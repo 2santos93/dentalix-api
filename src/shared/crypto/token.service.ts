@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ClinicRole } from '@prisma/client';
 
@@ -17,13 +17,15 @@ export class TokenService {
   ) {}
 
   async issue(payload: JwtPayload): Promise<{ accessToken: string; refreshToken: string }> {
+    // expiresIn config values are human-readable ms durations ("900s", "30d").
+    // jsonwebtoken accepts them at runtime; cast to satisfy its branded StringValue type.
     const accessToken = await this.jwt.signAsync(payload, {
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.config.getOrThrow<string>('JWT_ACCESS_TTL'),
+      expiresIn: this.config.getOrThrow<string>('JWT_ACCESS_TTL') as JwtSignOptions['expiresIn'],
     });
     const refreshToken = await this.jwt.signAsync(payload, {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.config.getOrThrow<string>('JWT_REFRESH_TTL'),
+      expiresIn: this.config.getOrThrow<string>('JWT_REFRESH_TTL') as JwtSignOptions['expiresIn'],
     });
     return { accessToken, refreshToken };
   }
