@@ -93,6 +93,7 @@ model Patient {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   @@index([tenantId])
   @@map("patients")
 }
