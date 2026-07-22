@@ -8,8 +8,11 @@ import { ConfigModule as NestConfigModule } from '@nestjs/config';
       validate: (env: Record<string, unknown>) => {
         const required = [
           'DATABASE_URL',
+          'DIRECT_URL',
           'JWT_ACCESS_SECRET',
           'JWT_REFRESH_SECRET',
+          'JWT_ACCESS_TTL',
+          'JWT_REFRESH_TTL',
         ];
         for (const key of required) {
           if (env[key] == null || env[key] === '') {
