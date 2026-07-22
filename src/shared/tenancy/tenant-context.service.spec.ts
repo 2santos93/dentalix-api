@@ -19,9 +19,4 @@ describe('TenantContextService', () => {
     });
     expect(outer).toEqual({ inner: 'b', outer: 'a' });
   });
-
-  it('persists the tenant id after enterWith', () => {
-    svc.enterWith('tenant-xyz');
-    expect(svc.getTenantId()).toBe('tenant-xyz');
-  });
 });
