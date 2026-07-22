@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { PrismaService } from './prisma.service';
 
 describe('PrismaService', () => {
