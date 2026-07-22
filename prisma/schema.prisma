@@ -59,3 +59,40 @@ model ClinicMembership {
   @@index([tenantId])
   @@map("clinic_memberships")
 }
+
+enum DocType {
+  CC
+  TI
+  CE
+  PASSPORT
+  OTHER
+}
+
+enum Sex {
+  M
+  F
+  OTHER
+  UNSPECIFIED
+}
+
+model Patient {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  firstName   String
+  lastName    String
+  docType     DocType   @default(CC)
+  docNumber   String?
+  birthDate   DateTime?
+  sex         Sex       @default(UNSPECIFIED)
+  phone       String?
+  email       String?
+  address     String?
+  notes       String?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([tenantId])
+  @@map("patients")
+}
