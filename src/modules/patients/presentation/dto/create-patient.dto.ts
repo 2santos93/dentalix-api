@@ -10,7 +10,7 @@ import {
 import { DocType, Sex } from '@prisma/client';
 
 // NOTE: deliberately NO `tenantId` field — the tenant comes from the guarded
-// request context (JwtAuthGuard -> TenantContextGuard), never from the client.
+// request context (JwtAuthGuard -> TenantContextInterceptor), never from the client.
 export class CreatePatientDto {
   @ApiProperty({ minLength: 1 })
   @IsString()
