@@ -5,7 +5,7 @@ services:
       POSTGRES_USER: dentalix
       POSTGRES_PASSWORD: dentalix
       POSTGRES_DB: dentalix
-    ports: ['5432:5432']
+    ports: ['5442:5432']
     volumes: ['dentalix_db:/var/lib/postgresql/data']
   db_test:
     image: postgres:16
