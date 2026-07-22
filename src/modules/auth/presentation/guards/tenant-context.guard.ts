@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { JwtPayload } from '../../../../shared/crypto/token.service';
 

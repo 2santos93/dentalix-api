@@ -34,7 +34,9 @@ describe('RolesGuard', () => {
   });
 
   it('forbids a user whose role is not allowed', () => {
-    const { ctx, reflector } = makeCtx(ClinicRole.RECEPTION, [ClinicRole.OWNER]);
+    const { ctx, reflector } = makeCtx(ClinicRole.RECEPTION, [
+      ClinicRole.OWNER,
+    ]);
     const guard = new RolesGuard(reflector);
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });

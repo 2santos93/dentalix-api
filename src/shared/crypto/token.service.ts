@@ -16,16 +16,22 @@ export class TokenService {
     private readonly config: ConfigService,
   ) {}
 
-  async issue(payload: JwtPayload): Promise<{ accessToken: string; refreshToken: string }> {
+  async issue(
+    payload: JwtPayload,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
     // expiresIn config values are human-readable ms durations ("900s", "30d").
     // jsonwebtoken accepts them at runtime; cast to satisfy its branded StringValue type.
     const accessToken = await this.jwt.signAsync(payload, {
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.config.getOrThrow<string>('JWT_ACCESS_TTL') as JwtSignOptions['expiresIn'],
+      expiresIn: this.config.getOrThrow<string>(
+        'JWT_ACCESS_TTL',
+      ) as JwtSignOptions['expiresIn'],
     });
     const refreshToken = await this.jwt.signAsync(payload, {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.config.getOrThrow<string>('JWT_REFRESH_TTL') as JwtSignOptions['expiresIn'],
+      expiresIn: this.config.getOrThrow<string>(
+        'JWT_REFRESH_TTL',
+      ) as JwtSignOptions['expiresIn'],
     });
     return { accessToken, refreshToken };
   }

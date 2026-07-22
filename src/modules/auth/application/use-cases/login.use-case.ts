@@ -18,13 +18,18 @@ export class LoginUseCase {
     private readonly tokens: TokenService,
   ) {}
 
-  async execute(input: LoginInput): Promise<{ accessToken: string; refreshToken: string }> {
+  async execute(
+    input: LoginInput,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
     const email = input.email.trim().toLowerCase();
     const membership = await this.repo.findMembership(input.tenantId, email);
     if (!membership) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    const ok = await this.password.verify(input.password, membership.passwordHash);
+    const ok = await this.password.verify(
+      input.password,
+      membership.passwordHash,
+    );
     if (!ok) {
       throw new UnauthorizedException('Invalid credentials');
     }

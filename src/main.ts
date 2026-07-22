@@ -16,12 +16,16 @@ async function bootstrap(): Promise<void> {
     .map((o) => o.trim())
     .filter(Boolean);
   app.enableCors({
-    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+    origin: (
+      origin: string | undefined,
+      cb: (err: Error | null, allow?: boolean) => void,
+    ) => {
       if (!origin) return cb(null, true); // non-browser / same-origin / curl
       if (explicitOrigins.includes(origin)) return cb(null, true);
       try {
         const host = new URL(origin).hostname;
-        if (host === rootDomain || host.endsWith(`.${rootDomain}`)) return cb(null, true);
+        if (host === rootDomain || host.endsWith(`.${rootDomain}`))
+          return cb(null, true);
       } catch {
         /* fall through to deny */
       }

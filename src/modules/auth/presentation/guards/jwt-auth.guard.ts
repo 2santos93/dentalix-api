@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { TokenService } from '../../../../shared/crypto/token.service';
 
 @Injectable()
@@ -15,7 +20,9 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing bearer token');
     }
     try {
-      request.user = await this.tokens.verifyAccess(header.slice('Bearer '.length));
+      request.user = await this.tokens.verifyAccess(
+        header.slice('Bearer '.length),
+      );
       return true;
     } catch {
       throw new UnauthorizedException('Invalid token');
