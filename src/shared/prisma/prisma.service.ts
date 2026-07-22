@@ -23,7 +23,7 @@ export class PrismaService
     tenantId: string,
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
   ): Promise<T> {
-    return this.$transaction(async (tx) => {
+    return this.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
       return fn(tx);
     });

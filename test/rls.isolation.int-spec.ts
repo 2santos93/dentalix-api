@@ -2,13 +2,13 @@ import { PrismaClient, ClinicRole } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para fixtures (seed/cleanup
-// entre tests) — usa DATABASE_ADMIN_URL (rol superuser) porque, con RLS
+// entre tests) — usa DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS
 // correctamente aplicado, una conexión sin contexto de tenant (DATABASE_URL,
 // rol dentalix_app, sin BYPASSRLS) ve 0 filas y NO podría limpiar datos de
 // tenants anteriores. La prueba de aislamiento en sí corre exclusivamente por
 // `prisma.runWithTenant`, que usa DATABASE_URL (rol restringido, sin bypass).
 const raw = new PrismaClient({
-  datasources: { db: { url: process.env.DATABASE_ADMIN_URL } },
+  datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const prisma = new PrismaService(); // con runWithTenant, sujeta a RLS de verdad
 

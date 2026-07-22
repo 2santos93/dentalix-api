@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: dentalix
       POSTGRES_DB: dentalix
     ports: ['5442:5432']   # 5442 en host: evita choque con postgresql@17 local en 5432
-    volumes: ['dentalix_db:/var/lib/postgresql/data']
+    volumes:
+      - 'dentalix_db:/var/lib/postgresql/data'
+      - './docker/db-init:/docker-entrypoint-initdb.d:ro'
   db_test:
     image: postgres:16
     environment:
@@ -14,5 +16,7 @@ services:
       POSTGRES_PASSWORD: dentalix
       POSTGRES_DB: dentalix_test
     ports: ['5433:5432']
+    volumes:
+      - './docker/db-init:/docker-entrypoint-initdb.d:ro'
 volumes:
   dentalix_db:
