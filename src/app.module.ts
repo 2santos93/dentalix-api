@@ -7,6 +7,7 @@ import { PrismaModule } from './shared/prisma/prisma.module';
 import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PatientsModule } from './modules/patients/patients.module';
+import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PatientsModule } from './modules/patients/patients.module';
     TenantContextModule,
     AuthModule,
     PatientsModule,
+    DentalCatalogModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
