@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { RegisterClinicUseCase } from './register-clinic.use-case';
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { AuthRepository } from '../../domain/ports/auth-repository.port';
@@ -63,6 +64,29 @@ describe('RegisterClinicUseCase', () => {
         clinicName: 'X',
         subdomain: 'new',
         email: 'a@b.com',
+        password: 'x',
+        fullName: 'A',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('maps a P2002 unique-violation from the repo create to a 409 (ConflictException), not a raw 500', async () => {
+    const p2002 = new Prisma.PrismaClientKnownRequestError(
+      'Unique constraint failed on the fields: (`subdomain`)',
+      { code: 'P2002', clientVersion: '6.19.3' },
+    );
+    const repo = makeRepo({
+      createClinicWithOwner: async () => {
+        throw p2002;
+      },
+    });
+    const uc = new RegisterClinicUseCase(repo, password);
+
+    await expect(
+      uc.execute({
+        clinicName: 'Race Condition Clinic',
+        subdomain: 'racey',
+        email: 'racey@b.com',
         password: 'x',
         fullName: 'A',
       }),
