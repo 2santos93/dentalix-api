@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   AuthRepository,
@@ -30,26 +30,30 @@ export class PrismaAuthRepository implements AuthRepository {
   async createClinicWithOwner(
     input: CreateClinicWithOwnerInput,
   ): Promise<{ tenantId: string; userId: string }> {
-    // tenants/users no tienen RLS (globales / lookup por subdominio);
-    // el membership sí, por eso lo insertamos bajo el contexto del nuevo tenant.
-    const tenant = await this.prisma.tenant.create({
-      data: { name: input.clinicName, subdomain: input.subdomain },
-      select: { id: true },
-    });
-    const user = await this.prisma.user.create({
-      data: {
-        email: input.email,
-        passwordHash: input.passwordHash,
-        fullName: input.fullName,
-      },
-      select: { id: true },
-    });
-    await this.prisma.runWithTenant(tenant.id, (tx) =>
-      tx.clinicMembership.create({
+    // Atomic: tenant + user + owner membership in ONE transaction, so a failed
+    // membership insert never leaves an orphaned tenant or an owner-less user.
+    // tenants/users have no RLS; the membership does, so we set the tenant GUC
+    // (SET LOCAL via set_config(..., true)) inside the SAME tx before inserting it
+    // so the RLS WITH CHECK passes for the freshly created tenant.
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const tenant = await tx.tenant.create({
+        data: { name: input.clinicName, subdomain: input.subdomain },
+        select: { id: true },
+      });
+      const user = await tx.user.create({
+        data: {
+          email: input.email,
+          passwordHash: input.passwordHash,
+          fullName: input.fullName,
+        },
+        select: { id: true },
+      });
+      await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenant.id}, true)`;
+      await tx.clinicMembership.create({
         data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.OWNER },
-      }),
-    );
-    return { tenantId: tenant.id, userId: user.id };
+      });
+      return { tenantId: tenant.id, userId: user.id };
+    });
   }
 
   async findMembership(
