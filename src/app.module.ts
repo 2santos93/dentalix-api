@@ -10,6 +10,7 @@ import { PatientsModule } from './modules/patients/patients.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
+import { OdontogramModule } from './modules/odontogram/odontogram.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entri
     DentalCatalogModule,
     MedicalHistoryModule,
     ClinicalEntriesModule,
+    OdontogramModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
