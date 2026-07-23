@@ -78,7 +78,6 @@ async function registerAndLogin(
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: 'S3cret!!',
     })
@@ -257,12 +256,16 @@ describe('Clinical history (e2e)', () => {
     // clinical-entries controller at all (see ClinicalEntriesController).
     // A method Express/Nest doesn't recognize on that path 404s.
     await request(app.getHttpServer())
-      .delete(`/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`)
+      .delete(
+        `/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`,
+      )
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(404);
     await request(app.getHttpServer())
-      .patch(`/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`)
+      .patch(
+        `/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`,
+      )
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ notes: 'intento de edicion' })
@@ -328,7 +331,8 @@ describe('Clinical history (e2e)', () => {
       .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
-    const listEntriesAsBBody = listEntriesAsB.body as ClinicalEntryResponseBody[];
+    const listEntriesAsBBody =
+      listEntriesAsB.body as ClinicalEntryResponseBody[];
     expect(listEntriesAsBBody).toEqual([]);
 
     // Catalog: clinic B's list must not include clinic A's item, even with

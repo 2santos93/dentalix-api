@@ -67,7 +67,6 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor('sonrisa'))
       .send({
-        subdomain: 'sonrisa',
         email: 'owner@sonrisa.com',
         password: 'S3cret!!',
       })
@@ -82,10 +81,17 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor('sonrisa'))
       .send({
-        subdomain: 'sonrisa',
         email: 'owner@sonrisa.com',
         password: 'nope',
       })
+      .expect(401);
+  });
+
+  it('rejects login when the host resolves to no tenant', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor('does-not-exist'))
+      .send({ email: 'owner@sonrisa.com', password: 'S3cret!!' })
       .expect(401);
   });
 });

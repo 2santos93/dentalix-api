@@ -78,7 +78,6 @@ async function registerAndLogin(
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: SEEDED_PASSWORD,
     })
@@ -148,7 +147,6 @@ async function loginAs(
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: SEEDED_PASSWORD,
     })
