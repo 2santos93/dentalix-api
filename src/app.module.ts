@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
+import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { MedicalHistoryModule } from './modules/medical-history/medical-history.
     PatientsModule,
     DentalCatalogModule,
     MedicalHistoryModule,
+    ClinicalEntriesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
