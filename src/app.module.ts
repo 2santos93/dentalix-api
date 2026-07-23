@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HealthController } from './health/health.controller';
@@ -13,6 +13,7 @@ import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entri
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { StaffModule } from './modules/staff/staff.module';
+import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
   imports: [
@@ -31,4 +32,8 @@ import { StaffModule } from './modules/staff/staff.module';
   controllers: [AppController, HealthController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(TenantHostMiddleware).forRoutes('*');
+  }
+}
