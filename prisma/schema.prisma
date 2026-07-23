@@ -95,6 +95,7 @@ model Patient {
 
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
+  toothRecords           ToothRecord[]
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   @@index([tenantId])
@@ -164,4 +165,40 @@ model DentalCatalogItem {
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
   @@index([tenantId])
   @@map("dental_catalog_items")
+}
+
+enum ToothSurface {
+  MESIAL
+  DISTAL
+  OCCLUSAL
+  VESTIBULAR
+  LINGUAL
+}
+
+enum ToothRecordStatus {
+  PLANNED
+  COMPLETED
+}
+
+model ToothRecord {
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @db.Uuid
+  patientId       String              @db.Uuid
+  toothNumber     String
+  surfaces        ToothSurface[]
+  kind            CatalogKind
+  catalogItemId   String?             @db.Uuid
+  status          ToothRecordStatus   @default(COMPLETED)
+  notes           String?
+  clinicalEntryId String?             @db.Uuid
+  performedById   String?             @db.Uuid
+  recordedAt      DateTime            @default(now())
+  createdAt       DateTime            @default(now())
+  deletedAt       DateTime?
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  @@index([tenantId, patientId])
+  @@index([tenantId, patientId, toothNumber])
+  @@map("tooth_records")
 }
