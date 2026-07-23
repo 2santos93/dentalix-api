@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   UseGuards,
   UseInterceptors,
@@ -15,6 +16,7 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { CreateDomainDto } from './dto/create-domain.dto';
 import { RegisterDomainUseCase } from '../application/use-cases/register-domain.use-case';
 import { ListDomainsUseCase } from '../application/use-cases/list-domains.use-case';
+import { VerifyDomainUseCase } from '../application/use-cases/verify-domain.use-case';
 
 @ApiTags('domains')
 @ApiBearerAuth()
@@ -26,6 +28,7 @@ export class DomainsController {
   constructor(
     private readonly registerDomain: RegisterDomainUseCase,
     private readonly listDomains: ListDomainsUseCase,
+    private readonly verifyDomain: VerifyDomainUseCase,
   ) {}
 
   @Post()
@@ -36,5 +39,10 @@ export class DomainsController {
   @Get()
   list() {
     return this.listDomains.execute();
+  }
+
+  @Post(':id/verify')
+  verify(@Param('id') id: string) {
+    return this.verifyDomain.execute({ id });
   }
 }
