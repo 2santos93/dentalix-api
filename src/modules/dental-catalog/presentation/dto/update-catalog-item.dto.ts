@@ -10,8 +10,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { CatalogKind } from '@prisma/client';
-
-const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
+import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
 
 // All fields optional (partial update). NO `tenantId` field — same rationale
 // as CreateCatalogItemDto: tenant scoping comes from the guarded request context.
@@ -50,7 +49,7 @@ export class UpdateCatalogItemDto {
 
   @ApiPropertyOptional({
     description: 'Hex color (e.g. #1A2B3C)',
-    pattern: '^#[0-9a-fA-F]{3,8}$',
+    pattern: HEX_COLOR_PATTERN.source,
   })
   @IsOptional()
   @IsString()

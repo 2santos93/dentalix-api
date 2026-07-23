@@ -81,7 +81,16 @@ describe('CreateCatalogItemUseCase', () => {
     expect(captured?.code).toBe('CAR-002');
   });
 
-  it.each(['red', '#GGG', '123456', '#12', '#1234567890', ''])(
+  it.each([
+    'red',
+    '#GGG',
+    '123456',
+    '#12',
+    '#1234567890',
+    '',
+    '#12345',
+    '#1234567',
+  ])(
     'rejects an invalid hex color (%s)',
     async (color) => {
       const repo = makeRepo();
@@ -98,7 +107,15 @@ describe('CreateCatalogItemUseCase', () => {
     },
   );
 
-  it.each(['#FFF', '#FFFF', '#FFFFFF', '#FFFFFFFF', '#000'])(
+  it.each([
+    '#FFF',
+    '#FFFF',
+    '#FFFFFF',
+    '#FFFFFFFF',
+    '#000',
+    '#1234',
+    '#12345678',
+  ])(
     'accepts a valid hex color (%s)',
     async (color) => {
       const repo = makeRepo();
@@ -189,4 +206,21 @@ describe('CreateCatalogItemUseCase', () => {
       active: false,
     });
   });
+
+  it.each(['', '   ', '\t\n'])(
+    'rejects a whitespace-only code (%j)',
+    async (code) => {
+      const repo = makeRepo();
+      const uc = new CreateCatalogItemUseCase(repo);
+
+      await expect(
+        uc.execute({
+          code,
+          kind: CatalogKind.DIAGNOSIS,
+          labelEs: 'Caries',
+          color: '#FFFFFF',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    },
+  );
 });

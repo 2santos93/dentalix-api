@@ -4,7 +4,10 @@ import { DENTAL_CATALOG_REPOSITORY } from '../../domain/ports/dental-catalog-rep
 import type { DentalCatalogRepository } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
 
-const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
+// Valid CSS hex color lengths are 3, 4, 6 or 8 hex digits after the `#`
+// (5 and 7 digits are not valid CSS hex colors and must be rejected).
+export const HEX_COLOR_PATTERN =
+  /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 export function isValidHexColor(color: unknown): color is string {
   return typeof color === 'string' && HEX_COLOR_PATTERN.test(color);
@@ -47,8 +50,13 @@ export class CreateCatalogItemUseCase {
       );
     }
 
+    const code = input.code.trim();
+    if (code === '') {
+      throw new BadRequestException('code must not be blank');
+    }
+
     return this.repo.create({
-      code: input.code.trim(),
+      code,
       category: input.category,
       kind: input.kind,
       labelEs: input.labelEs,

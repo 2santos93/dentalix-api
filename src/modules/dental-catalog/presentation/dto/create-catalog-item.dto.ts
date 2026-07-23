@@ -10,8 +10,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { CatalogKind } from '@prisma/client';
-
-const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
+import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
 
 // NOTE: deliberately NO `tenantId` field — the tenant comes from the guarded
 // request context (JwtAuthGuard -> TenantContextInterceptor), never from the
@@ -48,7 +47,7 @@ export class CreateCatalogItemDto {
 
   @ApiProperty({
     description: 'Hex color (e.g. #1A2B3C)',
-    pattern: '^#[0-9a-fA-F]{3,8}$',
+    pattern: HEX_COLOR_PATTERN.source,
   })
   @IsString()
   @Matches(HEX_COLOR_PATTERN, {
