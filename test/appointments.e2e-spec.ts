@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import { hostFor } from './support/tenant-host';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -55,7 +56,12 @@ interface StaffMemberResponseBody {
 async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
-): Promise<{ tenantId: string; userId: string; accessToken: string }> {
+): Promise<{
+  tenantId: string;
+  userId: string;
+  accessToken: string;
+  subdomain: string;
+}> {
   const register = await request(app.getHttpServer())
     .post('/api/v1/auth/register')
     .send({
@@ -70,8 +76,8 @@ async function registerAndLogin(
 
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: SEEDED_PASSWORD,
     })
@@ -82,16 +88,19 @@ async function registerAndLogin(
     tenantId: registerBody.tenantId,
     userId: registerBody.userId,
     accessToken: loginBody.accessToken,
+    subdomain: opts.subdomain,
   };
 }
 
 async function createPatient(
   app: INestApplication<App>,
   accessToken: string,
+  subdomain: string,
   docNumber: string,
 ): Promise<PatientResponseBody> {
   const create = await request(app.getHttpServer())
     .post('/api/v1/patients')
+    .set('X-Tenant-Host', hostFor(subdomain))
     .set('Authorization', `Bearer ${accessToken}`)
     .send({
       firstName: 'Agenda',
@@ -136,8 +145,8 @@ async function loginAs(
 ): Promise<string> {
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: SEEDED_PASSWORD,
     })
@@ -184,11 +193,17 @@ describe('Appointments (e2e)', () => {
       subdomain: subdomainA,
       email: 'owner@clinica-agenda-a.com',
     });
-    const patientA = await createPatient(app, clinicA.accessToken, '7001');
+    const patientA = await createPatient(
+      app,
+      clinicA.accessToken,
+      clinicA.subdomain,
+      '7001',
+    );
 
     // --- 1. Owner creates a valid appointment (provider = owner's userId).
     const create1 = await request(app.getHttpServer())
       .post('/api/v1/appointments')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         patientId: patientA.id,
@@ -214,6 +229,7 @@ describe('Appointments (e2e)', () => {
         from: '2026-08-01T00:00:00.000Z',
         to: '2026-08-02T00:00:00.000Z',
       })
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listCoveringBody = listCovering.body as AppointmentResponseBody[];
@@ -225,6 +241,7 @@ describe('Appointments (e2e)', () => {
         from: '2026-09-01T00:00:00.000Z',
         to: '2026-09-02T00:00:00.000Z',
       })
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listNotCoveringBody =
@@ -234,6 +251,7 @@ describe('Appointments (e2e)', () => {
     // --- 3. Overlapping appointment for the SAME provider -> 409.
     await request(app.getHttpServer())
       .post('/api/v1/appointments')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         patientId: patientA.id,
@@ -247,6 +265,7 @@ describe('Appointments (e2e)', () => {
     // 201, no false conflict (half-open interval).
     const create2 = await request(app.getHttpServer())
       .post('/api/v1/appointments')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         patientId: patientA.id,
@@ -261,12 +280,14 @@ describe('Appointments (e2e)', () => {
     // create in its exact slot.
     await request(app.getHttpServer())
       .patch(`/api/v1/appointments/${appt1.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ status: 'CANCELLED' })
       .expect(200);
 
     const create3 = await request(app.getHttpServer())
       .post('/api/v1/appointments')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         patientId: patientA.id,
@@ -281,12 +302,14 @@ describe('Appointments (e2e)', () => {
     // --- 6. PATCH status -> CONFIRMED reflected on subsequent GET.
     await request(app.getHttpServer())
       .patch(`/api/v1/appointments/${appt2.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ status: 'CONFIRMED' })
       .expect(200);
 
     const getAppt2 = await request(app.getHttpServer())
       .get(`/api/v1/appointments/${appt2.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     expect((getAppt2.body as AppointmentResponseBody).status).toBe('CONFIRMED');
@@ -306,6 +329,7 @@ describe('Appointments (e2e)', () => {
         from: '2026-08-01T00:00:00.000Z',
         to: '2026-08-02T00:00:00.000Z',
       })
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     expect(listAsB.body as AppointmentResponseBody[]).toEqual([]);
@@ -326,6 +350,7 @@ describe('Appointments (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/v1/appointments')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .send({
         patientId: patientA.id,
@@ -341,6 +366,7 @@ describe('Appointments (e2e)', () => {
         from: '2026-08-01T00:00:00.000Z',
         to: '2026-08-02T00:00:00.000Z',
       })
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .expect(200);
 
@@ -354,6 +380,7 @@ describe('Appointments (e2e)', () => {
 
     const staff = await request(app.getHttpServer())
       .get('/api/v1/staff')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const staffBody = staff.body as StaffMemberResponseBody[];

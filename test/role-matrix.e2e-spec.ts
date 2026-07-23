@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import { hostFor } from './support/tenant-host';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -39,7 +40,7 @@ interface PatientResponseBody {
 async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
-): Promise<{ tenantId: string; accessToken: string }> {
+): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await request(app.getHttpServer())
     .post('/api/v1/auth/register')
     .send({
@@ -54,8 +55,8 @@ async function registerAndLogin(
 
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: SEEDED_PASSWORD,
     })
@@ -65,16 +66,19 @@ async function registerAndLogin(
   return {
     tenantId: registerBody.tenantId,
     accessToken: loginBody.accessToken,
+    subdomain: opts.subdomain,
   };
 }
 
 async function createPatient(
   app: INestApplication<App>,
   accessToken: string,
+  subdomain: string,
   docNumber: string,
 ): Promise<PatientResponseBody> {
   const create = await request(app.getHttpServer())
     .post('/api/v1/patients')
+    .set('X-Tenant-Host', hostFor(subdomain))
     .set('Authorization', `Bearer ${accessToken}`)
     .send({
       firstName: 'Rol',
@@ -121,8 +125,8 @@ async function loginAs(
 ): Promise<string> {
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
-      subdomain: opts.subdomain,
       email: opts.email,
       password: SEEDED_PASSWORD,
     })
@@ -176,7 +180,12 @@ describe('Role matrix (e2e)', () => {
       subdomain,
       email: 'owner@clinica-roles-a.com',
     });
-    const patientA = await createPatient(app, clinicA.accessToken, '5001');
+    const patientA = await createPatient(
+      app,
+      clinicA.accessToken,
+      clinicA.subdomain,
+      '5001',
+    );
 
     // --- Seed a RECEPTION and a DENTIST membership in the SAME clinic (raw
     // DIRECT_URL client, bypasses RLS -- there is no staff-invite endpoint
@@ -205,11 +214,13 @@ describe('Role matrix (e2e)', () => {
     // Allowed: patients (demographic) reads and writes.
     await request(app.getHttpServer())
       .get('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .expect(200);
 
     await request(app.getHttpServer())
       .post('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .send({
         firstName: 'Recepcion',
@@ -224,11 +235,13 @@ describe('Role matrix (e2e)', () => {
     // 200/404, i.e. the RolesGuard denies BEFORE any handler logic runs.
     await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .expect(403);
 
     await request(app.getHttpServer())
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .send({ allergies: 'Intento recepcion', notes: 'No deberia guardar' })
       .expect(403);
@@ -241,11 +254,13 @@ describe('Role matrix (e2e)', () => {
     // reception is blocked from reading clinical/tooth data.
     await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/odontogram`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .expect(403);
 
     await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/tooth-records`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
       .send({
         toothNumber: '11',
@@ -258,6 +273,7 @@ describe('Role matrix (e2e)', () => {
     // Allowed: clinical write (tooth-records) and catalog read.
     const dentistToothRecord = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/tooth-records`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${dentistToken}`)
       .send({
         toothNumber: '21',
@@ -272,12 +288,14 @@ describe('Role matrix (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/v1/catalog/items')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${dentistToken}`)
       .expect(200);
 
     // Blocked: catalog write (OWNER/ADMIN only) -- 403.
     await request(app.getHttpServer())
       .post('/api/v1/catalog/items')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${dentistToken}`)
       .send({
         code: 'DENTIST-ATTEMPT',
@@ -290,6 +308,7 @@ describe('Role matrix (e2e)', () => {
     // ================= OWNER (sanity: matrix permits, not deny-all) =======
     await request(app.getHttpServer())
       .post('/api/v1/catalog/items')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         code: 'OWNER-ITEM',
@@ -301,6 +320,7 @@ describe('Role matrix (e2e)', () => {
 
     await request(app.getHttpServer())
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ allergies: 'Ninguna', notes: 'Guardado por owner' })
       .expect(200);

@@ -18,6 +18,7 @@ model Tenant {
   updatedAt    DateTime           @updatedAt
   deletedAt    DateTime?
   memberships  ClinicMembership[]
+  domains      TenantDomain[]
 
   @@map("tenants")
 }
@@ -232,4 +233,25 @@ model Appointment {
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
   @@map("appointments")
+}
+
+enum TenantDomainStatus {
+  PENDING
+  VERIFIED
+}
+
+model TenantDomain {
+  id          String             @id @default(uuid()) @db.Uuid
+  tenantId    String             @db.Uuid
+  host        String             @unique
+  status      TenantDomainStatus @default(PENDING)
+  verifyToken String
+  verifiedAt  DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  deletedAt   DateTime?
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("tenant_domains")
 }

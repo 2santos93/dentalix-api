@@ -2,10 +2,11 @@ import { CallHandler, ExecutionContext, UnauthorizedException } from '@nestjs/co
 import { Observable } from 'rxjs';
 import { TenantContextInterceptor } from './tenant-context.interceptor';
 import { TenantContextService } from './tenant-context.service';
+import { TenantHostRequest } from './tenant-host-request';
 
-function makeCtx(user?: { tenantId?: string; sub?: string; role?: string }): ExecutionContext {
+function makeCtx(req: Partial<TenantHostRequest>): ExecutionContext {
   return {
-    switchToHttp: () => ({ getRequest: () => ({ user }) }),
+    switchToHttp: () => ({ getRequest: () => req }),
   } as unknown as ExecutionContext;
 }
 
@@ -23,29 +24,51 @@ function makeHandlerThatReadsTenantContext(tenantContext: TenantContextService):
 }
 
 describe('TenantContextInterceptor', () => {
-  it('makes the tenant id visible from inside the piped handler', (done) => {
+  it('runs with the host-resolved tenant when the JWT tenant matches', (done) => {
     const tenantContext = new TenantContextService();
     const interceptor = new TenantContextInterceptor(tenantContext);
-    const ctx = makeCtx({ tenantId: 't-123', sub: 'u', role: 'OWNER' });
+    const ctx = makeCtx({
+      tenantHost: { tenantId: 't-1' },
+      user: { tenantId: 't-1', sub: 'u', role: 'OWNER' },
+    });
     const next = makeHandlerThatReadsTenantContext(tenantContext);
 
     const seen: (string | undefined)[] = [];
     interceptor.intercept(ctx, next).subscribe({
       next: (value) => seen.push(value as string | undefined),
       complete: () => {
-        expect(seen).toEqual(['t-123']);
+        expect(seen).toEqual(['t-1']);
         done();
       },
       error: done,
     });
   });
 
-  it('throws UnauthorizedException when req.user.tenantId is missing', () => {
+  it('throws UnauthorizedException when the JWT tenant differs from the host tenant', () => {
     const tenantContext = new TenantContextService();
     const interceptor = new TenantContextInterceptor(tenantContext);
-    const ctx = makeCtx(undefined);
+    const ctx = makeCtx({
+      tenantHost: { tenantId: 't-1' },
+      user: { tenantId: 't-2', sub: 'u', role: 'OWNER' },
+    });
     const next = makeHandlerThatReadsTenantContext(tenantContext);
+    const handleSpy = jest.spyOn(next, 'handle');
 
     expect(() => interceptor.intercept(ctx, next)).toThrow(UnauthorizedException);
+    expect(handleSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws UnauthorizedException when the host does not resolve to a tenant', () => {
+    const tenantContext = new TenantContextService();
+    const interceptor = new TenantContextInterceptor(tenantContext);
+    const ctx = makeCtx({
+      tenantHost: { tenantId: null },
+      user: { tenantId: 't-1', sub: 'u', role: 'OWNER' },
+    });
+    const next = makeHandlerThatReadsTenantContext(tenantContext);
+    const handleSpy = jest.spyOn(next, 'handle');
+
+    expect(() => interceptor.intercept(ctx, next)).toThrow(UnauthorizedException);
+    expect(handleSpy).not.toHaveBeenCalled();
   });
 });
