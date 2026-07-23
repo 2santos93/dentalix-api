@@ -26,7 +26,14 @@ export class TenantHostMiddleware implements NestMiddleware {
       isProd: this.isProd,
       trustProxy: this.trustProxy,
     });
-    const tenantId = await this.resolver.resolve(host);
+    let tenantId: string | null = null;
+    try {
+      tenantId = await this.resolver.resolve(host);
+    } catch {
+      // Resolution is best-effort: a transient DB error must not 500 every
+      // route. Degrade to no tenant; downstream enforcement handles it.
+      tenantId = null;
+    }
     req.tenantHost = { host, tenantId };
     next();
   }
