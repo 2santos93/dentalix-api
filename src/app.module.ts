@@ -13,6 +13,7 @@ import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entri
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { StaffModule } from './modules/staff/staff.module';
+import { DomainsModule } from './modules/domains/domains.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -28,6 +29,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OdontogramModule,
     AppointmentsModule,
     StaffModule,
+    DomainsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
