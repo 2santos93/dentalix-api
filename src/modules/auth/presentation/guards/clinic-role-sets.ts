@@ -37,3 +37,14 @@ export const CATALOG_WRITE_ROLES: ClinicRole[] = [
   ClinicRole.OWNER,
   ClinicRole.ADMIN,
 ];
+
+// Agenda de citas (Fase 3): todas las rutas, los 5 roles — recepción SÍ
+// gestiona la agenda (es su trabajo), a diferencia de la historia clínica.
+// Mismo array que PATIENT_ROLES (ver docs/plans/2026-07-23-fase3-appointments.md).
+export const APPOINTMENT_ROLES: ClinicRole[] = [
+  ClinicRole.OWNER,
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];

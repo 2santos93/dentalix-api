@@ -1,0 +1,31 @@
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { AppointmentsController } from './presentation/appointments.controller';
+import { CreateAppointmentUseCase } from './application/use-cases/create-appointment.use-case';
+import { ListAppointmentsUseCase } from './application/use-cases/list-appointments.use-case';
+import { GetAppointmentUseCase } from './application/use-cases/get-appointment.use-case';
+import { UpdateAppointmentUseCase } from './application/use-cases/update-appointment.use-case';
+import { APPOINTMENT_REPOSITORY } from './domain/ports/appointment-repository.port';
+import { PrismaAppointmentRepository } from './infrastructure/repositories/prisma-appointment.repository';
+import { TokenService } from '../../shared/crypto/token.service';
+import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+
+@Module({
+  // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
+  // JwtAuthGuard depends on TokenService, which depends on JwtService — must
+  // be available here since the guard is applied on this module's controller.
+  imports: [JwtModule.register({})],
+  controllers: [AppointmentsController],
+  providers: [
+    CreateAppointmentUseCase,
+    ListAppointmentsUseCase,
+    GetAppointmentUseCase,
+    UpdateAppointmentUseCase,
+    TokenService,
+    // TenantContextInterceptor only depends on the @Global TenantContextService;
+    // listing it here makes it resolvable for @UseInterceptors on AppointmentsController.
+    TenantContextInterceptor,
+    { provide: APPOINTMENT_REPOSITORY, useClass: PrismaAppointmentRepository },
+  ],
+})
+export class AppointmentsModule {}

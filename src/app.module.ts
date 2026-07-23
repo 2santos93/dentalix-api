@@ -11,6 +11,8 @@ import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.mod
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { StaffModule } from './modules/staff/staff.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { OdontogramModule } from './modules/odontogram/odontogram.module';
     MedicalHistoryModule,
     ClinicalEntriesModule,
     OdontogramModule,
+    AppointmentsModule,
+    StaffModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
