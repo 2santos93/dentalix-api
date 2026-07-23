@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { RegisterDomainUseCase } from './register-domain.use-case';
 import { TenantDomainRepository } from '../../domain/ports/tenant-domain-repository.port';
 
@@ -52,6 +53,13 @@ describe('RegisterDomainUseCase', () => {
     );
   });
 
+  it('rejects a host that is a reserved subdomain (parseHost returns null)', async () => {
+    const uc = new RegisterDomainUseCase(makeRepo(), config);
+    await expect(uc.execute({ host: 'www.dentalix.app' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   it('rejects a host already registered for this tenant', async () => {
     const repo = makeRepo({
       findByHostForTenant: jest.fn().mockResolvedValue({
@@ -62,6 +70,21 @@ describe('RegisterDomainUseCase', () => {
         verifiedAt: null,
         createdAt: new Date(0),
       }),
+    });
+    const uc = new RegisterDomainUseCase(repo, config);
+    await expect(
+      uc.execute({ host: 'citas.miclinica.com' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('maps a Prisma P2002 unique violation on create (cross-tenant duplicate host) to ConflictException', async () => {
+    const repo = makeRepo({
+      create: jest.fn().mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'x',
+        }),
+      ),
     });
     const uc = new RegisterDomainUseCase(repo, config);
     await expect(
