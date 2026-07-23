@@ -8,6 +8,7 @@ import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
+import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.mod
     AuthModule,
     PatientsModule,
     DentalCatalogModule,
+    MedicalHistoryModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
