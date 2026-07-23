@@ -96,6 +96,7 @@ model Patient {
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
   toothRecords           ToothRecord[]
+  appointments           Appointment[]
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   @@index([tenantId])
@@ -201,4 +202,34 @@ model ToothRecord {
   @@index([tenantId, patientId])
   @@index([tenantId, patientId, toothNumber])
   @@map("tooth_records")
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id          String            @id @default(uuid()) @db.Uuid
+  tenantId    String            @db.Uuid
+  patientId   String            @db.Uuid
+  providerId  String            @db.Uuid
+  start       DateTime
+  end         DateTime
+  status      AppointmentStatus @default(SCHEDULED)
+  reason      String?
+  notes       String?
+  createdById String?           @db.Uuid
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  @@index([tenantId, providerId, start])
+  @@index([tenantId, patientId])
+  @@map("appointments")
 }
