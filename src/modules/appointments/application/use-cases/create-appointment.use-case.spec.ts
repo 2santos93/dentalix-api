@@ -6,6 +6,7 @@ import {
   AppointmentRepository,
   CreateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
+import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
@@ -157,5 +158,88 @@ describe('CreateAppointmentUseCase', () => {
 
     expect(captured && 'tenantId' in captured).toBe(false);
     expect(captured && 'status' in captured).toBe(false);
+  });
+
+  // These cases go through InMemoryAppointmentRepository's REAL filtering
+  // (not a canned findOverlapping stub), so they would fail if the overlap
+  // math, the CANCELLED exclusion, or the per-provider scoping regressed.
+  describe('overlap enforcement (real in-memory filtering)', () => {
+    it('allows an adjacent appointment — end of the new one equals the start of the next (half-open, no overlap)', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      const result = await uc.execute({
+        patientId: 'p2',
+        providerId: 'prov1',
+        start: new Date('2026-08-01T11:00:00.000Z'),
+        end: new Date('2026-08-01T12:00:00.000Z'),
+      });
+
+      expect(result.providerId).toBe('prov1');
+      expect(result.start).toEqual(new Date('2026-08-01T11:00:00.000Z'));
+    });
+
+    it('does not block on a CANCELLED appointment for the same provider/slot', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+        status: AppointmentStatus.CANCELLED,
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      const result = await uc.execute({
+        patientId: 'p2',
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:30:00.000Z'),
+        end: new Date('2026-08-01T11:30:00.000Z'),
+      });
+
+      expect(result.providerId).toBe('prov1');
+    });
+
+    it('rejects a true overlap with ConflictException — real filtering, not a canned stub', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute({
+          patientId: 'p2',
+          providerId: 'prov1',
+          start: new Date('2026-08-01T10:30:00.000Z'),
+          end: new Date('2026-08-01T11:30:00.000Z'),
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('scopes overlap per provider — an identical slot for a different provider succeeds', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      const result = await uc.execute({
+        patientId: 'p2',
+        providerId: 'prov2',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+      });
+
+      expect(result.providerId).toBe('prov2');
+    });
   });
 });

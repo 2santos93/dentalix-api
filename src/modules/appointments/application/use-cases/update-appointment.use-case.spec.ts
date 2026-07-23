@@ -10,6 +10,7 @@ import {
   AppointmentRepository,
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
+import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
@@ -162,5 +163,77 @@ describe('UpdateAppointmentUseCase', () => {
         end: new Date(existing.start.getTime() - 1000),
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // These cases go through InMemoryAppointmentRepository's REAL filtering
+  // (not a canned findOverlapping stub), so they would fail if the
+  // self-exclusion (`excludeId`) or the overlap math regressed.
+  describe('overlap enforcement (real in-memory filtering)', () => {
+    it('self-exclusion: rescheduling to a slot that only overlaps its own current slot succeeds', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      // Shift by 15 minutes — the new window still overlaps the row's OWN
+      // current [10:00,11:00) slot, so if `excludeId` were not applied this
+      // would incorrectly self-conflict.
+      const result = await uc.execute(existing.id, {
+        start: new Date('2026-08-01T10:15:00.000Z'),
+        end: new Date('2026-08-01T11:15:00.000Z'),
+      });
+
+      expect(result.start).toEqual(new Date('2026-08-01T10:15:00.000Z'));
+      expect(result.end).toEqual(new Date('2026-08-01T11:15:00.000Z'));
+    });
+
+    it('self-exclusion does not hide a genuine overlap with a DIFFERENT active appointment', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T10:00:00.000Z'),
+        end: new Date('2026-08-01T11:00:00.000Z'),
+      });
+      repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T14:00:00.000Z'),
+        end: new Date('2026-08-01T15:00:00.000Z'),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute(existing.id, {
+          start: new Date('2026-08-01T14:30:00.000Z'),
+          end: new Date('2026-08-01T15:30:00.000Z'),
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('a CANCELLED appointment does not block a reschedule into its former slot', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({
+        id: 'to-reschedule',
+        providerId: 'prov1',
+        start: new Date('2026-08-01T09:00:00.000Z'),
+        end: new Date('2026-08-01T09:30:00.000Z'),
+      });
+      repo.seed({
+        providerId: 'prov1',
+        start: new Date('2026-08-01T14:00:00.000Z'),
+        end: new Date('2026-08-01T15:00:00.000Z'),
+        status: AppointmentStatus.CANCELLED,
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      const result = await uc.execute(existing.id, {
+        start: new Date('2026-08-01T14:30:00.000Z'),
+        end: new Date('2026-08-01T15:30:00.000Z'),
+      });
+
+      expect(result.start).toEqual(new Date('2026-08-01T14:30:00.000Z'));
+    });
   });
 });
