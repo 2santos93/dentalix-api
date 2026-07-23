@@ -9,7 +9,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ClinicRole } from '@prisma/client';
 import { SaveMedicalHistoryDto } from './dto/save-medical-history.dto';
 import { GetMedicalHistoryUseCase } from '../application/use-cases/get-medical-history.use-case';
 import { SaveMedicalHistoryUseCase } from '../application/use-cases/save-medical-history.use-case';
@@ -17,16 +16,9 @@ import { MedicalHistory } from '../domain/entities/medical-history.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-
-const MANAGE_MEDICAL_HISTORY_ROLES = [
-  ClinicRole.OWNER,
-  ClinicRole.DENTIST,
-  ClinicRole.ASSISTANT,
-  ClinicRole.RECEPTION,
-  ClinicRole.ADMIN,
-];
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -36,7 +28,7 @@ interface AuthenticatedRequest {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
-@Roles(...MANAGE_MEDICAL_HISTORY_ROLES)
+@Roles(...CLINICAL_ROLES)
 @Controller('patients/:patientId/medical-history')
 export class MedicalHistoryController {
   constructor(

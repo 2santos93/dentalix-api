@@ -10,7 +10,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ClinicRole } from '@prisma/client';
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
 import { UpdateCatalogItemDto } from './dto/update-catalog-item.dto';
 import { ListCatalogItemsQueryDto } from './dto/list-catalog-items-query.dto';
@@ -21,21 +20,17 @@ import { DentalCatalogItem } from '../domain/entities/dental-catalog-item.entity
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import {
+  CATALOG_READ_ROLES,
+  CATALOG_WRITE_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-
-const MANAGE_CATALOG_ROLES = [
-  ClinicRole.OWNER,
-  ClinicRole.DENTIST,
-  ClinicRole.ASSISTANT,
-  ClinicRole.RECEPTION,
-  ClinicRole.ADMIN,
-];
 
 @ApiTags('catalog')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
-@Roles(...MANAGE_CATALOG_ROLES)
+@Roles(...CATALOG_READ_ROLES)
 @Controller('catalog/items')
 export class DentalCatalogController {
   constructor(
@@ -45,6 +40,7 @@ export class DentalCatalogController {
   ) {}
 
   @Post()
+  @Roles(...CATALOG_WRITE_ROLES)
   create(@Body() dto: CreateCatalogItemDto): Promise<DentalCatalogItem> {
     return this.createCatalogItem.execute(dto);
   }
@@ -58,6 +54,7 @@ export class DentalCatalogController {
   }
 
   @Patch(':id')
+  @Roles(...CATALOG_WRITE_ROLES)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateCatalogItemDto,
