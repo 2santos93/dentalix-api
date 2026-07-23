@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { hostFor } from './support/tenant-host';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en beforeAll —
 // usa DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -64,6 +65,7 @@ describe('Auth (e2e)', () => {
 
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor('sonrisa'))
       .send({
         subdomain: 'sonrisa',
         email: 'owner@sonrisa.com',
@@ -78,6 +80,7 @@ describe('Auth (e2e)', () => {
   it('rejects login with a wrong password', async () => {
     await request(app.getHttpServer())
       .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor('sonrisa'))
       .send({
         subdomain: 'sonrisa',
         email: 'owner@sonrisa.com',

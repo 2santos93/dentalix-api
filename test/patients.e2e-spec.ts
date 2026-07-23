@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { PrismaClient, DocType, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { hostFor } from './support/tenant-host';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -42,7 +43,7 @@ interface ListPatientsResponseBody {
 async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
-): Promise<{ tenantId: string; accessToken: string }> {
+): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await request(app.getHttpServer())
     .post('/api/v1/auth/register')
     .send({
@@ -57,6 +58,7 @@ async function registerAndLogin(
 
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
       subdomain: opts.subdomain,
       email: opts.email,
@@ -65,7 +67,11 @@ async function registerAndLogin(
     .expect(201);
   const loginBody = login.body as LoginResponseBody;
 
-  return { tenantId: registerBody.tenantId, accessToken: loginBody.accessToken };
+  return {
+    tenantId: registerBody.tenantId,
+    accessToken: loginBody.accessToken,
+    subdomain: opts.subdomain,
+  };
 }
 
 describe('Patients (e2e)', () => {
@@ -106,6 +112,7 @@ describe('Patients (e2e)', () => {
 
     const create = await request(app.getHttpServer())
       .post('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         firstName: 'Ana',
@@ -128,6 +135,7 @@ describe('Patients (e2e)', () => {
 
     const list = await request(app.getHttpServer())
       .get('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listBody = list.body as ListPatientsResponseBody;
@@ -136,6 +144,7 @@ describe('Patients (e2e)', () => {
 
     const get = await request(app.getHttpServer())
       .get(`/api/v1/patients/${created.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const getBody = get.body as PatientResponseBody;
@@ -143,6 +152,7 @@ describe('Patients (e2e)', () => {
 
     const update = await request(app.getHttpServer())
       .patch(`/api/v1/patients/${created.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ phone: '3001234567' })
       .expect(200);
@@ -170,6 +180,7 @@ describe('Patients (e2e)', () => {
 
     const createA = await request(app.getHttpServer())
       .post('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         firstName: 'Solo',
@@ -184,6 +195,7 @@ describe('Patients (e2e)', () => {
     // Clinic B's list must NOT include clinic A's patient.
     const listAsB = await request(app.getHttpServer())
       .get('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     const listAsBBody = listAsB.body as ListPatientsResponseBody;
@@ -194,12 +206,14 @@ describe('Patients (e2e)', () => {
     // by design — see GetPatientUseCase).
     await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}`)
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(404);
 
     // Sanity: clinic A still sees its own patient.
     const listAsA = await request(app.getHttpServer())
       .get('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listAsABody = listAsA.body as ListPatientsResponseBody;

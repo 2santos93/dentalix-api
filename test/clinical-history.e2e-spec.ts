@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { PrismaClient, DocType, Sex, CatalogKind } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { hostFor } from './support/tenant-host';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -60,7 +61,7 @@ interface CatalogItemResponseBody {
 async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
-): Promise<{ tenantId: string; accessToken: string }> {
+): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await request(app.getHttpServer())
     .post('/api/v1/auth/register')
     .send({
@@ -75,6 +76,7 @@ async function registerAndLogin(
 
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
       subdomain: opts.subdomain,
       email: opts.email,
@@ -83,16 +85,22 @@ async function registerAndLogin(
     .expect(201);
   const loginBody = login.body as LoginResponseBody;
 
-  return { tenantId: registerBody.tenantId, accessToken: loginBody.accessToken };
+  return {
+    tenantId: registerBody.tenantId,
+    accessToken: loginBody.accessToken,
+    subdomain: opts.subdomain,
+  };
 }
 
 async function createPatient(
   app: INestApplication<App>,
   accessToken: string,
+  subdomain: string,
   docNumber: string,
 ): Promise<PatientResponseBody> {
   const create = await request(app.getHttpServer())
     .post('/api/v1/patients')
+    .set('X-Tenant-Host', hostFor(subdomain))
     .set('Authorization', `Bearer ${accessToken}`)
     .send({
       firstName: 'Historia',
@@ -148,7 +156,12 @@ describe('Clinical history (e2e)', () => {
       subdomain: 'clinica-historia-a',
       email: 'owner@clinica-historia-a.com',
     });
-    const patientA = await createPatient(app, clinicA.accessToken, '3001');
+    const patientA = await createPatient(
+      app,
+      clinicA.accessToken,
+      clinicA.subdomain,
+      '3001',
+    );
 
     // --- 1. Medical history: GET before any PUT is 200 + empty body (absent
     // anamnesis is a normal state, never a 404 — see GetMedicalHistoryUseCase).
@@ -158,6 +171,7 @@ describe('Clinical history (e2e)', () => {
     // `{}` when there is nothing to parse.
     const getBeforeAny = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     expect(getBeforeAny.text).toBe('');
@@ -166,6 +180,7 @@ describe('Clinical history (e2e)', () => {
     // version incremented (append-only, never an update-in-place).
     const putV1 = await request(app.getHttpServer())
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ allergies: 'Penicilina', notes: 'Version 1' })
       .expect(200);
@@ -176,6 +191,7 @@ describe('Clinical history (e2e)', () => {
 
     const putV2 = await request(app.getHttpServer())
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ allergies: 'Ninguna conocida', notes: 'Version 2' })
       .expect(200);
@@ -185,6 +201,7 @@ describe('Clinical history (e2e)', () => {
 
     const getLatest = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const getLatestBody = getLatest.body as MedicalHistoryResponseBody;
@@ -196,6 +213,7 @@ describe('Clinical history (e2e)', () => {
     // order, GET must return them ordered by entryDate DESC.
     const olderEntry = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/clinical-entries`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         entryDate: '2026-01-10T10:00:00.000Z',
@@ -207,6 +225,7 @@ describe('Clinical history (e2e)', () => {
 
     const newerEntry = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/clinical-entries`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         entryDate: '2026-05-20T10:00:00.000Z',
@@ -218,6 +237,7 @@ describe('Clinical history (e2e)', () => {
 
     const listEntries = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/clinical-entries`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listEntriesBody = listEntries.body as ClinicalEntryResponseBody[];
@@ -238,10 +258,12 @@ describe('Clinical history (e2e)', () => {
     // A method Express/Nest doesn't recognize on that path 404s.
     await request(app.getHttpServer())
       .delete(`/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(404);
     await request(app.getHttpServer())
       .patch(`/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ notes: 'intento de edicion' })
       .expect(404);
@@ -250,6 +272,7 @@ describe('Clinical history (e2e)', () => {
     // filter excludes it.
     const createCatalogItem = await request(app.getHttpServer())
       .post('/api/v1/catalog/items')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         code: 'CARIES-001',
@@ -264,6 +287,7 @@ describe('Clinical history (e2e)', () => {
 
     const listCatalog = await request(app.getHttpServer())
       .get('/api/v1/catalog/items')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listCatalogBody = listCatalog.body as CatalogItemResponseBody[];
@@ -271,6 +295,7 @@ describe('Clinical history (e2e)', () => {
 
     const listCatalogProcedureOnly = await request(app.getHttpServer())
       .get('/api/v1/catalog/items?kind=PROCEDURE')
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const listCatalogProcedureOnlyBody =
@@ -292,6 +317,7 @@ describe('Clinical history (e2e)', () => {
     // would leak whether the patient id exists).
     const getHistoryAsB = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     expect(getHistoryAsB.text).toBe('');
@@ -299,6 +325,7 @@ describe('Clinical history (e2e)', () => {
     // Clinical entries: clinic B's list for clinic A's patientId is empty.
     const listEntriesAsB = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/clinical-entries`)
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     const listEntriesAsBBody = listEntriesAsB.body as ClinicalEntryResponseBody[];
@@ -308,6 +335,7 @@ describe('Clinical history (e2e)', () => {
     // no kind filter.
     const listCatalogAsB = await request(app.getHttpServer())
       .get('/api/v1/catalog/items')
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     const listCatalogAsBBody = listCatalogAsB.body as CatalogItemResponseBody[];
@@ -318,6 +346,7 @@ describe('Clinical history (e2e)', () => {
     // Sanity: clinic A still sees its own data after clinic B's queries ran.
     const getHistoryAsAAgain = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const getHistoryAsAAgainBody =

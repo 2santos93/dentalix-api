@@ -10,6 +10,7 @@ import {
   ToothSurface,
 } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { hostFor } from './support/tenant-host';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -55,7 +56,7 @@ interface OdontogramGroupResponseBody {
 async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
-): Promise<{ tenantId: string; accessToken: string }> {
+): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await request(app.getHttpServer())
     .post('/api/v1/auth/register')
     .send({
@@ -70,6 +71,7 @@ async function registerAndLogin(
 
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({
       subdomain: opts.subdomain,
       email: opts.email,
@@ -81,16 +83,19 @@ async function registerAndLogin(
   return {
     tenantId: registerBody.tenantId,
     accessToken: loginBody.accessToken,
+    subdomain: opts.subdomain,
   };
 }
 
 async function createPatient(
   app: INestApplication<App>,
   accessToken: string,
+  subdomain: string,
   docNumber: string,
 ): Promise<PatientResponseBody> {
   const create = await request(app.getHttpServer())
     .post('/api/v1/patients')
+    .set('X-Tenant-Host', hostFor(subdomain))
     .set('Authorization', `Bearer ${accessToken}`)
     .send({
       firstName: 'Odonto',
@@ -148,11 +153,17 @@ describe('Odontogram (e2e)', () => {
       subdomain: 'clinica-odonto-a',
       email: 'owner@clinica-odonto-a.com',
     });
-    const patientA = await createPatient(app, clinicA.accessToken, '4001');
+    const patientA = await createPatient(
+      app,
+      clinicA.accessToken,
+      clinicA.subdomain,
+      '4001',
+    );
 
     // --- 1. POST several tooth-records across different teeth + surfaces.
     const tooth11Occlusal = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/tooth-records`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         toothNumber: '11',
@@ -170,6 +181,7 @@ describe('Odontogram (e2e)', () => {
 
     const tooth48Whole = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/tooth-records`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         toothNumber: '48',
@@ -188,6 +200,7 @@ describe('Odontogram (e2e)', () => {
     // timeline for tooth 11 must return this one first (DESC).
     const tooth11Mesial = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/tooth-records`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         toothNumber: '11',
@@ -202,6 +215,7 @@ describe('Odontogram (e2e)', () => {
     // --- 2. GET odontogram: grouped projection includes both teeth touched.
     const odontogram = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/odontogram`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const odontogramBody = odontogram.body as OdontogramGroupResponseBody[];
@@ -217,6 +231,7 @@ describe('Odontogram (e2e)', () => {
     // --- 3. GET teeth/11/history: DESC (most recent first).
     const history11 = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/teeth/11/history`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const history11Body = history11.body as ToothRecordResponseBody[];
@@ -230,6 +245,7 @@ describe('Odontogram (e2e)', () => {
     // --- 4. Invalid FDI on POST -> 400 (DTO-level validation).
     await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientA.id}/tooth-records`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         toothNumber: '99',
@@ -245,6 +261,7 @@ describe('Odontogram (e2e)', () => {
       .patch(
         `/api/v1/patients/${patientA.id}/tooth-records/${tooth11OcclusalBody.id}`,
       )
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ notes: 'intento de edicion' })
       .expect(404);
@@ -252,6 +269,7 @@ describe('Odontogram (e2e)', () => {
       .delete(
         `/api/v1/patients/${patientA.id}/tooth-records/${tooth11OcclusalBody.id}`,
       )
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(404);
 
@@ -264,6 +282,7 @@ describe('Odontogram (e2e)', () => {
 
     const odontogramAsB = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/odontogram`)
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     const odontogramAsBBody =
@@ -272,6 +291,7 @@ describe('Odontogram (e2e)', () => {
 
     const history11AsB = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/teeth/11/history`)
+      .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(200);
     const history11AsBBody = history11AsB.body as ToothRecordResponseBody[];
@@ -280,6 +300,7 @@ describe('Odontogram (e2e)', () => {
     // Sanity: clinic A still sees its own data after clinic B's queries ran.
     const odontogramAsAAgain = await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/odontogram`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const odontogramAsAAgainBody =
