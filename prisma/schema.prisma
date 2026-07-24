@@ -371,3 +371,45 @@ model SaleLineItem {
   @@index([tenantId, saleId])
   @@map("sale_line_items")
 }
+
+enum InventoryMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+model InventoryItem {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  name        String
+  sku         String?
+  unit        String
+  minStock    Decimal   @db.Decimal(14, 3) @default(0)
+  notes       String?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  movements InventoryMovement[]
+
+  @@index([tenantId])
+  @@map("inventory_items")
+}
+
+model InventoryMovement {
+  id          String                @id @default(uuid()) @db.Uuid
+  tenantId    String                @db.Uuid
+  itemId      String                @db.Uuid
+  type        InventoryMovementType
+  quantity    Decimal               @db.Decimal(14, 3)
+  reason      String?
+  occurredAt  DateTime              @default(now())
+  createdById String?               @db.Uuid
+  createdAt   DateTime              @default(now())
+
+  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, itemId])
+  @@map("inventory_movements")
+}
