@@ -99,7 +99,6 @@ model Patient {
   toothRecords           ToothRecord[]
   appointments           Appointment[]
   treatmentPlans         TreatmentPlan[]
-  sales                  Sale[]
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   @@index([tenantId])
@@ -255,14 +254,18 @@ model TreatmentPlan {
   tenantId    String              @db.Uuid
   patientId   String              @db.Uuid
   status      TreatmentPlanStatus @default(DRAFT)
+  // Moneda del plan: monto a pagar/saldo se calculan en esta moneda; un abono
+  // en otra moneda se convierte por su fecha (ver Payment/ConvertAmountUseCase).
+  currency    String              @default("USD")
   notes       String?
   createdById String?             @db.Uuid
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   deletedAt   DateTime?
 
-  patient Patient             @relation(fields: [patientId], references: [id])
-  items   TreatmentPlanItem[]
+  patient  Patient             @relation(fields: [patientId], references: [id])
+  items    TreatmentPlanItem[]
+  payments Payment[]
 
   @@index([tenantId, patientId])
   @@map("treatment_plans")
@@ -331,45 +334,32 @@ enum PaymentMethod {
   OTHER
 }
 
-model Sale {
-  id            String         @id @default(uuid()) @db.Uuid
-  tenantId      String         @db.Uuid
-  patientId     String?        @db.Uuid
-  currency      String
-  total         Decimal        @db.Decimal(14, 2)
-  paidAt        DateTime
-  paymentMethod PaymentMethod?
-  notes         String?
-  createdById   String?        @db.Uuid
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  deletedAt     DateTime?
+// Abono contra un Plan de Tratamiento (reemplaza Sale/SaleLineItem — ver
+// docs/plans/2026-07-24-payments-pivot.md). Saldo vive por plan: monto a
+// pagar = Σ item.price con status ACCEPTED|DONE; saldo = eso − Σ abonos
+// activos (cada uno convertido a `plan.currency` por su propia `paidAt` vía
+// ConvertAmountUseCase). `patientId` está denormalizado del plan para poder
+// listar abonos por paciente sin join. Anular abono = soft-delete (`deletedAt`).
+model Payment {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @db.Uuid
+  treatmentPlanId String         @db.Uuid
+  patientId       String         @db.Uuid
+  amount          Decimal        @db.Decimal(14, 2)
+  currency        String
+  paidAt          DateTime
+  method          PaymentMethod?
+  notes           String?
+  createdById     String?        @db.Uuid
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
 
-  patient   Patient?       @relation(fields: [patientId], references: [id])
-  lineItems SaleLineItem[]
+  plan TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Restrict)
 
-  @@index([tenantId, paidAt])
+  @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
-  @@map("sales")
-}
-
-model SaleLineItem {
-  id                  String   @id @default(uuid()) @db.Uuid
-  tenantId            String   @db.Uuid
-  saleId              String   @db.Uuid
-  description         String
-  catalogItemId       String?  @db.Uuid
-  treatmentPlanItemId String?  @db.Uuid
-  unitPrice           Decimal  @db.Decimal(14, 2)
-  quantity            Int
-  amount              Decimal  @db.Decimal(14, 2)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  sale Sale @relation(fields: [saleId], references: [id], onDelete: Restrict)
-
-  @@index([tenantId, saleId])
-  @@map("sale_line_items")
+  @@map("payments")
 }
 
 enum InventoryMovementType {

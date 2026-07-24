@@ -166,12 +166,13 @@ async function loginAs(
 }
 
 async function cleanup(): Promise<void> {
-  // FK-safe order: SaleLineItem -> Sale (onDelete: Restrict) ->
-  // InventoryMovement -> InventoryItem (onDelete: Restrict) -> Appointment ->
-  // Patient -> ClinicMembership -> User -> Tenant, plus the exchange
-  // snapshot this suite seeds directly.
-  await raw.saleLineItem.deleteMany();
-  await raw.sale.deleteMany();
+  // FK-safe order: InventoryMovement -> InventoryItem (onDelete: Restrict) ->
+  // Appointment -> Patient -> ClinicMembership -> User -> Tenant, plus the
+  // exchange snapshot this suite seeds directly. Sale/SaleLineItem were
+  // dropped by the payments pivot (see
+  // docs/plans/2026-07-24-payments-pivot.md); this suite's `/api/v1/sales`
+  // seed step + `dash.sales.*` assertions are now stale and will be
+  // replaced by Payment/GetPaymentsTotals in PAY-T3.
   await raw.inventoryMovement.deleteMany();
   await raw.inventoryItem.deleteMany();
   await raw.appointment.deleteMany();
