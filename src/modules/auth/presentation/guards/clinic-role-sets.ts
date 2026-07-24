@@ -48,3 +48,12 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+
+// Ventas / pagos (facturación): OWNER/ADMIN (gestión) + RECEPTION (mostrador
+// -- factura al paciente), pero NO DENTIST/ASSISTANT (dato financiero, no
+// clínico -- ver docs/plans/2026-07-24-sales.md "Global Constraints").
+export const SALES_ROLES: ClinicRole[] = [
+  ClinicRole.OWNER,
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
