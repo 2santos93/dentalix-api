@@ -67,3 +67,14 @@ export const INVENTORY_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.ASSISTANT,
 ];
+
+// Dashboard del doctor: agrega ventas convertidas (dato financiero) + bajo
+// stock + próximas citas + # pacientes en una sola vista de gestión ->
+// OWNER/ADMIN solamente, coherente con SALES_ROLES (que ya restringe el
+// mismo dato financiero que este endpoint expone) -- ver
+// docs/plans/2026-07-24-dashboard.md "Global Constraints" (asunción v1
+// ajustable).
+export const DASHBOARD_ROLES: ClinicRole[] = [
+  ClinicRole.OWNER,
+  ClinicRole.ADMIN,
+];

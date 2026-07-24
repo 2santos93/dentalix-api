@@ -19,6 +19,7 @@ import { PublicBrandingModule } from './modules/public-branding/public-branding.
 import { ExchangeModule } from './modules/exchange/exchange.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -40,6 +41,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ExchangeModule,
     SalesModule,
     InventoryModule,
+    DashboardModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
