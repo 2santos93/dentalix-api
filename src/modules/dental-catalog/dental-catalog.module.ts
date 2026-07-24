@@ -28,5 +28,10 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
       useClass: PrismaDentalCatalogRepository,
     },
   ],
+  // Exported so other modules (TreatmentPlansModule ->
+  // AddTreatmentPlanItemUseCase) can inject DENTAL_CATALOG_REPOSITORY to
+  // validate `catalogItemId` / resolve `defaultPrice` without duplicating the
+  // catalog repository.
+  exports: [DENTAL_CATALOG_REPOSITORY],
 })
 export class DentalCatalogModule {}

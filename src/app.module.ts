@@ -12,6 +12,7 @@ import { MedicalHistoryModule } from './modules/medical-history/medical-history.
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { TreatmentPlansModule } from './modules/treatment-plans/treatment-plans.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
@@ -29,6 +30,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ClinicalEntriesModule,
     OdontogramModule,
     AppointmentsModule,
+    TreatmentPlansModule,
     StaffModule,
     DomainsModule,
     PublicBrandingModule,
