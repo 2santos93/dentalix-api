@@ -3,18 +3,17 @@ import { Transform, Type } from 'class-transformer';
 import { IsInt, IsOptional, Matches, Min } from 'class-validator';
 
 // Uppercase-normalizes ISO 4217 codes before validation -- same convention
-// as SalesTotalsQueryDto / CreateSaleDto.
+// as CreatePaymentDto (payments, PAY-T3).
 function toUpperCase({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.toUpperCase() : value;
 }
 
 // `from`/`to` are plain calendar dates (YYYY-MM-DD, no time component) --
-// unlike SalesTotalsQueryDto's `@IsDateString` (a full ISO 8601 timestamp),
 // the dashboard is queried by day-granularity period. The controller turns
 // each into a UTC-midnight `Date` via `new Date(...)` before calling
 // GetDoctorDashboardUseCase (a date-only ISO string always parses as UTC
 // midnight, matching the convention documented on
-// GetSalesTotalsUseCase.toUtcDateString: exchange snapshots are always
+// GetPaymentsTotalsUseCase.toUtcDateString: exchange snapshots are always
 // keyed/compared in UTC).
 export class DashboardQueryDto {
   @ApiProperty({
@@ -35,7 +34,8 @@ export class DashboardQueryDto {
 
   @ApiProperty({
     example: 'USD',
-    description: 'ISO 4217 currency code every sale total is converted into.',
+    description:
+      'ISO 4217 currency code every payment amount is converted into.',
   })
   @Transform(toUpperCase)
   @Matches(/^[A-Z]{2,8}$/, {

@@ -41,5 +41,11 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
       useClass: PrismaTreatmentPlanRepository,
     },
   ],
+  // Exported (additive) so PaymentsModule can inject GetTreatmentPlanUseCase
+  // by class -- RecordPaymentUseCase/GetPlanBalanceUseCase need to read a
+  // plan (+ its active items + currency) before recording/valuing a payment,
+  // same cross-module DI pattern as ExchangeModule exporting
+  // ConvertAmountUseCase for SalesModule/PaymentsModule.
+  exports: [GetTreatmentPlanUseCase],
 })
 export class TreatmentPlansModule {}

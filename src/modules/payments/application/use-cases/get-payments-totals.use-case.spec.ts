@@ -1,6 +1,6 @@
-import { GetSalesTotalsUseCase } from './get-sales-totals.use-case';
-import { VoidSaleUseCase } from './void-sale.use-case';
-import { InMemorySaleRepository } from './__fixtures__/in-memory-sale.repository';
+import { GetPaymentsTotalsUseCase } from './get-payments-totals.use-case';
+import { VoidPaymentUseCase } from './void-payment.use-case';
+import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 
 interface FakeConvertInput {
@@ -11,17 +11,9 @@ interface FakeConvertInput {
 }
 
 /**
- * Deterministic fake for `ConvertAmountUseCase`: fixed COP<->USD rate (1
- * USD = 4000 COP), same-currency passthrough (mirrors the real use case's
- * `from === to` short-circuit). Records every call so specs can assert
- * per-sale-date conversion (the whole point of `GetSalesTotalsUseCase`:
- * convert each sale by ITS OWN paidAt date, not "today").
- *
- * `ConvertAmountUseCase` is a concrete class (constructed with
- * `getRatesForDate`, a private field), not an interface port — so a plain
- * object literal isn't structurally assignable to it. Cast via
- * `as unknown as ConvertAmountUseCase` at the injection site, same pattern
- * used elsewhere in this codebase for faking concrete class dependencies.
+ * Deterministic fake for `ConvertAmountUseCase` -- mirrors
+ * sales/get-sales-totals.use-case.spec.ts's FakeConvertAmountUseCase
+ * (fixed COP<->USD rate, same-currency passthrough, records every call).
  */
 class FakeConvertAmountUseCase {
   public readonly calls: FakeConvertInput[] = [];
@@ -49,29 +41,29 @@ class FakeConvertAmountUseCase {
   }
 }
 
-describe('GetSalesTotalsUseCase', () => {
+describe('GetPaymentsTotalsUseCase', () => {
   function makeUseCase() {
-    const repo = new InMemorySaleRepository();
+    const repo = new InMemoryPaymentRepository();
     const fakeConvert = new FakeConvertAmountUseCase();
-    const uc = new GetSalesTotalsUseCase(
+    const uc = new GetPaymentsTotalsUseCase(
       repo,
       fakeConvert as unknown as ConvertAmountUseCase,
     );
     return { repo, fakeConvert, uc };
   }
 
-  it('converts each sale by its own paidAt date and sums the results', async () => {
+  it('converts each payment by its own paidAt date and sums the results', async () => {
     const { repo, fakeConvert, uc } = makeUseCase();
-    repo.seedSale({
-      id: 's-cop',
+    repo.seedPayment({
+      id: 'p-cop',
       currency: 'COP',
-      total: 400000,
+      amount: 400000,
       paidAt: new Date('2026-03-05T12:00:00.000Z'),
     });
-    repo.seedSale({
-      id: 's-usd',
+    repo.seedPayment({
+      id: 'p-usd',
       currency: 'USD',
-      total: 30,
+      amount: 30,
       paidAt: new Date('2026-03-10T08:00:00.000Z'),
     });
 
@@ -85,34 +77,31 @@ describe('GetSalesTotalsUseCase', () => {
     expect(result.totalConverted).toBe(130);
     expect(result.count).toBe(2);
     expect(result.currency).toBe('USD');
-
-    // Original (unconverted) totals grouped by the sale's OWN currency.
     expect(result.byCurrency).toEqual({ COP: 400000, USD: 30 });
 
-    // Each sale is converted using ITS OWN paidAt date — not today's date.
     expect(fakeConvert.calls).toEqual([
       { amount: 400000, from: 'COP', to: 'USD', date: '2026-03-05' },
       { amount: 30, from: 'USD', to: 'USD', date: '2026-03-10' },
     ]);
   });
 
-  it('excludes a voided sale from the totals', async () => {
+  it('excludes a voided payment from the totals', async () => {
     const { repo, uc } = makeUseCase();
-    const voidUc = new VoidSaleUseCase(repo);
-    repo.seedSale({
-      id: 's1',
+    const voidUc = new VoidPaymentUseCase(repo);
+    repo.seedPayment({
+      id: 'p1',
       currency: 'USD',
-      total: 100,
+      amount: 100,
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
-    repo.seedSale({
-      id: 's2',
+    repo.seedPayment({
+      id: 'p2',
       currency: 'USD',
-      total: 50,
+      amount: 50,
       paidAt: new Date('2026-03-06T00:00:00.000Z'),
     });
 
-    await voidUc.execute('s1');
+    await voidUc.execute('p1');
 
     const result = await uc.execute({
       from: new Date('2026-03-01T00:00:00.000Z'),
@@ -127,10 +116,10 @@ describe('GetSalesTotalsUseCase', () => {
 
   it('returns zeroed totals for an empty range', async () => {
     const { repo, uc } = makeUseCase();
-    repo.seedSale({
-      id: 's1',
+    repo.seedPayment({
+      id: 'p1',
       currency: 'USD',
-      total: 100,
+      amount: 100,
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
 
@@ -147,10 +136,10 @@ describe('GetSalesTotalsUseCase', () => {
 
   it('uppercase-normalizes the target currency', async () => {
     const { repo, uc } = makeUseCase();
-    repo.seedSale({
-      id: 's1',
+    repo.seedPayment({
+      id: 'p1',
       currency: 'USD',
-      total: 10,
+      amount: 10,
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
 

@@ -20,11 +20,11 @@ const passwordService = new PasswordService();
 const SEEDED_PASSWORD = 'S3cret!!';
 
 // The date this suite seeds an exchange snapshot for. EXCHANGE_APP_ID is
-// blank in .env.test (see .env.test / exchange.e2e-spec.ts / sales.e2e-spec.ts),
-// so if GetSalesTotalsUseCase (invoked via GetDoctorDashboardUseCase) ever
-// fell through to the live provider it would throw instead of silently
-// hitting the network -- the seeded sale below is in COP, so it must hit
-// the seeded snapshot for RATE_DATE, never OpenExchangeRatesProvider.
+// blank in .env.test (see .env.test / exchange.e2e-spec.ts), so if
+// GetPaymentsTotalsUseCase (invoked via GetDoctorDashboardUseCase) ever fell
+// through to the live provider it would throw instead of silently hitting
+// the network -- the seeded payment below is in COP, so it must hit the
+// seeded snapshot for RATE_DATE, never OpenExchangeRatesProvider.
 const RATE_DATE = '2026-05-15';
 const RATE_COP = 4000;
 const FROM = '2026-05-15';
@@ -55,7 +55,7 @@ interface AppointmentResponseBody {
   end: string;
 }
 
-interface DashboardSalesBody {
+interface DashboardIncomesBody {
   currency: string;
   totalConverted: number;
   count: number;
@@ -78,7 +78,7 @@ interface DashboardUpcomingAppointmentBody {
 
 interface DashboardResponseBody {
   period: { from: string; to: string };
-  sales: DashboardSalesBody;
+  incomes: DashboardIncomesBody;
   lowStockItems: DashboardLowStockBody;
   upcomingAppointments: DashboardUpcomingAppointmentBody[];
   patientCount: number;
@@ -168,11 +168,14 @@ async function loginAs(
 async function cleanup(): Promise<void> {
   // FK-safe order: InventoryMovement -> InventoryItem (onDelete: Restrict) ->
   // Appointment -> Patient -> ClinicMembership -> User -> Tenant, plus the
-  // exchange snapshot this suite seeds directly. Sale/SaleLineItem were
-  // dropped by the payments pivot (see
-  // docs/plans/2026-07-24-payments-pivot.md); this suite's `/api/v1/sales`
-  // seed step + `dash.sales.*` assertions are now stale and will be
-  // replaced by Payment/GetPaymentsTotals in PAY-T3.
+  // exchange snapshot this suite seeds directly. Payment -> TreatmentPlan
+  // (onDelete: Restrict) must be cleared before Patient too -- Sale/
+  // SaleLineItem were dropped by the payments pivot (see
+  // docs/plans/2026-07-24-payments-pivot.md); this suite now seeds a
+  // TreatmentPlan + Payment directly (raw/DIRECT_URL, no REST yet -- PAY-T3)
+  // for the `dash.incomes.*` assertions.
+  await raw.payment.deleteMany();
+  await raw.treatmentPlan.deleteMany();
   await raw.inventoryMovement.deleteMany();
   await raw.inventoryItem.deleteMany();
   await raw.appointment.deleteMany();
@@ -200,11 +203,10 @@ describe('Dashboard (e2e)', () => {
     await cleanup();
 
     // Seed the COP snapshot directly via DIRECT_URL so
-    // GetSalesTotalsUseCase -> ConvertAmountUseCase -> GetRatesForDateUseCase's
+    // GetPaymentsTotalsUseCase -> ConvertAmountUseCase -> GetRatesForDateUseCase's
     // cache-then-fetch finds a row for RATE_DATE and returns immediately
     // (cache hit) -- it never calls OpenExchangeRatesProvider.fetchRates, so
-    // this suite needs no network access and no real EXCHANGE_APP_ID (same
-    // rationale as sales.e2e-spec.ts).
+    // this suite needs no network access and no real EXCHANGE_APP_ID.
     await raw.exchangeRateSnapshot.create({
       data: { date: RATE_DATE, currency: 'COP', rate: RATE_COP },
     });
@@ -217,7 +219,7 @@ describe('Dashboard (e2e)', () => {
   });
 
   it(
-    'aggregates converted sales + low-stock items + upcoming appointments + ' +
+    'aggregates converted incomes + low-stock items + upcoming appointments + ' +
       'patient count offline, isolates tenants and enforces DASHBOARD_ROLES',
     async () => {
       const subdomainA = 'clinica-dash-a';
@@ -242,22 +244,31 @@ describe('Dashboard (e2e)', () => {
         .expect(201);
       const patient = patientRes.body as PatientResponseBody;
 
-      // --- 2. Seed a COP sale on RATE_DATE -- converts offline via the
-      // seeded snapshot (500000 / 4000 = 125 USD).
-      const saleRes = await request(app.getHttpServer())
-        .post('/api/v1/sales')
-        .set('X-Tenant-Host', hostFor(subdomainA))
-        .set('Authorization', `Bearer ${clinicA.accessToken}`)
-        .send({
+      // --- 2. Seed a treatment plan (raw/DIRECT_URL -- no payments REST yet,
+      // that's PAY-T3) then a COP payment against it on RATE_DATE -- converts
+      // offline via the seeded snapshot (500000 / 4000 = 125 USD).
+      // GetPaymentsTotalsUseCase (invoked via GetDoctorDashboardUseCase) sums
+      // every active payment in [from,to) regardless of which plan it
+      // belongs to, so a bare plan row (no items) is enough here.
+      const plan = await raw.treatmentPlan.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId: patient.id,
+          currency: 'USD',
+        },
+        select: { id: true },
+      });
+      await raw.payment.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          treatmentPlanId: plan.id,
+          patientId: patient.id,
+          amount: 500000,
           currency: 'COP',
-          paidAt: `${RATE_DATE}T10:00:00.000Z`,
-          paymentMethod: 'CASH',
-          lineItems: [
-            { description: 'Consulta', unitPrice: 500000, quantity: 1 },
-          ],
-        })
-        .expect(201);
-      expect(saleRes.body).toMatchObject({ currency: 'COP', total: 500000 });
+          paidAt: new Date(`${RATE_DATE}T10:00:00.000Z`),
+          method: 'CASH',
+        },
+      });
 
       // --- 3. Seed an inventory item with no movements -> stock 0,
       // minStock default 0 is NOT low stock, so give it minStock 1 to force
@@ -302,10 +313,10 @@ describe('Dashboard (e2e)', () => {
         .expect(200);
       const dash = dashRes.body as DashboardResponseBody;
 
-      expect(dash.sales.currency).toBe('USD');
-      expect(dash.sales.count).toBeGreaterThanOrEqual(1);
-      expect(dash.sales.totalConverted).toBe(125);
-      expect(dash.sales.byCurrency).toEqual({ COP: 500000 });
+      expect(dash.incomes.currency).toBe('USD');
+      expect(dash.incomes.count).toBeGreaterThanOrEqual(1);
+      expect(dash.incomes.totalConverted).toBe(125);
+      expect(dash.incomes.byCurrency).toEqual({ COP: 500000 });
 
       expect(dash.lowStockItems.count).toBeGreaterThanOrEqual(1);
       expect(dash.lowStockItems.items.map((i) => i.id)).toContain(item.id);
@@ -337,8 +348,8 @@ describe('Dashboard (e2e)', () => {
         .expect(200);
       const dashB = dashResB.body as DashboardResponseBody;
 
-      expect(dashB.sales.count).toBe(0);
-      expect(dashB.sales.totalConverted).toBe(0);
+      expect(dashB.incomes.count).toBe(0);
+      expect(dashB.incomes.totalConverted).toBe(0);
       expect(dashB.lowStockItems.count).toBe(0);
       expect(dashB.lowStockItems.items).toEqual([]);
       expect(dashB.upcomingAppointments).toEqual([]);

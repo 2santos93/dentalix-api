@@ -31,6 +31,7 @@ function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
     tenantId: plan.tenantId,
     patientId: plan.patientId,
     status: plan.status,
+    currency: plan.currency,
     notes: plan.notes,
     createdById: plan.createdById,
     createdAt: plan.createdAt,

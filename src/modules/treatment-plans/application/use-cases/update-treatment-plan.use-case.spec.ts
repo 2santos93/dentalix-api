@@ -19,6 +19,7 @@ function fakePlanWithItems(
     tenantId: 't1',
     patientId: 'p1',
     status: TreatmentPlanStatus.DRAFT,
+    currency: 'USD',
     notes: null,
     createdById: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

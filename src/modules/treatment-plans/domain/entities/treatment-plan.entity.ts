@@ -12,6 +12,10 @@ export interface TreatmentPlan {
   tenantId: string;
   patientId: string;
   status: TreatmentPlanStatus;
+  // Moneda del plan (PAY-T1: `TreatmentPlan.currency`, default "USD" at the
+  // schema level). Monto a pagar/saldo se calculan en esta moneda -- ver
+  // `GetPlanBalanceUseCase` (payments module).
+  currency: string;
   notes: string | null;
   createdById: string | null;
   createdAt: Date;

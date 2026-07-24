@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import {
-  GetSalesTotalsUseCase,
-  GetSalesTotalsResult,
-} from '../../../sales/application/use-cases/get-sales-totals.use-case';
+  GetPaymentsTotalsUseCase,
+  GetPaymentsTotalsResult,
+} from '../../../payments/application/use-cases/get-payments-totals.use-case';
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { ListAppointmentsUseCase } from '../../../appointments/application/use-cases/list-appointments.use-case';
 import { ListPatientsUseCase } from '../../../patients/application/use-cases/list-patients.use-case';
@@ -43,7 +43,11 @@ export interface DashboardUpcomingAppointment {
 
 export interface GetDoctorDashboardResult {
   period: { from: Date; to: Date };
-  sales: GetSalesTotalsResult;
+  /** "Incomes of the period" — Σ payments (abonos) received, converted to
+   * the requested currency by each payment's own paidAt date (see
+   * GetPaymentsTotalsUseCase, which replaced the old sales-based metric —
+   * see docs/plans/2026-07-24-payments-pivot.md). */
+  incomes: GetPaymentsTotalsResult;
   lowStockItems: {
     count: number;
     items: DashboardLowStockItem[];
@@ -60,15 +64,15 @@ function isValidDate(value: unknown): value is Date {
  * Aggregates the "doctor dashboard" view purely by composing 4 existing use
  * cases via DI -- never touching a repository directly (see the plan at
  * docs/plans/2026-07-24-dashboard.md and DashboardModule, which imports
- * SalesModule/InventoryModule/AppointmentsModule/PatientsModule for exactly
- * this). Mirrors the cross-module reuse pattern already used by
- * GetSalesTotalsUseCase injecting ConvertAmountUseCase (SalesModule imports
- * ExchangeModule, which exports it).
+ * PaymentsModule/InventoryModule/AppointmentsModule/PatientsModule for
+ * exactly this). Mirrors the cross-module reuse pattern already used by
+ * GetPaymentsTotalsUseCase injecting ConvertAmountUseCase (PaymentsModule
+ * imports ExchangeModule, which exports it).
  */
 @Injectable()
 export class GetDoctorDashboardUseCase {
   constructor(
-    private readonly getSalesTotals: GetSalesTotalsUseCase,
+    private readonly getPaymentsTotals: GetPaymentsTotalsUseCase,
     private readonly listInventoryItems: ListInventoryItemsUseCase,
     private readonly listAppointments: ListAppointmentsUseCase,
     private readonly listPatients: ListPatientsUseCase,
@@ -95,10 +99,10 @@ export class GetDoctorDashboardUseCase {
     }
 
     // Currency format/support itself is validated downstream by
-    // GetSalesTotalsUseCase -> ConvertAmountUseCase (unsupported currency
+    // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
     // throws BadRequestException there) -- not duplicated here.
-    const [sales, allItems, patients] = await Promise.all([
-      this.getSalesTotals.execute({
+    const [incomes, allItems, patients] = await Promise.all([
+      this.getPaymentsTotals.execute({
         from: input.from,
         to: input.to,
         currency: input.currency,
@@ -133,7 +137,7 @@ export class GetDoctorDashboardUseCase {
 
     return {
       period: { from: input.from, to: input.to },
-      sales,
+      incomes,
       lowStockItems: {
         count: lowStock.length,
         items: lowStock.map((item) => ({

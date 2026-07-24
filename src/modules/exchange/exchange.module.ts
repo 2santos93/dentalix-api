@@ -35,9 +35,10 @@ import { TokenService } from '../../shared/crypto/token.service';
       useClass: PrismaExchangeRateRepository,
     },
   ],
-  // Exported so other modules (SalesModule -> GetSalesTotalsUseCase) can
-  // inject ConvertAmountUseCase to convert each sale's total at its own
-  // paidAt date without duplicating the exchange lookup/conversion logic.
+  // Exported so other modules (PaymentsModule -> RecordPayment/GetPlanBalance/
+  // GetPaymentsTotals) can inject ConvertAmountUseCase to convert each
+  // payment at its own paidAt date without duplicating the exchange
+  // lookup/conversion logic.
   exports: [ConvertAmountUseCase],
 })
 export class ExchangeModule {}

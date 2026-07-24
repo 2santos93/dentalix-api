@@ -1,9 +1,9 @@
 import { GetDoctorDashboardUseCase } from './get-doctor-dashboard.use-case';
 import {
-  GetSalesTotalsUseCase,
-  GetSalesTotalsInput,
-  GetSalesTotalsResult,
-} from '../../../sales/application/use-cases/get-sales-totals.use-case';
+  GetPaymentsTotalsUseCase,
+  GetPaymentsTotalsInput,
+  GetPaymentsTotalsResult,
+} from '../../../payments/application/use-cases/get-payments-totals.use-case';
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { InventoryItemWithStock } from '../../../inventory/domain/entities/inventory-item.entity';
 import {
@@ -20,15 +20,15 @@ import { AppointmentStatus } from '@prisma/client';
 
 /**
  * Fakes for the 4 reused use cases -- same pattern as
- * `FakeConvertAmountUseCase` in sales/get-sales-totals.use-case.spec.ts:
+ * `FakeConvertAmountUseCase` in payments/get-payments-totals.use-case.spec.ts:
  * each reused use case here is a concrete class (not an interface port), so
  * a plain object literal isn't structurally assignable to it. Record calls
  * so specs can assert exactly what the dashboard use case forwards
  * downstream, then cast `as unknown as <Class>` at the injection site.
  */
-class FakeGetSalesTotalsUseCase {
-  public readonly calls: GetSalesTotalsInput[] = [];
-  public result: GetSalesTotalsResult = {
+class FakeGetPaymentsTotalsUseCase {
+  public readonly calls: GetPaymentsTotalsInput[] = [];
+  public result: GetPaymentsTotalsResult = {
     from: new Date('2026-07-01T00:00:00.000Z'),
     to: new Date('2026-07-31T00:00:00.000Z'),
     currency: 'USD',
@@ -37,7 +37,7 @@ class FakeGetSalesTotalsUseCase {
     byCurrency: {},
   };
 
-  execute(input: GetSalesTotalsInput): Promise<GetSalesTotalsResult> {
+  execute(input: GetPaymentsTotalsInput): Promise<GetPaymentsTotalsResult> {
     this.calls.push(input);
     return Promise.resolve(this.result);
   }
@@ -116,19 +116,19 @@ function makeAppointment(overrides: Partial<Appointment>): Appointment {
 
 describe('GetDoctorDashboardUseCase', () => {
   function makeUseCase() {
-    const salesUc = new FakeGetSalesTotalsUseCase();
+    const incomesUc = new FakeGetPaymentsTotalsUseCase();
     const inventoryUc = new FakeListInventoryItemsUseCase();
     const appointmentsUc = new FakeListAppointmentsUseCase();
     const patientsUc = new FakeListPatientsUseCase();
 
     const uc = new GetDoctorDashboardUseCase(
-      salesUc as unknown as GetSalesTotalsUseCase,
+      incomesUc as unknown as GetPaymentsTotalsUseCase,
       inventoryUc as unknown as ListInventoryItemsUseCase,
       appointmentsUc as unknown as ListAppointmentsUseCase,
       patientsUc as unknown as ListPatientsUseCase,
     );
 
-    return { salesUc, inventoryUc, appointmentsUc, patientsUc, uc };
+    return { incomesUc, inventoryUc, appointmentsUc, patientsUc, uc };
   }
 
   const baseInput = {
@@ -137,9 +137,9 @@ describe('GetDoctorDashboardUseCase', () => {
     currency: 'USD',
   };
 
-  it('forwards {from,to,currency} to GetSalesTotalsUseCase and returns its result', async () => {
-    const { salesUc, uc } = makeUseCase();
-    salesUc.result = {
+  it('forwards {from,to,currency} to GetPaymentsTotalsUseCase and returns its result', async () => {
+    const { incomesUc, uc } = makeUseCase();
+    incomesUc.result = {
       from: baseInput.from,
       to: baseInput.to,
       currency: 'USD',
@@ -150,19 +150,38 @@ describe('GetDoctorDashboardUseCase', () => {
 
     const result = await uc.execute(baseInput);
 
-    expect(salesUc.calls).toEqual([
+    expect(incomesUc.calls).toEqual([
       { from: baseInput.from, to: baseInput.to, currency: 'USD' },
     ]);
-    expect(result.sales).toEqual(salesUc.result);
+    expect(result.incomes).toEqual(incomesUc.result);
     expect(result.period).toEqual({ from: baseInput.from, to: baseInput.to });
   });
 
   it('includes ONLY low-stock items in lowStockItems, with a matching count', async () => {
     const { inventoryUc, uc } = makeUseCase();
     inventoryUc.items = [
-      makeInventoryItem({ id: 'i1', name: 'Gloves', stock: 2, minStock: 5, lowStock: true }),
-      makeInventoryItem({ id: 'i2', name: 'Masks', stock: 50, minStock: 10, lowStock: false }),
-      makeInventoryItem({ id: 'i3', name: 'Anesthetic', stock: 0, minStock: 3, lowStock: true, unit: 'vial' }),
+      makeInventoryItem({
+        id: 'i1',
+        name: 'Gloves',
+        stock: 2,
+        minStock: 5,
+        lowStock: true,
+      }),
+      makeInventoryItem({
+        id: 'i2',
+        name: 'Masks',
+        stock: 50,
+        minStock: 10,
+        lowStock: false,
+      }),
+      makeInventoryItem({
+        id: 'i3',
+        name: 'Anesthetic',
+        stock: 0,
+        minStock: 3,
+        lowStock: true,
+        unit: 'vial',
+      }),
     ];
 
     const result = await uc.execute(baseInput);
@@ -180,10 +199,26 @@ describe('GetDoctorDashboardUseCase', () => {
     jest.useFakeTimers().setSystemTime(now);
 
     appointmentsUc.items = [
-      makeAppointment({ id: 'future-late', start: new Date('2026-08-10T09:00:00.000Z'), end: new Date('2026-08-10T10:00:00.000Z') }),
-      makeAppointment({ id: 'past', start: new Date('2026-07-01T09:00:00.000Z'), end: new Date('2026-07-01T10:00:00.000Z') }),
-      makeAppointment({ id: 'future-early', start: new Date('2026-07-16T09:00:00.000Z'), end: new Date('2026-07-16T10:00:00.000Z') }),
-      makeAppointment({ id: 'future-mid', start: new Date('2026-07-20T09:00:00.000Z'), end: new Date('2026-07-20T10:00:00.000Z') }),
+      makeAppointment({
+        id: 'future-late',
+        start: new Date('2026-08-10T09:00:00.000Z'),
+        end: new Date('2026-08-10T10:00:00.000Z'),
+      }),
+      makeAppointment({
+        id: 'past',
+        start: new Date('2026-07-01T09:00:00.000Z'),
+        end: new Date('2026-07-01T10:00:00.000Z'),
+      }),
+      makeAppointment({
+        id: 'future-early',
+        start: new Date('2026-07-16T09:00:00.000Z'),
+        end: new Date('2026-07-16T10:00:00.000Z'),
+      }),
+      makeAppointment({
+        id: 'future-mid',
+        start: new Date('2026-07-20T09:00:00.000Z'),
+        end: new Date('2026-07-20T10:00:00.000Z'),
+      }),
     ];
 
     const result = await uc.execute({ ...baseInput, upcomingLimit: 2 });

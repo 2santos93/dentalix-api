@@ -15,12 +15,13 @@ export class DashboardPeriodDto {
   to!: Date;
 }
 
-// Mirrors GetSalesTotalsResult (see
-// ../../../sales/application/use-cases/get-sales-totals.use-case.ts) --
-// duplicated here rather than importing SalesTotalsDto so the dashboard's
+// Mirrors GetPaymentsTotalsResult (see
+// ../../../payments/application/use-cases/get-payments-totals.use-case.ts)
+// -- duplicated here rather than importing a payments DTO so the dashboard's
 // presentation layer stays self-contained (Swagger-only doc classes, no
-// cross-module presentation coupling).
-export class DashboardSalesDto {
+// cross-module presentation coupling). Replaces the old sales-based metric
+// -- see docs/plans/2026-07-24-payments-pivot.md.
+export class DashboardIncomesDto {
   @ApiProperty({ type: String, format: 'date-time' })
   from!: Date;
 
@@ -33,21 +34,21 @@ export class DashboardSalesDto {
   @ApiProperty({
     example: 1250.5,
     description:
-      "Sum of every active sale's total in the range, each converted to " +
-      "`currency` using ITS OWN paidAt date (never today's rate).",
+      "Sum of every active payment's amount in the range, each converted " +
+      "to `currency` using ITS OWN paidAt date (never today's rate).",
   })
   totalConverted!: number;
 
   @ApiProperty({
     example: 12,
-    description: 'Number of active sales in the range, any currency.',
+    description: 'Number of active payments in the range, any currency.',
   })
   count!: number;
 
   @ApiProperty({
     example: { COP: 500000, USD: 30 },
     description:
-      "Breakdown of the ORIGINAL (unconverted) totals grouped by each sale's own currency.",
+      "Breakdown of the ORIGINAL (unconverted) amounts grouped by each payment's own currency.",
   })
   byCurrency!: Record<string, number>;
 }
@@ -70,7 +71,10 @@ export class DashboardLowStockItemDto {
 }
 
 export class DashboardLowStockDto {
-  @ApiProperty({ example: 3, description: 'Number of items at or below minStock.' })
+  @ApiProperty({
+    example: 3,
+    description: 'Number of items at or below minStock.',
+  })
   count!: number;
 
   @ApiProperty({ type: [DashboardLowStockItemDto] })
@@ -101,8 +105,8 @@ export class DashboardDto {
   @ApiProperty({ type: DashboardPeriodDto })
   period!: DashboardPeriodDto;
 
-  @ApiProperty({ type: DashboardSalesDto })
-  sales!: DashboardSalesDto;
+  @ApiProperty({ type: DashboardIncomesDto })
+  incomes!: DashboardIncomesDto;
 
   @ApiProperty({ type: DashboardLowStockDto })
   lowStockItems!: DashboardLowStockDto;
