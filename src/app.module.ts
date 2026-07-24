@@ -14,6 +14,7 @@ import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { DomainsModule } from './modules/domains/domains.module';
+import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -30,6 +31,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AppointmentsModule,
     StaffModule,
     DomainsModule,
+    PublicBrandingModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
