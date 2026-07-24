@@ -8,7 +8,13 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiExtraModels,
+  ApiOkResponse,
+  ApiTags,
+  getSchemaPath,
+} from '@nestjs/swagger';
 import { SaveMedicalHistoryDto } from './dto/save-medical-history.dto';
 import { GetMedicalHistoryUseCase } from '../application/use-cases/get-medical-history.use-case';
 import { SaveMedicalHistoryUseCase } from '../application/use-cases/save-medical-history.use-case';
@@ -41,10 +47,16 @@ export class MedicalHistoryController {
   // NEVER a 404: an absent anamnesis is a normal state (first visit), not an
   // error (see GetMedicalHistoryUseCase).
   @Get()
+  @ApiExtraModels(MedicalHistoryDto)
   @ApiOkResponse({
-    type: MedicalHistoryDto,
+    // Nullable at the SCHEMA level (not just prose) so `openapi-typescript`
+    // generates `MedicalHistoryDto | null` for the web client — the handler
+    // genuinely returns 200 + null on a first visit (see below).
+    schema: {
+      oneOf: [{ $ref: getSchemaPath(MedicalHistoryDto) }, { type: 'null' }],
+    },
     description:
-      'Latest medical history version. Response body is empty/null when the patient does not have one yet (first visit) — this is never a 404.',
+      'Latest medical history version. Response body is null when the patient does not have one yet (first visit) — this is never a 404.',
   })
   get(@Param('patientId') patientId: string): Promise<MedicalHistory | null> {
     return this.getMedicalHistory.execute(patientId);
