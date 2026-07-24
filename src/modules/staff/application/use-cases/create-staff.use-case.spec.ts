@@ -33,3 +33,8 @@ it('400 si fullName < 2', async () => {
   const uc = new CreateStaffUseCase(makeRepo() as any, pwd as any);
   await expect(uc.execute({ fullName: 'A', email: 'a@a.com', role: ClinicRole.DENTIST, password: 'secret12' })).rejects.toBeInstanceOf(BadRequestException);
 });
+
+it('400 si role no es válido', async () => {
+  const uc = new CreateStaffUseCase(makeRepo() as any, pwd as any);
+  await expect(uc.execute({ fullName: 'Ana', email: 'a@a.com', role: 'SUPERADMIN' as any, password: 'secret12' })).rejects.toBeInstanceOf(BadRequestException);
+});
