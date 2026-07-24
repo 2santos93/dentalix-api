@@ -49,10 +49,12 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
-// Ventas / pagos (facturación): OWNER/ADMIN (gestión) + RECEPTION (mostrador
-// -- factura al paciente), pero NO DENTIST/ASSISTANT (dato financiero, no
-// clínico -- ver docs/plans/2026-07-24-sales.md "Global Constraints").
-export const SALES_ROLES: ClinicRole[] = [
+// Pagos / abonos (facturación): OWNER/ADMIN (gestión) + RECEPTION (mostrador
+// -- registra el abono del paciente), pero NO DENTIST/ASSISTANT (dato
+// financiero, no clínico -- ver docs/plans/2026-07-24-payments-pivot.md
+// "Global Constraints"). Reemplaza a SALES_ROLES (el módulo de ventas fue
+// eliminado en el pivote a Payments, ver PAY-T2).
+export const PAYMENT_ROLES: ClinicRole[] = [
   ClinicRole.OWNER,
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
@@ -68,9 +70,9 @@ export const INVENTORY_ROLES: ClinicRole[] = [
   ClinicRole.ASSISTANT,
 ];
 
-// Dashboard del doctor: agrega ventas convertidas (dato financiero) + bajo
-// stock + próximas citas + # pacientes en una sola vista de gestión ->
-// OWNER/ADMIN solamente, coherente con SALES_ROLES (que ya restringe el
+// Dashboard del doctor: agrega pagos/abonos convertidos (dato financiero) +
+// bajo stock + próximas citas + # pacientes en una sola vista de gestión ->
+// OWNER/ADMIN solamente, coherente con PAYMENT_ROLES (que ya restringe el
 // mismo dato financiero que este endpoint expone) -- ver
 // docs/plans/2026-07-24-dashboard.md "Global Constraints" (asunción v1
 // ajustable).
@@ -80,4 +82,7 @@ export const DASHBOARD_ROLES: ClinicRole[] = [
 ];
 
 // Gestión de personal (crear/editar rol/desactivar): solo gestión.
-export const STAFF_WRITE_ROLES: ClinicRole[] = [ClinicRole.OWNER, ClinicRole.ADMIN];
+export const STAFF_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.OWNER,
+  ClinicRole.ADMIN,
+];
