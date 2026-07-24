@@ -27,3 +27,7 @@ it('409 al desactivar al último OWNER', async () => {
   const repo = makeRepo({ findById: jest.fn().mockResolvedValue(member(ClinicRole.OWNER)), countActiveOwners: jest.fn().mockResolvedValue(1) });
   await expect(new DeactivateStaffUseCase(repo as any).execute({ userId: 'u1', requestingUserId: 'admin' })).rejects.toBeInstanceOf(ConflictException);
 });
+it('404 si deactivateById devuelve false', async () => {
+  const repo = makeRepo({ deactivateById: jest.fn().mockResolvedValue(false) });
+  await expect(new DeactivateStaffUseCase(repo as any).execute({ userId: 'u1', requestingUserId: 'admin' })).rejects.toBeInstanceOf(NotFoundException);
+});
