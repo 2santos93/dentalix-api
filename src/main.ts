@@ -32,7 +32,7 @@ async function bootstrap(): Promise<void> {
       return cb(new Error(`Origin not allowed by CORS: ${origin}`), false);
     },
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant', 'X-Tenant-Host'],
   });
 
   const config = new DocumentBuilder()
