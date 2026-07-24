@@ -57,3 +57,13 @@ export const SALES_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];
+
+// Inventario de insumos: gestión (OWNER/ADMIN) + quien de hecho maneja el
+// stock del día a día (ASSISTANT), pero NO RECEPTION/DENTIST -- ver
+// docs/plans/2026-07-24-inventory.md "Global Constraints" (asunción v1
+// ajustable).
+export const INVENTORY_ROLES: ClinicRole[] = [
+  ClinicRole.OWNER,
+  ClinicRole.ADMIN,
+  ClinicRole.ASSISTANT,
+];
