@@ -9,12 +9,18 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreateClinicalEntryDto } from './dto/create-clinical-entry.dto';
 import { ListClinicalEntriesQueryDto } from './dto/list-clinical-entries-query.dto';
 import { CreateClinicalEntryUseCase } from '../application/use-cases/create-clinical-entry.use-case';
 import { ListClinicalEntriesUseCase } from '../application/use-cases/list-clinical-entries.use-case';
 import { ClinicalEntry } from '../domain/entities/clinical-entry.entity';
+import { ClinicalEntryDto } from './dto/clinical-entry.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -43,6 +49,7 @@ export class ClinicalEntriesController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: ClinicalEntryDto })
   create(
     @Param('patientId') patientId: string,
     @Body() dto: CreateClinicalEntryDto,
@@ -60,6 +67,7 @@ export class ClinicalEntriesController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [ClinicalEntryDto] })
   list(
     @Param('patientId') patientId: string,
     @Query() query: ListClinicalEntriesQueryDto,

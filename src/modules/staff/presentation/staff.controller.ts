@@ -1,7 +1,8 @@
 import { Controller, Get, UseGuards, UseInterceptors } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { ListStaffUseCase } from '../application/use-cases/list-staff.use-case';
 import { StaffMember } from '../domain/entities/staff-member.entity';
+import { StaffMemberDto } from './dto/staff-member.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -21,6 +22,7 @@ export class StaffController {
   constructor(private readonly listStaff: ListStaffUseCase) {}
 
   @Get()
+  @ApiOkResponse({ type: [StaffMemberDto] })
   list(): Promise<StaffMember[]> {
     return this.listStaff.execute();
   }

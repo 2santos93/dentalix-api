@@ -10,10 +10,17 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto';
+import { PatientDto } from './dto/patient.dto';
+import { ListPatientsResponseDto } from './dto/list-patients-response.dto';
 import { CreatePatientUseCase } from '../application/use-cases/create-patient.use-case';
 import {
   ListPatientsUseCase,
@@ -48,6 +55,7 @@ export class PatientsController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: PatientDto })
   create(
     @Body() dto: CreatePatientDto,
     @Req() req: AuthenticatedRequest,
@@ -60,6 +68,7 @@ export class PatientsController {
   }
 
   @Get()
+  @ApiOkResponse({ type: ListPatientsResponseDto })
   list(@Query() query: ListPatientsQueryDto): Promise<ListPatientsOutput> {
     return this.listPatients.execute({
       query: query.query,
@@ -69,11 +78,13 @@ export class PatientsController {
   }
 
   @Get(':id')
+  @ApiOkResponse({ type: PatientDto })
   get(@Param('id') id: string): Promise<Patient> {
     return this.getPatient.execute(id);
   }
 
   @Patch(':id')
+  @ApiOkResponse({ type: PatientDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdatePatientDto,

@@ -5,12 +5,14 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterClinicUseCase } from '../application/use-cases/register-clinic.use-case';
 import { LoginUseCase } from '../application/use-cases/login.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
+import { RegisterResponseDto } from './dto/register-response.dto';
+import { AuthTokensDto } from './dto/auth-tokens.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -21,6 +23,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @ApiCreatedResponse({ type: RegisterResponseDto })
   register(
     @Body() dto: RegisterDto,
   ): Promise<{ tenantId: string; userId: string }> {
@@ -28,6 +31,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @ApiCreatedResponse({ type: AuthTokensDto })
   async loginHandler(
     @Req() req: TenantHostRequest,
     @Body() dto: LoginDto,

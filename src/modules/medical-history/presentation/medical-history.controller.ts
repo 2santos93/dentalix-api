@@ -8,11 +8,12 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { SaveMedicalHistoryDto } from './dto/save-medical-history.dto';
 import { GetMedicalHistoryUseCase } from '../application/use-cases/get-medical-history.use-case';
 import { SaveMedicalHistoryUseCase } from '../application/use-cases/save-medical-history.use-case';
 import { MedicalHistory } from '../domain/entities/medical-history.entity';
+import { MedicalHistoryDto } from './dto/medical-history.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -40,12 +41,18 @@ export class MedicalHistoryController {
   // NEVER a 404: an absent anamnesis is a normal state (first visit), not an
   // error (see GetMedicalHistoryUseCase).
   @Get()
+  @ApiOkResponse({
+    type: MedicalHistoryDto,
+    description:
+      'Latest medical history version. Response body is empty/null when the patient does not have one yet (first visit) — this is never a 404.',
+  })
   get(@Param('patientId') patientId: string): Promise<MedicalHistory | null> {
     return this.getMedicalHistory.execute(patientId);
   }
 
   // Always APPENDS a new version; never updates the previous one.
   @Put()
+  @ApiOkResponse({ type: MedicalHistoryDto })
   save(
     @Param('patientId') patientId: string,
     @Body() dto: SaveMedicalHistoryDto,

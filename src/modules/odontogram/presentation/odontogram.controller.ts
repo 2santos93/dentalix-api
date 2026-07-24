@@ -8,7 +8,12 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreateToothRecordDto } from './dto/create-tooth-record.dto';
 import { AddToothRecordUseCase } from '../application/use-cases/add-tooth-record.use-case';
 import {
@@ -17,6 +22,8 @@ import {
 } from '../application/use-cases/get-odontogram.use-case';
 import { GetToothTimelineUseCase } from '../application/use-cases/get-tooth-timeline.use-case';
 import { ToothRecord } from '../domain/entities/tooth-record.entity';
+import { ToothRecordDto } from './dto/tooth-record.dto';
+import { OdontogramGroupDto } from './dto/odontogram-group.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -46,6 +53,7 @@ export class OdontogramController {
   ) {}
 
   @Post('tooth-records')
+  @ApiCreatedResponse({ type: ToothRecordDto })
   create(
     @Param('patientId') patientId: string,
     @Body() dto: CreateToothRecordDto,
@@ -67,6 +75,7 @@ export class OdontogramController {
   }
 
   @Get('odontogram')
+  @ApiOkResponse({ type: [OdontogramGroupDto] })
   projection(
     @Param('patientId') patientId: string,
   ): Promise<OdontogramToothGroup[]> {
@@ -74,6 +83,7 @@ export class OdontogramController {
   }
 
   @Get('teeth/:fdi/history')
+  @ApiOkResponse({ type: [ToothRecordDto] })
   history(
     @Param('patientId') patientId: string,
     @Param('fdi') fdi: string,

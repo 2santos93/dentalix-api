@@ -9,7 +9,12 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
 import { UpdateCatalogItemDto } from './dto/update-catalog-item.dto';
 import { ListCatalogItemsQueryDto } from './dto/list-catalog-items-query.dto';
@@ -17,6 +22,7 @@ import { CreateCatalogItemUseCase } from '../application/use-cases/create-catalo
 import { ListCatalogItemsUseCase } from '../application/use-cases/list-catalog-items.use-case';
 import { UpdateCatalogItemUseCase } from '../application/use-cases/update-catalog-item.use-case';
 import { DentalCatalogItem } from '../domain/entities/dental-catalog-item.entity';
+import { DentalCatalogItemDto } from './dto/dental-catalog-item.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -41,11 +47,13 @@ export class DentalCatalogController {
 
   @Post()
   @Roles(...CATALOG_WRITE_ROLES)
+  @ApiCreatedResponse({ type: DentalCatalogItemDto })
   create(@Body() dto: CreateCatalogItemDto): Promise<DentalCatalogItem> {
     return this.createCatalogItem.execute(dto);
   }
 
   @Get()
+  @ApiOkResponse({ type: [DentalCatalogItemDto] })
   list(@Query() query: ListCatalogItemsQueryDto): Promise<DentalCatalogItem[]> {
     return this.listCatalogItems.execute({
       kind: query.kind,
@@ -55,6 +63,7 @@ export class DentalCatalogController {
 
   @Patch(':id')
   @Roles(...CATALOG_WRITE_ROLES)
+  @ApiOkResponse({ type: DentalCatalogItemDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateCatalogItemDto,

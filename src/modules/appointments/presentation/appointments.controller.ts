@@ -10,10 +10,16 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { ListAppointmentsQueryDto } from './dto/list-appointments-query.dto';
+import { AppointmentDto } from './dto/appointment.dto';
 import { CreateAppointmentUseCase } from '../application/use-cases/create-appointment.use-case';
 import { ListAppointmentsUseCase } from '../application/use-cases/list-appointments.use-case';
 import { GetAppointmentUseCase } from '../application/use-cases/get-appointment.use-case';
@@ -48,6 +54,7 @@ export class AppointmentsController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: AppointmentDto })
   create(
     @Body() dto: CreateAppointmentDto,
     @Req() req: AuthenticatedRequest,
@@ -67,6 +74,7 @@ export class AppointmentsController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [AppointmentDto] })
   list(@Query() query: ListAppointmentsQueryDto): Promise<Appointment[]> {
     return this.listAppointments.execute({
       from: new Date(query.from),
@@ -76,11 +84,13 @@ export class AppointmentsController {
   }
 
   @Get(':id')
+  @ApiOkResponse({ type: AppointmentDto })
   get(@Param('id') id: string): Promise<Appointment> {
     return this.getAppointment.execute(id);
   }
 
   @Patch(':id')
+  @ApiOkResponse({ type: AppointmentDto })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAppointmentDto,
