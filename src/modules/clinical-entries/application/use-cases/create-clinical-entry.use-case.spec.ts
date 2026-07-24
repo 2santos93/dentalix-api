@@ -75,9 +75,7 @@ describe('CreateClinicalEntryUseCase', () => {
     const result = await uc.execute('p1', { notes: 'Nota' }, 'user-1');
 
     const after = new Date();
-    expect(result.entryDate.getTime()).toBeGreaterThanOrEqual(
-      before.getTime(),
-    );
+    expect(result.entryDate.getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(result.entryDate.getTime()).toBeLessThanOrEqual(after.getTime());
   });
 

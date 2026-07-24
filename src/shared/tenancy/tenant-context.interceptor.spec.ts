@@ -1,4 +1,8 @@
-import { CallHandler, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { TenantContextInterceptor } from './tenant-context.interceptor';
 import { TenantContextService } from './tenant-context.service';
@@ -10,7 +14,9 @@ function makeCtx(req: Partial<TenantHostRequest>): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
-function makeHandlerThatReadsTenantContext(tenantContext: TenantContextService): CallHandler {
+function makeHandlerThatReadsTenantContext(
+  tenantContext: TenantContextService,
+): CallHandler {
   return {
     handle: () =>
       new Observable<string | undefined>((subscriber) => {
@@ -54,7 +60,9 @@ describe('TenantContextInterceptor', () => {
     const next = makeHandlerThatReadsTenantContext(tenantContext);
     const handleSpy = jest.spyOn(next, 'handle');
 
-    expect(() => interceptor.intercept(ctx, next)).toThrow(UnauthorizedException);
+    expect(() => interceptor.intercept(ctx, next)).toThrow(
+      UnauthorizedException,
+    );
     expect(handleSpy).not.toHaveBeenCalled();
   });
 
@@ -68,7 +76,9 @@ describe('TenantContextInterceptor', () => {
     const next = makeHandlerThatReadsTenantContext(tenantContext);
     const handleSpy = jest.spyOn(next, 'handle');
 
-    expect(() => interceptor.intercept(ctx, next)).toThrow(UnauthorizedException);
+    expect(() => interceptor.intercept(ctx, next)).toThrow(
+      UnauthorizedException,
+    );
     expect(handleSpy).not.toHaveBeenCalled();
   });
 });

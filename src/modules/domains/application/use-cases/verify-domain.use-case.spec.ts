@@ -22,17 +22,16 @@ function makeRepo(
     findById: jest.fn().mockResolvedValue(pending),
     markVerified: jest.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as jest.Mocked<TenantDomainRepository>;
+  };
 }
 
 describe('VerifyDomainUseCase', () => {
   it('marks the domain VERIFIED when a matching TXT record exists', async () => {
     const repo = makeRepo();
     const dns: jest.Mocked<DnsResolver> = {
-      resolveTxt: jest.fn().mockResolvedValue([
-        'unrelated',
-        'dentalix-verify=abc123',
-      ]),
+      resolveTxt: jest
+        .fn()
+        .mockResolvedValue(['unrelated', 'dentalix-verify=abc123']),
     };
     const uc = new VerifyDomainUseCase(repo, dns);
     await expect(uc.execute({ id: 'd-1' })).resolves.toEqual({

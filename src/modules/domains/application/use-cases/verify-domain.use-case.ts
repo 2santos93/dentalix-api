@@ -12,12 +12,16 @@ export class VerifyDomainUseCase {
     @Inject(DNS_RESOLVER) private readonly dns: DnsResolver,
   ) {}
 
-  async execute(input: { id: string }): Promise<{ status: 'PENDING' | 'VERIFIED' }> {
+  async execute(input: {
+    id: string;
+  }): Promise<{ status: 'PENDING' | 'VERIFIED' }> {
     const domain = await this.repo.findById(input.id);
     if (!domain) throw new NotFoundException('Domain not found');
     if (domain.status === 'VERIFIED') return { status: 'VERIFIED' };
 
-    const records = await this.dns.resolveTxt(`_dentalix-verify.${domain.host}`);
+    const records = await this.dns.resolveTxt(
+      `_dentalix-verify.${domain.host}`,
+    );
     if (records.some((r) => r.includes(domain.verifyToken))) {
       await this.repo.markVerified(domain.id);
       return { status: 'VERIFIED' };

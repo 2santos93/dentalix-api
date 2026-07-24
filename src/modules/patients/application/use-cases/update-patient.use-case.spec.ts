@@ -36,7 +36,9 @@ function makeRepo(
   return {
     create: (input: CreatePatientRepoInput): Promise<Patient> =>
       Promise.reject(
-        new Error(`not implemented in this fake: create(${JSON.stringify(input)})`),
+        new Error(
+          `not implemented in this fake: create(${JSON.stringify(input)})`,
+        ),
       ),
     findById: (): Promise<Patient | null> => Promise.resolve(null),
     list: (): Promise<ListPatientsResult> =>
@@ -50,16 +52,16 @@ function makeRepo(
 describe('UpdatePatientUseCase', () => {
   it('updates fields and returns the updated entity', async () => {
     const existing = fakePatient();
-    const updated = fakePatient({ firstName: 'Ana Maria', phone: '3001234567' });
+    const updated = fakePatient({
+      firstName: 'Ana Maria',
+      phone: '3001234567',
+    });
     let receivedId: string | undefined;
     let receivedPatch: UpdatePatientRepoInput | undefined;
     const repo = makeRepo({
       findById: (id: string): Promise<Patient | null> =>
         Promise.resolve(id === existing.id ? existing : null),
-      update: (
-        id: string,
-        patch: UpdatePatientRepoInput,
-      ): Promise<Patient> => {
+      update: (id: string, patch: UpdatePatientRepoInput): Promise<Patient> => {
         receivedId = id;
         receivedPatch = patch;
         return Promise.resolve(updated);

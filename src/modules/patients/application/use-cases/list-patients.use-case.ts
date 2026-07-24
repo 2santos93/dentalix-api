@@ -28,11 +28,7 @@ function normalizePage(page?: number): number {
 }
 
 function normalizePageSize(pageSize?: number): number {
-  if (
-    pageSize === undefined ||
-    !Number.isFinite(pageSize) ||
-    pageSize < 1
-  ) {
+  if (pageSize === undefined || !Number.isFinite(pageSize) || pageSize < 1) {
     return DEFAULT_PAGE_SIZE;
   }
   return Math.min(Math.floor(pageSize), MAX_PAGE_SIZE);

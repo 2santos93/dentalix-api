@@ -50,9 +50,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     return tenantId;
   }
 
-  async create(
-    input: CreateClinicalEntryRepoInput,
-  ): Promise<ClinicalEntry> {
+  async create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
     const tenantId = this.requireTenantId();
 
     // Append-only: this is a plain INSERT. There is no update/delete method

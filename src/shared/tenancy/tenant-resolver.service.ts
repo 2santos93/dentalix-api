@@ -11,7 +11,9 @@ export class TenantResolverService {
     private readonly prisma: PrismaService,
     config: ConfigService,
   ) {
-    this.baseDomains = (config.get<string>('TENANT_BASE_DOMAINS') ?? 'localhost')
+    this.baseDomains = (
+      config.get<string>('TENANT_BASE_DOMAINS') ?? 'localhost'
+    )
       .split(',')
       .map((d) => d.trim().toLowerCase())
       .filter(Boolean);

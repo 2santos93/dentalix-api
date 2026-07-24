@@ -90,22 +90,19 @@ describe('CreateCatalogItemUseCase', () => {
     '',
     '#12345',
     '#1234567',
-  ])(
-    'rejects an invalid hex color (%s)',
-    async (color) => {
-      const repo = makeRepo();
-      const uc = new CreateCatalogItemUseCase(repo);
+  ])('rejects an invalid hex color (%s)', async (color) => {
+    const repo = makeRepo();
+    const uc = new CreateCatalogItemUseCase(repo);
 
-      await expect(
-        uc.execute({
-          code: 'CAR-003',
-          kind: CatalogKind.DIAGNOSIS,
-          labelEs: 'Caries',
-          color,
-        }),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    },
-  );
+    await expect(
+      uc.execute({
+        code: 'CAR-003',
+        kind: CatalogKind.DIAGNOSIS,
+        labelEs: 'Caries',
+        color,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 
   it.each([
     '#FFF',
@@ -115,22 +112,19 @@ describe('CreateCatalogItemUseCase', () => {
     '#000',
     '#1234',
     '#12345678',
-  ])(
-    'accepts a valid hex color (%s)',
-    async (color) => {
-      const repo = makeRepo();
-      const uc = new CreateCatalogItemUseCase(repo);
+  ])('accepts a valid hex color (%s)', async (color) => {
+    const repo = makeRepo();
+    const uc = new CreateCatalogItemUseCase(repo);
 
-      const result = await uc.execute({
-        code: 'CAR-004',
-        kind: CatalogKind.PROCEDURE,
-        labelEs: 'Limpieza',
-        color,
-      });
+    const result = await uc.execute({
+      code: 'CAR-004',
+      kind: CatalogKind.PROCEDURE,
+      labelEs: 'Limpieza',
+      color,
+    });
 
-      expect(result.color).toBe(color);
-    },
-  );
+    expect(result.color).toBe(color);
+  });
 
   it('rejects a kind that is not a valid CatalogKind enum value', async () => {
     const repo = makeRepo();

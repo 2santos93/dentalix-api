@@ -30,7 +30,9 @@ describe('TenantResolverService', () => {
       tenant: { findFirst: jest.fn().mockResolvedValue(null) },
       tenantDomain: { findFirst: jest.fn() },
     };
-    await expect(makeService(prisma).resolve('nope.localhost')).resolves.toBeNull();
+    await expect(
+      makeService(prisma).resolve('nope.localhost'),
+    ).resolves.toBeNull();
   });
 
   it('resolves a verified custom domain to its tenant id', async () => {
@@ -43,7 +45,11 @@ describe('TenantResolverService', () => {
     const svc = makeService(prisma);
     await expect(svc.resolve('citas.miclinica.com')).resolves.toBe('t-2');
     expect(prisma.tenantDomain.findFirst).toHaveBeenCalledWith({
-      where: { host: 'citas.miclinica.com', status: 'VERIFIED', deletedAt: null },
+      where: {
+        host: 'citas.miclinica.com',
+        status: 'VERIFIED',
+        deletedAt: null,
+      },
       select: { tenantId: true },
     });
   });

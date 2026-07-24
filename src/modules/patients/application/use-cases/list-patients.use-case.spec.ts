@@ -34,7 +34,9 @@ function makeRepo(
   return {
     create: (input: CreatePatientRepoInput): Promise<Patient> =>
       Promise.reject(
-        new Error(`not implemented in this fake: create(${JSON.stringify(input)})`),
+        new Error(
+          `not implemented in this fake: create(${JSON.stringify(input)})`,
+        ),
       ),
     findById: (): Promise<Patient | null> => Promise.resolve(null),
     list: (): Promise<ListPatientsResult> =>

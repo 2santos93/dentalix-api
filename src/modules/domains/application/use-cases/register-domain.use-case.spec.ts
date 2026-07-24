@@ -48,16 +48,16 @@ describe('RegisterDomainUseCase', () => {
 
   it('rejects a host that is actually a subdomain of a base domain', async () => {
     const uc = new RegisterDomainUseCase(makeRepo(), config);
-    await expect(uc.execute({ host: 'acme.dentalix.app' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute({ host: 'acme.dentalix.app' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a host that is a reserved subdomain (parseHost returns null)', async () => {
     const uc = new RegisterDomainUseCase(makeRepo(), config);
-    await expect(uc.execute({ host: 'www.dentalix.app' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute({ host: 'www.dentalix.app' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a host already registered for this tenant', async () => {

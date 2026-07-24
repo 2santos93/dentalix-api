@@ -26,7 +26,9 @@ export class RegisterDomainUseCase {
     private readonly repo: TenantDomainRepository,
     config: ConfigService,
   ) {
-    this.baseDomains = (config.get<string>('TENANT_BASE_DOMAINS') ?? 'localhost')
+    this.baseDomains = (
+      config.get<string>('TENANT_BASE_DOMAINS') ?? 'localhost'
+    )
       .split(',')
       .map((d) => d.trim().toLowerCase())
       .filter(Boolean);
@@ -54,7 +56,11 @@ export class RegisterDomainUseCase {
       const domain = await this.repo.create({ host, verifyToken });
       return {
         domain,
-        dns: { name: `_dentalix-verify.${host}`, type: 'TXT', value: verifyToken },
+        dns: {
+          name: `_dentalix-verify.${host}`,
+          type: 'TXT',
+          value: verifyToken,
+        },
       };
     } catch (error) {
       // TenantDomain.host is globally unique, but findByHostForTenant above

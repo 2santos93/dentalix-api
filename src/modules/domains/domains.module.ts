@@ -20,7 +20,10 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     VerifyDomainUseCase,
     TokenService,
     TenantContextInterceptor,
-    { provide: TENANT_DOMAIN_REPOSITORY, useClass: PrismaTenantDomainRepository },
+    {
+      provide: TENANT_DOMAIN_REPOSITORY,
+      useClass: PrismaTenantDomainRepository,
+    },
     { provide: DNS_RESOLVER, useClass: NodeDnsResolver },
   ],
 })

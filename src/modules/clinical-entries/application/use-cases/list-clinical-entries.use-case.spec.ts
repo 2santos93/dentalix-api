@@ -149,7 +149,9 @@ describe('ListClinicalEntriesUseCase', () => {
     const repo = makeRepo({
       listByPatient: (patientId): Promise<ClinicalEntry[]> =>
         Promise.resolve(
-          patientId === 'p1' ? [fakeEntry('p1', '2026-01-01T00:00:00.000Z')] : [],
+          patientId === 'p1'
+            ? [fakeEntry('p1', '2026-01-01T00:00:00.000Z')]
+            : [],
         ),
     });
     const uc = new ListClinicalEntriesUseCase(repo);

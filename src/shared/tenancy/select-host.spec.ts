@@ -43,7 +43,10 @@ describe('selectHost', () => {
 
   it('falls back to the Host header', () => {
     expect(
-      selectHost({ host: 'acme.localhost' }, { isProd: false, trustProxy: false }),
+      selectHost(
+        { host: 'acme.localhost' },
+        { isProd: false, trustProxy: false },
+      ),
     ).toBe('acme.localhost');
   });
 });
