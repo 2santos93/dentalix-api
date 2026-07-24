@@ -287,6 +287,21 @@ model TreatmentPlanItem {
   @@map("treatment_plan_items")
 }
 
+// Tasas de cambio (referencia/mercado, base USD). Tabla GLOBAL, no de dominio:
+// no lleva tenantId ni RLS ni deletedAt (excepción técnica documentada en la
+// migración, igual que cache/colas). Snapshot inmutable por (date, currency);
+// `date` es String YYYY-MM-DD (día del snapshot, sin ambigüedad de timezone).
+model ExchangeRateSnapshot {
+  id        String   @id @default(uuid()) @db.Uuid
+  date      String
+  currency  String
+  rate      Decimal  @db.Decimal(18, 8)
+  fetchedAt DateTime @default(now())
+
+  @@unique([date, currency])
+  @@map("exchange_rate_snapshots")
+}
+
 enum TenantDomainStatus {
   PENDING
   VERIFIED
