@@ -24,6 +24,7 @@ export class PrismaStaffRepository implements StaffRepository {
       return memberships.map((membership) => ({
         userId: membership.userId,
         fullName: membership.user.fullName,
+        email: membership.user.email,
         role: membership.role,
       }));
     });

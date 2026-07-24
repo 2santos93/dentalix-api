@@ -9,5 +9,6 @@ import { ClinicRole } from '@prisma/client';
 export interface StaffMember {
   userId: string;
   fullName: string;
+  email: string;
   role: ClinicRole;
 }
