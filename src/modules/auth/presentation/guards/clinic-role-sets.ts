@@ -78,3 +78,6 @@ export const DASHBOARD_ROLES: ClinicRole[] = [
   ClinicRole.OWNER,
   ClinicRole.ADMIN,
 ];
+
+// Gestión de personal (crear/editar rol/desactivar): solo gestión.
+export const STAFF_WRITE_ROLES: ClinicRole[] = [ClinicRole.OWNER, ClinicRole.ADMIN];
