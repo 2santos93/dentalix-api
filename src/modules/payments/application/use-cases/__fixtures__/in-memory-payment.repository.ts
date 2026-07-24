@@ -100,6 +100,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve(rows);
   }
 
+  listByPatient(patientId: string): Promise<Payment[]> {
+    const rows = this.payments
+      .filter((p) => p.patientId === patientId && p.deletedAt === null)
+      .sort((a, b) => b.paidAt.getTime() - a.paidAt.getTime())
+      .map((p) => this.toEntity(p));
+    return Promise.resolve(rows);
+  }
+
   softDelete(id: string): Promise<void> {
     const row = this.payments.find((p) => p.id === id && p.deletedAt === null);
     if (!row) {

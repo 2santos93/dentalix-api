@@ -38,6 +38,9 @@ export interface PaymentRepository {
   /** Active payments (`deletedAt: null`) for a plan, ordered by `paidAt` DESC. */
   listByPlan(treatmentPlanId: string): Promise<Payment[]>;
 
+  /** Active payments (`deletedAt: null`) for a patient, ordered by `paidAt` DESC. */
+  listByPatient(patientId: string): Promise<Payment[]>;
+
   /** Soft-delete (void): sets `deletedAt`. Never a hard delete. */
   softDelete(id: string): Promise<void>;
 

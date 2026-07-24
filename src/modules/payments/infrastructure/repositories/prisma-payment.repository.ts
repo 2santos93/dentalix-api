@@ -90,6 +90,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
+  async listByPatient(patientId: string): Promise<Payment[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const payments = await tx.payment.findMany({
+        where: { patientId, deletedAt: null },
+        orderBy: { paidAt: 'desc' },
+      });
+      return payments.map(mapToEntity);
+    });
+  }
+
   async softDelete(id: string): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
       const existing = await tx.payment.findFirst({

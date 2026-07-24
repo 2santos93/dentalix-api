@@ -26,8 +26,8 @@ export class DashboardQueryDto {
   @ApiProperty({
     example: '2026-07-31',
     description:
-      'Period end (YYYY-MM-DD). Passed through to GetSalesTotalsUseCase, ' +
-      'which treats the sales range as half-open [from, to).',
+      'Period end (YYYY-MM-DD). Passed through to GetPaymentsTotalsUseCase, ' +
+      'which treats the incomes/payments range as half-open [from, to).',
   })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must match YYYY-MM-DD' })
   to!: string;
