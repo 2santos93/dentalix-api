@@ -16,6 +16,7 @@ import { TreatmentPlansModule } from './modules/treatment-plans/treatment-plans.
 import { StaffModule } from './modules/staff/staff.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
+import { ExchangeModule } from './modules/exchange/exchange.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -34,6 +35,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     StaffModule,
     DomainsModule,
     PublicBrandingModule,
+    ExchangeModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
