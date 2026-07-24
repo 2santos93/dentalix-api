@@ -3,6 +3,21 @@ import { ListStaffUseCase } from './list-staff.use-case';
 import { StaffMember } from '../../domain/entities/staff-member.entity';
 import { StaffRepository } from '../../domain/ports/staff-repository.port';
 
+function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
+  return {
+    listActive: (): Promise<StaffMember[]> => Promise.resolve([]),
+    findUserByEmailGlobal: (): Promise<{ id: string } | null> =>
+      Promise.resolve(null),
+    create: (): Promise<StaffMember> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    findById: (): Promise<StaffMember | null> => Promise.resolve(null),
+    updateById: (): Promise<StaffMember | null> => Promise.resolve(null),
+    deactivateById: (): Promise<boolean> => Promise.resolve(false),
+    countActiveOwners: (): Promise<number> => Promise.resolve(0),
+    ...overrides,
+  };
+}
+
 describe('ListStaffUseCase', () => {
   it('returns whatever the repository resolves, untouched', async () => {
     const members: StaffMember[] = [
@@ -19,9 +34,9 @@ describe('ListStaffUseCase', () => {
         role: ClinicRole.RECEPTION,
       },
     ];
-    const repo: StaffRepository = {
+    const repo = makeRepo({
       listActive: (): Promise<StaffMember[]> => Promise.resolve(members),
-    };
+    });
     const uc = new ListStaffUseCase(repo);
 
     const result = await uc.execute();
