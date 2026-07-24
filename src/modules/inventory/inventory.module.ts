@@ -37,5 +37,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
       useClass: PrismaInventoryRepository,
     },
   ],
+  // Exported (additive) so DashboardModule can inject
+  // ListInventoryItemsUseCase by class for the low-stock aggregation.
+  exports: [ListInventoryItemsUseCase],
 })
 export class InventoryModule {}

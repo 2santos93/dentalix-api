@@ -27,5 +27,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     TenantContextInterceptor,
     { provide: APPOINTMENT_REPOSITORY, useClass: PrismaAppointmentRepository },
   ],
+  // Exported (additive) so DashboardModule can inject ListAppointmentsUseCase
+  // by class for the upcoming-appointments aggregation.
+  exports: [ListAppointmentsUseCase],
 })
 export class AppointmentsModule {}

@@ -27,5 +27,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     TenantContextInterceptor,
     { provide: PATIENT_REPOSITORY, useClass: PrismaPatientRepository },
   ],
+  // Exported (additive) so DashboardModule can inject ListPatientsUseCase by
+  // class for the patientCount aggregation.
+  exports: [ListPatientsUseCase],
 })
 export class PatientsModule {}

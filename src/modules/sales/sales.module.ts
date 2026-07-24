@@ -38,5 +38,9 @@ import { ExchangeModule } from '../exchange/exchange.module';
       useClass: PrismaSaleRepository,
     },
   ],
+  // Exported (additive) so DashboardModule can inject GetSalesTotalsUseCase
+  // by class -- same pattern as ExchangeModule exporting ConvertAmountUseCase
+  // for this module's own cross-module use.
+  exports: [GetSalesTotalsUseCase],
 })
 export class SalesModule {}
