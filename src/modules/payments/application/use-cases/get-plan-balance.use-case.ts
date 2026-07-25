@@ -1,4 +1,9 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { TreatmentPlanItemStatus } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
