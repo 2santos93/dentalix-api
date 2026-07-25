@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsInt, IsOptional, Matches, Min } from 'class-validator';
+import {
+  IsInt,
+  IsISO4217CurrencyCode,
+  IsOptional,
+  Matches,
+  Min,
+} from 'class-validator';
 
 // Uppercase-normalizes ISO 4217 codes before validation -- same convention
 // as CreatePaymentDto (payments, PAY-T3).
@@ -38,8 +44,8 @@ export class DashboardQueryDto {
       'ISO 4217 currency code every payment amount is converted into.',
   })
   @Transform(toUpperCase)
-  @Matches(/^[A-Z]{2,8}$/, {
-    message: 'currency must be a non-empty ISO 4217-like code',
+  @IsISO4217CurrencyCode({
+    message: 'currency must be a real ISO 4217 currency code',
   })
   currency!: string;
 

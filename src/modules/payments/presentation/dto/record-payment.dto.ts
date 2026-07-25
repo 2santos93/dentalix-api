@@ -3,11 +3,11 @@ import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
+  IsISO4217CurrencyCode,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
-  Matches,
 } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 
@@ -33,8 +33,8 @@ export class RecordPaymentDto {
 
   @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
   @Transform(toUpperCase)
-  @Matches(/^[A-Z]{2,8}$/, {
-    message: 'currency must be a non-empty ISO 4217-like code',
+  @IsISO4217CurrencyCode({
+    message: 'currency must be a real ISO 4217 currency code',
   })
   currency!: string;
 

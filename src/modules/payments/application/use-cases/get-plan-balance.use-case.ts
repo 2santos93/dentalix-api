@@ -69,14 +69,46 @@ export class GetPlanBalanceUseCase {
     const payments = await this.repo.listByPlan(treatmentPlanId);
 
     let paid = 0;
+
+    // IMP-4a: memoizes the conversion lookup per (calendar date, source
+    // currency) within THIS execute() call. `plan.currency` (the target)
+    // is invariant across the whole loop, so a payment's date+currency
+    // pair fully determines its rate. Without this, N payments sharing a
+    // date/currency would each re-trigger convertAmount.execute(), which
+    // hits the DB for that date's rate every time. Only the FIRST payment
+    // for a given pair does the real call; later payments reuse its
+    // `rateUsed` against their OWN amount (round2 is idempotent, so this
+    // reproduces the exact same value the first payment got, and is
+    // consistent — to full rate precision — for the rest).
+    const rateCache = new Map<string, Promise<{ rateUsed: number }>>();
+
     for (const payment of payments) {
-      const { result } = await this.convertAmount.execute({
-        amount: payment.amount,
-        from: payment.currency,
-        to: plan.currency,
-        date: toUtcDateString(payment.paidAt),
-      });
-      paid += result;
+      // IMP-4b: a single payment with a stale/unconvertible currency must
+      // not throw and fail the ENTIRE balance computation — skip it from
+      // `paid` instead. `paymentsCount` (below, from payments.length) is
+      // unaffected, since it doesn't depend on the conversion succeeding.
+      try {
+        const date = toUtcDateString(payment.paidAt);
+        const cacheKey = `${date}|${payment.currency}`;
+
+        let cached = rateCache.get(cacheKey);
+        if (!cached) {
+          cached = this.convertAmount.execute({
+            amount: payment.amount,
+            from: payment.currency,
+            to: plan.currency,
+            date,
+          });
+          rateCache.set(cacheKey, cached);
+        }
+
+        const { rateUsed } = await cached;
+        paid += round2(payment.amount * rateUsed);
+      } catch {
+        // Skip: leave this payment out of `paid`. The failed (or
+        // cached-as-failed) lookup is not retried for other payments
+        // sharing the same date/currency — they hit the same rejection.
+      }
     }
 
     return {

@@ -4,6 +4,8 @@ import {
   GetPaymentsTotalsInput,
   GetPaymentsTotalsResult,
 } from '../../../payments/application/use-cases/get-payments-totals.use-case';
+import { InMemoryPaymentRepository } from '../../../payments/application/use-cases/__fixtures__/in-memory-payment.repository';
+import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { InventoryItemWithStock } from '../../../inventory/domain/entities/inventory-item.entity';
 import {
@@ -293,5 +295,67 @@ describe('GetDoctorDashboardUseCase', () => {
     await expect(uc.execute({ ...baseInput, currency: '  ' })).rejects.toThrow(
       /currency/i,
     );
+  });
+
+  // IMP-4b (end-to-end): a single stored payment with an unconvertible
+  // currency must not fail the WHOLE dashboard. Wires the REAL
+  // GetPaymentsTotalsUseCase (not the fake above) over an in-memory payment
+  // repo, plus a ConvertAmountUseCase double that throws for one currency,
+  // to prove the resilience added in GetPaymentsTotalsUseCase.execute()
+  // actually prevents GetDoctorDashboardUseCase's Promise.all from
+  // rejecting wholesale (stock/patients/appointments would otherwise be
+  // dragged down by one bad income row).
+  it('does not fail wholesale when one payment has an unconvertible currency', async () => {
+    const paymentRepo = new InMemoryPaymentRepository();
+    paymentRepo.seedPayment({
+      id: 'p-good',
+      currency: 'USD',
+      amount: 100,
+      paidAt: new Date('2026-07-10T00:00:00.000Z'),
+    });
+    paymentRepo.seedPayment({
+      id: 'p-bad',
+      currency: 'ZZZ',
+      amount: 999,
+      paidAt: new Date('2026-07-11T00:00:00.000Z'),
+    });
+
+    class FailingForZzzConvertAmountUseCase {
+      execute(input: { amount: number; from: string; to: string }) {
+        if (input.from === 'ZZZ') {
+          return Promise.reject(new Error('unsupported currency: ZZZ'));
+        }
+        return Promise.resolve({ ...input, date: '2026-07-10', result: input.amount, rateUsed: 1 });
+      }
+    }
+
+    const realIncomesUc = new GetPaymentsTotalsUseCase(
+      paymentRepo,
+      new FailingForZzzConvertAmountUseCase() as unknown as ConvertAmountUseCase,
+    );
+
+    const inventoryUc = new FakeListInventoryItemsUseCase();
+    const appointmentsUc = new FakeListAppointmentsUseCase();
+    const patientsUc = new FakeListPatientsUseCase();
+    patientsUc.output = { items: [], total: 7, page: 1, pageSize: 20 };
+
+    const uc = new GetDoctorDashboardUseCase(
+      realIncomesUc,
+      inventoryUc as unknown as ListInventoryItemsUseCase,
+      appointmentsUc as unknown as ListAppointmentsUseCase,
+      patientsUc as unknown as ListPatientsUseCase,
+    );
+
+    const result = await uc.execute({
+      from: new Date('2026-07-01T00:00:00.000Z'),
+      to: new Date('2026-07-31T00:00:00.000Z'),
+      currency: 'USD',
+    });
+
+    // Only the good payment contributes; the whole dashboard still
+    // resolves (patients/stock/appointments included) instead of throwing.
+    expect(result.incomes.totalConverted).toBe(100);
+    expect(result.incomes.count).toBe(2);
+    expect(result.patientCount).toBe(7);
   });
 });

@@ -64,21 +64,56 @@ export class GetPaymentsTotalsUseCase {
     let totalConverted = 0;
     const byCurrency: Record<string, number> = {};
 
+    // IMP-4a: memoizes the conversion lookup per (calendar date, source
+    // currency) within THIS execute() call. `currency` (the dashboard's
+    // target) is invariant across the whole loop, so a payment's date+
+    // currency pair fully determines its rate. Without this, N payments
+    // sharing a date/currency (the common case: a clinic billing mostly in
+    // one currency) would each re-trigger convertAmount.execute(), which
+    // hits the DB for that date's rate every time. Only the FIRST payment
+    // for a given pair does the real call; later payments reuse its
+    // `rateUsed` against their OWN amount (round2 is idempotent, so this
+    // reproduces the exact same value the first payment got, and is
+    // consistent — to full rate precision — for the rest).
+    const rateCache = new Map<string, Promise<{ rateUsed: number }>>();
+
     for (const payment of payments) {
       // Grouped in the payment's OWN currency, at its ORIGINAL (unconverted)
       // value — this is a breakdown of what was actually received, not a
-      // converted figure.
+      // converted figure. Computed unconditionally (not inside the
+      // try/catch below): it never depends on the conversion succeeding.
       byCurrency[payment.currency] = round2(
         (byCurrency[payment.currency] ?? 0) + payment.amount,
       );
 
-      const { result } = await this.convertAmount.execute({
-        amount: payment.amount,
-        from: payment.currency,
-        to: currency,
-        date: toUtcDateString(payment.paidAt),
-      });
-      totalConverted += result;
+      // IMP-4b: a single payment with a stale/unconvertible currency must
+      // not throw and fail the ENTIRE totals computation (and,
+      // transitively, the whole dashboard/balance response) — skip it from
+      // totalConverted instead. `count` (below, from payments.length) and
+      // `byCurrency` (above) are unaffected, since neither depends on the
+      // conversion succeeding.
+      try {
+        const date = toUtcDateString(payment.paidAt);
+        const cacheKey = `${date}|${payment.currency}`;
+
+        let cached = rateCache.get(cacheKey);
+        if (!cached) {
+          cached = this.convertAmount.execute({
+            amount: payment.amount,
+            from: payment.currency,
+            to: currency,
+            date,
+          });
+          rateCache.set(cacheKey, cached);
+        }
+
+        const { rateUsed } = await cached;
+        totalConverted += round2(payment.amount * rateUsed);
+      } catch {
+        // Skip: leave this payment out of totalConverted. The failed (or
+        // cached-as-failed) lookup is not retried for other payments
+        // sharing the same date/currency — they hit the same rejection.
+      }
     }
 
     return {

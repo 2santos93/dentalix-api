@@ -33,6 +33,9 @@ interface FakeConvertInput {
  */
 class FakeConvertAmountUseCase {
   public readonly calls: FakeConvertInput[] = [];
+  /** Currencies (as `from`) that should make `execute` reject, simulating a
+   * stored payment with an unconvertible currency (IMP-4b). */
+  public readonly failingFrom = new Set<string>();
 
   execute(input: FakeConvertInput): Promise<{
     amount: number;
@@ -43,6 +46,11 @@ class FakeConvertAmountUseCase {
     rateUsed: number;
   }> {
     this.calls.push(input);
+    if (this.failingFrom.has(input.from)) {
+      return Promise.reject(
+        new Error(`unsupported currency in fake: ${input.from}`),
+      );
+    }
     if (input.from === input.to) {
       return Promise.resolve({ ...input, result: input.amount, rateUsed: 1 });
     }
@@ -216,5 +224,72 @@ describe('GetPlanBalanceUseCase', () => {
     await expect(uc.execute('missing-plan')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  // IMP-4a: memoize per (date, source currency) within a single execute()
+  // call so N payments sharing a date/currency don't each re-hit the
+  // exchange-rate lookup inside convertAmount.execute().
+  it('memoizes the conversion lookup per distinct date, converting each payment by its own amount', async () => {
+    const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan({
+      items: [
+        makeItem({ price: 1000, status: TreatmentPlanItemStatus.ACCEPTED }),
+      ],
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 400000,
+      currency: 'COP',
+      paidAt: new Date('2026-03-05T09:00:00.000Z'),
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 200000,
+      currency: 'COP',
+      paidAt: new Date('2026-03-05T18:00:00.000Z'),
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 40000,
+      currency: 'COP',
+      paidAt: new Date('2026-03-06T00:00:00.000Z'),
+    });
+
+    const result = await uc.execute('plan-1');
+
+    // 400000/4000 + 200000/4000 + 40000/4000 = 100 + 50 + 10 = 160.
+    expect(result.paid).toBe(160);
+    expect(result.paymentsCount).toBe(3);
+    expect(fakeConvert.calls).toHaveLength(2);
+  });
+
+  // IMP-4b: one payment with an unconvertible currency must not throw and
+  // fail the whole balance computation -- it should be skipped instead.
+  it('skips a payment whose currency conversion fails, keeping the rest of paid/balance', async () => {
+    const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+    fakeConvert.failingFrom.add('ZZZ');
+    fakeGetPlan.plan = makePlan({
+      items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 100,
+      currency: 'USD',
+      paidAt: new Date('2026-03-05T00:00:00.000Z'),
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 999,
+      currency: 'ZZZ',
+      paidAt: new Date('2026-03-06T00:00:00.000Z'),
+    });
+
+    const result = await uc.execute('plan-1');
+
+    expect(result.paid).toBe(100);
+    expect(result.balance).toBe(400);
+    // `paymentsCount` is unaffected by conversion failures -- it reflects
+    // how many active payments exist, not how many could be converted.
+    expect(result.paymentsCount).toBe(2);
   });
 });

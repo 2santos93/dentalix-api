@@ -1,22 +1,22 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { RecordPaymentDto } from './record-payment.dto';
+import { DashboardQueryDto } from './dashboard-query.dto';
 
 // Real ISO-4217 validation (`@IsISO4217CurrencyCode()`, applied AFTER the
-// uppercase transform) -- mirrors DashboardQueryDto's currency validation
-// (dashboard-query.dto.ts). Unlike the old `@Matches(/^[A-Z]{2,8}$/)`
+// uppercase transform) -- mirrors RecordPaymentDto's currency validation
+// (record-payment.dto.ts). Unlike the old `@Matches(/^[A-Z]{2,8}$/)`
 // format-only regex, this rejects a well-FORMED but non-real code like
 // "USDD"/"ZZZZ", not just malformed ones (IMP-1b).
-describe('RecordPaymentDto currency validation', () => {
+describe('DashboardQueryDto currency validation', () => {
   const base = {
-    amount: 100,
-    paidAt: '2026-07-01T00:00:00.000Z',
+    from: '2026-07-01',
+    to: '2026-07-31',
   };
 
   it.each(['USD', 'COP', 'usd'])(
     'accepts a real ISO-4217 currency, case-insensitively (%s)',
     async (currency) => {
-      const dto = plainToInstance(RecordPaymentDto, { ...base, currency });
+      const dto = plainToInstance(DashboardQueryDto, { ...base, currency });
 
       const errors = await validate(dto);
 
@@ -30,7 +30,7 @@ describe('RecordPaymentDto currency validation', () => {
   it.each(['1', 'A', '', 'USDD', 'ZZZZ'])(
     'rejects a non-ISO-4217 currency (%s)',
     async (currency) => {
-      const dto = plainToInstance(RecordPaymentDto, { ...base, currency });
+      const dto = plainToInstance(DashboardQueryDto, { ...base, currency });
 
       const errors = await validate(dto);
 
