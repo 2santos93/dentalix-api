@@ -335,7 +335,12 @@ describe('GetDoctorDashboardUseCase', () => {
             new BadRequestException('unsupported currency: ZZZ'),
           );
         }
-        return Promise.resolve({ ...input, date: '2026-07-10', result: input.amount, rateUsed: 1 });
+        return Promise.resolve({
+          ...input,
+          date: '2026-07-10',
+          result: input.amount,
+          rateUsed: 1,
+        });
       }
     }
 

@@ -93,7 +93,8 @@ class FakeConvertAmountUseCase {
       );
     }
     const result = round2(input.amount / unitsPerTo);
-    const rateUsed = input.amount !== 0 ? result / input.amount : 1 / unitsPerTo;
+    const rateUsed =
+      input.amount !== 0 ? result / input.amount : 1 / unitsPerTo;
     return Promise.resolve({ ...input, result, rateUsed });
   }
 }
