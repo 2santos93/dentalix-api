@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -100,20 +100,20 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
-  async softDelete(id: string): Promise<void> {
-    await this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.payment.findFirst({
+  async softDelete(id: string): Promise<boolean> {
+    // Single atomic UPDATE ... WHERE id = ? AND deletedAt IS NULL (RLS
+    // additionally scopes it to the current tenant) instead of a
+    // findFirst-then-update pair -- that sequence let two concurrent voids
+    // of the same payment both pass the "not yet voided" check (TOCTOU
+    // race), since `update({ where: { id } })` alone never re-checked
+    // `deletedAt`. `count` tells the caller, in one round trip, whether
+    // THIS call actually voided the row.
+    return this.prisma.runWithTenant(async (tx) => {
+      const result = await tx.payment.updateMany({
         where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!existing) {
-        throw new NotFoundException('Payment not found');
-      }
-
-      await tx.payment.update({
-        where: { id },
         data: { deletedAt: new Date() },
       });
+      return result.count > 0;
     });
   }
 

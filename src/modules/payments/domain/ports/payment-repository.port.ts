@@ -41,8 +41,16 @@ export interface PaymentRepository {
   /** Active payments (`deletedAt: null`) for a patient, ordered by `paidAt` DESC. */
   listByPatient(patientId: string): Promise<Payment[]>;
 
-  /** Soft-delete (void): sets `deletedAt`. Never a hard delete. */
-  softDelete(id: string): Promise<void>;
+  /**
+   * Soft-delete (void): atomically sets `deletedAt` ONLY if the row is
+   * currently active (`deletedAt: null`) -- a single check-and-set, not a
+   * separate find then update, so two concurrent voids of the same payment
+   * can't both "win" (TOCTOU race). Returns `true` if this call actually
+   * voided the payment, `false` if it was already voided or doesn't exist
+   * (never throws for that case -- the use case decides 404). Never a hard
+   * delete.
+   */
+  softDelete(id: string): Promise<boolean>;
 
   /**
    * Active payments (any plan/patient) whose `paidAt` falls within

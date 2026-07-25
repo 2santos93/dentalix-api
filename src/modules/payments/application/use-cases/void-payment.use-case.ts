@@ -10,15 +10,21 @@ export class VoidPaymentUseCase {
   ) {}
 
   async execute(id: string): Promise<void> {
-    const existing = await this.repo.findById(id);
-    if (!existing) {
-      throw new NotFoundException('Payment not found');
-    }
-
     // Soft-delete only — never a hard delete on a domain table. A voided
     // payment is a financial record too: it must remain queryable for
     // audit, just excluded from active lists/balances/totals via
     // `deletedAt: null`.
-    await this.repo.softDelete(id);
+    //
+    // A single atomic call, not a `findById` precheck followed by a separate
+    // `softDelete` — that two-step (each its own transaction) let two
+    // concurrent void requests for the same payment both observe "not yet
+    // voided" and both proceed (TOCTOU race). `repo.softDelete` now does the
+    // find-and-mark in one atomic step and reports whether THIS call was the
+    // one that voided it; `false` means already-voided or nonexistent,
+    // which — same as before — is a 404.
+    const voided = await this.repo.softDelete(id);
+    if (!voided) {
+      throw new NotFoundException('Payment not found');
+    }
   }
 }

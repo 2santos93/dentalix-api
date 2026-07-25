@@ -412,13 +412,13 @@ describe('Payments (e2e)', () => {
       ]);
 
       // --- 8. Tenant isolation: clinic B (different subdomain) cannot see
-      // or void clinic A's data. GetPlanBalanceUseCase resolves the plan via
-      // GetTreatmentPlanUseCase, which throws NotFoundException for a
+      // or void clinic A's data. Both GetPlanBalanceUseCase AND
+      // ListPaymentsUseCase resolve the plan via GetTreatmentPlanUseCase
+      // FIRST (404 parity, IMP-3), which throws NotFoundException for a
       // cross-tenant plan id -> 404 (RLS makes it indistinguishable from
-      // absent). ListPaymentsUseCase never re-validates the plan -- it just
-      // forwards the id to `repo.listByPlan`, which is itself RLS-scoped by
-      // tenant -- so clinic B "sees" only its own (zero) rows for that plan
-      // id: 200 with an empty array, never clinic A's payments.
+      // absent) -- clinic B never even reaches `repo.listByPlan`, so it
+      // gets 404, never a `200 []` that could be confused with "plan exists
+      // but has no payments".
       const subdomainB = 'clinica-pay-b';
       const clinicB = await registerAndLogin(app, {
         clinicName: 'Clinica Pagos B',
@@ -426,12 +426,11 @@ describe('Payments (e2e)', () => {
         email: 'owner@clinica-pay-b.com',
       });
 
-      const listB = await request(app.getHttpServer())
+      await request(app.getHttpServer())
         .get(`/api/v1/treatment-plans/${plan.id}/payments`)
         .set('X-Tenant-Host', hostFor(subdomainB))
         .set('Authorization', `Bearer ${clinicB.accessToken}`)
-        .expect(200);
-      expect(listB.body as PaymentResponseBody[]).toEqual([]);
+        .expect(404);
 
       await request(app.getHttpServer())
         .get(`/api/v1/treatment-plans/${plan.id}/balance`)

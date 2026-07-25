@@ -108,15 +108,17 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve(rows);
   }
 
-  softDelete(id: string): Promise<void> {
+  softDelete(id: string): Promise<boolean> {
+    // Atomic check-and-set (mirrors PrismaPaymentRepository.softDelete's
+    // `updateMany({ where: { id, deletedAt: null }, ... })`): find + mutate
+    // in one synchronous step, never a separate find then update, so the
+    // caller gets a single true/false answer instead of a stale read.
     const row = this.payments.find((p) => p.id === id && p.deletedAt === null);
     if (!row) {
-      return Promise.reject(
-        new Error(`InMemoryPaymentRepository.softDelete: not found ${id}`),
-      );
+      return Promise.resolve(false);
     }
     row.deletedAt = NOW;
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
 
   listReceivedInRange(

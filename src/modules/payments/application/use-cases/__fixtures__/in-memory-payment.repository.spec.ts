@@ -44,3 +44,39 @@ describe('InMemoryPaymentRepository#listByPatient', () => {
     expect(result).toEqual([]);
   });
 });
+
+// Atomic check-and-set semantics (mirrors PrismaPaymentRepository.softDelete's
+// `updateMany({ where: { id, deletedAt: null }, ... })`): the fake must
+// report whether it ACTUALLY voided the row (single true/false answer)
+// rather than throwing, so VoidPaymentUseCase can make the "already
+// voided/absent -> 404" decision from a single atomic call instead of a
+// separate find-then-update (the double-void TOCTOU race).
+describe('InMemoryPaymentRepository#softDelete', () => {
+  it('returns true and sets deletedAt on the first void of an active payment', async () => {
+    const repo = new InMemoryPaymentRepository();
+    const payment = repo.seedPayment({ id: 'p1' });
+
+    const result = await repo.softDelete(payment.id);
+
+    expect(result).toBe(true);
+    expect(await repo.findById(payment.id)).toBeNull();
+  });
+
+  it('returns false (never throws) voiding an already-voided payment', async () => {
+    const repo = new InMemoryPaymentRepository();
+    const payment = repo.seedPayment({ id: 'p1' });
+    await repo.softDelete(payment.id);
+
+    const second = await repo.softDelete(payment.id);
+
+    expect(second).toBe(false);
+  });
+
+  it('returns false (never throws) for a nonexistent id', async () => {
+    const repo = new InMemoryPaymentRepository();
+
+    const result = await repo.softDelete('missing-id');
+
+    expect(result).toBe(false);
+  });
+});
