@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { TreatmentPlanItemStatus } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
@@ -41,6 +41,20 @@ function toUtcDateString(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+// `ConvertAmountUseCase` throws exactly this kind of error (see
+// convert-amount.use-case.ts) when a payment's stored currency has no rate
+// in that date's snapshot. This is the ONLY failure this use case treats as
+// "safe to skip" — anything else (a DB/infra outage inside
+// GetRatesForDateUseCase, a programming error, etc.) must propagate instead
+// of silently corrupting a plan balance with no trace.
+function isUnsupportedCurrencyError(error: unknown): boolean {
+  return (
+    error instanceof BadRequestException &&
+    typeof error.message === 'string' &&
+    error.message.startsWith('unsupported currency')
+  );
+}
+
 /**
  * Computes the outstanding balance of a treatment plan: what's billable
  * (accepted + done items) minus what's actually been paid (active payments,
@@ -48,6 +62,8 @@ function toUtcDateString(date: Date): string {
  */
 @Injectable()
 export class GetPlanBalanceUseCase {
+  private readonly logger = new Logger(GetPlanBalanceUseCase.name);
+
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly repo: PaymentRepository,
@@ -70,44 +86,43 @@ export class GetPlanBalanceUseCase {
 
     let paid = 0;
 
-    // IMP-4a: memoizes the conversion lookup per (calendar date, source
-    // currency) within THIS execute() call. `plan.currency` (the target)
-    // is invariant across the whole loop, so a payment's date+currency
-    // pair fully determines its rate. Without this, N payments sharing a
-    // date/currency would each re-trigger convertAmount.execute(), which
-    // hits the DB for that date's rate every time. Only the FIRST payment
-    // for a given pair does the real call; later payments reuse its
-    // `rateUsed` against their OWN amount (round2 is idempotent, so this
-    // reproduces the exact same value the first payment got, and is
-    // consistent — to full rate precision — for the rest).
-    const rateCache = new Map<string, Promise<{ rateUsed: number }>>();
-
     for (const payment of payments) {
-      // IMP-4b: a single payment with a stale/unconvertible currency must
+      // IMP-4b: a single payment with an unsupported/stale currency must
       // not throw and fail the ENTIRE balance computation — skip it from
       // `paid` instead. `paymentsCount` (below, from payments.length) is
       // unaffected, since it doesn't depend on the conversion succeeding.
+      //
+      // IMP-4a follow-up: this used to memoize `rateUsed` per (date,
+      // source currency) and reapply it via `round2(amount * rateUsed)`
+      // for every payment sharing that pair. That's unsound:
+      // `ConvertAmountUseCase.rateUsed` is derived from ITS OWN
+      // already-rounded result (`result / amount`), so it is
+      // amount-dependent, not a fixed exchange rate — reusing it for a
+      // different amount reproduces that first payment's rounding error
+      // instead of rounding each payment independently, drifting the
+      // total (e.g. amounts [1,2,5,7,100,333] at a 3-units-per-USD rate:
+      // correct total is 149.33, memoized was 147.84). So every payment is
+      // converted FRESH, by its own amount and own paidAt date, exactly as
+      // before that optimization.
+      // TODO(perf): memoize the RAW rate at the GetRatesForDateUseCase/
+      // rate-repository layer (NOT the amount-dependent rateUsed) to
+      // remove the per-payment lookup without drift.
       try {
         const date = toUtcDateString(payment.paidAt);
-        const cacheKey = `${date}|${payment.currency}`;
-
-        let cached = rateCache.get(cacheKey);
-        if (!cached) {
-          cached = this.convertAmount.execute({
-            amount: payment.amount,
-            from: payment.currency,
-            to: plan.currency,
-            date,
-          });
-          rateCache.set(cacheKey, cached);
-        }
-
-        const { rateUsed } = await cached;
+        const { rateUsed } = await this.convertAmount.execute({
+          amount: payment.amount,
+          from: payment.currency,
+          to: plan.currency,
+          date,
+        });
         paid += round2(payment.amount * rateUsed);
-      } catch {
-        // Skip: leave this payment out of `paid`. The failed (or
-        // cached-as-failed) lookup is not retried for other payments
-        // sharing the same date/currency — they hit the same rejection.
+      } catch (error) {
+        if (!isUnsupportedCurrencyError(error)) {
+          throw error;
+        }
+        this.logger.warn(
+          `Skipping payment ${payment.id}: unsupported currency ${payment.currency}`,
+        );
       }
     }
 

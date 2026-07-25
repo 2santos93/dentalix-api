@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { GetDoctorDashboardUseCase } from './get-doctor-dashboard.use-case';
 import {
   GetPaymentsTotalsUseCase,
@@ -320,10 +321,19 @@ describe('GetDoctorDashboardUseCase', () => {
       paidAt: new Date('2026-07-11T00:00:00.000Z'),
     });
 
+    // Mirrors the REAL ConvertAmountUseCase contract: an unsupported
+    // currency rejects with a `BadRequestException` whose message starts
+    // with "unsupported currency" (see convert-amount.use-case.ts) -- that
+    // is the ONLY error shape GetPaymentsTotalsUseCase's narrowed catch
+    // treats as "safe to skip" (IMP-4b). A generic `Error` here would no
+    // longer be swallowed and would (correctly) fail this test's
+    // "wholesale dashboard resilience" assertion.
     class FailingForZzzConvertAmountUseCase {
       execute(input: { amount: number; from: string; to: string }) {
         if (input.from === 'ZZZ') {
-          return Promise.reject(new Error('unsupported currency: ZZZ'));
+          return Promise.reject(
+            new BadRequestException('unsupported currency: ZZZ'),
+          );
         }
         return Promise.resolve({ ...input, date: '2026-07-10', result: input.amount, rateUsed: 1 });
       }
