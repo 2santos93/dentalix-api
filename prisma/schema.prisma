@@ -359,6 +359,14 @@ model Payment {
 
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
+  // Partial (WHERE "deletedAt" IS NULL) -- Prisma has no schema-DSL support
+  // for filtered indexes, so the WHERE lives only in the migration SQL
+  // (see 20260726010000_payments_tenant_paidat_index). The explicit `map`
+  // keeps the name+columns in sync with that hand-written index so
+  // `prisma migrate status`/`migrate deploy` see no drift. Same approach as
+  // Patient.@@unique(patients_tenant_doc_key) / the tenants_subdomain_key
+  // and users_email_key partial unique indexes.
+  @@index([tenantId, paidAt], map: "payments_tenantId_paidAt_active_idx")
   @@map("payments")
 }
 

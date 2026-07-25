@@ -1,0 +1,20 @@
+-- Speed up the dashboard's "incomes" query
+-- (PrismaPaymentRepository.listReceivedInRange), which filters "payments" by
+-- tenantId + deletedAt IS NULL + a paidAt range. Today only
+-- (tenantId, treatmentPlanId) and (tenantId, patientId) exist, so this scans
+-- a growing per-tenant slice of the table on every dashboard load.
+--
+-- Partial (WHERE "deletedAt" IS NULL): only active (non-soft-deleted) rows
+-- need to be in the index, since every read filters deletedAt: null -- same
+-- rationale/pattern as 20260722184531_partial_unique_indexes,
+-- 20260722185208_add_patients (patients_tenant_doc_key) and
+-- 20260722222530_add_clinical_history_and_dental_catalog
+-- (mhv_tenant_patient_version_key / catalog_tenant_code_key). Prisma's
+-- schema DSL cannot express the WHERE clause, so schema.prisma keeps
+-- `@@index([tenantId, paidAt], map: "payments_tenantId_paidAt_active_idx")`
+-- (no WHERE) and this migration adds the partial predicate by hand. The
+-- name+columns match what the schema declares, so `prisma migrate status` /
+-- `migrate deploy` see no drift -- a future bare `prisma migrate dev` may
+-- still propose "fixing" this back to a full index; do NOT accept that
+-- diff.
+CREATE INDEX "payments_tenantId_paidAt_active_idx" ON "payments" ("tenantId", "paidAt") WHERE "deletedAt" IS NULL;
