@@ -56,6 +56,11 @@ describe('reference endpoints (e2e)', () => {
   });
 
   afterAll(async () => {
+    await raw.clinicMembership.deleteMany();
+    await raw.user.deleteMany();
+    await raw.tenantDomain.deleteMany();
+    await raw.tenant.deleteMany();
+
     await app.close();
     await raw.$disconnect();
   });
