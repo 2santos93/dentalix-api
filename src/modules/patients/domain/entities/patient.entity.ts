@@ -17,6 +17,8 @@ export interface Patient {
   phone: string | null;
   email: string | null;
   address: string | null;
+  countryCode: string | null;
+  cityId: number | null;
   notes: string | null;
   createdById: string | null;
   createdAt: Date;

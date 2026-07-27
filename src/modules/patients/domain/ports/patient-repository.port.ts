@@ -11,6 +11,8 @@ export interface CreatePatientRepoInput {
   phone?: string;
   email?: string;
   address?: string;
+  countryCode?: string;
+  cityId?: number;
   notes?: string;
   createdById?: string;
 }
@@ -25,6 +27,8 @@ export interface UpdatePatientRepoInput {
   phone?: string | null;
   email?: string | null;
   address?: string | null;
+  countryCode?: string;
+  cityId?: number;
   notes?: string | null;
 }
 
