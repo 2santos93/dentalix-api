@@ -78,4 +78,16 @@ describe('reference endpoints (e2e)', () => {
     const body = res.body as { code: string; symbol: string }[];
     expect(body.some((c) => c.code === 'USD' && c.symbol === '$')).toBe(true);
   });
+
+  it('GET /countries returns the seeded list incl. Colombia', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/countries')
+      .set('X-Tenant-Host', hostFor(sub))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as { code: string; name: string }[];
+    expect(body.some((c) => c.code === 'CO' && c.name === 'Colombia')).toBe(
+      true,
+    );
+  });
 });
