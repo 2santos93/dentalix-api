@@ -77,4 +77,27 @@ export class PrismaAuthRepository implements AuthRepository {
       };
     });
   }
+
+  // Denylist de refresh tokens. Tabla global sin RLS → acceso directo, sin
+  // runWithTenant. Idempotente: un doble logout del mismo jti no falla.
+  async revokeToken(jti: string, expiresAt: Date): Promise<void> {
+    await this.prisma.revokedToken.upsert({
+      where: { jti },
+      update: {},
+      create: { jti, expiresAt },
+    });
+    // Limpieza lazy: al revocar, purga los que ya expiraron (su token base ya
+    // es inválido por TTL, así que la fila no aporta nada).
+    await this.prisma.revokedToken.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+  }
+
+  async isTokenRevoked(jti: string): Promise<boolean> {
+    const row = await this.prisma.revokedToken.findUnique({
+      where: { jti },
+      select: { jti: true },
+    });
+    return row !== null;
+  }
 }

@@ -26,4 +26,6 @@ export interface AuthRepository {
     tenantId: string,
     email: string,
   ): Promise<MembershipRecord | null>;
+  revokeToken(jti: string, expiresAt: Date): Promise<void>;
+  isTokenRevoked(jti: string): Promise<boolean>;
 }
