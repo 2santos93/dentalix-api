@@ -8,8 +8,10 @@ import {
 import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshDto } from './dto/refresh.dto';
 import { RegisterClinicUseCase } from '../application/use-cases/register-clinic.use-case';
 import { LoginUseCase } from '../application/use-cases/login.use-case';
+import { RefreshUseCase } from '../application/use-cases/refresh.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
@@ -20,6 +22,7 @@ export class AuthController {
   constructor(
     private readonly registerClinic: RegisterClinicUseCase,
     private readonly login: LoginUseCase,
+    private readonly refresh: RefreshUseCase,
   ) {}
 
   @Post('register')
@@ -46,5 +49,17 @@ export class AuthController {
       email: dto.email,
       password: dto.password,
     });
+  }
+
+  // Stateless token renewal: the tenant is carried inside the refresh token
+  // itself, so — unlike /login — this does NOT depend on the resolved
+  // tenant host. A 401 here means the refresh token is invalid or expired
+  // and the client must send the user back to /login.
+  @Post('refresh')
+  @ApiCreatedResponse({ type: AuthTokensDto })
+  refreshHandler(
+    @Body() dto: RefreshDto,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    return this.refresh.execute({ refreshToken: dto.refreshToken });
   }
 }

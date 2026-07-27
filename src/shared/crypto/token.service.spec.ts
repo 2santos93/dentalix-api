@@ -29,4 +29,30 @@ describe('TokenService', () => {
   it('rejects a tampered access token', async () => {
     await expect(svc.verifyAccess('not-a-token')).rejects.toBeDefined();
   });
+
+  it('issues a refresh token that verifies back to the payload', async () => {
+    const { refreshToken } = await svc.issue(payload);
+    const decoded = await svc.verifyRefresh(refreshToken);
+    expect(decoded.sub).toBe('u1');
+    expect(decoded.tenantId).toBe('t1');
+    expect(decoded.role).toBe('OWNER');
+  });
+
+  it('rejects a tampered refresh token', async () => {
+    await expect(svc.verifyRefresh('not-a-token')).rejects.toBeDefined();
+  });
+
+  // The two token types are signed with DIFFERENT secrets on purpose: an
+  // access token must never pass as a refresh token (or the refresh endpoint
+  // would accept a stolen short-lived access token for renewal), and a
+  // refresh token must never pass the access guard.
+  it('does not accept an access token as a refresh token', async () => {
+    const { accessToken } = await svc.issue(payload);
+    await expect(svc.verifyRefresh(accessToken)).rejects.toBeDefined();
+  });
+
+  it('does not accept a refresh token as an access token', async () => {
+    const { refreshToken } = await svc.issue(payload);
+    await expect(svc.verifyAccess(refreshToken)).rejects.toBeDefined();
+  });
 });

@@ -161,7 +161,9 @@ describe('Exchange (e2e)', () => {
 
   it('GET /exchange/convert rejects an unknown currency for that date with 400', async () => {
     await request(app.getHttpServer())
-      .get(`/api/v1/exchange/convert?amount=100&from=USD&to=JPY&date=${RATE_DATE}`)
+      .get(
+        `/api/v1/exchange/convert?amount=100&from=USD&to=JPY&date=${RATE_DATE}`,
+      )
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(400);
   });
@@ -175,7 +177,9 @@ describe('Exchange (e2e)', () => {
 
   it('GET /exchange/convert rejects an invalid date format with 400', async () => {
     await request(app.getHttpServer())
-      .get('/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=not-a-date')
+      .get(
+        '/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=not-a-date',
+      )
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(400);
   });
