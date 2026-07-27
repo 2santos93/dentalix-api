@@ -411,3 +411,15 @@ model InventoryMovement {
   @@index([tenantId, itemId])
   @@map("inventory_movements")
 }
+
+// Denylist de refresh tokens revocados por logout. Cada fila vive a lo sumo el
+// TTL del refresh (JWT_REFRESH_TTL, ~30d); se limpian de forma lazy al revocar.
+// Tabla global (sin RLS ni tenantId): el jti ya es único por token.
+model RevokedToken {
+  jti       String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
+}
