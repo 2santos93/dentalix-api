@@ -41,4 +41,14 @@ export class TokenService {
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });
   }
+
+  // Verifies a refresh token against the SEPARATE refresh secret. Because
+  // access and refresh tokens are signed with different secrets, this
+  // rejects an access token presented at the refresh endpoint (and vice
+  // versa for `verifyAccess`).
+  verifyRefresh(token: string): Promise<JwtPayload> {
+    return this.jwt.verifyAsync<JwtPayload>(token, {
+      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+    });
+  }
 }
