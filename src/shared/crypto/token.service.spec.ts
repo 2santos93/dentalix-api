@@ -55,4 +55,24 @@ describe('TokenService', () => {
     const { refreshToken } = await svc.issue(payload);
     await expect(svc.verifyAccess(refreshToken)).rejects.toBeDefined();
   });
+
+  // The refresh token carries a unique `jti` claim so a later logout
+  // endpoint can revoke this SPECIFIC refresh token (denylist by jti).
+  it('embeds a unique jti in the refresh token, readable via verifyRefresh', async () => {
+    const { refreshToken } = await svc.issue(payload);
+    const decoded = await svc.verifyRefresh(refreshToken);
+
+    expect(typeof decoded.jti).toBe('string');
+    expect(decoded.jti.length).toBeGreaterThan(0);
+    expect(typeof decoded.exp).toBe('number');
+    expect(decoded.sub).toBe('u1');
+  });
+
+  it('mints a different jti on each issue (rotation)', async () => {
+    const a = await svc.issue(payload);
+    const b = await svc.issue(payload);
+    const da = await svc.verifyRefresh(a.refreshToken);
+    const db = await svc.verifyRefresh(b.refreshToken);
+    expect(da.jti).not.toBe(db.jti);
+  });
 });
