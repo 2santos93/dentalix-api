@@ -6,6 +6,7 @@ import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './shared/prisma/prisma.module';
 import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { MeModule } from './modules/me/me.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
@@ -28,6 +29,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PrismaModule,
     TenantContextModule,
     AuthModule,
+    MeModule,
     PatientsModule,
     DentalCatalogModule,
     MedicalHistoryModule,
