@@ -18,23 +18,29 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       update: {},
       create: { jti: 'jti-1', expiresAt: exp },
     });
-    // Limpieza lazy de expirados en el mismo camino.
-    expect(revokedToken.deleteMany).toHaveBeenCalled();
+    // Limpieza lazy de expirados en el mismo camino: debe filtrar por fecha,
+    // no borrar toda la tabla (deleteMany({}) barrería toda la denylist).
+    expect(revokedToken.deleteMany).toHaveBeenCalledWith({
+      where: { expiresAt: { lt: expect.any(Date) as Date } },
+    });
   });
 
   it('isTokenRevoked returns true only when a row exists', async () => {
     const revokedToken = {
       upsert: jest.fn(),
       deleteMany: jest.fn(),
-      findUnique: jest
-        .fn()
-        .mockResolvedValueOnce({ jti: 'jti-1' })
-        .mockResolvedValueOnce(null),
+      findUnique: jest.fn(({ where }: { where: { jti: string } }) =>
+        Promise.resolve(where.jti === 'jti-1' ? { jti: 'jti-1' } : null),
+      ),
     };
     const prisma = { revokedToken } as never;
     const repo = new PrismaAuthRepository(prisma);
 
     expect(await repo.isTokenRevoked('jti-1')).toBe(true);
     expect(await repo.isTokenRevoked('missing')).toBe(false);
+    expect(revokedToken.findUnique).toHaveBeenCalledWith({
+      where: { jti: 'jti-1' },
+      select: { jti: true },
+    });
   });
 });
