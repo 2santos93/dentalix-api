@@ -4,6 +4,7 @@ import { REFERENCE_REPOSITORY } from './domain/ports/reference-repository.port';
 import { PrismaReferenceRepository } from './infrastructure/repositories/prisma-reference.repository';
 import { ListCurrenciesUseCase } from './application/use-cases/list-currencies.use-case';
 import { ListCountriesUseCase } from './application/use-cases/list-countries.use-case';
+import { SearchCitiesUseCase } from './application/use-cases/search-cities.use-case';
 import { ReferenceController } from './presentation/reference.controller';
 import { TokenService } from '../../shared/crypto/token.service';
 
@@ -16,6 +17,7 @@ import { TokenService } from '../../shared/crypto/token.service';
   providers: [
     ListCurrenciesUseCase,
     ListCountriesUseCase,
+    SearchCitiesUseCase,
     TokenService,
     { provide: REFERENCE_REPOSITORY, useClass: PrismaReferenceRepository },
   ],

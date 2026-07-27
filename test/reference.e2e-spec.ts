@@ -90,4 +90,23 @@ describe('reference endpoints (e2e)', () => {
       true,
     );
   });
+
+  it('GET /cities requires countryCode (400 without it)', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/cities')
+      .set('X-Tenant-Host', hostFor(sub))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+  });
+
+  it('GET /cities filters by countryCode + q and caps at 50', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/cities?countryCode=CO&q=bog&limit=100')
+      .set('X-Tenant-Host', hostFor(sub))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as { id: number; name: string }[];
+    expect(body.length).toBeLessThanOrEqual(50);
+    expect(body.some((c) => /bog/i.test(c.name))).toBe(true);
+  });
 });
