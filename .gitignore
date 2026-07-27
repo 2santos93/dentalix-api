@@ -47,6 +47,10 @@ lerna-debug.log*
 .temp
 .tmp
 
+# storage directories
+/storage
+/storage-test
+
 # Runtime data
 pids
 *.pid
