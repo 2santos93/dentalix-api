@@ -8,6 +8,10 @@ const prisma = new PrismaClient({
 
 // Whitelist curada de monedas (ISO 4217). Cubre el contexto LATAM + majors;
 // alineada con lo que soporta el proveedor de exchange (base USD) e incluye COP.
+// Nota: estas mismas 10 monedas también se siembran vía la migración
+// 20260727130000_seed_currencies, así que la whitelist existe con solo
+// `prisma migrate deploy` (sin necesidad de correr este seed). El upsert de
+// abajo se mantiene para poder actualizar name/symbol sin una migración nueva.
 const CURRENCIES: { code: string; name: string; symbol: string }[] = [
   { code: 'USD', name: 'Dólar estadounidense', symbol: '$' },
   { code: 'COP', name: 'Peso colombiano', symbol: '$' },
