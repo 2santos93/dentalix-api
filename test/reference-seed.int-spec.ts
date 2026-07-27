@@ -35,3 +35,26 @@ describe('reference tables', () => {
     await raw.currency.delete({ where: { code: 'TST' } });
   });
 });
+
+describe('reference seed', () => {
+  const seedRaw = new PrismaClient({
+    datasources: { db: { url: process.env.DIRECT_URL } },
+  });
+  afterAll(async () => {
+    await seedRaw.$disconnect();
+  });
+
+  it('has USD and COP currencies with a symbol', async () => {
+    const usd = await seedRaw.currency.findUnique({ where: { code: 'USD' } });
+    const cop = await seedRaw.currency.findUnique({ where: { code: 'COP' } });
+    expect(usd?.symbol).toBe('$');
+    expect(cop?.name).toMatch(/colombiano/i);
+  });
+
+  it('has Colombia and at least one Colombian city', async () => {
+    const co = await seedRaw.country.findUnique({ where: { code: 'CO' } });
+    expect(co?.name).toBe('Colombia');
+    const cities = await seedRaw.city.count({ where: { countryCode: 'CO' } });
+    expect(cities).toBeGreaterThan(0);
+  });
+});

@@ -46,6 +46,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.13.3",
     "@types/supertest": "^7.0.0",
+    "country-state-city": "^3.2.1",
     "dotenv": "^17.4.2",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9.18.0",
@@ -79,5 +80,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }
