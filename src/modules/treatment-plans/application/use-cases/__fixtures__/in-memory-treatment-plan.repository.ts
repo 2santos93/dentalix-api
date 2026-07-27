@@ -111,7 +111,7 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       tenantId: 't1',
       patientId: input.patientId,
       status: TreatmentPlanStatus.DRAFT,
-      currency: 'USD',
+      currency: input.currency,
       notes: input.notes ?? null,
       createdById: input.createdById ?? null,
       createdAt: NOW,

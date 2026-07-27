@@ -10,6 +10,8 @@ import { UpdateTreatmentPlanItemUseCase } from './application/use-cases/update-t
 import { RemoveTreatmentPlanItemUseCase } from './application/use-cases/remove-treatment-plan-item.use-case';
 import { TREATMENT_PLAN_REPOSITORY } from './domain/ports/treatment-plan-repository.port';
 import { PrismaTreatmentPlanRepository } from './infrastructure/repositories/prisma-treatment-plan.repository';
+import { CURRENCY_WHITELIST } from './domain/ports/currency-whitelist.port';
+import { PrismaCurrencyWhitelist } from './infrastructure/adapters/prisma-currency-whitelist.adapter';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
@@ -39,6 +41,10 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
     {
       provide: TREATMENT_PLAN_REPOSITORY,
       useClass: PrismaTreatmentPlanRepository,
+    },
+    {
+      provide: CURRENCY_WHITELIST,
+      useClass: PrismaCurrencyWhitelist,
     },
   ],
   // Exported (additive) so PaymentsModule can inject GetTreatmentPlanUseCase

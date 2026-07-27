@@ -22,6 +22,9 @@ export class TreatmentPlanDto {
   @ApiProperty({ enum: TreatmentPlanStatus })
   status!: TreatmentPlanStatus;
 
+  @ApiProperty({ example: 'USD', description: 'ISO 4217 (default USD)' })
+  currency!: string;
+
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 

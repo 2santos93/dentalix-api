@@ -83,6 +83,7 @@ export class TreatmentPlansController {
     // / OdontogramController.create.
     return this.createTreatmentPlan.execute({
       patientId,
+      currency: dto.currency,
       notes: dto.notes,
       createdById: req.user.sub,
     });
@@ -108,6 +109,7 @@ export class TreatmentPlansController {
   ): Promise<TreatmentPlan> {
     return this.updateTreatmentPlan.execute(id, {
       status: dto.status,
+      currency: dto.currency,
       notes: dto.notes,
     });
   }
