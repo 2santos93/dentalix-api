@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  HttpCode,
   Post,
   Req,
   UnauthorizedException,
@@ -9,9 +10,11 @@ import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { LogoutDto } from './dto/logout.dto';
 import { RegisterClinicUseCase } from '../application/use-cases/register-clinic.use-case';
 import { LoginUseCase } from '../application/use-cases/login.use-case';
 import { RefreshUseCase } from '../application/use-cases/refresh.use-case';
+import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
@@ -23,6 +26,7 @@ export class AuthController {
     private readonly registerClinic: RegisterClinicUseCase,
     private readonly login: LoginUseCase,
     private readonly refresh: RefreshUseCase,
+    private readonly logout: LogoutUseCase,
   ) {}
 
   @Post('register')
@@ -61,5 +65,14 @@ export class AuthController {
     @Body() dto: RefreshDto,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     return this.refresh.execute({ refreshToken: dto.refreshToken });
+  }
+
+  // Cierre de sesión: revoca el refresh token entregado (denylist por jti). No
+  // requiere guard ni tenant host (igual que /refresh: la identidad va en el
+  // propio token). Idempotente → 204 aunque el token sea inválido/expirado.
+  @Post('logout')
+  @HttpCode(204)
+  async logoutHandler(@Body() dto: LogoutDto): Promise<void> {
+    await this.logout.execute({ refreshToken: dto.refreshToken });
   }
 }

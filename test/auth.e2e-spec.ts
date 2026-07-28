@@ -42,6 +42,7 @@ describe('Auth (e2e)', () => {
     await raw.clinicMembership.deleteMany();
     await raw.user.deleteMany();
     await raw.tenant.deleteMany();
+    await raw.revokedToken.deleteMany();
   });
 
   afterAll(async () => {
@@ -93,5 +94,58 @@ describe('Auth (e2e)', () => {
       .set('X-Tenant-Host', hostFor('does-not-exist'))
       .send({ email: 'owner@sonrisa.com', password: 'S3cret!!' })
       .expect(401);
+  });
+
+  it('sets up a clinic and confirms refresh works before logout', async () => {
+    // Nueva clínica aislada para no chocar con los otros tests.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({
+        clinicName: 'Muela',
+        subdomain: 'muela',
+        email: 'owner@muela.com',
+        password: 'S3cret!!',
+        fullName: 'Dra. Muela',
+      })
+      .expect(201);
+
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor('muela'))
+      .send({ email: 'owner@muela.com', password: 'S3cret!!' })
+      .expect(201);
+    const { refreshToken } = login.body as LoginResponseBody;
+
+    // Antes del logout, el refresh funciona.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken })
+      .expect(201);
+  });
+
+  it('rejects refresh after logout and stays 204 on repeat logout', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor('muela'))
+      .send({ email: 'owner@muela.com', password: 'S3cret!!' })
+      .expect(201);
+    const { refreshToken } = login.body as LoginResponseBody;
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .send({ refreshToken })
+      .expect(204);
+
+    // El refresh revocado ahora es 401.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken })
+      .expect(401);
+
+    // Logout repetido con el mismo token sigue siendo 204 (idempotente).
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .send({ refreshToken })
+      .expect(204);
   });
 });

@@ -7,6 +7,8 @@ describe('RefreshUseCase', () => {
     sub: 'u1',
     tenantId: 't1',
     role: ClinicRole.OWNER,
+    jti: 'jti-1',
+    exp: 1893456000,
   };
 
   it('verifies the refresh token and issues a fresh token pair (rotation)', async () => {
@@ -16,12 +18,12 @@ describe('RefreshUseCase', () => {
         .fn()
         .mockResolvedValue({ accessToken: 'new-acc', refreshToken: 'new-ref' }),
     } as never;
+    const repo = { isTokenRevoked: jest.fn().mockResolvedValue(false) } as never;
 
-    const uc = new RefreshUseCase(tokens);
+    const uc = new RefreshUseCase(tokens, repo);
     const result = await uc.execute({ refreshToken: 'old-ref' });
 
     expect(result).toEqual({ accessToken: 'new-acc', refreshToken: 'new-ref' });
-    // Re-issues from the verified payload — same identity, new tokens.
     expect((tokens as unknown as { issue: jest.Mock }).issue).toHaveBeenCalledWith({
       sub: 'u1',
       tenantId: 't1',
@@ -34,12 +36,27 @@ describe('RefreshUseCase', () => {
       verifyRefresh: jest.fn().mockRejectedValue(new Error('bad token')),
       issue: jest.fn(),
     } as never;
+    const repo = { isTokenRevoked: jest.fn() } as never;
 
-    const uc = new RefreshUseCase(tokens);
+    const uc = new RefreshUseCase(tokens, repo);
     await expect(
       uc.execute({ refreshToken: 'garbage' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
-    // Never mints tokens off an unverified refresh token.
+    expect((tokens as unknown as { issue: jest.Mock }).issue).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the refresh token has been revoked (logout)', async () => {
+    const tokens = {
+      verifyRefresh: jest.fn().mockResolvedValue(payload),
+      issue: jest.fn(),
+    } as never;
+    const repo = { isTokenRevoked: jest.fn().mockResolvedValue(true) } as never;
+
+    const uc = new RefreshUseCase(tokens, repo);
+    await expect(
+      uc.execute({ refreshToken: 'revoked-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    // No re-emite tokens de una sesión ya cerrada.
     expect((tokens as unknown as { issue: jest.Mock }).issue).not.toHaveBeenCalled();
   });
 });

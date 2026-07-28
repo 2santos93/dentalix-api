@@ -14,6 +14,8 @@ function makeRepo(
     findTenantBySubdomain: async () => null,
     createClinicWithOwner: async () => ({ tenantId: 't1', userId: 'u1' }),
     findMembership: async () => membership,
+    revokeToken: jest.fn(),
+    isTokenRevoked: jest.fn(),
   };
 }
 

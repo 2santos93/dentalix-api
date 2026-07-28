@@ -10,6 +10,8 @@ function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
     findTenantBySubdomain: async () => null,
     createClinicWithOwner: async () => ({ tenantId: 't1', userId: 'u1' }),
     findMembership: async () => null,
+    revokeToken: jest.fn(),
+    isTokenRevoked: jest.fn(),
     ...overrides,
   };
 }
