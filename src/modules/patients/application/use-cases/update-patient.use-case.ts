@@ -1,9 +1,16 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PATIENT_REPOSITORY } from '../../domain/ports/patient-repository.port';
 import type {
   PatientRepository,
   UpdatePatientRepoInput,
 } from '../../domain/ports/patient-repository.port';
+import { REFERENCE_LOOKUP } from '../../domain/ports/reference-lookup.port';
+import type { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { Patient } from '../../domain/entities/patient.entity';
 
 export type UpdatePatientInput = UpdatePatientRepoInput;
@@ -12,6 +19,7 @@ export type UpdatePatientInput = UpdatePatientRepoInput;
 export class UpdatePatientUseCase {
   constructor(
     @Inject(PATIENT_REPOSITORY) private readonly repo: PatientRepository,
+    @Inject(REFERENCE_LOOKUP) private readonly reference: ReferenceLookup,
   ) {}
 
   async execute(id: string, patch: UpdatePatientInput): Promise<Patient> {
@@ -21,6 +29,21 @@ export class UpdatePatientUseCase {
       // belongs to another tenant are indistinguishable here (RLS makes
       // cross-tenant rows invisible), so both surface as NotFound.
       throw new NotFoundException('Patient not found');
+    }
+
+    if (patch.cityId !== undefined) {
+      if (!patch.countryCode) {
+        throw new BadRequestException(
+          'countryCode is required when cityId is set',
+        );
+      }
+      const ok = await this.reference.cityBelongsToCountry(
+        patch.cityId,
+        patch.countryCode,
+      );
+      if (!ok) {
+        throw new BadRequestException('cityId does not belong to countryCode');
+      }
     }
 
     const normalizedPatch: UpdatePatientRepoInput = { ...patch };

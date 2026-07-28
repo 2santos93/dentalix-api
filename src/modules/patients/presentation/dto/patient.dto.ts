@@ -41,6 +41,12 @@ export class PatientDto {
   address!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
+  countryCode!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true })
+  cityId!: number | null;
+
+  @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })

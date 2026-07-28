@@ -17,6 +17,7 @@ import { StaffModule } from './modules/staff/staff.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
 import { ExchangeModule } from './modules/exchange/exchange.module';
+import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -39,6 +40,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     DomainsModule,
     PublicBrandingModule,
     ExchangeModule,
+    ReferenceModule,
     PaymentsModule,
     InventoryModule,
     DashboardModule,

@@ -13,14 +13,22 @@ import { TreatmentPlanItem } from '../entities/treatment-plan-item.entity';
 // from the guarded request context (never the client, same convention as
 // CreateAppointmentRepoInput). `status` always starts at the schema default
 // (DRAFT) on create; there is no way to create a plan in any other status.
+// `currency` arrives here ALREADY resolved (default "USD" applied) and
+// whitelist-validated by CreateTreatmentPlanUseCase — the repo never
+// defaults or validates it.
 export interface CreateTreatmentPlanRepoInput {
   patientId: string;
+  currency: string;
   notes?: string;
   createdById?: string;
 }
 
+// `currency`, like `status`/`notes`, is only present here when the caller
+// wants to change it — UpdateTreatmentPlanUseCase whitelist-validates it
+// BEFORE it reaches the repo, only when provided.
 export interface UpdateTreatmentPlanRepoInput {
   status?: TreatmentPlanStatus;
+  currency?: string;
   notes?: string | null;
 }
 

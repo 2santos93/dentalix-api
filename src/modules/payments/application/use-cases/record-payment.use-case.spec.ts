@@ -4,6 +4,7 @@ import { RecordPaymentUseCase } from './record-payment.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
+import { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 
 /**
  * Fake for `GetTreatmentPlanUseCase` -- concrete class (not an interface
@@ -44,6 +45,16 @@ function makePlan(
   };
 }
 
+// Fake whitelist: allows the codes actually exercised by this suite. `has`
+// is case-sensitive here on purpose, to catch a regression where the use
+// case forgets to `.toUpperCase()` BEFORE calling it.
+function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+  return {
+    has: (code: string): Promise<boolean> =>
+      Promise.resolve(allowed.includes(code)),
+  };
+}
+
 describe('RecordPaymentUseCase', () => {
   function makeUseCase() {
     const repo = new InMemoryPaymentRepository();
@@ -51,6 +62,7 @@ describe('RecordPaymentUseCase', () => {
     const uc = new RecordPaymentUseCase(
       repo,
       fakeGetPlan as unknown as GetTreatmentPlanUseCase,
+      makeWhitelist(),
     );
     return { repo, fakeGetPlan, uc };
   }
@@ -122,6 +134,19 @@ describe('RecordPaymentUseCase', () => {
       uc.execute('plan-1', {
         amount: 10,
         currency: '   ',
+        paidAt: '2026-03-05T00:00:00.000Z',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects an unknown currency with BadRequestException', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan();
+
+    await expect(
+      uc.execute('plan-1', {
+        amount: 10,
+        currency: 'XXX',
         paidAt: '2026-03-05T00:00:00.000Z',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);

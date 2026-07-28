@@ -88,6 +88,8 @@ model Patient {
   phone       String?
   email       String?
   address     String?
+  countryCode String?
+  cityId      Int?
   notes       String?
   createdById String?   @db.Uuid
   createdAt   DateTime  @default(now())
@@ -99,6 +101,8 @@ model Patient {
   toothRecords           ToothRecord[]
   appointments           Appointment[]
   treatmentPlans         TreatmentPlan[]
+  country                Country?                @relation(fields: [countryCode], references: [code])
+  city                   City?                   @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   @@index([tenantId])
@@ -306,6 +310,38 @@ model ExchangeRateSnapshot {
   @@map("exchange_rate_snapshots")
 }
 
+// Catálogos de referencia GLOBALES (moneda/país/ciudad). Misma excepción que
+// ExchangeRateSnapshot: sin tenantId, sin RLS, sin deletedAt. Currency es
+// además la whitelist de códigos ISO 4217 aceptados en planes/abonos.
+model Currency {
+  code   String @id // ISO 4217, p.ej. "USD"
+  name   String // "Dólar estadounidense"
+  symbol String // "$"
+
+  @@map("currencies")
+}
+
+model Country {
+  code     String    @id // ISO 3166-1 alpha-2, p.ej. "CO"
+  name     String // "Colombia"
+  cities   City[]
+  patients Patient[]
+
+  @@map("countries")
+}
+
+model City {
+  id          Int       @id @default(autoincrement())
+  countryCode String
+  name        String
+  region      String? // estado/departamento (informativo)
+  country     Country   @relation(fields: [countryCode], references: [code])
+  patients    Patient[]
+
+  @@index([countryCode, name])
+  @@map("cities")
+}
+
 enum TenantDomainStatus {
   PENDING
   VERIFIED
@@ -382,7 +418,7 @@ model InventoryItem {
   name        String
   sku         String?
   unit        String
-  minStock    Decimal   @db.Decimal(14, 3) @default(0)
+  minStock    Decimal   @default(0) @db.Decimal(14, 3)
   notes       String?
   createdById String?   @db.Uuid
   createdAt   DateTime  @default(now())

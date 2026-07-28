@@ -44,6 +44,23 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Local setup
+
+1. Instalar dependencias:
+   ```bash
+   npm install
+   ```
+2. Configurar variables de entorno (`.env`, ver `.env.test` para el entorno de tests) con `DATABASE_URL`/`DIRECT_URL` apuntando a Postgres.
+3. Aplicar las migraciones:
+   ```bash
+   npx prisma migrate deploy
+   ```
+4. Sembrar datos de referencia (monedas, países, ciudades):
+   ```bash
+   npx prisma db seed
+   ```
+   Idempotente: las ciudades solo se siembran una vez (los ids son estables).
+
 ## Run tests
 
 ```bash
