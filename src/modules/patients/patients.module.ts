@@ -7,6 +7,8 @@ import { GetPatientUseCase } from './application/use-cases/get-patient.use-case'
 import { UpdatePatientUseCase } from './application/use-cases/update-patient.use-case';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
 import { PrismaPatientRepository } from './infrastructure/repositories/prisma-patient.repository';
+import { REFERENCE_LOOKUP } from './domain/ports/reference-lookup.port';
+import { PrismaReferenceLookup } from './infrastructure/adapters/prisma-reference-lookup.adapter';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
@@ -26,6 +28,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     // listing it here makes it resolvable for @UseInterceptors on PatientsController.
     TenantContextInterceptor,
     { provide: PATIENT_REPOSITORY, useClass: PrismaPatientRepository },
+    { provide: REFERENCE_LOOKUP, useClass: PrismaReferenceLookup },
   ],
   // Exported (additive) so DashboardModule can inject ListPatientsUseCase by
   // class for the patientCount aggregation.

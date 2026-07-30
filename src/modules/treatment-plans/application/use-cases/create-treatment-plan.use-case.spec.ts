@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { CreateTreatmentPlanUseCase } from './create-treatment-plan.use-case';
 import {
@@ -9,6 +10,7 @@ import {
   TreatmentPlanRepository,
 } from '../../domain/ports/treatment-plan-repository.port';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 
 function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
   return {
@@ -54,10 +56,20 @@ function makeRepo(
   };
 }
 
+// Fake whitelist: allows the codes actually exercised by this suite. `has`
+// is case-sensitive here on purpose, to catch a regression where the use
+// case forgets to `.toUpperCase()` BEFORE calling it.
+function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+  return {
+    has: (code: string): Promise<boolean> =>
+      Promise.resolve(allowed.includes(code)),
+  };
+}
+
 describe('CreateTreatmentPlanUseCase', () => {
   it('creates a plan in DRAFT status and returns the mapped entity', async () => {
     const repo = makeRepo();
-    const uc = new CreateTreatmentPlanUseCase(repo);
+    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
 
     const result = await uc.execute({ patientId: 'p1', createdById: 'u1' });
 
@@ -76,7 +88,7 @@ describe('CreateTreatmentPlanUseCase', () => {
         return Promise.resolve(fakePlan({ notes: input.notes ?? null }));
       },
     });
-    const uc = new CreateTreatmentPlanUseCase(repo);
+    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
 
     await uc.execute({ patientId: 'p1', notes: 'Plan inicial' });
 
@@ -93,7 +105,7 @@ describe('CreateTreatmentPlanUseCase', () => {
         return Promise.resolve(fakePlan());
       },
     });
-    const uc = new CreateTreatmentPlanUseCase(repo);
+    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
 
     const maliciousInput = {
       patientId: 'p1',
@@ -105,5 +117,52 @@ describe('CreateTreatmentPlanUseCase', () => {
 
     expect(captured && 'tenantId' in captured).toBe(false);
     expect(captured && 'status' in captured).toBe(false);
+  });
+
+  it('defaults currency to USD, whitelist-validated, when omitted', async () => {
+    let captured: CreateTreatmentPlanRepoInput | undefined;
+    const repo = makeRepo({
+      createPlan: (
+        input: CreateTreatmentPlanRepoInput,
+      ): Promise<TreatmentPlan> => {
+        captured = input;
+        return Promise.resolve(fakePlan({ currency: input.currency }));
+      },
+    });
+    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+
+    const result = await uc.execute({ patientId: 'p1' });
+
+    expect(captured?.currency).toBe('USD');
+    expect(result.currency).toBe('USD');
+  });
+
+  it('uppercases an explicit currency before whitelisting/forwarding it', async () => {
+    let captured: CreateTreatmentPlanRepoInput | undefined;
+    const repo = makeRepo({
+      createPlan: (
+        input: CreateTreatmentPlanRepoInput,
+      ): Promise<TreatmentPlan> => {
+        captured = input;
+        return Promise.resolve(fakePlan({ currency: input.currency }));
+      },
+    });
+    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+
+    await uc.execute({ patientId: 'p1', currency: 'cop' });
+
+    expect(captured?.currency).toBe('COP');
+  });
+
+  it('rejects an unknown currency with BadRequestException, without calling the repo', async () => {
+    const repo = makeRepo({
+      createPlan: (): Promise<TreatmentPlan> =>
+        Promise.reject(new Error('createPlan should not be called')),
+    });
+    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+
+    await expect(
+      uc.execute({ patientId: 'p1', currency: 'XXX' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

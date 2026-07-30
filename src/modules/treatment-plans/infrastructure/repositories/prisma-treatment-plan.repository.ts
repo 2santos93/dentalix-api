@@ -101,6 +101,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         data: {
           tenantId,
           patientId: input.patientId,
+          currency: input.currency,
           notes: input.notes,
           createdById: input.createdById,
         },

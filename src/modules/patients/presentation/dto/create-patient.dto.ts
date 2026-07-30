@@ -3,6 +3,7 @@ import {
   IsDateString,
   IsEmail,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   MinLength,
@@ -54,6 +55,19 @@ export class CreatePatientDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @ApiPropertyOptional({ example: 'CO', description: 'ISO 3166-1 alpha-2' })
+  @IsOptional()
+  @IsString()
+  countryCode?: string;
+
+  @ApiPropertyOptional({
+    example: 12345,
+    description: 'City id from GET /cities',
+  })
+  @IsOptional()
+  @IsInt()
+  cityId?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -8,6 +8,7 @@ import {
   PatientRepository,
   UpdatePatientRepoInput,
 } from '../../domain/ports/patient-repository.port';
+import { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 
 function fakePatient(overrides: Partial<Patient> = {}): Patient {
   return {
@@ -22,6 +23,8 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
     phone: null,
     email: null,
     address: null,
+    countryCode: null,
+    cityId: null,
     notes: null,
     createdById: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -49,6 +52,15 @@ function makeRepo(
   };
 }
 
+function makeReferenceLookup(
+  overrides: Partial<ReferenceLookup> = {},
+): ReferenceLookup {
+  return {
+    cityBelongsToCountry: (): Promise<boolean> => Promise.resolve(true),
+    ...overrides,
+  };
+}
+
 describe('UpdatePatientUseCase', () => {
   it('updates fields and returns the updated entity', async () => {
     const existing = fakePatient();
@@ -67,7 +79,7 @@ describe('UpdatePatientUseCase', () => {
         return Promise.resolve(updated);
       },
     });
-    const uc = new UpdatePatientUseCase(repo);
+    const uc = new UpdatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute(existing.id, {
       firstName: 'Ana Maria',
@@ -88,7 +100,7 @@ describe('UpdatePatientUseCase', () => {
       update: (): Promise<Patient> =>
         Promise.reject(new Error('update should not be called')),
     });
-    const uc = new UpdatePatientUseCase(repo);
+    const uc = new UpdatePatientUseCase(repo, makeReferenceLookup());
 
     await expect(
       uc.execute('missing-id', { firstName: 'X' }),
@@ -109,7 +121,7 @@ describe('UpdatePatientUseCase', () => {
         return Promise.resolve(fakePatient({ email: 'ana@example.com' }));
       },
     });
-    const uc = new UpdatePatientUseCase(repo);
+    const uc = new UpdatePatientUseCase(repo, makeReferenceLookup());
 
     await uc.execute(existing.id, { email: '  Ana@Example.COM  ' });
 

@@ -7,6 +7,8 @@ import type {
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -36,6 +38,8 @@ export class RecordPaymentUseCase {
     // absent/soft-deleted/cross-tenant) and "what's its patientId" live in
     // exactly one place, never re-implemented here.
     private readonly getTreatmentPlan: GetTreatmentPlanUseCase,
+    @Inject(CURRENCY_WHITELIST)
+    private readonly whitelist: CurrencyWhitelist,
   ) {}
 
   /**
@@ -56,6 +60,9 @@ export class RecordPaymentUseCase {
       throw new BadRequestException('currency is required');
     }
     const currency = input.currency.trim().toUpperCase();
+    if (!(await this.whitelist.has(currency))) {
+      throw new BadRequestException(`Unknown currency: ${currency}`);
+    }
 
     const paidAt =
       input.paidAt instanceof Date ? input.paidAt : new Date(input.paidAt);

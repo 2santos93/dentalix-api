@@ -10,6 +10,8 @@ import { PrismaPaymentRepository } from './infrastructure/repositories/prisma-pa
 import { PaymentsController } from './presentation/payments.controller';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { TreatmentPlansModule } from '../treatment-plans/treatment-plans.module';
+import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whitelist.port';
+import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapters/prisma-currency-whitelist.adapter';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
@@ -38,6 +40,10 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     {
       provide: PAYMENT_REPOSITORY,
       useClass: PrismaPaymentRepository,
+    },
+    {
+      provide: CURRENCY_WHITELIST,
+      useClass: PrismaCurrencyWhitelist,
     },
   ],
   // Exported (additive) so DashboardModule can inject GetPaymentsTotalsUseCase

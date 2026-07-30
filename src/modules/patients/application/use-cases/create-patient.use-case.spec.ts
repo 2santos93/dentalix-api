@@ -6,6 +6,7 @@ import {
   ListPatientsResult,
   PatientRepository,
 } from '../../domain/ports/patient-repository.port';
+import { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 
 function fakePatientFrom(
   id: string,
@@ -24,6 +25,8 @@ function fakePatientFrom(
     phone: input.phone ?? null,
     email: input.email ?? null,
     address: input.address ?? null,
+    countryCode: input.countryCode ?? null,
+    cityId: input.cityId ?? null,
     notes: input.notes ?? null,
     createdById: input.createdById ?? null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -46,10 +49,19 @@ function makeRepo(
   };
 }
 
+function makeReferenceLookup(
+  overrides: Partial<ReferenceLookup> = {},
+): ReferenceLookup {
+  return {
+    cityBelongsToCountry: (): Promise<boolean> => Promise.resolve(true),
+    ...overrides,
+  };
+}
+
 describe('CreatePatientUseCase', () => {
   it('creates a patient and returns the mapped entity', async () => {
     const repo = makeRepo();
-    const uc = new CreatePatientUseCase(repo);
+    const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute({
       firstName: 'Ana',
@@ -73,7 +85,7 @@ describe('CreatePatientUseCase', () => {
         return Promise.resolve(fakePatientFrom('p2', input));
       },
     });
-    const uc = new CreatePatientUseCase(repo);
+    const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute({
       firstName: 'Carlos',
@@ -89,7 +101,7 @@ describe('CreatePatientUseCase', () => {
 
   it('leaves email null when not provided (no crash on trim/lowercase of undefined)', async () => {
     const repo = makeRepo();
-    const uc = new CreatePatientUseCase(repo);
+    const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute({
       firstName: 'No',
@@ -109,7 +121,7 @@ describe('CreatePatientUseCase', () => {
         return Promise.resolve(fakePatientFrom('p4', input));
       },
     });
-    const uc = new CreatePatientUseCase(repo);
+    const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     // Bypass the type system deliberately to prove that even if a caller
     // stuffed a tenantId in, the use case never reads/forwards it — the
@@ -137,7 +149,7 @@ describe('CreatePatientUseCase', () => {
         return Promise.resolve(fakePatientFrom('p3', input));
       },
     });
-    const uc = new CreatePatientUseCase(repo);
+    const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     await uc.execute({
       firstName: 'Jane',

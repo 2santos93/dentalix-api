@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { UpdateTreatmentPlanUseCase } from './update-treatment-plan.use-case';
 import {
@@ -10,6 +10,7 @@ import {
   TreatmentPlanRepository,
   UpdateTreatmentPlanRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
+import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 
 function fakePlanWithItems(
   overrides: Partial<TreatmentPlanWithItems> = {},
@@ -52,6 +53,16 @@ function makeRepo(
   };
 }
 
+// Fake whitelist: allows the codes actually exercised by this suite. `has`
+// is case-sensitive here on purpose, to catch a regression where the use
+// case forgets to `.toUpperCase()` BEFORE calling it.
+function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+  return {
+    has: (code: string): Promise<boolean> =>
+      Promise.resolve(allowed.includes(code)),
+  };
+}
+
 describe('UpdateTreatmentPlanUseCase', () => {
   it('throws NotFoundException when the plan does not exist (or belongs to another tenant)', async () => {
     const repo = makeRepo({
@@ -60,7 +71,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
       updatePlan: (): Promise<TreatmentPlan> =>
         Promise.reject(new Error('updatePlan should not be called')),
     });
-    const uc = new UpdateTreatmentPlanUseCase(repo);
+    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
 
     await expect(
       uc.execute('missing-id', { status: TreatmentPlanStatus.ACCEPTED }),
@@ -87,7 +98,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
         return Promise.resolve(updated);
       },
     });
-    const uc = new UpdateTreatmentPlanUseCase(repo);
+    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
 
     const result = await uc.execute(existing.id, { status });
 
@@ -109,11 +120,72 @@ describe('UpdateTreatmentPlanUseCase', () => {
         return Promise.resolve({ ...existing, notes: patch.notes ?? null });
       },
     });
-    const uc = new UpdateTreatmentPlanUseCase(repo);
+    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
 
     const result = await uc.execute(existing.id, { notes: 'Nueva nota' });
 
     expect(result.notes).toBe('Nueva nota');
     expect(receivedPatch).toEqual({ notes: 'Nueva nota' });
+  });
+
+  it('validates and uppercases currency only when provided, forwarding it to the repo', async () => {
+    const existing = fakePlanWithItems();
+    let receivedPatch: UpdateTreatmentPlanRepoInput | undefined;
+    const repo = makeRepo({
+      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
+        Promise.resolve(id === existing.id ? existing : null),
+      updatePlan: (
+        _id: string,
+        patch: UpdateTreatmentPlanRepoInput,
+      ): Promise<TreatmentPlan> => {
+        receivedPatch = patch;
+        return Promise.resolve({
+          ...existing,
+          currency: patch.currency ?? existing.currency,
+        });
+      },
+    });
+    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
+
+    const result = await uc.execute(existing.id, { currency: 'cop' });
+
+    expect(result.currency).toBe('COP');
+    expect(receivedPatch).toEqual({ currency: 'COP' });
+  });
+
+  it('rejects an unknown currency with BadRequestException, without calling the repo', async () => {
+    const existing = fakePlanWithItems();
+    const repo = makeRepo({
+      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
+        Promise.resolve(id === existing.id ? existing : null),
+      updatePlan: (): Promise<TreatmentPlan> =>
+        Promise.reject(new Error('updatePlan should not be called')),
+    });
+    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
+
+    await expect(
+      uc.execute(existing.id, { currency: 'XXX' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('leaves currency untouched (no whitelist call needed) when omitted', async () => {
+    const existing = fakePlanWithItems();
+    let receivedPatch: UpdateTreatmentPlanRepoInput | undefined;
+    const repo = makeRepo({
+      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
+        Promise.resolve(id === existing.id ? existing : null),
+      updatePlan: (
+        _id: string,
+        patch: UpdateTreatmentPlanRepoInput,
+      ): Promise<TreatmentPlan> => {
+        receivedPatch = patch;
+        return Promise.resolve(existing);
+      },
+    });
+    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist([]));
+
+    await uc.execute(existing.id, { notes: 'sin cambio de moneda' });
+
+    expect(receivedPatch && 'currency' in receivedPatch).toBe(false);
   });
 });
