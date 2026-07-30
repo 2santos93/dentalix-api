@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { ReferenceRepository } from '../../domain/ports/reference-repository.port';
 import { Currency } from '../../domain/entities/currency.entity';
@@ -26,15 +25,30 @@ export class PrismaReferenceRepository implements ReferenceRepository {
     q: string | undefined,
     limit: number,
   ): Promise<City[]> {
-    const where: Prisma.CityWhereInput = { countryCode };
-    if (q && q.trim() !== '') {
-      where.name = { contains: q.trim(), mode: 'insensitive' };
+    const term = q?.trim();
+    if (!term) {
+      return this.prisma.city.findMany({
+        where: { countryCode },
+        orderBy: { name: 'asc' },
+        take: limit,
+        select: { id: true, name: true, region: true },
+      });
     }
-    return this.prisma.city.findMany({
-      where,
-      orderBy: { name: 'asc' },
-      take: limit,
-      select: { id: true, name: true, region: true },
-    });
+    // Accent-insensitive (and case-insensitive) match so "medellin" finds
+    // "Medellín". Prisma's `mode: 'insensitive'` only folds case, not accents,
+    // so we drop to a raw query using the `unaccent` extension (enabled by the
+    // 20260729000000_enable_unaccent migration). ILIKE wildcards in the user
+    // input are escaped so the term matches literally, matching the previous
+    // `contains` semantics.
+    const escaped = term.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const pattern = `%${escaped}%`;
+    return this.prisma.$queryRaw<City[]>`
+      SELECT id, name, region
+      FROM cities
+      WHERE "countryCode" = ${countryCode}
+        AND unaccent(name) ILIKE unaccent(${pattern})
+      ORDER BY name ASC
+      LIMIT ${limit}
+    `;
   }
 }
