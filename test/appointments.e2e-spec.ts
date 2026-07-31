@@ -7,6 +7,19 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 
+// Las horas de este spec son un `HH:MM` fijo sobre un día SIEMPRE FUTURO:
+// CreateAppointmentUseCase rechaza un `start` en el pasado, así que una fecha
+// hardcodeada haría fallar la suite al pasar ese día. Anclar el día preserva las
+// relaciones de solape entre los literales (10:00 / 10:15 / 10:30 ...).
+// Mismo criterio que dashboard.e2e-spec.ts, que ya usaba `Date.now() + N días`.
+const ANCHOR_DAY = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+function at(time: string): string {
+  return `${ANCHOR_DAY}T${time}:00.000Z`;
+}
+
+
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
 // conexión sin contexto de tenant (rol dentalix_app vía DATABASE_URL) ve 0
@@ -208,8 +221,8 @@ describe('Appointments (e2e)', () => {
       .send({
         patientId: patientA.id,
         providerId: clinicA.userId,
-        start: '2026-08-01T10:00:00.000Z',
-        end: '2026-08-01T10:30:00.000Z',
+        start: at('10:00'),
+        end: at('10:30'),
         reason: 'Control de rutina',
       })
       .expect(201);
@@ -226,7 +239,7 @@ describe('Appointments (e2e)', () => {
     const listCovering = await request(app.getHttpServer())
       .get('/api/v1/appointments')
       .query({
-        from: '2026-08-01T00:00:00.000Z',
+        from: at('00:00'),
         to: '2026-08-02T00:00:00.000Z',
       })
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
@@ -256,8 +269,8 @@ describe('Appointments (e2e)', () => {
       .send({
         patientId: patientA.id,
         providerId: clinicA.userId,
-        start: '2026-08-01T10:15:00.000Z',
-        end: '2026-08-01T10:45:00.000Z',
+        start: at('10:15'),
+        end: at('10:45'),
       })
       .expect(409);
 
@@ -270,8 +283,8 @@ describe('Appointments (e2e)', () => {
       .send({
         patientId: patientA.id,
         providerId: clinicA.userId,
-        start: '2026-08-01T10:30:00.000Z',
-        end: '2026-08-01T11:00:00.000Z',
+        start: at('10:30'),
+        end: at('11:00'),
       })
       .expect(201);
     const appt2 = create2.body as AppointmentResponseBody;
@@ -292,8 +305,8 @@ describe('Appointments (e2e)', () => {
       .send({
         patientId: patientA.id,
         providerId: clinicA.userId,
-        start: '2026-08-01T10:00:00.000Z',
-        end: '2026-08-01T10:30:00.000Z',
+        start: at('10:00'),
+        end: at('10:30'),
       })
       .expect(201);
     const appt3 = create3.body as AppointmentResponseBody;
@@ -326,7 +339,7 @@ describe('Appointments (e2e)', () => {
     const listAsB = await request(app.getHttpServer())
       .get('/api/v1/appointments')
       .query({
-        from: '2026-08-01T00:00:00.000Z',
+        from: at('00:00'),
         to: '2026-08-02T00:00:00.000Z',
       })
       .set('X-Tenant-Host', hostFor(clinicB.subdomain))
@@ -355,15 +368,15 @@ describe('Appointments (e2e)', () => {
       .send({
         patientId: patientA.id,
         providerId: clinicA.userId,
-        start: '2026-08-01T14:00:00.000Z',
-        end: '2026-08-01T14:30:00.000Z',
+        start: at('14:00'),
+        end: at('14:30'),
       })
       .expect(201);
 
     await request(app.getHttpServer())
       .get('/api/v1/appointments')
       .query({
-        from: '2026-08-01T00:00:00.000Z',
+        from: at('00:00'),
         to: '2026-08-02T00:00:00.000Z',
       })
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))

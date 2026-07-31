@@ -8,14 +8,27 @@ import {
 } from '../../domain/ports/appointment-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 
+// Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
+// está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
+// ahora rechazan un `start` en el pasado. Anclar el día (en vez de hardcodear
+// una fecha) mantiene intactas las relaciones de solape entre los literales de
+// abajo y evita que el spec se podra al pasar esa fecha.
+const ANCHOR_DAY = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+function at(time: string): Date {
+  return new Date(`${ANCHOR_DAY}T${time}:00.000Z`);
+}
+
+
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
     id: 'a1',
     tenantId: 't1',
     patientId: 'p1',
     providerId: 'prov1',
-    start: new Date('2026-08-01T10:00:00.000Z'),
-    end: new Date('2026-08-01T10:30:00.000Z'),
+    start: at('10:00'),
+    end: at('10:30'),
     status: AppointmentStatus.SCHEDULED,
     reason: null,
     notes: null,
@@ -52,8 +65,62 @@ function makeRepo(
 }
 
 describe('CreateAppointmentUseCase', () => {
-  const start = new Date('2026-08-01T10:00:00.000Z');
-  const end = new Date('2026-08-01T10:30:00.000Z');
+  const start = at('10:00');
+  const end = at('10:30');
+
+  describe('no agendar en el pasado', () => {
+    it('rechaza una cita cuya fecha ya pasó', async () => {
+      const repo = makeRepo({
+        create: (): Promise<Appointment> =>
+          Promise.reject(new Error('create should not be called')),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: yesterday,
+          end: new Date(yesterday.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toThrow('No se puede agendar una cita en el pasado');
+    });
+
+    it('rechaza HOY a una hora que ya pasó (el caso que se cuela por un date input sin min)', async () => {
+      const repo = makeRepo({
+        create: (): Promise<Appointment> =>
+          Promise.reject(new Error('create should not be called')),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+      // Una hora atrás: mismo día, instante pasado.
+      const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: anHourAgo,
+          end: new Date(anHourAgo.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('acepta una cita inmediata (start ~ahora) — solo se rechaza lo estrictamente anterior', async () => {
+      const repo = makeRepo();
+      const uc = new CreateAppointmentUseCase(repo);
+      const soon = new Date(Date.now() + 1000);
+
+      const result = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: soon,
+        end: new Date(soon.getTime() + 30 * 60 * 1000),
+      });
+
+      expect(result.patientId).toBe('p1');
+    });
+  });
 
   it('creates an appointment and returns the mapped entity when there is no overlap', async () => {
     const repo = makeRepo();
@@ -168,28 +235,28 @@ describe('CreateAppointmentUseCase', () => {
       const repo = new InMemoryAppointmentRepository();
       repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
       });
       const uc = new CreateAppointmentUseCase(repo);
 
       const result = await uc.execute({
         patientId: 'p2',
         providerId: 'prov1',
-        start: new Date('2026-08-01T11:00:00.000Z'),
-        end: new Date('2026-08-01T12:00:00.000Z'),
+        start: at('11:00'),
+        end: at('12:00'),
       });
 
       expect(result.providerId).toBe('prov1');
-      expect(result.start).toEqual(new Date('2026-08-01T11:00:00.000Z'));
+      expect(result.start).toEqual(at('11:00'));
     });
 
     it('does not block on a CANCELLED appointment for the same provider/slot', async () => {
       const repo = new InMemoryAppointmentRepository();
       repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
         status: AppointmentStatus.CANCELLED,
       });
       const uc = new CreateAppointmentUseCase(repo);
@@ -197,8 +264,8 @@ describe('CreateAppointmentUseCase', () => {
       const result = await uc.execute({
         patientId: 'p2',
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:30:00.000Z'),
-        end: new Date('2026-08-01T11:30:00.000Z'),
+        start: at('10:30'),
+        end: at('11:30'),
       });
 
       expect(result.providerId).toBe('prov1');
@@ -208,8 +275,8 @@ describe('CreateAppointmentUseCase', () => {
       const repo = new InMemoryAppointmentRepository();
       repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
       });
       const uc = new CreateAppointmentUseCase(repo);
 
@@ -217,8 +284,8 @@ describe('CreateAppointmentUseCase', () => {
         uc.execute({
           patientId: 'p2',
           providerId: 'prov1',
-          start: new Date('2026-08-01T10:30:00.000Z'),
-          end: new Date('2026-08-01T11:30:00.000Z'),
+          start: at('10:30'),
+          end: at('11:30'),
         }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
@@ -227,16 +294,16 @@ describe('CreateAppointmentUseCase', () => {
       const repo = new InMemoryAppointmentRepository();
       repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
       });
       const uc = new CreateAppointmentUseCase(repo);
 
       const result = await uc.execute({
         patientId: 'p2',
         providerId: 'prov2',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
       });
 
       expect(result.providerId).toBe('prov2');
