@@ -243,7 +243,17 @@ describe('Role matrix (e2e)', () => {
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)
-      .send({ allergies: 'Intento recepcion', notes: 'No deberia guardar' })
+      .send({
+        allergies: [
+          {
+            alergeno: 'Intento recepcion',
+            tipo: 'MEDICAMENTO',
+            severidad: 'LEVE',
+            esAlerta: false,
+          },
+        ],
+        notes: 'No deberia guardar',
+      })
       .expect(403);
 
     // The odontogram controller's read route for tooth records is
@@ -322,7 +332,17 @@ describe('Role matrix (e2e)', () => {
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({ allergies: 'Ninguna', notes: 'Guardado por owner' })
+      .send({
+        allergies: [
+          {
+            alergeno: 'Ninguna',
+            tipo: 'MEDICAMENTO',
+            severidad: 'LEVE',
+            esAlerta: false,
+          },
+        ],
+        notes: 'Guardado por owner',
+      })
       .expect(200);
   });
 });

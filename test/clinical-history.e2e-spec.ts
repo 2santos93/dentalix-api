@@ -31,12 +31,20 @@ interface PatientResponseBody {
   tenantId: string;
 }
 
+interface AllergyResponseBody {
+  alergeno: string;
+  tipo: string;
+  reaccion?: string;
+  severidad: string;
+  esAlerta: boolean;
+}
+
 interface MedicalHistoryResponseBody {
   id: string;
   tenantId: string;
   patientId: string;
   version: number;
-  allergies: string | null;
+  allergies: AllergyResponseBody[];
   notes: string | null;
 }
 
@@ -181,18 +189,38 @@ describe('Clinical history (e2e)', () => {
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({ allergies: 'Penicilina', notes: 'Version 1' })
+      .send({
+        allergies: [
+          {
+            alergeno: 'Penicilina',
+            tipo: 'MEDICAMENTO',
+            severidad: 'MODERADA',
+            esAlerta: true,
+          },
+        ],
+        notes: 'Version 1',
+      })
       .expect(200);
     const putV1Body = putV1.body as MedicalHistoryResponseBody;
     expect(putV1Body.version).toBe(1);
-    expect(putV1Body.allergies).toBe('Penicilina');
+    expect(putV1Body.allergies[0].alergeno).toBe('Penicilina');
     expect(putV1Body.notes).toBe('Version 1');
 
     const putV2 = await request(app.getHttpServer())
       .put(`/api/v1/patients/${patientA.id}/medical-history`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({ allergies: 'Ninguna conocida', notes: 'Version 2' })
+      .send({
+        allergies: [
+          {
+            alergeno: 'Latex',
+            tipo: 'MATERIAL',
+            severidad: 'LEVE',
+            esAlerta: false,
+          },
+        ],
+        notes: 'Version 2',
+      })
       .expect(200);
     const putV2Body = putV2.body as MedicalHistoryResponseBody;
     expect(putV2Body.version).toBe(2);
@@ -205,7 +233,7 @@ describe('Clinical history (e2e)', () => {
       .expect(200);
     const getLatestBody = getLatest.body as MedicalHistoryResponseBody;
     expect(getLatestBody.version).toBe(2);
-    expect(getLatestBody.allergies).toBe('Ninguna conocida');
+    expect(getLatestBody.allergies[0].alergeno).toBe('Latex');
     expect(getLatestBody.notes).toBe('Version 2');
 
     // --- 3. Clinical entries: POST two entries out of chronological insert
