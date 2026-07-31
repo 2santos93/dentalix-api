@@ -38,7 +38,7 @@ describe('GetMyProfileUseCase', () => {
   it('throws NotFound when the user does not exist', async () => {
     const uc = new GetMyProfileUseCase(makeRepo({ findUserById: async () => null }));
     await expect(
-      uc.execute({ userId: 'x', tenantId: 't1', role: ClinicRole.OWNER }),
+      uc.execute({ userId: 'x', tenantId: 't1', role: ClinicRole.ADMIN }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

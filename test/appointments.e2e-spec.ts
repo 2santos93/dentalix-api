@@ -399,7 +399,7 @@ describe('Appointments (e2e)', () => {
     const staffBody = staff.body as StaffMemberResponseBody[];
     expect(staffBody.find((m) => m.userId === clinicA.userId)).toMatchObject({
       userId: clinicA.userId,
-      role: ClinicRole.OWNER,
+      role: ClinicRole.ADMIN,
     });
     expect(staffBody.some((m) => m.role === ClinicRole.RECEPTION)).toBe(true);
     expect(staffBody.some((m) => m.role === ClinicRole.DENTIST)).toBe(true);

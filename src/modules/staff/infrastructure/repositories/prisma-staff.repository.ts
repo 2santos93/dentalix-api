@@ -196,12 +196,12 @@ export class PrismaStaffRepository implements StaffRepository {
     });
   }
 
-  async countActiveOwners(): Promise<number> {
+  async countActiveAdmins(): Promise<number> {
     return this.prisma.runWithTenant(async (tx) =>
       tx.clinicMembership.count({
         where: {
           deletedAt: null,
-          role: ClinicRole.OWNER,
+          role: ClinicRole.ADMIN,
           user: { deletedAt: null },
         },
       }),

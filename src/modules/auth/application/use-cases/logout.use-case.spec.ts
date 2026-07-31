@@ -5,7 +5,7 @@ describe('LogoutUseCase', () => {
   const decoded = {
     sub: 'u1',
     tenantId: 't1',
-    role: ClinicRole.OWNER,
+    role: ClinicRole.ADMIN,
     jti: 'jti-1',
     exp: 1893456000, // 2030-01-01
   };

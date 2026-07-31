@@ -452,7 +452,7 @@ describe('Payments (e2e)', () => {
         .expect(200);
       expect((balance5.body as PlanBalanceResponseBody).paymentsCount).toBe(1);
 
-      // --- 9. Roles: DENTIST is not in PAYMENT_ROLES -> 403; OWNER (already
+      // --- 9. Roles: DENTIST is not in PAYMENT_ROLES -> 403; ADMIN (already
       // proven above) + a seeded RECEPTION -> allowed.
       await seedRoledMember(
         clinicA.tenantId,

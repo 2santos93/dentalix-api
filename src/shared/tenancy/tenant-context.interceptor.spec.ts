@@ -35,7 +35,7 @@ describe('TenantContextInterceptor', () => {
     const interceptor = new TenantContextInterceptor(tenantContext);
     const ctx = makeCtx({
       tenantHost: { tenantId: 't-1' },
-      user: { tenantId: 't-1', sub: 'u', role: 'OWNER' },
+      user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
     });
     const next = makeHandlerThatReadsTenantContext(tenantContext);
 
@@ -55,7 +55,7 @@ describe('TenantContextInterceptor', () => {
     const interceptor = new TenantContextInterceptor(tenantContext);
     const ctx = makeCtx({
       tenantHost: { tenantId: 't-1' },
-      user: { tenantId: 't-2', sub: 'u', role: 'OWNER' },
+      user: { tenantId: 't-2', sub: 'u', role: 'ADMIN' },
     });
     const next = makeHandlerThatReadsTenantContext(tenantContext);
     const handleSpy = jest.spyOn(next, 'handle');
@@ -71,7 +71,7 @@ describe('TenantContextInterceptor', () => {
     const interceptor = new TenantContextInterceptor(tenantContext);
     const ctx = makeCtx({
       tenantHost: { tenantId: null },
-      user: { tenantId: 't-1', sub: 'u', role: 'OWNER' },
+      user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
     });
     const next = makeHandlerThatReadsTenantContext(tenantContext);
     const handleSpy = jest.spyOn(next, 'handle');

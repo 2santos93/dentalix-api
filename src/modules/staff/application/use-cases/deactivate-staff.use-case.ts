@@ -24,10 +24,10 @@ export class DeactivateStaffUseCase {
     const current = await this.repo.findById(input.userId);
     if (!current) throw new NotFoundException('Staff member not found');
     if (
-      current.role === ClinicRole.OWNER &&
-      (await this.repo.countActiveOwners()) <= 1
+      current.role === ClinicRole.ADMIN &&
+      (await this.repo.countActiveAdmins()) <= 1
     ) {
-      throw new ConflictException('Cannot deactivate the last owner');
+      throw new ConflictException('Cannot deactivate the last admin');
     }
     const ok = await this.repo.deactivateById(input.userId);
     if (!ok) throw new NotFoundException('Staff member not found');

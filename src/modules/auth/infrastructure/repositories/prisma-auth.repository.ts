@@ -50,7 +50,7 @@ export class PrismaAuthRepository implements AuthRepository {
       });
       await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenant.id}, true)`;
       await tx.clinicMembership.create({
-        data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.OWNER },
+        data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.ADMIN },
       });
       return { tenantId: tenant.id, userId: user.id };
     });

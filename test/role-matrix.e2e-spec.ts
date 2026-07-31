@@ -302,7 +302,7 @@ describe('Role matrix (e2e)', () => {
       .set('Authorization', `Bearer ${dentistToken}`)
       .expect(200);
 
-    // Blocked: catalog write (OWNER/ADMIN only) -- 403.
+    // Blocked: catalog write (ADMIN only) -- 403.
     await request(app.getHttpServer())
       .post('/api/v1/catalog/items')
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
@@ -315,15 +315,15 @@ describe('Role matrix (e2e)', () => {
       })
       .expect(403);
 
-    // ================= OWNER (sanity: matrix permits, not deny-all) =======
+    // ================= ADMIN (sanity: matrix permits, not deny-all) =======
     await request(app.getHttpServer())
       .post('/api/v1/catalog/items')
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
-        code: 'OWNER-ITEM',
+        code: 'ADMIN-ITEM',
         kind: 'DIAGNOSIS',
-        labelEs: 'Item owner',
+        labelEs: 'Item admin',
         color: '#445566',
       })
       .expect(201);

@@ -38,7 +38,7 @@ interface AuthenticatedRequest {
   user: JwtPayload;
 }
 
-// Pagos/abonos es dato FINANCIERO -> @Roles(...PAYMENT_ROLES) (OWNER/ADMIN +
+// Pagos/abonos es dato FINANCIERO -> @Roles(...PAYMENT_ROLES) (ADMIN +
 // RECEPTION -- mostrador + gestión; DENTIST/ASSISTANT NO, ver
 // docs/plans/2026-07-24-payments-pivot.md "Global Constraints"). No
 // `@Controller(prefix)` base: routes mix a plan-nested path

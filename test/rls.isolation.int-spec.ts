@@ -23,7 +23,7 @@ async function seedTenant(subdomain: string) {
   });
   await prisma.runWithTenant(tenant.id, (tx) =>
     tx.clinicMembership.create({
-      data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.OWNER },
+      data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.ADMIN },
     }),
   );
   return tenant;

@@ -14,7 +14,7 @@ const makeRepo = (over = {}) => ({
     ...member(p.role ?? ClinicRole.DENTIST),
     fullName: p.fullName ?? 'Ana',
   })),
-  countActiveOwners: jest.fn().mockResolvedValue(2),
+  countActiveAdmins: jest.fn().mockResolvedValue(2),
   ...over,
 });
 
@@ -41,13 +41,13 @@ it('404 si no es miembro', async () => {
   ).rejects.toBeInstanceOf(NotFoundException);
 });
 
-it('409 al degradar al último OWNER', async () => {
+it('409 al degradar al último ADMIN', async () => {
   const repo = makeRepo({
-    findById: jest.fn().mockResolvedValue(member(ClinicRole.OWNER)),
-    countActiveOwners: jest.fn().mockResolvedValue(1),
+    findById: jest.fn().mockResolvedValue(member(ClinicRole.ADMIN)),
+    countActiveAdmins: jest.fn().mockResolvedValue(1),
   });
   const uc = new UpdateStaffUseCase(repo as any);
   await expect(
-    uc.execute({ userId: 'u1', role: ClinicRole.ADMIN }),
+    uc.execute({ userId: 'u1', role: ClinicRole.DENTIST }),
   ).rejects.toBeInstanceOf(ConflictException);
 });

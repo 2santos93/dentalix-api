@@ -14,7 +14,7 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     updateById: (): Promise<StaffMember | null> => Promise.resolve(null),
     deactivateById: (): Promise<boolean> => Promise.resolve(false),
     reactivateMembership: (): Promise<StaffMember | null> => Promise.resolve(null),
-    countActiveOwners: (): Promise<number> => Promise.resolve(0),
+    countActiveAdmins: (): Promise<number> => Promise.resolve(0),
     ...overrides,
   };
 }
@@ -26,7 +26,7 @@ describe('ListStaffUseCase', () => {
         userId: 'u1',
         fullName: 'Dr. Owner',
         email: 'ana@clinic.com',
-        role: ClinicRole.OWNER,
+        role: ClinicRole.ADMIN,
       },
       {
         userId: 'u2',

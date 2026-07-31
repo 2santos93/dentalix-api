@@ -10,7 +10,7 @@ const member = (role: ClinicRole) => ({
 });
 const makeRepo = (over = {}) => ({
   findById: jest.fn().mockResolvedValue(member(ClinicRole.DENTIST)),
-  countActiveOwners: jest.fn().mockResolvedValue(2),
+  countActiveAdmins: jest.fn().mockResolvedValue(2),
   deactivateById: jest.fn().mockResolvedValue(true),
   ...over,
 });
@@ -41,10 +41,10 @@ it('409 al desactivarte a ti mismo', async () => {
     }),
   ).rejects.toBeInstanceOf(ConflictException);
 });
-it('409 al desactivar al último OWNER', async () => {
+it('409 al desactivar al último ADMIN', async () => {
   const repo = makeRepo({
-    findById: jest.fn().mockResolvedValue(member(ClinicRole.OWNER)),
-    countActiveOwners: jest.fn().mockResolvedValue(1),
+    findById: jest.fn().mockResolvedValue(member(ClinicRole.ADMIN)),
+    countActiveAdmins: jest.fn().mockResolvedValue(1),
   });
   await expect(
     new DeactivateStaffUseCase(repo as any).execute({

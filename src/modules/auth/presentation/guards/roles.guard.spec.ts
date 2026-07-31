@@ -25,9 +25,9 @@ describe('RolesGuard', () => {
   });
 
   it('allows a user whose role is in the required set', () => {
-    const { ctx, reflector } = makeCtx(ClinicRole.OWNER, [
-      ClinicRole.OWNER,
+    const { ctx, reflector } = makeCtx(ClinicRole.ADMIN, [
       ClinicRole.ADMIN,
+      ClinicRole.DENTIST,
     ]);
     const guard = new RolesGuard(reflector);
     expect(guard.canActivate(ctx)).toBe(true);
@@ -35,7 +35,7 @@ describe('RolesGuard', () => {
 
   it('forbids a user whose role is not allowed', () => {
     const { ctx, reflector } = makeCtx(ClinicRole.RECEPTION, [
-      ClinicRole.OWNER,
+      ClinicRole.ADMIN,
     ]);
     const guard = new RolesGuard(reflector);
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);

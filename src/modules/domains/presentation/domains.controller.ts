@@ -22,7 +22,8 @@ import { VerifyDomainUseCase } from '../application/use-cases/verify-domain.use-
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
-@Roles(ClinicRole.OWNER)
+// Dominios personalizados (blanqueo de marca): solo gestión (ADMIN).
+@Roles(ClinicRole.ADMIN)
 @Controller('domains')
 export class DomainsController {
   constructor(

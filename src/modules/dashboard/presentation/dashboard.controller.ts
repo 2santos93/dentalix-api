@@ -19,7 +19,7 @@ import { DASHBOARD_ROLES } from '../../auth/presentation/guards/clinic-role-sets
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 
 // Vista de gestión (ingresos/pagos convertidos + bajo stock + próximas citas
-// + # pacientes) -> @Roles(...DASHBOARD_ROLES) (OWNER/ADMIN, coherente con
+// + # pacientes) -> @Roles(...DASHBOARD_ROLES) (ADMIN, coherente con
 // PAYMENT_ROLES que ya restringe el dato financiero que este endpoint agrega
 // -- ver docs/plans/2026-07-24-payments-pivot.md).
 @ApiTags('dashboard')

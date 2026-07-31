@@ -67,9 +67,9 @@ export interface StaffRepository {
   ): Promise<StaffMember | null>;
 
   /**
-   * Count of active (non-deleted) `OWNER` memberships for the current
+   * Count of active (non-deleted) `ADMIN` memberships for the current
    * tenant, joined to non-deleted users. Tenant-scoped (via RLS /
    * `runWithTenant`).
    */
-  countActiveOwners(): Promise<number>;
+  countActiveAdmins(): Promise<number>;
 }

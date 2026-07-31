@@ -354,7 +354,7 @@ describe('Inventory (e2e)', () => {
         .expect(404);
 
       // --- 11. Roles: RECEPTION is not in INVENTORY_ROLES -> 403 on POST
-      // and GET; OWNER (already proven above) + a seeded ASSISTANT -> OK.
+      // and GET; ADMIN (already proven above) + a seeded ASSISTANT -> OK.
       await seedRoledMember(
         clinicA.tenantId,
         'reception@clinica-inventory-a.com',

@@ -39,7 +39,6 @@ model User {
 }
 
 enum ClinicRole {
-  OWNER
   DENTIST
   ASSISTANT
   RECEPTION

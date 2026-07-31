@@ -29,7 +29,7 @@ describe('LoginUseCase', () => {
     const repo = makeRepo({
       userId: 'u1',
       passwordHash: hash,
-      role: ClinicRole.OWNER,
+      role: ClinicRole.ADMIN,
     });
     const uc = new LoginUseCase(repo, password, tokens);
     const result = await uc.execute({
@@ -52,7 +52,7 @@ describe('LoginUseCase', () => {
     const repo = makeRepo({
       userId: 'u1',
       passwordHash: hash,
-      role: ClinicRole.OWNER,
+      role: ClinicRole.ADMIN,
     });
     const uc = new LoginUseCase(repo, password, tokens);
     await expect(

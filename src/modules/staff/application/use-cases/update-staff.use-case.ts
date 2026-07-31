@@ -25,11 +25,11 @@ export class UpdateStaffUseCase {
     if (!current) throw new NotFoundException('Staff member not found');
     if (
       input.role &&
-      current.role === ClinicRole.OWNER &&
-      input.role !== ClinicRole.OWNER
+      current.role === ClinicRole.ADMIN &&
+      input.role !== ClinicRole.ADMIN
     ) {
-      if ((await this.repo.countActiveOwners()) <= 1)
-        throw new ConflictException('Cannot demote the last owner');
+      if ((await this.repo.countActiveAdmins()) <= 1)
+        throw new ConflictException('Cannot demote the last admin');
     }
     const patch: { fullName?: string; role?: ClinicRole } = {};
     if (input.role) patch.role = input.role;

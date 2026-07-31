@@ -304,7 +304,7 @@ describe('Payment plans / cuotas (e2e)', () => {
         })
         .expect(403);
 
-      // --- 4. OWNER creates the payment plan -> 201, 12 installments,
+      // --- 4. ADMIN creates the payment plan -> 201, 12 installments,
       // totalToFinance defaults to the plan balance (1200).
       const createPaymentPlan = await request(app.getHttpServer())
         .post(`/api/v1/treatment-plans/${plan.id}/payment-plan`)

@@ -369,7 +369,7 @@ describe('Treatment plans (e2e)', () => {
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
       .expect(404);
 
-    // --- 10. RECEPTION 403 on any treatment-plans route; OWNER/DENTIST OK.
+    // --- 10. RECEPTION 403 on any treatment-plans route; ADMIN/DENTIST OK.
     await seedRoledMember(
       clinicA.tenantId,
       'reception@clinica-tp-a.com',
@@ -418,7 +418,7 @@ describe('Treatment plans (e2e)', () => {
       .send({ notes: 'Plan de dentista' })
       .expect(201);
 
-    // OWNER sanity: not-deny-all.
+    // ADMIN sanity: not-deny-all.
     await request(app.getHttpServer())
       .get(`/api/v1/patients/${patientA.id}/treatment-plans`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))

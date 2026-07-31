@@ -45,8 +45,8 @@ interface AuthenticatedRequest {
   user: JwtPayload;
 }
 
-// Plan de tratamiento es dato CLÍNICO -> @Roles(...CLINICAL_ROLES) (OWNER/
-// DENTIST/ASSISTANT/ADMIN, NO recepción — ver docs/plans/2026-07-24-treatment-plans.md
+// Plan de tratamiento es dato CLÍNICO -> @Roles(...CLINICAL_ROLES) (DENTIST/
+// ASSISTANT/ADMIN, NO recepción — ver docs/plans/2026-07-24-treatment-plans.md
 // "Global Constraints"). No `@Controller(prefix)` base: routes mix a
 // patient-nested path (`patients/:patientId/treatment-plans`) with top-level
 // paths keyed by plan/item id (`treatment-plans/:id[/items/:itemId]`), so each

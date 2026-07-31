@@ -64,7 +64,7 @@ describe('Me (e2e)', () => {
     expect(body.fullName).toBe('Nombre Viejo');
     expect(body.email).toBe('perfil@e2e.com');
     expect(body.avatarUrl).toBeNull();
-    expect(body.memberships[0]).toMatchObject({ clinicName: 'Perfil E2E', role: 'OWNER' });
+    expect(body.memberships[0]).toMatchObject({ clinicName: 'Perfil E2E', role: 'ADMIN' });
   });
 
   it('PATCH /me updates the name', async () => {

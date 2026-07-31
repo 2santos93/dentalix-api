@@ -78,9 +78,9 @@ async function registerAndLogin(
 // Siembra un usuario con contraseña hasheada igual que el registro, más su
 // membresía en la clínica (tenant) dada, con el rol pedido. Usa el cliente
 // `raw` (DIRECT_URL, superuser) porque bypassa RLS -- se usa aquí solo para
-// sembrar un segundo actor con permiso de escritura (ADMIN) que no sea el
-// propio OWNER, para poder probar la regla de "último owner" sin confundirla
-// con la de "no puedes desactivarte a ti mismo" (mismo patrón de seed que
+// sembrar un segundo actor ADMIN que luego se degrada (ver step 4a más abajo)
+// para poder probar la regla de "último admin" sin confundirla con la de "no
+// puedes desactivarte a ti mismo" (mismo patrón de seed que
 // appointments.e2e-spec.ts / role-matrix.e2e-spec.ts).
 async function seedRoledMember(
   tenantId: string,
@@ -155,7 +155,7 @@ describe('Staff (e2e)', () => {
       email: 'owner@clinica-staff-a.com',
     });
 
-    // --- 1. OWNER creates a DENTIST via POST /staff -> GET /staff includes
+    // --- 1. ADMIN creates a DENTIST via POST /staff -> GET /staff includes
     // it (with email) -> the new DENTIST can log in on the clinic host.
     const dentistEmail = 'dentist@clinica-staff-a.com';
     const createDentist = await request(app.getHttpServer())
@@ -197,7 +197,7 @@ describe('Staff (e2e)', () => {
     expect(dentistLogin.refreshToken).toBeDefined();
     const dentistToken = dentistLogin.accessToken;
 
-    // --- 2. OWNER PATCHes the DENTIST's role to ASSISTANT -> 200, role
+    // --- 2. ADMIN PATCHes the DENTIST's role to ASSISTANT -> 200, role
     // updated in GET /staff.
     const patchRole = await request(app.getHttpServer())
       .patch(`/api/v1/staff/${dentist.userId}`)
@@ -237,27 +237,44 @@ describe('Staff (e2e)', () => {
       })
       .expect(403);
 
-    // --- 4a. DELETE the last OWNER -> 409. Seed an ADMIN (also has
-    // STAFF_WRITE_ROLES permission) so the attempt to remove the sole OWNER
-    // is a distinct actor exercising the "cannot deactivate the last owner"
-    // rule, not the "cannot deactivate yourself" rule (see
-    // DeactivateStaffUseCase: self-check runs before the last-owner count).
-    const adminEmail = 'admin@clinica-staff-a.com';
-    const admin = await seedRoledMember(
+    // --- 4a. DELETE the last ADMIN -> 409. With OWNER gone, STAFF_WRITE_ROLES
+    // is ADMIN-only, so exercising "cannot deactivate the last admin" with an
+    // actor different from the target (i.e. NOT tripping the "cannot
+    // deactivate yourself" check, which runs first) needs a bit of setup:
+    // seed a second ADMIN, log it in (JWT role claim: ADMIN), then have
+    // clinicA legitimately PATCH that second admin's role down to DENTIST.
+    // That leaves clinicA as the sole ACTIVE admin in the DB, while the
+    // second admin's already-issued JWT still claims role ADMIN -- the
+    // RolesGuard reads the role straight off the JWT, not a fresh DB lookup
+    // (same snapshot behaviour exploited by the DENTIST-token probe in step 3
+    // above), so that stale token still clears STAFF_WRITE_ROLES and can
+    // attempt to deactivate clinicA as a genuinely different actor.
+    const secondAdminEmail = 'admin2@clinica-staff-a.com';
+    const secondAdmin = await seedRoledMember(
       clinicA.tenantId,
-      adminEmail,
+      secondAdminEmail,
       ClinicRole.ADMIN,
       'Seeded Admin',
     );
-    const adminLogin = await loginAs(app, { subdomain, email: adminEmail });
+    const secondAdminLogin = await loginAs(app, {
+      subdomain,
+      email: secondAdminEmail,
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/staff/${secondAdmin.userId}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Authorization', `Bearer ${clinicA.accessToken}`)
+      .send({ role: ClinicRole.DENTIST })
+      .expect(200);
 
     await request(app.getHttpServer())
       .delete(`/api/v1/staff/${clinicA.userId}`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${adminLogin.accessToken}`)
+      .set('Authorization', `Bearer ${secondAdminLogin.accessToken}`)
       .expect(409);
 
-    // Sole OWNER is still listed (delete above must not have taken effect).
+    // Sole ADMIN is still listed (delete above must not have taken effect).
     const listAfterFailedDelete = await request(app.getHttpServer())
       .get('/api/v1/staff')
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
@@ -265,14 +282,14 @@ describe('Staff (e2e)', () => {
       .expect(200);
     expect(
       (listAfterFailedDelete.body as StaffMemberResponseBody[]).some(
-        (m) => m.userId === clinicA.userId && m.role === ClinicRole.OWNER,
+        (m) => m.userId === clinicA.userId && m.role === ClinicRole.ADMIN,
       ),
     ).toBe(true);
 
-    // --- 4b. DELETE a normal member (the seeded ADMIN) -> 204, and it
-    // disappears from GET /staff.
+    // --- 4b. DELETE a normal member (the demoted second admin, now DENTIST)
+    // -> 204, and it disappears from GET /staff.
     await request(app.getHttpServer())
-      .delete(`/api/v1/staff/${admin.userId}`)
+      .delete(`/api/v1/staff/${secondAdmin.userId}`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(204);
@@ -284,7 +301,7 @@ describe('Staff (e2e)', () => {
       .expect(200);
     expect(
       (listAfterDelete.body as StaffMemberResponseBody[]).find(
-        (m) => m.userId === admin.userId,
+        (m) => m.userId === secondAdmin.userId,
       ),
     ).toBeUndefined();
 

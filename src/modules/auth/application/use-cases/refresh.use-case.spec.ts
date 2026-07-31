@@ -6,7 +6,7 @@ describe('RefreshUseCase', () => {
   const payload = {
     sub: 'u1',
     tenantId: 't1',
-    role: ClinicRole.OWNER,
+    role: ClinicRole.ADMIN,
     jti: 'jti-1',
     exp: 1893456000,
   };
@@ -27,7 +27,7 @@ describe('RefreshUseCase', () => {
     expect((tokens as unknown as { issue: jest.Mock }).issue).toHaveBeenCalledWith({
       sub: 'u1',
       tenantId: 't1',
-      role: ClinicRole.OWNER,
+      role: ClinicRole.ADMIN,
     });
   });
 

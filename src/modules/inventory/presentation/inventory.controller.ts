@@ -45,7 +45,7 @@ interface AuthenticatedRequest {
 }
 
 // Inventario es gestión de insumos + admin -> @Roles(...INVENTORY_ROLES)
-// (OWNER/ADMIN/ASSISTANT; RECEPTION/DENTIST NO -- ver
+// (ADMIN/ASSISTANT; RECEPTION/DENTIST NO -- ver
 // docs/plans/2026-07-24-inventory.md "Global Constraints"). Single
 // `@Controller('inventory/items')` prefix covers every route below (unlike
 // TreatmentPlansController, which mixes two different prefixes) --

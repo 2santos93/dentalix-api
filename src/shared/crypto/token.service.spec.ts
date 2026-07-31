@@ -14,7 +14,7 @@ function makeService(): TokenService {
 
 describe('TokenService', () => {
   const svc = makeService();
-  const payload = { sub: 'u1', tenantId: 't1', role: 'OWNER' as const };
+  const payload = { sub: 'u1', tenantId: 't1', role: 'ADMIN' as const };
 
   it('issues an access token that verifies back to the payload', async () => {
     const { accessToken, refreshToken } = await svc.issue(payload);
@@ -23,7 +23,7 @@ describe('TokenService', () => {
     const decoded = await svc.verifyAccess(accessToken);
     expect(decoded.sub).toBe('u1');
     expect(decoded.tenantId).toBe('t1');
-    expect(decoded.role).toBe('OWNER');
+    expect(decoded.role).toBe('ADMIN');
   });
 
   it('rejects a tampered access token', async () => {
@@ -35,7 +35,7 @@ describe('TokenService', () => {
     const decoded = await svc.verifyRefresh(refreshToken);
     expect(decoded.sub).toBe('u1');
     expect(decoded.tenantId).toBe('t1');
-    expect(decoded.role).toBe('OWNER');
+    expect(decoded.role).toBe('ADMIN');
   });
 
   it('rejects a tampered refresh token', async () => {

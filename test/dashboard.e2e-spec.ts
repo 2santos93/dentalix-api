@@ -356,7 +356,7 @@ describe('Dashboard (e2e)', () => {
       expect(dashB.patientCount).toBe(0);
 
       // --- 7. Roles: DENTIST and RECEPTION are not in DASHBOARD_ROLES ->
-      // 403; OWNER (already proven above via clinicA) -> 200.
+      // 403; ADMIN (already proven above via clinicA) -> 200.
       await seedRoledMember(
         clinicA.tenantId,
         'dentist@clinica-dash-a.com',
