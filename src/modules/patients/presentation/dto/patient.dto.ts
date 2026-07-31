@@ -49,6 +49,45 @@ export class PatientDto {
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
+  @ApiProperty()
+  dataConsentAccepted!: boolean;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  dataConsentAt!: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  dataConsentPolicyVersion!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  maritalStatus!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  occupation!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  insurerEps!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  physicianName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  physicianPhone!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  emergencyContactName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  emergencyContactRelationship!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  emergencyContactPhone!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  guardianName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  guardianDocNumber!: string | null;
+
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
 

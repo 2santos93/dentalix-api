@@ -1,17 +1,30 @@
-import { MedicalHistory } from '../entities/medical-history.entity';
+import {
+  MedicalHistory,
+  Allergy,
+  Condition,
+  Medication,
+  Habits,
+  DentalHistory,
+  Surgery,
+  VitalSigns,
+} from '../entities/medical-history.entity';
 
-// NOTE: deliberately NO `tenantId`/`version`/`id` fields — the tenant comes
-// from the guarded request context (never the client, same convention as
-// CreatePatientRepoInput / CreateDentalCatalogItemRepoInput), and `version`
-// is always computed by the repository (append-only: never chosen by a
-// caller).
+// NO `tenantId`/`version`/`id`/`safetyFlags`/`hasCriticalAlert`: tenant de
+// contexto, version calculada por el repo, banderas derivadas en el dominio.
+// `embarazo`/`semanasEmbarazo` SÍ son entrada (no se derivan de las listas);
+// alimentan `deriveSafetyFlags`.
 export interface MedicalHistoryVersionData {
-  allergies?: string;
-  chronicConditions?: string;
-  currentMedications?: string;
-  habits?: string;
-  medicalAlerts?: string;
+  allergies?: Allergy[];
+  conditions?: Condition[];
+  medications?: Medication[];
+  habits?: Habits;
+  dentalHistory?: DentalHistory;
+  surgeries?: Surgery[];
+  vitalSigns?: VitalSigns;
+  familyHistory?: string;
   notes?: string;
+  embarazo?: boolean;
+  semanasEmbarazo?: number;
 }
 
 export const MEDICAL_HISTORY_REPOSITORY = Symbol('MEDICAL_HISTORY_REPOSITORY');

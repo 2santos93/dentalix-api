@@ -29,6 +29,19 @@ function mapToEntity(patient: PrismaPatient): Patient {
     countryCode: patient.countryCode,
     cityId: patient.cityId,
     notes: patient.notes,
+    dataConsentAccepted: patient.dataConsentAccepted,
+    dataConsentAt: patient.dataConsentAt,
+    dataConsentPolicyVersion: patient.dataConsentPolicyVersion,
+    maritalStatus: patient.maritalStatus,
+    occupation: patient.occupation,
+    insurerEps: patient.insurerEps,
+    physicianName: patient.physicianName,
+    physicianPhone: patient.physicianPhone,
+    emergencyContactName: patient.emergencyContactName,
+    emergencyContactRelationship: patient.emergencyContactRelationship,
+    emergencyContactPhone: patient.emergencyContactPhone,
+    guardianName: patient.guardianName,
+    guardianDocNumber: patient.guardianDocNumber,
     createdById: patient.createdById,
     createdAt: patient.createdAt,
     updatedAt: patient.updatedAt,
@@ -62,7 +75,7 @@ export class PrismaPatientRepository implements PatientRepository {
   async create(input: CreatePatientRepoInput): Promise<Patient> {
     const tenantId = this.requireTenantId();
     const patient = await this.prisma.runWithTenant(async (tx) => {
-      return tx.patient.create({
+      const created = await tx.patient.create({
         data: {
           tenantId,
           firstName: input.firstName,
@@ -77,9 +90,48 @@ export class PrismaPatientRepository implements PatientRepository {
           countryCode: input.countryCode,
           cityId: input.cityId,
           notes: input.notes,
+          dataConsentAccepted: input.dataConsentAccepted ?? false,
+          dataConsentAt: input.dataConsentAt,
+          dataConsentPolicyVersion: input.dataConsentPolicyVersion,
+          maritalStatus: input.maritalStatus,
+          occupation: input.occupation,
+          insurerEps: input.insurerEps,
+          physicianName: input.physicianName,
+          physicianPhone: input.physicianPhone,
+          emergencyContactName: input.emergencyContactName,
+          emergencyContactRelationship: input.emergencyContactRelationship,
+          emergencyContactPhone: input.emergencyContactPhone,
+          guardianName: input.guardianName,
+          guardianDocNumber: input.guardianDocNumber,
           createdById: input.createdById,
         },
       });
+
+      if (input.medicalHistory) {
+        const { data, safetyFlags, hasCriticalAlert } = input.medicalHistory;
+        await tx.medicalHistoryVersion.create({
+          data: {
+            tenantId,
+            patientId: created.id,
+            version: 1,
+            allergies: (data.allergies ?? []) as unknown as Prisma.InputJsonValue,
+            conditions: (data.conditions ?? []) as unknown as Prisma.InputJsonValue,
+            medications: (data.medications ?? []) as unknown as Prisma.InputJsonValue,
+            habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            dentalHistory: (data.dentalHistory ??
+              Prisma.JsonNull) as Prisma.InputJsonValue,
+            surgeries: (data.surgeries ?? []) as unknown as Prisma.InputJsonValue,
+            vitalSigns: (data.vitalSigns ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            familyHistory: data.familyHistory,
+            notes: data.notes,
+            safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
+            hasCriticalAlert,
+            createdById: input.createdById,
+          },
+        });
+      }
+
+      return created;
     });
     return mapToEntity(patient);
   }

@@ -4,6 +4,7 @@ import {
   MedicalHistoryRepository,
   MedicalHistoryVersionData,
 } from '../../domain/ports/medical-history-repository.port';
+import { deriveSafetyFlags } from '../../domain/safety-flags';
 
 /**
  * A REAL (stateful) in-memory fake — not just a jest-mock object — because
@@ -30,17 +31,23 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
   ): Promise<MedicalHistory> {
     const latest = await this.getLatest(patientId);
     const version = (latest?.version ?? 0) + 1;
+    const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
     const row: MedicalHistory = {
       id: `mh-${this.nextId++}`,
       tenantId: 't1',
       patientId,
       version,
-      allergies: data.allergies ?? null,
-      chronicConditions: data.chronicConditions ?? null,
-      currentMedications: data.currentMedications ?? null,
+      allergies: data.allergies ?? [],
+      conditions: data.conditions ?? [],
+      medications: data.medications ?? [],
       habits: data.habits ?? null,
-      medicalAlerts: data.medicalAlerts ?? null,
+      dentalHistory: data.dentalHistory ?? null,
+      surgeries: data.surgeries ?? [],
+      vitalSigns: data.vitalSigns ?? null,
+      familyHistory: data.familyHistory ?? null,
       notes: data.notes ?? null,
+      safetyFlags,
+      hasCriticalAlert,
       createdById: createdById ?? null,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     };
@@ -55,15 +62,11 @@ describe('SaveMedicalHistoryUseCase', () => {
     const repo = new InMemoryMedicalHistoryRepository();
     const uc = new SaveMedicalHistoryUseCase(repo);
 
-    const result = await uc.execute(
-      'p1',
-      { allergies: 'Penicilina' },
-      'user-1',
-    );
+    const result = await uc.execute('p1', { notes: 'Penicilina' }, 'user-1');
 
     expect(result.version).toBe(1);
     expect(result.patientId).toBe('p1');
-    expect(result.allergies).toBe('Penicilina');
+    expect(result.notes).toBe('Penicilina');
     expect(result.createdById).toBe('user-1');
   });
 
@@ -71,8 +74,8 @@ describe('SaveMedicalHistoryUseCase', () => {
     const repo = new InMemoryMedicalHistoryRepository();
     const uc = new SaveMedicalHistoryUseCase(repo);
 
-    const v1 = await uc.execute('p1', { allergies: 'Penicilina' }, 'user-1');
-    const v2 = await uc.execute('p1', { allergies: 'Ninguna' }, 'user-1');
+    const v1 = await uc.execute('p1', { notes: 'Penicilina' }, 'user-1');
+    const v2 = await uc.execute('p1', { notes: 'Ninguna' }, 'user-1');
 
     expect(v1.version).toBe(1);
     expect(v2.version).toBe(2);
@@ -82,13 +85,13 @@ describe('SaveMedicalHistoryUseCase', () => {
     expect(repo.rows).toHaveLength(2);
     expect(repo.rows[0]).toMatchObject({
       version: 1,
-      allergies: 'Penicilina',
+      notes: 'Penicilina',
     });
-    expect(repo.rows[1]).toMatchObject({ version: 2, allergies: 'Ninguna' });
+    expect(repo.rows[1]).toMatchObject({ version: 2, notes: 'Ninguna' });
 
     // The v1 object returned earlier must also be untouched (no shared
     // mutable reference to the "current" row).
-    expect(v1.allergies).toBe('Penicilina');
+    expect(v1.notes).toBe('Penicilina');
     expect(v1.version).toBe(1);
   });
 
@@ -103,32 +106,38 @@ describe('SaveMedicalHistoryUseCase', () => {
     expect(repo.rows).toHaveLength(2);
   });
 
-  it('forwards createdById and all optional fields through untouched', async () => {
+  it('persiste listas estructuradas y deriva las banderas', async () => {
     const repo = new InMemoryMedicalHistoryRepository();
     const uc = new SaveMedicalHistoryUseCase(repo);
 
     const result = await uc.execute(
       'p1',
       {
-        allergies: 'Latex',
-        chronicConditions: 'Diabetes',
-        currentMedications: 'Metformina',
-        habits: 'Fumador',
-        medicalAlerts: 'Anticoagulantes',
-        notes: 'Paciente colaborador',
+        allergies: [
+          {
+            alergeno: 'Penicilina',
+            tipo: 'MEDICAMENTO',
+            severidad: 'MODERADA',
+            esAlerta: true,
+          },
+        ],
+        medications: [{ nombre: 'Warfarina', esAlerta: false }],
+        conditions: [
+          { codigo: 'DIABETES', etiqueta: 'Diabetes', estado: 'SI', esAlerta: true },
+        ],
+        embarazo: true,
+        semanasEmbarazo: 20,
       },
-      'user-9',
+      'user-1',
     );
 
-    expect(result).toMatchObject({
-      allergies: 'Latex',
-      chronicConditions: 'Diabetes',
-      currentMedications: 'Metformina',
-      habits: 'Fumador',
-      medicalAlerts: 'Anticoagulantes',
-      notes: 'Paciente colaborador',
-      createdById: 'user-9',
-    });
+    expect(result.version).toBe(1);
+    expect(result.allergies).toHaveLength(1);
+    expect(result.safetyFlags.alergiaPenicilina).toBe(true);
+    expect(result.safetyFlags.anticoagulantes).toBe(true);
+    expect(result.safetyFlags.diabetes).toBe(true);
+    expect(result.safetyFlags.embarazo).toBe(true);
+    expect(result.hasCriticalAlert).toBe(true);
   });
 
   it('never forwards a tenantId/version sneaked into the input to the repository (tenant/version come from context/computation, not input)', async () => {
@@ -142,16 +151,21 @@ describe('SaveMedicalHistoryUseCase', () => {
     const uc = new SaveMedicalHistoryUseCase(repo);
 
     const maliciousInput = {
-      allergies: 'Latex',
+      notes: 'Latex',
       tenantId: 'sneaky-tenant',
       version: 999,
+      safetyFlags: { embarazo: true },
+      hasCriticalAlert: true,
     } as unknown as Parameters<typeof uc.execute>[1];
 
     const result = await uc.execute('p1', maliciousInput, 'user-1');
 
     expect(captured && 'tenantId' in captured).toBe(false);
     expect(captured && 'version' in captured).toBe(false);
+    expect(captured && 'safetyFlags' in captured).toBe(false);
+    expect(captured && 'hasCriticalAlert' in captured).toBe(false);
     expect(result.version).toBe(1); // computed by the repo, not the sneaked 999
     expect(result.tenantId).toBe('t1'); // comes from the repo/context, not input
+    expect(result.hasCriticalAlert).toBe(false); // recalculated, not the sneaked true
   });
 });

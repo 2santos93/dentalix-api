@@ -1,5 +1,7 @@
 import { DocType, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
+import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
+import type { SafetyFlags } from '../../../medical-history/domain/entities/medical-history.entity';
 
 export interface CreatePatientRepoInput {
   firstName: string;
@@ -14,7 +16,25 @@ export interface CreatePatientRepoInput {
   countryCode?: string;
   cityId?: number;
   notes?: string;
+  dataConsentAccepted?: boolean;
+  dataConsentAt?: Date;
+  dataConsentPolicyVersion?: string;
+  maritalStatus?: string;
+  occupation?: string;
+  insurerEps?: string;
+  physicianName?: string;
+  physicianPhone?: string;
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
+  guardianName?: string;
+  guardianDocNumber?: string;
   createdById?: string;
+  medicalHistory?: {
+    data: MedicalHistoryVersionData;
+    safetyFlags: SafetyFlags;
+    hasCriticalAlert: boolean;
+  };
 }
 
 export interface UpdatePatientRepoInput {

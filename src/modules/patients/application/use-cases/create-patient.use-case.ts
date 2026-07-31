@@ -5,6 +5,8 @@ import type { PatientRepository } from '../../domain/ports/patient-repository.po
 import { REFERENCE_LOOKUP } from '../../domain/ports/reference-lookup.port';
 import type { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { Patient } from '../../domain/entities/patient.entity';
+import { deriveSafetyFlags } from '../../../medical-history/domain/safety-flags';
+import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
 
 export interface CreatePatientInput {
   firstName: string;
@@ -19,7 +21,21 @@ export interface CreatePatientInput {
   countryCode?: string;
   cityId?: number;
   notes?: string;
+  dataConsentAccepted?: boolean;
+  dataConsentAt?: Date;
+  dataConsentPolicyVersion?: string;
+  maritalStatus?: string;
+  occupation?: string;
+  insurerEps?: string;
+  physicianName?: string;
+  physicianPhone?: string;
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
+  guardianName?: string;
+  guardianDocNumber?: string;
   createdById?: string;
+  medicalHistory?: MedicalHistoryVersionData;
 }
 
 @Injectable()
@@ -47,6 +63,10 @@ export class CreatePatientUseCase {
       }
     }
 
+    const medicalHistory = input.medicalHistory
+      ? { data: input.medicalHistory, ...deriveSafetyFlags(input.medicalHistory) }
+      : undefined;
+
     return this.repo.create({
       firstName: input.firstName,
       lastName: input.lastName,
@@ -60,7 +80,21 @@ export class CreatePatientUseCase {
       countryCode: input.countryCode,
       cityId: input.cityId,
       notes: input.notes,
+      dataConsentAccepted: input.dataConsentAccepted,
+      dataConsentAt: input.dataConsentAt,
+      dataConsentPolicyVersion: input.dataConsentPolicyVersion,
+      maritalStatus: input.maritalStatus,
+      occupation: input.occupation,
+      insurerEps: input.insurerEps,
+      physicianName: input.physicianName,
+      physicianPhone: input.physicianPhone,
+      emergencyContactName: input.emergencyContactName,
+      emergencyContactRelationship: input.emergencyContactRelationship,
+      emergencyContactPhone: input.emergencyContactPhone,
+      guardianName: input.guardianName,
+      guardianDocNumber: input.guardianDocNumber,
       createdById: input.createdById,
+      medicalHistory,
     });
   }
 }

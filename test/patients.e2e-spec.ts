@@ -40,6 +40,13 @@ interface ListPatientsResponseBody {
   pageSize: number;
 }
 
+interface MedicalHistoryResponseBody {
+  version: number;
+  allergies: unknown[];
+  safetyFlags: { alergiaPenicilina: boolean; embarazo: boolean };
+  hasCriticalAlert: boolean;
+}
+
 async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
@@ -86,7 +93,9 @@ describe('Patients (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
-    // FK-safe order: patients -> memberships -> users -> tenants.
+    // FK-safe order: medical_history_versions (FKs to patients) -> patients
+    // -> memberships -> users -> tenants.
+    await raw.medicalHistoryVersion.deleteMany();
     await raw.patient.deleteMany();
     await raw.clinicMembership.deleteMany();
     await raw.user.deleteMany();
@@ -94,6 +103,7 @@ describe('Patients (e2e)', () => {
   });
 
   afterAll(async () => {
+    await raw.medicalHistoryVersion.deleteMany();
     await raw.patient.deleteMany();
     await raw.clinicMembership.deleteMany();
     await raw.user.deleteMany();
@@ -217,5 +227,83 @@ describe('Patients (e2e)', () => {
       .expect(200);
     const listAsABody = listAsA.body as ListPatientsResponseBody;
     expect(listAsABody.items.some((p) => p.id === patientA.id)).toBe(true);
+  });
+
+  it('creates a patient with a medicalHistory payload and persists it as v1 with derived safety flags', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Historia Alta',
+      subdomain: 'clinica-historia-alta',
+      email: 'owner@clinica-historia-alta.com',
+    });
+
+    const create = await request(app.getHttpServer())
+      .post('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .send({
+        firstName: 'Con',
+        lastName: 'Historia',
+        docType: DocType.CC,
+        docNumber: '4001',
+        sex: Sex.F,
+        medicalHistory: {
+          allergies: [
+            {
+              alergeno: 'Penicilina',
+              tipo: 'MEDICAMENTO',
+              severidad: 'ANAFILAXIA',
+              esAlerta: true,
+            },
+          ],
+          embarazo: true,
+        },
+      })
+      .expect(201);
+    const created = create.body as PatientResponseBody;
+
+    const getHistory = await request(app.getHttpServer())
+      .get(`/api/v1/patients/${created.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    const historyBody = getHistory.body as MedicalHistoryResponseBody;
+    expect(historyBody.version).toBe(1);
+    expect(historyBody.allergies).toHaveLength(1);
+    expect(historyBody.safetyFlags.alergiaPenicilina).toBe(true);
+    expect(historyBody.safetyFlags.embarazo).toBe(true);
+    expect(historyBody.hasCriticalAlert).toBe(true);
+  });
+
+  it('creates a patient without a medicalHistory payload and leaves medical-history absent', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Sin Historia',
+      subdomain: 'clinica-sin-historia',
+      email: 'owner@clinica-sin-historia.com',
+    });
+
+    const create = await request(app.getHttpServer())
+      .post('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .send({
+        firstName: 'Sin',
+        lastName: 'Historia',
+        docType: DocType.CC,
+        docNumber: '4002',
+        sex: Sex.M,
+      })
+      .expect(201);
+    const created = create.body as PatientResponseBody;
+
+    // 200 + null: an absent anamnesis is a normal state, never a 404 (see
+    // GetMedicalHistoryUseCase). Nest sends the handler's `null` return as an
+    // empty response body (no content-type), so assert on the wire shape
+    // rather than `.body`, which supertest defaults to `{}` when empty.
+    const getHistory = await request(app.getHttpServer())
+      .get(`/api/v1/patients/${created.id}/medical-history`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    expect(getHistory.text).toBe('');
   });
 });

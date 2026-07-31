@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsEmail,
   IsEnum,
@@ -7,8 +9,10 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { DocType, Sex } from '@prisma/client';
+import { SaveMedicalHistoryDto } from '../../../medical-history/presentation/dto/save-medical-history.dto';
 
 // NOTE: deliberately NO `tenantId` field — the tenant comes from the guarded
 // request context (JwtAuthGuard -> TenantContextInterceptor), never from the client.
@@ -73,4 +77,75 @@ export class CreatePatientDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  dataConsentAccepted?: boolean;
+
+  @ApiPropertyOptional({ type: String, format: 'date-time' })
+  @IsOptional()
+  @IsDateString()
+  dataConsentAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  dataConsentPolicyVersion?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  maritalStatus?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  occupation?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  insurerEps?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  physicianName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  physicianPhone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  emergencyContactName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  emergencyContactRelationship?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  emergencyContactPhone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  guardianName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  guardianDocNumber?: string;
+
+  @ApiPropertyOptional({ type: SaveMedicalHistoryDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveMedicalHistoryDto)
+  medicalHistory?: SaveMedicalHistoryDto;
 }
