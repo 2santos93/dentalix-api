@@ -20,6 +20,7 @@ function fakeRecord(
     notes: null,
     clinicalEntryId: null,
     performedById: null,
+    sourcePlanItemId: null,
     recordedAt: new Date('2026-07-23T00:00:00.000Z'),
     createdAt: new Date('2026-07-23T00:00:00.000Z'),
     ...overrides,
@@ -34,6 +35,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ToothRecord[]> => Promise.resolve([]),
     listByTooth: (): Promise<ToothRecord[]> => Promise.resolve([]),
+    findBySourcePlanItem: (): Promise<ToothRecord | null> =>
+      Promise.resolve(null),
     ...overrides,
   };
 }

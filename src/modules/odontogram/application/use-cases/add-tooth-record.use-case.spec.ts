@@ -31,6 +31,7 @@ class InMemoryToothRecordRepository implements ToothRecordRepository {
       notes: input.notes ?? null,
       clinicalEntryId: input.clinicalEntryId ?? null,
       performedById: input.performedById ?? null,
+      sourcePlanItemId: input.sourcePlanItemId ?? null,
       recordedAt: input.recordedAt ?? new Date('2026-07-23T00:00:00.000Z'),
       createdAt: new Date('2026-07-23T00:00:00.000Z'),
     };
@@ -48,6 +49,12 @@ class InMemoryToothRecordRepository implements ToothRecordRepository {
       this.rows.filter(
         (r) => r.patientId === patientId && r.toothNumber === toothNumber,
       ),
+    );
+  }
+
+  findBySourcePlanItem(planItemId: string): Promise<ToothRecord | null> {
+    return Promise.resolve(
+      this.rows.find((r) => r.sourcePlanItemId === planItemId) ?? null,
     );
   }
 }
