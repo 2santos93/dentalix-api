@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, Prisma } from '@prisma/client';
 import { CreateAppointmentUseCase } from './create-appointment.use-case';
 import { Appointment } from '../../domain/entities/appointment.entity';
 import {
@@ -240,6 +240,71 @@ describe('CreateAppointmentUseCase', () => {
       });
 
       expect(result.providerId).toBe('prov2');
+    });
+  });
+
+  describe('DB exclusion-constraint backstop (23P01 → 409)', () => {
+    // Shape captured from `tx.appointment.create()` hitting the EXCLUDE
+    // constraint: PrismaClientUnknownRequestError, no code/meta, SQLSTATE only
+    // in the message — the shape the global PrismaExceptionFilter does NOT
+    // catch, so the use-case must.
+    function ormExclusionError(): Prisma.PrismaClientUnknownRequestError {
+      return new Prisma.PrismaClientUnknownRequestError(
+        'Invalid `tx.appointment.create()` ... code: "23P01", message: ' +
+          '"conflicting key value violates exclusion constraint ' +
+          '\\"appointments_no_overlap_per_provider\\""',
+        { clientVersion: '6.19.3' },
+      );
+    }
+
+    function rawExclusionError(): Prisma.PrismaClientKnownRequestError {
+      return new Prisma.PrismaClientKnownRequestError('Raw query failed. Code: `23P01`.', {
+        code: 'P2010',
+        clientVersion: '6.19.3',
+        meta: { code: '23P01' },
+      });
+    }
+
+    it('maps the ORM exclusion violation (23P01) to the SAME 409 as the pre-check', async () => {
+      const repo = makeRepo({
+        findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+        create: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).rejects.toThrow('El profesional ya tiene una cita en ese horario');
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('also maps the raw-path shape (P2010 / meta.code 23P01) to 409', async () => {
+      const repo = makeRepo({
+        findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+        create: (): Promise<Appointment> => Promise.reject(rawExclusionError()),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does NOT swallow unrelated create errors (rethrows as-is)', async () => {
+      const boom = new Prisma.PrismaClientUnknownRequestError('some other db failure', {
+        clientVersion: '6.19.3',
+      });
+      const repo = makeRepo({
+        findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+        create: (): Promise<Appointment> => Promise.reject(boom),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).rejects.toBe(boom);
     });
   });
 });

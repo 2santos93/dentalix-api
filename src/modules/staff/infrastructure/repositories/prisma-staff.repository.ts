@@ -164,6 +164,38 @@ export class PrismaStaffRepository implements StaffRepository {
     });
   }
 
+  async reactivateMembership(
+    userId: string,
+    role: ClinicRole,
+  ): Promise<StaffMember | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Target a SOFT-DELETED membership specifically — that's what
+      // reactivation clears. RLS scopes this to the current tenant. If only an
+      // ACTIVE membership exists we return null (nothing to reactivate) and the
+      // caller treats it as a duplicate; the partial unique index still guards
+      // the pathological "active + soft-deleted both present" case.
+      const membership = await tx.clinicMembership.findFirst({
+        where: { userId, deletedAt: { not: null } },
+        orderBy: { deletedAt: 'desc' },
+        select: { id: true },
+      });
+      if (!membership) {
+        return null;
+      }
+      const updated = await tx.clinicMembership.update({
+        where: { id: membership.id },
+        data: { deletedAt: null, role },
+        include: { user: true },
+      });
+      return {
+        userId: updated.userId,
+        fullName: updated.user.fullName,
+        email: updated.user.email,
+        role: updated.role,
+      };
+    });
+  }
+
   async countActiveOwners(): Promise<number> {
     return this.prisma.runWithTenant(async (tx) =>
       tx.clinicMembership.count({

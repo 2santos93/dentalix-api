@@ -7,6 +7,7 @@ import {
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
 import { Appointment } from '../../domain/entities/appointment.entity';
+import { isProviderOverlapExclusionViolation } from '../appointment-overlap-error';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -47,14 +48,28 @@ export class CreateAppointmentUseCase {
       );
     }
 
-    return this.repo.create({
-      patientId: input.patientId,
-      providerId: input.providerId,
-      start: input.start,
-      end: input.end,
-      reason: input.reason,
-      notes: input.notes,
-      createdById: input.createdById,
-    });
+    // The pre-check above handles the common case with a friendly 409 WITHOUT
+    // hitting the DB. This try/catch is the race-proof backstop: if a
+    // concurrent create slips past the pre-check, the DB's EXCLUDE constraint
+    // (appointments_no_overlap_per_provider, SQLSTATE 23P01) rejects the INSERT
+    // — map it to the SAME 409 so the outcome is identical either way.
+    try {
+      return await this.repo.create({
+        patientId: input.patientId,
+        providerId: input.providerId,
+        start: input.start,
+        end: input.end,
+        reason: input.reason,
+        notes: input.notes,
+        createdById: input.createdById,
+      });
+    } catch (error) {
+      if (isProviderOverlapExclusionViolation(error)) {
+        throw new ConflictException(
+          'El profesional ya tiene una cita en ese horario',
+        );
+      }
+      throw error;
+    }
   }
 }

@@ -28,6 +28,8 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
   { match: 'patients_tenant_doc_key', message: 'Ya existe un paciente con ese número de documento.' },
   { match: 'docNumber', message: 'Ya existe un paciente con ese número de documento.' },
   { match: 'catalog_tenant_code_key', message: 'Ya existe un ítem del catálogo con ese código.' },
+  { match: 'inventory_items_tenantId_name_key', message: 'Ya existe un ítem de inventario con ese nombre.' },
+  { match: 'payments_tenant_idempotency_key', message: 'Este pago ya fue registrado.' },
   { match: 'users_email_key', message: 'Ese correo electrónico ya está registrado.' },
   { match: 'email', message: 'Ese correo electrónico ya está registrado.' },
   { match: 'tenants_subdomain_key', message: 'Ese subdominio ya está en uso.' },

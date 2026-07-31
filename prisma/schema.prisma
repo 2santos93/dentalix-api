@@ -57,6 +57,11 @@ model ClinicMembership {
   tenant    Tenant     @relation(fields: [tenantId], references: [id])
   user      User       @relation(fields: [userId], references: [id])
 
+  // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
+  // NOT block re-adding the same user. The predicate lives in migration
+  // 20260731163000_clinic_membership_partial_unique (Prisma can't express it);
+  // the name/columns here keep migrate-status drift-free. Same pattern as
+  // users_email_key. Do NOT accept a migrate-dev diff that makes this full again.
   @@unique([tenantId, userId])
   @@index([tenantId])
   @@map("clinic_memberships")
@@ -382,6 +387,10 @@ enum TenantDomainStatus {
 model TenantDomain {
   id          String             @id @default(uuid()) @db.Uuid
   tenantId    String             @db.Uuid
+  // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted host must be
+  // re-registerable. Predicate lives in migration
+  // 20260731164000_tenant_domain_partial_unique (Prisma can't express it); the
+  // name (tenant_domains_host_key) keeps migrate-status drift-free.
   host        String             @unique
   status      TenantDomainStatus @default(PENDING)
   verifyToken String
@@ -418,6 +427,7 @@ model Payment {
   paidAt          DateTime
   method          PaymentMethod?
   notes           String?
+  idempotencyKey  String?
   createdById     String?        @db.Uuid
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
@@ -435,6 +445,14 @@ model Payment {
   // Patient.@@unique(patients_tenant_doc_key) / the tenants_subdomain_key
   // and users_email_key partial unique indexes.
   @@index([tenantId, paidAt], map: "payments_tenantId_paidAt_active_idx")
+  // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
+  // unique index; the migration 20260731160000_add_payment_idempotency_key
+  // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
+  // keys (legacy rows + writes without the header) stay unconstrained, while a
+  // non-null key is unique per tenant. Same name+columns as declared here, so
+  // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
+  // recreates this as a full index.
+  @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   @@map("payments")
 }
 
@@ -524,6 +542,13 @@ model InventoryItem {
   movements InventoryMovement[]
 
   @@index([tenantId])
+  // Partial unique (WHERE "deletedAt" IS NULL) so two ACTIVE items can't share
+  // a name, while soft-deleted rows don't block re-using the name. The WHERE
+  // lives only in migration 20260731162000_inventory_item_unique_name (Prisma
+  // can't express it); the map keeps migrate-status drift-free. Same pattern as
+  // Patient.@@unique(patients_tenant_doc_key). Do NOT accept a migrate-dev diff
+  // that recreates this as a full index.
+  @@unique([tenantId, name], map: "inventory_items_tenantId_name_key")
   @@map("inventory_items")
 }
 

@@ -4,6 +4,7 @@ import { ConflictException, BadRequestException } from '@nestjs/common';
 
 const makeRepo = (over = {}) => ({
   findUserByEmailGlobal: jest.fn().mockResolvedValue(null),
+  reactivateMembership: jest.fn().mockResolvedValue(null),
   create: jest.fn().mockImplementation(async (i) => ({
     userId: 'u1',
     fullName: i.fullName,
@@ -33,9 +34,10 @@ it('crea usuario+membership con password hasheada y email normalizado', async ()
   expect(r.userId).toBe('u1');
 });
 
-it('409 si el email ya existe', async () => {
+it('409 si el email ya existe y no hay membresía para reactivar', async () => {
   const repo = makeRepo({
     findUserByEmailGlobal: jest.fn().mockResolvedValue({ id: 'x' }),
+    reactivateMembership: jest.fn().mockResolvedValue(null),
   });
   const uc = new CreateStaffUseCase(repo as any, pwd);
   await expect(
@@ -46,6 +48,32 @@ it('409 si el email ya existe', async () => {
       password: 'secret12',
     }),
   ).rejects.toBeInstanceOf(ConflictException);
+});
+
+it('reactiva una membresía soft-deleted en vez de fallar (dup guard soft-delete)', async () => {
+  const reactivated = {
+    userId: 'x',
+    fullName: 'Ana Ruiz',
+    email: 'a@a.com',
+    role: ClinicRole.ASSISTANT,
+  };
+  const repo = makeRepo({
+    findUserByEmailGlobal: jest.fn().mockResolvedValue({ id: 'x' }),
+    reactivateMembership: jest.fn().mockResolvedValue(reactivated),
+    create: jest.fn(),
+  });
+  const uc = new CreateStaffUseCase(repo as any, pwd);
+
+  const r = await uc.execute({
+    fullName: 'Ana',
+    email: 'a@a.com',
+    role: ClinicRole.ASSISTANT,
+    password: 'secret12',
+  });
+
+  expect(r).toEqual(reactivated);
+  expect(repo.reactivateMembership).toHaveBeenCalledWith('x', ClinicRole.ASSISTANT);
+  expect(repo.create).not.toHaveBeenCalled();
 });
 
 it('400 si password < 8', async () => {

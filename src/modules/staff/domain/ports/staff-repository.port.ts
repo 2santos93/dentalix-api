@@ -54,6 +54,19 @@ export interface StaffRepository {
   deactivateById(userId: string): Promise<boolean>;
 
   /**
+   * Reactivates a previously-removed staff member: if `userId` has a
+   * SOFT-DELETED `ClinicMembership` in the current tenant, clears its
+   * `deletedAt` and sets `role`, returning the refreshed StaffMember. Returns
+   * `null` when there's nothing to reactivate (no membership here, or the only
+   * one is already active). The user's existing credentials are preserved.
+   * Tenant-scoped (via RLS / `runWithTenant`).
+   */
+  reactivateMembership(
+    userId: string,
+    role: ClinicRole,
+  ): Promise<StaffMember | null>;
+
+  /**
    * Count of active (non-deleted) `OWNER` memberships for the current
    * tenant, joined to non-deleted users. Tenant-scoped (via RLS /
    * `runWithTenant`).
