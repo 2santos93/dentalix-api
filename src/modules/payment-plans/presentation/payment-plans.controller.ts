@@ -24,7 +24,6 @@ import {
   GetPaymentPlanResult,
 } from '../application/use-cases/get-payment-plan.use-case';
 import { CancelPaymentPlanUseCase } from '../application/use-cases/cancel-payment-plan.use-case';
-import { PaymentPlanWithInstallments } from '../domain/entities/payment-plan.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -53,12 +52,12 @@ export class PaymentPlansController {
 
   @Post('treatment-plans/:id/payment-plan')
   @ApiCreatedResponse({ type: PaymentPlanDto })
-  create(
+  async create(
     @Param('id') id: string,
     @Body() dto: CreatePaymentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<PaymentPlanWithInstallments> {
-    return this.createPaymentPlan.execute(
+  ): Promise<GetPaymentPlanResult> {
+    await this.createPaymentPlan.execute(
       id,
       {
         downPayment: dto.downPayment ?? 0,
@@ -70,6 +69,10 @@ export class PaymentPlansController {
       },
       req.user.sub,
     );
+    // Return the SAME derived shape as GET (adds paidTotal/balance/isPaidOff
+    // etc.) instead of the raw entity, which leaked tenantId/patientId/
+    // createdById and lacked the fields @ApiCreatedResponse documents.
+    return this.getPaymentPlan.execute(id);
   }
 
   @Get('treatment-plans/:id/payment-plan')

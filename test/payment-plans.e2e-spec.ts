@@ -403,10 +403,12 @@ describe('Payment plans / cuotas (e2e)', () => {
         .expect(201);
       const recreatedPlan = recreate.body as PaymentPlanResponseBody;
       expect(recreatedPlan.installments.length).toBe(12);
-      // The abono of 100 recorded above is still against the treatment plan,
-      // so the balance-derived totalToFinance for the new payment plan is
-      // 1100 (1200 - 100), not 1200.
-      expect(recreatedPlan.totalToFinance).toBe(1100);
+      // totalToFinance defaults to the plan's full billable (gross, 1200),
+      // not the net balance after the 100 abono recorded above: prior abonos
+      // count as paid against the full financed amount, since paidTotal
+      // (read-time, all-time paid) would otherwise be double-counted against
+      // a net default.
+      expect(recreatedPlan.totalToFinance).toBe(1200);
     },
   );
 });

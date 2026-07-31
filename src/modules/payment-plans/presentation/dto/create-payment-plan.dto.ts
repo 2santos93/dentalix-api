@@ -6,13 +6,15 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 
 export class CreatePaymentPlanDto {
-  @ApiProperty({ example: 12, description: 'Número de cuotas, entero >= 1' })
+  @ApiProperty({ example: 12, description: 'Número de cuotas, entero >= 1 y <= 600' })
   @IsInt()
   @Min(1)
+  @Max(600)
   installmentsCount!: number;
 
   @ApiProperty({ enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY'] })

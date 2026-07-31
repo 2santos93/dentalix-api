@@ -443,6 +443,15 @@ model PaymentPlan {
 
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
+  // Hand-written partial unique index (WHERE status = 'ACTIVE' AND
+  // deletedAt IS NULL) on (tenantId, treatmentPlanId) exists in SQL only --
+  // see 20260731120000_payment_plan_active_unique. Prisma's schema DSL
+  // can't express a filtered/partial unique constraint (same rationale as
+  // Payment.@@index([tenantId, paidAt], map: "payments_tenantId_paidAt_active_idx")
+  // above), so it is not declared here; `prisma migrate status` won't show
+  // it, and that's expected -- do not "fix" this by adding a plain
+  // @@unique, which would wrongly forbid multiple CANCELLED/COMPLETED
+  // plans per treatment plan.
   @@map("payment_plans")
 }
 
