@@ -92,6 +92,22 @@ model Patient {
   countryCode String?
   cityId      Int?
   notes       String?
+  // Consentimiento Ley 1581 (atributo único, no versionado).
+  dataConsentAccepted      Boolean   @default(false)
+  dataConsentAt            DateTime?
+  dataConsentPolicyVersion String?
+  // Identificación ampliada.
+  maritalStatus String?
+  occupation    String?
+  insurerEps    String?
+  physicianName String?
+  physicianPhone String?
+  // Contacto de emergencia / acudiente.
+  emergencyContactName         String?
+  emergencyContactRelationship String?
+  emergencyContactPhone        String?
+  guardianName                 String?
+  guardianDocNumber            String?
   createdById String?   @db.Uuid
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -111,24 +127,32 @@ model Patient {
 }
 
 model MedicalHistoryVersion {
-  id                 String    @id @default(uuid()) @db.Uuid
-  tenantId           String    @db.Uuid
-  patientId          String    @db.Uuid
-  version            Int
-  allergies          String?
-  chronicConditions  String?
-  currentMedications String?
-  habits             String?
-  medicalAlerts      String?
-  notes              String?
-  createdById        String?   @db.Uuid
-  createdAt          DateTime  @default(now())
-  deletedAt          DateTime?
+  id            String  @id @default(uuid()) @db.Uuid
+  tenantId      String  @db.Uuid
+  patientId     String  @db.Uuid
+  version       Int
+  // Listas/objetos estructurados (snapshot inmutable por versión).
+  allergies     Json?
+  conditions    Json?
+  medications   Json?
+  habits        Json?
+  dentalHistory Json?
+  surgeries     Json?
+  vitalSigns    Json?
+  familyHistory String?
+  notes         String?
+  // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
+  safetyFlags      Json?
+  hasCriticalAlert Boolean   @default(false)
+  createdById      String?   @db.Uuid
+  createdAt        DateTime  @default(now())
+  deletedAt        DateTime?
 
   patient Patient @relation(fields: [patientId], references: [id])
 
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
   @@index([tenantId, patientId])
+  @@index([tenantId, hasCriticalAlert])
   @@map("medical_history_versions")
 }
 
