@@ -19,23 +19,38 @@ export class MedicalHistoryDto {
   @ApiProperty()
   version!: number;
 
-  @ApiProperty({ type: String, nullable: true })
-  allergies!: string | null;
+  @ApiProperty({ type: [Object] })
+  allergies!: unknown[];
+
+  @ApiProperty({ type: [Object] })
+  conditions!: unknown[];
+
+  @ApiProperty({ type: [Object] })
+  medications!: unknown[];
+
+  @ApiProperty({ type: Object, nullable: true })
+  habits!: Record<string, unknown> | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  dentalHistory!: Record<string, unknown> | null;
+
+  @ApiProperty({ type: [Object] })
+  surgeries!: unknown[];
+
+  @ApiProperty({ type: Object, nullable: true })
+  vitalSigns!: Record<string, unknown> | null;
 
   @ApiProperty({ type: String, nullable: true })
-  chronicConditions!: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  currentMedications!: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  habits!: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  medicalAlerts!: string | null;
+  familyHistory!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
+
+  @ApiProperty({ type: Object })
+  safetyFlags!: Record<string, unknown>;
+
+  @ApiProperty()
+  hasCriticalAlert!: boolean;
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
