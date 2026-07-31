@@ -10,7 +10,10 @@ import {
 // "non-deleted only" like the real Prisma repo, so it tracks `deletedAt` on
 // the stored row and strips it via `toEntity` (mirrors `mapToEntity` in
 // prisma-payment.repository.ts).
-type StoredPayment = Payment & { deletedAt: Date | null };
+type StoredPayment = Payment & {
+  deletedAt: Date | null;
+  idempotencyKey: string | null;
+};
 
 let seq = 0;
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -39,6 +42,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       createdById: overrides.createdById ?? null,
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
+      idempotencyKey: overrides.idempotencyKey ?? null,
       deletedAt: overrides.deletedAt ?? null,
     };
     this.payments.push(row);
@@ -79,6 +83,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       createdById: input.createdById ?? null,
       createdAt: NOW,
       updatedAt: NOW,
+      idempotencyKey: input.idempotencyKey ?? null,
       deletedAt: null,
     };
     this.payments.push(row);
@@ -87,6 +92,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
 
   findById(id: string): Promise<Payment | null> {
     const row = this.payments.find((p) => p.id === id && p.deletedAt === null);
+    return Promise.resolve(row ? this.toEntity(row) : null);
+  }
+
+  findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null> {
+    // Mirrors PrismaPaymentRepository.findByIdempotencyKey: match by key only
+    // (RLS scopes tenant in the real repo). Deliberately NOT filtered by
+    // deletedAt, so a replay resolves to the same row even if voided.
+    const row = this.payments.find((p) => p.idempotencyKey === idempotencyKey);
     return Promise.resolve(row ? this.toEntity(row) : null);
   }
 

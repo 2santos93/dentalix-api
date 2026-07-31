@@ -27,6 +27,12 @@ function isFinitePositive(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+// Idempotency-Key must be a UUID (the client contract). Validated here rather
+// than via a DTO because it's a header, not a body field — same reason
+// tenant/createdById live outside RecordPaymentInput.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class RecordPaymentUseCase {
   constructor(
@@ -51,7 +57,23 @@ export class RecordPaymentUseCase {
     treatmentPlanId: string,
     input: RecordPaymentInput,
     createdById?: string,
+    idempotencyKey?: string,
   ): Promise<Payment> {
+    // Idempotency short-circuit FIRST — before any validation or plan lookup: a
+    // replay must be cheap and must NOT re-run "does the plan still exist" (a
+    // plan voided AFTER the original payment would otherwise make an honest
+    // retry 404). Blank/whitespace header == no key (today's behavior).
+    const key = idempotencyKey?.trim() ? idempotencyKey.trim() : undefined;
+    if (key !== undefined) {
+      if (!UUID_RE.test(key)) {
+        throw new BadRequestException('Idempotency-Key must be a UUID');
+      }
+      const existing = await this.repo.findByIdempotencyKey(key);
+      if (existing) {
+        return existing;
+      }
+    }
+
     if (!isFinitePositive(input.amount)) {
       throw new BadRequestException('amount must be a finite number > 0');
     }
@@ -83,6 +105,7 @@ export class RecordPaymentUseCase {
       method: input.method,
       notes: input.notes,
       createdById,
+      idempotencyKey: key,
     };
 
     return this.repo.create(repoInput);

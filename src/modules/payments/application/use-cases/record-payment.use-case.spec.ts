@@ -177,4 +177,96 @@ describe('RecordPaymentUseCase', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  describe('idempotency', () => {
+    it('records the Idempotency-Key so it can be looked up', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', patientId: 'patient-1' });
+      const key = '11111111-1111-1111-1111-111111111111';
+
+      const created = await uc.execute(
+        'plan-1',
+        { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+        'user-1',
+        key,
+      );
+
+      const found = await repo.findByIdempotencyKey(key);
+      expect(found?.id).toBe(created.id);
+    });
+
+    it('returns the EXISTING payment on replay of the same key (no second row, no plan re-check)', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', patientId: 'patient-1' });
+      const key = '22222222-2222-2222-2222-222222222222';
+
+      const first = await uc.execute(
+        'plan-1',
+        { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+        'user-1',
+        key,
+      );
+
+      // Plan gone on the retry (voided after the first write): the short-circuit
+      // must NOT re-check the plan, so this still resolves to the original.
+      fakeGetPlan.plan = null;
+      const replay = await uc.execute(
+        'plan-1',
+        { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+        'user-1',
+        key,
+      );
+
+      expect(replay.id).toBe(first.id);
+      expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+      expect(fakeGetPlan.calls).toEqual(['plan-1']); // plan looked up only once
+    });
+
+    it('creates a distinct payment for a DIFFERENT key', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', patientId: 'patient-1' });
+
+      await uc.execute(
+        'plan-1',
+        { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+        'user-1',
+        '33333333-3333-3333-3333-333333333333',
+      );
+      await uc.execute(
+        'plan-1',
+        { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+        'user-1',
+        '44444444-4444-4444-4444-444444444444',
+      );
+
+      expect(await repo.listByPlan('plan-1')).toHaveLength(2);
+    });
+
+    it('rejects a non-UUID key with BadRequestException', async () => {
+      const { fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan();
+
+      await expect(
+        uc.execute(
+          'plan-1',
+          { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+          'user-1',
+          'not-a-uuid',
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('records normally when no key is provided (key stays absent)', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', patientId: 'patient-1' });
+
+      await uc.execute(
+        'plan-1',
+        { amount: 100, currency: 'USD', paidAt: '2026-03-05T00:00:00.000Z' },
+        'user-1',
+      );
+
+      expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+    });
+  });
 });

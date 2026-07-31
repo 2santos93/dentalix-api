@@ -66,6 +66,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           paidAt: input.paidAt,
           method: input.method,
           notes: input.notes,
+          idempotencyKey: input.idempotencyKey,
           createdById: input.createdById,
         },
       });
@@ -76,6 +77,17 @@ export class PrismaPaymentRepository implements PaymentRepository {
   async findById(id: string): Promise<Payment | null> {
     const payment = await this.prisma.runWithTenant(async (tx) => {
       return tx.payment.findFirst({ where: { id, deletedAt: null } });
+    });
+    return payment ? mapToEntity(payment) : null;
+  }
+
+  async findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null> {
+    // RLS (runWithTenant) scopes this to the current tenant, matching the
+    // (tenantId, idempotencyKey) unique index. NOT filtered by `deletedAt`: a
+    // replay must resolve to the SAME row even if it was later voided, so we
+    // never insert a duplicate for a key that already exists.
+    const payment = await this.prisma.runWithTenant(async (tx) => {
+      return tx.payment.findFirst({ where: { idempotencyKey } });
     });
     return payment ? mapToEntity(payment) : null;
   }

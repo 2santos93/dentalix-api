@@ -16,6 +16,13 @@ export interface CreatePaymentRepoInput {
   method?: PaymentMethod;
   notes?: string;
   createdById?: string;
+  /**
+   * Idempotency-Key (UUID) for dedup. When set, persisted and covered by the
+   * partial unique index (tenantId, idempotencyKey). `undefined` → stored as
+   * NULL (unconstrained). Validated/normalized by RecordPaymentUseCase before
+   * it reaches here (never taken raw from the client).
+   */
+  idempotencyKey?: string;
 }
 
 export interface ListPaymentsReceivedInRangeParams {
@@ -34,6 +41,14 @@ export interface PaymentRepository {
    * "absent").
    */
   findById(id: string): Promise<Payment | null>;
+
+  /**
+   * The payment carrying this Idempotency-Key in the current tenant (RLS-
+   * scoped), or `null` if none. Deliberately NOT filtered by `deletedAt`:
+   * idempotency means "same request → same row" regardless of whether that row
+   * was later voided, so a replay never creates a duplicate.
+   */
+  findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null>;
 
   /** Active payments (`deletedAt: null`) for a plan, ordered by `paidAt` DESC. */
   listByPlan(treatmentPlanId: string): Promise<Payment[]>;

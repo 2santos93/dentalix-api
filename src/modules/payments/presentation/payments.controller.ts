@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Post,
   Req,
@@ -64,6 +65,11 @@ export class PaymentsController {
   create(
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
+    // Idempotency-Key (UUID) dedup header. Optional: absent → today's behavior
+    // (no dedup, idempotencyKey stays NULL). Read from the header (never the
+    // body), like tenant/createdById. A replay of the same key returns the
+    // EXISTING payment instead of creating a second row.
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<Payment> {
     // `createdById` comes from the authenticated user (req.user.sub), never
@@ -79,6 +85,7 @@ export class PaymentsController {
         notes: dto.notes,
       },
       req.user.sub,
+      idempotencyKey,
     );
   }
 
