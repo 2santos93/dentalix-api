@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
 import {
   AuthRepository,
   CreateClinicWithOwnerInput,
@@ -51,6 +52,15 @@ export class PrismaAuthRepository implements AuthRepository {
       await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenant.id}, true)`;
       await tx.clinicMembership.create({
         data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.OWNER },
+      });
+      // La clínica arranca con el catálogo semilla de procedimientos y
+      // diagnósticos. Va DENTRO de la misma tx (tras setear el GUC de tenant)
+      // para que el WITH CHECK de RLS acepte las filas del tenant recién creado.
+      await tx.dentalCatalogItem.createMany({
+        data: DEFAULT_DENTAL_CATALOG.map((item) => ({
+          ...item,
+          tenantId: tenant.id,
+        })),
       });
       return { tenantId: tenant.id, userId: user.id };
     });
