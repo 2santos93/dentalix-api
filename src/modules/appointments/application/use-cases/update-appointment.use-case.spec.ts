@@ -12,14 +12,27 @@ import {
 } from '../../domain/ports/appointment-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 
+// Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
+// está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
+// ahora rechazan un `start` en el pasado. Anclar el día (en vez de hardcodear
+// una fecha) mantiene intactas las relaciones de solape entre los literales de
+// abajo y evita que el spec se podra al pasar esa fecha.
+const ANCHOR_DAY = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+function at(time: string): Date {
+  return new Date(`${ANCHOR_DAY}T${time}:00.000Z`);
+}
+
+
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
     id: 'a1',
     tenantId: 't1',
     patientId: 'p1',
     providerId: 'prov1',
-    start: new Date('2026-08-01T10:00:00.000Z'),
-    end: new Date('2026-08-01T10:30:00.000Z'),
+    start: at('10:00'),
+    end: at('10:30'),
     status: AppointmentStatus.SCHEDULED,
     reason: null,
     notes: null,
@@ -92,8 +105,8 @@ describe('UpdateAppointmentUseCase', () => {
 
   it('reschedules (start/end) and re-checks overlap EXCLUDING its own id', async () => {
     const existing = fakeAppointment();
-    const newStart = new Date('2026-08-01T14:00:00.000Z');
-    const newEnd = new Date('2026-08-01T14:30:00.000Z');
+    const newStart = at('14:00');
+    const newEnd = at('14:30');
     const updated = fakeAppointment({ start: newStart, end: newEnd });
     let overlapArgs:
       | { providerId: string; start: Date; end: Date; excludeId?: string }
@@ -142,8 +155,8 @@ describe('UpdateAppointmentUseCase', () => {
 
     await expect(
       uc.execute(existing.id, {
-        start: new Date('2026-08-01T14:00:00.000Z'),
-        end: new Date('2026-08-01T14:30:00.000Z'),
+        start: at('14:00'),
+        end: at('14:30'),
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
@@ -173,8 +186,8 @@ describe('UpdateAppointmentUseCase', () => {
       const repo = new InMemoryAppointmentRepository();
       const existing = repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
       });
       const uc = new UpdateAppointmentUseCase(repo);
 
@@ -182,32 +195,32 @@ describe('UpdateAppointmentUseCase', () => {
       // current [10:00,11:00) slot, so if `excludeId` were not applied this
       // would incorrectly self-conflict.
       const result = await uc.execute(existing.id, {
-        start: new Date('2026-08-01T10:15:00.000Z'),
-        end: new Date('2026-08-01T11:15:00.000Z'),
+        start: at('10:15'),
+        end: at('11:15'),
       });
 
-      expect(result.start).toEqual(new Date('2026-08-01T10:15:00.000Z'));
-      expect(result.end).toEqual(new Date('2026-08-01T11:15:00.000Z'));
+      expect(result.start).toEqual(at('10:15'));
+      expect(result.end).toEqual(at('11:15'));
     });
 
     it('self-exclusion does not hide a genuine overlap with a DIFFERENT active appointment', async () => {
       const repo = new InMemoryAppointmentRepository();
       const existing = repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T10:00:00.000Z'),
-        end: new Date('2026-08-01T11:00:00.000Z'),
+        start: at('10:00'),
+        end: at('11:00'),
       });
       repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T14:00:00.000Z'),
-        end: new Date('2026-08-01T15:00:00.000Z'),
+        start: at('14:00'),
+        end: at('15:00'),
       });
       const uc = new UpdateAppointmentUseCase(repo);
 
       await expect(
         uc.execute(existing.id, {
-          start: new Date('2026-08-01T14:30:00.000Z'),
-          end: new Date('2026-08-01T15:30:00.000Z'),
+          start: at('14:30'),
+          end: at('15:30'),
         }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
@@ -217,23 +230,23 @@ describe('UpdateAppointmentUseCase', () => {
       const existing = repo.seed({
         id: 'to-reschedule',
         providerId: 'prov1',
-        start: new Date('2026-08-01T09:00:00.000Z'),
-        end: new Date('2026-08-01T09:30:00.000Z'),
+        start: at('09:00'),
+        end: at('09:30'),
       });
       repo.seed({
         providerId: 'prov1',
-        start: new Date('2026-08-01T14:00:00.000Z'),
-        end: new Date('2026-08-01T15:00:00.000Z'),
+        start: at('14:00'),
+        end: at('15:00'),
         status: AppointmentStatus.CANCELLED,
       });
       const uc = new UpdateAppointmentUseCase(repo);
 
       const result = await uc.execute(existing.id, {
-        start: new Date('2026-08-01T14:30:00.000Z'),
-        end: new Date('2026-08-01T15:30:00.000Z'),
+        start: at('14:30'),
+        end: at('15:30'),
       });
 
-      expect(result.start).toEqual(new Date('2026-08-01T14:30:00.000Z'));
+      expect(result.start).toEqual(at('14:30'));
     });
   });
 
@@ -260,8 +273,8 @@ describe('UpdateAppointmentUseCase', () => {
 
       await expect(
         uc.execute('a1', {
-          start: new Date('2026-08-01T11:00:00.000Z'),
-          end: new Date('2026-08-01T11:30:00.000Z'),
+          start: at('11:00'),
+          end: at('11:30'),
         }),
       ).rejects.toThrow('El profesional ya tiene una cita en ese horario');
     });
@@ -295,6 +308,76 @@ describe('UpdateAppointmentUseCase', () => {
       await expect(
         uc.execute('a1', { notes: 'x' }),
       ).rejects.toBe(boom);
+    });
+  });
+
+  describe('no reagendar al pasado', () => {
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    it('rechaza mover una cita a un instante que ya pasó', async () => {
+      const existing = fakeAppointment();
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(existing),
+        update: (): Promise<Appointment> =>
+          Promise.reject(new Error('update should not be called')),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute('a1', {
+          start: anHourAgo,
+          end: new Date(anHourAgo.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toThrow('No se puede reagendar una cita al pasado');
+    });
+
+    // El matiz que hace usable la agenda: una cita que YA pasó se sigue
+    // pudiendo cerrar (completar/cancelar) o editar. La validación de pasado
+    // vive solo en la rama de reschedule, así que un patch sin start/end pasa.
+    it('PERMITE completar una cita que ya pasó (patch de solo estado)', async () => {
+      const past = fakeAppointment({
+        start: anHourAgo,
+        end: new Date(anHourAgo.getTime() + 30 * 60 * 1000),
+      });
+      let received: UpdateAppointmentRepoInput | undefined;
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(past),
+        update: (
+          _id: string,
+          patch: UpdateAppointmentRepoInput,
+        ): Promise<Appointment> => {
+          received = patch;
+          return Promise.resolve({
+            ...past,
+            status: AppointmentStatus.COMPLETED,
+          });
+        },
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      const result = await uc.execute('a1', {
+        status: AppointmentStatus.COMPLETED,
+      });
+
+      expect(result.status).toBe(AppointmentStatus.COMPLETED);
+      expect(received).toEqual({ status: AppointmentStatus.COMPLETED });
+    });
+
+    it('PERMITE editar las notas de una cita que ya pasó', async () => {
+      const past = fakeAppointment({
+        start: anHourAgo,
+        end: new Date(anHourAgo.getTime() + 30 * 60 * 1000),
+      });
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(past),
+        update: (): Promise<Appointment> =>
+          Promise.resolve({ ...past, notes: 'El paciente asistió' }),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      const result = await uc.execute('a1', { notes: 'El paciente asistió' });
+
+      expect(result.notes).toBe('El paciente asistió');
     });
   });
 });

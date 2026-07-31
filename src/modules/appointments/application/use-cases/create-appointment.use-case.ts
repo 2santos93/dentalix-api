@@ -34,6 +34,20 @@ export class CreateAppointmentUseCase {
       throw new BadRequestException('End must be after start');
     }
 
+    // No agendar en el pasado: una cita nueva siempre es a futuro. Se compara
+    // el INSTANTE (no solo la fecha), así que "hoy a una hora ya pasada" también
+    // se rechaza — que es el caso que más se cuela por un `<input type="date">`
+    // sin `min`. `start === now` se permite (solo se rechaza estrictamente
+    // anterior), para no fallar por el segundo que tarda el submit en llegar.
+    // Nota: esto aplica a CREAR; registrar/cerrar una cita YA pasada se hace
+    // cambiando su estado (ver UpdateAppointmentUseCase, que solo valida el
+    // pasado cuando se re-agenda).
+    if (input.start.getTime() < Date.now()) {
+      throw new BadRequestException(
+        'No se puede agendar una cita en el pasado',
+      );
+    }
+
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff
     // s1 < e2 AND s2 < e1 — enforced by the repository's findOverlapping
     // query. A CANCELLED appointment never blocks (repo excludes it).

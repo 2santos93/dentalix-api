@@ -43,6 +43,16 @@ export class UpdateAppointmentUseCase {
         throw new BadRequestException('End must be after start');
       }
 
+      // No re-agendar hacia el pasado. Deliberadamente SOLO dentro de la rama
+      // de reschedule: una cita que ya pasó se sigue pudiendo completar,
+      // cancelar o editarle notas/motivo (patch sin start/end) — bloquear eso
+      // haría imposible cerrar la agenda del día.
+      if (nextStart.getTime() < Date.now()) {
+        throw new BadRequestException(
+          'No se puede reagendar una cita al pasado',
+        );
+      }
+
       // Re-check overlap EXCLUDING this appointment's own id — otherwise an
       // unchanged appointment would always "collide" with itself.
       const overlapping = await this.repo.findOverlapping(
