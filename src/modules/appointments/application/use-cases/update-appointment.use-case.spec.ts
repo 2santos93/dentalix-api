@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, Prisma } from '@prisma/client';
 import { UpdateAppointmentUseCase } from './update-appointment.use-case';
 import { Appointment } from '../../domain/entities/appointment.entity';
 import {
@@ -234,6 +234,67 @@ describe('UpdateAppointmentUseCase', () => {
       });
 
       expect(result.start).toEqual(new Date('2026-08-01T14:30:00.000Z'));
+    });
+  });
+
+  describe('DB exclusion-constraint backstop (23P01 → 409)', () => {
+    // Shape Prisma raises from an ORM update hitting the EXCLUDE constraint:
+    // PrismaClientUnknownRequestError, no code/meta, SQLSTATE in the message.
+    function ormExclusionError(): Prisma.PrismaClientUnknownRequestError {
+      return new Prisma.PrismaClientUnknownRequestError(
+        'Invalid `tx.appointment.update()` ... code: "23P01", message: ' +
+          '"conflicting key value violates exclusion constraint ' +
+          '\\"appointments_no_overlap_per_provider\\""',
+        { clientVersion: '6.19.3' },
+      );
+    }
+
+    it('maps an overlapping RESCHEDULE that slips past the pre-check to 409', async () => {
+      const existing = fakeAppointment();
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(existing),
+        findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]), // pre-check passes
+        update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute('a1', {
+          start: new Date('2026-08-01T11:00:00.000Z'),
+          end: new Date('2026-08-01T11:30:00.000Z'),
+        }),
+      ).rejects.toThrow('El profesional ya tiene una cita en ese horario');
+    });
+
+    it('maps an UN-CANCEL into a taken slot to 409 (no pre-check runs on a status-only patch)', async () => {
+      const existing = fakeAppointment({ status: AppointmentStatus.CANCELLED });
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(existing),
+        findOverlapping: (): Promise<Appointment[]> =>
+          Promise.reject(new Error('findOverlapping should not run for a status-only patch')),
+        update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute('a1', { status: AppointmentStatus.SCHEDULED }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does NOT swallow unrelated update errors (rethrows as-is)', async () => {
+      const boom = new Prisma.PrismaClientUnknownRequestError('some other db failure', {
+        clientVersion: '6.19.3',
+      });
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(fakeAppointment()),
+        findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+        update: (): Promise<Appointment> => Promise.reject(boom),
+      });
+      const uc = new UpdateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute('a1', { notes: 'x' }),
+      ).rejects.toBe(boom);
     });
   });
 });

@@ -11,6 +11,7 @@ import type {
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
 import { Appointment } from '../../domain/entities/appointment.entity';
+import { isProviderOverlapExclusionViolation } from '../appointment-overlap-error';
 
 export type UpdateAppointmentInput = UpdateAppointmentRepoInput;
 
@@ -57,6 +58,24 @@ export class UpdateAppointmentUseCase {
       }
     }
 
-    return this.repo.update(id, patch);
+    // Race-proof backstop for the DB's EXCLUDE constraint
+    // (appointments_no_overlap_per_provider, SQLSTATE 23P01) — mirrors
+    // CreateAppointmentUseCase. NOT limited to the reschedule branch on
+    // purpose: the constraint's predicate is
+    // `deletedAt IS NULL AND status <> 'CANCELLED'`, so UN-CANCELLING an
+    // appointment (CANCELLED -> SCHEDULED) can also collide when its old slot
+    // was taken meanwhile — and that path never runs the pre-check above.
+    // Without this, either case would surface as a raw 500 instead of the 409
+    // the pre-check produces.
+    try {
+      return await this.repo.update(id, patch);
+    } catch (error) {
+      if (isProviderOverlapExclusionViolation(error)) {
+        throw new ConflictException(
+          'El profesional ya tiene una cita en ese horario',
+        );
+      }
+      throw error;
+    }
   }
 }
