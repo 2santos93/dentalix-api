@@ -161,4 +161,46 @@ describe('CreatePatientUseCase', () => {
 
     expect(captured?.createdById).toBe('user-42');
   });
+
+  it('deriva las banderas y pasa la historia v1 al repo cuando viene medicalHistory', async () => {
+    let captured: any;
+    const repo: any = {
+      create: (input: any) => {
+        captured = input;
+        return Promise.resolve({ id: 'p1' });
+      },
+    };
+    const reference: any = { cityBelongsToCountry: () => Promise.resolve(true) };
+    const uc = new CreatePatientUseCase(repo, reference);
+
+    await uc.execute({
+      firstName: 'Ana',
+      lastName: 'Ríos',
+      docType: 'CC',
+      sex: 'F',
+      medicalHistory: {
+        allergies: [
+          { alergeno: 'Penicilina', tipo: 'MEDICAMENTO', severidad: 'MODERADA', esAlerta: true },
+        ],
+      },
+    } as any);
+
+    expect(captured.medicalHistory).toBeDefined();
+    expect(captured.medicalHistory.hasCriticalAlert).toBe(true);
+    expect(captured.medicalHistory.safetyFlags.alergiaPenicilina).toBe(true);
+  });
+
+  it('no adjunta historia cuando no viene medicalHistory', async () => {
+    let captured: any;
+    const repo: any = {
+      create: (input: any) => {
+        captured = input;
+        return Promise.resolve({ id: 'p1' });
+      },
+    };
+    const reference: any = { cityBelongsToCountry: () => Promise.resolve(true) };
+    const uc = new CreatePatientUseCase(repo, reference);
+    await uc.execute({ firstName: 'Ana', lastName: 'Ríos', docType: 'CC', sex: 'F' } as any);
+    expect(captured.medicalHistory).toBeUndefined();
+  });
 });
