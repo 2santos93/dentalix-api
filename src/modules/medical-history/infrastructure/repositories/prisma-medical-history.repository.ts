@@ -6,11 +6,33 @@ import {
   MedicalHistoryRepository,
   MedicalHistoryVersionData,
 } from '../../domain/ports/medical-history-repository.port';
-import { MedicalHistory } from '../../domain/entities/medical-history.entity';
+import {
+  MedicalHistory,
+  Allergy,
+  Condition,
+  Medication,
+  Habits,
+  DentalHistory,
+  Surgery,
+  VitalSigns,
+  SafetyFlags,
+} from '../../domain/entities/medical-history.entity';
+import { deriveSafetyFlags } from '../../domain/safety-flags';
 
 type PrismaMedicalHistoryVersion = Prisma.MedicalHistoryVersionGetPayload<
   Record<string, never>
 >;
+
+const EMPTY_FLAGS: SafetyFlags = {
+  embarazo: false,
+  anticoagulantes: false,
+  bifosfonatos: false,
+  diabetes: false,
+  profilaxisAntibiotica: false,
+  alergiaAnestesico: false,
+  alergiaPenicilina: false,
+  alergiaLatex: false,
+};
 
 function mapToEntity(row: PrismaMedicalHistoryVersion): MedicalHistory {
   return {
@@ -18,12 +40,17 @@ function mapToEntity(row: PrismaMedicalHistoryVersion): MedicalHistory {
     tenantId: row.tenantId,
     patientId: row.patientId,
     version: row.version,
-    allergies: row.allergies,
-    chronicConditions: row.chronicConditions,
-    currentMedications: row.currentMedications,
-    habits: row.habits,
-    medicalAlerts: row.medicalAlerts,
+    allergies: (row.allergies as Allergy[] | null) ?? [],
+    conditions: (row.conditions as Condition[] | null) ?? [],
+    medications: (row.medications as Medication[] | null) ?? [],
+    habits: (row.habits as Habits | null) ?? null,
+    dentalHistory: (row.dentalHistory as DentalHistory | null) ?? null,
+    surgeries: (row.surgeries as Surgery[] | null) ?? [],
+    vitalSigns: (row.vitalSigns as VitalSigns | null) ?? null,
+    familyHistory: row.familyHistory,
     notes: row.notes,
+    safetyFlags: (row.safetyFlags as SafetyFlags | null) ?? EMPTY_FLAGS,
+    hasCriticalAlert: row.hasCriticalAlert,
     createdById: row.createdById,
     createdAt: row.createdAt,
   };
@@ -69,6 +96,7 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
     createdById?: string,
   ): Promise<MedicalHistory> {
     const tenantId = this.requireTenantId();
+    const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
 
     const row = await this.prisma.runWithTenant(async (tx) => {
       // Append-only: NEVER update/delete an existing row. `findFirst` +
@@ -90,12 +118,18 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
           tenantId,
           patientId,
           version,
-          allergies: data.allergies,
-          chronicConditions: data.chronicConditions,
-          currentMedications: data.currentMedications,
-          habits: data.habits,
-          medicalAlerts: data.medicalAlerts,
+          allergies: (data.allergies ?? []) as unknown as Prisma.InputJsonValue,
+          conditions: (data.conditions ?? []) as unknown as Prisma.InputJsonValue,
+          medications: (data.medications ?? []) as unknown as Prisma.InputJsonValue,
+          habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          dentalHistory: (data.dentalHistory ??
+            Prisma.JsonNull) as Prisma.InputJsonValue,
+          surgeries: (data.surgeries ?? []) as unknown as Prisma.InputJsonValue,
+          vitalSigns: (data.vitalSigns ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          familyHistory: data.familyHistory,
           notes: data.notes,
+          safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
+          hasCriticalAlert,
           createdById,
         },
       });

@@ -6,9 +6,10 @@ import type {
 } from '../../domain/ports/medical-history-repository.port';
 import { MedicalHistory } from '../../domain/entities/medical-history.entity';
 
-// NOTE: deliberately NO `tenantId`/`version`/`id` fields — same rationale as
-// MedicalHistoryVersionData (tenant from context, version computed by the
-// repository). This is the shape the controller's DTO maps into.
+// NOTE: deliberately NO `tenantId`/`version`/`id`/`safetyFlags`/
+// `hasCriticalAlert` fields — same rationale as MedicalHistoryVersionData
+// (tenant from context, version computed by the repository, flags derived in
+// the domain). This is the shape the controller's DTO maps into.
 export type SaveMedicalHistoryInput = MedicalHistoryVersionData;
 
 @Injectable()
@@ -19,30 +20,30 @@ export class SaveMedicalHistoryUseCase {
   ) {}
 
   /**
-   * Append-only: ALWAYS creates a brand-new version via
-   * `repo.createVersion` — never looks up or updates an existing row. The
-   * repository computes `version = latest+1`; the previous version is left
-   * completely untouched (see PrismaMedicalHistoryRepository /
-   * InMemoryMedicalHistoryRepository in the spec for the same contract).
+   * Append-only: siempre crea una versión nueva. Reconstruye el payload solo
+   * con los campos conocidos (defensivo: descarta cualquier `tenantId`/
+   * `version`/`safetyFlags` colado en `data`). La derivación de banderas vive
+   * en el repositorio (`deriveSafetyFlags`), junto al INSERT, para que el
+   * cómputo sea la única fuente de verdad tanto aquí como en el alta.
    */
   async execute(
     patientId: string,
     data: MedicalHistoryVersionData,
     createdById?: string,
   ): Promise<MedicalHistory> {
-    // Rebuild the payload from only the known fields — same defensive
-    // convention as CreateCatalogItemUseCase: anything sneaked into `data`
-    // beyond this shape (e.g. a client-supplied `tenantId`/`version`) is
-    // dropped here, never forwarded to the repository.
     const normalized: MedicalHistoryVersionData = {
       allergies: data.allergies,
-      chronicConditions: data.chronicConditions,
-      currentMedications: data.currentMedications,
+      conditions: data.conditions,
+      medications: data.medications,
       habits: data.habits,
-      medicalAlerts: data.medicalAlerts,
+      dentalHistory: data.dentalHistory,
+      surgeries: data.surgeries,
+      vitalSigns: data.vitalSigns,
+      familyHistory: data.familyHistory,
       notes: data.notes,
+      embarazo: data.embarazo,
+      semanasEmbarazo: data.semanasEmbarazo,
     };
-
     return this.repo.createVersion(patientId, normalized, createdById);
   }
 }
