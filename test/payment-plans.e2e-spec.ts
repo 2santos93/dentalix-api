@@ -349,7 +349,7 @@ describe('Payment plans / cuotas (e2e)', () => {
       // --- 7. Abono: POST an abono in the plan's own currency (USD) so the
       // exchange-rate snapshot is never consulted (passthrough conversion) ->
       // then GET again: paidTotal reflects it.
-      await request(app.getHttpServer())
+      const abono = await request(app.getHttpServer())
         .post(`/api/v1/treatment-plans/${plan.id}/payments`)
         .set('X-Tenant-Host', hostFor(subdomain))
         .set('Authorization', `Bearer ${clinic.accessToken}`)
@@ -360,6 +360,9 @@ describe('Payment plans / cuotas (e2e)', () => {
           method: 'CASH',
         })
         .expect(201);
+      const abonoBody = abono.body as PaymentResponseBody;
+      expect(abonoBody.amount).toBe(100);
+      expect(abonoBody.currency).toBe('USD');
 
       const getPlan2 = await request(app.getHttpServer())
         .get(`/api/v1/treatment-plans/${plan.id}/payment-plan`)
@@ -369,6 +372,10 @@ describe('Payment plans / cuotas (e2e)', () => {
       const getPlanBody2 = getPlan2.body as PaymentPlanResponseBody;
       expect(getPlanBody2.paidTotal).toBe(100);
       expect(getPlanBody2.remaining).toBe(1100);
+      // Per-installment allocation: the 100 abono exactly covers the first
+      // installment (1200 / 12 = 100 each) -> covered=100 -> status PAID.
+      expect(getPlanBody2.installments[0].covered).toBe(100);
+      expect(getPlanBody2.installments[0].status).toBe('PAID');
 
       // --- 8. Cancel: DELETE -> 204; GET -> 404; a fresh POST is allowed
       // again -> 201 (cancel + re-create, no reconciliation needed).
