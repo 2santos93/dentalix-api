@@ -70,4 +70,17 @@ describe('generateSchedule', () => {
       '2026-01-29',
     ]);
   });
+
+  it('sum of installments is bit-exact to financedAmount in cents (no float drift)', () => {
+    // NOTE: comparing the raw dollar-float sum (rows.reduce((s,r)=>s+r.amount,0)) against
+    // 1000 with strict `toBe` is NOT achievable here even with a correct integer-cent
+    // split: 83.33 (x11) + 83.37 summed left-to-right via Array.reduce is IEEE-754
+    // 1000.0000000000001, not 1000, because 83.33/83.37 are not exactly representable in
+    // binary floating point. That is a property of double summation order, not a bug in
+    // the split. The invariant the review cares about -- Sigma installments === financed
+    // EXACTLY -- is genuinely bit-exact at the correct granularity: integer cents.
+    const rows = generateSchedule({ ...base, totalToFinance: 1200, downPayment: 200, installmentsCount: 12 });
+    const sumCents = rows.reduce((s, r) => s + Math.round(r.amount * 100), 0);
+    expect(sumCents).toBe(100000); // strict ===, exact in integer cents by construction
+  });
 });

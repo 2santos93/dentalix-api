@@ -18,12 +18,6 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-// Truncate to 2 decimals toward zero, so the per-installment base never
-// overshoots and the last installment always absorbs a NON-NEGATIVE remainder.
-function floor2(value: number): number {
-  return Math.floor(value * 100) / 100;
-}
-
 // Calendar-month add in UTC with end-of-month clamp (Jan 31 + 1m -> Feb 28/29),
 // so a due date never rolls over into the next month.
 function addMonthsUtc(date: Date, months: number): Date {
@@ -68,18 +62,24 @@ export function generateSchedule(
 ): GeneratedInstallment[] {
   const { installmentsCount, periodicity, startDate } = input;
   const financed = round2(input.totalToFinance - input.downPayment);
-  const base = floor2(financed / installmentsCount);
+
+  // Do the per-installment split in INTEGER CENTS so the sum is bit-exact
+  // by construction (float division/rounding would otherwise drift, e.g.
+  // 0.1 + 0.2 !== 0.3). Only the first N-1 installments use the floored
+  // base; the last absorbs whatever remains, which is always >= 0.
+  const financedCents = Math.round(financed * 100);
+  const baseCents = Math.floor(financedCents / installmentsCount);
 
   const rows: GeneratedInstallment[] = [];
   for (let i = 0; i < installmentsCount; i++) {
     const isLast = i === installmentsCount - 1;
-    const amount = isLast
-      ? round2(financed - base * (installmentsCount - 1))
-      : base;
+    const amountCents = isLast
+      ? financedCents - baseCents * (installmentsCount - 1)
+      : baseCents;
     rows.push({
       sequence: i + 1,
       dueDate: dueDateFor(startDate, periodicity, i),
-      amount,
+      amount: amountCents / 100,
     });
   }
   return rows;
