@@ -48,6 +48,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   ],
   // Exported (additive) so DashboardModule can inject GetPaymentsTotalsUseCase
   // by class — same pattern as SalesModule exporting GetSalesTotalsUseCase.
-  exports: [GetPaymentsTotalsUseCase],
+  // GetPlanBalanceUseCase is also exported so PaymentPlansModule can inject it
+  // (GetPaymentPlanUseCase reuses the same multi-currency "paid" math).
+  exports: [GetPaymentsTotalsUseCase, GetPlanBalanceUseCase],
 })
 export class PaymentsModule {}

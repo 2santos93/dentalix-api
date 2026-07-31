@@ -20,6 +20,7 @@ import { PublicBrandingModule } from './modules/public-branding/public-branding.
 import { ExchangeModule } from './modules/exchange/exchange.module';
 import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
@@ -44,6 +45,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ExchangeModule,
     ReferenceModule,
     PaymentsModule,
+    PaymentPlansModule,
     InventoryModule,
     DashboardModule,
   ],
