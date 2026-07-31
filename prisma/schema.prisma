@@ -200,6 +200,11 @@ model ToothRecord {
   notes           String?
   clinicalEntryId String?           @db.Uuid
   performedById   String?           @db.Uuid
+  // Set when this record was auto-created because a TreatmentPlanItem was
+  // marked DONE (Pieza B). Soft pointer (no FK/relation): used to dedupe so a
+  // given plan item mirrors into the odontogram at most once. Null for records
+  // created directly in the odontogram.
+  sourcePlanItemId String?          @db.Uuid
   recordedAt      DateTime          @default(now())
   createdAt       DateTime          @default(now())
   deletedAt       DateTime?
@@ -208,6 +213,7 @@ model ToothRecord {
 
   @@index([tenantId, patientId])
   @@index([tenantId, patientId, toothNumber])
+  @@index([tenantId, sourcePlanItemId])
   @@map("tooth_records")
 }
 

@@ -15,6 +15,7 @@ import { PrismaCurrencyWhitelist } from './infrastructure/adapters/prisma-curren
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
+import { OdontogramModule } from '../odontogram/odontogram.module';
 
 @Module({
   // JwtModule.register({}) mirrors AppointmentsModule/OdontogramModule:
@@ -23,8 +24,10 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
   // DentalCatalogModule is imported (not re-implemented) so
   // AddTreatmentPlanItemUseCase can inject DENTAL_CATALOG_REPOSITORY — it now
   // exports that provider (see dental-catalog.module.ts) for exactly this
-  // cross-module use case.
-  imports: [JwtModule.register({}), DentalCatalogModule],
+  // cross-module use case. OdontogramModule is imported so
+  // UpdateTreatmentPlanItemUseCase can inject TOOTH_RECORD_REPOSITORY to mirror
+  // an item marked DONE into the odontogram (Pieza B).
+  imports: [JwtModule.register({}), DentalCatalogModule, OdontogramModule],
   controllers: [TreatmentPlansController],
   providers: [
     CreateTreatmentPlanUseCase,

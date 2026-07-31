@@ -1,5 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
-import { ToothSurface, TreatmentPlanItemStatus } from '@prisma/client';
+import {
+  CatalogKind,
+  ToothSurface,
+  TreatmentPlanItemStatus,
+} from '@prisma/client';
 import { UpdateTreatmentPlanItemUseCase } from './update-treatment-plan-item.use-case';
 import {
   TreatmentPlan,
@@ -10,6 +14,13 @@ import {
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
+import { ToothRecord } from '../../../odontogram/domain/entities/tooth-record.entity';
+import {
+  CreateToothRecordRepoInput,
+  ToothRecordRepository,
+} from '../../../odontogram/domain/ports/tooth-record-repository.port';
+import { DentalCatalogItem } from '../../../dental-catalog/domain/entities/dental-catalog-item.entity';
+import { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 
 function fakeItem(
   overrides: Partial<TreatmentPlanItem> = {},
@@ -53,6 +64,37 @@ function makeRepo(
   };
 }
 
+function makeToothRepo(
+  overrides: Partial<ToothRecordRepository> = {},
+): ToothRecordRepository {
+  return {
+    create: (): Promise<ToothRecord> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    listByPatient: (): Promise<ToothRecord[]> => Promise.resolve([]),
+    listByTooth: (): Promise<ToothRecord[]> => Promise.resolve([]),
+    findBySourcePlanItem: (): Promise<ToothRecord | null> =>
+      Promise.resolve(null),
+    ...overrides,
+  };
+}
+
+function makeCatalogRepo(
+  overrides: Partial<DentalCatalogRepository> = {},
+): DentalCatalogRepository {
+  return {
+    create: (): Promise<DentalCatalogItem> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    list: (): Promise<DentalCatalogItem[]> => Promise.resolve([]),
+    findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),
+    update: (): Promise<DentalCatalogItem> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    ...overrides,
+  };
+}
+
+// Minimal plan whose only field the use case reads is `patientId`.
+const planWithPatient = { patientId: 'pat1' } as unknown as TreatmentPlanWithItems;
+
 describe('UpdateTreatmentPlanItemUseCase', () => {
   it('throws NotFoundException when the item does not exist (or belongs to another tenant)', async () => {
     const repo = makeRepo({
@@ -61,7 +103,11 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       updateItem: (): Promise<TreatmentPlanItem> =>
         Promise.reject(new Error('updateItem should not be called')),
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo);
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeToothRepo(),
+      makeCatalogRepo(),
+    );
 
     await expect(
       uc.execute('missing-id', { price: 100 }),
@@ -85,7 +131,11 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         });
       },
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo);
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeToothRepo(),
+      makeCatalogRepo(),
+    );
 
     const result = await uc.execute(existing.id, { price: 999 });
 
@@ -105,7 +155,11 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       updateItem: (): Promise<TreatmentPlanItem> =>
         Promise.resolve({ ...existing, status }),
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo);
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeToothRepo(),
+      makeCatalogRepo(),
+    );
 
     const result = await uc.execute(existing.id, { status });
 
@@ -130,7 +184,11 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         });
       },
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo);
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeToothRepo(),
+      makeCatalogRepo(),
+    );
 
     const result = await uc.execute(existing.id, {
       surfaces: [ToothSurface.DISTAL],
@@ -142,6 +200,129 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     expect(receivedPatch).toEqual({
       surfaces: [ToothSurface.DISTAL],
       notes: 'Actualizado',
+    });
+  });
+
+  describe('Pieza B — mirror to odontogram on DONE', () => {
+    it('creates a tooth record linked to the item when it transitions to DONE', async () => {
+      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
+      const repo = makeRepo({
+        findItemById: (): Promise<TreatmentPlanItem | null> =>
+          Promise.resolve(existing),
+        updateItem: (): Promise<TreatmentPlanItem> =>
+          Promise.resolve({ ...existing, status: TreatmentPlanItemStatus.DONE }),
+        findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
+          Promise.resolve(planWithPatient),
+      });
+      let received: CreateToothRecordRepoInput | undefined;
+      const toothRepo = makeToothRepo({
+        findBySourcePlanItem: (): Promise<ToothRecord | null> =>
+          Promise.resolve(null),
+        create: (input: CreateToothRecordRepoInput): Promise<ToothRecord> => {
+          received = input;
+          return Promise.resolve({} as ToothRecord);
+        },
+      });
+      const catalog = makeCatalogRepo({
+        findById: (): Promise<DentalCatalogItem | null> =>
+          Promise.resolve({ kind: CatalogKind.PROCEDURE } as DentalCatalogItem),
+      });
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, toothRepo, catalog);
+
+      const result = await uc.execute(
+        existing.id,
+        { status: TreatmentPlanItemStatus.DONE },
+        'user1',
+      );
+
+      expect(result.status).toBe(TreatmentPlanItemStatus.DONE);
+      expect(received).toEqual({
+        patientId: 'pat1',
+        toothNumber: '11',
+        surfaces: [],
+        kind: CatalogKind.PROCEDURE,
+        catalogItemId: 'cat1',
+        status: 'COMPLETED',
+        performedById: 'user1',
+        sourcePlanItemId: 'item1',
+      });
+    });
+
+    it('does not create a second tooth record if the item was already mirrored (dedupe)', async () => {
+      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
+      const repo = makeRepo({
+        findItemById: (): Promise<TreatmentPlanItem | null> =>
+          Promise.resolve(existing),
+        updateItem: (): Promise<TreatmentPlanItem> =>
+          Promise.resolve({ ...existing, status: TreatmentPlanItemStatus.DONE }),
+        findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
+          Promise.resolve(planWithPatient),
+      });
+      const create = jest.fn();
+      const toothRepo = makeToothRepo({
+        findBySourcePlanItem: (): Promise<ToothRecord | null> =>
+          Promise.resolve({ id: 'existing-record' } as ToothRecord),
+        create,
+      });
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        toothRepo,
+        makeCatalogRepo(),
+      );
+
+      await uc.execute(existing.id, { status: TreatmentPlanItemStatus.DONE });
+
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('does not mirror when the item was already DONE (no transition)', async () => {
+      const existing = fakeItem({ status: TreatmentPlanItemStatus.DONE });
+      const repo = makeRepo({
+        findItemById: (): Promise<TreatmentPlanItem | null> =>
+          Promise.resolve(existing),
+        updateItem: (): Promise<TreatmentPlanItem> =>
+          Promise.resolve({ ...existing, price: 300 }),
+      });
+      const create = jest.fn();
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        makeToothRepo({ create }),
+        makeCatalogRepo(),
+      );
+
+      const result = await uc.execute(existing.id, { price: 300 });
+
+      expect(result.price).toBe(300);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('still succeeds if mirroring fails (best-effort)', async () => {
+      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
+      const repo = makeRepo({
+        findItemById: (): Promise<TreatmentPlanItem | null> =>
+          Promise.resolve(existing),
+        updateItem: (): Promise<TreatmentPlanItem> =>
+          Promise.resolve({ ...existing, status: TreatmentPlanItemStatus.DONE }),
+        findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
+          Promise.resolve(planWithPatient),
+      });
+      const toothRepo = makeToothRepo({
+        findBySourcePlanItem: (): Promise<ToothRecord | null> =>
+          Promise.resolve(null),
+        create: (): Promise<ToothRecord> =>
+          Promise.reject(new Error('odontogram write failed')),
+      });
+      const catalog = makeCatalogRepo({
+        findById: (): Promise<DentalCatalogItem | null> =>
+          Promise.resolve({ kind: CatalogKind.PROCEDURE } as DentalCatalogItem),
+      });
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, toothRepo, catalog);
+
+      const result = await uc.execute(existing.id, {
+        status: TreatmentPlanItemStatus.DONE,
+      });
+
+      expect(result.status).toBe(TreatmentPlanItemStatus.DONE);
     });
   });
 });

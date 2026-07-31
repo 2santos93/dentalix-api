@@ -16,6 +16,8 @@ export interface CreateToothRecordRepoInput {
   notes?: string;
   clinicalEntryId?: string;
   performedById?: string;
+  /** Set only when this record mirrors a treatment-plan item marked DONE (Pieza B). */
+  sourcePlanItemId?: string;
   recordedAt?: Date;
 }
 
@@ -43,4 +45,11 @@ export interface ToothRecordRepository {
    * (most recent first) — this is the per-tooth timeline.
    */
   listByTooth(patientId: string, toothNumber: string): Promise<ToothRecord[]>;
+
+  /**
+   * The non-deleted record auto-created from a given treatment-plan item, or
+   * `null` if none. Used to dedupe (Pieza B): a plan item mirrors into the
+   * odontogram at most once. Read-only — does NOT violate append-only.
+   */
+  findBySourcePlanItem(planItemId: string): Promise<ToothRecord | null>;
 }

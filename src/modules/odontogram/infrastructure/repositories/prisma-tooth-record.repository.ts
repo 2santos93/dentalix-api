@@ -27,6 +27,7 @@ function mapToEntity(row: PrismaToothRecord): ToothRecord {
     notes: row.notes,
     clinicalEntryId: row.clinicalEntryId,
     performedById: row.performedById,
+    sourcePlanItemId: row.sourcePlanItemId,
     recordedAt: row.recordedAt,
     createdAt: row.createdAt,
   };
@@ -75,11 +76,21 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
           notes: input.notes,
           clinicalEntryId: input.clinicalEntryId,
           performedById: input.performedById,
+          sourcePlanItemId: input.sourcePlanItemId,
           recordedAt: input.recordedAt ?? new Date(),
         },
       });
     });
     return mapToEntity(row);
+  }
+
+  async findBySourcePlanItem(planItemId: string): Promise<ToothRecord | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.toothRecord.findFirst({
+        where: { sourcePlanItemId: planItemId, deletedAt: null },
+      });
+      return row ? mapToEntity(row) : null;
+    });
   }
 
   async listByPatient(patientId: string): Promise<ToothRecord[]> {

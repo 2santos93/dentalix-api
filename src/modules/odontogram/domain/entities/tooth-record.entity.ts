@@ -26,6 +26,12 @@ export interface ToothRecord {
   notes: string | null;
   clinicalEntryId: string | null;
   performedById: string | null;
+  /**
+   * When set, this record was auto-created because a TreatmentPlanItem was
+   * marked DONE (Pieza B) — it points at that plan item. Null for records
+   * created directly in the odontogram.
+   */
+  sourcePlanItemId: string | null;
   recordedAt: Date;
   createdAt: Date;
 }

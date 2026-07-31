@@ -134,13 +134,20 @@ export class TreatmentPlansController {
   updateItem(
     @Param('itemId') itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlanItem> {
-    return this.updateTreatmentPlanItem.execute(itemId, {
-      price: dto.price,
-      status: dto.status,
-      surfaces: dto.surfaces,
-      notes: dto.notes,
-    });
+    // `performedById` (req.user.sub) stamps the odontogram record auto-created
+    // when this item is marked DONE (Pieza B) — never from the client body.
+    return this.updateTreatmentPlanItem.execute(
+      itemId,
+      {
+        price: dto.price,
+        status: dto.status,
+        surfaces: dto.surfaces,
+        notes: dto.notes,
+      },
+      req.user.sub,
+    );
   }
 
   @Delete('treatment-plans/:id/items/:itemId')

@@ -28,5 +28,9 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
       useClass: PrismaToothRecordRepository,
     },
   ],
+  // Exported (additive) so TreatmentPlansModule can inject TOOTH_RECORD_REPOSITORY
+  // to mirror a plan item marked DONE into the odontogram (Pieza B) — same
+  // cross-module DI pattern as DentalCatalogModule exporting its repository.
+  exports: [TOOTH_RECORD_REPOSITORY],
 })
 export class OdontogramModule {}
