@@ -7,7 +7,10 @@ import {
 } from '../../../payments/application/use-cases/get-payments-totals.use-case';
 import { InMemoryPaymentRepository } from '../../../payments/application/use-cases/__fixtures__/in-memory-payment.repository';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
-import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
+import {
+  ListInventoryItemsUseCase,
+  ListInventoryItemsOutput,
+} from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { InventoryItemWithStock } from '../../../inventory/domain/entities/inventory-item.entity';
 import {
   ListAppointmentsUseCase,
@@ -49,8 +52,19 @@ class FakeGetPaymentsTotalsUseCase {
 class FakeListInventoryItemsUseCase {
   public items: InventoryItemWithStock[] = [];
 
-  execute(): Promise<InventoryItemWithStock[]> {
-    return Promise.resolve(this.items);
+  // `ListInventoryItemsUseCase.execute()` now returns the paginated envelope
+  // (feat(inventory): búsqueda, paginación y filtro de bajo stock). This
+  // dashboard consumer doesn't page or filter -- see the `pageSize` cap note
+  // in get-doctor-dashboard.use-case.ts -- so the fake echoes `total` as
+  // `items.length` and fixes `page`/`pageSize` the way the real use case
+  // would when called with no explicit pagination.
+  execute(): Promise<ListInventoryItemsOutput> {
+    return Promise.resolve({
+      items: this.items,
+      total: this.items.length,
+      page: 1,
+      pageSize: 20,
+    });
   }
 }
 

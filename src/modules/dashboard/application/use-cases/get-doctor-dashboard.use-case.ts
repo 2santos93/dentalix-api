@@ -104,17 +104,22 @@ export class GetDoctorDashboardUseCase {
     // Currency format/support itself is validated downstream by
     // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
     // throws BadRequestException there) -- not duplicated here.
-    const [incomes, allItems, patients] = await Promise.all([
+    const [incomes, inventoryPage, patients] = await Promise.all([
       this.getPaymentsTotals.execute({
         from: input.from,
         to: input.to,
         currency: input.currency,
       }),
-      this.listInventoryItems.execute(),
+      // ListInventoryItemsUseCase.execute() now returns a paginated envelope
+      // (feat(inventory): búsqueda, paginación y filtro de bajo stock) --
+      // request `pageSize: 100` (its MAX_PAGE_SIZE) so this count stays
+      // correct for the same range of inventories the patients list below
+      // already accepts capping at (see `patientFirstName` comment above).
+      this.listInventoryItems.execute({ pageSize: 100 }),
       this.listPatients.execute({}),
     ]);
 
-    const lowStock = allItems.filter((item) => item.lowStock);
+    const lowStock = inventoryPage.items.filter((item) => item.lowStock);
 
     const now = new Date();
     const windowEnd = new Date(

@@ -90,8 +90,16 @@ export class InventoryController {
 
   @Get()
   @ApiOkResponse({ type: [InventoryItemDto] })
-  list(): Promise<InventoryItemWithStock[]> {
-    return this.listInventoryItems.execute();
+  // TEMPORARY: ListInventoryItemsUseCase.execute() now returns the paginated
+  // envelope `{ items, total, page, pageSize }` (Task 1 of
+  // docs/plans/2026-08-01-inventario-busqueda-paginacion.md). This route
+  // still exposes a flat array (unpaginated, first page only) to avoid
+  // widening this task's scope into the query DTO / paginated response DTO,
+  // which is Task 2's job -- flagged to the team lead as a scope gap the
+  // plan's File Structure didn't call out.
+  async list(): Promise<InventoryItemWithStock[]> {
+    const { items } = await this.listInventoryItems.execute();
+    return items;
   }
 
   @Get(':id')

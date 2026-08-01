@@ -38,6 +38,11 @@ export interface CreateInventoryMovementRepoInput {
 
 export const INVENTORY_REPOSITORY = Symbol('INVENTORY_REPOSITORY');
 
+export interface ListInventoryItemsRepoParams {
+  /** Texto libre: nombre o SKU, sin distinguir mayúsculas. */
+  query?: string;
+}
+
 export interface InventoryRepository {
   createItem(input: CreateInventoryItemRepoInput): Promise<InventoryItem>;
 
@@ -46,9 +51,13 @@ export interface InventoryRepository {
   findItemById(id: string): Promise<InventoryItem | null>;
 
   /** Active items only (`deletedAt: null`), no `stock`/`lowStock` attached —
-   * computing those is `ListInventoryItemsUseCase`'s job, using
-   * `sumSignedQuantityAll` to avoid an N+1. */
-  listItems(): Promise<InventoryItem[]>;
+   * computing those (and any `lowStockOnly` filter/pagination over them) is
+   * `ListInventoryItemsUseCase`'s job, using `sumSignedQuantityAll` to avoid
+   * an N+1. `params.query`, when present, is a case-insensitive match on
+   * name OR sku — text filtering IS the repo's job (unlike stock, it needs
+   * no cross-item aggregation, so there is no reason to pull every row and
+   * filter in memory). Omitting `params` preserves today's behaviour. */
+  listItems(params?: ListInventoryItemsRepoParams): Promise<InventoryItem[]>;
 
   updateItem(
     id: string,
