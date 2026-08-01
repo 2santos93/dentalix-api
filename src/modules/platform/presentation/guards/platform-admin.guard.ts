@@ -27,9 +27,7 @@ export class PlatformAdminGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const { user } = context
-      .switchToHttp()
-      .getRequest<{ user?: JwtPayload }>();
+    const { user } = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
     if (!user || !isPlatformPayload(user)) {
       throw new ForbiddenException('Platform admin only');
     }
