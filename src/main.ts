@@ -41,6 +41,11 @@ async function bootstrap(): Promise<void> {
       'Authorization',
       'X-Tenant',
       'X-Tenant-Host',
+      // Sede activa (multi-sede). Sin esto el navegador bloquea en el
+      // preflight TODAS las llamadas en cuanto el usuario elige una sede: por
+      // curl y en los e2e (supertest no hace preflight) funcionaba igual, así
+      // que solo se ve probándolo en un navegador de verdad.
+      'X-Location-Id',
     ],
   });
 
