@@ -129,6 +129,33 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     });
   }
 
+  async findOverlappingForPatient(
+    patientId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]> {
+    // Mismo criterio de solape medio-abierto que `findOverlapping` (ver el
+    // detalle allí): dos citas contiguas no se solapan. Solo cambia el eje:
+    // paciente en vez de profesional.
+    const where: Prisma.AppointmentWhereInput = {
+      patientId,
+      deletedAt: null,
+      status: { not: 'CANCELLED' },
+      start: { lt: end },
+      end: { gt: start },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    };
+
+    return this.prisma.runWithTenant(async (tx) => {
+      const appointments = await tx.appointment.findMany({
+        where,
+        orderBy: { start: 'asc' },
+      });
+      return appointments.map(mapToEntity);
+    });
+  }
+
   async update(
     id: string,
     patch: UpdateAppointmentRepoInput,

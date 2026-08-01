@@ -58,6 +58,7 @@ function makeRepo(
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
     listByRange: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
     update: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
@@ -290,6 +291,70 @@ describe('CreateAppointmentUseCase', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
+    it('rechaza doble-agendar al MISMO PACIENTE aunque el profesional esté libre', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      // El paciente ya tiene cita con prov1; se intenta otra solapada con prov2
+      // (profesional distinto y libre). El paciente no puede estar en dos
+      // sillones a la vez.
+      repo.seed({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('10:00'),
+        end: at('11:00'),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov2',
+          start: at('10:30'),
+          end: at('11:30'),
+        }),
+      ).rejects.toThrow('El paciente ya tiene otra cita en ese horario');
+    });
+
+    it('permite al mismo paciente una cita CONTIGUA (el fin de una es el inicio de la otra)', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('10:00'),
+        end: at('11:00'),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      const result = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov2',
+        start: at('11:00'),
+        end: at('11:30'),
+      });
+
+      expect(result.patientId).toBe('p1');
+    });
+
+    it('una cita CANCELADA del paciente no bloquea el horario', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('10:00'),
+        end: at('11:00'),
+        status: AppointmentStatus.CANCELLED,
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      const result = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov2',
+        start: at('10:30'),
+        end: at('11:30'),
+      });
+
+      expect(result.patientId).toBe('p1');
+    });
+
     it('scopes overlap per provider — an identical slot for a different provider succeeds', async () => {
       const repo = new InMemoryAppointmentRepository();
       repo.seed({
@@ -335,6 +400,7 @@ describe('CreateAppointmentUseCase', () => {
     it('maps the ORM exclusion violation (23P01) to the SAME 409 as the pre-check', async () => {
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
       const uc = new CreateAppointmentUseCase(repo);
@@ -347,9 +413,29 @@ describe('CreateAppointmentUseCase', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
+    it('distingue la constraint del PACIENTE y devuelve su mensaje (no el del profesional)', async () => {
+      const patientExclusion = new Prisma.PrismaClientUnknownRequestError(
+        'Invalid `tx.appointment.create()` ... code: "23P01", message: ' +
+          '"conflicting key value violates exclusion constraint ' +
+          '\\"appointments_no_overlap_per_patient\\""',
+        { clientVersion: '6.19.3' },
+      );
+      const repo = makeRepo({
+        findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+        findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+        create: (): Promise<Appointment> => Promise.reject(patientExclusion),
+      });
+      const uc = new CreateAppointmentUseCase(repo);
+
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).rejects.toThrow('El paciente ya tiene otra cita en ese horario');
+    });
+
     it('also maps the raw-path shape (P2010 / meta.code 23P01) to 409', async () => {
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(rawExclusionError()),
       });
       const uc = new CreateAppointmentUseCase(repo);
@@ -365,6 +451,7 @@ describe('CreateAppointmentUseCase', () => {
       });
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(boom),
       });
       const uc = new CreateAppointmentUseCase(repo);

@@ -134,6 +134,23 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return Promise.resolve(items);
   }
 
+  findOverlappingForPatient(
+    patientId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]> {
+    // Igual que `findOverlapping` pero por paciente (mismo solape medio-abierto).
+    const items = this.rows
+      .filter((r) => r.patientId === patientId)
+      .filter((r) => r.deletedAt === null)
+      .filter((r) => r.status !== AppointmentStatus.CANCELLED)
+      .filter((r) => r.start < end && r.end > start)
+      .filter((r) => (excludeId ? r.id !== excludeId : true))
+      .map((r) => this.toEntity(r));
+    return Promise.resolve(items);
+  }
+
   update(id: string, patch: UpdateAppointmentRepoInput): Promise<Appointment> {
     const row = this.rows.find((r) => r.id === id && r.deletedAt === null);
     if (!row) {
