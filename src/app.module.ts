@@ -15,6 +15,7 @@ import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { TreatmentPlansModule } from './modules/treatment-plans/treatment-plans.module';
 import { StaffModule } from './modules/staff/staff.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
 import { ExchangeModule } from './modules/exchange/exchange.module';
@@ -41,6 +42,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AppointmentsModule,
     TreatmentPlansModule,
     StaffModule,
+    InvitationsModule,
     DomainsModule,
     PublicBrandingModule,
     ExchangeModule,
