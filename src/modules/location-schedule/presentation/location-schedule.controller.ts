@@ -41,7 +41,9 @@ export class LocationScheduleController {
 
   /** `null` = sede sin horario configurado ⇒ no se restringe nada. */
   @Get()
-  @ApiOkResponse({ description: 'Horario de la sede, o null si no se configuró' })
+  @ApiOkResponse({
+    description: 'Horario de la sede, o null si no se configuró',
+  })
   get(): Promise<BusinessHours | null> {
     return this.getSchedule.execute();
   }

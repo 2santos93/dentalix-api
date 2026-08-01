@@ -27,7 +27,12 @@ describe('DiskFileStorage (int)', () => {
 
   it('saves bytes under <root>/<namespace>/<filename> and returns a public url', async () => {
     const storage = makeStorage(root);
-    const { url } = await storage.save('avatars', 'u1.png', Buffer.from('img'), 'image/png');
+    const { url } = await storage.save(
+      'avatars',
+      'u1.png',
+      Buffer.from('img'),
+      'image/png',
+    );
     expect(url).toBe('http://files.test/api/v1/files/avatars/u1.png');
     const written = await fs.readFile(path.join(root, 'avatars', 'u1.png'));
     expect(written.toString()).toBe('img');
@@ -37,7 +42,9 @@ describe('DiskFileStorage (int)', () => {
     const storage = makeStorage(root);
     await storage.save('avatars', 'u1.png', Buffer.from('img'), 'image/png');
     await storage.delete('avatars', 'u1.png');
-    await expect(fs.access(path.join(root, 'avatars', 'u1.png'))).rejects.toBeDefined();
+    await expect(
+      fs.access(path.join(root, 'avatars', 'u1.png')),
+    ).rejects.toBeDefined();
     await expect(storage.delete('avatars', 'u1.png')).resolves.toBeUndefined();
   });
 });

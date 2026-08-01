@@ -18,7 +18,11 @@ export class ScheduleRangeDto {
   @Max(6)
   weekday!: number;
 
-  @ApiProperty({ minimum: 0, maximum: 1440, description: 'Minutos desde 00:00' })
+  @ApiProperty({
+    minimum: 0,
+    maximum: 1440,
+    description: 'Minutos desde 00:00',
+  })
   @IsInt()
   @Min(0)
   @Max(1440)
@@ -32,7 +36,10 @@ export class ScheduleRangeDto {
 }
 
 export class ReplaceLocationScheduleDto {
-  @ApiProperty({ example: 'America/Bogota', description: 'Zona IANA de la sede' })
+  @ApiProperty({
+    example: 'America/Bogota',
+    description: 'Zona IANA de la sede',
+  })
   @IsString()
   @MinLength(1)
   timezone!: string;

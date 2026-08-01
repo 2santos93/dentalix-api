@@ -6,9 +6,14 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 
-const raw = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL } } });
+const raw = new PrismaClient({
+  datasources: { db: { url: process.env.DIRECT_URL } },
+});
 
-interface Tokens { accessToken: string; refreshToken: string }
+interface Tokens {
+  accessToken: string;
+  refreshToken: string;
+}
 interface Profile {
   fullName: string;
   email: string;
@@ -30,24 +35,38 @@ describe('Me (e2e)', () => {
   }
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
 
-    await raw.clinicMembership.deleteMany({ where: { tenant: { subdomain: sub } } });
+    await raw.clinicMembership.deleteMany({
+      where: { tenant: { subdomain: sub } },
+    });
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
     await raw.tenant.deleteMany({ where: { subdomain: sub } });
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ clinicName: 'Perfil E2E', subdomain: sub, email: 'perfil@e2e.com', password: 'OldPass1!', fullName: 'Nombre Viejo' })
+      .send({
+        clinicName: 'Perfil E2E',
+        subdomain: sub,
+        email: 'perfil@e2e.com',
+        password: 'OldPass1!',
+        fullName: 'Nombre Viejo',
+      })
       .expect(201);
   });
 
   afterAll(async () => {
-    await raw.clinicMembership.deleteMany({ where: { tenant: { subdomain: sub } } });
+    await raw.clinicMembership.deleteMany({
+      where: { tenant: { subdomain: sub } },
+    });
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
     await raw.tenant.deleteMany({ where: { subdomain: sub } });
     await app.close();
@@ -64,7 +83,10 @@ describe('Me (e2e)', () => {
     expect(body.fullName).toBe('Nombre Viejo');
     expect(body.email).toBe('perfil@e2e.com');
     expect(body.avatarUrl).toBeNull();
-    expect(body.memberships[0]).toMatchObject({ clinicName: 'Perfil E2E', role: 'ADMIN' });
+    expect(body.memberships[0]).toMatchObject({
+      clinicName: 'Perfil E2E',
+      role: 'ADMIN',
+    });
   });
 
   it('PATCH /me updates the name', async () => {

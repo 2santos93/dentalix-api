@@ -19,7 +19,10 @@ describe('Files (e2e)', () => {
     app.setGlobalPrefix('api/v1');
     await app.init();
     await fs.mkdir(path.join(root, 'avatars'), { recursive: true });
-    await fs.writeFile(path.join(root, 'avatars', 'sample.png'), Buffer.from('PNGDATA'));
+    await fs.writeFile(
+      path.join(root, 'avatars', 'sample.png'),
+      Buffer.from('PNGDATA'),
+    );
   });
 
   afterAll(async () => {

@@ -25,9 +25,7 @@ function mapToBusinessHours(row: ScheduleWithRanges): BusinessHours {
 }
 
 @Injectable()
-export class PrismaLocationScheduleRepository
-  implements LocationScheduleRepository
-{
+export class PrismaLocationScheduleRepository implements LocationScheduleRepository {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,

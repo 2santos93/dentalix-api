@@ -2,6 +2,7 @@ import { ClinicRole } from '@prisma/client';
 import { ListStaffUseCase } from './list-staff.use-case';
 import { StaffMember } from '../../domain/entities/staff-member.entity';
 import { StaffRepository } from '../../domain/ports/staff-repository.port';
+import { StaffDirectoryPage } from '../../domain/entities/staff-directory-entry.entity';
 
 function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
   return {
@@ -9,6 +10,12 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     findById: (): Promise<StaffMember | null> => Promise.resolve(null),
     updateById: (): Promise<StaffMember | null> => Promise.resolve(null),
     deactivateById: (): Promise<boolean> => Promise.resolve(false),
+    listDirectory: (): Promise<StaffDirectoryPage> =>
+      Promise.resolve({ items: [], total: 0, page: 1, pageSize: 20 }),
+    findDetailById: (): Promise<
+      (StaffMember & { status: 'ACTIVE' | 'INACTIVE' }) | null
+    > => Promise.resolve(null),
+    reactivateById: (): Promise<StaffMember | null> => Promise.resolve(null),
     countActiveAdmins: (): Promise<number> => Promise.resolve(0),
     ...overrides,
   };

@@ -179,6 +179,32 @@ describe('Patients (e2e)', () => {
       phone: string | null;
     };
     expect(updateBody.phone).toBe('3001234567');
+
+    // Los campos administrativos se pueden CREAR (CreatePatientDto) pero hasta
+    // ahora no editar: UpdatePatientDto no los aceptaba y ValidationPipe con
+    // whitelist:true los descartaba en silencio.
+    const patchAdmin = await request(app.getHttpServer())
+      .patch(`/api/v1/patients/${created.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Authorization', `Bearer ${clinicA.accessToken}`)
+      .send({
+        occupation: 'Docente',
+        insurerEps: 'Sura',
+        maritalStatus: 'Casado',
+        physicianName: 'Dra. Ruiz',
+        physicianPhone: '+57 300 000 0000',
+        emergencyContactName: 'Ana Pérez',
+        emergencyContactRelationship: 'Madre',
+        emergencyContactPhone: '+57 300 111 1111',
+        guardianName: 'Luis Pérez',
+        guardianDocNumber: '9001',
+      })
+      .expect(200);
+    const admin = patchAdmin.body as Record<string, unknown>;
+    expect(admin.occupation).toBe('Docente');
+    expect(admin.insurerEps).toBe('Sura');
+    expect(admin.emergencyContactName).toBe('Ana Pérez');
+    expect(admin.guardianDocNumber).toBe('9001');
   });
 
   it('rejects requests without a bearer token', async () => {

@@ -63,18 +63,18 @@ function makeRepo(
   };
 }
 
-
 // Doble del horario de la sede: por defecto SIN horario configurado (null), que
 // el dominio interpreta como "sin restricción" — así los tests existentes siguen
 // probando lo suyo sin que el horario interfiera. Los tests del horario lo pasan.
 function makeSchedule(hours: unknown = null): LocationScheduleRepository {
   return {
-    findByLocation: (): Promise<never> => Promise.resolve(hours) as Promise<never>,
+    findByLocation: (): Promise<never> =>
+      Promise.resolve(hours) as Promise<never>,
     findForCurrentLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
     replaceForCurrentLocation: (): Promise<never> =>
-      Promise.reject(new Error('not implemented in this fake')) as Promise<never>,
-  } as unknown as LocationScheduleRepository;
+      Promise.reject(new Error('not implemented in this fake')),
+  };
 }
 
 describe('UpdateAppointmentUseCase', () => {

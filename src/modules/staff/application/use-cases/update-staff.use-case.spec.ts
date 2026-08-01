@@ -1,6 +1,8 @@
 import { UpdateStaffUseCase } from './update-staff.use-case';
 import { ClinicRole } from '@prisma/client';
 import { NotFoundException, ConflictException } from '@nestjs/common';
+import { StaffMember } from '../../domain/entities/staff-member.entity';
+import { StaffDirectoryPage } from '../../domain/entities/staff-directory-entry.entity';
 
 const member = (role: ClinicRole) => ({
   userId: 'u1',
@@ -44,6 +46,12 @@ it('404 si no es miembro', async () => {
 it('409 al degradar al último ADMIN', async () => {
   const repo = makeRepo({
     findById: jest.fn().mockResolvedValue(member(ClinicRole.ADMIN)),
+    listDirectory: (): Promise<StaffDirectoryPage> =>
+      Promise.resolve({ items: [], total: 0, page: 1, pageSize: 20 }),
+    findDetailById: (): Promise<
+      (StaffMember & { status: 'ACTIVE' | 'INACTIVE' }) | null
+    > => Promise.resolve(null),
+    reactivateById: (): Promise<StaffMember | null> => Promise.resolve(null),
     countActiveAdmins: jest.fn().mockResolvedValue(1),
   });
   const uc = new UpdateStaffUseCase(repo as any);

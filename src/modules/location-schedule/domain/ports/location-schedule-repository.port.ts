@@ -34,5 +34,7 @@ export interface LocationScheduleRepository {
    * para una grilla: el cliente manda el horario completo, no parches por día).
    * Crea la fila de configuración si no existía.
    */
-  replaceForCurrentLocation(input: ReplaceScheduleInput): Promise<BusinessHours>;
+  replaceForCurrentLocation(
+    input: ReplaceScheduleInput,
+  ): Promise<BusinessHours>;
 }
