@@ -235,11 +235,40 @@ describe('GetDoctorDashboardUseCase', () => {
     expect(result.upcomingAppointments[0]).toEqual({
       id: 'future-early',
       patientId: 'patient-1',
+      // Carried through from the appointment, so the dashboard can name the
+      // patient without a `GET /patients?pageSize=100` lookup (which capped
+      // at 100 and left a raw UUID on screen past that).
+      patientFirstName: null,
+      patientLastName: null,
       providerId: 'provider-1',
       start: new Date('2026-07-16T09:00:00.000Z'),
       end: new Date('2026-07-16T10:00:00.000Z'),
       status: AppointmentStatus.SCHEDULED,
     });
+
+    jest.useRealTimers();
+  });
+
+  it("carries the appointment's joined patient name into upcomingAppointments", async () => {
+    const { appointmentsUc, uc } = makeUseCase();
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-15T12:00:00.000Z'));
+
+    appointmentsUc.items = [
+      makeAppointment({
+        id: 'future-named',
+        patientFirstName: 'Ana',
+        patientLastName: 'García',
+        start: new Date('2026-07-16T09:00:00.000Z'),
+        end: new Date('2026-07-16T10:00:00.000Z'),
+      }),
+    ];
+
+    const result = await uc.execute(baseInput);
+
+    // Without this the dashboard had to resolve the name itself via
+    // `GET /patients?pageSize=100` — a UUID on screen past 100 patients.
+    expect(result.upcomingAppointments[0].patientFirstName).toBe('Ana');
+    expect(result.upcomingAppointments[0].patientLastName).toBe('García');
 
     jest.useRealTimers();
   });

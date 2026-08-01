@@ -88,6 +88,17 @@ export class DashboardUpcomingAppointmentDto {
   @ApiProperty({ format: 'uuid' })
   patientId!: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      "Patient's first name, joined so the dashboard can label the appointment without fetching the patient list.",
+  })
+  patientFirstName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  patientLastName!: string | null;
+
   @ApiProperty({ format: 'uuid' })
   providerId!: string;
 

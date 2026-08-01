@@ -35,6 +35,9 @@ export interface DashboardLowStockItem {
 export interface DashboardUpcomingAppointment {
   id: string;
   patientId: string;
+  /** Joined from Patient (see `Appointment.patientFirstName`) so the dashboard can name the patient without fetching the patient list — which capped at 100 and rendered a UUID past that. */
+  patientFirstName: string | null;
+  patientLastName: string | null;
   providerId: string;
   start: Date;
   end: Date;
@@ -129,6 +132,8 @@ export class GetDoctorDashboardUseCase {
       .map((appt) => ({
         id: appt.id,
         patientId: appt.patientId,
+        patientFirstName: appt.patientFirstName,
+        patientLastName: appt.patientLastName,
         providerId: appt.providerId,
         start: appt.start,
         end: appt.end,
