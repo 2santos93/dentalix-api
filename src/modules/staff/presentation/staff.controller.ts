@@ -7,16 +7,27 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
+  Query,
   Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { ListStaffUseCase } from '../application/use-cases/list-staff.use-case';
+import { ListStaffDirectoryUseCase } from '../application/use-cases/list-staff-directory.use-case';
+import { GetStaffDetailUseCase } from '../application/use-cases/get-staff-detail.use-case';
+import { ReactivateStaffUseCase } from '../application/use-cases/reactivate-staff.use-case';
 import { UpdateStaffUseCase } from '../application/use-cases/update-staff.use-case';
 import { DeactivateStaffUseCase } from '../application/use-cases/deactivate-staff.use-case';
 import { StaffMember } from '../domain/entities/staff-member.entity';
 import { StaffMemberDto } from './dto/staff-member.dto';
+import {
+  StaffDirectoryPageDto,
+  StaffMemberDetailDto,
+} from './dto/staff-directory.dto';
+import { ListStaffDirectoryQueryDto } from './dto/list-staff-directory-query.dto';
+import { StaffDirectoryPage } from '../domain/entities/staff-directory-entry.entity';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -50,14 +61,47 @@ interface AuthenticatedRequest {
 export class StaffController {
   constructor(
     private readonly listStaff: ListStaffUseCase,
+    private readonly listDirectory: ListStaffDirectoryUseCase,
+    private readonly getStaffDetail: GetStaffDetailUseCase,
     private readonly updateStaff: UpdateStaffUseCase,
     private readonly deactivateStaff: DeactivateStaffUseCase,
+    private readonly reactivateStaff: ReactivateStaffUseCase,
   ) {}
 
+  // Sigue SIN paginar a propósito: alimenta selectores (profesional de la
+  // cita, filtro de la agenda, dashboard) que necesitan la lista entera. La
+  // pantalla de gestión usa /staff/directory.
   @Get()
   @ApiOkResponse({ type: [StaffMemberDto] })
   list(): Promise<StaffMember[]> {
     return this.listStaff.execute();
+  }
+
+  // DEBE declararse antes que `@Get(':userId')`: Nest resuelve por orden de
+  // declaración y si no, "directory" entraría como userId (y moriría en el
+  // ParseUUIDPipe con un 400 en vez de listar).
+  @Get('directory')
+  @Roles(...STAFF_WRITE_ROLES)
+  @ApiOkResponse({ type: StaffDirectoryPageDto })
+  directory(
+    @Query() query: ListStaffDirectoryQueryDto,
+  ): Promise<StaffDirectoryPage> {
+    return this.listDirectory.execute({
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 20,
+      search: query.search,
+      role: query.role,
+      status: query.status,
+    });
+  }
+
+  @Get(':userId')
+  @Roles(...STAFF_WRITE_ROLES)
+  @ApiOkResponse({ type: StaffMemberDetailDto })
+  detail(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<StaffMember & { status: 'ACTIVE' | 'INACTIVE' }> {
+    return this.getStaffDetail.execute(userId);
   }
 
   @Patch(':userId')
@@ -68,6 +112,18 @@ export class StaffController {
     @Body() dto: UpdateStaffDto,
   ): Promise<StaffMember> {
     return this.updateStaff.execute({ userId, ...dto });
+  }
+
+  // 200, no el 201 que Nest da por defecto en POST: reactivar no crea ningún
+  // recurso, resucita una membresía que ya existía.
+  @Post(':userId/reactivate')
+  @Roles(...STAFF_WRITE_ROLES)
+  @HttpCode(200)
+  @ApiOkResponse({ type: StaffMemberDto })
+  reactivate(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<StaffMember> {
+    return this.reactivateStaff.execute(userId);
   }
 
   @Delete(':userId')

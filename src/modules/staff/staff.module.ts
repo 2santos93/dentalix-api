@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { StaffController } from './presentation/staff.controller';
 import { ListStaffUseCase } from './application/use-cases/list-staff.use-case';
+import { ListStaffDirectoryUseCase } from './application/use-cases/list-staff-directory.use-case';
+import { GetStaffDetailUseCase } from './application/use-cases/get-staff-detail.use-case';
+import { ReactivateStaffUseCase } from './application/use-cases/reactivate-staff.use-case';
 import { UpdateStaffUseCase } from './application/use-cases/update-staff.use-case';
 import { DeactivateStaffUseCase } from './application/use-cases/deactivate-staff.use-case';
 import { STAFF_REPOSITORY } from './domain/ports/staff-repository.port';
@@ -17,7 +20,10 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   controllers: [StaffController],
   providers: [
     ListStaffUseCase,
+    ListStaffDirectoryUseCase,
+    GetStaffDetailUseCase,
     UpdateStaffUseCase,
+    ReactivateStaffUseCase,
     DeactivateStaffUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;

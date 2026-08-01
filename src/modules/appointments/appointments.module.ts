@@ -20,7 +20,12 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   // PatientsModule/StaffModule se importan (no se re-implementan) para que
   // CreateAppointmentUseCase valide que paciente y profesional pertenezcan a la
   // clínica; ambos exportan su repositorio para exactamente este caso.
-  imports: [JwtModule.register({}), PatientsModule, StaffModule, LocationScheduleModule],
+  imports: [
+    JwtModule.register({}),
+    PatientsModule,
+    StaffModule,
+    LocationScheduleModule,
+  ],
   controllers: [AppointmentsController],
   providers: [
     CreateAppointmentUseCase,

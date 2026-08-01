@@ -43,7 +43,11 @@ export class ReplaceLocationScheduleUseCase {
     }
 
     for (const range of input.ranges) {
-      if (!Number.isInteger(range.weekday) || range.weekday < 0 || range.weekday > 6) {
+      if (
+        !Number.isInteger(range.weekday) ||
+        range.weekday < 0 ||
+        range.weekday > 6
+      ) {
         throw new BadRequestException(
           'weekday debe ser un entero de 0 (domingo) a 6 (sábado)',
         );
@@ -74,7 +78,10 @@ export class ReplaceLocationScheduleUseCase {
       );
     }
 
-    return this.repo.replaceForCurrentLocation({ timezone, ranges: input.ranges });
+    return this.repo.replaceForCurrentLocation({
+      timezone,
+      ranges: input.ranges,
+    });
   }
 }
 
