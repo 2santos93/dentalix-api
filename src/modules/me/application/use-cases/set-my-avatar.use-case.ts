@@ -1,7 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import type {
-  UserProfileRepository,
-} from '../../domain/ports/user-profile-repository.port';
+import type { UserProfileRepository } from '../../domain/ports/user-profile-repository.port';
 import { USER_PROFILE_REPOSITORY } from '../../domain/ports/user-profile-repository.port';
 import type { FileStoragePort } from '../../../../shared/storage/file-storage.port';
 import { FILE_STORAGE } from '../../../../shared/storage/file-storage.port';
@@ -22,7 +20,8 @@ export interface SetMyAvatarInput {
 @Injectable()
 export class SetMyAvatarUseCase {
   constructor(
-    @Inject(USER_PROFILE_REPOSITORY) private readonly repo: UserProfileRepository,
+    @Inject(USER_PROFILE_REPOSITORY)
+    private readonly repo: UserProfileRepository,
     @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
   ) {}
 

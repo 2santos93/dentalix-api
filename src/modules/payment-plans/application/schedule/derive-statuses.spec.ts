@@ -41,7 +41,12 @@ describe('deriveStatuses', () => {
 
   it('allocates the down payment tramo before installments', () => {
     const tramos: ScheduleTramo[] = [
-      { kind: 'DOWN_PAYMENT', sequence: null, dueDate: new Date('2026-01-15'), amount: 200 },
+      {
+        kind: 'DOWN_PAYMENT',
+        sequence: null,
+        dueDate: new Date('2026-01-15'),
+        amount: 200,
+      },
       inst(1, '2026-02-15', 100),
     ];
     const out = deriveStatuses(tramos, 250, today);

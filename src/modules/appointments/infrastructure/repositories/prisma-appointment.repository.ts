@@ -73,14 +73,27 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     return tenantId;
   }
 
+  /**
+   * Filtro por sede activa, o `{}` si el request no fijó ninguna (vista
+   * consolidada de la clínica). Se aplica SOLO donde la sede es semánticamente
+   * correcta — ver los comentarios en cada consulta.
+   */
+  private locationFilter(): { locationId?: string } {
+    const locationId = this.tenantContext.getLocationId();
+    return locationId ? { locationId } : {};
+  }
+
   async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const tenantId = this.requireTenantId();
     const appointment = await this.prisma.runWithTenant(async (tx) => {
       return tx.appointment.create({
         data: {
-          // Fase 1 multi-sede: la sede sale de la única del tenant; en la fase 2
-          // vendrá del request ya validada (ver default-location.ts).
-          locationId: await resolveDefaultLocationId(tx),
+          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+          // contra esta clínica); si no, la sede por defecto — que es lo que
+          // hacen hoy todos los clientes y mantiene el comportamiento igual.
+          locationId:
+            this.tenantContext.getLocationId() ??
+            (await resolveDefaultLocationId(tx)),
           tenantId,
           patientId: input.patientId,
           providerId: input.providerId,
@@ -113,6 +126,8 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       deletedAt: null,
       start: { gte: params.from, lt: params.to },
       ...(params.providerId ? { providerId: params.providerId } : {}),
+      // La agenda SÍ es por sede: una cita ocurre en un sitio físico.
+      ...this.locationFilter(),
     };
 
     return this.prisma.runWithTenant(async (tx) => {

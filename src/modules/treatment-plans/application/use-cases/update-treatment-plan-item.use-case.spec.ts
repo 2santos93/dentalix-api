@@ -93,7 +93,9 @@ function makeCatalogRepo(
 }
 
 // Minimal plan whose only field the use case reads is `patientId`.
-const planWithPatient = { patientId: 'pat1' } as unknown as TreatmentPlanWithItems;
+const planWithPatient = {
+  patientId: 'pat1',
+} as unknown as TreatmentPlanWithItems;
 
 describe('UpdateTreatmentPlanItemUseCase', () => {
   it('throws NotFoundException when the item does not exist (or belongs to another tenant)', async () => {
@@ -210,7 +212,10 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
         updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({ ...existing, status: TreatmentPlanItemStatus.DONE }),
+          Promise.resolve({
+            ...existing,
+            status: TreatmentPlanItemStatus.DONE,
+          }),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
       });
@@ -254,7 +259,10 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
         updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({ ...existing, status: TreatmentPlanItemStatus.DONE }),
+          Promise.resolve({
+            ...existing,
+            status: TreatmentPlanItemStatus.DONE,
+          }),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
       });
@@ -302,7 +310,10 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
         updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({ ...existing, status: TreatmentPlanItemStatus.DONE }),
+          Promise.resolve({
+            ...existing,
+            status: TreatmentPlanItemStatus.DONE,
+          }),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
       });

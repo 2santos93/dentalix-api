@@ -12,6 +12,8 @@ export class MyProfileDto {
   @ApiProperty() email!: string;
   @ApiProperty() fullName!: string;
   @ApiProperty({ type: String, nullable: true }) avatarUrl!: string | null;
-  @ApiProperty({ type: String, nullable: true }) emailVerifiedAt!: string | null;
-  @ApiProperty({ type: [MyProfileMembershipDto] }) memberships!: MyProfileMembershipDto[];
+  @ApiProperty({ type: String, nullable: true }) emailVerifiedAt!:
+    string | null;
+  @ApiProperty({ type: [MyProfileMembershipDto] })
+  memberships!: MyProfileMembershipDto[];
 }

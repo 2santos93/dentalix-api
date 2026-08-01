@@ -24,7 +24,6 @@ function at(time: string): Date {
   return new Date(`${ANCHOR_DAY}T${time}:00.000Z`);
 }
 
-
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
     id: 'a1',
@@ -54,7 +53,8 @@ function makeRepo(
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
     listByRange: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> =>
+      Promise.resolve([]),
     update: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
@@ -270,7 +270,8 @@ describe('UpdateAppointmentUseCase', () => {
       const repo = makeRepo({
         findById: (): Promise<Appointment | null> => Promise.resolve(existing),
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]), // pre-check passes
+        findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]), // pre-check passes
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
       const uc = new UpdateAppointmentUseCase(repo);
@@ -288,7 +289,9 @@ describe('UpdateAppointmentUseCase', () => {
       const repo = makeRepo({
         findById: (): Promise<Appointment | null> => Promise.resolve(existing),
         findOverlapping: (): Promise<Appointment[]> =>
-          Promise.reject(new Error('findOverlapping should not run for a status-only patch')),
+          Promise.reject(
+            new Error('findOverlapping should not run for a status-only patch'),
+          ),
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
       const uc = new UpdateAppointmentUseCase(repo);
@@ -299,32 +302,40 @@ describe('UpdateAppointmentUseCase', () => {
     });
 
     it('does NOT swallow unrelated update errors (rethrows as-is)', async () => {
-      const boom = new Prisma.PrismaClientUnknownRequestError('some other db failure', {
-        clientVersion: '6.19.3',
-      });
+      const boom = new Prisma.PrismaClientUnknownRequestError(
+        'some other db failure',
+        {
+          clientVersion: '6.19.3',
+        },
+      );
       const repo = makeRepo({
-        findById: (): Promise<Appointment | null> => Promise.resolve(fakeAppointment()),
+        findById: (): Promise<Appointment | null> =>
+          Promise.resolve(fakeAppointment()),
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+        findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         update: (): Promise<Appointment> => Promise.reject(boom),
       });
       const uc = new UpdateAppointmentUseCase(repo);
 
-      await expect(
-        uc.execute('a1', { notes: 'x' }),
-      ).rejects.toBe(boom);
+      await expect(uc.execute('a1', { notes: 'x' })).rejects.toBe(boom);
     });
   });
 
   describe('solape del paciente al reagendar', () => {
     it('rechaza mover la cita a un horario donde el paciente ya tiene otra', async () => {
-      const existing = fakeAppointment({ patientId: 'p1', providerId: 'prov1' });
+      const existing = fakeAppointment({
+        patientId: 'p1',
+        providerId: 'prov1',
+      });
       const repo = makeRepo({
         findById: (): Promise<Appointment | null> => Promise.resolve(existing),
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         // El paciente ya tiene otra cita (con otro profesional) en el destino.
         findOverlappingForPatient: (): Promise<Appointment[]> =>
-          Promise.resolve([fakeAppointment({ id: 'other', providerId: 'prov2' })]),
+          Promise.resolve([
+            fakeAppointment({ id: 'other', providerId: 'prov2' }),
+          ]),
         update: (): Promise<Appointment> =>
           Promise.reject(new Error('update should not be called')),
       });

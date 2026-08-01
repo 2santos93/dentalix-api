@@ -18,13 +18,17 @@ describe('RefreshUseCase', () => {
         .fn()
         .mockResolvedValue({ accessToken: 'new-acc', refreshToken: 'new-ref' }),
     } as never;
-    const repo = { isTokenRevoked: jest.fn().mockResolvedValue(false) } as never;
+    const repo = {
+      isTokenRevoked: jest.fn().mockResolvedValue(false),
+    } as never;
 
     const uc = new RefreshUseCase(tokens, repo);
     const result = await uc.execute({ refreshToken: 'old-ref' });
 
     expect(result).toEqual({ accessToken: 'new-acc', refreshToken: 'new-ref' });
-    expect((tokens as unknown as { issue: jest.Mock }).issue).toHaveBeenCalledWith({
+    expect(
+      (tokens as unknown as { issue: jest.Mock }).issue,
+    ).toHaveBeenCalledWith({
       sub: 'u1',
       tenantId: 't1',
       role: ClinicRole.ADMIN,
@@ -42,7 +46,9 @@ describe('RefreshUseCase', () => {
     await expect(
       uc.execute({ refreshToken: 'garbage' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
-    expect((tokens as unknown as { issue: jest.Mock }).issue).not.toHaveBeenCalled();
+    expect(
+      (tokens as unknown as { issue: jest.Mock }).issue,
+    ).not.toHaveBeenCalled();
   });
 
   it('rejects when the refresh token has been revoked (logout)', async () => {
@@ -57,6 +63,8 @@ describe('RefreshUseCase', () => {
       uc.execute({ refreshToken: 'revoked-ref' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     // No re-emite tokens de una sesión ya cerrada.
-    expect((tokens as unknown as { issue: jest.Mock }).issue).not.toHaveBeenCalled();
+    expect(
+      (tokens as unknown as { issue: jest.Mock }).issue,
+    ).not.toHaveBeenCalled();
   });
 });

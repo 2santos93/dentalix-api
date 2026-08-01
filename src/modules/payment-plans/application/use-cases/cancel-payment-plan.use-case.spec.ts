@@ -12,7 +12,9 @@ function seed(repo: InMemoryPaymentPlanRepository) {
     installmentsCount: 1,
     periodicity: 'MONTHLY',
     startDate: new Date('2026-01-15'),
-    installments: [{ sequence: 1, dueDate: new Date('2026-01-15'), amount: 100 }],
+    installments: [
+      { sequence: 1, dueDate: new Date('2026-01-15'), amount: 100 },
+    ],
   });
 }
 
@@ -28,6 +30,8 @@ describe('CancelPaymentPlanUseCase', () => {
   it('throws NotFound when there is no active plan', async () => {
     const repo = new InMemoryPaymentPlanRepository();
     const useCase = new CancelPaymentPlanUseCase(repo);
-    await expect(useCase.execute('tp-1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(useCase.execute('tp-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

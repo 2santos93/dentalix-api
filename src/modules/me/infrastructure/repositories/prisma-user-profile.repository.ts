@@ -42,14 +42,29 @@ export class PrismaUserProfileRepository implements UserProfileRepository {
   }
 
   async updateName(userId: string, fullName: string): Promise<void> {
-    await this.prisma.user.update({ where: { id: userId }, data: { fullName } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fullName },
+    });
   }
 
-  async updatePasswordHash(userId: string, passwordHash: string): Promise<void> {
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  async updatePasswordHash(
+    userId: string,
+    passwordHash: string,
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
   }
 
-  async updateAvatarUrl(userId: string, avatarUrl: string | null): Promise<void> {
-    await this.prisma.user.update({ where: { id: userId }, data: { avatarUrl } });
+  async updateAvatarUrl(
+    userId: string,
+    avatarUrl: string | null,
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl },
+    });
   }
 }

@@ -24,9 +24,7 @@ export class RolesGuard implements CanActivate {
     if (!required || required.length === 0) {
       return true;
     }
-    const { user } = context
-      .switchToHttp()
-      .getRequest<{ user?: JwtPayload }>();
+    const { user } = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
     // A platform token carries no `role` (it is not scoped to any clinic), so
     // it can never satisfy a @Roles(...) requirement — the superadmin reaches
     // clinic routes with a real tenant token instead.

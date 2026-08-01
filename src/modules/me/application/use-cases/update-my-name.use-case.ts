@@ -10,7 +10,8 @@ export interface UpdateMyNameInput {
 @Injectable()
 export class UpdateMyNameUseCase {
   constructor(
-    @Inject(USER_PROFILE_REPOSITORY) private readonly repo: UserProfileRepository,
+    @Inject(USER_PROFILE_REPOSITORY)
+    private readonly repo: UserProfileRepository,
   ) {}
 
   async execute(input: UpdateMyNameInput): Promise<void> {

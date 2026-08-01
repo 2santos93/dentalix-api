@@ -10,10 +10,7 @@ import type { PaymentPlanRepository } from '../../domain/ports/payment-plan-repo
 import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
-import {
-  generateSchedule,
-  Periodicity,
-} from '../schedule/generate-schedule';
+import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
 
 const PERIODICITIES: ReadonlySet<Periodicity> = new Set([
   'WEEKLY',
@@ -61,16 +58,22 @@ export class CreatePaymentPlanUseCase {
       input.installmentsCount < 1 ||
       input.installmentsCount > 600
     ) {
-      throw new BadRequestException('installmentsCount must be between 1 and 600');
+      throw new BadRequestException(
+        'installmentsCount must be between 1 and 600',
+      );
     }
     if (!isFiniteNonNegative(input.downPayment)) {
       throw new BadRequestException('downPayment must be a finite number >= 0');
     }
     if (!PERIODICITIES.has(input.periodicity)) {
-      throw new BadRequestException('periodicity must be WEEKLY, BIWEEKLY or MONTHLY');
+      throw new BadRequestException(
+        'periodicity must be WEEKLY, BIWEEKLY or MONTHLY',
+      );
     }
     const startDate =
-      input.startDate instanceof Date ? input.startDate : new Date(input.startDate);
+      input.startDate instanceof Date
+        ? input.startDate
+        : new Date(input.startDate);
     if (Number.isNaN(startDate.getTime())) {
       throw new BadRequestException('startDate must be a valid date');
     }
@@ -78,7 +81,9 @@ export class CreatePaymentPlanUseCase {
       input.totalToFinance !== undefined &&
       !isFiniteNonNegative(input.totalToFinance)
     ) {
-      throw new BadRequestException('totalToFinance must be a finite number >= 0');
+      throw new BadRequestException(
+        'totalToFinance must be a finite number >= 0',
+      );
     }
 
     // Throws NotFound if absent/soft-deleted/cross-tenant — never re-derived.

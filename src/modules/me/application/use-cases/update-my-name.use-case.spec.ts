@@ -10,12 +10,17 @@ describe('UpdateMyNameUseCase', () => {
         saved = { userId, fullName };
       },
     } as unknown as UserProfileRepository;
-    await new UpdateMyNameUseCase(repo).execute({ userId: 'u1', fullName: '  Ana Gómez  ' });
+    await new UpdateMyNameUseCase(repo).execute({
+      userId: 'u1',
+      fullName: '  Ana Gómez  ',
+    });
     expect(saved).toEqual({ userId: 'u1', fullName: 'Ana Gómez' });
   });
 
   it('rejects an empty name', async () => {
-    const repo = { updateName: async () => {} } as unknown as UserProfileRepository;
+    const repo = {
+      updateName: async () => {},
+    } as unknown as UserProfileRepository;
     await expect(
       new UpdateMyNameUseCase(repo).execute({ userId: 'u1', fullName: '   ' }),
     ).rejects.toBeInstanceOf(BadRequestException);

@@ -79,6 +79,16 @@ export class PrismaInventoryRepository implements InventoryRepository {
     return tenantId;
   }
 
+  /**
+   * Filtro por sede activa, o `{}` si el request no fijó ninguna (vista
+   * consolidada de la clínica). Se aplica SOLO donde la sede es semánticamente
+   * correcta — ver los comentarios en cada consulta.
+   */
+  private locationFilter(): { locationId?: string } {
+    const locationId = this.tenantContext.getLocationId();
+    return locationId ? { locationId } : {};
+  }
+
   async createItem(
     input: CreateInventoryItemRepoInput,
   ): Promise<InventoryItem> {
@@ -86,9 +96,12 @@ export class PrismaInventoryRepository implements InventoryRepository {
     const item = await this.prisma.runWithTenant(async (tx) => {
       return tx.inventoryItem.create({
         data: {
-          // Fase 1 multi-sede: la sede sale de la única del tenant; en la fase 2
-          // vendrá del request ya validada (ver default-location.ts).
-          locationId: await resolveDefaultLocationId(tx),
+          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+          // contra esta clínica); si no, la sede por defecto — que es lo que
+          // hacen hoy todos los clientes y mantiene el comportamiento igual.
+          locationId:
+            this.tenantContext.getLocationId() ??
+            (await resolveDefaultLocationId(tx)),
           tenantId,
           name: input.name,
           sku: input.sku,
@@ -114,7 +127,8 @@ export class PrismaInventoryRepository implements InventoryRepository {
   async listItems(): Promise<InventoryItem[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const items = await tx.inventoryItem.findMany({
-        where: { deletedAt: null },
+        // El stock es físico: pertenece a una sede.
+        where: { deletedAt: null, ...this.locationFilter() },
         orderBy: { name: 'asc' },
       });
       return items.map(mapToEntity);
@@ -166,9 +180,12 @@ export class PrismaInventoryRepository implements InventoryRepository {
     const movement = await this.prisma.runWithTenant(async (tx) => {
       return tx.inventoryMovement.create({
         data: {
-          // Fase 1 multi-sede: la sede sale de la única del tenant; en la fase 2
-          // vendrá del request ya validada (ver default-location.ts).
-          locationId: await resolveDefaultLocationId(tx),
+          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+          // contra esta clínica); si no, la sede por defecto — que es lo que
+          // hacen hoy todos los clientes y mantiene el comportamiento igual.
+          locationId:
+            this.tenantContext.getLocationId() ??
+            (await resolveDefaultLocationId(tx)),
           tenantId,
           itemId: input.itemId,
           type: input.type,
@@ -181,6 +198,9 @@ export class PrismaInventoryRepository implements InventoryRepository {
     return mapMovementToEntity(movement);
   }
 
+  // listMovements NO filtra por sede: los movimientos ya cuelgan de un ítem,
+  // que a su vez es de una sede — volver a filtrar sería redundante y podría
+  // ocultar el historial del propio ítem que se está consultando.
   async listMovements(itemId: string): Promise<InventoryMovement[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const movements = await tx.inventoryMovement.findMany({

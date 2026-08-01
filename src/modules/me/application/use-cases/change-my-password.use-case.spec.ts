@@ -5,7 +5,10 @@ import { UserProfileRepository } from '../../domain/ports/user-profile-repositor
 
 const password = new PasswordService();
 
-function makeRepo(hash: string | null, sink: { saved?: string }): UserProfileRepository {
+function makeRepo(
+  hash: string | null,
+  sink: { saved?: string },
+): UserProfileRepository {
   return {
     getPasswordHash: async () => hash,
     updatePasswordHash: async (_userId: string, newHash: string) => {
@@ -19,7 +22,11 @@ describe('ChangeMyPasswordUseCase', () => {
     const current = await password.hash('OldPass1');
     const sink: { saved?: string } = {};
     const uc = new ChangeMyPasswordUseCase(makeRepo(current, sink), password);
-    await uc.execute({ userId: 'u1', currentPassword: 'OldPass1', newPassword: 'NewPass9' });
+    await uc.execute({
+      userId: 'u1',
+      currentPassword: 'OldPass1',
+      newPassword: 'NewPass9',
+    });
     expect(sink.saved).toBeDefined();
     expect(await password.verify('NewPass9', sink.saved!)).toBe(true);
   });
@@ -28,14 +35,22 @@ describe('ChangeMyPasswordUseCase', () => {
     const current = await password.hash('OldPass1');
     const uc = new ChangeMyPasswordUseCase(makeRepo(current, {}), password);
     await expect(
-      uc.execute({ userId: 'u1', currentPassword: 'WRONG', newPassword: 'NewPass9' }),
+      uc.execute({
+        userId: 'u1',
+        currentPassword: 'WRONG',
+        newPassword: 'NewPass9',
+      }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('rejects when the user has no stored hash', async () => {
     const uc = new ChangeMyPasswordUseCase(makeRepo(null, {}), password);
     await expect(
-      uc.execute({ userId: 'u1', currentPassword: 'x', newPassword: 'NewPass9' }),
+      uc.execute({
+        userId: 'u1',
+        currentPassword: 'x',
+        newPassword: 'NewPass9',
+      }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

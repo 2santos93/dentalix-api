@@ -123,7 +123,12 @@ describe('SaveMedicalHistoryUseCase', () => {
         ],
         medications: [{ nombre: 'Warfarina', esAlerta: false }],
         conditions: [
-          { codigo: 'DIABETES', etiqueta: 'Diabetes', estado: 'SI', esAlerta: true },
+          {
+            codigo: 'DIABETES',
+            etiqueta: 'Diabetes',
+            estado: 'SI',
+            esAlerta: true,
+          },
         ],
         embarazo: true,
         semanasEmbarazo: 20,

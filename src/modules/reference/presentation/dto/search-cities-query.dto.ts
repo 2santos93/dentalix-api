@@ -3,7 +3,10 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 
 export class SearchCitiesQueryDto {
-  @ApiProperty({ example: 'CO', description: 'ISO 3166-1 alpha-2 country code' })
+  @ApiProperty({
+    example: 'CO',
+    description: 'ISO 3166-1 alpha-2 country code',
+  })
   @IsString()
   @Length(2, 2)
   countryCode!: string;

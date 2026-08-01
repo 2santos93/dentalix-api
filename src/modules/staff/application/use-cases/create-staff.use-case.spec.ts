@@ -72,7 +72,10 @@ it('reactiva una membresía soft-deleted en vez de fallar (dup guard soft-delete
   });
 
   expect(r).toEqual(reactivated);
-  expect(repo.reactivateMembership).toHaveBeenCalledWith('x', ClinicRole.ASSISTANT);
+  expect(repo.reactivateMembership).toHaveBeenCalledWith(
+    'x',
+    ClinicRole.ASSISTANT,
+  );
   expect(repo.create).not.toHaveBeenCalled();
 });
 

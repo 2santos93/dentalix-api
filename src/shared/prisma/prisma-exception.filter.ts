@@ -25,18 +25,46 @@ import { Prisma } from '@prisma/client';
 // friendly message. Matched by substring so it works whether Prisma reports the
 // constraint's `map:` name (e.g. "patients_tenant_doc_key") or the raw columns.
 const CONFLICT_MESSAGES: { match: string; message: string }[] = [
-  { match: 'patients_tenant_doc_key', message: 'Ya existe un paciente con ese número de documento.' },
-  { match: 'docNumber', message: 'Ya existe un paciente con ese número de documento.' },
-  { match: 'catalog_tenant_code_key', message: 'Ya existe un ítem del catálogo con ese código.' },
-  { match: 'inventory_items_tenantId_name_key', message: 'Ya existe un ítem de inventario con ese nombre.' },
-  { match: 'payments_tenant_idempotency_key', message: 'Este pago ya fue registrado.' },
-  { match: 'users_email_key', message: 'Ese correo electrónico ya está registrado.' },
+  {
+    match: 'patients_tenant_doc_key',
+    message: 'Ya existe un paciente con ese número de documento.',
+  },
+  {
+    match: 'docNumber',
+    message: 'Ya existe un paciente con ese número de documento.',
+  },
+  {
+    match: 'catalog_tenant_code_key',
+    message: 'Ya existe un ítem del catálogo con ese código.',
+  },
+  {
+    match: 'inventory_items_tenantId_name_key',
+    message: 'Ya existe un ítem de inventario con ese nombre.',
+  },
+  {
+    match: 'payments_tenant_idempotency_key',
+    message: 'Este pago ya fue registrado.',
+  },
+  {
+    match: 'users_email_key',
+    message: 'Ese correo electrónico ya está registrado.',
+  },
   { match: 'email', message: 'Ese correo electrónico ya está registrado.' },
   { match: 'tenants_subdomain_key', message: 'Ese subdominio ya está en uso.' },
   { match: 'subdomain', message: 'Ese subdominio ya está en uso.' },
-  { match: 'mhv_tenant_patient_version_key', message: 'La historia clínica cambió mientras editabas. Vuelve a cargarla y reintenta.' },
-  { match: 'clinic_memberships', message: 'Esa persona ya pertenece a la clínica.' },
-  { match: 'tenant_domains_host_key', message: 'Ese dominio ya está registrado.' },
+  {
+    match: 'mhv_tenant_patient_version_key',
+    message:
+      'La historia clínica cambió mientras editabas. Vuelve a cargarla y reintenta.',
+  },
+  {
+    match: 'clinic_memberships',
+    message: 'Esa persona ya pertenece a la clínica.',
+  },
+  {
+    match: 'tenant_domains_host_key',
+    message: 'Ese dominio ya está registrado.',
+  },
   { match: 'host', message: 'Ese dominio ya está registrado.' },
 ];
 
@@ -54,7 +82,10 @@ interface HttpishResponse {
 export class PrismaExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(PrismaExceptionFilter.name);
 
-  catch(exception: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost): void {
+  catch(
+    exception: Prisma.PrismaClientKnownRequestError,
+    host: ArgumentsHost,
+  ): void {
     const response = host.switchToHttp().getResponse<HttpishResponse>();
 
     if (exception.code === 'P2002') {

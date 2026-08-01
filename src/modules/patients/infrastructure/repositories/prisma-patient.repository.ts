@@ -114,14 +114,19 @@ export class PrismaPatientRepository implements PatientRepository {
             tenantId,
             patientId: created.id,
             version: 1,
-            allergies: (data.allergies ?? []) as unknown as Prisma.InputJsonValue,
-            conditions: (data.conditions ?? []) as unknown as Prisma.InputJsonValue,
-            medications: (data.medications ?? []) as unknown as Prisma.InputJsonValue,
+            allergies: (data.allergies ??
+              []) as unknown as Prisma.InputJsonValue,
+            conditions: (data.conditions ??
+              []) as unknown as Prisma.InputJsonValue,
+            medications: (data.medications ??
+              []) as unknown as Prisma.InputJsonValue,
             habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
             dentalHistory: (data.dentalHistory ??
               Prisma.JsonNull) as Prisma.InputJsonValue,
-            surgeries: (data.surgeries ?? []) as unknown as Prisma.InputJsonValue,
-            vitalSigns: (data.vitalSigns ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            surgeries: (data.surgeries ??
+              []) as unknown as Prisma.InputJsonValue,
+            vitalSigns: (data.vitalSigns ??
+              Prisma.JsonNull) as Prisma.InputJsonValue,
             familyHistory: data.familyHistory,
             notes: data.notes,
             safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,

@@ -1,13 +1,19 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CreatePaymentPlanUseCase } from './create-payment-plan.use-case';
 import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-plan.repository';
 
-function makeDeps(overrides: {
-  planCurrency?: string;
-  balance?: number;
-  planThrows?: boolean;
-} = {}) {
+function makeDeps(
+  overrides: {
+    planCurrency?: string;
+    balance?: number;
+    planThrows?: boolean;
+  } = {},
+) {
   const repo = new InMemoryPaymentPlanRepository();
   const getTreatmentPlan = {
     execute: jest.fn(async (id: string) => {
@@ -32,7 +38,11 @@ function makeDeps(overrides: {
       paymentsCount: 0,
     })),
   } as any;
-  const useCase = new CreatePaymentPlanUseCase(repo, getTreatmentPlan, getPlanBalance);
+  const useCase = new CreatePaymentPlanUseCase(
+    repo,
+    getTreatmentPlan,
+    getPlanBalance,
+  );
   return { repo, getTreatmentPlan, getPlanBalance, useCase };
 }
 
@@ -56,7 +66,11 @@ describe('CreatePaymentPlanUseCase', () => {
 
   it('honors an explicit totalToFinance', async () => {
     const { useCase } = makeDeps({ balance: 1200 });
-    const plan = await useCase.execute('tp-1', { ...baseInput, totalToFinance: 600, installmentsCount: 6 }, 'u1');
+    const plan = await useCase.execute(
+      'tp-1',
+      { ...baseInput, totalToFinance: 600, installmentsCount: 6 },
+      'u1',
+    );
     expect(plan.totalToFinance).toBe(600);
     expect(plan.installments.every((i) => i.amount === 100)).toBe(true);
   });
@@ -64,7 +78,9 @@ describe('CreatePaymentPlanUseCase', () => {
   it('rejects a second ACTIVE plan for the same treatment plan (409)', async () => {
     const { useCase } = makeDeps();
     await useCase.execute('tp-1', baseInput, 'u1');
-    await expect(useCase.execute('tp-1', baseInput, 'u1')).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      useCase.execute('tp-1', baseInput, 'u1'),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('rejects installmentsCount < 1', async () => {
@@ -83,7 +99,9 @@ describe('CreatePaymentPlanUseCase', () => {
 
   it('rejects a non-positive resolved totalToFinance', async () => {
     const { useCase } = makeDeps({ balance: 0 });
-    await expect(useCase.execute('tp-1', baseInput, 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      useCase.execute('tp-1', baseInput, 'u1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects an invalid startDate', async () => {
@@ -95,15 +113,46 @@ describe('CreatePaymentPlanUseCase', () => {
 
   it('propagates NotFound when the treatment plan is absent', async () => {
     const { useCase } = makeDeps({ planThrows: true });
-    await expect(useCase.execute('missing', baseInput, 'u1')).rejects.toThrow('Treatment plan not found');
+    await expect(useCase.execute('missing', baseInput, 'u1')).rejects.toThrow(
+      'Treatment plan not found',
+    );
   });
 
   it('defaults totalToFinance to the plan billable (gross), not the net balance', async () => {
     const repo = new InMemoryPaymentPlanRepository();
-    const getTreatmentPlan = { execute: jest.fn(async (id: string) => ({ id, patientId: 'p1', currency: 'USD', items: [], total: 0 })) } as any;
-    const getPlanBalance = { execute: jest.fn(async () => ({ planCurrency: 'USD', billable: 1200, paid: 200, balance: 1000, paymentsCount: 1 })) } as any;
-    const useCase = new CreatePaymentPlanUseCase(repo, getTreatmentPlan, getPlanBalance);
-    const plan = await useCase.execute('tp-1', { downPayment: 0, installmentsCount: 12, periodicity: 'MONTHLY', startDate: '2026-01-15T00:00:00.000Z' }, 'u1');
+    const getTreatmentPlan = {
+      execute: jest.fn(async (id: string) => ({
+        id,
+        patientId: 'p1',
+        currency: 'USD',
+        items: [],
+        total: 0,
+      })),
+    } as any;
+    const getPlanBalance = {
+      execute: jest.fn(async () => ({
+        planCurrency: 'USD',
+        billable: 1200,
+        paid: 200,
+        balance: 1000,
+        paymentsCount: 1,
+      })),
+    } as any;
+    const useCase = new CreatePaymentPlanUseCase(
+      repo,
+      getTreatmentPlan,
+      getPlanBalance,
+    );
+    const plan = await useCase.execute(
+      'tp-1',
+      {
+        downPayment: 0,
+        installmentsCount: 12,
+        periodicity: 'MONTHLY',
+        startDate: '2026-01-15T00:00:00.000Z',
+      },
+      'u1',
+    );
     expect(plan.totalToFinance).toBe(1200); // gross billable, NOT the 1000 net balance
   });
 
@@ -120,7 +169,7 @@ describe('CreatePaymentPlanUseCase', () => {
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
         code: 'P2002',
         clientVersion: 'x',
-      } as any),
+      }),
     );
     const getTreatmentPlan = {
       execute: jest.fn(async (id: string) => ({
@@ -140,9 +189,13 @@ describe('CreatePaymentPlanUseCase', () => {
         paymentsCount: 0,
       })),
     } as any;
-    const useCase = new CreatePaymentPlanUseCase(repo, getTreatmentPlan, getPlanBalance);
-    await expect(useCase.execute('tp-1', baseInput, 'u1')).rejects.toBeInstanceOf(
-      ConflictException,
+    const useCase = new CreatePaymentPlanUseCase(
+      repo,
+      getTreatmentPlan,
+      getPlanBalance,
     );
+    await expect(
+      useCase.execute('tp-1', baseInput, 'u1'),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });

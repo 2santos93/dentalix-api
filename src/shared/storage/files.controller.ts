@@ -45,7 +45,9 @@ export class FilesController {
     } catch {
       throw new NotFoundException('File not found');
     }
-    const mime = MIME_BY_EXT[path.extname(name).toLowerCase()] ?? 'application/octet-stream';
+    const mime =
+      MIME_BY_EXT[path.extname(name).toLowerCase()] ??
+      'application/octet-stream';
     res.set('Content-Type', mime);
     return new StreamableFile(bytes);
   }

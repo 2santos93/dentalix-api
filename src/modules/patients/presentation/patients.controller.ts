@@ -63,7 +63,9 @@ export class PatientsController {
     return this.createPatient.execute({
       ...dto,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-      dataConsentAt: dto.dataConsentAt ? new Date(dto.dataConsentAt) : undefined,
+      dataConsentAt: dto.dataConsentAt
+        ? new Date(dto.dataConsentAt)
+        : undefined,
       createdById: req.user.sub,
     });
   }

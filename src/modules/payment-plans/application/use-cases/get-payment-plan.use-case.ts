@@ -71,7 +71,9 @@ export class GetPaymentPlanUseCase {
   async execute(treatmentPlanId: string): Promise<GetPaymentPlanResult> {
     const plan = await this.repo.findActiveByPlan(treatmentPlanId);
     if (!plan) {
-      throw new NotFoundException('No active payment plan for this treatment plan');
+      throw new NotFoundException(
+        'No active payment plan for this treatment plan',
+      );
     }
 
     // Reuse the exact multi-currency "paid" total (converted to plan currency
@@ -147,7 +149,9 @@ export class GetPaymentPlanUseCase {
         amount: plan.downPayment,
       });
     }
-    for (const inst of [...plan.installments].sort((a, b) => a.sequence - b.sequence)) {
+    for (const inst of [...plan.installments].sort(
+      (a, b) => a.sequence - b.sequence,
+    )) {
       tramos.push({
         kind: 'INSTALLMENT',
         sequence: inst.sequence,

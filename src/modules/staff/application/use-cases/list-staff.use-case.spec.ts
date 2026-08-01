@@ -13,7 +13,8 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     findById: (): Promise<StaffMember | null> => Promise.resolve(null),
     updateById: (): Promise<StaffMember | null> => Promise.resolve(null),
     deactivateById: (): Promise<boolean> => Promise.resolve(false),
-    reactivateMembership: (): Promise<StaffMember | null> => Promise.resolve(null),
+    reactivateMembership: (): Promise<StaffMember | null> =>
+      Promise.resolve(null),
     countActiveAdmins: (): Promise<number> => Promise.resolve(0),
     ...overrides,
   };

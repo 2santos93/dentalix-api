@@ -54,14 +54,27 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return tenantId;
   }
 
+  /**
+   * Filtro por sede activa, o `{}` si el request no fijó ninguna (vista
+   * consolidada de la clínica). Se aplica SOLO donde la sede es semánticamente
+   * correcta — ver los comentarios en cada consulta.
+   */
+  private locationFilter(): { locationId?: string } {
+    const locationId = this.tenantContext.getLocationId();
+    return locationId ? { locationId } : {};
+  }
+
   async create(input: CreatePaymentRepoInput): Promise<Payment> {
     const tenantId = this.requireTenantId();
     const payment = await this.prisma.runWithTenant(async (tx) => {
       return tx.payment.create({
         data: {
-          // Fase 1 multi-sede: la sede sale de la única del tenant; en la fase 2
-          // vendrá del request ya validada (ver default-location.ts).
-          locationId: await resolveDefaultLocationId(tx),
+          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+          // contra esta clínica); si no, la sede por defecto — que es lo que
+          // hacen hoy todos los clientes y mantiene el comportamiento igual.
+          locationId:
+            this.tenantContext.getLocationId() ??
+            (await resolveDefaultLocationId(tx)),
           tenantId,
           treatmentPlanId: input.treatmentPlanId,
           patientId: input.patientId,
@@ -96,6 +109,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return payment ? mapToEntity(payment) : null;
   }
 
+  // OJO: listByPlan/listByPatient NO filtran por sede a propósito. El plan y
+  // el paciente son de la CLÍNICA, no de una sede; filtrarlos haría que el
+  // saldo del paciente cambiara según desde qué sede se mire, que es
+  // justamente lo contrario de la "ficha centralizada" que define este modelo.
   async listByPlan(treatmentPlanId: string): Promise<Payment[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const payments = await tx.payment.findMany({
@@ -141,6 +158,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
         where: {
           deletedAt: null,
           paidAt: { gte: params.from, lt: params.to },
+          // La CAJA del periodo sí es por sede (es lo que se arquea).
+          ...this.locationFilter(),
         },
         orderBy: { paidAt: 'desc' },
       });

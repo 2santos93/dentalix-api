@@ -64,7 +64,10 @@ export class CreatePatientUseCase {
     }
 
     const medicalHistory = input.medicalHistory
-      ? { data: input.medicalHistory, ...deriveSafetyFlags(input.medicalHistory) }
+      ? {
+          data: input.medicalHistory,
+          ...deriveSafetyFlags(input.medicalHistory),
+        }
       : undefined;
 
     return this.repo.create({

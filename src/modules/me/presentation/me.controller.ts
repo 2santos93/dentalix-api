@@ -82,7 +82,10 @@ export class MeController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateNameDto,
   ): Promise<MyProfile> {
-    await this.updateMyName.execute({ userId: req.user.sub, fullName: dto.fullName });
+    await this.updateMyName.execute({
+      userId: req.user.sub,
+      fullName: dto.fullName,
+    });
     const user = tenantUserOrThrow(req.user);
     return this.getMyProfile.execute({
       userId: user.sub,
@@ -107,7 +110,9 @@ export class MeController {
   @Post('avatar')
   @HttpCode(200)
   @ApiOkResponse({ type: AvatarResponseDto })
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_AVATAR_BYTES } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_AVATAR_BYTES } }),
+  )
   uploadAvatar(
     @Req() req: AuthenticatedRequest,
     @UploadedFile() file: Express.Multer.File | undefined,

@@ -26,7 +26,6 @@ function at(time: string): Date {
   return new Date(`${ANCHOR_DAY}T${time}:00.000Z`);
 }
 
-
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
     id: 'a1',
@@ -66,20 +65,18 @@ function makeRepo(
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
     listByRange: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> =>
+      Promise.resolve([]),
     update: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
 }
 
-
 // Dobles para las validaciones de pertenencia: por defecto el paciente y el
 // profesional SÍ existen en la clínica, que es la precondición de casi todos los
 // tests de abajo. Los tests que prueban lo contrario los sobreescriben.
-function makePatients(
-  found: unknown = { id: 'p1' },
-): PatientRepository {
+function makePatients(found: unknown = { id: 'p1' }): PatientRepository {
   return {
     findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
   } as unknown as PatientRepository;
@@ -100,7 +97,11 @@ describe('CreateAppointmentUseCase', () => {
         create: (): Promise<Appointment> =>
           Promise.reject(new Error('create should not be called')),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
       await expect(
@@ -118,7 +119,11 @@ describe('CreateAppointmentUseCase', () => {
         create: (): Promise<Appointment> =>
           Promise.reject(new Error('create should not be called')),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
       // Una hora atrás: mismo día, instante pasado.
       const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
@@ -134,7 +139,11 @@ describe('CreateAppointmentUseCase', () => {
 
     it('acepta una cita inmediata (start ~ahora) — solo se rechaza lo estrictamente anterior', async () => {
       const repo = makeRepo();
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
       const soon = new Date(Date.now() + 1000);
 
       const result = await uc.execute({
@@ -161,7 +170,12 @@ describe('CreateAppointmentUseCase', () => {
       );
 
       await expect(
-        uc.execute({ patientId: 'de-otro-tenant', providerId: 'prov1', start, end }),
+        uc.execute({
+          patientId: 'de-otro-tenant',
+          providerId: 'prov1',
+          start,
+          end,
+        }),
       ).rejects.toThrow('Paciente no encontrado');
     });
 
@@ -323,7 +337,11 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       const result = await uc.execute({
         patientId: 'p2',
@@ -344,7 +362,11 @@ describe('CreateAppointmentUseCase', () => {
         end: at('11:00'),
         status: AppointmentStatus.CANCELLED,
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       const result = await uc.execute({
         patientId: 'p2',
@@ -363,7 +385,11 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       await expect(
         uc.execute({
@@ -386,7 +412,11 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       await expect(
         uc.execute({
@@ -406,7 +436,11 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       const result = await uc.execute({
         patientId: 'p1',
@@ -427,7 +461,11 @@ describe('CreateAppointmentUseCase', () => {
         end: at('11:00'),
         status: AppointmentStatus.CANCELLED,
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       const result = await uc.execute({
         patientId: 'p1',
@@ -446,7 +484,11 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       const result = await uc.execute({
         patientId: 'p2',
@@ -474,20 +516,28 @@ describe('CreateAppointmentUseCase', () => {
     }
 
     function rawExclusionError(): Prisma.PrismaClientKnownRequestError {
-      return new Prisma.PrismaClientKnownRequestError('Raw query failed. Code: `23P01`.', {
-        code: 'P2010',
-        clientVersion: '6.19.3',
-        meta: { code: '23P01' },
-      });
+      return new Prisma.PrismaClientKnownRequestError(
+        'Raw query failed. Code: `23P01`.',
+        {
+          code: 'P2010',
+          clientVersion: '6.19.3',
+          meta: { code: '23P01' },
+        },
+      );
     }
 
     it('maps the ORM exclusion violation (23P01) to the SAME 409 as the pre-check', async () => {
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+        findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -506,10 +556,15 @@ describe('CreateAppointmentUseCase', () => {
       );
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-        findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+        findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(patientExclusion),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -519,10 +574,15 @@ describe('CreateAppointmentUseCase', () => {
     it('also maps the raw-path shape (P2010 / meta.code 23P01) to 409', async () => {
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+        findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(rawExclusionError()),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -530,15 +590,23 @@ describe('CreateAppointmentUseCase', () => {
     });
 
     it('does NOT swallow unrelated create errors (rethrows as-is)', async () => {
-      const boom = new Prisma.PrismaClientUnknownRequestError('some other db failure', {
-        clientVersion: '6.19.3',
-      });
+      const boom = new Prisma.PrismaClientUnknownRequestError(
+        'some other db failure',
+        {
+          clientVersion: '6.19.3',
+        },
+      );
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
-    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
+        findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(boom),
       });
-      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+      );
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),

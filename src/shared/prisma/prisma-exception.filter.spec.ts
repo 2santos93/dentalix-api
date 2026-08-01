@@ -18,7 +18,9 @@ function mockHost(): {
   return { host, status, json };
 }
 
-function p2002(target: string | string[]): Prisma.PrismaClientKnownRequestError {
+function p2002(
+  target: string | string[],
+): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002',
     clientVersion: '6.19.3',
@@ -28,7 +30,9 @@ function p2002(target: string | string[]): Prisma.PrismaClientKnownRequestError 
 
 describe('conflictMessageForTarget', () => {
   it('maps the patient doc index (by constraint name) to a doc message', () => {
-    expect(conflictMessageForTarget('patients_tenant_doc_key')).toMatch(/documento/i);
+    expect(conflictMessageForTarget('patients_tenant_doc_key')).toMatch(
+      /documento/i,
+    );
   });
 
   it('maps by raw column list too (array target)', () => {
@@ -68,17 +72,23 @@ describe('PrismaExceptionFilter', () => {
 
     expect(status).toHaveBeenCalledWith(409);
     expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 409, message: expect.stringMatching(/documento/i) }),
+      expect.objectContaining({
+        statusCode: 409,
+        message: expect.stringMatching(/documento/i),
+      }),
     );
   });
 
   it('leaves other Prisma errors as a 500 (does not masquerade them as conflicts)', () => {
     const filter = new PrismaExceptionFilter();
     const { host, status, json } = mockHost();
-    const notFound = new Prisma.PrismaClientKnownRequestError('Record not found', {
-      code: 'P2025',
-      clientVersion: '6.19.3',
-    });
+    const notFound = new Prisma.PrismaClientKnownRequestError(
+      'Record not found',
+      {
+        code: 'P2025',
+        clientVersion: '6.19.3',
+      },
+    );
 
     filter.catch(notFound, host);
 

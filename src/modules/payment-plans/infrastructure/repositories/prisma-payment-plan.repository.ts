@@ -23,7 +23,7 @@ function mapToEntity(row: PrismaPaymentPlan): PaymentPlanWithInstallments {
     totalToFinance: row.totalToFinance.toNumber(),
     downPayment: row.downPayment.toNumber(),
     installmentsCount: row.installmentsCount,
-    periodicity: row.periodicity as Periodicity,
+    periodicity: row.periodicity,
     startDate: row.startDate,
     status: row.status,
     notes: row.notes,

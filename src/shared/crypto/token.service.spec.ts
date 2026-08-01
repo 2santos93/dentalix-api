@@ -1,6 +1,10 @@
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { isPlatformPayload, isTenantPayload, TokenService } from './token.service';
+import {
+  isPlatformPayload,
+  isTenantPayload,
+  TokenService,
+} from './token.service';
 
 function makeService(): TokenService {
   const config = new ConfigService({

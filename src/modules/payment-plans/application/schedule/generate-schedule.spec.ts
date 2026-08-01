@@ -26,7 +26,11 @@ describe('generateSchedule', () => {
   });
 
   it('puts the rounding remainder on the LAST installment', () => {
-    const rows = generateSchedule({ ...base, totalToFinance: 100, installmentsCount: 3 });
+    const rows = generateSchedule({
+      ...base,
+      totalToFinance: 100,
+      installmentsCount: 3,
+    });
     // 100 / 3 -> 33.33, 33.33, 33.34
     expect(rows.map((r) => r.amount)).toEqual([33.33, 33.33, 33.34]);
     const sum = rows.reduce((s, r) => s + r.amount, 0);
@@ -55,7 +59,11 @@ describe('generateSchedule', () => {
   });
 
   it('spaces WEEKLY installments 7 days apart', () => {
-    const rows = generateSchedule({ ...base, periodicity: 'WEEKLY', installmentsCount: 3 });
+    const rows = generateSchedule({
+      ...base,
+      periodicity: 'WEEKLY',
+      installmentsCount: 3,
+    });
     expect(rows.map((r) => r.dueDate.toISOString().slice(0, 10))).toEqual([
       '2026-01-15',
       '2026-01-22',
@@ -64,7 +72,11 @@ describe('generateSchedule', () => {
   });
 
   it('spaces BIWEEKLY installments 14 days apart', () => {
-    const rows = generateSchedule({ ...base, periodicity: 'BIWEEKLY', installmentsCount: 2 });
+    const rows = generateSchedule({
+      ...base,
+      periodicity: 'BIWEEKLY',
+      installmentsCount: 2,
+    });
     expect(rows.map((r) => r.dueDate.toISOString().slice(0, 10))).toEqual([
       '2026-01-15',
       '2026-01-29',
@@ -79,7 +91,12 @@ describe('generateSchedule', () => {
     // binary floating point. That is a property of double summation order, not a bug in
     // the split. The invariant the review cares about -- Sigma installments === financed
     // EXACTLY -- is genuinely bit-exact at the correct granularity: integer cents.
-    const rows = generateSchedule({ ...base, totalToFinance: 1200, downPayment: 200, installmentsCount: 12 });
+    const rows = generateSchedule({
+      ...base,
+      totalToFinance: 1200,
+      downPayment: 200,
+      installmentsCount: 12,
+    });
     const sumCents = rows.reduce((s, r) => s + Math.round(r.amount * 100), 0);
     expect(sumCents).toBe(100000); // strict ===, exact in integer cents by construction
   });

@@ -1,5 +1,8 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
-import { TokenService, isTenantPayload } from '../../../../shared/crypto/token.service';
+import {
+  TokenService,
+  isTenantPayload,
+} from '../../../../shared/crypto/token.service';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 

@@ -41,7 +41,9 @@ function makeUseCase(paid: number) {
 describe('GetPaymentPlanUseCase', () => {
   it('throws NotFound when there is no active plan', async () => {
     const { useCase } = makeUseCase(0);
-    await expect(useCase.execute('tp-1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(useCase.execute('tp-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('derives installment statuses from the paid total', async () => {
@@ -49,7 +51,11 @@ describe('GetPaymentPlanUseCase', () => {
     await seed(repo);
     const res = await useCase.execute('tp-1');
     // paid 150: inst1 (Jan, due<today) PAID; inst2 (Feb, due<today) covered 50 -> OVERDUE; inst3 (Apr) PENDING
-    expect(res.installments.map((i) => i.status)).toEqual(['PAID', 'OVERDUE', 'PENDING']);
+    expect(res.installments.map((i) => i.status)).toEqual([
+      'PAID',
+      'OVERDUE',
+      'PENDING',
+    ]);
     expect(res.paidTotal).toBe(150);
     expect(res.remaining).toBe(150);
     expect(res.overdueCount).toBe(1);
@@ -61,7 +67,11 @@ describe('GetPaymentPlanUseCase', () => {
     const { repo, useCase } = makeUseCase(250);
     await seed(repo, 200);
     const res = await useCase.execute('tp-1');
-    expect(res.downPaymentStatus).toMatchObject({ amount: 200, covered: 200, status: 'PAID' });
+    expect(res.downPaymentStatus).toMatchObject({
+      amount: 200,
+      covered: 200,
+      status: 'PAID',
+    });
     // remaining 50 hits installment 1
     expect(res.installments[0]).toMatchObject({ covered: 50 });
     expect(res.financedAmount).toBe(300);

@@ -12,7 +12,8 @@ export interface ChangeMyPasswordInput {
 @Injectable()
 export class ChangeMyPasswordUseCase {
   constructor(
-    @Inject(USER_PROFILE_REPOSITORY) private readonly repo: UserProfileRepository,
+    @Inject(USER_PROFILE_REPOSITORY)
+    private readonly repo: UserProfileRepository,
     private readonly password: PasswordService,
   ) {}
 

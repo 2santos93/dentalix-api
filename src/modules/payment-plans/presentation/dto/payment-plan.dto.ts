@@ -7,13 +7,19 @@ import { ApiProperty } from '@nestjs/swagger';
 // semantics (derived tramo statuses, next due, overdue aggregation).
 
 export class TramoViewDto {
-  @ApiProperty({ example: 100, description: 'Monto del tramo (down payment o cuota)' })
+  @ApiProperty({
+    example: 100,
+    description: 'Monto del tramo (down payment o cuota)',
+  })
   amount!: number;
 
   @ApiProperty({ type: String, format: 'date-time' })
   dueDate!: Date;
 
-  @ApiProperty({ example: 100, description: 'Monto ya cubierto por pagos aplicados' })
+  @ApiProperty({
+    example: 100,
+    description: 'Monto ya cubierto por pagos aplicados',
+  })
   covered!: number;
 
   @ApiProperty({ enum: ['PAID', 'PARTIAL', 'PENDING', 'OVERDUE'] })
@@ -30,7 +36,10 @@ export class DerivedInstallmentDto {
   @ApiProperty({ example: 100 })
   amount!: number;
 
-  @ApiProperty({ example: 100, description: 'Monto ya cubierto por pagos aplicados' })
+  @ApiProperty({
+    example: 100,
+    description: 'Monto ya cubierto por pagos aplicados',
+  })
   covered!: number;
 
   @ApiProperty({ enum: ['PAID', 'PARTIAL', 'PENDING', 'OVERDUE'] })
@@ -41,7 +50,8 @@ export class NextDueDto {
   @ApiProperty({
     example: 2,
     nullable: true,
-    description: 'Número de cuota; null si el próximo vencimiento es el down payment',
+    description:
+      'Número de cuota; null si el próximo vencimiento es el down payment',
   })
   sequence!: number | null;
 
@@ -80,19 +90,30 @@ export class PaymentPlanDto {
   @ApiProperty({ enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY'] })
   periodicity!: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
 
-  @ApiProperty({ type: String, format: 'date-time', description: 'Fecha de la 1ª cuota' })
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description: 'Fecha de la 1ª cuota',
+  })
   startDate!: Date;
 
-  @ApiProperty({ example: 300, description: 'Total pagado, convertido a currency del plan' })
+  @ApiProperty({
+    example: 300,
+    description: 'Total pagado, convertido a currency del plan',
+  })
   paidTotal!: number;
 
-  @ApiProperty({ example: 900, description: 'totalToFinance - paidTotal, min 0' })
+  @ApiProperty({
+    example: 900,
+    description: 'totalToFinance - paidTotal, min 0',
+  })
   remaining!: number;
 
   @ApiProperty({
     type: TramoViewDto,
     nullable: true,
-    description: 'Estado derivado del down payment; null si no hay down payment',
+    description:
+      'Estado derivado del down payment; null si no hay down payment',
   })
   downPaymentStatus!: TramoViewDto | null;
 
@@ -102,14 +123,21 @@ export class PaymentPlanDto {
   @ApiProperty({
     type: NextDueDto,
     nullable: true,
-    description: 'Próximo tramo pendiente/vencido; null si el plan está totalmente pagado',
+    description:
+      'Próximo tramo pendiente/vencido; null si el plan está totalmente pagado',
   })
   nextDue!: NextDueDto | null;
 
-  @ApiProperty({ example: 0, description: 'Cantidad de tramos vencidos (OVERDUE)' })
+  @ApiProperty({
+    example: 0,
+    description: 'Cantidad de tramos vencidos (OVERDUE)',
+  })
   overdueCount!: number;
 
-  @ApiProperty({ example: 0, description: 'Monto vencido no cubierto (suma de tramos OVERDUE)' })
+  @ApiProperty({
+    example: 0,
+    description: 'Monto vencido no cubierto (suma de tramos OVERDUE)',
+  })
   overdueAmount!: number;
 
   @ApiProperty({ example: false, description: 'true si remaining <= 0' })

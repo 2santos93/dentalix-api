@@ -11,7 +11,10 @@ import {
 } from 'class-validator';
 
 export class CreatePaymentPlanDto {
-  @ApiProperty({ example: 12, description: 'Número de cuotas, entero >= 1 y <= 600' })
+  @ApiProperty({
+    example: 12,
+    description: 'Número de cuotas, entero >= 1 y <= 600',
+  })
   @IsInt()
   @Min(1)
   @Max(600)
@@ -21,11 +24,18 @@ export class CreatePaymentPlanDto {
   @IsIn(['WEEKLY', 'BIWEEKLY', 'MONTHLY'])
   periodicity!: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
 
-  @ApiProperty({ type: String, format: 'date-time', description: 'Fecha de la 1ª cuota' })
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description: 'Fecha de la 1ª cuota',
+  })
   @IsDateString()
   startDate!: string;
 
-  @ApiPropertyOptional({ example: 200, description: 'Pie/abono inicial esperado (>= 0)' })
+  @ApiPropertyOptional({
+    example: 200,
+    description: 'Pie/abono inicial esperado (>= 0)',
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)

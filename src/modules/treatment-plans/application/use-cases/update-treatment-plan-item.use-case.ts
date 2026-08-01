@@ -53,13 +53,15 @@ export class UpdateTreatmentPlanItemUseCase {
       existing.status !== TreatmentPlanItemStatus.DONE &&
       updated.status === TreatmentPlanItemStatus.DONE;
     if (becameDone) {
-      await this.mirrorToOdontogram(updated, performedById).catch((err: unknown) => {
-        this.logger.warn(
-          `No se pudo reflejar el ítem ${updated.id} en el odontograma: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      });
+      await this.mirrorToOdontogram(updated, performedById).catch(
+        (err: unknown) => {
+          this.logger.warn(
+            `No se pudo reflejar el ítem ${updated.id} en el odontograma: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        },
+      );
     }
 
     return updated;

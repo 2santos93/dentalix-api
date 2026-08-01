@@ -183,7 +183,9 @@ describe('CreatePatientUseCase', () => {
         return Promise.resolve({ id: 'p1' });
       },
     };
-    const reference: any = { cityBelongsToCountry: () => Promise.resolve(true) };
+    const reference: any = {
+      cityBelongsToCountry: () => Promise.resolve(true),
+    };
     const uc = new CreatePatientUseCase(repo, reference);
 
     await uc.execute({
@@ -193,7 +195,12 @@ describe('CreatePatientUseCase', () => {
       sex: 'F',
       medicalHistory: {
         allergies: [
-          { alergeno: 'Penicilina', tipo: 'MEDICAMENTO', severidad: 'MODERADA', esAlerta: true },
+          {
+            alergeno: 'Penicilina',
+            tipo: 'MEDICAMENTO',
+            severidad: 'MODERADA',
+            esAlerta: true,
+          },
         ],
       },
     } as any);
@@ -211,9 +218,16 @@ describe('CreatePatientUseCase', () => {
         return Promise.resolve({ id: 'p1' });
       },
     };
-    const reference: any = { cityBelongsToCountry: () => Promise.resolve(true) };
+    const reference: any = {
+      cityBelongsToCountry: () => Promise.resolve(true),
+    };
     const uc = new CreatePatientUseCase(repo, reference);
-    await uc.execute({ firstName: 'Ana', lastName: 'Ríos', docType: 'CC', sex: 'F' } as any);
+    await uc.execute({
+      firstName: 'Ana',
+      lastName: 'Ríos',
+      docType: 'CC',
+      sex: 'F',
+    } as any);
     expect(captured.medicalHistory).toBeUndefined();
   });
 });

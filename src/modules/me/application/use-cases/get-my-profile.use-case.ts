@@ -13,7 +13,8 @@ export interface GetMyProfileInput {
 @Injectable()
 export class GetMyProfileUseCase {
   constructor(
-    @Inject(USER_PROFILE_REPOSITORY) private readonly repo: UserProfileRepository,
+    @Inject(USER_PROFILE_REPOSITORY)
+    private readonly repo: UserProfileRepository,
   ) {}
 
   async execute(input: GetMyProfileInput): Promise<MyProfile> {

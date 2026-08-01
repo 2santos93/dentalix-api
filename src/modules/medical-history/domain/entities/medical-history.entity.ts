@@ -28,7 +28,12 @@ export interface Habits {
   alcohol?: { activo: boolean; frecuencia?: string };
   sustancias?: boolean;
   bruxismo?: boolean;
-  higieneOral?: { cepilladoPorDia?: number; hilo?: boolean; enjuague?: boolean; cremaConFluor?: boolean };
+  higieneOral?: {
+    cepilladoPorDia?: number;
+    hilo?: boolean;
+    enjuague?: boolean;
+    cremaConFluor?: boolean;
+  };
   dieta?: string;
 }
 export interface DentalHistory {

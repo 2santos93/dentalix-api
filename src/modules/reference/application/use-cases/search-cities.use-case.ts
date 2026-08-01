@@ -21,6 +21,10 @@ export class SearchCitiesUseCase {
 
   execute(input: SearchCitiesInput): Promise<City[]> {
     const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
-    return this.repo.searchCities(input.countryCode.toUpperCase(), input.q, limit);
+    return this.repo.searchCities(
+      input.countryCode.toUpperCase(),
+      input.q,
+      limit,
+    );
   }
 }
