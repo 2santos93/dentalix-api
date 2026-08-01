@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -25,11 +26,16 @@ export class PrismaLocationRepository implements LocationRepository {
 
   async create(input: CreateLocationRepoInput): Promise<Location> {
     const tenantId = this.requireTenantId();
-    return this.prisma.runWithTenant((tx) =>
-      tx.location.create({
+    return this.prisma.runWithTenant(async (tx) => {
+      const location = await tx.location.create({
         data: { tenantId, name: input.name, address: input.address },
-      }),
-    );
+      });
+      // Una sede nueva nace con horario por defecto, igual que la que se crea al
+      // registrar la clínica — si no, unas sedes tendrían horario y otras no
+      // según por dónde se crearon.
+      await seedDefaultBusinessHours(tx, tenantId, location.id);
+      return location;
+    });
   }
 
   async list(): Promise<Location[]> {

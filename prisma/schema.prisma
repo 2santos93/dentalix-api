@@ -181,6 +181,11 @@ model Patient {
   city                   City?                   @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
+  // Requisito de la FK COMPUESTA de Appointment: permite referenciar un
+  // paciente exigiendo que el tenant coincida, cerrando el cross-tenant a
+  // nivel DB (las FK de Postgres se chequean saltando la RLS, así que una FK
+  // a `id` sola no basta).
+  @@unique([tenantId, id], map: "patients_tenant_id_key")
   @@index([tenantId])
   @@map("patients")
 }
@@ -324,7 +329,11 @@ model Appointment {
   updatedAt   DateTime          @updatedAt
   deletedAt   DateTime?
 
-  patient  Patient  @relation(fields: [patientId], references: [id])
+  // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
+  // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
+  // en algún tenant" (las FK saltan la RLS), así que se podía agendar contra
+  // un paciente de otra clínica.
+  patient  Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id])
   location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, providerId, start])

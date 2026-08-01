@@ -40,9 +40,19 @@ async function registerAndLogin(
     .set('X-Tenant-Host', hostFor(opts.subdomain))
     .send({ email: opts.email, password: PASSWORD })
     .expect(201);
+  const accessToken = (login.body as LoginBody).accessToken;
+  // Este spec no prueba el horario de atención, y una sede nueva nace con uno por
+  // defecto (lun-vie 9-13/15-19, sáb 9-13). Un PUT con `ranges: []` deja la sede
+  // SIN restricción, así que agendar no depende de la hora/día de la corrida.
+  await request(app.getHttpServer())
+    .put('/api/v1/locations/schedule')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({ timezone: 'America/Bogota', ranges: [] })
+    .expect(200);
   return {
     tenantId: (register.body as RegisterBody).tenantId,
-    accessToken: (login.body as LoginBody).accessToken,
+    accessToken,
     subdomain: opts.subdomain,
   };
 }
