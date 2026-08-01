@@ -113,6 +113,17 @@ async function registerAndLogin(
     .expect(201);
   const loginBody = login.body as LoginResponseBody;
 
+  // Estos specs no prueban el horario de atención, y una sede nueva nace con uno
+  // por defecto (lun-vie 9-13/15-19, sáb 9-13). Un PUT con `ranges: []` deja la
+  // sede SIN restricción de horario, así que los casos de abajo pueden agendar a
+  // cualquier hora sin depender de la hora/día de la corrida.
+  await request(app.getHttpServer())
+    .put('/api/v1/locations/schedule')
+    .set('X-Tenant-Host', hostFor(opts.subdomain))
+    .set('Authorization', `Bearer ${loginBody.accessToken}`)
+    .send({ timezone: 'America/Bogota', ranges: [] })
+    .expect(200);
+
   return {
     tenantId: registerBody.tenantId,
     userId: registerBody.userId,

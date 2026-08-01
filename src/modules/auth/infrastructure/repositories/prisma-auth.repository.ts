@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
 import {
   AuthRepository,
@@ -68,9 +69,13 @@ export class PrismaAuthRepository implements AuthRepository {
       // "Sede principal" de las clínicas que YA existían; esto cubre las
       // nuevas, y va en la MISMA transacción para que no pueda existir una
       // clínica sin sede (citas, pagos e inventario la exigen).
-      await tx.location.create({
+      const location = await tx.location.create({
         data: { tenantId: tenant.id, name: 'Sede principal' },
+        select: { id: true },
       });
+      // La sede nace con un horario de atención por defecto (editable en
+      // /settings/horarios). En la misma tx para que no pueda quedar a medias.
+      await seedDefaultBusinessHours(tx, tenant.id, location.id);
       // La clínica arranca con el catálogo semilla de procedimientos y
       // diagnósticos. Va DENTRO de la misma tx (tras setear el GUC de tenant)
       // para que el WITH CHECK de RLS acepte las filas del tenant recién creado.
