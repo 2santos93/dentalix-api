@@ -94,8 +94,14 @@ export class PatientsController {
   ): Promise<Patient> {
     return this.updatePatient.execute(id, {
       ...dto,
+      // Tres casos, no dos: ausente = no tocar, `null` = vaciar la columna
+      // (es nullable), y una fecha = parsearla. El guard anterior sólo miraba
+      // `undefined`, así que un `null` caía en `new Date(null)` y escribía
+      // 1970-01-01 en vez de vaciar.
       birthDate:
-        dto.birthDate !== undefined ? new Date(dto.birthDate) : undefined,
+        dto.birthDate === undefined || dto.birthDate === null
+          ? dto.birthDate
+          : new Date(dto.birthDate),
     });
   }
 }

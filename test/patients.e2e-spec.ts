@@ -205,6 +205,64 @@ describe('Patients (e2e)', () => {
     expect(admin.insurerEps).toBe('Sura');
     expect(admin.emergencyContactName).toBe('Ana Pérez');
     expect(admin.guardianDocNumber).toBe('9001');
+
+    // `null` VACÍA un campo que la columna admite como nulo. Es la única forma
+    // de corregir un dato mal cargado: omitirlo lo deja como estaba.
+    const patchClear = await request(app.getHttpServer())
+      .patch(`/api/v1/patients/${created.id}`)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Authorization', `Bearer ${clinicA.accessToken}`)
+      .send({ occupation: null, phone: null, birthDate: null })
+      .expect(200);
+    const cleared = patchClear.body as Record<string, unknown>;
+    expect(cleared.occupation).toBeNull();
+    expect(cleared.phone).toBeNull();
+    // birthDate era el caso peligroso: `new Date(null)` da 1970-01-01, así que
+    // un null mal manejado escribía una fecha falsa en vez de vaciar.
+    expect(cleared.birthDate).toBeNull();
+    // Lo omitido no se toca.
+    expect(cleared.insurerEps).toBe('Sura');
+  });
+
+  it('rejects null on columns that are NOT NULL, with 400 instead of a 500', async () => {
+    // `@IsOptional()` de class-validator saltea TODOS los validadores cuando el
+    // valor es null, así que un `firstName: null` pasaba la validación, llegaba
+    // a Prisma y reventaba la restricción NOT NULL como un 500 genérico.
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Not Null',
+      subdomain: 'clinica-notnull',
+      email: 'owner@clinica-notnull.com',
+    });
+    const create = await request(app.getHttpServer())
+      .post('/api/v1/patients')
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .send({
+        firstName: 'Nulo',
+        lastName: 'Prueba',
+        docType: DocType.CC,
+        docNumber: '8100',
+        sex: Sex.M,
+      })
+      .expect(201);
+    const patient = create.body as PatientResponseBody;
+
+    for (const field of ['firstName', 'lastName', 'docType', 'sex']) {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/patients/${patient.id}`)
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({ [field]: null })
+        .expect(400);
+    }
+
+    // El paciente sigue intacto tras los rechazos.
+    const after = await request(app.getHttpServer())
+      .get(`/api/v1/patients/${patient.id}`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    expect((after.body as { firstName: string }).firstName).toBeTruthy();
   });
 
   it('rejects requests without a bearer token', async () => {
