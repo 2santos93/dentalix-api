@@ -4,6 +4,7 @@ import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.
 import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
 import { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
 import { hashInvitationToken, invitationStatus, maskEmail } from '../invitation-token';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export interface GetInvitationResult {
   status: InvitationStatus | 'NOT_FOUND';
@@ -22,11 +23,24 @@ export interface GetInvitationResult {
 @Injectable()
 export class GetInvitationUseCase {
   constructor(
+    private readonly tenantContext: TenantContextService,
     @Inject(INVITATION_REPOSITORY)
     private readonly repo: InvitationRepository,
   ) {}
 
   async execute(token: string): Promise<GetInvitationResult> {
+    // The host is the only source of tenant identity here (no JWT on a
+    // public route) — see PublicTenantContextInterceptor /
+    // GetTenantBrandingUseCase. An apex/unknown host never puts a tenant in
+    // context, so there's nothing to look up — checked FIRST, before any
+    // repo call, so it can't hit `runWithTenant`'s "No tenant in context"
+    // plain Error (which Nest would surface as a 500). Returned as data
+    // (`NOT_FOUND`), not thrown, to honor this use case's "never throws"
+    // contract.
+    if (!this.tenantContext.getTenantId()) {
+      return { status: 'NOT_FOUND' };
+    }
+
     const invitation = await this.repo.findByTokenHash(
       hashInvitationToken(token),
     );

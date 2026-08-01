@@ -44,6 +44,26 @@ function withTenant<T>(
 }
 
 describe('AcceptInvitationUseCase', () => {
+  it('sin tenant en contexto (host apex/desconocido) -> NotFoundException sin llamar al repo', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const findByTokenHashSpy = jest.spyOn(repo, 'findByTokenHash');
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      makeTokens(),
+      new TenantContextService(),
+    );
+
+    // Deliberately NOT wrapped in ctx.run(...): mirrors a request that hit an
+    // apex/unknown host, where PublicTenantContextInterceptor never sets a
+    // tenant in context.
+    await expect(
+      uc.execute({ token: 'any-token', password: 'longenough1' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(findByTokenHashSpy).not.toHaveBeenCalled();
+  });
+
   it('usuario NUEVO: crea usuario, crea membresía con el rol de la invitación, marca aceptada, devuelve tokens', async () => {
     const repo = new InMemoryInvitationRepository();
     const invitation = repo.seedInvitation({

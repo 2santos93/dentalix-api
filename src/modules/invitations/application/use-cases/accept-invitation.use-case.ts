@@ -42,6 +42,17 @@ export class AcceptInvitationUseCase {
   ) {}
 
   async execute(input: AcceptInvitationInput): Promise<AcceptInvitationResult> {
+    // Checked FIRST, before any repo call: an apex/unknown host never puts a
+    // tenant in context (see PublicTenantContextInterceptor /
+    // GetTenantBrandingUseCase), so there's nothing to look up. Doing this
+    // check late would let `findByTokenHash` reach `runWithTenant`'s "No
+    // tenant in context" plain Error first, which Nest surfaces as a 500
+    // instead of a clean 404.
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) {
+      throw new NotFoundException('Invitation not found');
+    }
+
     const invitation = await this.repo.findByTokenHash(
       hashInvitationToken(input.token),
     );
@@ -91,13 +102,8 @@ export class AcceptInvitationUseCase {
       userId = outcome.userId;
     }
 
-    const tenantId = this.tenantContext.getTenantId();
-    if (!tenantId) {
-      throw new Error('No tenant in context');
-    }
-
     // El rol viene de la invitación (`invitation.role`), NUNCA de `input` —
-    // que ni siquiera lo acepta.
+    // que ni siquiera lo acepta. `tenantId` ya se validó al principio.
     return this.tokens.issue({ sub: userId, tenantId, role: invitation.role });
   }
 }
