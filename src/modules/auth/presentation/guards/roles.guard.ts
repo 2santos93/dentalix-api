@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClinicRole } from '@prisma/client';
+import {
+  JwtPayload,
+  isTenantPayload,
+} from '../../../../shared/crypto/token.service';
 import { ROLES_KEY } from './roles.decorator';
 
 @Injectable()
@@ -22,8 +26,11 @@ export class RolesGuard implements CanActivate {
     }
     const { user } = context
       .switchToHttp()
-      .getRequest<{ user?: { role: ClinicRole } }>();
-    if (!user || !required.includes(user.role)) {
+      .getRequest<{ user?: JwtPayload }>();
+    // A platform token carries no `role` (it is not scoped to any clinic), so
+    // it can never satisfy a @Roles(...) requirement — the superadmin reaches
+    // clinic routes with a real tenant token instead.
+    if (!user || !isTenantPayload(user) || !required.includes(user.role)) {
       throw new ForbiddenException('Insufficient role');
     }
     return true;

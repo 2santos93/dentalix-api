@@ -45,8 +45,15 @@ export class AuthController {
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const tenantId = req.tenantHost?.tenantId;
     if (!tenantId) {
-      // Do not disclose whether the tenant or the credentials were wrong.
-      throw new UnauthorizedException('Invalid credentials');
+      // Host SIN clínica (el apex). Antes era un 401 seco; ahora es la puerta
+      // del área de plataforma: solo la resuelve un superadmin, y recibe un
+      // token de plataforma (sin tenant ni rol). Para cualquier otro usuario
+      // `executePlatform` lanza el mismo 'Invalid credentials', así que no se
+      // filtra si el email existe ni si es superadmin.
+      return this.login.executePlatform({
+        email: dto.email,
+        password: dto.password,
+      });
     }
     return this.login.execute({
       tenantId,

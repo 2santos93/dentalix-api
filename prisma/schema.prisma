@@ -30,6 +30,10 @@ model User {
   fullName        String
   avatarUrl       String?
   emailVerifiedAt DateTime?
+  // Superadmin de PLATAFORMA: transversal a todos los tenants (por eso no es
+  // un ClinicRole, que siempre es por-clínica vía ClinicMembership). Se otorga
+  // SOLO por migración; ningún endpoint lo concede.
+  isPlatformAdmin Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   deletedAt       DateTime?

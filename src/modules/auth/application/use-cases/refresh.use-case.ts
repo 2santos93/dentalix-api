@@ -1,5 +1,5 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
-import { TokenService } from '../../../../shared/crypto/token.service';
+import { TokenService, isTenantPayload } from '../../../../shared/crypto/token.service';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 
@@ -35,10 +35,14 @@ export class RefreshUseCase {
     if (await this.repo.isTokenRevoked(payload.jti)) {
       throw new UnauthorizedException('Invalid refresh token');
     }
-    return this.tokens.issue({
-      sub: payload.sub,
-      tenantId: payload.tenantId,
-      role: payload.role,
-    });
+    // El refresh re-emite el MISMO tipo de sesión que se renovó: una de
+    // plataforma sigue sin tenant/rol, una de clínica conserva los suyos. Así
+    // renovar nunca puede convertir un token de plataforma en uno de clínica
+    // (ni al revés), que sería una escalada silenciosa.
+    return this.tokens.issue(
+      isTenantPayload(payload)
+        ? { sub: payload.sub, tenantId: payload.tenantId, role: payload.role }
+        : { sub: payload.sub, platform: true },
+    );
   }
 }

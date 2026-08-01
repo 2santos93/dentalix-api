@@ -11,6 +11,7 @@ function makeRepo(
 ): AuthRepository {
   return {
     findUserByEmail: async () => null,
+    findUserForAuth: () => Promise.resolve(null),
     findTenantBySubdomain: async () => null,
     createClinicWithOwner: async () => ({ tenantId: 't1', userId: 'u1' }),
     findMembership: async () => membership,

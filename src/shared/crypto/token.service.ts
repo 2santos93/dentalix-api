@@ -4,10 +4,42 @@ import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ClinicRole } from '@prisma/client';
 
-export interface JwtPayload {
+/** Sesión dentro de UNA clínica: la forma de siempre. */
+export interface TenantJwtPayload {
   sub: string;
   tenantId: string;
   role: ClinicRole;
+}
+
+/**
+ * Sesión de PLATAFORMA (superadmin): no pertenece a ningún tenant, así que no
+ * lleva `tenantId` ni `role`. Solo sirve para las rutas `/platform/*`; el
+ * interceptor de tenant y el RolesGuard lo rechazan explícitamente en
+ * cualquier ruta de clínica (ver `isTenantPayload`).
+ */
+export interface PlatformJwtPayload {
+  sub: string;
+  platform: true;
+}
+
+export type JwtPayload = TenantJwtPayload | PlatformJwtPayload;
+
+/** Narrowing: ¿es un token de plataforma (superadmin, sin tenant)? */
+export function isPlatformPayload(
+  payload: JwtPayload,
+): payload is PlatformJwtPayload {
+  return (payload as PlatformJwtPayload).platform === true;
+}
+
+/**
+ * Narrowing: ¿es un token de clínica (con tenant y rol)? Se usa como guarda
+ * en todo consumidor que necesite `tenantId`/`role`, de modo que un token de
+ * plataforma NUNCA pueda colarse en una ruta tenant-scoped.
+ */
+export function isTenantPayload(
+  payload: JwtPayload,
+): payload is TenantJwtPayload {
+  return !isPlatformPayload(payload);
 }
 
 @Injectable()

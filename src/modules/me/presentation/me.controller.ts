@@ -9,13 +9,18 @@ import {
   Post,
   Req,
   UploadedFile,
+  UnauthorizedException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
-import { JwtPayload } from '../../../shared/crypto/token.service';
+import {
+  JwtPayload,
+  TenantJwtPayload,
+  isTenantPayload,
+} from '../../../shared/crypto/token.service';
 import { GetMyProfileUseCase } from '../application/use-cases/get-my-profile.use-case';
 import { UpdateMyNameUseCase } from '../application/use-cases/update-my-name.use-case';
 import { ChangeMyPasswordUseCase } from '../application/use-cases/change-my-password.use-case';
@@ -26,6 +31,20 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { MyProfileDto } from './dto/my-profile.dto';
 import { AvatarResponseDto } from './dto/avatar-response.dto';
 import { MyProfile } from '../domain/entities/my-profile.entity';
+
+/**
+ * `/me` describe el perfil DENTRO de una clínica (tenant + rol), y este
+ * controlador solo pasa por `JwtAuthGuard` — no por `TenantContextInterceptor`,
+ * que es quien normalmente descarta un token de plataforma. Así que aquí se
+ * descarta a mano: un superadmin con token de plataforma no tiene clínica
+ * activa y no puede resolver este endpoint.
+ */
+function tenantUserOrThrow(user: JwtPayload): TenantJwtPayload {
+  if (!isTenantPayload(user)) {
+    throw new UnauthorizedException('No tenant in context');
+  }
+  return user;
+}
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -49,10 +68,11 @@ export class MeController {
   @Get()
   @ApiOkResponse({ type: MyProfileDto })
   me(@Req() req: AuthenticatedRequest): Promise<MyProfile> {
+    const user = tenantUserOrThrow(req.user);
     return this.getMyProfile.execute({
-      userId: req.user.sub,
-      tenantId: req.user.tenantId,
-      role: req.user.role,
+      userId: user.sub,
+      tenantId: user.tenantId,
+      role: user.role,
     });
   }
 
@@ -63,10 +83,11 @@ export class MeController {
     @Body() dto: UpdateNameDto,
   ): Promise<MyProfile> {
     await this.updateMyName.execute({ userId: req.user.sub, fullName: dto.fullName });
+    const user = tenantUserOrThrow(req.user);
     return this.getMyProfile.execute({
-      userId: req.user.sub,
-      tenantId: req.user.tenantId,
-      role: req.user.role,
+      userId: user.sub,
+      tenantId: user.tenantId,
+      role: user.role,
     });
   }
 

@@ -3,6 +3,7 @@ import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   AuthRepository,
+  AuthUserRecord,
   CreateClinicWithOwnerInput,
   MembershipRecord,
 } from '../../domain/ports/auth-repository.port';
@@ -15,6 +16,16 @@ export class PrismaAuthRepository implements AuthRepository {
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
       select: { id: true },
+    });
+  }
+
+  // Sin `runWithTenant`: `users` no tiene RLS (es tabla global, como
+  // `tenants`), y este lookup existe justamente para el caso en que el usuario
+  // NO pertenece al tenant del host.
+  async findUserForAuth(email: string): Promise<AuthUserRecord | null> {
+    return this.prisma.user.findFirst({
+      where: { email, deletedAt: null },
+      select: { id: true, passwordHash: true, isPlatformAdmin: true },
     });
   }
 

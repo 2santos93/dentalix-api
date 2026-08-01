@@ -1,6 +1,6 @@
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { TokenService } from './token.service';
+import { isPlatformPayload, isTenantPayload, TokenService } from './token.service';
 
 function makeService(): TokenService {
   const config = new ConfigService({
@@ -21,6 +21,7 @@ describe('TokenService', () => {
     expect(accessToken).toBeTruthy();
     expect(refreshToken).toBeTruthy();
     const decoded = await svc.verifyAccess(accessToken);
+    if (!isTenantPayload(decoded)) throw new Error('expected a tenant payload');
     expect(decoded.sub).toBe('u1');
     expect(decoded.tenantId).toBe('t1');
     expect(decoded.role).toBe('ADMIN');
@@ -33,6 +34,7 @@ describe('TokenService', () => {
   it('issues a refresh token that verifies back to the payload', async () => {
     const { refreshToken } = await svc.issue(payload);
     const decoded = await svc.verifyRefresh(refreshToken);
+    if (!isTenantPayload(decoded)) throw new Error('expected a tenant payload');
     expect(decoded.sub).toBe('u1');
     expect(decoded.tenantId).toBe('t1');
     expect(decoded.role).toBe('ADMIN');

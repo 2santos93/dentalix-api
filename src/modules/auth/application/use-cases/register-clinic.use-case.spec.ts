@@ -7,6 +7,7 @@ import { AuthRepository } from '../../domain/ports/auth-repository.port';
 function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   return {
     findUserByEmail: async () => null,
+    findUserForAuth: () => Promise.resolve(null),
     findTenantBySubdomain: async () => null,
     createClinicWithOwner: async () => ({ tenantId: 't1', userId: 'u1' }),
     findMembership: async () => null,
