@@ -7,24 +7,16 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
-  Post,
   Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiCreatedResponse,
-  ApiOkResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { ListStaffUseCase } from '../application/use-cases/list-staff.use-case';
-import { CreateStaffUseCase } from '../application/use-cases/create-staff.use-case';
 import { UpdateStaffUseCase } from '../application/use-cases/update-staff.use-case';
 import { DeactivateStaffUseCase } from '../application/use-cases/deactivate-staff.use-case';
 import { StaffMember } from '../domain/entities/staff-member.entity';
 import { StaffMemberDto } from './dto/staff-member.dto';
-import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -44,11 +36,11 @@ interface AuthenticatedRequest {
 // touch the agenda (or just needs to see who's on staff) can read it, so it
 // reuses PATIENT_ROLES (all 5) rather than a bespoke set.
 //
-// POST/PATCH/DELETE (staff management) are narrower: RolesGuard reads
+// PATCH/DELETE (staff management) are narrower: RolesGuard reads
 // @Roles metadata via getAllAndOverride([handler, class]) (see
 // roles.guard.ts), so the per-method @Roles(...STAFF_WRITE_ROLES) below
 // correctly overrides the class-level @Roles(...PATIENT_ROLES) for those
-// three routes, while GET keeps the class-level PATIENT_ROLES.
+// two routes, while GET keeps the class-level PATIENT_ROLES.
 @ApiTags('staff')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -58,7 +50,6 @@ interface AuthenticatedRequest {
 export class StaffController {
   constructor(
     private readonly listStaff: ListStaffUseCase,
-    private readonly createStaff: CreateStaffUseCase,
     private readonly updateStaff: UpdateStaffUseCase,
     private readonly deactivateStaff: DeactivateStaffUseCase,
   ) {}
@@ -67,13 +58,6 @@ export class StaffController {
   @ApiOkResponse({ type: [StaffMemberDto] })
   list(): Promise<StaffMember[]> {
     return this.listStaff.execute();
-  }
-
-  @Post()
-  @Roles(...STAFF_WRITE_ROLES)
-  @ApiCreatedResponse({ type: StaffMemberDto })
-  create(@Body() dto: CreateStaffDto): Promise<StaffMember> {
-    return this.createStaff.execute(dto);
   }
 
   @Patch(':userId')
