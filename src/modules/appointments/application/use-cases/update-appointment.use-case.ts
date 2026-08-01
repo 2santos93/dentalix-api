@@ -11,6 +11,12 @@ import type {
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
 import { Appointment } from '../../domain/entities/appointment.entity';
+import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import {
+  businessHoursErrorMessage,
+  fitsBusinessHours,
+} from '../../../location-schedule/application/business-hours';
 import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
@@ -23,6 +29,8 @@ export class UpdateAppointmentUseCase {
   constructor(
     @Inject(APPOINTMENT_REPOSITORY)
     private readonly repo: AppointmentRepository,
+    @Inject(LOCATION_SCHEDULE_REPOSITORY)
+    private readonly schedule: LocationScheduleRepository,
   ) {}
 
   async execute(
@@ -53,6 +61,16 @@ export class UpdateAppointmentUseCase {
       if (nextStart.getTime() < Date.now()) {
         throw new BadRequestException(
           'No se puede reagendar una cita al pasado',
+        );
+      }
+
+      // Horario de atención, igual que en Create — y también SOLO en la rama de
+      // reagendar: una cita que quedó fuera de horario (p. ej. porque la clínica
+      // cambió su horario después) se sigue pudiendo completar o cancelar.
+      const hours = await this.schedule.findForCurrentLocation();
+      if (!fitsBusinessHours(nextStart, nextEnd, hours)) {
+        throw new BadRequestException(
+          businessHoursErrorMessage(nextStart, nextEnd, hours!),
         );
       }
 

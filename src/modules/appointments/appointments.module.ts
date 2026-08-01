@@ -10,6 +10,7 @@ import { PrismaAppointmentRepository } from './infrastructure/repositories/prism
 import { TokenService } from '../../shared/crypto/token.service';
 import { PatientsModule } from '../patients/patients.module';
 import { StaffModule } from '../staff/staff.module';
+import { LocationScheduleModule } from '../location-schedule/location-schedule.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
 @Module({
@@ -19,7 +20,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   // PatientsModule/StaffModule se importan (no se re-implementan) para que
   // CreateAppointmentUseCase valide que paciente y profesional pertenezcan a la
   // clínica; ambos exportan su repositorio para exactamente este caso.
-  imports: [JwtModule.register({}), PatientsModule, StaffModule],
+  imports: [JwtModule.register({}), PatientsModule, StaffModule, LocationScheduleModule],
   controllers: [AppointmentsController],
   providers: [
     CreateAppointmentUseCase,

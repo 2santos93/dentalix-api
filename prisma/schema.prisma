@@ -642,3 +642,47 @@ model RevokedToken {
   @@index([expiresAt])
   @@map("revoked_tokens")
 }
+
+/// Configuración de horario de atención de una SEDE (una fila por sede).
+/// Vive en su propia tabla, no como columnas de `Location`, para no tocar un
+/// modelo que el trabajo multi-sede está modificando en paralelo
+/// (docs/plans/2026-08-01-multi-sede.md, Fases 2-5).
+model LocationSchedule {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  /// Puntero suave a `Location` (sin relación Prisma, mismo criterio que
+  /// ToothRecord.sourcePlanItemId): evita añadir la back-relation al modelo
+  /// Location mientras otro flujo lo edita. FK a nivel DB queda como follow-up.
+  locationId String @db.Uuid
+  /// IANA (ej. "America/Bogota"). Los tramos son hora de PARED; las citas se
+  /// guardan como instante, así que hace falta la zona para compararlos.
+  timezone  String    @default("America/Bogota")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  ranges LocationScheduleRange[]
+
+  @@unique([tenantId, locationId], map: "location_schedule_tenant_location_key")
+  @@index([tenantId])
+  @@map("location_schedules")
+}
+
+/// Un tramo de atención. Día CERRADO = sin filas para ese `weekday`.
+/// Sede SIN configurar (sin LocationSchedule) = sin restricción.
+model LocationScheduleRange {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @db.Uuid
+  scheduleId String @db.Uuid
+  /// 0=domingo .. 6=sábado (convención de `Date.getDay()`, para no convertir).
+  weekday     Int
+  /// Minutos desde 00:00 (0..1440), hora de pared de la sede. endMinute > startMinute.
+  startMinute Int
+  endMinute   Int
+  createdAt   DateTime @default(now())
+
+  schedule LocationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, scheduleId, weekday])
+  @@map("location_schedule_ranges")
+}
