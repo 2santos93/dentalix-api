@@ -5,6 +5,7 @@ import {
   CreateInventoryItemRepoInput,
   CreateInventoryMovementRepoInput,
   InventoryRepository,
+  ListInventoryItemsRepoParams,
   UpdateInventoryItemRepoInput,
 } from '../../../domain/ports/inventory-repository.port';
 import { signedQuantity } from '../../../domain/stock-signing';
@@ -31,6 +32,11 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
 export class InMemoryInventoryRepository implements InventoryRepository {
   private readonly items: StoredItem[] = [];
   private readonly movements: InventoryMovement[] = [];
+
+  /** Test spy: the `params` the use case last passed to `listItems`, so a
+   * spec can assert the text filter reached the repo (that's where
+   * filtering is supposed to happen — see the port's docs). */
+  lastListItemsParams: ListInventoryItemsRepoParams | undefined;
 
   /** Test helper: seed an item row directly, bypassing use-case validation. */
   seedItem(overrides: Partial<StoredItem> = {}): InventoryItem {
@@ -111,9 +117,17 @@ export class InMemoryInventoryRepository implements InventoryRepository {
     return Promise.resolve(row ? this.toItemEntity(row) : null);
   }
 
-  listItems(): Promise<InventoryItem[]> {
+  listItems(params?: ListInventoryItemsRepoParams): Promise<InventoryItem[]> {
+    this.lastListItemsParams = params;
+    const query = params?.query?.toLowerCase();
     const rows = this.items
       .filter((i) => i.deletedAt === null)
+      .filter(
+        (i) =>
+          !query ||
+          i.name.toLowerCase().includes(query) ||
+          (i.sku?.toLowerCase().includes(query) ?? false),
+      )
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((i) => this.toItemEntity(i));
     return Promise.resolve(rows);

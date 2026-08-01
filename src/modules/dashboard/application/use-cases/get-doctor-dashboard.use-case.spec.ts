@@ -7,7 +7,11 @@ import {
 } from '../../../payments/application/use-cases/get-payments-totals.use-case';
 import { InMemoryPaymentRepository } from '../../../payments/application/use-cases/__fixtures__/in-memory-payment.repository';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
-import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
+import {
+  ListInventoryItemsUseCase,
+  ListInventoryItemsInput,
+  ListInventoryItemsOutput,
+} from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { InventoryItemWithStock } from '../../../inventory/domain/entities/inventory-item.entity';
 import {
   ListAppointmentsUseCase,
@@ -48,9 +52,29 @@ class FakeGetPaymentsTotalsUseCase {
 
 class FakeListInventoryItemsUseCase {
   public items: InventoryItemWithStock[] = [];
+  public readonly calls: ListInventoryItemsInput[] = [];
 
-  execute(): Promise<InventoryItemWithStock[]> {
-    return Promise.resolve(this.items);
+  // Genuinely honours `lowStockOnly`/`page`/`pageSize` -- same "real fake,
+  // not a canned stub" convention as InMemoryInventoryRepository -- so specs
+  // that drive this through GetDoctorDashboardUseCase exercise the actual
+  // filter-then-paginate order (`total` computed on the FILTERED set, before
+  // the page slice) rather than a stand-in that always echoes everything.
+  execute(
+    input: ListInventoryItemsInput = {},
+  ): Promise<ListInventoryItemsOutput> {
+    this.calls.push(input);
+    const filtered = input.lowStockOnly
+      ? this.items.filter((item) => item.lowStock)
+      : this.items;
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 20;
+    const start = (page - 1) * pageSize;
+    return Promise.resolve({
+      items: filtered.slice(start, start + pageSize),
+      total: filtered.length,
+      page,
+      pageSize,
+    });
   }
 }
 
@@ -196,6 +220,34 @@ describe('GetDoctorDashboardUseCase', () => {
       { id: 'i1', name: 'Gloves', unit: 'box', stock: 2, minStock: 5 },
       { id: 'i3', name: 'Anesthetic', unit: 'vial', stock: 0, minStock: 3 },
     ]);
+    // The dashboard delegates the filter to ListInventoryItemsUseCase itself
+    // (`lowStockOnly: true`) rather than fetching everything and filtering
+    // here -- this is what keeps `count` exact regardless of the preview
+    // `pageSize` (see the next test).
+    expect(inventoryUc.calls).toEqual([{ lowStockOnly: true, pageSize: 100 }]);
+  });
+
+  it('reports the TRUE low-stock count even when it exceeds the preview pageSize (100)', async () => {
+    const { inventoryUc, uc } = makeUseCase();
+    const LOW_STOCK_COUNT = 105; // > the dashboard's 100-item preview page
+    inventoryUc.items = Array.from({ length: LOW_STOCK_COUNT }, (_, i) =>
+      makeInventoryItem({
+        id: `low-${i}`,
+        name: `Item ${String(i).padStart(3, '0')}`,
+        stock: 1,
+        minStock: 5,
+        lowStock: true,
+      }),
+    );
+
+    const result = await uc.execute(baseInput);
+
+    // This is the regression the count must NOT reproduce: before delegating
+    // `lowStockOnly` to the repo, the dashboard fetched one page (capped at
+    // 100) and counted `.length` on it -- silently truncating the count for
+    // any clinic with more than 100 simultaneous low-stock items.
+    expect(result.lowStockItems.count).toBe(LOW_STOCK_COUNT);
+    expect(result.lowStockItems.items).toHaveLength(100);
   });
 
   it('filters out past appointments, sorts ascending by start, and respects upcomingLimit', async () => {
