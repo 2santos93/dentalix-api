@@ -22,6 +22,7 @@ import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { LocationsModule } from './modules/locations/locations.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
@@ -48,6 +49,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PaymentsModule,
     PaymentPlansModule,
     InventoryModule,
+    LocationsModule,
     PlatformModule,
     DashboardModule,
   ],
