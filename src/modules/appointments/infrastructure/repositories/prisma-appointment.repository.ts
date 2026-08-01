@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   AppointmentRepository,
@@ -77,6 +78,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     const appointment = await this.prisma.runWithTenant(async (tx) => {
       return tx.appointment.create({
         data: {
+          // Fase 1 multi-sede: la sede sale de la única del tenant; en la fase 2
+          // vendrá del request ya validada (ver default-location.ts).
+          locationId: await resolveDefaultLocationId(tx),
           tenantId,
           patientId: input.patientId,
           providerId: input.providerId,

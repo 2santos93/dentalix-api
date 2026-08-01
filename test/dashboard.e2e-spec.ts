@@ -263,9 +263,17 @@ describe('Dashboard (e2e)', () => {
         },
         select: { id: true },
       });
+      // El pago se siembra por Prisma (no hay REST de pagos en este spec), así
+      // que hay que darle su sede: multi-sede hizo `locationId` obligatorio.
+      // Se toma la "Sede principal" que el registro de la clínica ya creó.
+      const locationA = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId },
+        select: { id: true },
+      });
       await raw.payment.create({
         data: {
           tenantId: clinicA.tenantId,
+          locationId: locationA.id,
           treatmentPlanId: plan.id,
           patientId: patient.id,
           amount: 500000,

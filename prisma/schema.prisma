@@ -49,6 +49,29 @@ enum ClinicRole {
   ADMIN
 }
 
+/// Sede/sucursal física de una clínica. La sede es una dimensión de filtrado
+/// DENTRO del tenant, no un nivel de aislamiento: el RLS por tenant sigue
+/// siendo la frontera dura. Pacientes, historia y catálogo NO llevan sede —
+/// la ficha del paciente es de la clínica (ver docs/plans/2026-08-01-multi-sede.md).
+model Location {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @db.Uuid
+  name      String
+  address   String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  appointments       Appointment[]
+  payments           Payment[]
+  inventoryItems     InventoryItem[]
+  inventoryMovements InventoryMovement[]
+
+  @@index([tenantId])
+  @@map("locations")
+}
+
 model ClinicMembership {
   id        String     @id @default(uuid()) @db.Uuid
   tenantId  String     @db.Uuid
@@ -86,40 +109,40 @@ enum Sex {
 }
 
 model Patient {
-  id          String    @id @default(uuid()) @db.Uuid
-  tenantId    String    @db.Uuid
-  firstName   String
-  lastName    String
-  docType     DocType   @default(CC)
-  docNumber   String?
-  birthDate   DateTime?
-  sex         Sex       @default(UNSPECIFIED)
-  phone       String?
-  email       String?
-  address     String?
-  countryCode String?
-  cityId      Int?
-  notes       String?
+  id                           String    @id @default(uuid()) @db.Uuid
+  tenantId                     String    @db.Uuid
+  firstName                    String
+  lastName                     String
+  docType                      DocType   @default(CC)
+  docNumber                    String?
+  birthDate                    DateTime?
+  sex                          Sex       @default(UNSPECIFIED)
+  phone                        String?
+  email                        String?
+  address                      String?
+  countryCode                  String?
+  cityId                       Int?
+  notes                        String?
   // Consentimiento Ley 1581 (atributo único, no versionado).
-  dataConsentAccepted      Boolean   @default(false)
-  dataConsentAt            DateTime?
-  dataConsentPolicyVersion String?
+  dataConsentAccepted          Boolean   @default(false)
+  dataConsentAt                DateTime?
+  dataConsentPolicyVersion     String?
   // Identificación ampliada.
-  maritalStatus String?
-  occupation    String?
-  insurerEps    String?
-  physicianName String?
-  physicianPhone String?
+  maritalStatus                String?
+  occupation                   String?
+  insurerEps                   String?
+  physicianName                String?
+  physicianPhone               String?
   // Contacto de emergencia / acudiente.
   emergencyContactName         String?
   emergencyContactRelationship String?
   emergencyContactPhone        String?
   guardianName                 String?
   guardianDocNumber            String?
-  createdById String?   @db.Uuid
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  createdById                  String?   @db.Uuid
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+  deletedAt                    DateTime?
 
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
@@ -135,20 +158,20 @@ model Patient {
 }
 
 model MedicalHistoryVersion {
-  id            String  @id @default(uuid()) @db.Uuid
-  tenantId      String  @db.Uuid
-  patientId     String  @db.Uuid
-  version       Int
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @db.Uuid
+  patientId        String    @db.Uuid
+  version          Int
   // Listas/objetos estructurados (snapshot inmutable por versión).
-  allergies     Json?
-  conditions    Json?
-  medications   Json?
-  habits        Json?
-  dentalHistory Json?
-  surgeries     Json?
-  vitalSigns    Json?
-  familyHistory String?
-  notes         String?
+  allergies        Json?
+  conditions       Json?
+  medications      Json?
+  habits           Json?
+  dentalHistory    Json?
+  surgeries        Json?
+  vitalSigns       Json?
+  familyHistory    String?
+  notes            String?
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
   hasCriticalAlert Boolean   @default(false)
@@ -221,25 +244,25 @@ enum ToothRecordStatus {
 }
 
 model ToothRecord {
-  id              String            @id @default(uuid()) @db.Uuid
-  tenantId        String            @db.Uuid
-  patientId       String            @db.Uuid
-  toothNumber     String
-  surfaces        ToothSurface[]
-  kind            CatalogKind
-  catalogItemId   String?           @db.Uuid
-  status          ToothRecordStatus @default(COMPLETED)
-  notes           String?
-  clinicalEntryId String?           @db.Uuid
-  performedById   String?           @db.Uuid
+  id               String            @id @default(uuid()) @db.Uuid
+  tenantId         String            @db.Uuid
+  patientId        String            @db.Uuid
+  toothNumber      String
+  surfaces         ToothSurface[]
+  kind             CatalogKind
+  catalogItemId    String?           @db.Uuid
+  status           ToothRecordStatus @default(COMPLETED)
+  notes            String?
+  clinicalEntryId  String?           @db.Uuid
+  performedById    String?           @db.Uuid
   // Set when this record was auto-created because a TreatmentPlanItem was
   // marked DONE (Pieza B). Soft pointer (no FK/relation): used to dedupe so a
   // given plan item mirrors into the odontogram at most once. Null for records
   // created directly in the odontogram.
-  sourcePlanItemId String?          @db.Uuid
-  recordedAt      DateTime          @default(now())
-  createdAt       DateTime          @default(now())
-  deletedAt       DateTime?
+  sourcePlanItemId String?           @db.Uuid
+  recordedAt       DateTime          @default(now())
+  createdAt        DateTime          @default(now())
+  deletedAt        DateTime?
 
   patient Patient @relation(fields: [patientId], references: [id])
 
@@ -260,6 +283,7 @@ enum AppointmentStatus {
 model Appointment {
   id          String            @id @default(uuid()) @db.Uuid
   tenantId    String            @db.Uuid
+  locationId  String            @db.Uuid
   patientId   String            @db.Uuid
   providerId  String            @db.Uuid
   start       DateTime
@@ -272,7 +296,8 @@ model Appointment {
   updatedAt   DateTime          @updatedAt
   deletedAt   DateTime?
 
-  patient Patient @relation(fields: [patientId], references: [id])
+  patient  Patient  @relation(fields: [patientId], references: [id])
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
@@ -423,6 +448,7 @@ enum PaymentMethod {
 model Payment {
   id              String         @id @default(uuid()) @db.Uuid
   tenantId        String         @db.Uuid
+  locationId      String         @db.Uuid
   treatmentPlanId String         @db.Uuid
   patientId       String         @db.Uuid
   amount          Decimal        @db.Decimal(14, 2)
@@ -436,8 +462,17 @@ model Payment {
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
 
-  plan TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Restrict)
+  plan     TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Restrict)
+  location Location      @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
+  // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
+  // unique index; the migration 20260731160000_add_payment_idempotency_key
+  // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
+  // keys (legacy rows + writes without the header) stay unconstrained, while a
+  // non-null key is unique per tenant. Same name+columns as declared here, so
+  // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
+  // recreates this as a full index.
+  @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
   // Partial (WHERE "deletedAt" IS NULL) -- Prisma has no schema-DSL support
@@ -448,14 +483,6 @@ model Payment {
   // Patient.@@unique(patients_tenant_doc_key) / the tenants_subdomain_key
   // and users_email_key partial unique indexes.
   @@index([tenantId, paidAt], map: "payments_tenantId_paidAt_active_idx")
-  // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
-  // unique index; the migration 20260731160000_add_payment_idempotency_key
-  // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
-  // keys (legacy rows + writes without the header) stay unconstrained, while a
-  // non-null key is unique per tenant. Same name+columns as declared here, so
-  // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
-  // recreates this as a full index.
-  @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   @@map("payments")
 }
 
@@ -478,7 +505,7 @@ model PaymentPlan {
   patientId         String                 @db.Uuid
   currency          String
   totalToFinance    Decimal                @db.Decimal(14, 2)
-  downPayment       Decimal                @db.Decimal(14, 2) @default(0)
+  downPayment       Decimal                @default(0) @db.Decimal(14, 2)
   installmentsCount Int
   periodicity       InstallmentPeriodicity
   startDate         DateTime
@@ -532,6 +559,7 @@ enum InventoryMovementType {
 model InventoryItem {
   id          String    @id @default(uuid()) @db.Uuid
   tenantId    String    @db.Uuid
+  locationId  String    @db.Uuid
   name        String
   sku         String?
   unit        String
@@ -543,8 +571,8 @@ model InventoryItem {
   deletedAt   DateTime?
 
   movements InventoryMovement[]
+  location  Location            @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
-  @@index([tenantId])
   // Partial unique (WHERE "deletedAt" IS NULL) so two ACTIVE items can't share
   // a name, while soft-deleted rows don't block re-using the name. The WHERE
   // lives only in migration 20260731162000_inventory_item_unique_name (Prisma
@@ -552,12 +580,14 @@ model InventoryItem {
   // Patient.@@unique(patients_tenant_doc_key). Do NOT accept a migrate-dev diff
   // that recreates this as a full index.
   @@unique([tenantId, name], map: "inventory_items_tenantId_name_key")
+  @@index([tenantId])
   @@map("inventory_items")
 }
 
 model InventoryMovement {
   id          String                @id @default(uuid()) @db.Uuid
   tenantId    String                @db.Uuid
+  locationId  String                @db.Uuid
   itemId      String                @db.Uuid
   type        InventoryMovementType
   quantity    Decimal               @db.Decimal(14, 3)
@@ -566,7 +596,8 @@ model InventoryMovement {
   createdById String?               @db.Uuid
   createdAt   DateTime              @default(now())
 
-  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  item     InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location Location      @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, itemId])
   @@map("inventory_movements")

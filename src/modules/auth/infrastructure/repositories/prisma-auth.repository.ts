@@ -63,6 +63,13 @@ export class PrismaAuthRepository implements AuthRepository {
       await tx.clinicMembership.create({
         data: { tenantId: tenant.id, userId: user.id, role: ClinicRole.ADMIN },
       });
+      // Toda clínica nace con una sede. La migración de multi-sede creó la
+      // "Sede principal" de las clínicas que YA existían; esto cubre las
+      // nuevas, y va en la MISMA transacción para que no pueda existir una
+      // clínica sin sede (citas, pagos e inventario la exigen).
+      await tx.location.create({
+        data: { tenantId: tenant.id, name: 'Sede principal' },
+      });
       return { tenantId: tenant.id, userId: user.id };
     });
   }
