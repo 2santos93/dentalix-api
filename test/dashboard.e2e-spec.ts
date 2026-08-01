@@ -174,6 +174,11 @@ async function cleanup(): Promise<void> {
   // docs/plans/2026-07-24-payments-pivot.md); this suite now seeds a
   // TreatmentPlan + Payment directly (raw/DIRECT_URL, no REST yet -- PAY-T3)
   // for the `dash.incomes.*` assertions.
+  // tooth_records referencia patients (y plan items): marcar un ítem de plan
+  // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+  // patients falla por FK y hace reventar el afterAll (contaminando las
+  // suites siguientes).
+  await raw.toothRecord.deleteMany();
   await raw.payment.deleteMany();
   await raw.treatmentPlan.deleteMany();
   await raw.inventoryMovement.deleteMany();

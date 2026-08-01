@@ -30,6 +30,11 @@ async function cleanup(): Promise<void> {
   // as payments.e2e-spec.ts / patients-location.e2e-spec.ts). This suite
   // never creates a payment or a plan item, but the deletes are harmless
   // no-ops when there are no rows, so the full order is kept for safety.
+  // tooth_records referencia patients (y plan items): marcar un ítem de plan
+  // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+  // patients falla por FK y hace reventar el afterAll (contaminando las
+  // suites siguientes).
+  await raw.toothRecord.deleteMany();
   await raw.payment.deleteMany();
   await raw.treatmentPlanItem.deleteMany();
   await raw.treatmentPlan.deleteMany();

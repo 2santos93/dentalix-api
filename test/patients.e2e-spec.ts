@@ -95,6 +95,11 @@ describe('Patients (e2e)', () => {
     await app.init();
     // FK-safe order: medical_history_versions (FKs to patients) -> patients
     // -> memberships -> users -> tenants.
+    // tooth_records referencia patients (y plan items): marcar un ítem de plan
+    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+    // patients falla por FK y hace reventar el afterAll (contaminando las
+    // suites siguientes).
+    await raw.toothRecord.deleteMany();
     await raw.medicalHistoryVersion.deleteMany();
     await raw.patient.deleteMany();
     await raw.clinicMembership.deleteMany();
@@ -103,6 +108,11 @@ describe('Patients (e2e)', () => {
   });
 
   afterAll(async () => {
+    // tooth_records referencia patients (y plan items): marcar un ítem de plan
+    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+    // patients falla por FK y hace reventar el afterAll (contaminando las
+    // suites siguientes).
+    await raw.toothRecord.deleteMany();
     await raw.medicalHistoryVersion.deleteMany();
     await raw.patient.deleteMany();
     await raw.clinicMembership.deleteMany();

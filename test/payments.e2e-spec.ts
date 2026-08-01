@@ -188,6 +188,11 @@ async function cleanup(): Promise<void> {
   // TreatmentPlanItem -> DentalCatalogItem -> Patient -> ClinicMembership ->
   // User -> Tenant, plus the exchange snapshot this suite seeds directly
   // (same convention as dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts).
+  // tooth_records referencia patients (y plan items): marcar un ítem de plan
+  // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+  // patients falla por FK y hace reventar el afterAll (contaminando las
+  // suites siguientes).
+  await raw.toothRecord.deleteMany();
   await raw.payment.deleteMany();
   await raw.treatmentPlanItem.deleteMany();
   await raw.treatmentPlan.deleteMany();

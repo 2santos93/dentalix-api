@@ -186,6 +186,11 @@ describe('Treatment plans (e2e)', () => {
     // FK-safe order: treatment_plan_items -> treatment_plans ->
     // dental_catalog_items -> patients -> memberships -> users -> tenants
     // (same convention as appointments.e2e-spec.ts / role-matrix.e2e-spec.ts).
+    // tooth_records referencia patients (y plan items): marcar un ítem de plan
+    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+    // patients falla por FK y hace reventar el afterAll (contaminando las
+    // suites siguientes).
+    await raw.toothRecord.deleteMany();
     await raw.treatmentPlanItem.deleteMany();
     await raw.treatmentPlan.deleteMany();
     await raw.dentalCatalogItem.deleteMany();
@@ -196,6 +201,11 @@ describe('Treatment plans (e2e)', () => {
   });
 
   afterAll(async () => {
+    // tooth_records referencia patients (y plan items): marcar un ítem de plan
+    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
+    // patients falla por FK y hace reventar el afterAll (contaminando las
+    // suites siguientes).
+    await raw.toothRecord.deleteMany();
     await raw.treatmentPlanItem.deleteMany();
     await raw.treatmentPlan.deleteMany();
     await raw.dentalCatalogItem.deleteMany();
