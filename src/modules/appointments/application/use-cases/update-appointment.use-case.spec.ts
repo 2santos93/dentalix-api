@@ -30,6 +30,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     id: 'a1',
     tenantId: 't1',
     patientId: 'p1',
+    patientFirstName: null,
+    patientLastName: null,
     providerId: 'prov1',
     start: at('10:00'),
     end: at('10:30'),

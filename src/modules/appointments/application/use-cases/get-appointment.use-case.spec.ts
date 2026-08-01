@@ -12,6 +12,8 @@ function fakeAppointment(id: string): Appointment {
     id,
     tenantId: 't1',
     patientId: 'p1',
+    patientFirstName: null,
+    patientLastName: null,
     providerId: 'prov1',
     start: new Date('2026-08-01T10:00:00.000Z'),
     end: new Date('2026-08-01T10:30:00.000Z'),

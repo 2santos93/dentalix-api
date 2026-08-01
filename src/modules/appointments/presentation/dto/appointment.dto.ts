@@ -17,6 +17,17 @@ export class AppointmentDto {
   @ApiProperty({ format: 'uuid' })
   patientId!: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      "Patient's first name, joined so a client can label the appointment without fetching the patient list. Null when the join is unavailable.",
+  })
+  patientFirstName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  patientLastName!: string | null;
+
   @ApiProperty({ format: 'uuid' })
   providerId!: string;
 

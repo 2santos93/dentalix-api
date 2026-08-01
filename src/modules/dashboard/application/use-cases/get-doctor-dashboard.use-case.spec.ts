@@ -104,6 +104,8 @@ function makeAppointment(overrides: Partial<Appointment>): Appointment {
     id: 'appt-1',
     tenantId: 'tenant-1',
     patientId: 'patient-1',
+    patientFirstName: null,
+    patientLastName: null,
     providerId: 'provider-1',
     start: new Date('2026-08-01T10:00:00.000Z'),
     end: new Date('2026-08-01T11:00:00.000Z'),

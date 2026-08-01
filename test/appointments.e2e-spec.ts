@@ -12,13 +12,27 @@ import { hostFor } from './support/tenant-host';
 // hardcodeada haría fallar la suite al pasar ese día. Anclar el día preserva las
 // relaciones de solape entre los literales (10:00 / 10:15 / 10:30 ...).
 // Mismo criterio que dashboard.e2e-spec.ts, que ya usaba `Date.now() + N días`.
-const ANCHOR_DAY = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
-  .toISOString()
-  .slice(0, 10);
+const DAY_MS = 24 * 60 * 60 * 1000;
+function isoDayIn(days: number): string {
+  return new Date(Date.now() + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+const ANCHOR_DAY = isoDayIn(2);
 function at(time: string): string {
   return `${ANCHOR_DAY}T${time}:00.000Z`;
 }
 
+/**
+ * 00:00Z of the day AFTER the anchor day — the exclusive `to` bound that
+ * covers the whole anchor day. This used to be hardcoded (`2026-08-02`), which
+ * silently emptied every "covering" range the moment the rolling anchor day
+ * caught up to that date: the list assertions then received `[]`.
+ */
+const AFTER_ANCHOR = `${isoDayIn(3)}T00:00:00.000Z`;
+
+/** A range far from the anchor day, for the "does NOT cover" assertion — derived, not hardcoded, for the same reason. */
+const FAR_FROM = `${isoDayIn(40)}T00:00:00.000Z`;
+const FAR_TO = `${isoDayIn(41)}T00:00:00.000Z`;
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -51,6 +65,8 @@ interface AppointmentResponseBody {
   id: string;
   tenantId: string;
   patientId: string;
+  patientFirstName: string | null;
+  patientLastName: string | null;
   providerId: string;
   start: string;
   end: string;
@@ -240,7 +256,7 @@ describe('Appointments (e2e)', () => {
       .get('/api/v1/appointments')
       .query({
         from: at('00:00'),
-        to: '2026-08-02T00:00:00.000Z',
+        to: AFTER_ANCHOR,
       })
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
@@ -248,11 +264,19 @@ describe('Appointments (e2e)', () => {
     const listCoveringBody = listCovering.body as AppointmentResponseBody[];
     expect(listCoveringBody.map((a) => a.id)).toContain(appt1.id);
 
+    // The listed appointment carries the patient's name (joined from Patient),
+    // so a client can label it without fetching the patient list — which used
+    // to mean `GET /patients?pageSize=100` and a raw UUID for everyone past
+    // the first 100 patients.
+    const listedAppt1 = listCoveringBody.find((a) => a.id === appt1.id);
+    expect(listedAppt1?.patientFirstName).toBe('Agenda');
+    expect(listedAppt1?.patientLastName).toBe('Paciente');
+
     const listNotCovering = await request(app.getHttpServer())
       .get('/api/v1/appointments')
       .query({
-        from: '2026-09-01T00:00:00.000Z',
-        to: '2026-09-02T00:00:00.000Z',
+        from: FAR_FROM,
+        to: FAR_TO,
       })
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
@@ -340,7 +364,7 @@ describe('Appointments (e2e)', () => {
       .get('/api/v1/appointments')
       .query({
         from: at('00:00'),
-        to: '2026-08-02T00:00:00.000Z',
+        to: AFTER_ANCHOR,
       })
       .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
@@ -377,7 +401,7 @@ describe('Appointments (e2e)', () => {
       .get('/api/v1/appointments')
       .query({
         from: at('00:00'),
-        to: '2026-08-02T00:00:00.000Z',
+        to: AFTER_ANCHOR,
       })
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${receptionToken}`)

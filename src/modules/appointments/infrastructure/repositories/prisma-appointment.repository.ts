@@ -12,11 +12,30 @@ import { Appointment } from '../../domain/entities/appointment.entity';
 
 type PrismaAppointment = Prisma.AppointmentGetPayload<Record<string, never>>;
 
-function mapToEntity(appointment: PrismaAppointment): Appointment {
+/**
+ * Joins just the patient's name onto an appointment — enough for a client to
+ * label it without fetching the patient list (see `Appointment.patientFirstName`).
+ */
+const INCLUDE_PATIENT_NAME = {
+  patient: { select: { firstName: true, lastName: true } },
+} as const;
+
+/**
+ * `patient` is optional on purpose: `findOverlapping` only needs the slots for
+ * conflict detection, so it skips the join rather than paying for it, and the
+ * entity's name fields come back null there.
+ */
+type PrismaAppointmentWithPatient = PrismaAppointment & {
+  patient?: { firstName: string; lastName: string };
+};
+
+function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
   return {
     id: appointment.id,
     tenantId: appointment.tenantId,
     patientId: appointment.patientId,
+    patientFirstName: appointment.patient?.firstName ?? null,
+    patientLastName: appointment.patient?.lastName ?? null,
     providerId: appointment.providerId,
     start: appointment.start,
     end: appointment.end,
@@ -67,6 +86,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           notes: input.notes,
           createdById: input.createdById,
         },
+        include: INCLUDE_PATIENT_NAME,
       });
     });
     return mapToEntity(appointment);
@@ -76,6 +96,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     const appointment = await this.prisma.runWithTenant(async (tx) => {
       return tx.appointment.findFirst({
         where: { id, deletedAt: null },
+        include: INCLUDE_PATIENT_NAME,
       });
     });
     return appointment ? mapToEntity(appointment) : null;
@@ -94,6 +115,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       const appointments = await tx.appointment.findMany({
         where,
         orderBy: { start: 'asc' },
+        include: INCLUDE_PATIENT_NAME,
       });
       return appointments.map(mapToEntity);
     });
@@ -172,6 +194,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       const appointment = await tx.appointment.update({
         where: { id },
         data: patch,
+        include: INCLUDE_PATIENT_NAME,
       });
       return mapToEntity(appointment);
     });
