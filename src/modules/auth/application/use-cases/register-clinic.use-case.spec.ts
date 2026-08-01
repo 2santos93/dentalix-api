@@ -6,11 +6,12 @@ import { AuthRepository } from '../../domain/ports/auth-repository.port';
 
 function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   return {
-    findUserByEmail: async () => null,
+    findUserByEmail: () => Promise.resolve(null),
     findUserForAuth: () => Promise.resolve(null),
-    findTenantBySubdomain: async () => null,
-    createClinicWithOwner: async () => ({ tenantId: 't1', userId: 'u1' }),
-    findMembership: async () => null,
+    findTenantBySubdomain: () => Promise.resolve(null),
+    createClinicWithOwner: () =>
+      Promise.resolve({ tenantId: 't1', userId: 'u1' }),
+    findMembership: () => Promise.resolve(null),
     revokeToken: jest.fn(),
     isTokenRevoked: jest.fn(),
     ...overrides,
@@ -23,9 +24,9 @@ describe('RegisterClinicUseCase', () => {
   it('creates a clinic + owner and normalizes the email', async () => {
     let captured: { email: string; passwordHash: string } | undefined;
     const repo = makeRepo({
-      createClinicWithOwner: async (input) => {
+      createClinicWithOwner: (input) => {
         captured = { email: input.email, passwordHash: input.passwordHash };
-        return { tenantId: 't1', userId: 'u1' };
+        return Promise.resolve({ tenantId: 't1', userId: 'u1' });
       },
     });
     const uc = new RegisterClinicUseCase(repo, password);
@@ -45,7 +46,7 @@ describe('RegisterClinicUseCase', () => {
 
   it('rejects a taken subdomain', async () => {
     const repo = makeRepo({
-      findTenantBySubdomain: async () => ({ id: 't0' }),
+      findTenantBySubdomain: () => Promise.resolve({ id: 't0' }),
     });
     const uc = new RegisterClinicUseCase(repo, password);
     await expect(
@@ -60,7 +61,9 @@ describe('RegisterClinicUseCase', () => {
   });
 
   it('rejects a taken email', async () => {
-    const repo = makeRepo({ findUserByEmail: async () => ({ id: 'u0' }) });
+    const repo = makeRepo({
+      findUserByEmail: () => Promise.resolve({ id: 'u0' }),
+    });
     const uc = new RegisterClinicUseCase(repo, password);
     await expect(
       uc.execute({
@@ -79,9 +82,7 @@ describe('RegisterClinicUseCase', () => {
       { code: 'P2002', clientVersion: '6.19.3' },
     );
     const repo = makeRepo({
-      createClinicWithOwner: async () => {
-        throw p2002;
-      },
+      createClinicWithOwner: () => Promise.reject(p2002),
     });
     const uc = new RegisterClinicUseCase(repo, password);
 

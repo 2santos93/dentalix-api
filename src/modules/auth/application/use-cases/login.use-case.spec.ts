@@ -10,18 +10,19 @@ function makeRepo(
   membership: Awaited<ReturnType<AuthRepository['findMembership']>>,
 ): AuthRepository {
   return {
-    findUserByEmail: async () => null,
+    findUserByEmail: () => Promise.resolve(null),
     findUserForAuth: () => Promise.resolve(null),
-    findTenantBySubdomain: async () => null,
-    createClinicWithOwner: async () => ({ tenantId: 't1', userId: 'u1' }),
-    findMembership: async () => membership,
+    findTenantBySubdomain: () => Promise.resolve(null),
+    createClinicWithOwner: () =>
+      Promise.resolve({ tenantId: 't1', userId: 'u1' }),
+    findMembership: () => Promise.resolve(membership),
     revokeToken: jest.fn(),
     isTokenRevoked: jest.fn(),
   };
 }
 
 const tokens = {
-  issue: async () => ({ accessToken: 'acc', refreshToken: 'ref' }),
+  issue: () => Promise.resolve({ accessToken: 'acc', refreshToken: 'ref' }),
 } as never;
 
 describe('LoginUseCase', () => {
