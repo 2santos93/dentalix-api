@@ -206,7 +206,43 @@ describe('Locations / multi-sede (e2e)', () => {
           .query(range),
       ).expect(400);
 
-      // --- 8. No se puede desactivar la última sede activa: primero se
+      // --- 8. El DASHBOARD también respeta la sede, sin haber tocado nada:
+      // compone los use-cases de citas/pagos/inventario, que ya filtran. Se
+      // comprueba porque "emerge del diseño" no es lo mismo que "funciona".
+      const dashQuery = {
+        from: range.from.slice(0, 10),
+        to: range.to.slice(0, 10),
+        currency: 'USD',
+      };
+      const dashNorte = await auth(
+        request(app.getHttpServer())
+          .get('/api/v1/dashboard')
+          .set('X-Location-Id', sedeB)
+          .query(dashQuery),
+      ).expect(200);
+      const dashPrincipal = await auth(
+        request(app.getHttpServer())
+          .get('/api/v1/dashboard')
+          .set('X-Location-Id', sedeA)
+          .query(dashQuery),
+      ).expect(200);
+
+      type Dash = {
+        upcomingAppointments: { id: string }[];
+        patientCount: number;
+      };
+      const norte = dashNorte.body as Dash;
+      const principal = dashPrincipal.body as Dash;
+
+      expect(norte.upcomingAppointments.map((a) => a.id)).toContain(apptId);
+      expect(principal.upcomingAppointments.map((a) => a.id)).not.toContain(
+        apptId,
+      );
+      // ...pero el conteo de PACIENTES es igual en ambas: el paciente es de la
+      // clínica, no de la sede (ficha centralizada).
+      expect(principal.patientCount).toBe(norte.patientCount);
+
+      // --- 9. No se puede desactivar la última sede activa: primero se
       // desactiva la B (quedan 1), y entonces la A ya no se puede desactivar.
       await auth(
         request(app.getHttpServer())
