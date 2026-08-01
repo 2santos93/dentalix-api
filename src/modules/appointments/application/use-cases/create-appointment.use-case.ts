@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
@@ -11,6 +12,10 @@ import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
 } from '../appointment-overlap-error';
+import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
+import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
+import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -30,6 +35,13 @@ export class CreateAppointmentUseCase {
   constructor(
     @Inject(APPOINTMENT_REPOSITORY)
     private readonly repo: AppointmentRepository,
+    // Se inyectan (no se re-implementan) para resolver "¿este paciente y este
+    // profesional son de ESTA clínica?" — mismo patrón cross-module que
+    // AddTreatmentPlanItemUseCase inyectando DENTAL_CATALOG_REPOSITORY.
+    @Inject(PATIENT_REPOSITORY)
+    private readonly patients: PatientRepository,
+    @Inject(STAFF_REPOSITORY)
+    private readonly staff: StaffRepository,
   ) {}
 
   async execute(input: CreateAppointmentInput): Promise<Appointment> {
@@ -49,6 +61,24 @@ export class CreateAppointmentUseCase {
       throw new BadRequestException(
         'No se puede agendar una cita en el pasado',
       );
+    }
+
+    // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
+    // clínica, antes de mirar solapes (un id inválido hace que el solape no
+    // signifique nada). Ambos repos filtran por tenant vía RLS, así que un
+    // paciente/profesional de otro tenant devuelve null igual que uno inexistente.
+    //
+    // Por qué importa: `patientId` solo tenía una FK a `patients(id)`, que NO
+    // valida el tenant (las FK de Postgres se chequean saltando la RLS), así que
+    // se podía agendar contra un paciente de OTRA clínica. Y `providerId` no
+    // tenía ninguna validación: cualquier UUID pasaba como "profesional".
+    const patient = await this.patients.findById(input.patientId);
+    if (!patient) {
+      throw new NotFoundException('Paciente no encontrado');
+    }
+    const provider = await this.staff.findById(input.providerId);
+    if (!provider) {
+      throw new NotFoundException('Profesional no encontrado');
     }
 
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff

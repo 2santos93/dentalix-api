@@ -8,13 +8,18 @@ import { UpdateAppointmentUseCase } from './application/use-cases/update-appoint
 import { APPOINTMENT_REPOSITORY } from './domain/ports/appointment-repository.port';
 import { PrismaAppointmentRepository } from './infrastructure/repositories/prisma-appointment.repository';
 import { TokenService } from '../../shared/crypto/token.service';
+import { PatientsModule } from '../patients/patients.module';
+import { StaffModule } from '../staff/staff.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
   // JwtAuthGuard depends on TokenService, which depends on JwtService — must
   // be available here since the guard is applied on this module's controller.
-  imports: [JwtModule.register({})],
+  // PatientsModule/StaffModule se importan (no se re-implementan) para que
+  // CreateAppointmentUseCase valide que paciente y profesional pertenezcan a la
+  // clínica; ambos exportan su repositorio para exactamente este caso.
+  imports: [JwtModule.register({}), PatientsModule, StaffModule],
   controllers: [AppointmentsController],
   providers: [
     CreateAppointmentUseCase,

@@ -29,5 +29,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     TenantContextInterceptor,
     { provide: STAFF_REPOSITORY, useClass: PrismaStaffRepository },
   ],
+  // STAFF_REPOSITORY exportado (aditivo) para que CreateAppointmentUseCase
+  // valide que el profesional sea staff activo de ESTA clínica.
+  exports: [STAFF_REPOSITORY],
 })
 export class StaffModule {}
