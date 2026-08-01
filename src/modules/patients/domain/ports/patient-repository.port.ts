@@ -50,6 +50,16 @@ export interface UpdatePatientRepoInput {
   countryCode?: string;
   cityId?: number;
   notes?: string | null;
+  maritalStatus?: string | null;
+  occupation?: string | null;
+  insurerEps?: string | null;
+  physicianName?: string | null;
+  physicianPhone?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactRelationship?: string | null;
+  emergencyContactPhone?: string | null;
+  guardianName?: string | null;
+  guardianDocNumber?: string | null;
 }
 
 export interface ListPatientsParams {
