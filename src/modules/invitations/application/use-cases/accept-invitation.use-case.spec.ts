@@ -17,7 +17,7 @@ function makePassword(overrides: Partial<PasswordService> = {}) {
     hash: jest.fn().mockResolvedValue('NEW_HASH'),
     verify: jest.fn().mockResolvedValue(true),
     ...overrides,
-  } as unknown as PasswordService;
+  };
 }
 
 function makeTokens(overrides: Partial<TokenService> = {}) {
@@ -40,7 +40,7 @@ function withTenant<T>(
   tenantId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return ctx.run(tenantId, fn) as Promise<T>;
+  return ctx.run(tenantId, fn);
 }
 
 describe('AcceptInvitationUseCase', () => {
@@ -104,7 +104,9 @@ describe('AcceptInvitationUseCase', () => {
       email: 'existente@clinic.com',
       role: ClinicRole.DENTIST,
     });
-    const password = makePassword({ verify: jest.fn().mockResolvedValue(true) });
+    const password = makePassword({
+      verify: jest.fn().mockResolvedValue(true),
+    });
     const tokens = makeTokens();
     const ctx = new TenantContextService();
     const uc = new AcceptInvitationUseCase(repo, password, tokens, ctx);
@@ -151,7 +153,12 @@ describe('AcceptInvitationUseCase', () => {
     const repo = new InMemoryInvitationRepository();
     repo.seedInvitation({ token: 'tok-4', ...overrides });
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, makePassword(), makeTokens(), ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      makeTokens(),
+      ctx,
+    );
 
     await expect(
       withTenant(ctx, 't1', () =>
@@ -180,7 +187,12 @@ describe('AcceptInvitationUseCase', () => {
     const repo = new InMemoryInvitationRepository();
     repo.seedInvitation({ token: 'tok-5', email: 'nuevo@clinic.com' });
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, makePassword(), makeTokens(), ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      makeTokens(),
+      ctx,
+    );
 
     await expect(
       withTenant(ctx, 't1', () =>
@@ -201,7 +213,9 @@ describe('AcceptInvitationUseCase', () => {
       email: 'activo@clinic.com',
       role: ClinicRole.ADMIN,
     });
-    const password = makePassword({ verify: jest.fn().mockResolvedValue(true) });
+    const password = makePassword({
+      verify: jest.fn().mockResolvedValue(true),
+    });
     const ctx = new TenantContextService();
     const uc = new AcceptInvitationUseCase(repo, password, makeTokens(), ctx);
 

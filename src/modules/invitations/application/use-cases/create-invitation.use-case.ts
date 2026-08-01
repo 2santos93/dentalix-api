@@ -8,7 +8,10 @@ import { ClinicRole } from '@prisma/client';
 import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.port';
 import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
 import { ClinicInvitation } from '../../domain/entities/clinic-invitation.entity';
-import { generateInvitationToken, hashInvitationToken } from '../invitation-token';
+import {
+  generateInvitationToken,
+  hashInvitationToken,
+} from '../invitation-token';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 

@@ -177,7 +177,11 @@ describe('Staff invitations (e2e)', () => {
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({ fullName: 'Nueva Persona', email: newEmail, role: ClinicRole.DENTIST })
+      .send({
+        fullName: 'Nueva Persona',
+        email: newEmail,
+        role: ClinicRole.DENTIST,
+      })
       .expect(201);
     const created = createRes.body as CreatedInvitationResponseBody;
     expect(created.token).toEqual(expect.any(String));
@@ -216,9 +220,10 @@ describe('Staff invitations (e2e)', () => {
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
     const staffListBody = staffList.body as StaffMemberResponseBody[];
-    expect(
-      staffListBody.find((m) => m.email === newEmail),
-    ).toMatchObject({ email: newEmail, role: ClinicRole.DENTIST });
+    expect(staffListBody.find((m) => m.email === newEmail)).toMatchObject({
+      email: newEmail,
+      role: ClinicRole.DENTIST,
+    });
 
     // Puede autenticarse con el correo/contraseña recién definidos.
     const loginRes = await request(app.getHttpServer())
@@ -259,7 +264,11 @@ describe('Staff invitations (e2e)', () => {
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
-      .send({ fullName: 'Nueva Persona', email: newEmail, role: ClinicRole.RECEPTION })
+      .send({
+        fullName: 'Nueva Persona',
+        email: newEmail,
+        role: ClinicRole.RECEPTION,
+      })
       .expect(201);
     const tokenB = (createResB.body as CreatedInvitationResponseBody).token;
 
@@ -332,7 +341,11 @@ describe('Staff invitations (e2e)', () => {
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicD.subdomain))
       .set('Authorization', `Bearer ${clinicD.accessToken}`)
-      .send({ fullName: 'Ya Existe', email: existingEmail, role: ClinicRole.RECEPTION })
+      .send({
+        fullName: 'Ya Existe',
+        email: existingEmail,
+        role: ClinicRole.RECEPTION,
+      })
       .expect(201);
     const token = (createRes.body as CreatedInvitationResponseBody).token;
 
@@ -363,7 +376,11 @@ describe('Staff invitations (e2e)', () => {
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicE.subdomain))
       .set('Authorization', `Bearer ${clinicE.accessToken}`)
-      .send({ fullName: 'Persona Revocada', email: 'revocada@example.com', role: ClinicRole.ASSISTANT })
+      .send({
+        fullName: 'Persona Revocada',
+        email: 'revocada@example.com',
+        role: ClinicRole.ASSISTANT,
+      })
       .expect(201);
     const created = createRes.body as CreatedInvitationResponseBody;
 
@@ -412,7 +429,11 @@ describe('Staff invitations (e2e)', () => {
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicF.subdomain))
       .set('Authorization', `Bearer ${dentistLogin.accessToken}`)
-      .send({ fullName: 'Otra Persona', email: 'otra@example.com', role: ClinicRole.RECEPTION })
+      .send({
+        fullName: 'Otra Persona',
+        email: 'otra@example.com',
+        role: ClinicRole.RECEPTION,
+      })
       .expect(403);
   });
 });

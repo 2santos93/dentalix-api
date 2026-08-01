@@ -13,7 +13,7 @@ function withTenant<T>(
   tenantId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return ctx.run(tenantId, fn) as Promise<T>;
+  return ctx.run(tenantId, fn);
 }
 
 describe('GetInvitationUseCase', () => {
@@ -37,7 +37,10 @@ describe('GetInvitationUseCase', () => {
 
   it('token inexistente -> NOT_FOUND sin otros campos', async () => {
     const ctx = new TenantContextService();
-    const uc = new GetInvitationUseCase(ctx, new InMemoryInvitationRepository());
+    const uc = new GetInvitationUseCase(
+      ctx,
+      new InMemoryInvitationRepository(),
+    );
 
     const result = await withTenant(ctx, 't1', () =>
       uc.execute('does-not-exist'),
@@ -107,9 +110,7 @@ describe('GetInvitationUseCase', () => {
     const ctx = new TenantContextService();
     const uc = new GetInvitationUseCase(ctx, repo);
 
-    const result = await withTenant(ctx, 't1', () =>
-      uc.execute('valid-token'),
-    );
+    const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
 
     expect(result).toEqual({
       status: 'VALID',
@@ -127,9 +128,7 @@ describe('GetInvitationUseCase', () => {
     const ctx = new TenantContextService();
     const uc = new GetInvitationUseCase(ctx, repo);
 
-    const result = await withTenant(ctx, 't1', () =>
-      uc.execute('valid-token'),
-    );
+    const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
 
     expect(result.userExists).toBe(true);
   });
@@ -141,9 +140,7 @@ describe('GetInvitationUseCase', () => {
     const ctx = new TenantContextService();
     const uc = new GetInvitationUseCase(ctx, repo);
 
-    const result = await withTenant(ctx, 't1', () =>
-      uc.execute('valid-token'),
-    );
+    const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
 
     expect(result.status).toBe('VALID');
     expect(result).not.toHaveProperty('clinicName');

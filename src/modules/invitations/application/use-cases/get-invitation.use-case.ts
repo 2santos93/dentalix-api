@@ -3,7 +3,11 @@ import { ClinicRole } from '@prisma/client';
 import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.port';
 import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
 import { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
-import { hashInvitationToken, invitationStatus, maskEmail } from '../invitation-token';
+import {
+  hashInvitationToken,
+  invitationStatus,
+  maskEmail,
+} from '../invitation-token';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export interface GetInvitationResult {

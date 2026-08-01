@@ -2,8 +2,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
 import type { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
 
-const PUBLIC_INVITATION_STATUS_VALUES: Array<InvitationStatus | 'NOT_FOUND'> =
-  ['VALID', 'EXPIRED', 'USED', 'REVOKED', 'NOT_FOUND'];
+const PUBLIC_INVITATION_STATUS_VALUES: Array<InvitationStatus | 'NOT_FOUND'> = [
+  'VALID',
+  'EXPIRED',
+  'USED',
+  'REVOKED',
+  'NOT_FOUND',
+];
 
 // Response shape for the PUBLIC GET /public/invitations/:token — always 200
 // (see GetInvitationUseCase, which never throws). `clinicName`/`role`/
