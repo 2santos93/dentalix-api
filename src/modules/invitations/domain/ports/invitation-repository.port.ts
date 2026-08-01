@@ -39,6 +39,13 @@ export interface InvitationRepository {
   /** Revoca la invitación por id. Devuelve si afectó una fila. */
   revokeById(id: string): Promise<boolean>;
 
+  /**
+   * Nombre del tenant en contexto, para mostrarlo en la pantalla pública de
+   * "aceptar invitación" (`GetInvitationUseCase`). `null` si el tenant no
+   * existe (no debería ocurrir en la práctica).
+   */
+  findTenantName(): Promise<string | null>;
+
   create(input: {
     email: string;
     fullName: string;

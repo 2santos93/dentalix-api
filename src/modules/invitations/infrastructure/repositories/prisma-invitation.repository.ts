@@ -119,6 +119,17 @@ export class PrismaInvitationRepository implements InvitationRepository {
     });
   }
 
+  async findTenantName(): Promise<string | null> {
+    // `tenants` has no RLS on itself (same as `TenantResolverService`) — a
+    // plain lookup by the id already in context, no `runWithTenant` needed.
+    const tenantId = this.requireTenantId();
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true },
+    });
+    return tenant?.name ?? null;
+  }
+
   async create(input: {
     email: string;
     fullName: string;
