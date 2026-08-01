@@ -6,8 +6,7 @@ import {
 } from '../../domain/ports/user-profile-repository.port';
 
 // `users` y `tenants` son tablas GLOBALES (sin RLS) → Prisma directo, sin
-// runWithTenant (mismo criterio que PrismaAuthRepository.findUserByEmail /
-// PrismaStaffRepository.findUserByEmailGlobal).
+// runWithTenant (mismo criterio que PrismaAuthRepository.findUserByEmail).
 @Injectable()
 export class PrismaUserProfileRepository implements UserProfileRepository {
   constructor(private readonly prisma: PrismaService) {}

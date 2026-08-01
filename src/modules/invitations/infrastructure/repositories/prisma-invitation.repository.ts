@@ -91,8 +91,8 @@ export class PrismaInvitationRepository implements InvitationRepository {
     email: string,
   ): Promise<{ id: string; passwordHash: string } | null> {
     // `users` has no RLS (global table, same as
-    // `PrismaStaffRepository.findUserByEmailGlobal`) — plain query, no
-    // tenant context needed.
+    // `PrismaAuthRepository.findUserByEmail`) — plain query, no tenant
+    // context needed.
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
       select: { id: true, passwordHash: true },

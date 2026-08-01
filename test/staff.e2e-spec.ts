@@ -147,7 +147,7 @@ describe('Staff (e2e)', () => {
     await raw.$disconnect();
   });
 
-  it('creates, lists, logs in as the new member, updates role, enforces write permission (403), deactivates (409/204), and rejects duplicate email (409)', async () => {
+  it('lists a seeded member, logs in as it, updates role, enforces write permission (403), and deactivates (409/204)', async () => {
     const subdomain = 'clinica-staff-a';
     const clinicA = await registerAndLogin(app, {
       clinicName: 'Clinica Staff A',
@@ -155,24 +155,16 @@ describe('Staff (e2e)', () => {
       email: 'owner@clinica-staff-a.com',
     });
 
-    // --- 1. ADMIN creates a DENTIST via POST /staff -> GET /staff includes
-    // it (with email) -> the new DENTIST can log in on the clinic host.
+    // --- 1. Seed a DENTIST directly (invitations now own onboarding; this
+    // module no longer creates staff) -> GET /staff includes it (with email)
+    // -> the seeded DENTIST can log in on the clinic host.
     const dentistEmail = 'dentist@clinica-staff-a.com';
-    const createDentist = await request(app.getHttpServer())
-      .post('/api/v1/staff')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({
-        fullName: 'Seeded Dentist',
-        email: dentistEmail,
-        role: ClinicRole.DENTIST,
-        password: SEEDED_PASSWORD,
-      })
-      .expect(201);
-    const dentist = createDentist.body as StaffMemberResponseBody;
-    expect(dentist.userId).toBeDefined();
-    expect(dentist.email).toBe(dentistEmail);
-    expect(dentist.role).toBe(ClinicRole.DENTIST);
+    const dentist = await seedRoledMember(
+      clinicA.tenantId,
+      dentistEmail,
+      ClinicRole.DENTIST,
+      'Seeded Dentist',
+    );
 
     const listAfterCreate = await request(app.getHttpServer())
       .get('/api/v1/staff')
@@ -219,22 +211,17 @@ describe('Staff (e2e)', () => {
       listAfterPatchBody.find((m) => m.userId === dentist.userId),
     ).toMatchObject({ userId: dentist.userId, role: ClinicRole.ASSISTANT });
 
-    // --- 3. A DENTIST (no write permission on /staff) POSTs -> 403. The
+    // --- 3. A DENTIST (no write permission on /staff) PATCHes -> 403. The
     // token was issued while the actor's role was still DENTIST -- the JWT
     // carries a role snapshot from login time (RolesGuard reads it straight
     // off the JWT payload, not a fresh DB lookup), so it stays a valid
     // DENTIST-permission probe even though that same user was demoted to
     // ASSISTANT in step 2 above.
     await request(app.getHttpServer())
-      .post('/api/v1/staff')
+      .patch(`/api/v1/staff/${dentist.userId}`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${dentistToken}`)
-      .send({
-        fullName: 'Intento Dentist',
-        email: 'intento-dentist@clinica-staff-a.com',
-        role: ClinicRole.RECEPTION,
-        password: SEEDED_PASSWORD,
-      })
+      .send({ role: ClinicRole.RECEPTION })
       .expect(403);
 
     // --- 4a. DELETE the last ADMIN -> 409. With OWNER gone, STAFF_WRITE_ROLES
@@ -304,18 +291,5 @@ describe('Staff (e2e)', () => {
         (m) => m.userId === secondAdmin.userId,
       ),
     ).toBeUndefined();
-
-    // --- 5. POST /staff with an already-used email -> 409.
-    await request(app.getHttpServer())
-      .post('/api/v1/staff')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({
-        fullName: 'Duplicado',
-        email: dentistEmail,
-        role: ClinicRole.RECEPTION,
-        password: SEEDED_PASSWORD,
-      })
-      .expect(409);
   });
 });

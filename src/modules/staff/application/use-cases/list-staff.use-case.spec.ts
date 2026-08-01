@@ -6,14 +6,9 @@ import { StaffRepository } from '../../domain/ports/staff-repository.port';
 function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
   return {
     listActive: (): Promise<StaffMember[]> => Promise.resolve([]),
-    findUserByEmailGlobal: (): Promise<{ id: string } | null> =>
-      Promise.resolve(null),
-    create: (): Promise<StaffMember> =>
-      Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<StaffMember | null> => Promise.resolve(null),
     updateById: (): Promise<StaffMember | null> => Promise.resolve(null),
     deactivateById: (): Promise<boolean> => Promise.resolve(false),
-    reactivateMembership: (): Promise<StaffMember | null> => Promise.resolve(null),
     countActiveAdmins: (): Promise<number> => Promise.resolve(0),
     ...overrides,
   };
