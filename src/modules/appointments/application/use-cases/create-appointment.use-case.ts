@@ -14,6 +14,12 @@ import {
 } from '../appointment-overlap-error';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import {
+  businessHoursErrorMessage,
+  fitsBusinessHours,
+} from '../../../location-schedule/application/business-hours';
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 
@@ -42,6 +48,8 @@ export class CreateAppointmentUseCase {
     private readonly patients: PatientRepository,
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
+    @Inject(LOCATION_SCHEDULE_REPOSITORY)
+    private readonly schedule: LocationScheduleRepository,
   ) {}
 
   async execute(input: CreateAppointmentInput): Promise<Appointment> {
@@ -79,6 +87,18 @@ export class CreateAppointmentUseCase {
     const provider = await this.staff.findById(input.providerId);
     if (!provider) {
       throw new NotFoundException('Profesional no encontrado');
+    }
+
+    // Horario de atención de la SEDE: la cita tiene que caber completa en un
+    // tramo del día. Sede sin horario configurado => sin restricción (ver
+    // fitsBusinessHours), así que esto no cambia nada hasta que la clínica lo
+    // configure. Se lee la sede EN CONTEXTO, la misma en la que el repo escribirá
+    // la cita.
+    const hours = await this.schedule.findForCurrentLocation();
+    if (!fitsBusinessHours(input.start, input.end, hours)) {
+      throw new BadRequestException(
+        businessHoursErrorMessage(input.start, input.end, hours!),
+      );
     }
 
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff
