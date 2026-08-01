@@ -3,7 +3,6 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
-  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -11,42 +10,22 @@ import {
   ValidateNested,
 } from 'class-validator';
 import type {
-  AllergyType,
-  AllergySeverity,
-  ConditionStatus,
   Habits,
   DentalHistory,
   Surgery,
   VitalSigns,
 } from '../../domain/entities/medical-history.entity';
-
-// Nested classes are structurally identical to the domain's Allergy/
-// Condition/Medication interfaces (Task 2) — enum fields are typed with the
-// domain union (not `string`) so `SaveMedicalHistoryDto` is structurally
-// assignable to `MedicalHistoryVersionData` at the controller call site,
-// with no cast.
-class AllergyDto {
-  @IsString() alergeno!: string;
-  @IsEnum(['MEDICAMENTO', 'MATERIAL', 'ALIMENTO', 'AMBIENTAL'])
-  tipo!: AllergyType;
-  @IsOptional() @IsString() reaccion?: string;
-  @IsEnum(['LEVE', 'MODERADA', 'ANAFILAXIA']) severidad!: AllergySeverity;
-  @IsBoolean() esAlerta!: boolean;
-}
-class ConditionDto {
-  @IsString() codigo!: string;
-  @IsString() etiqueta!: string;
-  @IsEnum(['SI', 'NO', 'DESCONOCE']) estado!: ConditionStatus;
-  @IsBoolean() esAlerta!: boolean;
-  @IsOptional() @IsString() nota?: string;
-}
-class MedicationDto {
-  @IsString() nombre!: string;
-  @IsOptional() @IsString() dosis?: string;
-  @IsOptional() @IsString() frecuencia?: string;
-  @IsOptional() @IsString() motivo?: string;
-  @IsBoolean() esAlerta!: boolean;
-}
+// Las partes viven en un archivo compartido para que el MISMO esquema
+// documente request y response (ver anamnesis-parts.dto.ts).
+import {
+  AllergyDto,
+  ConditionDto,
+  MedicationDto,
+  HabitsDto,
+  DentalHistoryDto,
+  SurgeryDto,
+  VitalSignsDto,
+} from './anamnesis-parts.dto';
 
 // NOTE: deliberately NO `tenantId`/`version`/`patientId`/`createdById` field —
 // tenant comes from the guarded request context, `patientId` from the route
@@ -80,20 +59,20 @@ export class SaveMedicalHistoryDto {
   // JSON (v1) — se validan por forma en el frontend; aquí se aceptan tal
   // cual (tipados con las interfaces de dominio para que el DTO sea
   // estructuralmente compatible con `MedicalHistoryVersionData`).
-  @ApiPropertyOptional({ type: Object })
+  @ApiPropertyOptional({ type: HabitsDto })
   @IsOptional()
   habits?: Habits;
 
-  @ApiPropertyOptional({ type: Object })
+  @ApiPropertyOptional({ type: DentalHistoryDto })
   @IsOptional()
   dentalHistory?: DentalHistory;
 
-  @ApiPropertyOptional({ type: [Object] })
+  @ApiPropertyOptional({ type: [SurgeryDto] })
   @IsOptional()
   @IsArray()
   surgeries?: Surgery[];
 
-  @ApiPropertyOptional({ type: Object })
+  @ApiPropertyOptional({ type: VitalSignsDto })
   @IsOptional()
   vitalSigns?: VitalSigns;
 

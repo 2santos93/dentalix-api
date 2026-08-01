@@ -1,4 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  AllergyDto,
+  ConditionDto,
+  MedicationDto,
+  HabitsDto,
+  DentalHistoryDto,
+  SurgeryDto,
+  VitalSignsDto,
+  SafetyFlagsDto,
+} from './anamnesis-parts.dto';
 
 // Response shape for MedicalHistory endpoints — documents the
 // MedicalHistoryVersion entity contract for Swagger (same convention as
@@ -19,26 +29,26 @@ export class MedicalHistoryDto {
   @ApiProperty()
   version!: number;
 
-  @ApiProperty({ type: [Object] })
-  allergies!: unknown[];
+  @ApiProperty({ type: [AllergyDto] })
+  allergies!: AllergyDto[];
 
-  @ApiProperty({ type: [Object] })
-  conditions!: unknown[];
+  @ApiProperty({ type: [ConditionDto] })
+  conditions!: ConditionDto[];
 
-  @ApiProperty({ type: [Object] })
-  medications!: unknown[];
+  @ApiProperty({ type: [MedicationDto] })
+  medications!: MedicationDto[];
 
-  @ApiProperty({ type: Object, nullable: true })
-  habits!: Record<string, unknown> | null;
+  @ApiProperty({ type: HabitsDto, nullable: true })
+  habits!: HabitsDto | null;
 
-  @ApiProperty({ type: Object, nullable: true })
-  dentalHistory!: Record<string, unknown> | null;
+  @ApiProperty({ type: DentalHistoryDto, nullable: true })
+  dentalHistory!: DentalHistoryDto | null;
 
-  @ApiProperty({ type: [Object] })
-  surgeries!: unknown[];
+  @ApiProperty({ type: [SurgeryDto] })
+  surgeries!: SurgeryDto[];
 
-  @ApiProperty({ type: Object, nullable: true })
-  vitalSigns!: Record<string, unknown> | null;
+  @ApiProperty({ type: VitalSignsDto, nullable: true })
+  vitalSigns!: VitalSignsDto | null;
 
   @ApiProperty({ type: String, nullable: true })
   familyHistory!: string | null;
@@ -46,8 +56,8 @@ export class MedicalHistoryDto {
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
-  @ApiProperty({ type: Object })
-  safetyFlags!: Record<string, unknown>;
+  @ApiProperty({ type: SafetyFlagsDto })
+  safetyFlags!: SafetyFlagsDto;
 
   @ApiProperty()
   hasCriticalAlert!: boolean;
