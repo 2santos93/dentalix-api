@@ -77,4 +77,57 @@ export class UpdatePatientDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // Administrativos: `CreatePatientDto` ya los acepta, pero hasta ahora no se
+  // podían corregir — el PATCH los descartaba. El consentimiento queda FUERA a
+  // propósito: es un hecho fechado, no un dato editable.
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  maritalStatus?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  occupation?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  insurerEps?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  physicianName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  physicianPhone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  emergencyContactName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  emergencyContactRelationship?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  emergencyContactPhone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  guardianName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  guardianDocNumber?: string;
 }
