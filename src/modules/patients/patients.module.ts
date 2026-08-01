@@ -32,6 +32,9 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   ],
   // Exported (additive) so DashboardModule can inject ListPatientsUseCase by
   // class for the patientCount aggregation.
-  exports: [ListPatientsUseCase],
+  // PATIENT_REPOSITORY exportado (aditivo) para que CreateAppointmentUseCase
+  // valide que el paciente sea de ESTA clínica — mismo patrón cross-module que
+  // DentalCatalogModule exportando su repo.
+  exports: [ListPatientsUseCase, PATIENT_REPOSITORY],
 })
 export class PatientsModule {}

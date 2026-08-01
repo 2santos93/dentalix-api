@@ -1,4 +1,8 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { CreateAppointmentUseCase } from './create-appointment.use-case';
 import { Appointment } from '../../domain/entities/appointment.entity';
@@ -7,6 +11,8 @@ import {
   CreateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
+import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -67,6 +73,23 @@ function makeRepo(
   };
 }
 
+
+// Dobles para las validaciones de pertenencia: por defecto el paciente y el
+// profesional SÍ existen en la clínica, que es la precondición de casi todos los
+// tests de abajo. Los tests que prueban lo contrario los sobreescriben.
+function makePatients(
+  found: unknown = { id: 'p1' },
+): PatientRepository {
+  return {
+    findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
+  } as unknown as PatientRepository;
+}
+function makeStaff(found: unknown = { userId: 'prov1' }): StaffRepository {
+  return {
+    findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
+  } as unknown as StaffRepository;
+}
+
 describe('CreateAppointmentUseCase', () => {
   const start = at('10:00');
   const end = at('10:30');
@@ -77,7 +100,7 @@ describe('CreateAppointmentUseCase', () => {
         create: (): Promise<Appointment> =>
           Promise.reject(new Error('create should not be called')),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
       await expect(
@@ -95,7 +118,7 @@ describe('CreateAppointmentUseCase', () => {
         create: (): Promise<Appointment> =>
           Promise.reject(new Error('create should not be called')),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
       // Una hora atrás: mismo día, instante pasado.
       const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
@@ -111,7 +134,7 @@ describe('CreateAppointmentUseCase', () => {
 
     it('acepta una cita inmediata (start ~ahora) — solo se rechaza lo estrictamente anterior', async () => {
       const repo = makeRepo();
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
       const soon = new Date(Date.now() + 1000);
 
       const result = await uc.execute({
@@ -125,9 +148,68 @@ describe('CreateAppointmentUseCase', () => {
     });
   });
 
+  describe('pertenencia de paciente y profesional', () => {
+    it('rechaza un paciente inexistente o de OTRA clínica (RLS lo devuelve null igual)', async () => {
+      const repo = makeRepo({
+        create: (): Promise<Appointment> =>
+          Promise.reject(new Error('create should not be called')),
+      });
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(null), // el repo de pacientes filtra por tenant vía RLS
+        makeStaff(),
+      );
+
+      await expect(
+        uc.execute({ patientId: 'de-otro-tenant', providerId: 'prov1', start, end }),
+      ).rejects.toThrow('Paciente no encontrado');
+    });
+
+    it('rechaza un providerId que no es staff activo de la clínica (antes pasaba cualquier UUID)', async () => {
+      const repo = makeRepo({
+        create: (): Promise<Appointment> =>
+          Promise.reject(new Error('create should not be called')),
+      });
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(null),
+      );
+
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: '11111111-2222-3333-4444-555555555555',
+          start,
+          end,
+        }),
+      ).rejects.toThrow('Profesional no encontrado');
+    });
+
+    it('valida la pertenencia ANTES de mirar solapes (un id inválido hace que el solape no signifique nada)', async () => {
+      let overlapChecked = false;
+      const repo = makeRepo({
+        findOverlapping: (): Promise<Appointment[]> => {
+          overlapChecked = true;
+          return Promise.resolve([]);
+        },
+      });
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(null),
+        makeStaff(),
+      );
+
+      await expect(
+        uc.execute({ patientId: 'nope', providerId: 'prov1', start, end }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(overlapChecked).toBe(false);
+    });
+  });
+
   it('creates an appointment and returns the mapped entity when there is no overlap', async () => {
     const repo = makeRepo();
-    const uc = new CreateAppointmentUseCase(repo);
+    const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
     const result = await uc.execute({
       patientId: 'p1',
@@ -145,7 +227,7 @@ describe('CreateAppointmentUseCase', () => {
 
   it('rejects when end <= start with BadRequestException (equal instants)', async () => {
     const repo = makeRepo();
-    const uc = new CreateAppointmentUseCase(repo);
+    const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
     await expect(
       uc.execute({
@@ -159,7 +241,7 @@ describe('CreateAppointmentUseCase', () => {
 
   it('rejects when end < start with BadRequestException', async () => {
     const repo = makeRepo();
-    const uc = new CreateAppointmentUseCase(repo);
+    const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
     await expect(
       uc.execute({
@@ -179,7 +261,7 @@ describe('CreateAppointmentUseCase', () => {
       create: (): Promise<Appointment> =>
         Promise.reject(new Error('create should not be called on conflict')),
     });
-    const uc = new CreateAppointmentUseCase(repo);
+    const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
     await expect(
       uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -198,7 +280,7 @@ describe('CreateAppointmentUseCase', () => {
         return Promise.resolve([]);
       },
     });
-    const uc = new CreateAppointmentUseCase(repo);
+    const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
     await uc.execute({ patientId: 'p1', providerId: 'prov1', start, end });
 
@@ -213,7 +295,7 @@ describe('CreateAppointmentUseCase', () => {
         return Promise.resolve(fakeAppointment());
       },
     });
-    const uc = new CreateAppointmentUseCase(repo);
+    const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
     const maliciousInput = {
       patientId: 'p1',
@@ -241,7 +323,7 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       const result = await uc.execute({
         patientId: 'p2',
@@ -262,7 +344,7 @@ describe('CreateAppointmentUseCase', () => {
         end: at('11:00'),
         status: AppointmentStatus.CANCELLED,
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       const result = await uc.execute({
         patientId: 'p2',
@@ -281,7 +363,7 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       await expect(
         uc.execute({
@@ -304,7 +386,7 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       await expect(
         uc.execute({
@@ -324,7 +406,7 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       const result = await uc.execute({
         patientId: 'p1',
@@ -345,7 +427,7 @@ describe('CreateAppointmentUseCase', () => {
         end: at('11:00'),
         status: AppointmentStatus.CANCELLED,
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       const result = await uc.execute({
         patientId: 'p1',
@@ -364,7 +446,7 @@ describe('CreateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       const result = await uc.execute({
         patientId: 'p2',
@@ -405,7 +487,7 @@ describe('CreateAppointmentUseCase', () => {
     findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -427,7 +509,7 @@ describe('CreateAppointmentUseCase', () => {
         findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(patientExclusion),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -440,7 +522,7 @@ describe('CreateAppointmentUseCase', () => {
     findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(rawExclusionError()),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
@@ -456,7 +538,7 @@ describe('CreateAppointmentUseCase', () => {
     findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(boom),
       });
-      const uc = new CreateAppointmentUseCase(repo);
+      const uc = new CreateAppointmentUseCase(repo, makePatients(), makeStaff());
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
