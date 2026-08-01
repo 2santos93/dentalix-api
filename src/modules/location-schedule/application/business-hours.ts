@@ -149,7 +149,10 @@ export function businessHoursErrorMessage(
   const dayName = WEEKDAY_NAMES[slot.weekday];
   const ranges = describeDayRanges(slot.weekday, hours);
   if (ranges === '') {
-    return `La sede no atiende los ${dayName}`;
+    // "los lunes" pero "los domingos": en español los días terminados en -s son
+    // invariables en plural, y solo sábado y domingo lo añaden.
+    const plural = dayName.endsWith('s') ? dayName : `${dayName}s`;
+    return `La sede no atiende los ${plural}`;
   }
   return `Fuera del horario de atención (${dayName}: ${ranges})`;
 }

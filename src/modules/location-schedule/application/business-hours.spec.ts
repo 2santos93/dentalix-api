@@ -136,6 +136,22 @@ describe('mensajes', () => {
     const start = new Date('2026-08-02T15:00:00.000Z'); // domingo
     expect(
       businessHoursErrorMessage(start, new Date(start.getTime() + 1800000), bogotaHours()),
-    ).toBe('La sede no atiende los domingo');
+    ).toBe('La sede no atiende los domingos');
+  });
+
+  it('pluraliza solo los días que lo necesitan (sábado sí, martes no)', () => {
+    // Solo se abre lunes: cualquier otro día cae en la rama de "cerrado".
+    const soloLunes = {
+      timezone: 'America/Bogota',
+      ranges: [{ weekday: 1, startMinute: 540, endMinute: 1080 }],
+    };
+    const sabado = new Date('2026-08-08T15:00:00.000Z');
+    const martes = new Date('2026-08-04T15:00:00.000Z');
+    expect(
+      businessHoursErrorMessage(sabado, new Date(sabado.getTime() + 1800000), soloLunes),
+    ).toBe('La sede no atiende los sábados');
+    expect(
+      businessHoursErrorMessage(martes, new Date(martes.getTime() + 1800000), soloLunes),
+    ).toBe('La sede no atiende los martes');
   });
 });
