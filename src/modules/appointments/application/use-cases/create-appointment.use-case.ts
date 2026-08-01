@@ -7,7 +7,10 @@ import {
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
 import { Appointment } from '../../domain/entities/appointment.entity';
-import { isProviderOverlapExclusionViolation } from '../appointment-overlap-error';
+import {
+  OVERLAP_MESSAGES,
+  overlapExclusionScope,
+} from '../appointment-overlap-error';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -57,16 +60,26 @@ export class CreateAppointmentUseCase {
       input.end,
     );
     if (overlapping.length > 0) {
-      throw new ConflictException(
-        'El profesional ya tiene una cita en ese horario',
-      );
+      throw new ConflictException(OVERLAP_MESSAGES.provider);
     }
 
-    // The pre-check above handles the common case with a friendly 409 WITHOUT
+    // Mismo criterio, otro eje: el PACIENTE tampoco puede estar en dos citas a
+    // la vez (aunque sean con profesionales distintos — no puede estar en dos
+    // sillones). Antes solo se validaba el solape del profesional.
+    const patientOverlapping = await this.repo.findOverlappingForPatient(
+      input.patientId,
+      input.start,
+      input.end,
+    );
+    if (patientOverlapping.length > 0) {
+      throw new ConflictException(OVERLAP_MESSAGES.patient);
+    }
+
+    // The pre-checks above handle the common case with a friendly 409 WITHOUT
     // hitting the DB. This try/catch is the race-proof backstop: if a
-    // concurrent create slips past the pre-check, the DB's EXCLUDE constraint
-    // (appointments_no_overlap_per_provider, SQLSTATE 23P01) rejects the INSERT
-    // — map it to the SAME 409 so the outcome is identical either way.
+    // concurrent create slips past them, the DB's EXCLUDE constraints
+    // (appointments_no_overlap_per_provider / ..._per_patient, SQLSTATE 23P01)
+    // reject the INSERT — se mapea al MISMO 409 del pre-check correspondiente.
     try {
       return await this.repo.create({
         patientId: input.patientId,
@@ -78,10 +91,9 @@ export class CreateAppointmentUseCase {
         createdById: input.createdById,
       });
     } catch (error) {
-      if (isProviderOverlapExclusionViolation(error)) {
-        throw new ConflictException(
-          'El profesional ya tiene una cita en ese horario',
-        );
+      const scope = overlapExclusionScope(error);
+      if (scope !== null) {
+        throw new ConflictException(OVERLAP_MESSAGES[scope]);
       }
       throw error;
     }

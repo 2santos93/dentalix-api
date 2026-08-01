@@ -11,7 +11,10 @@ import type {
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
 import { Appointment } from '../../domain/entities/appointment.entity';
-import { isProviderOverlapExclusionViolation } from '../appointment-overlap-error';
+import {
+  OVERLAP_MESSAGES,
+  overlapExclusionScope,
+} from '../appointment-overlap-error';
 
 export type UpdateAppointmentInput = UpdateAppointmentRepoInput;
 
@@ -62,14 +65,24 @@ export class UpdateAppointmentUseCase {
         existing.id,
       );
       if (overlapping.length > 0) {
-        throw new ConflictException(
-          'El profesional ya tiene una cita en ese horario',
-        );
+        throw new ConflictException(OVERLAP_MESSAGES.provider);
+      }
+
+      // Mismo criterio, otro eje: el paciente tampoco puede quedar con dos
+      // citas solapadas al reagendar.
+      const patientOverlapping = await this.repo.findOverlappingForPatient(
+        existing.patientId,
+        nextStart,
+        nextEnd,
+        existing.id,
+      );
+      if (patientOverlapping.length > 0) {
+        throw new ConflictException(OVERLAP_MESSAGES.patient);
       }
     }
 
     // Race-proof backstop for the DB's EXCLUDE constraint
-    // (appointments_no_overlap_per_provider, SQLSTATE 23P01) — mirrors
+    // (appointments_no_overlap_per_provider / ..._per_patient, 23P01) — mirrors
     // CreateAppointmentUseCase. NOT limited to the reschedule branch on
     // purpose: the constraint's predicate is
     // `deletedAt IS NULL AND status <> 'CANCELLED'`, so UN-CANCELLING an
@@ -80,10 +93,9 @@ export class UpdateAppointmentUseCase {
     try {
       return await this.repo.update(id, patch);
     } catch (error) {
-      if (isProviderOverlapExclusionViolation(error)) {
-        throw new ConflictException(
-          'El profesional ya tiene una cita en ese horario',
-        );
+      const scope = overlapExclusionScope(error);
+      if (scope !== null) {
+        throw new ConflictException(OVERLAP_MESSAGES[scope]);
       }
       throw error;
     }

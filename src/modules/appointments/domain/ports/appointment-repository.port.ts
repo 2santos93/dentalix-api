@@ -57,5 +57,18 @@ export interface AppointmentRepository {
     excludeId?: string,
   ): Promise<Appointment[]>;
 
+  /**
+   * Igual que `findOverlapping` pero por PACIENTE: citas activas y no canceladas
+   * del paciente que se solapan con `[start, end)`. Un paciente no puede estar
+   * en dos sillones a la vez, así que esto es tan inválido como el solape por
+   * profesional. `excludeId` permite excluir la propia cita al reagendar.
+   */
+  findOverlappingForPatient(
+    patientId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]>;
+
   update(id: string, patch: UpdateAppointmentRepoInput): Promise<Appointment>;
 }

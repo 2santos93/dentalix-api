@@ -33,6 +33,7 @@ function makeRepo(
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
     listByRange: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+    findOverlappingForPatient: (): Promise<Appointment[]> => Promise.resolve([]),
     update: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
