@@ -127,6 +127,19 @@ describe('Locations / multi-sede (e2e)', () => {
       const sedeB = (created.body as LocationBody).id;
       expect(sedeB).not.toBe(sedeA);
 
+      // `registerAndLogin` dejó SIN horario la sede principal, pero la sede que
+      // acabamos de crear nace con el suyo por defecto (lun-vie 9-13/15-19, sáb
+      // 9-13, domingo cerrado). La cita del paso 3 va a la sede B con la
+      // cabecera puesta, así que se valida contra ESE horario: sin este PUT la
+      // suite falla cada vez que `now + 2 días` cae en domingo o fuera de esas
+      // franjas. Este spec prueba el filtrado por sede, no el horario.
+      await auth(
+        request(app.getHttpServer())
+          .put('/api/v1/locations/schedule')
+          .set('X-Location-Id', sedeB)
+          .send({ timezone: 'America/Bogota', ranges: [] }),
+      ).expect(200);
+
       // --- 3. Una cita creada CON la cabecera queda en esa sede.
       const patient = await auth(
         request(app.getHttpServer()).post('/api/v1/patients').send({
