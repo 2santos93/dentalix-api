@@ -21,6 +21,12 @@ export class RemoveMyAvatarUseCase {
     const current = await this.repo.findUserById(input.userId);
     if (current?.avatarUrl) {
       const key = splitFileUrl(current.avatarUrl);
+      // Excepción justificada al borrado blando: esto borra el FICHERO del
+      // bucket, no una fila. La fila de `users` se conserva; sólo se le pone
+      // `avatarUrl` a null (abajo). Retener en blando un blob que ya nadie
+      // referencia sería pagar almacenamiento por una imagen que el usuario
+      // pidió quitar.
+      // eslint-disable-next-line no-restricted-syntax
       if (key) await this.storage.delete(key.namespace, key.filename);
     }
     await this.repo.updateAvatarUrl(input.userId, null);

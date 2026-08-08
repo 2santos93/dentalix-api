@@ -42,7 +42,7 @@ export async function seedDefaultBusinessHours(
   locationId: string,
 ): Promise<void> {
   const existing = await tx.locationSchedule.findFirst({
-    where: { tenantId, locationId },
+    where: { tenantId, locationId, deletedAt: null },
     select: { id: true },
   });
   if (existing) return;

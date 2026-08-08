@@ -121,6 +121,11 @@ export class PrismaAuthRepository implements AuthRepository {
     });
     // Limpieza lazy: al revocar, purga los que ya expiraron (su token base ya
     // es inválido por TTL, así que la fila no aporta nada).
+    // Excepción justificada al borrado blando: `revoked_tokens` no es un dato
+    // de negocio sino una denylist con TTL. Una fila cuyo `expiresAt` ya pasó
+    // no aporta nada (el token base es inválido por TTL), así que retenerla en
+    // blando sólo haría crecer la tabla sin que nadie pueda consultarla nunca.
+    // eslint-disable-next-line no-restricted-syntax
     await this.prisma.revokedToken.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });

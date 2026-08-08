@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { guardHardDeletes } from './no-hard-delete';
 
 @Injectable()
 export class PrismaService
@@ -61,7 +62,9 @@ export class PrismaService
 
     return this.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
-      return fn(tx);
+      // `guardHardDeletes`: dentro de una transacción de tenant no se borra
+      // nada de verdad, se retira con `deletedAt`. Ver no-hard-delete.ts.
+      return fn(guardHardDeletes(tx));
     });
   }
 }

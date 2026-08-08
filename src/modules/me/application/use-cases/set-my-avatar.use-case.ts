@@ -33,6 +33,11 @@ export class SetMyAvatarUseCase {
     const current = await this.repo.findUserById(input.userId);
     if (current?.avatarUrl) {
       const prev = splitFileUrl(current.avatarUrl);
+      // Excepción justificada al borrado blando: borra el FICHERO anterior del
+      // bucket al reemplazar el avatar, no una fila. Si la extensión cambia
+      // (jpg -> png) el `save` de abajo no lo pisaría y el blob viejo quedaría
+      // huérfano ocupando espacio.
+      // eslint-disable-next-line no-restricted-syntax
       if (prev) await this.storage.delete(prev.namespace, prev.filename);
     }
     const { url } = await this.storage.save(

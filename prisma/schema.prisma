@@ -580,7 +580,10 @@ model Installment {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  paymentPlan PaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+  /// `Restrict`, no `Cascade`: `PaymentPlan` se anula en blando (status
+  /// CANCELLED + deletedAt), nunca se borra. Un DELETE duro del plan sería un
+  /// error, y con Cascade se llevaba las cuotas sin dejar rastro.
+  paymentPlan PaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Restrict)
 
   @@unique([paymentPlanId, sequence])
   @@index([tenantId, dueDate])
@@ -657,18 +660,18 @@ model RevokedToken {
 /// modelo que el trabajo multi-sede está modificando en paralelo
 /// (docs/plans/2026-08-01-multi-sede.md, Fases 2-5).
 model LocationSchedule {
-  id       String @id @default(uuid()) @db.Uuid
-  tenantId String @db.Uuid
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
   /// Puntero suave a `Location` (sin relación Prisma, mismo criterio que
   /// ToothRecord.sourcePlanItemId): evita añadir la back-relation al modelo
   /// Location mientras otro flujo lo edita. FK a nivel DB queda como follow-up.
-  locationId String @db.Uuid
+  locationId String    @db.Uuid
   /// IANA (ej. "America/Bogota"). Los tramos son hora de PARED; las citas se
   /// guardan como instante, así que hace falta la zona para compararlos.
-  timezone  String    @default("America/Bogota")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  timezone   String    @default("America/Bogota")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
 
   ranges LocationScheduleRange[]
 
@@ -677,20 +680,30 @@ model LocationSchedule {
   @@map("location_schedules")
 }
 
-/// Un tramo de atención. Día CERRADO = sin filas para ese `weekday`.
+/// Un tramo de atención. Día CERRADO = sin tramos VIVOS para ese `weekday`.
 /// Sede SIN configurar (sin LocationSchedule) = sin restricción.
+///
+/// Guardar el horario NO borra los tramos anteriores: los marca con `deletedAt`
+/// y crea los nuevos. Así queda el rastro de qué horario tenía la sede en cada
+/// momento — que es la pregunta que se hace al auditar una cita vieja ("¿esa
+/// cita de marzo cabía en el horario que había ENTONCES?"). Toda lectura debe
+/// filtrar `deletedAt: null`, incluidos los `include: { ranges: ... }`.
 model LocationScheduleRange {
-  id         String @id @default(uuid()) @db.Uuid
-  tenantId   String @db.Uuid
-  scheduleId String @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  scheduleId  String    @db.Uuid
   /// 0=domingo .. 6=sábado (convención de `Date.getDay()`, para no convertir).
   weekday     Int
   /// Minutos desde 00:00 (0..1440), hora de pared de la sede. endMinute > startMinute.
   startMinute Int
   endMinute   Int
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
 
-  schedule LocationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  /// `Restrict`, no `Cascade`: el padre se borra en blando, así que un borrado
+  /// DURO de `location_schedules` solo puede venir de un error. Con Cascade se
+  /// llevaba los tramos por delante en silencio; con Restrict la DB lo rechaza.
+  schedule LocationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, scheduleId, weekday])
   @@map("location_schedule_ranges")

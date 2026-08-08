@@ -9,8 +9,16 @@ import {
 } from '../../domain/ports/location-schedule-repository.port';
 import { BusinessHours } from '../../application/business-hours';
 
+/// Los tramos se retiran en blando (ver `LocationScheduleRange` en el esquema),
+/// así que la tabla acumula los horarios anteriores. Toda lectura pide SOLO los
+/// vivos: sin este filtro el horario de la sede sería la unión de todo lo que
+/// alguna vez estuvo configurado.
+const LIVE_RANGES = {
+  ranges: { where: { deletedAt: null }, orderBy: { weekday: 'asc' } },
+} as const satisfies Prisma.LocationScheduleInclude;
+
 type ScheduleWithRanges = Prisma.LocationScheduleGetPayload<{
-  include: { ranges: true };
+  include: typeof LIVE_RANGES;
 }>;
 
 function mapToBusinessHours(row: ScheduleWithRanges): BusinessHours {
@@ -43,7 +51,7 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
     const row = await this.prisma.runWithTenant(async (tx) =>
       tx.locationSchedule.findFirst({
         where: { locationId, deletedAt: null },
-        include: { ranges: true },
+        include: LIVE_RANGES,
       }),
     );
     return row ? mapToBusinessHours(row) : null;
@@ -56,7 +64,7 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
         (await resolveDefaultLocationId(tx));
       const row = await tx.locationSchedule.findFirst({
         where: { locationId, deletedAt: null },
-        include: { ranges: true },
+        include: LIVE_RANGES,
       });
       return row ? mapToBusinessHours(row) : null;
     });
@@ -91,9 +99,14 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
           where: { id: scheduleId },
           data: { timezone: input.timezone },
         });
-        // Reemplazo completo de la semana: se borran los tramos viejos y se
-        // insertan los nuevos, todo en la misma transacción.
-        await tx.locationScheduleRange.deleteMany({ where: { scheduleId } });
+        // Reemplazo completo de la semana: los tramos viejos se RETIRAN (borrado
+        // blando) y se insertan los nuevos, todo en la misma transacción. No se
+        // borran de verdad — así el horario que regía en cualquier fecha pasada
+        // sigue siendo reconstruible.
+        await tx.locationScheduleRange.updateMany({
+          where: { scheduleId, deletedAt: null },
+          data: { deletedAt: new Date() },
+        });
       }
 
       if (input.ranges.length > 0) {
@@ -110,7 +123,7 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
 
       return tx.locationSchedule.findFirstOrThrow({
         where: { id: scheduleId },
-        include: { ranges: true },
+        include: LIVE_RANGES,
       });
     });
     return mapToBusinessHours(row);
