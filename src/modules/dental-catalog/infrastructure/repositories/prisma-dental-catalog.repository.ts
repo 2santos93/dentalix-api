@@ -3,8 +3,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  CatalogDirectoryPage,
   CreateDentalCatalogItemRepoInput,
   DentalCatalogRepository,
+  ListCatalogDirectoryParams,
   ListDentalCatalogItemsParams,
   UpdateDentalCatalogItemRepoInput,
 } from '../../domain/ports/dental-catalog-repository.port';
@@ -103,6 +105,68 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
         orderBy: { code: 'asc' },
       });
       return items.map(mapToEntity);
+    });
+  }
+
+  async listDirectory(
+    params: ListCatalogDirectoryParams,
+  ): Promise<CatalogDirectoryPage> {
+    const where: Prisma.DentalCatalogItemWhereInput = {
+      deletedAt: null,
+      ...(params.kind ? { kind: params.kind } : {}),
+      ...(params.activeOnly ? { active: true } : {}),
+      // El buscador cubre lo que la persona ve en la tabla: código, la
+      // etiqueta en los tres idiomas y la categoría. Buscar solo por `labelEs`
+      // dejaría fuera a quien escribe el código ("D-01"), que es como el
+      // personal de mostrador se refiere a un procedimiento.
+      ...(params.query
+        ? {
+            OR: [
+              {
+                code: { contains: params.query, mode: 'insensitive' as const },
+              },
+              {
+                labelEs: {
+                  contains: params.query,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                labelEn: {
+                  contains: params.query,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                labelPt: {
+                  contains: params.query,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                category: {
+                  contains: params.query,
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    return this.prisma.runWithTenant(async (tx) => {
+      // Cuenta y página en la MISMA transacción: si se hicieran en dos, un
+      // alta concurrente dejaría un total que no describe estas filas.
+      const [items, total] = await Promise.all([
+        tx.dentalCatalogItem.findMany({
+          where,
+          orderBy: { code: 'asc' },
+          skip: params.skip,
+          take: params.take,
+        }),
+        tx.dentalCatalogItem.count({ where }),
+      ]);
+      return { items: items.map(mapToEntity), total };
     });
   }
 

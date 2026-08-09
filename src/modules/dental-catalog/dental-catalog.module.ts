@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { DentalCatalogController } from './presentation/dental-catalog.controller';
 import { CreateCatalogItemUseCase } from './application/use-cases/create-catalog-item.use-case';
 import { ListCatalogItemsUseCase } from './application/use-cases/list-catalog-items.use-case';
+import { ListCatalogDirectoryUseCase } from './application/use-cases/list-catalog-directory.use-case';
 import { UpdateCatalogItemUseCase } from './application/use-cases/update-catalog-item.use-case';
 import { DENTAL_CATALOG_REPOSITORY } from './domain/ports/dental-catalog-repository.port';
 import { PrismaDentalCatalogRepository } from './infrastructure/repositories/prisma-dental-catalog.repository';
@@ -18,6 +19,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   providers: [
     CreateCatalogItemUseCase,
     ListCatalogItemsUseCase,
+    ListCatalogDirectoryUseCase,
     UpdateCatalogItemUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;

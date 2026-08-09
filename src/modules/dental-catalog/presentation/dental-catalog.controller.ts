@@ -18,8 +18,14 @@ import {
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
 import { UpdateCatalogItemDto } from './dto/update-catalog-item.dto';
 import { ListCatalogItemsQueryDto } from './dto/list-catalog-items-query.dto';
+import { ListCatalogDirectoryQueryDto } from './dto/list-catalog-directory-query.dto';
+import { CatalogDirectoryResponseDto } from './dto/catalog-directory-response.dto';
 import { CreateCatalogItemUseCase } from '../application/use-cases/create-catalog-item.use-case';
 import { ListCatalogItemsUseCase } from '../application/use-cases/list-catalog-items.use-case';
+import {
+  ListCatalogDirectoryUseCase,
+  type ListCatalogDirectoryOutput,
+} from '../application/use-cases/list-catalog-directory.use-case';
 import { UpdateCatalogItemUseCase } from '../application/use-cases/update-catalog-item.use-case';
 import { DentalCatalogItem } from '../domain/entities/dental-catalog-item.entity';
 import { DentalCatalogItemDto } from './dto/dental-catalog-item.dto';
@@ -42,6 +48,7 @@ export class DentalCatalogController {
   constructor(
     private readonly createCatalogItem: CreateCatalogItemUseCase,
     private readonly listCatalogItems: ListCatalogItemsUseCase,
+    private readonly listCatalogDirectory: ListCatalogDirectoryUseCase,
     private readonly updateCatalogItem: UpdateCatalogItemUseCase,
   ) {}
 
@@ -58,6 +65,29 @@ export class DentalCatalogController {
     return this.listCatalogItems.execute({
       kind: query.kind,
       activeOnly: query.activeOnly,
+    });
+  }
+
+  /**
+   * La lista paginada y buscable que consume la pantalla de gestión.
+   *
+   * Va aparte de `GET /catalog/items` —que devuelve el catálogo entero— por la
+   * misma razón que `GET /staff/directory` convive con `GET /staff`: los
+   * selectores del odontograma y del plan de tratamiento necesitan todas las
+   * opciones, y una tabla de administración necesita una página. Un solo
+   * endpoint obligaría a uno de los dos a fingir.
+   */
+  @Get('directory')
+  @ApiOkResponse({ type: CatalogDirectoryResponseDto })
+  listDirectory(
+    @Query() query: ListCatalogDirectoryQueryDto,
+  ): Promise<ListCatalogDirectoryOutput> {
+    return this.listCatalogDirectory.execute({
+      query: query.query,
+      kind: query.kind,
+      activeOnly: query.activeOnly,
+      page: query.page,
+      pageSize: query.pageSize,
     });
   }
 

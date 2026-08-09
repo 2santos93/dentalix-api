@@ -85,6 +85,8 @@ function makeCatalogRepo(
     create: (): Promise<DentalCatalogItem> =>
       Promise.reject(new Error('not implemented in this fake')),
     list: (): Promise<DentalCatalogItem[]> => Promise.resolve([]),
+    listDirectory: () =>
+      Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),
     update: (): Promise<DentalCatalogItem> =>
       Promise.reject(new Error('not implemented in this fake')),

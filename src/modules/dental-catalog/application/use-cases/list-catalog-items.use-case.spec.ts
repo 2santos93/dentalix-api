@@ -41,6 +41,8 @@ function makeRepo(
       ),
     findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),
     list: (): Promise<DentalCatalogItem[]> => Promise.resolve([]),
+    listDirectory: () =>
+      Promise.reject(new Error('not implemented in this fake')),
     update: (): Promise<DentalCatalogItem> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
