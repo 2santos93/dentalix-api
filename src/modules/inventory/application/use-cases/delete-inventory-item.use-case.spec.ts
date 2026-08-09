@@ -23,7 +23,7 @@ describe('DeleteInventoryItemUseCase', () => {
     await uc.execute(item.id);
 
     expect(await repo.findItemById(item.id)).toBeNull();
-    expect(await listUc.execute()).toEqual([]);
+    expect((await listUc.execute()).items).toEqual([]);
   });
 
   it('throws NotFoundException on a second delete (already soft-deleted)', async () => {

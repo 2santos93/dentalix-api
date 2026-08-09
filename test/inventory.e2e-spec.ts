@@ -39,11 +39,22 @@ interface InventoryMovementResponseBody {
 interface InventoryItemResponseBody {
   id: string;
   name: string;
+  sku?: string | null;
   unit: string;
   minStock: number;
   stock?: number;
   lowStock?: boolean;
   movements?: InventoryMovementResponseBody[];
+}
+
+// Shape returned by GET /inventory/items since Task 2 (paginated envelope,
+// mirrors ListPatientsResponseBody in patients.e2e-spec.ts) -- see
+// ListInventoryItemsOutput (list-inventory-items.use-case.ts).
+interface ListInventoryItemsResponseBody {
+  items: InventoryItemResponseBody[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 async function registerAndLogin(
@@ -190,8 +201,9 @@ describe('Inventory (e2e)', () => {
         .set('X-Tenant-Host', hostFor(subdomainA))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
-      const items1 = list1.body as InventoryItemResponseBody[];
-      const listed1 = items1.find((i) => i.id === item.id);
+      const listed1 = (list1.body as ListInventoryItemsResponseBody).items.find(
+        (i) => i.id === item.id,
+      );
       expect(listed1?.stock).toBe(0);
       expect(listed1?.lowStock).toBe(true);
 
@@ -209,7 +221,7 @@ describe('Inventory (e2e)', () => {
         .set('X-Tenant-Host', hostFor(subdomainA))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
-      const listed2 = (list2.body as InventoryItemResponseBody[]).find(
+      const listed2 = (list2.body as ListInventoryItemsResponseBody).items.find(
         (i) => i.id === item.id,
       );
       expect(listed2?.stock).toBe(10);
@@ -229,7 +241,7 @@ describe('Inventory (e2e)', () => {
         .set('X-Tenant-Host', hostFor(subdomainA))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
-      const listed3 = (list3.body as InventoryItemResponseBody[]).find(
+      const listed3 = (list3.body as ListInventoryItemsResponseBody).items.find(
         (i) => i.id === item.id,
       );
       expect(listed3?.stock).toBe(3);
@@ -304,7 +316,7 @@ describe('Inventory (e2e)', () => {
         .set('X-Tenant-Host', hostFor(subdomainA))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
-      const listed4 = (list4.body as InventoryItemResponseBody[]).find(
+      const listed4 = (list4.body as ListInventoryItemsResponseBody).items.find(
         (i) => i.id === item.id,
       );
       expect(listed4?.minStock).toBe(1);
@@ -344,7 +356,9 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
       expect(
-        (list5.body as InventoryItemResponseBody[]).map((i) => i.id),
+        (list5.body as ListInventoryItemsResponseBody).items.map(
+          (i) => i.id,
+        ),
       ).not.toContain(item.id);
 
       await request(app.getHttpServer())
@@ -405,6 +419,125 @@ describe('Inventory (e2e)', () => {
       expect((assistantCreate.body as InventoryItemResponseBody).name).toBe(
         'Alcohol antiseptico',
       );
+    },
+  );
+
+  it(
+    'GET /inventory/items paginates, searches by name/SKU and filters ' +
+      'low-stock items',
+    async () => {
+      const subdomain = 'clinica-inventory-search';
+      const clinic = await registerAndLogin(app, {
+        clinicName: 'Clinica Inventory Search',
+        subdomain,
+        email: 'owner@clinica-inventory-search.com',
+      });
+
+      // "Alcohol ..." sorts before "Gasa ..." (repo orders by name asc) --
+      // relied on below for the page=2 assertion.
+      const lowRes = await request(app.getHttpServer())
+        .post('/api/v1/inventory/items')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({
+          name: 'Alcohol Search Bajo',
+          sku: 'SRCH-LOW-001',
+          unit: 'ml',
+          minStock: 5,
+        })
+        .expect(201);
+      const lowItem = lowRes.body as InventoryItemResponseBody;
+
+      const highRes = await request(app.getHttpServer())
+        .post('/api/v1/inventory/items')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({
+          name: 'Gasa Search Alto',
+          sku: 'SRCH-HIGH-002',
+          unit: 'caja',
+          minStock: 5,
+        })
+        .expect(201);
+      const highItem = highRes.body as InventoryItemResponseBody;
+
+      // `lowItem` gets IN 2 -> stock 2 <= minStock 5 -> lowStock. `highItem`
+      // gets IN 20 -> stock 20 > minStock 5 -> not lowStock.
+      await request(app.getHttpServer())
+        .post(`/api/v1/inventory/items/${lowItem.id}/movements`)
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({ type: 'IN', quantity: 2 })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/inventory/items/${highItem.id}/movements`)
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({ type: 'IN', quantity: 20 })
+        .expect(201);
+
+      // --- No filters: both items, `{items,total,page,pageSize}` shape,
+      // total 2.
+      const listAll = await request(app.getHttpServer())
+        .get('/api/v1/inventory/items')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      const bodyAll = listAll.body as ListInventoryItemsResponseBody;
+      expect(bodyAll.total).toBe(2);
+      expect(bodyAll.page).toBe(1);
+      expect(bodyAll.pageSize).toBe(20);
+      expect(bodyAll.items.map((i) => i.id).sort()).toEqual(
+        [lowItem.id, highItem.id].sort(),
+      );
+
+      // --- lowStockOnly=true -> only the low-stock item, total 1.
+      const listLow = await request(app.getHttpServer())
+        .get('/api/v1/inventory/items?lowStockOnly=true')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      const bodyLow = listLow.body as ListInventoryItemsResponseBody;
+      expect(bodyLow.total).toBe(1);
+      expect(bodyLow.items.map((i) => i.id)).toEqual([lowItem.id]);
+
+      // --- lowStockOnly=false (string!) must NOT act as truthy -- both
+      // items still come back. This is the trap `@Transform` guards against.
+      const listLowFalse = await request(app.getHttpServer())
+        .get('/api/v1/inventory/items?lowStockOnly=false')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      const bodyLowFalse = listLowFalse.body as ListInventoryItemsResponseBody;
+      expect(bodyLowFalse.total).toBe(2);
+      expect(bodyLowFalse.items.map((i) => i.id).sort()).toEqual(
+        [lowItem.id, highItem.id].sort(),
+      );
+
+      // --- query=<part of the SKU> -> finds by SKU.
+      const listQuery = await request(app.getHttpServer())
+        .get('/api/v1/inventory/items?query=SRCH-LOW')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      const bodyQuery = listQuery.body as ListInventoryItemsResponseBody;
+      expect(bodyQuery.total).toBe(1);
+      expect(bodyQuery.items[0]?.id).toBe(lowItem.id);
+
+      // --- pageSize=1&page=2 -> the second item (alphabetically, "Gasa ..."
+      // after "Alcohol ..."), total still 2.
+      const listPage2 = await request(app.getHttpServer())
+        .get('/api/v1/inventory/items?pageSize=1&page=2')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      const bodyPage2 = listPage2.body as ListInventoryItemsResponseBody;
+      expect(bodyPage2.total).toBe(2);
+      expect(bodyPage2.page).toBe(2);
+      expect(bodyPage2.pageSize).toBe(1);
+      expect(bodyPage2.items).toHaveLength(1);
+      expect(bodyPage2.items[0]?.id).toBe(highItem.id);
     },
   );
 });

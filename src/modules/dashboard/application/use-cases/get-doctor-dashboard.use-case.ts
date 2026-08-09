@@ -17,6 +17,15 @@ const DEFAULT_UPCOMING_LIMIT = 5;
 // changing the owner module's contract (per the plan's guidance).
 const UPCOMING_WINDOW_DAYS = 90;
 
+// Cuántos insumos bajo mínimo se listan en la tarjeta. El CONTADOR no depende
+// de esto (sale de `total`, ya filtrado en el módulo de inventario); esto solo
+// acota la lista que se pinta. 100 es el MAX_PAGE_SIZE de
+// ListInventoryItemsUseCase -- el mismo techo técnico que ya acepta
+// ListPatientsUseCase (ver el comentario de `patientFirstName` más abajo):
+// una clínica con más de 100 insumos bajo mínimo a la vez vería la lista
+// corta, pero nunca el contador.
+const LOW_STOCK_PREVIEW_SIZE = 100;
+
 export interface GetDoctorDashboardInput {
   from: Date;
   to: Date;
@@ -104,17 +113,27 @@ export class GetDoctorDashboardUseCase {
     // Currency format/support itself is validated downstream by
     // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
     // throws BadRequestException there) -- not duplicated here.
-    const [incomes, allItems, patients] = await Promise.all([
+    const [incomes, inventoryPage, patients] = await Promise.all([
       this.getPaymentsTotals.execute({
         from: input.from,
         to: input.to,
         currency: input.currency,
       }),
-      this.listInventoryItems.execute(),
+      // `lowStockOnly` hace el filtrado en el módulo dueño de la regla de
+      // signos (ListInventoryItemsUseCase), así que `total` es el número REAL
+      // de insumos bajo mínimo, calculado ANTES de cortar por página -- el
+      // contador de la tarjeta no depende de `pageSize` ni puede quedarse
+      // corto aunque la clínica tenga cientos de insumos. `pageSize` acota
+      // solo la lista (`items`) que se pinta debajo del contador.
+      this.listInventoryItems.execute({
+        lowStockOnly: true,
+        pageSize: LOW_STOCK_PREVIEW_SIZE,
+      }),
       this.listPatients.execute({}),
     ]);
 
-    const lowStock = allItems.filter((item) => item.lowStock);
+    // Ya vienen todos bajo mínimo: filtrar otra vez sería redundante.
+    const lowStock = inventoryPage.items;
 
     const now = new Date();
     const windowEnd = new Date(
@@ -144,7 +163,8 @@ export class GetDoctorDashboardUseCase {
       period: { from: input.from, to: input.to },
       incomes,
       lowStockItems: {
-        count: lowStock.length,
+        // Total real, no el tamaño de la página listada arriba.
+        count: inventoryPage.total,
         items: lowStock.map((item) => ({
           id: item.id,
           name: item.name,

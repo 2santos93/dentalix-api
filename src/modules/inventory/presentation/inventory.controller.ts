@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
   UseInterceptors,
@@ -19,10 +20,15 @@ import {
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
 import { UpdateInventoryItemDto } from './dto/update-inventory-item.dto';
 import { RecordInventoryMovementDto } from './dto/record-inventory-movement.dto';
+import { ListInventoryItemsQueryDto } from './dto/list-inventory-items-query.dto';
+import { ListInventoryItemsResponseDto } from './dto/list-inventory-items-response.dto';
 import { InventoryItemDto } from './dto/inventory-item.dto';
 import { InventoryMovementDto } from './dto/inventory-movement.dto';
 import { CreateInventoryItemUseCase } from '../application/use-cases/create-inventory-item.use-case';
-import { ListInventoryItemsUseCase } from '../application/use-cases/list-inventory-items.use-case';
+import {
+  ListInventoryItemsUseCase,
+  ListInventoryItemsOutput,
+} from '../application/use-cases/list-inventory-items.use-case';
 import { GetInventoryItemUseCase } from '../application/use-cases/get-inventory-item.use-case';
 import { UpdateInventoryItemUseCase } from '../application/use-cases/update-inventory-item.use-case';
 import { DeleteInventoryItemUseCase } from '../application/use-cases/delete-inventory-item.use-case';
@@ -30,7 +36,6 @@ import { RecordInventoryMovementUseCase } from '../application/use-cases/record-
 import {
   InventoryItem,
   InventoryItemDetail,
-  InventoryItemWithStock,
 } from '../domain/entities/inventory-item.entity';
 import { InventoryMovement } from '../domain/entities/inventory-movement.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
@@ -89,9 +94,16 @@ export class InventoryController {
   }
 
   @Get()
-  @ApiOkResponse({ type: [InventoryItemDto] })
-  list(): Promise<InventoryItemWithStock[]> {
-    return this.listInventoryItems.execute();
+  @ApiOkResponse({ type: ListInventoryItemsResponseDto })
+  list(
+    @Query() query: ListInventoryItemsQueryDto,
+  ): Promise<ListInventoryItemsOutput> {
+    return this.listInventoryItems.execute({
+      query: query.query,
+      page: query.page,
+      pageSize: query.pageSize,
+      lowStockOnly: query.lowStockOnly,
+    });
   }
 
   @Get(':id')

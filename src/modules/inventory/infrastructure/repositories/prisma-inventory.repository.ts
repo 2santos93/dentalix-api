@@ -7,6 +7,7 @@ import {
   CreateInventoryItemRepoInput,
   CreateInventoryMovementRepoInput,
   InventoryRepository,
+  ListInventoryItemsRepoParams,
   UpdateInventoryItemRepoInput,
 } from '../../domain/ports/inventory-repository.port';
 import { InventoryItem } from '../../domain/entities/inventory-item.entity';
@@ -124,11 +125,36 @@ export class PrismaInventoryRepository implements InventoryRepository {
     return item ? mapToEntity(item) : null;
   }
 
-  async listItems(): Promise<InventoryItem[]> {
+  async listItems(
+    params?: ListInventoryItemsRepoParams,
+  ): Promise<InventoryItem[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const items = await tx.inventoryItem.findMany({
         // El stock es físico: pertenece a una sede.
-        where: { deletedAt: null, ...this.locationFilter() },
+        where: {
+          deletedAt: null,
+          ...this.locationFilter(),
+          ...(params?.query
+            ? {
+                OR: [
+                  {
+                    name: {
+                      contains: params.query,
+                      mode: 'insensitive' as const,
+                    },
+                  },
+                  {
+                    sku: {
+                      contains: params.query,
+                      mode: 'insensitive' as const,
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+        // Orden estable: sin él, cortar por página podría repetir o
+        // saltarse filas entre una llamada y la siguiente.
         orderBy: { name: 'asc' },
       });
       return items.map(mapToEntity);
