@@ -36,12 +36,17 @@ lerna-debug.log*
 !.vscode/extensions.json
 
 # dotenv environment variable files
-.env
-.env.development.local
-.env.test
-.env.test.local
-.env.production.local
-.env.local
+#
+# Glob, no lista: enumerar variantes deja fuera cualquier nombre no previsto, y
+# un `.env.bak-…` (los que se crean al apuntar la API a otra base) lleva la
+# DATABASE_URL con credenciales dentro. `dentalix-web` ya usa `.env*`.
+.env*
+# La plantilla sí se versiona: es la referencia de qué claves hacen falta.
+!.env.example
+
+# Config local de servidores MCP: es de la máquina, no del proyecto, y su
+# bloque `env` puede llevar cadenas de conexión.
+.mcp.json
 
 # temp directory
 .temp
