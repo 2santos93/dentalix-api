@@ -1,0 +1,367 @@
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { App } from 'supertest/types';
+import { PrismaClient } from '@prisma/client';
+import { AppModule } from '../src/app.module';
+import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
+import {
+  DEMO_EMAIL_DOMAIN,
+  DEMO_PASSWORD,
+  DEMO_SUBDOMAIN,
+  DEMO_USERS,
+  seedDemo,
+} from '../prisma/seed-demo';
+import { hostFor } from './support/tenant-host';
+
+// `raw` (DIRECT_URL, superusuario) es SOLO para inspeccionar y limpiar: ve
+// todas las filas saltando la RLS, que es justo lo que hace falta para
+// comprobar que el seed no escribió nada fuera del tenant demo. El seed en sí
+// corre por DATABASE_URL (rol con RLS), igual que la API.
+const raw = new PrismaClient({
+  datasources: { db: { url: process.env.DIRECT_URL } },
+});
+
+// Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
+const TENANT_TABLES = [
+  'installments',
+  'payment_plans',
+  'payments',
+  'treatment_plan_items',
+  'treatment_plans',
+  'tooth_records',
+  'clinical_entries',
+  'medical_history_versions',
+  'appointments',
+  'inventory_movements',
+  'inventory_items',
+  'location_schedule_ranges',
+  'location_schedules',
+  'patients',
+  'dental_catalog_items',
+  'clinic_invitations',
+  'clinic_memberships',
+  'tenant_domains',
+  'locations',
+] as const;
+
+type Counts = Record<string, number>;
+
+async function countsFor(tenantId: string): Promise<Counts> {
+  const out: Counts = {};
+  for (const table of TENANT_TABLES) {
+    const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM "${table}" WHERE "tenantId" = $1::uuid`,
+      tenantId,
+    );
+    out[table] = rows[0].n;
+  }
+  return out;
+}
+
+async function countsOutside(tenantIds: string[]): Promise<Counts> {
+  const out: Counts = {};
+  for (const table of TENANT_TABLES) {
+    const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM "${table}" WHERE NOT ("tenantId" = ANY($1::uuid[]))`,
+      tenantIds,
+    );
+    out[table] = rows[0].n;
+  }
+  return out;
+}
+
+/** Borra (duro, solo en la base de test) todo tenant demo, vivo o retirado. */
+async function purgeDemo(): Promise<void> {
+  const tenants = await raw.tenant.findMany({
+    where: { subdomain: DEMO_SUBDOMAIN },
+    select: { id: true },
+  });
+  const ids = tenants.map((t) => t.id);
+  if (ids.length > 0) {
+    for (const table of TENANT_TABLES) {
+      await raw.$executeRawUnsafe(
+        `DELETE FROM "${table}" WHERE "tenantId" = ANY($1::uuid[])`,
+        ids,
+      );
+    }
+    await raw.tenant.deleteMany({ where: { id: { in: ids } } });
+  }
+  await raw.user.deleteMany({
+    where: { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` } },
+  });
+}
+
+async function liveDemoTenantId(): Promise<string> {
+  const tenant = await raw.tenant.findFirstOrThrow({
+    where: { subdomain: DEMO_SUBDOMAIN, deletedAt: null },
+    select: { id: true },
+  });
+  return tenant.id;
+}
+
+describe('seed demo (prisma/seed-demo.ts)', () => {
+  let app: INestApplication<App>;
+  let firstCounts: Counts;
+  let outsideBefore: Counts;
+  let usersBefore: string[];
+
+  beforeAll(async () => {
+    await purgeDemo();
+    outsideBefore = await countsOutside([]);
+    usersBefore = (await raw.user.findMany({ select: { email: true } })).map(
+      (u) => u.email,
+    );
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+  }, 60000);
+
+  afterAll(async () => {
+    await app.close();
+    await purgeDemo();
+    await raw.$disconnect();
+  });
+
+  it('se niega a correr con NODE_ENV=production', async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      await expect(seedDemo({ quiet: true })).rejects.toThrow(/production/);
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
+    expect(
+      await raw.tenant.count({ where: { subdomain: DEMO_SUBDOMAIN } }),
+    ).toBe(0);
+  });
+
+  it('la primera corrida crea la clínica demo completa', async () => {
+    const result = await seedDemo({ quiet: true });
+    expect(result.status).toBe('created');
+    const tenantId = await liveDemoTenantId();
+    expect(result.tenantId).toBe(tenantId);
+
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+    });
+    expect(tenant.name).toBe('Clínica Demo');
+    expect(tenant.primaryColor).not.toBe('#0F5E9C');
+
+    firstCounts = await countsFor(tenantId);
+    expect(firstCounts.locations).toBe(2);
+    expect(firstCounts.location_schedules).toBe(2);
+    expect(firstCounts.clinic_memberships).toBe(5);
+    expect(firstCounts.patients).toBe(25);
+    expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
+    expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
+    expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);
+    expect(firstCounts.appointments).toBeGreaterThanOrEqual(40);
+    expect(firstCounts.treatment_plans).toBeGreaterThanOrEqual(6);
+    expect(firstCounts.payments).toBeGreaterThanOrEqual(10);
+    expect(firstCounts.payment_plans).toBe(1);
+    expect(firstCounts.installments).toBeGreaterThanOrEqual(3);
+    expect(firstCounts.inventory_items).toBeGreaterThanOrEqual(8);
+    expect(firstCounts.inventory_movements).toBeGreaterThanOrEqual(10);
+    // Catálogo por defecto del registro real.
+    expect(firstCounts.dental_catalog_items).toBeGreaterThan(50);
+  }, 120000);
+
+  it('reparte los roles pedidos con la contraseña documentada', async () => {
+    const tenantId = await liveDemoTenantId();
+    const memberships = await raw.clinicMembership.findMany({
+      where: { tenantId, deletedAt: null },
+      include: { user: true },
+    });
+    const byEmail = Object.fromEntries(
+      memberships.map((m) => [m.user.email, m.role]),
+    );
+    expect(byEmail).toEqual(
+      Object.fromEntries(DEMO_USERS.map((u) => [u.email, u.role])),
+    );
+    expect(byEmail[`admin@${DEMO_EMAIL_DOMAIN}`]).toBe('ADMIN');
+  });
+
+  it('las citas cubren semana pasada/actual/próxima, varios estados, sedes y dentistas, dentro del horario', async () => {
+    const tenantId = await liveDemoTenantId();
+    const appointments = await raw.appointment.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    const statuses = new Set(appointments.map((a) => a.status));
+    for (const s of [
+      'SCHEDULED',
+      'CONFIRMED',
+      'COMPLETED',
+      'CANCELLED',
+      'NO_SHOW',
+    ]) {
+      expect(statuses).toContain(s);
+    }
+    expect(new Set(appointments.map((a) => a.locationId)).size).toBe(2);
+    expect(new Set(appointments.map((a) => a.providerId)).size).toBe(2);
+
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    expect(appointments.some((a) => a.start.getTime() < now - 2 * day)).toBe(
+      true,
+    );
+    expect(appointments.some((a) => a.start.getTime() > now + 2 * day)).toBe(
+      true,
+    );
+    expect(
+      appointments.every(
+        (a) =>
+          a.start.getTime() > now - 15 * day &&
+          a.start.getTime() < now + 15 * day,
+      ),
+    ).toBe(true);
+
+    const schedules = await raw.locationSchedule.findMany({
+      where: { tenantId, deletedAt: null },
+      include: { ranges: { where: { deletedAt: null } } },
+    });
+    const hoursByLocation = new Map(
+      schedules.map((s) => [
+        s.locationId,
+        { timezone: s.timezone, ranges: s.ranges },
+      ]),
+    );
+    for (const a of appointments) {
+      expect(
+        fitsBusinessHours(a.start, a.end, hoursByLocation.get(a.locationId)!),
+      ).toBe(true);
+    }
+  });
+
+  it('planes, pagos, plan de pagos e inventario son coherentes', async () => {
+    const tenantId = await liveDemoTenantId();
+    const plans = await raw.treatmentPlan.findMany({
+      where: { tenantId },
+      include: { items: true },
+    });
+    expect(new Set(plans.map((p) => p.status)).size).toBeGreaterThanOrEqual(3);
+    expect(new Set(plans.flatMap((p) => p.items.map((i) => i.status)))).toEqual(
+      new Set(['PROPOSED', 'ACCEPTED', 'DONE']),
+    );
+    expect(plans.every((p) => p.currency === 'COP')).toBe(true);
+
+    const payments = await raw.payment.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    const sixtyDaysAgo = Date.now() - 61 * 24 * 60 * 60 * 1000;
+    expect(payments.every((p) => p.currency === 'COP')).toBe(true);
+    expect(
+      payments.every(
+        (p) =>
+          p.paidAt.getTime() >= sixtyDaysAgo &&
+          p.paidAt.getTime() <= Date.now(),
+      ),
+    ).toBe(true);
+    expect(new Set(payments.map((p) => p.locationId)).size).toBe(2);
+    expect(new Set(payments.map((p) => p.method)).size).toBeGreaterThanOrEqual(
+      3,
+    );
+    // Ningún plan cobra más de lo facturable (ítems ACCEPTED|DONE).
+    for (const plan of plans) {
+      const billable = plan.items
+        .filter((i) => i.status !== 'PROPOSED')
+        .reduce((s, i) => s + Number(i.price), 0);
+      const paid = payments
+        .filter((p) => p.treatmentPlanId === plan.id)
+        .reduce((s, p) => s + Number(p.amount), 0);
+      expect(paid).toBeLessThanOrEqual(billable);
+    }
+
+    const paymentPlan = await raw.paymentPlan.findFirstOrThrow({
+      where: { tenantId },
+      include: { installments: true },
+    });
+    expect(paymentPlan.status).toBe('ACTIVE');
+    expect(paymentPlan.installments).toHaveLength(
+      paymentPlan.installmentsCount,
+    );
+
+    const lowStock = await raw.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM (
+         SELECT i.id, i."minStock",
+           COALESCE(SUM(CASE m.type WHEN 'OUT' THEN -m.quantity ELSE m.quantity END), 0) AS stock
+         FROM inventory_items i
+         LEFT JOIN inventory_movements m ON m."itemId" = i.id
+         WHERE i."tenantId" = $1::uuid AND i."deletedAt" IS NULL
+         GROUP BY i.id, i."minStock"
+       ) s WHERE s.stock < s."minStock"`,
+      tenantId,
+    );
+    expect(lowStock[0].n).toBeGreaterThanOrEqual(2);
+    const items = await raw.inventoryItem.findMany({ where: { tenantId } });
+    expect(new Set(items.map((i) => i.locationId)).size).toBe(2);
+  });
+
+  it('una segunda corrida no duplica nada', async () => {
+    const result = await seedDemo({ quiet: true });
+    expect(result.status).toBe('skipped');
+    const tenantId = await liveDemoTenantId();
+    expect(result.tenantId).toBe(tenantId);
+    expect(await countsFor(tenantId)).toEqual(firstCounts);
+    expect(
+      await raw.tenant.count({ where: { subdomain: DEMO_SUBDOMAIN } }),
+    ).toBe(1);
+  }, 120000);
+
+  it('no escribe nada fuera del tenant demo', async () => {
+    const demoIds = (
+      await raw.tenant.findMany({
+        where: { subdomain: DEMO_SUBDOMAIN },
+        select: { id: true },
+      })
+    ).map((t) => t.id);
+    expect(await countsOutside(demoIds)).toEqual(outsideBefore);
+
+    const newUsers = (await raw.user.findMany({ select: { email: true } }))
+      .map((u) => u.email)
+      .filter((e) => !usersBefore.includes(e));
+    expect(newUsers.sort()).toEqual(DEMO_USERS.map((u) => u.email).sort());
+  });
+
+  it('todos los usuarios demo inician sesión en demo.localhost con la contraseña documentada', async () => {
+    for (const user of DEMO_USERS) {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+        .send({ email: user.email, password: DEMO_PASSWORD })
+        .expect(201);
+      expect((res.body as { accessToken: string }).accessToken).toBeDefined();
+    }
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: DEMO_USERS[0].email, password: 'otra-cosa' })
+      .expect(401);
+  });
+
+  it('--reset retira la demo anterior en blando y la reconstruye igual', async () => {
+    const oldId = await liveDemoTenantId();
+    const result = await seedDemo({ quiet: true, reset: true });
+    expect(result.status).toBe('rebuilt');
+    const newId = await liveDemoTenantId();
+    expect(newId).not.toBe(oldId);
+    expect(result.tenantId).toBe(newId);
+
+    const old = await raw.tenant.findUniqueOrThrow({ where: { id: oldId } });
+    expect(old.deletedAt).not.toBeNull();
+    expect(await countsFor(newId)).toEqual(firstCounts);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: DEMO_USERS[0].email, password: DEMO_PASSWORD })
+      .expect(201);
+  }, 120000);
+});

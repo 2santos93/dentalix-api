@@ -1,0 +1,1252 @@
+import {
+  ClinicRole,
+  DocType,
+  InventoryMovementType,
+  PaymentMethod,
+  Sex,
+  ToothRecordStatus,
+  ToothSurface,
+  TreatmentPlanItemStatus,
+  TreatmentPlanStatus,
+} from '@prisma/client';
+import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
+import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
+import type { DemoLocationKey } from './calendar';
+
+// Datos FICTICIOS de la clínica demo. Nombres y documentos inventados; los
+// correos usan example.com (RFC 2606) y los teléfonos son de formato
+// colombiano pero no asignados a nadie a propósito.
+
+export const DEMO_SUBDOMAIN = 'demo';
+export const DEMO_CLINIC_NAME = 'Clínica Demo';
+export const DEMO_PRIMARY_COLOR = '#0E7C86';
+export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
+/** Contraseña común de todos los usuarios demo (se imprime al terminar). */
+export const DEMO_PASSWORD = 'DemoDentalix2026!';
+/** Moneda de la clínica: planes y abonos van en COP (Colombia). */
+export const DEMO_CURRENCY = 'COP';
+
+export interface DemoUser {
+  email: string;
+  fullName: string;
+  role: ClinicRole;
+}
+
+/** El primero es el dueño (lo crea el registro); el resto entra por invitación. */
+export const DEMO_USERS: readonly DemoUser[] = [
+  {
+    email: `admin@${DEMO_EMAIL_DOMAIN}`,
+    fullName: 'Marcela Rojas Salazar',
+    role: ClinicRole.ADMIN,
+  },
+  {
+    email: `dentista@${DEMO_EMAIL_DOMAIN}`,
+    fullName: 'Andrés Gómez Pérez',
+    role: ClinicRole.DENTIST,
+  },
+  {
+    email: `dentista2@${DEMO_EMAIL_DOMAIN}`,
+    fullName: 'Valentina Restrepo Mejía',
+    role: ClinicRole.DENTIST,
+  },
+  {
+    email: `recepcion@${DEMO_EMAIL_DOMAIN}`,
+    fullName: 'Paola Martínez Ruiz',
+    role: ClinicRole.RECEPTION,
+  },
+  {
+    email: `asistente@${DEMO_EMAIL_DOMAIN}`,
+    fullName: 'Camilo Herrera Duarte',
+    role: ClinicRole.ASSISTANT,
+  },
+];
+
+export const DEMO_LOCATIONS: Record<
+  DemoLocationKey,
+  { name: string; address: string }
+> = {
+  // La crea el registro con el nombre "Sede principal"; el seed le pone dirección.
+  principal: {
+    name: 'Sede principal',
+    address: 'Calle 93 # 14-20, Consultorio 302, Bogotá',
+  },
+  norte: {
+    name: 'Sede Norte',
+    address: 'Carrera 7 # 140-15, Local 4, Bogotá',
+  },
+};
+
+/** Horario propio de la Sede Norte (la principal conserva el del registro). */
+export const NORTE_SCHEDULE: ScheduleRange[] = [
+  ...[1, 2, 3, 4, 5].flatMap((weekday) => [
+    { weekday, startMinute: 7 * 60, endMinute: 12 * 60 },
+    { weekday, startMinute: 13 * 60, endMinute: 17 * 60 },
+  ]),
+  { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 },
+];
+
+/** Tarifas (COP) que la clínica demo pone a los ítems del catálogo por defecto. */
+export const DEMO_PRICES: Record<string, number> = {
+  'IMG-CONSULTA': 80000,
+  'IMG-RX-PERIAPICAL': 35000,
+  'IMG-RX-PANORAMICA': 90000,
+  'PREV-PROFILAXIS': 120000,
+  'PREV-FLUOR': 50000,
+  'PREV-SELLANTE': 70000,
+  'OP-RESINA-1': 150000,
+  'OP-RESINA-2': 190000,
+  'OP-RESINA-3': 230000,
+  'ENDO-UNI': 450000,
+  'ENDO-MULTI': 750000,
+  'PERIO-RASPADO': 180000,
+  'CX-EXO-SIMPLE': 150000,
+  'CX-CORDAL-INCL': 450000,
+  'PROT-CORONA-PROV': 250000,
+  'PROT-CORONA-LM': 1200000,
+  'IMPL-IMPLANTE': 3500000,
+  'IMPL-CORONA': 1800000,
+  'ORTO-VALORACION': 100000,
+  'ORTO-CONTROL': 120000,
+  'PED-SELLANTE': 65000,
+  'PED-FLUOR': 45000,
+  'EST-BLANQ-CONSULTORIO': 650000,
+  'EST-CARILLA-RESINA': 380000,
+  'URG-CONSULTA': 90000,
+};
+
+export interface DemoPatient {
+  firstName: string;
+  lastName: string;
+  docType: DocType;
+  docNumber: string;
+  birthDate: string; // YYYY-MM-DD
+  sex: Sex;
+  phone: string;
+  email: string;
+  address: string;
+  /** Nombre exacto en la tabla `cities` (país CO); se omite si no existe. */
+  city: string;
+  occupation?: string;
+  maritalStatus?: string;
+  insurerEps?: string;
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
+  guardianName?: string;
+  guardianDocNumber?: string;
+  medicalHistory?: MedicalHistoryVersionData;
+}
+
+const healthy: MedicalHistoryVersionData = {
+  allergies: [],
+  conditions: [],
+  medications: [],
+  habits: {
+    tabaquismo: { activo: false },
+    higieneOral: { cepilladoPorDia: 3, hilo: true, cremaConFluor: true },
+  },
+};
+
+export const DEMO_PATIENTS: readonly DemoPatient[] = [
+  {
+    firstName: 'Laura',
+    lastName: 'Castro Jiménez',
+    docType: DocType.CC,
+    docNumber: '1020456789',
+    birthDate: '1992-03-14',
+    sex: Sex.F,
+    phone: '+57 310 555 0101',
+    email: 'laura.castro@example.com',
+    address: 'Calle 127 # 19-40, Apto 501',
+    city: 'Bogotá D.C.',
+    occupation: 'Diseñadora gráfica',
+    maritalStatus: 'Soltera',
+    insurerEps: 'Sura EPS',
+    emergencyContactName: 'Rosa Jiménez',
+    emergencyContactRelationship: 'Madre',
+    emergencyContactPhone: '+57 310 555 0201',
+    medicalHistory: {
+      ...healthy,
+      habits: {
+        tabaquismo: { activo: true, porDia: 5, anios: 8 },
+        higieneOral: { cepilladoPorDia: 2, hilo: false },
+      },
+      dentalHistory: {
+        motivoConsulta: 'Sensibilidad al frío en molares inferiores',
+        sensibilidad: true,
+        ultimaVisita: 'Hace 2 años',
+      },
+    },
+  },
+  {
+    firstName: 'Jorge Eduardo',
+    lastName: 'Ramírez Ospina',
+    docType: DocType.CC,
+    docNumber: '79845123',
+    birthDate: '1968-11-02',
+    sex: Sex.M,
+    phone: '+57 311 555 0102',
+    email: 'jorge.ramirez@example.com',
+    address: 'Carrera 15 # 85-30',
+    city: 'Bogotá D.C.',
+    occupation: 'Contador',
+    maritalStatus: 'Casado',
+    insurerEps: 'Sanitas',
+    emergencyContactName: 'Gloria Ospina',
+    emergencyContactRelationship: 'Esposa',
+    emergencyContactPhone: '+57 311 555 0202',
+    medicalHistory: {
+      allergies: [],
+      conditions: [
+        {
+          codigo: 'HIPERTENSION',
+          etiqueta: 'Hipertensión',
+          estado: 'SI',
+          esAlerta: true,
+          nota: 'Controlada',
+        },
+      ],
+      medications: [
+        {
+          nombre: 'Losartán',
+          dosis: '50 mg',
+          frecuencia: 'Cada 24 h',
+          motivo: 'Hipertensión',
+          esAlerta: false,
+        },
+      ],
+      vitalSigns: { sistolica: 135, diastolica: 85, fc: 72 },
+      dentalHistory: {
+        motivoConsulta: 'Rehabilitar molar inferior perdido',
+        tratamientosPrevios: ['Exodoncia 36 (2019)'],
+      },
+    },
+  },
+  {
+    firstName: 'Natalia',
+    lastName: 'Vargas Quintero',
+    docType: DocType.CC,
+    docNumber: '1015332110',
+    birthDate: '1998-07-21',
+    sex: Sex.F,
+    phone: '+57 312 555 0103',
+    email: 'natalia.vargas@example.com',
+    address: 'Calle 53 # 24-12',
+    city: 'Bogotá D.C.',
+    occupation: 'Estudiante de medicina',
+    insurerEps: 'Compensar',
+    medicalHistory: healthy,
+  },
+  {
+    firstName: 'Héctor',
+    lastName: 'Molina Cárdenas',
+    docType: DocType.CC,
+    docNumber: '80123987',
+    birthDate: '1975-01-30',
+    sex: Sex.M,
+    phone: '+57 313 555 0104',
+    email: 'hector.molina@example.com',
+    address: 'Avenida Boyacá # 64-20',
+    city: 'Bogotá D.C.',
+    occupation: 'Conductor',
+    insurerEps: 'Nueva EPS',
+    medicalHistory: {
+      allergies: [],
+      conditions: [
+        {
+          codigo: 'DIABETES',
+          etiqueta: 'Diabetes',
+          estado: 'SI',
+          esAlerta: true,
+          nota: 'Tipo 2',
+        },
+      ],
+      medications: [
+        {
+          nombre: 'Metformina',
+          dosis: '850 mg',
+          frecuencia: 'Cada 12 h',
+          motivo: 'Diabetes tipo 2',
+          esAlerta: false,
+        },
+      ],
+      vitalSigns: { glucometria: 142, sistolica: 128, diastolica: 82 },
+      dentalHistory: {
+        motivoConsulta: 'Dolor intenso en molar inferior derecho',
+      },
+    },
+  },
+  {
+    firstName: 'Daniela',
+    lastName: 'Montoya Arango',
+    docType: DocType.CC,
+    docNumber: '1036789456',
+    birthDate: '1995-09-09',
+    sex: Sex.F,
+    phone: '+57 314 555 0105',
+    email: 'daniela.montoya@example.com',
+    address: 'Calle 10 # 43-50',
+    city: 'Medellín',
+    occupation: 'Abogada',
+    insurerEps: 'Sura EPS',
+  },
+  {
+    firstName: 'Santiago',
+    lastName: 'Pardo Luna',
+    docType: DocType.CC,
+    docNumber: '1019876543',
+    birthDate: '2001-04-18',
+    sex: Sex.M,
+    phone: '+57 315 555 0106',
+    email: 'santiago.pardo@example.com',
+    address: 'Carrera 11 # 118-05',
+    city: 'Bogotá D.C.',
+    occupation: 'Ingeniero de software',
+    insurerEps: 'Famisanar',
+  },
+  {
+    firstName: 'Martha Lucía',
+    lastName: 'Becerra Rincón',
+    docType: DocType.CC,
+    docNumber: '41678234',
+    birthDate: '1960-12-05',
+    sex: Sex.F,
+    phone: '+57 316 555 0107',
+    email: 'martha.becerra@example.com',
+    address: 'Calle 145 # 12-80',
+    city: 'Bogotá D.C.',
+    occupation: 'Pensionada',
+    maritalStatus: 'Viuda',
+    insurerEps: 'Sanitas',
+    emergencyContactName: 'Felipe Becerra',
+    emergencyContactRelationship: 'Hijo',
+    emergencyContactPhone: '+57 316 555 0207',
+    medicalHistory: {
+      allergies: [
+        {
+          alergeno: 'Penicilina',
+          tipo: 'MEDICAMENTO',
+          reaccion: 'Edema de glotis',
+          severidad: 'ANAFILAXIA',
+          esAlerta: true,
+        },
+      ],
+      conditions: [
+        {
+          codigo: 'OSTEOPOROSIS',
+          etiqueta: 'Osteoporosis / bifosfonatos',
+          estado: 'SI',
+          esAlerta: true,
+        },
+      ],
+      medications: [
+        {
+          nombre: 'Alendronato',
+          dosis: '70 mg',
+          frecuencia: 'Semanal',
+          motivo: 'Osteoporosis',
+          esAlerta: true,
+        },
+      ],
+      dentalHistory: {
+        motivoConsulta: 'Sangrado de encías al cepillarse',
+        sangradoEncias: true,
+        enfPeriodontal: true,
+      },
+    },
+  },
+  {
+    firstName: 'Ricardo',
+    lastName: 'Salcedo Parra',
+    docType: DocType.CC,
+    docNumber: '19456789',
+    birthDate: '1955-06-27',
+    sex: Sex.M,
+    phone: '+57 317 555 0108',
+    email: 'ricardo.salcedo@example.com',
+    address: 'Transversal 23 # 97-45',
+    city: 'Bogotá D.C.',
+    occupation: 'Comerciante',
+    insurerEps: 'Salud Total',
+    medicalHistory: {
+      allergies: [],
+      conditions: [
+        {
+          codigo: 'CARDIOPATIA',
+          etiqueta: 'Enfermedad cardíaca',
+          estado: 'SI',
+          esAlerta: true,
+          nota: 'Fibrilación auricular',
+        },
+      ],
+      medications: [
+        {
+          nombre: 'Warfarina',
+          dosis: '5 mg',
+          frecuencia: 'Cada 24 h',
+          motivo: 'Fibrilación auricular',
+          esAlerta: true,
+        },
+      ],
+      notes: 'Pedir INR reciente antes de procedimientos quirúrgicos.',
+    },
+  },
+  {
+    firstName: 'Sofía',
+    lastName: 'Ortiz Navarro',
+    docType: DocType.TI,
+    docNumber: '1011223344',
+    birthDate: '2015-02-11',
+    sex: Sex.F,
+    phone: '+57 318 555 0109',
+    email: 'familia.ortiz@example.com',
+    address: 'Calle 160 # 58-10',
+    city: 'Bogotá D.C.',
+    insurerEps: 'Compensar',
+    guardianName: 'Claudia Navarro',
+    guardianDocNumber: '52987654',
+    emergencyContactName: 'Claudia Navarro',
+    emergencyContactRelationship: 'Madre',
+    emergencyContactPhone: '+57 318 555 0209',
+    medicalHistory: {
+      ...healthy,
+      habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: true } },
+    },
+  },
+  {
+    firstName: 'Carolina',
+    lastName: 'Duque Henao',
+    docType: DocType.CC,
+    docNumber: '1032456987',
+    birthDate: '1993-10-03',
+    sex: Sex.F,
+    phone: '+57 319 555 0110',
+    email: 'carolina.duque@example.com',
+    address: 'Carrera 50 # 102-33',
+    city: 'Bogotá D.C.',
+    occupation: 'Docente',
+    insurerEps: 'Sura EPS',
+    medicalHistory: {
+      ...healthy,
+      embarazo: true,
+      semanasEmbarazo: 20,
+      notes: 'Embarazo de 20 semanas: evitar radiografías no urgentes.',
+    },
+  },
+  {
+    firstName: 'Felipe',
+    lastName: 'Arias Londoño',
+    docType: DocType.CC,
+    docNumber: '1053789012',
+    birthDate: '1988-08-16',
+    sex: Sex.M,
+    phone: '+57 320 555 0111',
+    email: 'felipe.arias@example.com',
+    address: 'Calle 5 # 38-25',
+    city: 'Cali',
+    occupation: 'Chef',
+    insurerEps: 'Coomeva',
+  },
+  {
+    firstName: 'Juliana',
+    lastName: 'Guerrero Pinzón',
+    docType: DocType.CC,
+    docNumber: '1018543210',
+    birthDate: '1990-05-25',
+    sex: Sex.F,
+    phone: '+57 321 555 0112',
+    email: 'juliana.guerrero@example.com',
+    address: 'Calle 72 # 10-07',
+    city: 'Bogotá D.C.',
+    occupation: 'Periodista',
+    insurerEps: 'Sanitas',
+    medicalHistory: {
+      allergies: [
+        {
+          alergeno: 'Látex',
+          tipo: 'MATERIAL',
+          reaccion: 'Urticaria de contacto',
+          severidad: 'MODERADA',
+          esAlerta: true,
+        },
+      ],
+      conditions: [
+        {
+          codigo: 'ASMA',
+          etiqueta: 'Asma / respiratorio',
+          estado: 'SI',
+          esAlerta: false,
+        },
+      ],
+      medications: [
+        {
+          nombre: 'Salbutamol inhalador',
+          frecuencia: 'A necesidad',
+          motivo: 'Asma',
+          esAlerta: false,
+        },
+      ],
+    },
+  },
+  {
+    firstName: 'Mateo',
+    lastName: 'Cifuentes Rojas',
+    docType: DocType.TI,
+    docNumber: '1099887766',
+    birthDate: '2012-09-30',
+    sex: Sex.M,
+    phone: '+57 322 555 0113',
+    email: 'familia.cifuentes@example.com',
+    address: 'Carrera 68 # 24-15',
+    city: 'Bogotá D.C.',
+    insurerEps: 'Nueva EPS',
+    guardianName: 'Óscar Cifuentes',
+    guardianDocNumber: '79345678',
+  },
+  {
+    firstName: 'Ana María',
+    lastName: 'Zapata Gil',
+    docType: DocType.CC,
+    docNumber: '43987123',
+    birthDate: '1979-03-08',
+    sex: Sex.F,
+    phone: '+57 323 555 0114',
+    email: 'anamaria.zapata@example.com',
+    address: 'Calle 33 # 80-12',
+    city: 'Medellín',
+    occupation: 'Administradora de empresas',
+    insurerEps: 'Sura EPS',
+    medicalHistory: healthy,
+  },
+  {
+    firstName: 'Luis Fernando',
+    lastName: 'Peña Acosta',
+    docType: DocType.CC,
+    docNumber: '72234567',
+    birthDate: '1970-07-12',
+    sex: Sex.M,
+    phone: '+57 324 555 0115',
+    email: 'luis.pena@example.com',
+    address: 'Carrera 54 # 72-80',
+    city: 'Barranquilla',
+    occupation: 'Ingeniero civil',
+    insurerEps: 'Salud Total',
+  },
+  {
+    firstName: 'Valeria',
+    lastName: 'Suárez Medina',
+    docType: DocType.CC,
+    docNumber: '1000234987',
+    birthDate: '2004-12-19',
+    sex: Sex.F,
+    phone: '+57 325 555 0116',
+    email: 'valeria.suarez@example.com',
+    address: 'Calle 116 # 7-15',
+    city: 'Bogotá D.C.',
+    occupation: 'Estudiante',
+    insurerEps: 'Compensar',
+  },
+  {
+    firstName: 'Gustavo',
+    lastName: 'Ríos Villamizar',
+    docType: DocType.CC,
+    docNumber: '91234876',
+    birthDate: '1966-02-22',
+    sex: Sex.M,
+    phone: '+57 326 555 0117',
+    email: 'gustavo.rios@example.com',
+    address: 'Carrera 27 # 36-14',
+    city: 'Bucaramanga',
+    occupation: 'Agricultor',
+    insurerEps: 'Nueva EPS',
+    medicalHistory: {
+      allergies: [
+        {
+          alergeno: 'Ibuprofeno',
+          tipo: 'MEDICAMENTO',
+          reaccion: 'Brote en la piel',
+          severidad: 'LEVE',
+          esAlerta: false,
+        },
+      ],
+      conditions: [],
+      medications: [],
+      habits: { tabaquismo: { activo: true, porDia: 10, anios: 30 } },
+    },
+  },
+  {
+    firstName: 'Isabella',
+    lastName: 'Moreno Castaño',
+    docType: DocType.CC,
+    docNumber: '1026789345',
+    birthDate: '1997-06-06',
+    sex: Sex.F,
+    phone: '+57 327 555 0118',
+    email: 'isabella.moreno@example.com',
+    address: 'Calle 63 # 9-48',
+    city: 'Bogotá D.C.',
+    occupation: 'Fotógrafa',
+    insurerEps: 'Famisanar',
+  },
+  {
+    firstName: 'Alejandro',
+    lastName: 'Fuentes Beltrán',
+    docType: DocType.CE,
+    docNumber: 'CE4567821',
+    birthDate: '1986-01-17',
+    sex: Sex.M,
+    phone: '+57 328 555 0119',
+    email: 'alejandro.fuentes@example.com',
+    address: 'Carrera 19 # 134-60',
+    city: 'Bogotá D.C.',
+    occupation: 'Médico veterinario',
+  },
+  {
+    firstName: 'Camila',
+    lastName: 'Rincón Pulido',
+    docType: DocType.CC,
+    docNumber: '1014567890',
+    birthDate: '1999-11-28',
+    sex: Sex.F,
+    phone: '+57 329 555 0120',
+    email: 'camila.rincon@example.com',
+    address: 'Calle 26 # 69-76',
+    city: 'Bogotá D.C.',
+    occupation: 'Asesora comercial',
+    insurerEps: 'Sanitas',
+  },
+  {
+    firstName: 'Diego',
+    lastName: 'Lozano Torres',
+    docType: DocType.CC,
+    docNumber: '1022345678',
+    birthDate: '1991-04-04',
+    sex: Sex.M,
+    phone: '+57 330 555 0121',
+    email: 'diego.lozano@example.com',
+    address: 'Avenida 68 # 13-45',
+    city: 'Bogotá D.C.',
+    occupation: 'Mecánico',
+    insurerEps: 'Salud Total',
+  },
+  {
+    firstName: 'Paula Andrea',
+    lastName: 'Cortés Silva',
+    docType: DocType.CC,
+    docNumber: '52345678',
+    birthDate: '1982-08-31',
+    sex: Sex.F,
+    phone: '+57 331 555 0122',
+    email: 'paula.cortes@example.com',
+    address: 'Calle 100 # 45-21',
+    city: 'Bogotá D.C.',
+    occupation: 'Enfermera',
+    insurerEps: 'Compensar',
+  },
+  {
+    firstName: 'Tomás',
+    lastName: 'Aguilar Reyes',
+    docType: DocType.PASSPORT,
+    docNumber: 'G48213976',
+    birthDate: '1984-10-10',
+    sex: Sex.M,
+    phone: '+52 55 5555 0123',
+    email: 'tomas.aguilar@example.com',
+    address: 'Calle 85 # 11-53, Hotel',
+    city: 'Bogotá D.C.',
+    occupation: 'Consultor',
+  },
+  {
+    firstName: 'María José',
+    lastName: 'Escobar Franco',
+    docType: DocType.CC,
+    docNumber: '1037654321',
+    birthDate: '1996-01-23',
+    sex: Sex.F,
+    phone: '+57 332 555 0124',
+    email: 'mariajose.escobar@example.com',
+    address: 'Carrera 43A # 1-50',
+    city: 'Medellín',
+    occupation: 'Arquitecta',
+    insurerEps: 'Sura EPS',
+  },
+  {
+    firstName: 'Sebastián',
+    lastName: 'Niño Cabrera',
+    docType: DocType.CC,
+    docNumber: '1010987654',
+    birthDate: '2000-03-15',
+    sex: Sex.M,
+    phone: '+57 333 555 0125',
+    email: 'sebastian.nino@example.com',
+    address: 'Calle 45 # 13-31',
+    city: 'Bogotá D.C.',
+    occupation: 'Músico',
+    insurerEps: 'Famisanar',
+  },
+];
+
+export interface DemoClinicalEntry {
+  patientIndex: number;
+  dentistIndex: number;
+  daysAgo: number;
+  reason: string;
+  notes: string;
+}
+
+export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
+  {
+    patientIndex: 0,
+    dentistIndex: 0,
+    daysAgo: 40,
+    reason: 'Valoración inicial',
+    notes:
+      'Paciente refiere sensibilidad al frío en 36. Se observa lesión cariosa oclusal. Se indica resina y profilaxis. Se refuerza técnica de cepillado.',
+  },
+  {
+    patientIndex: 1,
+    dentistIndex: 0,
+    daysAgo: 55,
+    reason: 'Valoración para implante',
+    notes:
+      'Ausencia de 36. Rx panorámica con buena altura ósea. Se planea implante + corona. TA 135/85 al ingreso, paciente medicado.',
+  },
+  {
+    patientIndex: 1,
+    dentistIndex: 0,
+    daysAgo: 30,
+    reason: 'Exodoncia de resto radicular',
+    notes:
+      'Se retira resto radicular en zona de 36 bajo anestesia local (lidocaína 2% con epinefrina, 1 cartucho). Sin complicaciones. Indicaciones post-operatorias por escrito.',
+  },
+  {
+    patientIndex: 2,
+    dentistIndex: 1,
+    daysAgo: 42,
+    reason: 'Profilaxis y resinas',
+    notes:
+      'Profilaxis completa. Resina en 16 (O) y 26 (OM). Oclusión verificada con papel articular.',
+  },
+  {
+    patientIndex: 3,
+    dentistIndex: 0,
+    daysAgo: 26,
+    reason: 'Urgencia: dolor en 46',
+    notes:
+      'Pulpitis irreversible en 46. Glucometría 142 mg/dL. Se realiza apertura cameral y medicación intraconducto.',
+  },
+  {
+    patientIndex: 3,
+    dentistIndex: 0,
+    daysAgo: 12,
+    reason: 'Endodoncia 46 (obturación)',
+    notes:
+      'Obturación de conductos de 46 con técnica de condensación lateral. Se coloca provisional. Pendiente corona.',
+  },
+  {
+    patientIndex: 6,
+    dentistIndex: 1,
+    daysAgo: 18,
+    reason: 'Periodoncia: raspaje cuadrantes 1 y 2',
+    notes:
+      'Raspaje y alisado radicular en cuadrantes 1 y 2. Paciente con alendronato: se evita cirugía periodontal, se trata de forma conservadora. Alérgica a penicilina: no se formula amoxicilina.',
+  },
+  {
+    patientIndex: 7,
+    dentistIndex: 0,
+    daysAgo: 58,
+    reason: 'Urgencia: fractura de 21',
+    notes:
+      'Fractura coronal complicada de 21. INR 2.4 del día anterior. Se inicia endodoncia, hemostasia local sin novedad.',
+  },
+  {
+    patientIndex: 8,
+    dentistIndex: 1,
+    daysAgo: 14,
+    reason: 'Control odontopediátrico',
+    notes:
+      'Sellantes en 16 y 26. Buena colaboración. Se cita para aplicación de flúor.',
+  },
+  {
+    patientIndex: 9,
+    dentistIndex: 1,
+    daysAgo: 9,
+    reason: 'Control prenatal odontológico',
+    notes:
+      'Embarazo de 20 semanas. Gingivitis leve asociada al embarazo. Se refuerza higiene; se difieren radiografías.',
+  },
+  {
+    patientIndex: 10,
+    dentistIndex: 0,
+    daysAgo: 7,
+    reason: 'Resinas en molares',
+    notes:
+      'Resina en 36 (MOD) y 47 (O). Paciente tolera bien el procedimiento.',
+  },
+  {
+    patientIndex: 11,
+    dentistIndex: 1,
+    daysAgo: 21,
+    reason: 'Valoración',
+    notes:
+      'Paciente alérgica al látex: se atiende con guantes de nitrilo y dique libre de látex. Fractura incisal en 21.',
+  },
+  {
+    patientIndex: 4,
+    dentistIndex: 1,
+    daysAgo: 16,
+    reason: 'Valoración estética',
+    notes:
+      'Solicita blanqueamiento y carilla en 21. Se entrega presupuesto (plan en borrador).',
+  },
+  {
+    patientIndex: 5,
+    dentistIndex: 0,
+    daysAgo: 33,
+    reason: 'Valoración de cordales',
+    notes:
+      'Terceros molares inferiores 38 y 48 retenidos. Se propone cirugía; el paciente decide posponerla.',
+  },
+];
+
+export interface DemoToothRecord {
+  patientIndex: number;
+  dentistIndex: number;
+  daysAgo: number;
+  toothNumber: string;
+  surfaces: ToothSurface[];
+  catalogCode: string;
+  status: ToothRecordStatus;
+  notes?: string;
+}
+
+const { OCCLUSAL, MESIAL, DISTAL, VESTIBULAR } = ToothSurface;
+
+/** Hallazgos registrados directo en el odontograma (los DONE del plan se reflejan solos). */
+export const DEMO_TOOTH_RECORDS: readonly DemoToothRecord[] = [
+  {
+    patientIndex: 0,
+    dentistIndex: 0,
+    daysAgo: 40,
+    toothNumber: '36',
+    surfaces: [OCCLUSAL],
+    catalogCode: 'DX-CARIES',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 0,
+    dentistIndex: 0,
+    daysAgo: 40,
+    toothNumber: '25',
+    surfaces: [DISTAL],
+    catalogCode: 'DX-CARIES-INC',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 0,
+    dentistIndex: 0,
+    daysAgo: 40,
+    toothNumber: '36',
+    surfaces: [OCCLUSAL],
+    catalogCode: 'OP-RESINA-1',
+    status: ToothRecordStatus.PLANNED,
+  },
+  {
+    patientIndex: 1,
+    dentistIndex: 0,
+    daysAgo: 55,
+    toothNumber: '36',
+    surfaces: [],
+    catalogCode: 'DX-RESTO-RAD',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 3,
+    dentistIndex: 0,
+    daysAgo: 26,
+    toothNumber: '46',
+    surfaces: [],
+    catalogCode: 'DX-PERIAPICAL',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 5,
+    dentistIndex: 0,
+    daysAgo: 33,
+    toothNumber: '38',
+    surfaces: [],
+    catalogCode: 'DX-RETENIDO',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 5,
+    dentistIndex: 0,
+    daysAgo: 33,
+    toothNumber: '48',
+    surfaces: [],
+    catalogCode: 'DX-RETENIDO',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 6,
+    dentistIndex: 1,
+    daysAgo: 18,
+    toothNumber: '31',
+    surfaces: [VESTIBULAR],
+    catalogCode: 'DX-RECESION',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 11,
+    dentistIndex: 1,
+    daysAgo: 21,
+    toothNumber: '21',
+    surfaces: [MESIAL],
+    catalogCode: 'DX-FRACT',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 4,
+    dentistIndex: 1,
+    daysAgo: 16,
+    toothNumber: '11',
+    surfaces: [VESTIBULAR],
+    catalogCode: 'DX-PIGMENTACION',
+    status: ToothRecordStatus.COMPLETED,
+  },
+  {
+    patientIndex: 14,
+    dentistIndex: 0,
+    daysAgo: 6,
+    toothNumber: '46',
+    surfaces: [],
+    catalogCode: 'DX-AUSENTE',
+    status: ToothRecordStatus.COMPLETED,
+  },
+];
+
+export interface DemoPlanItem {
+  code: string;
+  tooth: string;
+  surfaces?: ToothSurface[];
+  status: TreatmentPlanItemStatus;
+}
+
+export interface DemoPayment {
+  daysAgo: number;
+  amount: number;
+  method: PaymentMethod;
+  location: DemoLocationKey;
+  notes?: string;
+}
+
+export interface DemoPlan {
+  patientIndex: number;
+  dentistIndex: number;
+  status: TreatmentPlanStatus;
+  notes: string;
+  items: DemoPlanItem[];
+  payments: DemoPayment[];
+  /** Plan de pagos (cuotas) sobre el total facturable del plan. */
+  paymentPlan?: {
+    downPayment: number;
+    installmentsCount: number;
+    startDaysAgo: number;
+  };
+}
+
+const { PROPOSED, ACCEPTED, DONE } = TreatmentPlanItemStatus;
+const { CASH, CARD, TRANSFER, OTHER } = PaymentMethod;
+
+export const DEMO_PLANS: readonly DemoPlan[] = [
+  {
+    patientIndex: 1,
+    dentistIndex: 0,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Rehabilitación de 36 con implante y corona.',
+    items: [
+      { code: 'IMG-RX-PANORAMICA', tooth: '36', status: DONE },
+      { code: 'CX-EXO-SIMPLE', tooth: '36', status: DONE },
+      { code: 'IMPL-IMPLANTE', tooth: '36', status: ACCEPTED },
+      { code: 'IMPL-CORONA', tooth: '36', status: ACCEPTED },
+    ],
+    payments: [
+      {
+        daysAgo: 52,
+        amount: 1040000,
+        method: TRANSFER,
+        location: 'principal',
+        notes: 'Cuota inicial del plan de pagos',
+      },
+      { daysAgo: 21, amount: 750000, method: CARD, location: 'principal' },
+    ],
+    paymentPlan: {
+      downPayment: 1040000,
+      installmentsCount: 6,
+      startDaysAgo: 22,
+    },
+  },
+  {
+    patientIndex: 2,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.COMPLETED,
+    notes: 'Profilaxis y resinas.',
+    items: [
+      { code: 'PREV-PROFILAXIS', tooth: '11', status: DONE },
+      { code: 'OP-RESINA-1', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
+      {
+        code: 'OP-RESINA-2',
+        tooth: '26',
+        surfaces: [OCCLUSAL, MESIAL],
+        status: DONE,
+      },
+    ],
+    payments: [
+      { daysAgo: 42, amount: 200000, method: CASH, location: 'norte' },
+      { daysAgo: 35, amount: 260000, method: CARD, location: 'norte' },
+    ],
+  },
+  {
+    patientIndex: 3,
+    dentistIndex: 0,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Endodoncia y rehabilitación de 46.',
+    items: [
+      { code: 'IMG-RX-PERIAPICAL', tooth: '46', status: DONE },
+      { code: 'ENDO-MULTI', tooth: '46', status: DONE },
+      { code: 'PROT-CORONA-PROV', tooth: '46', status: ACCEPTED },
+      { code: 'PROT-CORONA-LM', tooth: '46', status: PROPOSED },
+    ],
+    payments: [
+      { daysAgo: 26, amount: 400000, method: CARD, location: 'principal' },
+      { daysAgo: 12, amount: 300000, method: TRANSFER, location: 'principal' },
+    ],
+  },
+  {
+    patientIndex: 4,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.DRAFT,
+    notes: 'Presupuesto estético (pendiente de aprobación).',
+    items: [
+      { code: 'EST-BLANQ-CONSULTORIO', tooth: '11', status: PROPOSED },
+      {
+        code: 'EST-CARILLA-RESINA',
+        tooth: '21',
+        surfaces: [VESTIBULAR],
+        status: PROPOSED,
+      },
+    ],
+    payments: [],
+  },
+  {
+    patientIndex: 5,
+    dentistIndex: 0,
+    status: TreatmentPlanStatus.CANCELLED,
+    notes: 'Cirugía de cordales: el paciente decidió posponerla.',
+    items: [
+      { code: 'CX-CORDAL-INCL', tooth: '38', status: PROPOSED },
+      { code: 'CX-CORDAL-INCL', tooth: '48', status: PROPOSED },
+    ],
+    payments: [],
+  },
+  {
+    patientIndex: 6,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Tratamiento periodontal por cuadrantes.',
+    items: [
+      { code: 'PERIO-RASPADO', tooth: '16', status: DONE },
+      { code: 'PERIO-RASPADO', tooth: '26', status: DONE },
+      { code: 'PERIO-RASPADO', tooth: '36', status: ACCEPTED },
+      { code: 'PERIO-RASPADO', tooth: '46', status: ACCEPTED },
+    ],
+    payments: [
+      { daysAgo: 18, amount: 180000, method: CASH, location: 'norte' },
+      {
+        daysAgo: 4,
+        amount: 180000,
+        method: OTHER,
+        location: 'norte',
+        notes: 'Pago por Nequi',
+      },
+    ],
+  },
+  {
+    patientIndex: 7,
+    dentistIndex: 0,
+    status: TreatmentPlanStatus.COMPLETED,
+    notes: 'Urgencia y endodoncia de 21.',
+    items: [
+      { code: 'URG-CONSULTA', tooth: '21', status: DONE },
+      { code: 'ENDO-UNI', tooth: '21', status: DONE },
+    ],
+    payments: [
+      { daysAgo: 58, amount: 90000, method: CASH, location: 'principal' },
+      { daysAgo: 50, amount: 450000, method: CARD, location: 'principal' },
+    ],
+  },
+  {
+    patientIndex: 8,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Prevención odontopediátrica.',
+    items: [
+      { code: 'PED-SELLANTE', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
+      { code: 'PED-SELLANTE', tooth: '26', surfaces: [OCCLUSAL], status: DONE },
+      { code: 'PED-FLUOR', tooth: '11', status: ACCEPTED },
+    ],
+    payments: [
+      { daysAgo: 14, amount: 130000, method: TRANSFER, location: 'norte' },
+    ],
+  },
+  {
+    patientIndex: 10,
+    dentistIndex: 0,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Resinas en molares.',
+    items: [
+      {
+        code: 'OP-RESINA-3',
+        tooth: '36',
+        surfaces: [MESIAL, OCCLUSAL, DISTAL],
+        status: DONE,
+      },
+      { code: 'OP-RESINA-1', tooth: '47', surfaces: [OCCLUSAL], status: DONE },
+      { code: 'PREV-PROFILAXIS', tooth: '11', status: PROPOSED },
+    ],
+    payments: [
+      { daysAgo: 7, amount: 230000, method: CARD, location: 'principal' },
+    ],
+  },
+];
+
+export interface DemoInventoryItem {
+  location: DemoLocationKey;
+  name: string;
+  sku: string;
+  unit: string;
+  minStock: number;
+  movements: {
+    type: InventoryMovementType;
+    quantity: number;
+    reason: string;
+  }[];
+}
+
+const { IN, OUT, ADJUSTMENT } = InventoryMovementType;
+
+/** Varios ítems quedan por debajo del mínimo a propósito (alerta de stock). */
+export const DEMO_INVENTORY: readonly DemoInventoryItem[] = [
+  {
+    location: 'principal',
+    name: 'Guantes de nitrilo talla M',
+    sku: 'GUA-NIT-M',
+    unit: 'caja x100',
+    minStock: 10,
+    movements: [
+      { type: IN, quantity: 30, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 12, reason: 'Consumo del mes' },
+      { type: OUT, quantity: 9, reason: 'Consumo del mes' },
+    ],
+  },
+  {
+    location: 'principal',
+    name: 'Lidocaína 2% con epinefrina',
+    sku: 'ANE-LID-2',
+    unit: 'cartucho',
+    minStock: 50,
+    movements: [
+      { type: IN, quantity: 100, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 38, reason: 'Consumo en procedimientos' },
+    ],
+  },
+  {
+    location: 'principal',
+    name: 'Resina compuesta A2',
+    sku: 'RES-A2',
+    unit: 'jeringa 4 g',
+    minStock: 5,
+    movements: [
+      { type: IN, quantity: 8, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 4, reason: 'Consumo en procedimientos' },
+    ],
+  },
+  {
+    location: 'principal',
+    name: 'Eyectores de saliva',
+    sku: 'EYE-SAL',
+    unit: 'bolsa x100',
+    minStock: 3,
+    movements: [
+      { type: IN, quantity: 10, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 2, reason: 'Consumo del mes' },
+    ],
+  },
+  {
+    location: 'principal',
+    name: 'Hipoclorito de sodio 5,25%',
+    sku: 'HIP-525',
+    unit: 'litro',
+    minStock: 2,
+    movements: [
+      { type: IN, quantity: 6, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 3, reason: 'Consumo en endodoncias' },
+      { type: ADJUSTMENT, quantity: -1, reason: 'Envase dañado' },
+    ],
+  },
+  {
+    location: 'principal',
+    name: 'Fresas de diamante redondas',
+    sku: 'FRE-DIA-R',
+    unit: 'unidad',
+    minStock: 20,
+    movements: [
+      { type: IN, quantity: 40, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 15, reason: 'Desgaste' },
+    ],
+  },
+  {
+    location: 'norte',
+    name: 'Guantes de nitrilo talla S',
+    sku: 'GUA-NIT-S',
+    unit: 'caja x100',
+    minStock: 8,
+    movements: [
+      { type: IN, quantity: 20, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 6, reason: 'Consumo del mes' },
+    ],
+  },
+  {
+    location: 'norte',
+    name: 'Algodón en rollos',
+    sku: 'ALG-ROL',
+    unit: 'paquete',
+    minStock: 5,
+    movements: [
+      { type: IN, quantity: 6, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 3, reason: 'Consumo del mes' },
+    ],
+  },
+  {
+    location: 'norte',
+    name: 'Ionómero de vidrio',
+    sku: 'ION-VID',
+    unit: 'kit',
+    minStock: 2,
+    movements: [
+      { type: IN, quantity: 3, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 2, reason: 'Consumo en procedimientos' },
+    ],
+  },
+  {
+    location: 'norte',
+    name: 'Baberos desechables',
+    sku: 'BAB-DES',
+    unit: 'paquete x500',
+    minStock: 2,
+    movements: [
+      { type: IN, quantity: 5, reason: 'Compra a proveedor' },
+      { type: OUT, quantity: 1, reason: 'Consumo del mes' },
+    ],
+  },
+];

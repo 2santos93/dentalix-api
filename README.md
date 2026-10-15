@@ -60,6 +60,48 @@ $ npm run start:prod
    npx prisma db seed
    ```
    Idempotente: las ciudades solo se siembran una vez (los ids son estables).
+5. (Opcional) Sembrar la **clínica demo** para probar todo el producto en local:
+   ```bash
+   npm run seed:demo            # crea la demo si no existe
+   npm run seed:demo -- --reset # la reconstruye con fechas relativas a hoy
+   ```
+   Requiere los pasos 3 y 4 (usa el catálogo de monedas y las ciudades). Crea
+   "Clínica Demo" con subdominio `demo` — en local `demo.localhost` resuelve al
+   tenant por `Tenant.subdomain` (`localhost` está en `TENANT_BASE_DOMAINS`), sin
+   necesidad de `TenantDomain` — y la deja lista en **http://demo.localhost:3001**
+   (web en 3001, API en 3000). Al terminar imprime las credenciales; todos los
+   usuarios comparten la contraseña `DemoDentalix2026!`:
+
+   | Rol       | Email                         |
+   |-----------|-------------------------------|
+   | ADMIN     | `admin@demo.dentalix.app`     |
+   | DENTIST   | `dentista@demo.dentalix.app`  |
+   | DENTIST   | `dentista2@demo.dentalix.app` |
+   | RECEPTION | `recepcion@demo.dentalix.app` |
+   | ASSISTANT | `asistente@demo.dentalix.app` |
+
+   Contenido: 2 sedes con horario (la principal con el horario por defecto del
+   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
+   25 pacientes ficticios (correos `@example.com`) con historias clínicas,
+   evoluciones y odontograma, ~90 citas desde el lunes de la semana pasada hasta
+   el sábado de la próxima en distintos estados, planes de tratamiento en todos
+   sus estados, abonos en COP de los últimos 60 días en ambas sedes, un plan de
+   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo.
+
+   - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
+     imprimir las credenciales). `--reset` retira la demo anterior **en blando**
+     (tenant, membresías y usuarios `@demo.dentalix.app` con `deletedAt`, como el
+     resto del producto) y la crea de nuevo; úsalo cuando la agenda "envejezca".
+     Si una corrida falla a medias, la demo incompleta se retira sola.
+   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (hora de
+     Bogotá, UTC-5 fijo).
+   - **Conexión**: no usa `DIRECT_URL`. Levanta la app (`AppModule`) y escribe con
+     los mismos casos de uso que la API (registro, invitación + aceptación, sedes,
+     horarios, pacientes, planes, abonos, plan de pagos, inventario), por
+     `DATABASE_URL` (rol `dentalix_app`) con `app.current_tenant` fijado: la RLS
+     garantiza que nada cae fuera del tenant demo, y el hashing de contraseñas,
+     las validaciones de horario y las EXCLUDE de solapes son las del producto.
+   - Se niega a correr con `NODE_ENV=production`.
 
 ## Run tests
 
