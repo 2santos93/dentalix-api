@@ -980,10 +980,13 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       },
       { daysAgo: 21, amount: 750000, method: CARD, location: 'principal' },
     ],
+    // Arranca hace 45 días (mensual): la cuota inicial y la 1 quedan cubiertas
+    // por los dos abonos, y la 2 (vencida hace ~2 semanas) sin pagar, para que
+    // el estado de cuenta de la demo enseñe saldo Y una cuota vencida (DX-011).
     paymentPlan: {
       downPayment: 1040000,
       installmentsCount: 6,
-      startDaysAgo: 22,
+      startDaysAgo: 45,
     },
   },
   {

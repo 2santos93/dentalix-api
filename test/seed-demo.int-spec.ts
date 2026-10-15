@@ -414,6 +414,33 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(new Set(items.map((i) => i.locationId)).size).toBe(2);
   });
 
+  it('el estado de cuenta demo enseña saldo y una cuota vencida (DX-011)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const paymentPlan = await raw.paymentPlan.findFirstOrThrow({
+      where: { tenantId },
+      select: { patientId: true },
+    });
+    const reception = DEMO_USERS.find((u) => u.role === ClinicRole.RECEPTION);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: reception?.email, password: DEMO_PASSWORD })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/patients/${paymentPlan.patientId}/account-statement`)
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as {
+      summary: { currency: string; balance: number; overdueCount: number }[];
+    };
+    const cop = body.summary.find((s) => s.currency === 'COP');
+    expect(cop?.balance).toBeGreaterThan(0);
+    expect(cop?.overdueCount).toBeGreaterThanOrEqual(1);
+  });
+
   it('una segunda corrida no duplica nada', async () => {
     const result = await seedDemo({ quiet: true });
     expect(result.status).toBe('skipped');
