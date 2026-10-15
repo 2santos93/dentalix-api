@@ -9,12 +9,14 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreateTreatmentPlanDto } from './dto/create-treatment-plan.dto';
@@ -73,13 +75,14 @@ export class TreatmentPlansController {
   ) {}
 
   @Post('patients/:patientId/treatment-plans')
+  @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiCreatedResponse({ type: TreatmentPlanDto })
   @ApiNotFoundResponse({
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
   create(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlan> {
@@ -95,8 +98,11 @@ export class TreatmentPlansController {
   }
 
   @Get('patients/:patientId/treatment-plans')
+  @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiOkResponse({ type: [TreatmentPlanDto] })
-  list(@Param('patientId') patientId: string): Promise<TreatmentPlan[]> {
+  list(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+  ): Promise<TreatmentPlan[]> {
     return this.listTreatmentPlans.execute(patientId);
   }
 

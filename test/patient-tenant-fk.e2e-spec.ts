@@ -22,6 +22,7 @@ const raw = new PrismaClient({
 });
 
 const PASSWORD = 'S3cret!!';
+const SUBDOMAINS = ['clinica-fk-a', 'clinica-fk-b'];
 
 interface Clinic {
   accessToken: string;
@@ -83,6 +84,16 @@ async function cleanup(): Promise<void> {
   await raw.treatmentPlan.deleteMany();
   await raw.appointment.deleteMany();
   await raw.patient.deleteMany();
+  // El registro crea la sede por defecto y su horario: se borran los de las
+  // clínicas de ESTE spec (no las de otros) antes de borrar los tenants.
+  const ours = await raw.tenant.findMany({
+    where: { subdomain: { in: SUBDOMAINS } },
+    select: { id: true },
+  });
+  const ourTenants = { tenantId: { in: ours.map((t) => t.id) } };
+  await raw.locationScheduleRange.deleteMany({ where: ourTenants });
+  await raw.locationSchedule.deleteMany({ where: ourTenants });
+  await raw.location.deleteMany({ where: ourTenants });
   await raw.clinicMembership.deleteMany();
   await raw.user.deleteMany();
   await raw.tenant.deleteMany();
@@ -151,8 +162,8 @@ describe('Pertenencia del paciente al tenant en endpoints clínicos (SEC-004, e2
     await app.init();
     await cleanup();
 
-    clinicA = await registerAndLogin(app, 'clinica-fk-a');
-    const clinicB = await registerAndLogin(app, 'clinica-fk-b');
+    clinicA = await registerAndLogin(app, SUBDOMAINS[0]);
+    const clinicB = await registerAndLogin(app, SUBDOMAINS[1]);
     patientA = await createPatient(app, clinicA, '9101');
     patientB = await createPatient(app, clinicB, '9102');
   });
@@ -170,6 +181,29 @@ describe('Pertenencia del paciente al tenant en endpoints clínicos (SEC-004, e2
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send(endpoint.body);
   }
+
+  // `:patientId` pasa por ParseUUIDPipe: un id que no es UUID es un 400 de
+  // validación, no un 500 de Postgres (columna uuid) ni un 404.
+  describe.each([
+    ['post', '/api/v1/patients/no-es-uuid/treatment-plans'],
+    ['get', '/api/v1/patients/no-es-uuid/treatment-plans'],
+    ['put', '/api/v1/patients/no-es-uuid/medical-history'],
+    ['get', '/api/v1/patients/no-es-uuid/medical-history'],
+    ['post', '/api/v1/patients/no-es-uuid/clinical-entries'],
+    ['get', '/api/v1/patients/no-es-uuid/clinical-entries'],
+    ['post', '/api/v1/patients/no-es-uuid/tooth-records'],
+    ['get', '/api/v1/patients/no-es-uuid/odontogram'],
+    ['get', '/api/v1/patients/no-es-uuid/teeth/11/history'],
+  ] as const)('%s %s con :patientId que no es UUID', (method, path) => {
+    it('responde 400', async () => {
+      await request(app.getHttpServer())
+        [method](path)
+        .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .send({ notes: 'x', toothNumber: '11', kind: 'DIAGNOSIS' })
+        .expect(400);
+    });
+  });
 
   describe.each(ENDPOINTS)('$name', (endpoint) => {
     it('con token de la clínica A y paciente de la clínica B: 404 y nada insertado', async () => {

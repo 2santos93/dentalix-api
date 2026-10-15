@@ -7,12 +7,14 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiExtraModels,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
@@ -37,6 +39,7 @@ interface AuthenticatedRequest {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
 @Roles(...CLINICAL_ROLES)
+@ApiParam({ name: 'patientId', format: 'uuid' })
 @Controller('patients/:patientId/medical-history')
 export class MedicalHistoryController {
   constructor(
@@ -59,7 +62,9 @@ export class MedicalHistoryController {
     description:
       'Latest medical history version. Response body is null when the patient does not have one yet (first visit) — this is never a 404.',
   })
-  get(@Param('patientId') patientId: string): Promise<MedicalHistory | null> {
+  get(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+  ): Promise<MedicalHistory | null> {
     return this.getMedicalHistory.execute(patientId);
   }
 
@@ -71,7 +76,7 @@ export class MedicalHistoryController {
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
   save(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: SaveMedicalHistoryDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<MedicalHistory> {

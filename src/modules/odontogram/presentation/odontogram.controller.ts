@@ -7,12 +7,14 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreateToothRecordDto } from './dto/create-tooth-record.dto';
@@ -45,6 +47,7 @@ interface AuthenticatedRequest {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
 @Roles(...CLINICAL_ROLES)
+@ApiParam({ name: 'patientId', format: 'uuid' })
 @Controller('patients/:patientId')
 export class OdontogramController {
   constructor(
@@ -60,7 +63,7 @@ export class OdontogramController {
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
   create(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateToothRecordDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<ToothRecord> {
@@ -82,7 +85,7 @@ export class OdontogramController {
   @Get('odontogram')
   @ApiOkResponse({ type: [OdontogramGroupDto] })
   projection(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
   ): Promise<OdontogramToothGroup[]> {
     return this.getOdontogram.execute(patientId);
   }
@@ -90,7 +93,7 @@ export class OdontogramController {
   @Get('teeth/:fdi/history')
   @ApiOkResponse({ type: [ToothRecordDto] })
   history(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
     @Param('fdi') fdi: string,
   ): Promise<ToothRecord[]> {
     return this.getToothTimeline.execute(patientId, fdi);

@@ -8,12 +8,14 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreateClinicalEntryDto } from './dto/create-clinical-entry.dto';
@@ -42,6 +44,7 @@ interface AuthenticatedRequest {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
 @Roles(...CLINICAL_ROLES)
+@ApiParam({ name: 'patientId', format: 'uuid' })
 @Controller('patients/:patientId/clinical-entries')
 export class ClinicalEntriesController {
   constructor(
@@ -56,7 +59,7 @@ export class ClinicalEntriesController {
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
   create(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateClinicalEntryDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<ClinicalEntry> {
@@ -74,7 +77,7 @@ export class ClinicalEntriesController {
   @Get()
   @ApiOkResponse({ type: [ClinicalEntryDto] })
   list(
-    @Param('patientId') patientId: string,
+    @Param('patientId', ParseUUIDPipe) patientId: string,
     @Query() query: ListClinicalEntriesQueryDto,
   ): Promise<ClinicalEntry[]> {
     return this.listClinicalEntries.execute(patientId, {
