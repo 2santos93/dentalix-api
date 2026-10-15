@@ -1,9 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-// Response shape for POST /auth/login — documents the
-// `{accessToken, refreshToken}` contract for Swagger (see
-// ../../application/use-cases/login.use-case.ts). This class exists purely
-// for `@ApiProperty` documentation, not for input validation.
+// Par `{accessToken, refreshToken}` que devuelve TokenService.issue(). Única
+// definición para Swagger, compartida por POST /auth/login, /auth/refresh,
+// /public/invitations/:token/accept y /me/password (antes había una copia con
+// el mismo nombre en invitations, que Swagger fusionaba en silencio). Solo
+// documenta la respuesta; no valida entrada.
 export class AuthTokensDto {
   @ApiProperty()
   accessToken!: string;

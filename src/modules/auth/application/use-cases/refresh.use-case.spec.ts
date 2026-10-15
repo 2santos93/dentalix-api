@@ -224,6 +224,22 @@ describe('RefreshUseCase', () => {
     });
   });
 
+  it('rejects (401) a legacy token without `tv` once the user changed the password', async () => {
+    // Sin claim `tv` cuenta como versión 0: tras un cambio de contraseña
+    // (tokenVersion=1) un token anterior al despliegue también muere.
+    const legacy = { ...tenantPayload, tv: undefined };
+    const { uc, tokens, repo } = setup({
+      payload: legacy,
+      state: activeMember(ClinicRole.DENTIST, 1),
+    });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
+  });
+
   it('rejects when the refresh token is invalid/expired', async () => {
     const { uc, tokens, repo } = setup({ verifyError: true, state: null });
 

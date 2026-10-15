@@ -37,6 +37,10 @@ export class ChangeMyPasswordUseCase {
     input: ChangeMyPasswordInput,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const userId = input.session.sub;
+    // Primero la sesión: si ya no es válida (baja, superadmin revocado) se
+    // rechaza sin verificar la contraseña — una sesión muerta no puede usarse
+    // como oráculo de la contraseña actual — ni tocar nada.
+    const { claims } = await this.sessions.current(input.session);
     const hash = await this.repo.getPasswordHash(userId);
     // Mensaje genérico: no revelar si el usuario existe. La longitud mínima
     // de newPassword la valida el DTO (@MinLength(8)).
@@ -47,9 +51,6 @@ export class ChangeMyPasswordUseCase {
     if (!ok) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    // Antes de tocar nada: si la sesión ya no es válida (baja, cambio de
-    // superadmin) se rechaza sin cambiar la contraseña.
-    const { claims } = await this.sessions.current(input.session);
     const newHash = await this.password.hash(input.newPassword);
     const tv = await this.repo.updatePasswordAndRevokeSessions(userId, newHash);
     return this.tokens.issue({ ...claims, tv });

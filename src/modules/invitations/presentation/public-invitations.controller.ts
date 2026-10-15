@@ -11,7 +11,7 @@ import { GetInvitationUseCase } from '../application/use-cases/get-invitation.us
 import { AcceptInvitationUseCase } from '../application/use-cases/accept-invitation.use-case';
 import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { PublicInvitationDto } from './dto/public-invitation.dto';
-import { AuthTokensDto } from './dto/auth-tokens.dto';
+import { AuthTokensDto } from '../../auth/presentation/dto/auth-tokens.dto';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
 

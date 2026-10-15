@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 
@@ -63,5 +64,25 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
     await expect(
       repo.consumeRefreshToken('jti-1', new Date('2030-01-01T00:00:00Z')),
     ).rejects.toBe(boom);
+  });
+
+  // La purga de expirados es mantenimiento oportunista: si falla (timeout,
+  // lock), el refresh/logout que la disparó NO debe fallar con ella.
+  it('a failing purge never breaks consumeRefreshToken nor revokeToken', async () => {
+    const revokedToken = {
+      create: jest.fn().mockResolvedValue({ jti: 'jti-1' }),
+      upsert: jest.fn().mockResolvedValue(undefined),
+      deleteMany: jest.fn().mockRejectedValue(new Error('lock timeout')),
+    };
+    const repo = new PrismaAuthRepository({ revokedToken } as never);
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const exp = new Date('2030-01-01T00:00:00Z');
+
+    await expect(repo.consumeRefreshToken('jti-1', exp)).resolves.toBe(true);
+    await expect(repo.revokeToken('jti-2', exp)).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });

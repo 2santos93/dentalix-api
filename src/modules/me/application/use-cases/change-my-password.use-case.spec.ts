@@ -75,6 +75,10 @@ describe('ChangeMyPasswordUseCase', () => {
   it('does not touch the password when the session is no longer valid', async () => {
     const { uc, repo, claims, tokens } = setup(await password.hash('OldPass1'));
     claims.current.mockRejectedValue(new UnauthorizedException());
+    // La sesión se valida ANTES de verificar la contraseña: una sesión muerta
+    // no debe poder usarse como oráculo de la contraseña actual (ni gastar un
+    // argon2.verify).
+    const verify = jest.spyOn(password, 'verify');
 
     await expect(
       uc.execute({
@@ -83,6 +87,8 @@ describe('ChangeMyPasswordUseCase', () => {
         newPassword: 'NewPass9',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(verify).not.toHaveBeenCalled();
+    verify.mockRestore();
     expect(repo.updatePasswordAndRevokeSessions).not.toHaveBeenCalled();
     expect(tokens.issue).not.toHaveBeenCalled();
   });

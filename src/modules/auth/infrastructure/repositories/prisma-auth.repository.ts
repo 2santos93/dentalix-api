@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
@@ -13,6 +13,8 @@ import {
 
 @Injectable()
 export class PrismaAuthRepository implements AuthRepository {
+  private readonly logger = new Logger(PrismaAuthRepository.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserByEmail(email: string): Promise<{ id: string } | null> {
@@ -188,10 +190,21 @@ export class PrismaAuthRepository implements AuthRepository {
   // de negocio sino una denylist con TTL. Una fila cuyo `expiresAt` ya pasó
   // no aporta nada (el token base es inválido por TTL), así que retenerla en
   // blando sólo haría crecer la tabla sin que nadie pueda consultarla nunca.
+  //
+  // Es mantenimiento oportunista, no parte de la operación: si falla (timeout,
+  // lock, conexión), el jti ya quedó revocado/consumido, así que se registra y
+  // se sigue. Un fallo aquí nunca debe convertir un refresh válido en un 500
+  // (el cliente lo trataría como sesión rota) ni romper un logout.
   private async purgeExpiredRevocations(): Promise<void> {
-    // eslint-disable-next-line no-restricted-syntax
-    await this.prisma.revokedToken.deleteMany({
-      where: { expiresAt: { lt: new Date() } },
-    });
+    try {
+      // eslint-disable-next-line no-restricted-syntax
+      await this.prisma.revokedToken.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Purge of expired revoked tokens failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }
