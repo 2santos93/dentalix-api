@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Un push nuevo a la misma rama/PR cancela la ejecución anterior.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, tipos, unit y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      # `npm run lint` lleva --fix (reescribiría y "pasaría"); en CI solo se comprueba.
+      - run: npm run lint:check
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+  integration:
+    name: Integración y e2e (Postgres 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dentalix
+          POSTGRES_PASSWORD: dentalix
+          POSTGRES_DB: dentalix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dentalix -d dentalix_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Valores SOLO de test, ficticios: no son secretos reales ni deben serlo.
+      # Misma forma que el `.env.test` local (owner `dentalix` para migrar,
+      # rol `dentalix_app` sin privilegios para que la app corra bajo RLS).
+      DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_test?schema=public
+      DIRECT_URL: postgresql://dentalix:dentalix@localhost:5432/dentalix_test?schema=public
+      JWT_ACCESS_SECRET: ci-test-access-secret
+      JWT_REFRESH_SECRET: ci-test-refresh-secret
+      JWT_ACCESS_TTL: 900s
+      JWT_REFRESH_TTL: 30d
+      EXCHANGE_APP_ID: ''
+      EXCHANGE_BASE_URL: https://openexchangerates.org/api
+      TENANT_BASE_DOMAINS: dentalix.app,localhost
+      TRUST_PROXY: 'false'
+      STORAGE_DIR: ./storage-test
+      FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      # Los servicios de Actions no montan /docker-entrypoint-initdb.d: se aplica
+      # a mano el mismo script que usa docker-compose (rol RLS + default privileges).
+      - name: Crear el rol de la app (docker/db-init)
+        env:
+          PGPASSWORD: dentalix
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix -d dentalix_test -f docker/db-init/01-app-role.sql
+
+      # Los scripts de test leen `.env.test` (dotenv -e); se genera desde el env del job.
+      - name: Generar .env.test
+        run: |
+          for k in DATABASE_URL DIRECT_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET \
+                   JWT_ACCESS_TTL JWT_REFRESH_TTL EXCHANGE_APP_ID EXCHANGE_BASE_URL \
+                   TENANT_BASE_DOMAINS TRUST_PROXY STORAGE_DIR FILES_PUBLIC_BASE_URL; do
+            printf '%s="%s"\n' "$k" "${!k}"
+          done > .env.test
+
+      - run: npm run db:test:setup
+      - run: npm run test:int
+      - run: npm run test:e2e
