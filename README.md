@@ -93,15 +93,25 @@ $ npm run start:prod
      (tenant, membresías y usuarios `@demo.dentalix.app` con `deletedAt`, como el
      resto del producto) y la crea de nuevo; úsalo cuando la agenda "envejezca".
      Si una corrida falla a medias, la demo incompleta se retira sola.
+   - **Nunca toca lo ajeno**: un tenant `demo` que no creó el seed (sin
+     `admin@demo.dentalix.app` como ADMIN vivo) aborta la corrida, con o sin
+     `--reset`; y si algún usuario `@demo.dentalix.app` es miembro vivo de otra
+     clínica, tampoco se retira nada.
    - **Determinista**: sin azar; todo depende solo de la fecha de hoy (hora de
      Bogotá, UTC-5 fijo).
    - **Conexión**: no usa `DIRECT_URL`. Levanta la app (`AppModule`) y escribe con
      los mismos casos de uso que la API (registro, invitación + aceptación, sedes,
      horarios, pacientes, planes, abonos, plan de pagos, inventario), por
-     `DATABASE_URL` (rol `dentalix_app`) con `app.current_tenant` fijado: la RLS
-     garantiza que nada cae fuera del tenant demo, y el hashing de contraseñas,
-     las validaciones de horario y las EXCLUDE de solapes son las del producto.
-   - Se niega a correr con `NODE_ENV=production`.
+     `DATABASE_URL` (rol `dentalix_app`). Las tablas de clínica se escriben con
+     `app.current_tenant` fijado, así que la RLS garantiza que nada cae fuera del
+     tenant demo; las únicas escrituras sin tenant son a las tablas globales
+     `tenants` y `users`, acotadas al tenant y a los correos demo. Las citas
+     pasadas usan `CreateAppointmentUseCase.registerHistorical`: las mismas
+     validaciones (pertenencia, horario, solapes) salvo "no en el pasado".
+   - **Solo local**: carga `.env` y se niega a correr con `NODE_ENV=production`
+     (sin excepción) o si el host de `DATABASE_URL` no es
+     `localhost`/`127.0.0.1`/`::1`; esto último se puede levantar con
+     `ALLOW_DEMO_SEED=1` para una base de pruebas desechable.
 
 ## Run tests
 

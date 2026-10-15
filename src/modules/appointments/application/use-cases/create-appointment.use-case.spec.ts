@@ -177,6 +177,128 @@ describe('CreateAppointmentUseCase', () => {
     });
   });
 
+  describe('registerHistorical (carga histórica: seed demo, importaciones)', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    // Hace 3 días a las 15:00 UTC (10:00 en Bogotá).
+    const pastStart = new Date(
+      Math.floor((Date.now() - 3 * DAY) / DAY) * DAY + 15 * 60 * 60 * 1000,
+    );
+    const pastEnd = new Date(pastStart.getTime() + 30 * 60 * 1000);
+
+    it('acepta una cita en el pasado (la única regla que se salta)', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+      );
+      const created = await uc.registerHistorical({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: pastStart,
+        end: pastEnd,
+      });
+      expect(created.start).toEqual(pastStart);
+    });
+
+    it('sigue rechazando end <= start', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+      );
+      await expect(
+        uc.registerHistorical({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: pastEnd,
+          end: pastStart,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('sigue exigiendo que paciente y profesional sean de la clínica', async () => {
+      const noPatient = new CreateAppointmentUseCase(
+        makeRepo(),
+        makePatients(null),
+        makeStaff(),
+        makeSchedule(),
+      );
+      await expect(
+        noPatient.registerHistorical({
+          patientId: 'ajeno',
+          providerId: 'prov1',
+          start: pastStart,
+          end: pastEnd,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      const noProvider = new CreateAppointmentUseCase(
+        makeRepo(),
+        makePatients(),
+        makeStaff(null),
+        makeSchedule(),
+      );
+      await expect(
+        noProvider.registerHistorical({
+          patientId: 'p1',
+          providerId: 'ajeno',
+          start: pastStart,
+          end: pastEnd,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('sigue rechazando solapes del profesional y del paciente con 409', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      repo.seed({ providerId: 'prov1', start: pastStart, end: pastEnd });
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+      );
+      await expect(
+        uc.registerHistorical({
+          patientId: 'p2',
+          providerId: 'prov1',
+          start: pastStart,
+          end: pastEnd,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('sigue validando el horario de atención de la sede', async () => {
+      // Abre solo un día DISTINTO al de la cita (10:00 Bogotá), así que ese día
+      // está cerrado.
+      const otherWeekday = (pastStart.getUTCDay() + 1) % 7;
+      const closedThatDay: BusinessHours = {
+        timezone: 'America/Bogota',
+        ranges: [
+          { weekday: otherWeekday, startMinute: 9 * 60, endMinute: 13 * 60 },
+        ],
+      };
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(closedThatDay),
+      );
+      await expect(
+        uc.registerHistorical({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: pastStart,
+          end: pastEnd,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('horario de atención de la sede', () => {
     // Sede en Bogotá (UTC-5 fijo) que abre lunes 9-13. `at()` construye horas en
     // Z sobre un día futuro, así que se calcula el lunes explícitamente.

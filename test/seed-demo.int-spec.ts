@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { PrismaClient } from '@prisma/client';
+import { ClinicRole, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
 import {
@@ -10,9 +10,19 @@ import {
   DEMO_PASSWORD,
   DEMO_SUBDOMAIN,
   DEMO_USERS,
+  assertLocalEnvironment,
   seedDemo,
 } from '../prisma/seed-demo';
 import { hostFor } from './support/tenant-host';
+
+// Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
+for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
+  if (!process.env[key]?.includes('_test')) {
+    throw new Error(
+      `seed-demo.int-spec: ${key} no apunta a una base de test (*_test*); aborto.`,
+    );
+  }
+}
 
 // `raw` (DIRECT_URL, superusuario) es SOLO para inspeccionar y limpiar: ve
 // todas las filas saltando la RLS, que es justo lo que hace falta para
@@ -88,8 +98,46 @@ async function purgeDemo(): Promise<void> {
     await raw.tenant.deleteMany({ where: { id: { in: ids } } });
   }
   await raw.user.deleteMany({
-    where: { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` } },
+    where: {
+      OR: [
+        { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` } },
+        { email: FOREIGN_OWNER_EMAIL },
+      ],
+    },
   });
+}
+
+const FOREIGN_OWNER_EMAIL = 'duena@otra-clinica.example.com';
+
+/** Crea (vía superusuario) un tenant ajeno con un ADMIN, opcionalmente con más miembros. */
+async function createForeignTenant(
+  subdomain: string,
+  extraMemberIds: string[] = [],
+): Promise<string> {
+  const tenant = await raw.tenant.create({
+    data: { name: `Ajena ${subdomain}`, subdomain },
+  });
+  const owner = await raw.user.upsert({
+    where: { email: FOREIGN_OWNER_EMAIL },
+    update: {},
+    create: {
+      email: FOREIGN_OWNER_EMAIL,
+      passwordHash: 'x',
+      fullName: 'Dueña',
+    },
+  });
+  for (const userId of [owner.id, ...extraMemberIds]) {
+    await raw.clinicMembership.create({
+      data: { tenantId: tenant.id, userId, role: ClinicRole.ADMIN },
+    });
+  }
+  return tenant.id;
+}
+
+async function purgeTenant(tenantId: string): Promise<void> {
+  await raw.clinicMembership.deleteMany({ where: { tenantId } });
+  await raw.tenant.delete({ where: { id: tenantId } });
+  await raw.user.deleteMany({ where: { email: FOREIGN_OWNER_EMAIL } });
 }
 
 async function liveDemoTenantId(): Promise<string> {
@@ -143,9 +191,71 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ).toBe(0);
   });
 
+  it('se niega si DATABASE_URL apunta a un host que no es local, salvo ALLOW_DEMO_SEED=1', async () => {
+    const previous = process.env.DATABASE_URL;
+    process.env.DATABASE_URL =
+      'postgresql://dentalix_app:x@db.prod.example.com:5432/dentalix_test?schema=public';
+    try {
+      await expect(seedDemo({ quiet: true })).rejects.toThrow(/no es local/);
+    } finally {
+      process.env.DATABASE_URL = previous;
+    }
+    expect(
+      await raw.tenant.count({ where: { subdomain: DEMO_SUBDOMAIN } }),
+    ).toBe(0);
+
+    const remote = 'postgresql://u:p@10.0.0.8:5432/x';
+    expect(() => assertLocalEnvironment({ DATABASE_URL: remote })).toThrow(
+      /no es local/,
+    );
+    expect(() =>
+      assertLocalEnvironment({ DATABASE_URL: remote, ALLOW_DEMO_SEED: '1' }),
+    ).not.toThrow();
+    for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+      expect(() =>
+        assertLocalEnvironment({
+          DATABASE_URL: `postgresql://u:p@${host}:5432/x`,
+        }),
+      ).not.toThrow();
+    }
+    // ALLOW_DEMO_SEED no levanta la negativa de producción.
+    expect(() =>
+      assertLocalEnvironment({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://u:p@localhost:5432/x',
+        ALLOW_DEMO_SEED: '1',
+      }),
+    ).toThrow(/production/);
+  });
+
+  it('no toca un tenant `demo` que no creó el seed (ni sin flags ni con --reset)', async () => {
+    const foreignId = await createForeignTenant(DEMO_SUBDOMAIN);
+    try {
+      await expect(seedDemo({ quiet: true })).rejects.toThrow(/no lo creó/);
+      await expect(seedDemo({ quiet: true, reset: true })).rejects.toThrow(
+        /no lo creó/,
+      );
+      const tenant = await raw.tenant.findUniqueOrThrow({
+        where: { id: foreignId },
+      });
+      expect(tenant.deletedAt).toBeNull();
+      expect(
+        await raw.clinicMembership.count({
+          where: { tenantId: foreignId, deletedAt: null },
+        }),
+      ).toBe(1);
+    } finally {
+      await purgeTenant(foreignId);
+    }
+  }, 60000);
+
   it('la primera corrida crea la clínica demo completa', async () => {
     const result = await seedDemo({ quiet: true });
     expect(result.status).toBe('created');
+    expect(result.password).toBe(DEMO_PASSWORD);
+    expect(result.users.map((u) => u.email)).toEqual(
+      DEMO_USERS.map((u) => u.email),
+    );
     const tenantId = await liveDemoTenantId();
     expect(result.tenantId).toBe(tenantId);
 
@@ -234,9 +344,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ]),
     );
     for (const a of appointments) {
-      expect(
-        fitsBusinessHours(a.start, a.end, hoursByLocation.get(a.locationId)!),
-      ).toBe(true);
+      const hours = hoursByLocation.get(a.locationId);
+      expect(hours).toBeDefined();
+      expect(fitsBusinessHours(a.start, a.end, hours ?? null)).toBe(true);
     }
   });
 
@@ -346,6 +456,31 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       .expect(401);
   });
 
+  it('--reset aborta sin escribir si un usuario demo es miembro vivo de otra clínica', async () => {
+    const demoId = await liveDemoTenantId();
+    const dentist = await raw.user.findFirstOrThrow({
+      where: { email: DEMO_USERS[1].email, deletedAt: null },
+    });
+    const otherId = await createForeignTenant('otra-clinica', [dentist.id]);
+    try {
+      await expect(seedDemo({ quiet: true, reset: true })).rejects.toThrow(
+        /otra-clinica/,
+      );
+      expect(await liveDemoTenantId()).toBe(demoId);
+      expect(
+        await raw.user.count({
+          where: {
+            email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` },
+            deletedAt: null,
+          },
+        }),
+      ).toBe(DEMO_USERS.length);
+      expect(await countsFor(demoId)).toEqual(firstCounts);
+    } finally {
+      await purgeTenant(otherId);
+    }
+  }, 60000);
+
   it('--reset retira la demo anterior en blando y la reconstruye igual', async () => {
     const oldId = await liveDemoTenantId();
     const result = await seedDemo({ quiet: true, reset: true });
@@ -356,7 +491,14 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
     const old = await raw.tenant.findUniqueOrThrow({ where: { id: oldId } });
     expect(old.deletedAt).not.toBeNull();
-    expect(await countsFor(newId)).toEqual(firstCounts);
+    // Las citas dependen del día (si la corrida cruza la medianoche cambia la
+    // ventana), así que se comparan aparte y con margen.
+    const { appointments: newAppointments, ...rebuilt } =
+      await countsFor(newId);
+    const { appointments: firstAppointments, ...first } = firstCounts;
+    expect(firstAppointments).toBeGreaterThan(0);
+    expect(rebuilt).toEqual(first);
+    expect(newAppointments).toBeGreaterThanOrEqual(40);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/login')

@@ -13,7 +13,7 @@ const BOGOTA_OFFSET_MINUTES = 5 * 60;
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
-export interface LocalDay {
+interface LocalDay {
   /** Días respecto de hoy (0 = hoy, -1 = ayer...). */
   offset: number;
   /** Medianoche UTC de la fecha de pared (solo para aritmética). */
@@ -23,7 +23,7 @@ export interface LocalDay {
 }
 
 /** El día de pared en Bogotá desplazado `offset` días desde `now`. */
-export function bogotaDay(now: Date, offset: number): LocalDay {
+function bogotaDay(now: Date, offset: number): LocalDay {
   const wall = new Date(now.getTime() - BOGOTA_OFFSET_MINUTES * MINUTE_MS);
   const todayMidnight = Date.UTC(
     wall.getUTCFullYear(),
@@ -35,7 +35,7 @@ export function bogotaDay(now: Date, offset: number): LocalDay {
 }
 
 /** Instante de las `minuteOfDay` (hora de pared de Bogotá) de ese día. */
-export function at(day: LocalDay, minuteOfDay: number): Date {
+function at(day: LocalDay, minuteOfDay: number): Date {
   return new Date(
     day.utcMidnight + (minuteOfDay + BOGOTA_OFFSET_MINUTES) * MINUTE_MS,
   );
@@ -90,8 +90,7 @@ const REASONS = [
   'Ajuste de prótesis',
 ] as const;
 
-export interface PlannedAppointment {
-  day: LocalDay;
+interface PlannedAppointment {
   /** 0 = dentista, 1 = dentista2. */
   dentistIndex: number;
   location: DemoLocationKey;
@@ -152,7 +151,6 @@ export function planAppointments(
         cursor[dentistIndex]++;
         const seq = planned.length;
         planned.push({
-          day,
           dentistIndex,
           location,
           start,

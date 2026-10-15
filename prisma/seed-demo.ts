@@ -1,6 +1,8 @@
 import { INestApplicationContext, Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppointmentStatus } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { AppointmentStatus, ClinicRole } from '@prisma/client';
+import { config as loadDotenv } from 'dotenv';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -25,8 +27,6 @@ import { CreateClinicalEntryUseCase } from '../src/modules/clinical-entries/appl
 import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/add-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
-import { APPOINTMENT_REPOSITORY } from '../src/modules/appointments/domain/ports/appointment-repository.port';
-import type { AppointmentRepository } from '../src/modules/appointments/domain/ports/appointment-repository.port';
 import { CreateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/create-treatment-plan.use-case';
 import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
@@ -70,14 +70,22 @@ export {
  * Seed de la clínica DEMO para probar el producto en local
  * (http://demo.localhost:3001). Uso: `npm run seed:demo [-- --reset]`.
  *
+ * SOLO LOCAL: carga `.env` y se niega a correr si NODE_ENV=production (sin
+ * excepción) o si el host de DATABASE_URL no es localhost/127.0.0.1/::1, salvo
+ * ALLOW_DEMO_SEED=1 (que solo levanta la comprobación de host). Lo comprueba
+ * antes de levantar la app y otra vez después, con la configuración ya cargada.
+ *
  * IDEMPOTENCIA — "si el tenant demo ya existe, no hace nada":
- *   - Sin flags: si hay un tenant vivo con subdominio `demo`, no toca nada y
- *     solo vuelve a imprimir las credenciales. Correrlo dos veces no duplica.
+ *   - Sin flags: si hay un tenant vivo con subdominio `demo` creado por este
+ *     seed, no toca nada y solo vuelve a imprimir las credenciales.
  *   - `--reset`: retira EN BLANDO la demo anterior (tenant, membresías y
  *     usuarios @demo.dentalix.app con `deletedAt`, igual que el resto del
  *     producto: aquí nada se borra en duro) y la reconstruye con fechas
  *     relativas al hoy nuevo. Es lo que hay que correr cuando la agenda demo
  *     "envejece".
+ *   - Un tenant `demo` que NO creó este seed (sin admin@demo.dentalix.app como
+ *     ADMIN vivo) nunca se toca: aborta con error, con o sin --reset. Tampoco se
+ *     retiran usuarios demo que sean miembros vivos de otra clínica.
  *   - Si una corrida falla a medias, la demo incompleta se retira sola, así que
  *     la siguiente corrida empieza limpia.
  *
@@ -86,15 +94,16 @@ export {
  * `PrismaService` con DATABASE_URL (rol `dentalix_app`, sujeto a RLS) y los
  * MISMOS casos de uso que llaman los controladores: registro de clínica,
  * invitación + aceptación, sedes, horarios, pacientes, planes, abonos, etc.
- * Cada escritura corre en `runWithTenant` con `app.current_tenant` fijado, así
- * que el WITH CHECK de RLS hace imposible que una fila caiga fuera del tenant
- * demo, y las reglas de negocio (horario de la sede, solapes, precios del
- * catálogo, cuotas, hashing argon2 de contraseñas...) son exactamente las del
- * producto. La única excepción son las citas YA pasadas: el caso de uso de
- * crear cita rechaza el pasado por diseño, así que se insertan con el MISMO
- * repositorio (que respeta las EXCLUDE de solapes) tras validar el horario con
- * el validador real (`fitsBusinessHours`), y se cierran con el caso de uso de
- * actualizar cita, que sí admite cerrar citas pasadas.
+ * Toda escritura en tablas de CLÍNICA corre en `runWithTenant` con
+ * `app.current_tenant` fijado, así que el WITH CHECK de RLS hace imposible que
+ * una de esas filas caiga fuera del tenant demo. Las únicas escrituras fuera de
+ * `runWithTenant` son a las tablas GLOBALES sin RLS — `tenants` (registro,
+ * branding, retiro) y `users` (registro, aceptación de invitación, retiro) — y
+ * van acotadas por el id del tenant demo o por los correos @demo.dentalix.app.
+ * Las reglas de negocio (horario de la sede, solapes, pertenencia, precios del
+ * catálogo, cuotas, hashing argon2...) son exactamente las del producto. Las
+ * citas YA pasadas van por `CreateAppointmentUseCase.registerHistorical`, que
+ * aplica las mismas validaciones salvo "no agendar en el pasado".
  */
 
 export type DemoSeedStatus = 'created' | 'skipped' | 'rebuilt';
@@ -102,8 +111,6 @@ export type DemoSeedStatus = 'created' | 'skipped' | 'rebuilt';
 export interface DemoSeedOptions {
   /** Retira la demo existente (en blando) y la reconstruye. */
   reset?: boolean;
-  /** "Hoy" de referencia; por defecto, el instante actual. */
-  now?: Date;
   /** No imprime el resumen (tests). */
   quiet?: boolean;
 }
@@ -112,28 +119,74 @@ export interface DemoSeedResult {
   status: DemoSeedStatus;
   tenantId: string;
   url: string;
-  users: { email: string; role: string; password: string }[];
+  /** La misma para todos los usuarios demo. */
+  password: string;
+  users: { email: string; role: string }[];
 }
 
 const DEMO_URL = `http://${DEMO_SUBDOMAIN}.localhost:3001`;
 /** Las citas que empiezan antes de esto se tratan como pasadas (margen de reloj). */
 const FUTURE_MARGIN_MS = 5 * 60 * 1000;
+const LOCAL_DB_HOSTS: ReadonlySet<string> = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+]);
 
-export async function seedDemo(
-  options: DemoSeedOptions = {},
-): Promise<DemoSeedResult> {
-  if (process.env.NODE_ENV === 'production') {
+/** Lanza si el entorno no es una base local de desarrollo/pruebas. */
+export function assertLocalEnvironment(env: {
+  NODE_ENV?: string;
+  DATABASE_URL?: string;
+  ALLOW_DEMO_SEED?: string;
+}): void {
+  if (env.NODE_ENV === 'production') {
     throw new Error(
       'seed:demo se niega a correr con NODE_ENV=production: solo es para entornos locales.',
     );
   }
+  if (env.ALLOW_DEMO_SEED === '1') return;
+  if (!env.DATABASE_URL) {
+    throw new Error('seed:demo: falta DATABASE_URL.');
+  }
+  let host: string;
+  try {
+    host = new URL(env.DATABASE_URL).hostname;
+  } catch {
+    throw new Error('seed:demo: DATABASE_URL no es una URL válida.');
+  }
+  if (!LOCAL_DB_HOSTS.has(host)) {
+    throw new Error(
+      `seed:demo se niega a escribir en una base que no es local (host "${host}"); ` +
+        'solo acepta localhost/127.0.0.1/::1. Si es un entorno de pruebas desechable, ' +
+        'exporta ALLOW_DEMO_SEED=1.',
+    );
+  }
+}
+
+export async function seedDemo(
+  options: DemoSeedOptions = {},
+): Promise<DemoSeedResult> {
+  // `.env` ANTES de la guarda: si no, la app lo cargaría después y la guarda
+  // habría mirado otra base. No pisa variables ya definidas.
+  loadDotenv({ quiet: true });
+  assertLocalEnvironment(process.env);
 
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn'],
   });
   try {
-    const seeder = new DemoSeeder(app, options.now ?? new Date());
+    // Re-comprobación con la configuración que de verdad usa la app.
+    const config = app.get(ConfigService);
+    assertLocalEnvironment({
+      NODE_ENV: config.get<string>('NODE_ENV'),
+      DATABASE_URL: config.get<string>('DATABASE_URL'),
+      ALLOW_DEMO_SEED: config.get<string>('ALLOW_DEMO_SEED'),
+    });
+
+    const seeder = new DemoSeeder(app);
     const existing = await seeder.findLiveDemoTenantId();
+    if (existing) await seeder.assertSeedOwned(existing);
 
     let status: DemoSeedStatus;
     let tenantId: string;
@@ -150,11 +203,8 @@ export async function seedDemo(
       status,
       tenantId,
       url: DEMO_URL,
-      users: DEMO_USERS.map((u) => ({
-        email: u.email,
-        role: u.role,
-        password: DEMO_PASSWORD,
-      })),
+      password: DEMO_PASSWORD,
+      users: DEMO_USERS.map((u) => ({ email: u.email, role: u.role })),
     };
     if (!options.quiet) printSummary(result);
     return result;
@@ -166,11 +216,10 @@ export async function seedDemo(
 class DemoSeeder {
   private readonly prisma: PrismaService;
   private readonly tenantContext: TenantContextService;
+  /** "Hoy" de referencia para fechar los datos (no para decidir pasado/futuro). */
+  private readonly now = new Date();
 
-  constructor(
-    private readonly app: INestApplicationContext,
-    private readonly now: Date,
-  ) {
+  constructor(private readonly app: INestApplicationContext) {
     this.prisma = app.get(PrismaService);
     this.tenantContext = app.get(TenantContextService);
   }
@@ -187,8 +236,77 @@ class DemoSeeder {
     return tenant?.id ?? null;
   }
 
-  /** Retiro en blando de una demo (y de los usuarios demo, que son exclusivos). */
+  /** El tenant `demo` es de este seed si su admin demo sigue siendo ADMIN vivo. */
+  async assertSeedOwned(tenantId: string): Promise<void> {
+    const owner = DEMO_USERS[0];
+    const membership = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.clinicMembership.findFirst({
+        where: {
+          tenantId,
+          role: ClinicRole.ADMIN,
+          deletedAt: null,
+          user: { email: owner.email, deletedAt: null },
+        },
+        select: { id: true },
+      }),
+    );
+    if (!membership) {
+      throw new Error(
+        `El tenant con subdominio "${DEMO_SUBDOMAIN}" (${tenantId}) no lo creó seed:demo ` +
+          `(no tiene a ${owner.email} como ADMIN vivo), así que no se toca. ` +
+          'Si quieres la demo, retira o renombra ese tenant a mano.',
+      );
+    }
+  }
+
+  private async liveDemoUserIds(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({
+      where: { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` }, deletedAt: null },
+      select: { id: true },
+    });
+    return users.map((u) => u.id);
+  }
+
+  /**
+   * Aborta si algún usuario demo es miembro vivo de una clínica distinta de
+   * `demoTenantId`. `clinic_memberships` tiene RLS y aquí no hay bypass, así que
+   * se mira tenant a tenant (en local son pocos).
+   */
+  private async assertDemoUsersExclusive(
+    userIds: string[],
+    demoTenantId: string | null,
+  ): Promise<void> {
+    if (userIds.length === 0) return;
+    const others = await this.prisma.tenant.findMany({
+      where: {
+        deletedAt: null,
+        ...(demoTenantId ? { id: { not: demoTenantId } } : {}),
+      },
+      select: { id: true, subdomain: true },
+    });
+    for (const other of others) {
+      const count = await this.prisma.runWithTenant(other.id, (tx) =>
+        tx.clinicMembership.count({
+          where: {
+            tenantId: other.id,
+            userId: { in: userIds },
+            deletedAt: null,
+          },
+        }),
+      );
+      if (count > 0) {
+        throw new Error(
+          `Hay usuarios @${DEMO_EMAIL_DOMAIN} que también son miembros vivos de ` +
+            `"${other.subdomain}"; seed:demo no los retira. Quítalos de esa clínica a mano.`,
+        );
+      }
+    }
+  }
+
+  /** Retiro en blando de una demo y de sus usuarios (comprobado antes de escribir). */
   async retire(tenantId: string): Promise<void> {
+    const userIds = await this.liveDemoUserIds();
+    await this.assertDemoUsersExclusive(userIds, tenantId);
     const at = new Date();
     await this.prisma.runWithTenant(tenantId, (tx) =>
       tx.clinicMembership.updateMany({
@@ -197,7 +315,7 @@ class DemoSeeder {
       }),
     );
     await this.prisma.user.updateMany({
-      where: { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` }, deletedAt: null },
+      where: { id: { in: userIds } },
       data: { deletedAt: at },
     });
     await this.prisma.tenant.update({
@@ -208,11 +326,15 @@ class DemoSeeder {
 
   async build(): Promise<string> {
     // Usuarios demo huérfanos (p. ej. de un tenant retirado a mano) impedirían
-    // el registro: se retiran antes, igual que en --reset.
-    await this.prisma.user.updateMany({
-      where: { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` }, deletedAt: null },
-      data: { deletedAt: new Date() },
-    });
+    // el registro: se retiran, siempre que no pertenezcan a otra clínica.
+    const orphans = await this.liveDemoUserIds();
+    await this.assertDemoUsersExclusive(orphans, null);
+    if (orphans.length > 0) {
+      await this.prisma.user.updateMany({
+        where: { id: { in: orphans } },
+        data: { deletedAt: new Date() },
+      });
+    }
 
     const owner = DEMO_USERS[0];
     // Registro REAL: tenant + dueño ADMIN + "Sede principal" con horario por
@@ -230,7 +352,14 @@ class DemoSeeder {
     try {
       await this.populate(tenantId, ownerId);
     } catch (error) {
-      await this.retire(tenantId);
+      try {
+        await this.retire(tenantId);
+      } catch (retireError) {
+        console.error(
+          `No se pudo retirar la demo incompleta ${tenantId}; usa --reset:`,
+          retireError,
+        );
+      }
       throw error;
     }
     return tenantId;
@@ -321,7 +450,7 @@ class DemoSeeder {
   private async setUpLocations(
     tenantId: string,
   ): Promise<Record<DemoLocationKey, string>> {
-    const principal = await this.prisma.runWithTenant((tx) =>
+    const principal = await this.prisma.runWithTenant(tenantId, (tx) =>
       tx.location.findFirstOrThrow({
         where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },
@@ -448,9 +577,7 @@ class DemoSeeder {
       patientIds.length,
       (key, start, end) => fitsBusinessHours(start, end, hours[key]),
     );
-    const repo = this.app.get<AppointmentRepository>(APPOINTMENT_REPOSITORY, {
-      strict: false,
-    });
+    const appointments = this.use(CreateAppointmentUseCase);
 
     for (const a of planned) {
       await this.inTenant(tenantId, locations[a.location], async () => {
@@ -462,13 +589,13 @@ class DemoSeeder {
           reason: a.reason,
           createdById,
         };
+        // Pasado/futuro se decide con el reloj VIVO (el mismo que usa el caso
+        // de uso), no con `this.now`. Las pasadas van por la ruta histórica,
+        // que conserva todas las validaciones salvo "no en el pasado".
         const isFuture = a.start.getTime() >= Date.now() + FUTURE_MARGIN_MS;
-        // Futuras: caso de uso real (horario, solapes, pertenencia). Pasadas:
-        // el caso de uso las rechaza por diseño, así que van por el repositorio
-        // (las EXCLUDE de solape siguen aplicando en la base).
         const created = isFuture
-          ? await this.use(CreateAppointmentUseCase).execute(input)
-          : await repo.create(input);
+          ? await appointments.execute(input)
+          : await appointments.registerHistorical(input);
         if (a.status !== AppointmentStatus.SCHEDULED) {
           await this.use(UpdateAppointmentUseCase).execute(created.id, {
             status: a.status,
@@ -609,7 +736,7 @@ function printSummary(result: DemoSeedResult): void {
     headline[result.status],
     `  URL:        ${result.url}`,
     `  Tenant:     ${result.tenantId}`,
-    `  Contraseña: ${DEMO_PASSWORD} (la misma para todos)`,
+    `  Contraseña: ${result.password} (la misma para todos)`,
     '',
     ...result.users.map((u) => `  ${u.role.padEnd(10)} ${u.email}`),
     '',

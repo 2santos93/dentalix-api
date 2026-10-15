@@ -26,7 +26,7 @@ export const DEMO_PASSWORD = 'DemoDentalix2026!';
 /** Moneda de la clínica: planes y abonos van en COP (Colombia). */
 export const DEMO_CURRENCY = 'COP';
 
-export interface DemoUser {
+interface DemoUser {
   email: string;
   fullName: string;
   role: ClinicRole;
@@ -114,7 +114,7 @@ export const DEMO_PRICES: Record<string, number> = {
   'URG-CONSULTA': 90000,
 };
 
-export interface DemoPatient {
+interface DemoPatient {
   firstName: string;
   lastName: string;
   docType: DocType;
@@ -686,7 +686,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
 ];
 
-export interface DemoClinicalEntry {
+interface DemoClinicalEntry {
   patientIndex: number;
   dentistIndex: number;
   daysAgo: number;
@@ -809,7 +809,7 @@ export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
   },
 ];
 
-export interface DemoToothRecord {
+interface DemoToothRecord {
   patientIndex: number;
   dentistIndex: number;
   daysAgo: number;
@@ -925,14 +925,14 @@ export const DEMO_TOOTH_RECORDS: readonly DemoToothRecord[] = [
   },
 ];
 
-export interface DemoPlanItem {
+interface DemoPlanItem {
   code: string;
   tooth: string;
   surfaces?: ToothSurface[];
   status: TreatmentPlanItemStatus;
 }
 
-export interface DemoPayment {
+interface DemoPayment {
   daysAgo: number;
   amount: number;
   method: PaymentMethod;
@@ -940,7 +940,7 @@ export interface DemoPayment {
   notes?: string;
 }
 
-export interface DemoPlan {
+interface DemoPlan {
   patientIndex: number;
   dentistIndex: number;
   status: TreatmentPlanStatus;
@@ -1120,7 +1120,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
   },
 ];
 
-export interface DemoInventoryItem {
+interface DemoInventoryItem {
   location: DemoLocationKey;
   name: string;
   sku: string;

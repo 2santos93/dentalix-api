@@ -71,6 +71,28 @@ export class CreateAppointmentUseCase {
       );
     }
 
+    return this.createChecked(input);
+  }
+
+  /**
+   * Carga HISTÓRICA: registra una cita que ya ocurrió (seed demo,
+   * importaciones). Aplica EXACTAMENTE las mismas reglas que `execute` —
+   * pertenencia de paciente y profesional, horario de la sede, solapes 409 —
+   * salvo "no agendar en el pasado", que solo tiene sentido para quien agenda
+   * desde la UI. Deliberadamente NO lo expone ningún controlador.
+   */
+  async registerHistorical(
+    input: CreateAppointmentInput,
+  ): Promise<Appointment> {
+    if (input.end <= input.start) {
+      throw new BadRequestException('End must be after start');
+    }
+    return this.createChecked(input);
+  }
+
+  private async createChecked(
+    input: CreateAppointmentInput,
+  ): Promise<Appointment> {
     // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
     // clínica, antes de mirar solapes (un id inválido hace que el solape no
     // signifique nada). Ambos repos filtran por tenant vía RLS, así que un
