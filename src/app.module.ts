@@ -13,6 +13,7 @@ import { MedicalHistoryModule } from './modules/medical-history/medical-history.
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { AppointmentConfirmationsModule } from './modules/appointment-confirmations/appointment-confirmations.module';
 import { TreatmentPlansModule } from './modules/treatment-plans/treatment-plans.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
@@ -44,6 +45,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ClinicalEntriesModule,
     OdontogramModule,
     AppointmentsModule,
+    AppointmentConfirmationsModule,
     TreatmentPlansModule,
     StaffModule,
     InvitationsModule,

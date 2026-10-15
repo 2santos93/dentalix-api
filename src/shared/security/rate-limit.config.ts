@@ -14,9 +14,16 @@
  * - login-account: login, solo por email (fuerza bruta distribuida).
  * - invitation:    ver y aceptar invitación por token; por IP (enumeración).
  * - password:      cambio de contraseña, por IP+usuario (contraseña actual).
+ * - confirmation:  ver y responder el enlace público de confirmación de cita
+ *                  (DX-005); por IP (enumeración de tokens).
  */
 export type RateLimitPolicy =
-  'auth' | 'login' | 'login-account' | 'invitation' | 'password';
+  | 'auth'
+  | 'login'
+  | 'login-account'
+  | 'invitation'
+  | 'password'
+  | 'confirmation';
 
 export interface RateLimitRule {
   limit: number;
@@ -36,6 +43,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'login-account': { limit: 50, ttlMs: 60 * MINUTE },
   invitation: { limit: 10, ttlMs: MINUTE },
   password: { limit: 5, ttlMs: 15 * MINUTE },
+  confirmation: { limit: 20, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -67,5 +75,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'login-account': rule('login-account'),
     invitation: rule('invitation'),
     password: rule('password'),
+    confirmation: rule('confirmation'),
   };
 }

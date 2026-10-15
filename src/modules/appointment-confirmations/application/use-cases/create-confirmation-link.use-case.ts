@@ -1,0 +1,95 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { AppointmentStatus } from '@prisma/client';
+import { APPOINTMENT_CONFIRMATION_REPOSITORY } from '../../domain/ports/appointment-confirmation-repository.port';
+import type { AppointmentConfirmationRepository } from '../../domain/ports/appointment-confirmation-repository.port';
+import {
+  generateConfirmationToken,
+  hashConfirmationToken,
+} from '../confirmation-token';
+import { toWhatsAppNumber } from '../whatsapp-phone';
+import {
+  PublicAppointmentView,
+  toPublicAppointmentView,
+} from '../public-confirmation-view';
+
+/** Solo una cita que todavía va a ocurrir tiene algo que confirmar. */
+const CONFIRMABLE: ReadonlySet<AppointmentStatus> = new Set([
+  AppointmentStatus.SCHEDULED,
+  AppointmentStatus.CONFIRMED,
+]);
+
+export interface CreateConfirmationLinkInput {
+  appointmentId: string;
+  createdById?: string;
+}
+
+export interface CreateConfirmationLinkResult {
+  /** Texto plano del token: se entrega SOLO aquí, nunca se persiste. */
+  token: string;
+  expiresAt: Date;
+  /** Número E.164 sin `+` para `wa.me`, o `null` si no hay uno utilizable. */
+  whatsappPhone: string | null;
+  /** Lo que el mensaje prellenado cuenta de la cita (sin nada clínico). */
+  appointment: PublicAppointmentView;
+}
+
+/**
+ * Recepción pide el enlace de confirmación de una cita. El token caduca al
+ * inicio de la cita y queda atado a su hora y estado actuales: reagendarla o
+ * cambiarle el estado lo deja sin efecto. Emitir uno nuevo revoca el anterior.
+ */
+@Injectable()
+export class CreateConfirmationLinkUseCase {
+  constructor(
+    @Inject(APPOINTMENT_CONFIRMATION_REPOSITORY)
+    private readonly repo: AppointmentConfirmationRepository,
+  ) {}
+
+  async execute(
+    input: CreateConfirmationLinkInput,
+  ): Promise<CreateConfirmationLinkResult> {
+    // RLS: una cita de otra clínica es invisible, así que cae aquí como 404.
+    const appointment = await this.repo.findAppointment(input.appointmentId);
+    if (!appointment) {
+      throw new NotFoundException('Appointment not found');
+    }
+    if (!CONFIRMABLE.has(appointment.status)) {
+      throw new ConflictException(
+        'Solo se puede pedir confirmación de una cita agendada o confirmada',
+      );
+    }
+    const now = new Date();
+    if (appointment.start.getTime() <= now.getTime()) {
+      throw new BadRequestException(
+        'La cita ya empezó: no tiene sentido pedir confirmación',
+      );
+    }
+
+    const token = generateConfirmationToken();
+    await this.repo.issue({
+      appointmentId: appointment.id,
+      tokenHash: hashConfirmationToken(token),
+      expiresAt: appointment.start,
+      appointmentStart: appointment.start,
+      appointmentStatus: appointment.status,
+      createdById: input.createdById,
+      now,
+    });
+
+    return {
+      token,
+      expiresAt: appointment.start,
+      whatsappPhone: toWhatsAppNumber(
+        appointment.patientPhone,
+        appointment.patientCountryCode,
+      ),
+      appointment: toPublicAppointmentView(appointment),
+    };
+  }
+}

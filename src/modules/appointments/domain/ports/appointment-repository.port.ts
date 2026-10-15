@@ -22,6 +22,9 @@ export interface UpdateAppointmentRepoInput {
   status?: AppointmentStatus;
   reason?: string | null;
   notes?: string | null;
+  /** Solo para limpiarlos (DX-005): los fija el flujo de confirmación, no el PATCH. */
+  confirmationSentAt?: null;
+  callbackRequestedAt?: null;
 }
 
 export interface ListAppointmentsByRangeParams {

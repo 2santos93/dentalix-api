@@ -13,6 +13,7 @@ for (const policy of [
   'LOGIN_ACCOUNT',
   'INVITATION',
   'PASSWORD',
+  'CONFIRMATION',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }
