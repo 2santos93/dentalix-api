@@ -19,13 +19,53 @@
 --
 -- Grants/RLS: sin cambios. Corre con el rol owner "dentalix" (DIRECT_URL); una
 -- FK no altera los privilegios DML de dentalix_app.
+--
+-- Transaccion y locks. Prisma ejecuta el script entero como UNA transaccion
+-- (si algo falla, no queda nada a medias). Al principio se toman locks SHARE
+-- ROW EXCLUSIVE sobre todas las tablas implicadas (hijas y padres, en un
+-- orden fijo para no generar deadlocks). Ese modo deja LEER pero bloquea
+-- INSERT/UPDATE/DELETE hasta el COMMIT, asi que nadie puede colar una fila
+-- inconsistente entre la comprobacion previa y el ADD CONSTRAINT. Es el mismo
+-- modo que ADD FOREIGN KEY toma de todas formas sobre hija y padre; aqui solo
+-- se adelanta. Los CREATE UNIQUE INDEX (sin CONCURRENTLY, que no admite
+-- transaccion) toman SHARE sobre los padres. Hoy las tablas son pequenas y
+-- todo dura milisegundos.
+--
+-- Alternativa para tablas grandes: ADD CONSTRAINT ... NOT VALID (solo toma el
+-- lock un instante y valida las filas NUEVAS) y, en una migracion posterior,
+-- ALTER TABLE ... VALIDATE CONSTRAINT ..., que recorre las filas existentes con
+-- un lock SHARE UPDATE EXCLUSIVE (no bloquea escrituras). Los UNIQUE de los
+-- padres irian antes con CREATE UNIQUE INDEX CONCURRENTLY, en su propia
+-- migracion, porque no puede correr dentro de una transaccion.
+
+-- ---------------------------------------------------------------------------
+-- 0. row_security = off (transaccion actual). Las tablas tienen RLS FORCE, que
+--    tambien aplica al owner si no es superusuario ni BYPASSRLS: la comprobacion
+--    previa contaria 0 filas en silencio y daria un falso "todo limpio". Con
+--    row_security = off, cualquier consulta a la que se le aplicaria una
+--    politica FALLA ("query would be affected by row-level security policy")
+--    en vez de filtrar. O se ven todas las filas, o la migracion se detiene. Si
+--    se detiene por esto, hay que correrla con un rol superusuario o BYPASSRLS.
+--    (Las FK en si se validan saltando la RLS, asi que no dependen de esto.)
+-- ---------------------------------------------------------------------------
+SET LOCAL row_security = off;
+
+-- ---------------------------------------------------------------------------
+-- 0b. Locks (ver arriba). Padres primero, luego hijas.
+-- ---------------------------------------------------------------------------
+LOCK TABLE "patients", "locations", "treatment_plans", "payment_plans",
+  "inventory_items", "location_schedules"
+  IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "medical_history_versions", "clinical_entries", "tooth_records",
+  "treatment_plan_items", "payments", "installments", "appointments",
+  "inventory_movements", "location_schedule_ranges"
+  IN SHARE ROW EXCLUSIVE MODE;
 
 -- ---------------------------------------------------------------------------
 -- 1. Pre-flight. Si hay filas cuyo padre no existe en el MISMO tenant (o cuyo
---    patientId no es el del plan), se aborta con un mensaje claro ANTES de
---    tocar nada (es la primera sentencia). NUNCA se borran ni se reescriben
---    datos: hay que revisarlos a mano, `prisma migrate resolve --rolled-back`
---    y reintentar.
+--    patientId no es el del plan), se aborta con un mensaje claro antes de
+--    crear ningun indice ni FK. NUNCA se borran ni se reescriben datos: hay
+--    que revisarlos a mano, `prisma migrate resolve --rolled-back` y reintentar.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -90,7 +130,7 @@ BEGIN
 
   IF bad <> '' THEN
     RAISE EXCEPTION 'SEC-004: hay filas que referencian un padre de OTRO tenant (o inexistente, o con un patientId distinto del de su plan). No se crean las FK compuestas ni se toca ningun dato. Filas por FK:%', bad
-      USING HINT = 'Revisa y corrige esas filas a mano (tenantId de hijo y padre), marca la migracion con prisma migrate resolve --rolled-back 20261015120000_tenant_composite_fks y vuelve a ejecutar prisma migrate deploy.';
+      USING HINT = 'Revisa y corrige esas filas a mano (tenantId de hijo y padre), marca la migracion con prisma migrate resolve --rolled-back 20261015130000_tenant_composite_fks y vuelve a ejecutar prisma migrate deploy.';
   END IF;
 END $$;
 

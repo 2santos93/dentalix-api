@@ -188,7 +188,7 @@ model Patient {
   // MedicalHistoryVersion, ClinicalEntry y ToothRecord: permite referenciar un
   // paciente exigiendo que el tenant coincida, cerrando el cross-tenant a
   // nivel DB (las FK de Postgres se chequean saltando la RLS, así que una FK
-  // a `id` sola no basta). Ver 20261015120000_tenant_composite_fks (SEC-004).
+  // a `id` sola no basta). Ver 20261015130000_tenant_composite_fks (SEC-004).
   @@unique([tenantId, id], map: "patients_tenant_id_key")
   @@index([tenantId])
   @@map("patients")
@@ -218,7 +218,7 @@ model MedicalHistoryVersion {
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
-  // SEC-004, 20261015120000_tenant_composite_fks).
+  // SEC-004, 20261015130000_tenant_composite_fks).
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
@@ -240,7 +240,7 @@ model ClinicalEntry {
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
-  // SEC-004, 20261015120000_tenant_composite_fks).
+  // SEC-004, 20261015130000_tenant_composite_fks).
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
   @@index([tenantId, patientId, entryDate])
@@ -309,7 +309,7 @@ model ToothRecord {
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
-  // SEC-004, 20261015120000_tenant_composite_fks).
+  // SEC-004, 20261015130000_tenant_composite_fks).
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
   @@index([tenantId, patientId])
@@ -387,7 +387,7 @@ model TreatmentPlan {
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
-  // SEC-004, 20261015120000_tenant_composite_fks).
+  // SEC-004, 20261015130000_tenant_composite_fks).
   patient      Patient             @relation(fields: [tenantId, patientId], references: [tenantId, id])
   items        TreatmentPlanItem[]
   payments     Payment[]
