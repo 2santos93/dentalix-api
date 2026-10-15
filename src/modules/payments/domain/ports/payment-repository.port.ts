@@ -1,5 +1,6 @@
 import { PaymentMethod } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
+import { CashPayment } from '../entities/cash-payment.entity';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
 // guarded request context (never the client), same convention as
@@ -28,6 +29,39 @@ export interface CreatePaymentRepoInput {
 export interface ListPaymentsReceivedInRangeParams {
   from: Date;
   to: Date;
+}
+
+export interface ListCashRegisterParams {
+  /** Inicio del rango, inclusive (medianoche UTC del primer día). */
+  from: Date;
+  /** Fin del rango, EXCLUSIVO (medianoche UTC del día siguiente al último). */
+  toExclusive: Date;
+  method?: PaymentMethod;
+  /** Ya normalizado por el caso de uso. */
+  skip: number;
+  /** Ya acotado por el caso de uso. */
+  take: number;
+}
+
+/**
+ * Suma de un grupo (moneda, método) con los mismos filtros que la página.
+ * `total` es la suma exacta de SQL sobre `Decimal(14,2)` pasada a `number`.
+ */
+export interface CashRegisterGroup {
+  currency: string;
+  method: PaymentMethod | null;
+  total: number;
+  count: number;
+}
+
+export interface CashRegisterPage {
+  items: CashPayment[];
+  /** Filas que casan con los filtros (no solo las de esta página). */
+  total: number;
+  /** Agregado por (moneda, método) del período entero, sin paginar. */
+  groups: CashRegisterGroup[];
+  /** La sede activa del request, o `null` en la vista consolidada. */
+  scopeLocation: { id: string; name: string } | null;
 }
 
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
@@ -76,4 +110,15 @@ export interface PaymentRepository {
   listReceivedInRange(
     params: ListPaymentsReceivedInRangeParams,
   ): Promise<Payment[]>;
+
+  /**
+   * La CAJA: una página de abonos activos del período (de la sede activa, o
+   * de toda la clínica sin sede), con paciente/plan/sede resueltos en la misma
+   * consulta, más el agregado por (moneda, método) del período entero. Página,
+   * conteo y agregado van en la MISMA transacción: los totales describen
+   * siempre el mismo universo que las filas. Orden `paidAt` DESC, `id` DESC.
+   */
+  listForCashRegister(
+    params: ListCashRegisterParams,
+  ): Promise<CashRegisterPage>;
 }

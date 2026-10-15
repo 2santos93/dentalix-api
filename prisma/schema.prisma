@@ -520,6 +520,14 @@ model Payment {
   // Patient.@@unique(patients_tenant_doc_key) / the tenants_subdomain_key
   // and users_email_key partial unique indexes.
   @@index([tenantId, paidAt], map: "payments_tenantId_paidAt_active_idx")
+  // La caja con una sede activa (GET /payments + X-Location-Id) filtra
+  // tenantId + locationId + rango de paidAt + deletedAt IS NULL. Parcial igual
+  // que el de arriba: el WHERE vive solo en la migración
+  // 20261015120000_payments_tenant_location_paidat_index, y el `map` mantiene
+  // nombre+columnas en sync para que migrate status/deploy no vean drift. Un
+  // `prisma migrate dev` puede proponer "arreglarlo" a índice completo: NO
+  // aceptes ese diff.
+  @@index([tenantId, locationId, paidAt], map: "payments_tenantId_locationId_paidAt_active_idx")
   @@map("payments")
 }
 

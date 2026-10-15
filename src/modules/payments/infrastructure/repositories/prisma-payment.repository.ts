@@ -4,11 +4,14 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  CashRegisterPage,
   CreatePaymentRepoInput,
+  ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   PaymentRepository,
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
+import { CashPayment } from '../../domain/entities/cash-payment.entity';
 
 type PrismaPayment = Prisma.PaymentGetPayload<Record<string, never>>;
 
@@ -26,6 +29,55 @@ function mapToEntity(payment: PrismaPayment): Payment {
     createdById: payment.createdById,
     createdAt: payment.createdAt,
     updatedAt: payment.updatedAt,
+  };
+}
+
+// Lo que la caja lee de cada abono: el abono más paciente (vía su plan), plan y
+// sede, en una sola `findMany` con `select` anidado — Prisma resuelve cada
+// relación con UNA consulta por nivel para toda la página (`IN (...)`), nunca
+// una por fila, así que el número de consultas no crece con la página.
+const CASH_PAYMENT_SELECT = {
+  id: true,
+  paidAt: true,
+  amount: true,
+  currency: true,
+  method: true,
+  notes: true,
+  location: { select: { id: true, name: true } },
+  plan: {
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      patient: { select: { id: true, firstName: true, lastName: true } },
+    },
+  },
+} satisfies Prisma.PaymentSelect;
+
+type PrismaCashPayment = Prisma.PaymentGetPayload<{
+  select: typeof CASH_PAYMENT_SELECT;
+}>;
+
+function mapToCashPayment(row: PrismaCashPayment): CashPayment {
+  return {
+    id: row.id,
+    paidAt: row.paidAt,
+    amount: row.amount.toNumber(),
+    currency: row.currency,
+    method: row.method,
+    notes: row.notes,
+    location: { id: row.location.id, name: row.location.name },
+    // `Payment.patientId` es la copia desnormalizada de `plan.patientId` (ver
+    // RecordPaymentUseCase), así que el paciente del plan ES el del abono.
+    patient: {
+      id: row.plan.patient.id,
+      fullName: `${row.plan.patient.firstName} ${row.plan.patient.lastName}`,
+    },
+    treatmentPlan: {
+      id: row.plan.id,
+      status: row.plan.status,
+      createdAt: row.plan.createdAt,
+    },
   };
 }
 
@@ -164,6 +216,65 @@ export class PrismaPaymentRepository implements PaymentRepository {
         orderBy: { paidAt: 'desc' },
       });
       return payments.map(mapToEntity);
+    });
+  }
+
+  async listForCashRegister(
+    params: ListCashRegisterParams,
+  ): Promise<CashRegisterPage> {
+    const locationId = this.tenantContext.getLocationId();
+    const where: Prisma.PaymentWhereInput = {
+      deletedAt: null,
+      paidAt: { gte: params.from, lt: params.toExclusive },
+      ...(params.method ? { method: params.method } : {}),
+      // La caja es por sede, igual que listReceivedInRange: es lo que se
+      // arquea. Con sede, la sirve payments_tenantId_locationId_paidAt_active_idx;
+      // sin ella (vista consolidada), payments_tenantId_paidAt_active_idx.
+      ...this.locationFilter(),
+    };
+
+    return this.prisma.runWithTenant(async (tx) => {
+      // Página, conteo, agregado y sede en la MISMA transacción: un abono
+      // registrado o anulado a la vez no puede dejar un total que describa
+      // otras filas que las devueltas.
+      const [rows, total, groups, scopeLocation] = await Promise.all([
+        tx.payment.findMany({
+          where,
+          select: CASH_PAYMENT_SELECT,
+          // `paidAt` es un día civil: todos los abonos de un día empatan, y
+          // sin un desempate estable la paginación podría repetir o saltarse
+          // filas de ese día entre una página y la siguiente.
+          orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
+          skip: params.skip,
+          take: params.take,
+        }),
+        tx.payment.count({ where }),
+        tx.payment.groupBy({
+          by: ['currency', 'method'],
+          where,
+          _sum: { amount: true },
+          _count: { _all: true },
+          orderBy: [{ currency: 'asc' }, { method: 'asc' }],
+        }),
+        locationId
+          ? tx.location.findFirst({
+              where: { id: locationId },
+              select: { id: true, name: true },
+            })
+          : Promise.resolve(null),
+      ]);
+
+      return {
+        items: rows.map(mapToCashPayment),
+        total,
+        groups: groups.map((group) => ({
+          currency: group.currency,
+          method: group.method,
+          total: group._sum.amount?.toNumber() ?? 0,
+          count: group._count._all,
+        })),
+        scopeLocation,
+      };
     });
   }
 }

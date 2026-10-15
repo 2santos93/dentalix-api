@@ -5,6 +5,7 @@ import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-c
 import { VoidPaymentUseCase } from './application/use-cases/void-payment.use-case';
 import { GetPlanBalanceUseCase } from './application/use-cases/get-plan-balance.use-case';
 import { GetPaymentsTotalsUseCase } from './application/use-cases/get-payments-totals.use-case';
+import { ListCashPaymentsUseCase } from './application/use-cases/list-cash-payments.use-case';
 import { PAYMENT_REPOSITORY } from './domain/ports/payment-repository.port';
 import { PrismaPaymentRepository } from './infrastructure/repositories/prisma-payment.repository';
 import { PaymentsController } from './presentation/payments.controller';
@@ -33,6 +34,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     VoidPaymentUseCase,
     GetPlanBalanceUseCase,
     GetPaymentsTotalsUseCase,
+    ListCashPaymentsUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PaymentsController.

@@ -1,0 +1,28 @@
+-- Índice para la CAJA con sede activa (GET /payments con X-Location-Id,
+-- PrismaPaymentRepository.listForCashRegister): filtra "payments" por
+-- tenantId + locationId + deletedAt IS NULL + un rango de paidAt, y ordena por
+-- paidAt DESC. Sin él, el planificador solo tiene
+-- payments_tenantId_paidAt_active_idx (todas las sedes del rango, filtrando la
+-- sede fila a fila) o payments_tenantId_locationId_idx (toda la historia de la
+-- sede, filtrando el rango fila a fila). La vista consolidada (sin sede) ya la
+-- cubre payments_tenantId_paidAt_active_idx y no cambia.
+--
+-- `method` y el desempate por `id` NO van en el índice a propósito: el
+-- resumen del período (groupBy moneda+método) recorre igualmente todas las
+-- filas del rango, así que el método se filtra sobre ellas sin coste extra, y
+-- ordenar por id dentro de un mismo día es un sort incremental sobre unas
+-- pocas filas.
+--
+-- Parcial (WHERE "deletedAt" IS NULL): toda lectura de la caja excluye los
+-- abonos anulados -- mismo criterio y patrón que
+-- 20260726010000_payments_tenant_paidat_index. El DSL de Prisma no expresa el
+-- WHERE, así que schema.prisma declara
+-- `@@index([tenantId, locationId, paidAt], map: "payments_tenantId_locationId_paidAt_active_idx")`
+-- (sin WHERE) y el predicado parcial se añade aquí a mano. Nombre y columnas
+-- coinciden con el schema, así que `prisma migrate status` / `migrate deploy`
+-- no ven drift -- un `prisma migrate dev` futuro puede proponer "arreglarlo" a
+-- índice completo; NO aceptes ese diff.
+--
+-- Aditivo: no toca ni sustituye ningún índice existente (compatible hacia
+-- atrás con el código desplegado).
+CREATE INDEX "payments_tenantId_locationId_paidAt_active_idx" ON "payments" ("tenantId", "locationId", "paidAt") WHERE "deletedAt" IS NULL;

@@ -1,6 +1,8 @@
 import { Payment } from '../../../domain/entities/payment.entity';
 import {
+  CashRegisterPage,
   CreatePaymentRepoInput,
+  ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   PaymentRepository,
 } from '../../../domain/ports/payment-repository.port';
@@ -142,5 +144,19 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       .filter((p) => p.paidAt >= params.from && p.paidAt < params.to)
       .map((p) => this.toEntity(p));
     return Promise.resolve(rows);
+  }
+
+  // La caja une paciente, plan y sede, que este fake no modela: ningún caso de
+  // uso que lo use la necesita. ListCashPaymentsUseCase se prueba con un espía
+  // que sobreescribe este método (ver list-cash-payments.use-case.spec.ts) y la
+  // consulta real, con sus joins, en test/cash-register.e2e-spec.ts.
+  listForCashRegister(
+    params: ListCashRegisterParams,
+  ): Promise<CashRegisterPage> {
+    return Promise.reject(
+      new Error(
+        `listForCashRegister(${params.from.toISOString()}) not implemented in this fake`,
+      ),
+    );
   }
 }

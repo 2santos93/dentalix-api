@@ -6,19 +6,26 @@ import {
   Headers,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiHeader,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { PaymentDto } from './dto/payment.dto';
 import { PlanBalanceDto } from './dto/plan-balance.dto';
+import { ListCashPaymentsQueryDto } from './dto/list-cash-payments-query.dto';
+import { CashPaymentsResponseDto } from './dto/cash-payments-response.dto';
 import { RecordPaymentUseCase } from '../application/use-cases/record-payment.use-case';
 import { ListPaymentsUseCase } from '../application/use-cases/list-payments.use-case';
 import { VoidPaymentUseCase } from '../application/use-cases/void-payment.use-case';
@@ -26,6 +33,10 @@ import {
   GetPlanBalanceUseCase,
   GetPlanBalanceResult,
 } from '../application/use-cases/get-plan-balance.use-case';
+import {
+  ListCashPaymentsUseCase,
+  ListCashPaymentsOutput,
+} from '../application/use-cases/list-cash-payments.use-case';
 import { Payment } from '../domain/entities/payment.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -58,7 +69,43 @@ export class PaymentsController {
     private readonly listPayments: ListPaymentsUseCase,
     private readonly voidPayment: VoidPaymentUseCase,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    private readonly listCashPayments: ListCashPaymentsUseCase,
   ) {}
+
+  /**
+   * La CAJA: todos los abonos de la clínica en un período, sin entrar plan por
+   * plan. Mismos roles que el resto de pagos (PAYMENT_ROLES, a nivel de clase):
+   * es el mismo dato financiero visto de través. La sede la pone
+   * `X-Location-Id` (validada por TenantContextInterceptor); sin ella, la vista
+   * consolidada de la clínica.
+   */
+  @Get('payments')
+  @ApiOperation({
+    summary: 'Caja: abonos del período con resumen por moneda y método',
+  })
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description: 'Sede activa. Sin cabecera: todas las sedes de la clínica.',
+  })
+  @ApiOkResponse({ type: CashPaymentsResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'Fecha inválida, from > to, período de más de 366 días, método ' +
+      'desconocido o sede ajena a la clínica',
+  })
+  @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
+  listCash(
+    @Query() query: ListCashPaymentsQueryDto,
+  ): Promise<ListCashPaymentsOutput> {
+    return this.listCashPayments.execute({
+      from: query.from,
+      to: query.to,
+      method: query.method,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+  }
 
   @Post('treatment-plans/:id/payments')
   @ApiCreatedResponse({ type: PaymentDto })
