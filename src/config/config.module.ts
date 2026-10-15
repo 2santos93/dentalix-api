@@ -1,26 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
+import { validateEnv } from './env.validation';
 
 @Module({
   imports: [
     NestConfigModule.forRoot({
       isGlobal: true,
-      validate: (env: Record<string, unknown>) => {
-        const required = [
-          'DATABASE_URL',
-          'DIRECT_URL',
-          'JWT_ACCESS_SECRET',
-          'JWT_REFRESH_SECRET',
-          'JWT_ACCESS_TTL',
-          'JWT_REFRESH_TTL',
-        ];
-        for (const key of required) {
-          if (env[key] == null || env[key] === '') {
-            throw new Error(`Missing required env var: ${key}`);
-          }
-        }
-        return env;
-      },
+      validate: validateEnv,
     }),
   ],
 })

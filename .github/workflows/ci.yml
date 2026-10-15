@@ -63,8 +63,11 @@ jobs:
       # rol `dentalix_app` sin privilegios para que la app corra bajo RLS).
       DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_test?schema=public
       DIRECT_URL: postgresql://dentalix:dentalix@localhost:5432/dentalix_test?schema=public
-      JWT_ACCESS_SECRET: ci-test-access-secret
-      JWT_REFRESH_SECRET: ci-test-refresh-secret
+      # Secretos JWT ficticios y públicos: ≥32 caracteres y distintos para pasar
+      # la validación del arranque; la marca "solo-test" hace que la API los
+      # rechace con NODE_ENV=production.
+      JWT_ACCESS_SECRET: solo-test-ci-access-4f1d9b2e7a6c3058e1b4d7a0c9f2e6b3
+      JWT_REFRESH_SECRET: solo-test-ci-refresh-8c2a5e9f1b7d4063a2e5c8f1b4d7a0e9
       JWT_ACCESS_TTL: 900s
       JWT_REFRESH_TTL: 30d
       EXCHANGE_APP_ID: ''
