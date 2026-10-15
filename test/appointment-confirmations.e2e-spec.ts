@@ -281,6 +281,26 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         .expect(401);
     });
 
+    it('host manipulado (resuelve a la clínica pero lleva otro dominio tras el ":"): 400 y no revoca el enlace vigente', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+
+      for (const evil of [
+        `${clinicA.host}:3001@evil.com`,
+        `${clinicA.host}:@evil.com`,
+      ]) {
+        const res = await request(server)
+          .post(`/api/v1/appointments/${appt.id}/confirmation-link`)
+          .set('X-Tenant-Host', evil)
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(400);
+        expect(JSON.stringify(res.body)).not.toContain('evil.com/');
+      }
+      expect((await view(clinicA.host, token).expect(200)).body).toMatchObject({
+        status: 'PENDING',
+      });
+    });
+
     it('la cita de otra clínica no existe (404); id no UUID 400; cita cancelada 409', async () => {
       const apptB = await createAppointment(clinicB, patientB);
       await generateLink(clinicA, apptB.id).expect(404);
@@ -397,15 +417,24 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       expect(again.respondedAt).not.toBeNull();
     });
 
-    it('dos clics simultáneos: solo uno responde', async () => {
-      const appt = await createAppointment(clinicA, patientA);
-      const { token } = await newLink(clinicA, appt.id);
+    it('clics simultáneos: solo uno responde y los demás ven "ya respondido" (409, no 410)', async () => {
+      // Varias rondas: la carrera (lectura del enlace y de la cita en fotos
+      // distintas → 410) solo aparecía en alguna corrida suelta.
+      for (let round = 0; round < 4; round++) {
+        const appt = await createAppointment(clinicA, patientA);
+        const { token } = await newLink(clinicA, appt.id);
 
-      const results = await Promise.all([
-        respond(clinicA.host, token, 'confirm'),
-        respond(clinicA.host, token, 'cancel'),
-      ]);
-      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+        const results = await Promise.all([
+          respond(clinicA.host, token, 'confirm'),
+          respond(clinicA.host, token, 'cancel'),
+          respond(clinicA.host, token, 'call_me'),
+        ]);
+        expect(results.map((r) => r.status).sort()).toEqual([200, 409, 409]);
+        const rows = await raw.appointmentConfirmation.findMany({
+          where: { appointmentId: appt.id },
+        });
+        expect(rows.filter((r) => r.respondedAt !== null)).toHaveLength(1);
+      }
     });
 
     it('cancel: CANCELLED', async () => {

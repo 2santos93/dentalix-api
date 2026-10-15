@@ -150,23 +150,32 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
   }
 
   async findByTokenHash(tokenHash: string): Promise<ConfirmationLookup | null> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const confirmation = await tx.appointmentConfirmation.findUnique({
-        where: { tokenHash },
-        select: CONFIRMATION_SELECT,
-      });
-      if (!confirmation) return null;
-      const appointment = await tx.appointment.findFirst({
-        where: { id: confirmation.appointmentId, deletedAt: null },
-        select: APPOINTMENT_SELECT,
-      });
-      return {
-        confirmation: confirmation satisfies AppointmentConfirmation,
-        appointment: appointment
-          ? await this.toAppointment(tx, appointment)
-          : null,
-      };
-    });
+    // REPEATABLE READ: enlace y cita se leen en dos sentencias y TIENEN que
+    // verse en la misma foto. En READ COMMITTED, si otra respuesta hace COMMIT
+    // entre las dos lecturas se ve el enlace aún sin responder pero la cita ya
+    // CONFIRMED/CANCELLED → "la cita cambió" → 410, cuando lo correcto es
+    // "ya respondido" (409). Era el fallo intermitente de "dos clics
+    // simultáneos". Solo lee, así que RR no puede fallar por serialización.
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const confirmation = await tx.appointmentConfirmation.findUnique({
+          where: { tokenHash },
+          select: CONFIRMATION_SELECT,
+        });
+        if (!confirmation) return null;
+        const appointment = await tx.appointment.findFirst({
+          where: { id: confirmation.appointmentId, deletedAt: null },
+          select: APPOINTMENT_SELECT,
+        });
+        return {
+          confirmation: confirmation satisfies AppointmentConfirmation,
+          appointment: appointment
+            ? await this.toAppointment(tx, appointment)
+            : null,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   async findClinicBranding(): Promise<ClinicBranding | null> {

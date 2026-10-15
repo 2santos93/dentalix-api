@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   NotFoundException,
   Param,
@@ -12,7 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { CreateConfirmationLinkUseCase } from '../application/use-cases/create-confirmation-link.use-case';
 import { ConfirmationLinkDto } from './dto/appointment-confirmation.dto';
-import { buildConfirmationUrl } from './confirmation-url';
+import { buildConfirmationUrl, safeLinkHost } from './confirmation-url';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -55,10 +56,15 @@ export class ConfirmationLinksController {
     @Req() req: AuthenticatedRequest,
   ): Promise<ConfirmationLinkDto> {
     // TenantContextInterceptor ya exigió que el host resuelva a la clínica
-    // del JWT, así que `host` es SIEMPRE un host de esta clínica.
-    const host = req.tenantHost?.host;
-    if (!host) {
+    // del JWT, pero la resolución ignora lo que va tras el `:`: se valida el
+    // host entero ANTES de emitir (un host manipulado no debe ni revocar el
+    // enlace vigente). Ver SAFE_HOST en confirmation-url.ts.
+    if (!req.tenantHost?.host) {
       throw new NotFoundException('Appointment not found');
+    }
+    const host = safeLinkHost(req.tenantHost.host);
+    if (!host) {
+      throw new BadRequestException('Invalid host');
     }
     const result = await this.createLink.execute({
       appointmentId: id,
