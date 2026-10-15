@@ -25,4 +25,14 @@
 --
 -- Aditivo: no toca ni sustituye ningún índice existente (compatible hacia
 -- atrás con el código desplegado).
+--
+-- Sin CONCURRENTLY, a propósito: `prisma migrate deploy` ejecuta cada
+-- migración dentro de una transacción y CREATE INDEX CONCURRENTLY no puede ir
+-- dentro de una. Es el mismo criterio que todos los índices previos de esta
+-- tabla (20260726010000_payments_tenant_paidat_index,
+-- 20260801150000_add_locations): "payments" es una tabla pequeña (abonos de
+-- clínicas) y el bloqueo de escrituras que toma CREATE INDEX dura lo que tarda
+-- en construirse. Si la tabla creciera hasta que eso importe, la vía es crear
+-- el índice CONCURRENTLY a mano fuera de la migración y marcar esta como
+-- aplicada (`prisma migrate resolve --applied`).
 CREATE INDEX "payments_tenantId_locationId_paidAt_active_idx" ON "payments" ("tenantId", "locationId", "paidAt") WHERE "deletedAt" IS NULL;

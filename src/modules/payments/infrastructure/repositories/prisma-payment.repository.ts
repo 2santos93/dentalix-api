@@ -233,48 +233,56 @@ export class PrismaPaymentRepository implements PaymentRepository {
       ...this.locationFilter(),
     };
 
-    return this.prisma.runWithTenant(async (tx) => {
-      // Página, conteo, agregado y sede en la MISMA transacción: un abono
-      // registrado o anulado a la vez no puede dejar un total que describa
-      // otras filas que las devueltas.
-      const [rows, total, groups, scopeLocation] = await Promise.all([
-        tx.payment.findMany({
-          where,
-          select: CASH_PAYMENT_SELECT,
-          // `paidAt` es un día civil: todos los abonos de un día empatan, y
-          // sin un desempate estable la paginación podría repetir o saltarse
-          // filas de ese día entre una página y la siguiente.
-          orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
-          skip: params.skip,
-          take: params.take,
-        }),
-        tx.payment.count({ where }),
-        tx.payment.groupBy({
-          by: ['currency', 'method'],
-          where,
-          _sum: { amount: true },
-          _count: { _all: true },
-          orderBy: [{ currency: 'asc' }, { method: 'asc' }],
-        }),
-        locationId
-          ? tx.location.findFirst({
-              where: { id: locationId },
-              select: { id: true, name: true },
-            })
-          : Promise.resolve(null),
-      ]);
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE
+        // READ: todas las sentencias ven la misma foto, así que un abono
+        // registrado o anulado a mitad de camino no puede dejar un total que
+        // describa otras filas que las devueltas (en READ COMMITTED, el nivel
+        // por defecto, cada sentencia vería su propia foto).
+        const [rows, total, groups, scopeLocation] = await Promise.all([
+          tx.payment.findMany({
+            where,
+            select: CASH_PAYMENT_SELECT,
+            // `paidAt` es un día civil: todos los abonos de un día empatan, y
+            // sin un desempate estable la paginación podría repetir o saltarse
+            // filas de ese día entre una página y la siguiente.
+            orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
+            skip: params.skip,
+            take: params.take,
+          }),
+          tx.payment.count({ where }),
+          tx.payment.groupBy({
+            by: ['currency', 'method'],
+            where,
+            _sum: { amount: true },
+            _count: { _all: true },
+            orderBy: [{ currency: 'asc' }, { method: 'asc' }],
+          }),
+          locationId
+            ? tx.location.findFirst({
+                // El interceptor ya la validó (activa y de esta clínica); se
+                // repite el filtro para que una sede retirada entre la
+                // validación y esta lectura no reaparezca como alcance.
+                where: { id: locationId, deletedAt: null },
+                select: { id: true, name: true },
+              })
+            : Promise.resolve(null),
+        ]);
 
-      return {
-        items: rows.map(mapToCashPayment),
-        total,
-        groups: groups.map((group) => ({
-          currency: group.currency,
-          method: group.method,
-          total: group._sum.amount?.toNumber() ?? 0,
-          count: group._count._all,
-        })),
-        scopeLocation,
-      };
-    });
+        return {
+          items: rows.map(mapToCashPayment),
+          total,
+          groups: groups.map((group) => ({
+            currency: group.currency,
+            method: group.method,
+            total: group._sum.amount?.toNumber() ?? 0,
+            count: group._count._all,
+          })),
+          scopeLocation,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 }

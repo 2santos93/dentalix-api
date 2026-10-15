@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Matches, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 import { MAX_RANGE_DAYS } from '../../application/use-cases/list-cash-payments.use-case';
 
@@ -44,10 +44,14 @@ export class ListCashPaymentsQueryDto {
   @Min(1)
   page?: number;
 
+  // El caso de uso también lo acota a 100, pero aquí se rechaza: Swagger
+  // anuncia `maximum: 100` y un pageSize=5000 que vuelve con 100 filas en
+  // silencio contradice el contrato publicado.
   @ApiPropertyOptional({ minimum: 1, maximum: 100, default: 20 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(100)
   pageSize?: number;
 }

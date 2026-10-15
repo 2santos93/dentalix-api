@@ -512,6 +512,9 @@ describe('Caja — GET /payments (e2e)', () => {
     await getA({ to: '2026-10-31' }).expect(400);
     await getA({ ...OCTOBER, method: 'CHEQUE' }).expect(400);
     await getA({ ...OCTOBER, pageSize: 0 }).expect(400);
+    // El contrato publica `maximum: 100`: pasarse se rechaza, no se recorta.
+    await getA({ ...OCTOBER, pageSize: 101 }).expect(400);
+    await getA({ ...OCTOBER, pageSize: 100 }).expect(200);
   });
 
   it('respeta PAYMENT_ROLES: recepción entra; odontólogo y asistente reciben 403; sin token 401', async () => {

@@ -115,8 +115,10 @@ export interface PaymentRepository {
    * La CAJA: una página de abonos activos del período (de la sede activa, o
    * de toda la clínica sin sede), con paciente/plan/sede resueltos en la misma
    * consulta, más el agregado por (moneda, método) del período entero. Página,
-   * conteo y agregado van en la MISMA transacción: los totales describen
-   * siempre el mismo universo que las filas. Orden `paidAt` DESC, `id` DESC.
+   * conteo y agregado van en UNA transacción REPEATABLE READ (misma foto para
+   * todas las sentencias): los totales describen siempre el mismo universo que
+   * las filas, aunque se registre un abono a la vez. Orden `paidAt` DESC,
+   * `id` DESC.
    */
   listForCashRegister(
     params: ListCashRegisterParams,

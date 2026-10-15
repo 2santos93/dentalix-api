@@ -3,6 +3,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { guardHardDeletes } from './no-hard-delete';
 
+export interface RunWithTenantOptions {
+  isolationLevel?: Prisma.TransactionIsolationLevel;
+}
+
 @Injectable()
 export class PrismaService
   extends PrismaClient
@@ -32,20 +36,32 @@ export class PrismaService
    *   (`AsyncLocalStorage`), que es lo que un guard/handler ya dejó fijado para el
    *   request actual. Cierra el footgun de Fase 0A: los repositorios ya no tienen
    *   que pasar el tenant a mano en cada llamada. Lanza si no hay tenant en contexto.
+   *
+   * `options.isolationLevel` (opcional, ambas formas): sin él, el nivel por
+   * defecto de Postgres (READ COMMITTED), que es lo que quiere casi todo. Una
+   * lectura que hace VARIAS consultas y necesita que todas vean la MISMA foto
+   * (p. ej. la caja: página + conteo + agregado) pide `RepeatableRead`; en READ
+   * COMMITTED cada sentencia ve su propia foto y un abono registrado entre dos
+   * de ellas dejaría totales que no casan con las filas.
    */
   async runWithTenant<T>(
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
+    options?: RunWithTenantOptions,
   ): Promise<T>;
   async runWithTenant<T>(
     tenantId: string,
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
+    options?: RunWithTenantOptions,
   ): Promise<T>;
   async runWithTenant<T>(
     tenantIdOrFn: string | ((tx: Prisma.TransactionClient) => Promise<T>),
-    maybeFn?: (tx: Prisma.TransactionClient) => Promise<T>,
+    fnOrOptions?:
+      ((tx: Prisma.TransactionClient) => Promise<T>) | RunWithTenantOptions,
+    maybeOptions?: RunWithTenantOptions,
   ): Promise<T> {
     let tenantId: string;
     let fn: (tx: Prisma.TransactionClient) => Promise<T>;
+    let options: RunWithTenantOptions | undefined;
 
     if (typeof tenantIdOrFn === 'function') {
       const contextTenantId = this.tenantContext.getTenantId();
@@ -54,10 +70,12 @@ export class PrismaService
       }
       tenantId = contextTenantId;
       fn = tenantIdOrFn;
+      options = fnOrOptions as RunWithTenantOptions | undefined;
     } else {
       tenantId = tenantIdOrFn;
-      // El overload público garantiza que `maybeFn` viene presente en esta rama.
-      fn = maybeFn as (tx: Prisma.TransactionClient) => Promise<T>;
+      // El overload público garantiza que la función viene presente en esta rama.
+      fn = fnOrOptions as (tx: Prisma.TransactionClient) => Promise<T>;
+      options = maybeOptions;
     }
 
     return this.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -65,6 +83,6 @@ export class PrismaService
       // `guardHardDeletes`: dentro de una transacción de tenant no se borra
       // nada de verdad, se retira con `deletedAt`. Ver no-hard-delete.ts.
       return fn(guardHardDeletes(tx));
-    });
+    }, options);
   }
 }
