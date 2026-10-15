@@ -14,6 +14,8 @@ describe('loadRateLimitConfig', () => {
     expect(cfg.password).toEqual({ limit: 5, ttlMs: 15 * 60_000 });
     expect(cfg.auth.limit).toBeLessThanOrEqual(20);
     expect(cfg.invitation.limit).toBeLessThanOrEqual(10);
+    // Holgado: solo frena la fuerza bruta distribuida contra una cuenta.
+    expect(cfg['login-account']).toEqual({ limit: 50, ttlMs: 60 * 60_000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {
@@ -26,6 +28,8 @@ describe('loadRateLimitConfig', () => {
         RATE_LIMIT_AUTH_LIMIT: '7',
         RATE_LIMIT_INVITATION_TTL_MS: '120000',
         RATE_LIMIT_PASSWORD_LIMIT: '2',
+        RATE_LIMIT_LOGIN_ACCOUNT_LIMIT: '9',
+        RATE_LIMIT_LOGIN_ACCOUNT_TTL_MS: '5000',
       }),
     );
     expect(cfg.global).toEqual({ limit: 50, ttlMs: 1000 });
@@ -36,6 +40,7 @@ describe('loadRateLimitConfig', () => {
       ttlMs: 120000,
     });
     expect(cfg.password.limit).toBe(2);
+    expect(cfg['login-account']).toEqual({ limit: 9, ttlMs: 5000 });
   });
 
   it('trata la cadena vacía como "no definida"', () => {

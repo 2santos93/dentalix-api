@@ -8,6 +8,7 @@ import {
   RATE_LIMIT_CONFIG,
   RateLimitConfig,
 } from '../src/shared/security/rate-limit.config';
+import { tooManyRequestsException } from '../src/shared/security/too-many-requests';
 import {
   SecuritySettings,
   loadSecuritySettings,
@@ -20,15 +21,20 @@ const LOW_LIMITS: RateLimitConfig = {
   global: { limit: 1000, ttlMs: 60_000 },
   auth: { limit: 8, ttlMs: 60_000 },
   login: { limit: 3, ttlMs: 60_000 },
+  'login-account': { limit: 6, ttlMs: 60_000 },
   invitation: { limit: 2, ttlMs: 60_000 },
   password: { limit: 2, ttlMs: 60_000 },
 };
 
-interface ErrorBody {
-  statusCode: number;
-  error: string;
-  message: string;
-}
+// JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
+// limitador de me/password solo lo decodifica para separar baldes por usuario.
+const fakeBearer = (sub: string): string =>
+  'Bearer ' +
+  [
+    Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+    Buffer.from(JSON.stringify({ sub })).toString('base64url'),
+    'firma-invalida',
+  ].join('.');
 
 async function buildApp(
   limits: RateLimitConfig,
@@ -62,12 +68,13 @@ function expectTooMany(res: request.Response): void {
   expect(Number.isInteger(retryAfter)).toBe(true);
   expect(retryAfter).toBeGreaterThan(0);
   expect(retryAfter).toBeLessThanOrEqual(60);
-  const body = res.body as ErrorBody;
-  expect(body.statusCode).toBe(429);
-  expect(body.error).toBe('Too Many Requests');
-  expect(body.message).toBe(
-    `Demasiadas solicitudes. Intenta de nuevo en ${retryAfter} segundos.`,
+  expect(res.body).toEqual(tooManyRequestsException(retryAfter).getResponse());
+  // Solo Retry-After: sin las cabeceras X-RateLimit-* / Retry-After-<nombre>
+  // de la librería (setHeaders: false).
+  const extra = Object.keys(res.headers).filter(
+    (h) => h.startsWith('x-ratelimit') || h.startsWith('retry-after-'),
   );
+  expect(extra).toEqual([]);
 }
 
 describe('Rate limiting (e2e)', () => {
@@ -126,7 +133,9 @@ describe('Rate limiting (e2e)', () => {
       );
     });
 
-    it('POST auth/refresh: 429 tras el límite por IP', async () => {
+    it('POST auth/refresh: balde propio (register ya agotado) y 429 tras el límite', async () => {
+      // auth/register agotó su balde `auth` en el test anterior; refresh comparte
+      // política pero cuenta en su propio balde, así que empieza de cero.
       for (let i = 0; i < LOW_LIMITS.auth.limit; i++) {
         const res = await request(app.getHttpServer())
           .post('/api/v1/auth/refresh')
@@ -165,18 +174,21 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await accept('guess-next'));
     });
 
-    it('POST me/password: 429 tras el límite (se aplica antes del JWT)', async () => {
-      const change = () =>
+    it('POST me/password: 429 por IP+usuario (se aplica antes del JWT)', async () => {
+      const change = (sub: string) =>
         request(app.getHttpServer())
           .post('/api/v1/me/password')
+          .set('Authorization', fakeBearer(sub))
           .send({ currentPassword: 'a', newPassword: 'b' });
       for (let i = 0; i < LOW_LIMITS.password.limit; i++) {
-        expect((await change()).status).toBe(401);
+        expect((await change('user-1')).status).toBe(401);
       }
-      expectTooMany(await change());
+      expectTooMany(await change('user-1'));
+      // Otro usuario de la misma clínica (misma IP por NAT) no queda bloqueado.
+      expect((await change('user-2')).status).toBe(401);
     });
 
-    it('las rutas no sensibles no usan los límites estrictos', async () => {
+    it('health nunca se limita (@SkipThrottle)', async () => {
       for (let i = 0; i < 10; i++) {
         await request(app.getHttpServer()).get('/api/v1/health').expect(200);
       }
@@ -207,6 +219,16 @@ describe('Rate limiting (e2e)', () => {
       ).toBe(401);
     });
 
+    it('login-account: frena la fuerza bruta distribuida contra un email desde muchas IPs', async () => {
+      const email = 'distributed@sonrisa.com';
+      for (let i = 0; i < LOW_LIMITS['login-account'].limit; i++) {
+        expect((await login(app, email, `203.0.113.${i + 1}`)).status).toBe(
+          401,
+        );
+      }
+      expectTooMany(await login(app, email, '203.0.113.200'));
+    });
+
     it('solo confía en el salto del proxy: un X-Forwarded-For prefijado por el cliente no cambia la clave', async () => {
       // El proxy AÑADE la IP real al final; lo que el cliente ponga delante se
       // ignora con 1 salto de confianza.
@@ -231,10 +253,18 @@ describe('Rate limiting (e2e)', () => {
     });
 
     it('aplica a cualquier ruta con un 429 en el mismo formato', async () => {
+      const branding = () =>
+        request(app.getHttpServer()).get('/api/v1/public/tenant/branding');
       for (let i = 0; i < 3; i++) {
+        expect((await branding()).status).not.toBe(429);
+      }
+      expectTooMany(await branding());
+    });
+
+    it('health queda fuera incluso del límite global', async () => {
+      for (let i = 0; i < 5; i++) {
         await request(app.getHttpServer()).get('/api/v1/health').expect(200);
       }
-      expectTooMany(await request(app.getHttpServer()).get('/api/v1/health'));
     });
   });
 });

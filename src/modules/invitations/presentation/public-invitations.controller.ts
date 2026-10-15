@@ -22,7 +22,8 @@ import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-t
 // public-branding.controller.ts; there is no JWT to cross-check.
 @ApiTags('public')
 @UseInterceptors(PublicTenantContextInterceptor)
-// Por IP: frena la enumeración de tokens (ver y aceptar comparten política).
+// Por IP: frena la enumeración de tokens. Ver y aceptar usan la misma
+// política, pero cada ruta cuenta en su propio balde.
 @RateLimit('invitation')
 @Controller('public/invitations')
 export class PublicInvitationsController {

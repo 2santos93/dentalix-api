@@ -6,6 +6,13 @@ config({ path: '.env.test' });
 // suben aquí (las variables ya presentes ganan). El 429 real se prueba en
 // test/rate-limit.e2e-spec.ts forzando límites bajos.
 const HIGH_LIMIT = '100000';
-for (const policy of ['GLOBAL', 'AUTH', 'LOGIN', 'INVITATION', 'PASSWORD']) {
+for (const policy of [
+  'GLOBAL',
+  'AUTH',
+  'LOGIN',
+  'LOGIN_ACCOUNT',
+  'INVITATION',
+  'PASSWORD',
+]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

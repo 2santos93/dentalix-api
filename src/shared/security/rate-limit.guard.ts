@@ -3,9 +3,9 @@ import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
 import { tooManyRequestsException } from './too-many-requests';
 
 /**
- * ThrottlerGuard con la respuesta 429 de Dentalix: siempre envía `Retry-After`
- * (la librería solo lo pone sin sufijo para el limitador `default`; para los
- * nombrados usa `Retry-After-<nombre>`) y el cuerpo en el formato de la API.
+ * ThrottlerGuard con la respuesta 429 de Dentalix: un único `Retry-After` en
+ * segundos (las cabeceras de la librería van desactivadas con
+ * `setHeaders: false`) y el cuerpo en el formato de errores de la API.
  */
 @Injectable()
 export class RateLimitGuard extends ThrottlerGuard {

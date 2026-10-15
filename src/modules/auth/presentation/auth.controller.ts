@@ -33,7 +33,7 @@ export class AuthController {
   }
 
   @Post('login')
-  @RateLimit('auth', 'login')
+  @RateLimit('auth', 'login', 'login-account')
   @ApiCreatedResponse({ type: AuthTokensDto })
   async loginHandler(
     @Req() req: TenantHostRequest,

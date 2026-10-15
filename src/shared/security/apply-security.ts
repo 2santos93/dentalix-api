@@ -32,9 +32,8 @@ export function applySecurity(
           upgradeInsecureRequests: null,
         },
       },
-      // Los avatares (/files) se incrustan con <img> desde la web, que vive en
-      // otro origen (y en dominios propios de marca blanca).
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      // Cross-Origin-Resource-Policy queda en el default (same-origin); solo
+      // FilesController lo abre a cross-origin para los avatares.
     }),
   );
 

@@ -1,4 +1,17 @@
-import { loginRateLimitKey } from './rate-limit.keys';
+import {
+  loginAccountRateLimitKey,
+  loginRateLimitKey,
+  passwordRateLimitKey,
+} from './rate-limit.keys';
+
+// JWT sin firma válida: la clave solo DECODIFICA el payload (la verificación
+// la hace JwtAuthGuard después).
+const fakeJwt = (payload: object): string =>
+  [
+    Buffer.from('{"alg":"HS256"}').toString('base64url'),
+    Buffer.from(JSON.stringify(payload)).toString('base64url'),
+    'firma',
+  ].join('.');
 
 describe('loginRateLimitKey', () => {
   const prefix = 'AuthController-loginHandler-login';
@@ -34,5 +47,76 @@ describe('loginRateLimitKey', () => {
     const key = loginRateLimitKey(prefix, '1.2.3.4', { email: 'a@x.com' });
     expect(key).not.toContain('a@x.com');
     expect(key).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('loginAccountRateLimitKey', () => {
+  const prefix = 'AuthController-loginHandler-login-account';
+
+  it('depende solo del email normalizado, no de la IP', () => {
+    const a = loginAccountRateLimitKey(prefix, { email: 'a@x.com' });
+    expect(loginAccountRateLimitKey(prefix, { email: ' A@X.com' })).toBe(a);
+    expect(loginAccountRateLimitKey(prefix, { email: 'b@x.com' })).not.toBe(a);
+    expect(a).toMatch(/^[a-f0-9]{64}$/);
+    expect(a).not.toContain('a@x.com');
+  });
+
+  it('no coincide con la clave IP+email del mismo email', () => {
+    expect(loginAccountRateLimitKey(prefix, { email: 'a@x.com' })).not.toBe(
+      loginRateLimitKey(prefix, '', { email: 'a@x.com' }),
+    );
+  });
+});
+
+describe('passwordRateLimitKey', () => {
+  const prefix = 'MeController-changePassword-password';
+
+  it('separa por usuario (sub del token) dentro de la misma IP', () => {
+    const a = passwordRateLimitKey(
+      prefix,
+      '1.2.3.4',
+      `Bearer ${fakeJwt({ sub: 'u1' })}`,
+    );
+    const b = passwordRateLimitKey(
+      prefix,
+      '1.2.3.4',
+      `Bearer ${fakeJwt({ sub: 'u2' })}`,
+    );
+    expect(a).not.toBe(b);
+  });
+
+  it('el mismo usuario con otro token (renovado) comparte balde', () => {
+    const a = passwordRateLimitKey(
+      prefix,
+      '1.2.3.4',
+      `Bearer ${fakeJwt({ sub: 'u1', iat: 1 })}`,
+    );
+    const b = passwordRateLimitKey(
+      prefix,
+      '1.2.3.4',
+      `Bearer ${fakeJwt({ sub: 'u1', iat: 2 })}`,
+    );
+    expect(b).toBe(a);
+  });
+
+  it('separa por IP para el mismo usuario', () => {
+    const token = `Bearer ${fakeJwt({ sub: 'u1' })}`;
+    expect(passwordRateLimitKey(prefix, '1.2.3.4', token)).not.toBe(
+      passwordRateLimitKey(prefix, '5.6.7.8', token),
+    );
+  });
+
+  it('si el token no se puede decodificar usa la cabecera completa (hasheada)', () => {
+    const a = passwordRateLimitKey(prefix, '1.2.3.4', 'Bearer basura');
+    const b = passwordRateLimitKey(prefix, '1.2.3.4', 'Bearer otra-basura');
+    expect(a).not.toBe(b);
+    expect(passwordRateLimitKey(prefix, '1.2.3.4', 'Bearer basura')).toBe(a);
+    expect(a).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('sin cabecera cae a un balde solo por IP', () => {
+    expect(passwordRateLimitKey(prefix, '1.2.3.4', undefined)).toBe(
+      passwordRateLimitKey(prefix, '1.2.3.4', ''),
+    );
   });
 });

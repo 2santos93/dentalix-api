@@ -3,14 +3,20 @@
  * entorno. Cada política tiene `RATE_LIMIT_<POLÍTICA>_LIMIT` (peticiones) y
  * `RATE_LIMIT_<POLÍTICA>_TTL_MS` (ventana en ms); ver `.env.example`.
  *
- * - global:     toda la API, por IP. Red de seguridad contra abuso/scraping,
- *               holgada porque una clínica entera suele salir por UNA IP (NAT).
- * - auth:       login/register/refresh, por IP (frena el "spraying" de emails).
- * - login:      login, por IP+email (fuerza bruta contra una cuenta).
- * - invitation: ver/aceptar invitación por token, por IP (enumeración).
- * - password:   cambio de contraseña, por IP (adivinar la contraseña actual).
+ * El límite se cuenta POR RUTA: las rutas que comparten política tienen cada
+ * una su propio balde (p. ej. 20/min en login y otros 20/min en register).
+ *
+ * - global:        cada ruta, por IP (salvo /health, con @SkipThrottle). Red
+ *                  de seguridad contra abuso/scraping, holgada porque una
+ *                  clínica entera suele salir por UNA IP (NAT).
+ * - auth:          login, register y refresh; por IP (frena el "spraying").
+ * - login:         login, por IP+email (fuerza bruta contra una cuenta).
+ * - login-account: login, solo por email (fuerza bruta distribuida).
+ * - invitation:    ver y aceptar invitación por token; por IP (enumeración).
+ * - password:      cambio de contraseña, por IP+usuario (contraseña actual).
  */
-export type RateLimitPolicy = 'auth' | 'login' | 'invitation' | 'password';
+export type RateLimitPolicy =
+  'auth' | 'login' | 'login-account' | 'invitation' | 'password';
 
 export interface RateLimitRule {
   limit: number;
@@ -27,6 +33,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   global: { limit: 1000, ttlMs: MINUTE },
   auth: { limit: 20, ttlMs: MINUTE },
   login: { limit: 5, ttlMs: 15 * MINUTE },
+  'login-account': { limit: 50, ttlMs: 60 * MINUTE },
   invitation: { limit: 10, ttlMs: MINUTE },
   password: { limit: 5, ttlMs: 15 * MINUTE },
 };
@@ -46,7 +53,7 @@ function positiveInt(env: EnvReader, key: string, fallback: number): number {
 
 export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
   const rule = (name: keyof RateLimitConfig): RateLimitRule => {
-    const prefix = `RATE_LIMIT_${name.toUpperCase()}`;
+    const prefix = `RATE_LIMIT_${name.toUpperCase().replace('-', '_')}`;
     const fallback = DEFAULT_RATE_LIMITS[name];
     return {
       limit: positiveInt(env, `${prefix}_LIMIT`, fallback.limit),
@@ -57,6 +64,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     global: rule('global'),
     auth: rule('auth'),
     login: rule('login'),
+    'login-account': rule('login-account'),
     invitation: rule('invitation'),
     password: rule('password'),
   };

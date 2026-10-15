@@ -9,7 +9,11 @@ import {
   loadRateLimitConfig,
 } from './rate-limit.config';
 import { RATE_LIMIT_POLICIES } from './rate-limit.decorator';
-import { loginRateLimitKey } from './rate-limit.keys';
+import {
+  loginAccountRateLimitKey,
+  loginRateLimitKey,
+  passwordRateLimitKey,
+} from './rate-limit.keys';
 import { RateLimitGuard } from './rate-limit.guard';
 
 // Proveedor propio para la configuración: así un test puede sustituirla
@@ -46,21 +50,45 @@ function throttlers(
     ttl: cfg[policy].ttlMs,
     skipIf: onlyFor(policy),
   });
+  // Mismo prefijo que la clave por defecto de la librería: un balde por ruta.
+  const routePrefix = (context: ExecutionContext, name: string): string =>
+    `${context.getClass().name}-${context.getHandler().name}-${name}`;
+  const request = (context: ExecutionContext) =>
+    context.switchToHttp().getRequest<{
+      body?: unknown;
+      headers: Record<string, string | string[] | undefined>;
+    }>();
   return [
-    // `default` = límite global, por IP, para todas las rutas.
+    // `default` = límite global, por IP, en cada ruta.
     { name: 'default', limit: cfg.global.limit, ttl: cfg.global.ttlMs },
     strict('auth'),
     {
       ...strict('login'),
       generateKey: (context, ip, name) =>
         loginRateLimitKey(
-          `${context.getClass().name}-${context.getHandler().name}-${name}`,
+          routePrefix(context, name),
           ip,
-          context.switchToHttp().getRequest<{ body?: unknown }>().body,
+          request(context).body,
+        ),
+    },
+    {
+      ...strict('login-account'),
+      generateKey: (context, _ip, name) =>
+        loginAccountRateLimitKey(
+          routePrefix(context, name),
+          request(context).body,
         ),
     },
     strict('invitation'),
-    strict('password'),
+    {
+      ...strict('password'),
+      generateKey: (context, ip, name) =>
+        passwordRateLimitKey(
+          routePrefix(context, name),
+          ip,
+          request(context).headers.authorization,
+        ),
+    },
   ];
 }
 
@@ -76,6 +104,9 @@ function throttlers(
       inject: [RATE_LIMIT_CONFIG, Reflector],
       useFactory: (cfg: RateLimitConfig, reflector: Reflector) => ({
         throttlers: throttlers(cfg, reflector),
+        // Sin X-RateLimit-* ni Retry-After-<nombre>: RateLimitGuard pone un
+        // único Retry-After al responder 429.
+        setHeaders: false,
       }),
     }),
   ],

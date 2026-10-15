@@ -4,6 +4,7 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Header,
   NotFoundException,
   Param,
   Res,
@@ -31,6 +32,10 @@ export class FilesController {
   }
 
   @Get('avatars/:name')
+  // helmet deja CORP en same-origin para toda la API; los avatares son la
+  // excepción porque la web (otro origen, y dominios de marca blanca) los
+  // incrusta con <img>.
+  @Header('Cross-Origin-Resource-Policy', 'cross-origin')
   async getAvatar(
     @Param('name') name: string,
     @Res({ passthrough: true }) res: Response,

@@ -1,5 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
@@ -10,8 +12,12 @@ import { setupSwagger } from '../src/config/swagger';
 // las cabeceras HTTP de seguridad tal como salen en producción.
 describe('Cabeceras de seguridad (e2e)', () => {
   let app: INestApplication<App>;
+  const storageRoot = process.env.STORAGE_DIR ?? './storage-test';
+  const avatar = path.join(storageRoot, 'avatars', 'security-headers.png');
 
   beforeAll(async () => {
+    await fs.mkdir(path.dirname(avatar), { recursive: true });
+    await fs.writeFile(avatar, Buffer.from('PNGDATA'));
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -27,6 +33,7 @@ describe('Cabeceras de seguridad (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
+    await fs.rm(avatar, { force: true });
   });
 
   it('aplica las cabeceras de helmet en las respuestas de la API', async () => {
@@ -45,13 +52,16 @@ describe('Cabeceras de seguridad (e2e)', () => {
     expect(res.headers['content-security-policy']).toContain(
       "frame-ancestors 'self'",
     );
+    // Por defecto los recursos de la API no se pueden incrustar desde otro origen.
+    expect(res.headers['cross-origin-resource-policy']).toBe('same-origin');
   });
 
-  it('permite que la web (otro origen) incruste los archivos públicos (avatares)', async () => {
-    const res = await request(app.getHttpServer()).get(
-      '/api/v1/files/avatars/does-not-exist.png',
-    );
+  it('solo /files (avatares) se puede incrustar desde la web (otro origen)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/files/avatars/security-headers.png')
+      .expect(200);
     expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
 
   it('sirve Swagger UI en /docs con una CSP compatible', async () => {
