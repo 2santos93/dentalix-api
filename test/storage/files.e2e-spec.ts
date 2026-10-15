@@ -35,7 +35,7 @@ describe('Files (e2e)', () => {
       .get('/api/v1/files/avatars/sample.png')
       .expect(200);
     expect(res.headers['content-type']).toContain('image/png');
-    expect(res.body.toString()).toBe('PNGDATA');
+    expect((res.body as Buffer).toString()).toBe('PNGDATA');
   });
 
   it('404s a missing avatar', async () => {

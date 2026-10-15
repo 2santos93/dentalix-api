@@ -7,7 +7,6 @@ import {
   PaymentPlanRepository,
 } from '../../domain/ports/payment-plan-repository.port';
 import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
-import { Periodicity } from '../../application/schedule/generate-schedule';
 
 type PrismaPaymentPlan = Prisma.PaymentPlanGetPayload<{
   include: { installments: true };

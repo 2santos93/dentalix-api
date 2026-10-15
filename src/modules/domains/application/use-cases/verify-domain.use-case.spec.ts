@@ -27,24 +27,25 @@ function makeRepo(
 
 describe('VerifyDomainUseCase', () => {
   it('marks the domain VERIFIED when a matching TXT record exists', async () => {
-    const repo = makeRepo();
-    const dns: jest.Mocked<DnsResolver> = {
-      resolveTxt: jest
-        .fn()
-        .mockResolvedValue(['unrelated', 'dentalix-verify=abc123']),
-    };
+    const markVerified = jest.fn().mockResolvedValue(undefined);
+    const repo = makeRepo({ markVerified });
+    const resolveTxt = jest
+      .fn()
+      .mockResolvedValue(['unrelated', 'dentalix-verify=abc123']);
+    const dns: jest.Mocked<DnsResolver> = { resolveTxt };
     const uc = new VerifyDomainUseCase(repo, dns);
     await expect(uc.execute({ id: 'd-1' })).resolves.toEqual({
       status: 'VERIFIED',
     });
-    expect(dns.resolveTxt).toHaveBeenCalledWith(
+    expect(resolveTxt).toHaveBeenCalledWith(
       '_dentalix-verify.citas.miclinica.com',
     );
-    expect(repo.markVerified).toHaveBeenCalledWith('d-1');
+    expect(markVerified).toHaveBeenCalledWith('d-1');
   });
 
   it('stays PENDING when no TXT record matches', async () => {
-    const repo = makeRepo();
+    const markVerified = jest.fn().mockResolvedValue(undefined);
+    const repo = makeRepo({ markVerified });
     const dns: jest.Mocked<DnsResolver> = {
       resolveTxt: jest.fn().mockResolvedValue(['something-else']),
     };
@@ -52,19 +53,20 @@ describe('VerifyDomainUseCase', () => {
     await expect(uc.execute({ id: 'd-1' })).resolves.toEqual({
       status: 'PENDING',
     });
-    expect(repo.markVerified).not.toHaveBeenCalled();
+    expect(markVerified).not.toHaveBeenCalled();
   });
 
   it('is idempotent for an already-verified domain', async () => {
     const repo = makeRepo({
       findById: jest.fn().mockResolvedValue({ ...pending, status: 'VERIFIED' }),
     });
-    const dns: jest.Mocked<DnsResolver> = { resolveTxt: jest.fn() };
+    const resolveTxt = jest.fn();
+    const dns: jest.Mocked<DnsResolver> = { resolveTxt };
     const uc = new VerifyDomainUseCase(repo, dns);
     await expect(uc.execute({ id: 'd-1' })).resolves.toEqual({
       status: 'VERIFIED',
     });
-    expect(dns.resolveTxt).not.toHaveBeenCalled();
+    expect(resolveTxt).not.toHaveBeenCalled();
   });
 
   it('throws NotFound for an unknown/other-tenant domain', async () => {

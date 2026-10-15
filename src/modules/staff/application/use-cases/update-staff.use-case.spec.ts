@@ -12,10 +12,15 @@ const member = (role: ClinicRole) => ({
 });
 const makeRepo = (over = {}) => ({
   findById: jest.fn().mockResolvedValue(member(ClinicRole.DENTIST)),
-  updateById: jest.fn().mockImplementation(async (_id, p) => ({
-    ...member(p.role ?? ClinicRole.DENTIST),
-    fullName: p.fullName ?? 'Ana',
-  })),
+  updateById: jest
+    .fn()
+    .mockImplementation(
+      (_id: string, p: { fullName?: string; role?: ClinicRole }) =>
+        Promise.resolve({
+          ...member(p.role ?? ClinicRole.DENTIST),
+          fullName: p.fullName ?? 'Ana',
+        }),
+    ),
   countActiveAdmins: jest.fn().mockResolvedValue(2),
   ...over,
 });

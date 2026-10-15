@@ -5,9 +5,8 @@ import { TenantHostRequest } from './tenant-host-request';
 
 describe('TenantHostMiddleware', () => {
   it('resolves the host and annotates req.tenantHost with the tenant id', async () => {
-    const mockResolver = {
-      resolve: jest.fn().mockResolvedValue('t-1'),
-    } as unknown as TenantResolverService;
+    const resolve = jest.fn().mockResolvedValue('t-1');
+    const mockResolver = { resolve } as unknown as TenantResolverService;
 
     const mockConfig = {
       get: jest.fn().mockReturnValue(undefined),
@@ -21,7 +20,7 @@ describe('TenantHostMiddleware', () => {
 
     await middleware.use(req, undefined, next);
 
-    expect(mockResolver.resolve).toHaveBeenCalledWith('acme.localhost');
+    expect(resolve).toHaveBeenCalledWith('acme.localhost');
     expect(req.tenantHost).toEqual({
       host: 'acme.localhost',
       tenantId: 't-1',
@@ -30,9 +29,8 @@ describe('TenantHostMiddleware', () => {
   });
 
   it('degrades to tenantId null on resolver rejection and still calls next', async () => {
-    const mockResolver = {
-      resolve: jest.fn().mockRejectedValue(new Error('db down')),
-    } as unknown as TenantResolverService;
+    const resolve = jest.fn().mockRejectedValue(new Error('db down'));
+    const mockResolver = { resolve } as unknown as TenantResolverService;
 
     const mockConfig = {
       get: jest.fn().mockReturnValue(undefined),
@@ -46,7 +44,7 @@ describe('TenantHostMiddleware', () => {
 
     await middleware.use(req, undefined, next);
 
-    expect(mockResolver.resolve).toHaveBeenCalledWith('acme.localhost');
+    expect(resolve).toHaveBeenCalledWith('acme.localhost');
     expect(req.tenantHost).toEqual({
       host: 'acme.localhost',
       tenantId: null,

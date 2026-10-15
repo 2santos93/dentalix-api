@@ -9,21 +9,24 @@ describe('RemoveMyAvatarUseCase', () => {
       avatarUrl: undefined as string | null | undefined,
     };
     const repo = {
-      findUserById: async () => ({
-        id: 'u1',
-        email: 'a@b',
-        fullName: 'A',
-        avatarUrl: 'http://h/api/v1/files/avatars/u1.png',
-        emailVerifiedAt: null,
-      }),
-      updateAvatarUrl: async (_id: string, url: string | null) => {
+      findUserById: () =>
+        Promise.resolve({
+          id: 'u1',
+          email: 'a@b',
+          fullName: 'A',
+          avatarUrl: 'http://h/api/v1/files/avatars/u1.png',
+          emailVerifiedAt: null,
+        }),
+      updateAvatarUrl: (_id: string, url: string | null) => {
         calls.avatarUrl = url;
+        return Promise.resolve();
       },
     } as unknown as UserProfileRepository;
     const storage: FileStoragePort = {
-      save: async () => ({ url: '' }),
-      delete: async (ns, filename) => {
+      save: () => Promise.resolve({ url: '' }),
+      delete: (ns, filename) => {
         calls.deleted.push(`${ns}/${filename}`);
+        return Promise.resolve();
       },
     };
     await new RemoveMyAvatarUseCase(repo, storage).execute({ userId: 'u1' });
@@ -37,19 +40,21 @@ describe('RemoveMyAvatarUseCase', () => {
       avatarUrl: undefined as string | null | undefined,
     };
     const repo = {
-      findUserById: async () => ({
-        id: 'u1',
-        email: 'a@b',
-        fullName: 'A',
-        avatarUrl: null,
-        emailVerifiedAt: null,
-      }),
-      updateAvatarUrl: async (_id: string, url: string | null) => {
+      findUserById: () =>
+        Promise.resolve({
+          id: 'u1',
+          email: 'a@b',
+          fullName: 'A',
+          avatarUrl: null,
+          emailVerifiedAt: null,
+        }),
+      updateAvatarUrl: (_id: string, url: string | null) => {
         calls.avatarUrl = url;
+        return Promise.resolve();
       },
     } as unknown as UserProfileRepository;
     const storage: FileStoragePort = {
-      save: async () => ({ url: '' }),
+      save: () => Promise.resolve({ url: '' }),
       delete: async () => {},
     };
     await new RemoveMyAvatarUseCase(repo, storage).execute({ userId: 'u1' });

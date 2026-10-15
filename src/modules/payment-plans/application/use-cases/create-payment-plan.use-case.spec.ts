@@ -6,6 +6,8 @@ import {
 import { Prisma } from '@prisma/client';
 import { CreatePaymentPlanUseCase } from './create-payment-plan.use-case';
 import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-plan.repository';
+import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 function makeDeps(
   overrides: {
@@ -16,28 +18,32 @@ function makeDeps(
 ) {
   const repo = new InMemoryPaymentPlanRepository();
   const getTreatmentPlan = {
-    execute: jest.fn(async (id: string) => {
+    execute: jest.fn((id: string) => {
       if (overrides.planThrows) {
-        throw new NotFoundException('Treatment plan not found');
+        return Promise.reject(
+          new NotFoundException('Treatment plan not found'),
+        );
       }
-      return {
+      return Promise.resolve({
         id,
         patientId: 'p1',
         currency: overrides.planCurrency ?? 'USD',
         items: [],
         total: 0,
-      };
+      });
     }),
-  } as any;
+  } as unknown as GetTreatmentPlanUseCase;
   const getPlanBalance = {
-    execute: jest.fn(async () => ({
-      planCurrency: overrides.planCurrency ?? 'USD',
-      billable: overrides.balance ?? 1200,
-      paid: 0,
-      balance: overrides.balance ?? 1200,
-      paymentsCount: 0,
-    })),
-  } as any;
+    execute: jest.fn(() =>
+      Promise.resolve({
+        planCurrency: overrides.planCurrency ?? 'USD',
+        billable: overrides.balance ?? 1200,
+        paid: 0,
+        balance: overrides.balance ?? 1200,
+        paymentsCount: 0,
+      }),
+    ),
+  } as unknown as GetPlanBalanceUseCase;
   const useCase = new CreatePaymentPlanUseCase(
     repo,
     getTreatmentPlan,
@@ -121,23 +127,27 @@ describe('CreatePaymentPlanUseCase', () => {
   it('defaults totalToFinance to the plan billable (gross), not the net balance', async () => {
     const repo = new InMemoryPaymentPlanRepository();
     const getTreatmentPlan = {
-      execute: jest.fn(async (id: string) => ({
-        id,
-        patientId: 'p1',
-        currency: 'USD',
-        items: [],
-        total: 0,
-      })),
-    } as any;
+      execute: jest.fn((id: string) =>
+        Promise.resolve({
+          id,
+          patientId: 'p1',
+          currency: 'USD',
+          items: [],
+          total: 0,
+        }),
+      ),
+    } as unknown as GetTreatmentPlanUseCase;
     const getPlanBalance = {
-      execute: jest.fn(async () => ({
-        planCurrency: 'USD',
-        billable: 1200,
-        paid: 200,
-        balance: 1000,
-        paymentsCount: 1,
-      })),
-    } as any;
+      execute: jest.fn(() =>
+        Promise.resolve({
+          planCurrency: 'USD',
+          billable: 1200,
+          paid: 200,
+          balance: 1000,
+          paymentsCount: 1,
+        }),
+      ),
+    } as unknown as GetPlanBalanceUseCase;
     const useCase = new CreatePaymentPlanUseCase(
       repo,
       getTreatmentPlan,
@@ -172,23 +182,27 @@ describe('CreatePaymentPlanUseCase', () => {
       }),
     );
     const getTreatmentPlan = {
-      execute: jest.fn(async (id: string) => ({
-        id,
-        patientId: 'p1',
-        currency: 'USD',
-        items: [],
-        total: 0,
-      })),
-    } as any;
+      execute: jest.fn((id: string) =>
+        Promise.resolve({
+          id,
+          patientId: 'p1',
+          currency: 'USD',
+          items: [],
+          total: 0,
+        }),
+      ),
+    } as unknown as GetTreatmentPlanUseCase;
     const getPlanBalance = {
-      execute: jest.fn(async () => ({
-        planCurrency: 'USD',
-        billable: 1200,
-        paid: 0,
-        balance: 1200,
-        paymentsCount: 0,
-      })),
-    } as any;
+      execute: jest.fn(() =>
+        Promise.resolve({
+          planCurrency: 'USD',
+          billable: 1200,
+          paid: 0,
+          balance: 1200,
+          paymentsCount: 0,
+        }),
+      ),
+    } as unknown as GetPlanBalanceUseCase;
     const useCase = new CreatePaymentPlanUseCase(
       repo,
       getTreatmentPlan,

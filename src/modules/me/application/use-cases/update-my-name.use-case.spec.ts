@@ -6,8 +6,9 @@ describe('UpdateMyNameUseCase', () => {
   it('trims and persists the name', async () => {
     let saved: { userId: string; fullName: string } | null = null;
     const repo = {
-      updateName: async (userId: string, fullName: string) => {
+      updateName: (userId: string, fullName: string) => {
         saved = { userId, fullName };
+        return Promise.resolve();
       },
     } as unknown as UserProfileRepository;
     await new UpdateMyNameUseCase(repo).execute({

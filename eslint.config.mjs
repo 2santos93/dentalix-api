@@ -29,6 +29,17 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
+      // Convención del repo: un `_` delante marca a propósito un parámetro que
+      // exige el puerto pero esta implementación no usa (`_contentType`) o una
+      // clave que se separa para descartarla (`{ deletedAt: _deletedAt, ...rest }`).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },

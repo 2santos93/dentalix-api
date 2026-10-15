@@ -8,20 +8,22 @@ function makeRepo(
   overrides: Partial<jest.Mocked<TenantDomainRepository>> = {},
 ): jest.Mocked<TenantDomainRepository> {
   return {
-    create: jest.fn(async ({ host, verifyToken }) => ({
-      id: 'd-1',
-      host,
-      status: 'PENDING',
-      verifyToken,
-      verifiedAt: null,
-      createdAt: new Date(0),
-    })),
+    create: jest.fn(({ host, verifyToken }) =>
+      Promise.resolve({
+        id: 'd-1',
+        host,
+        status: 'PENDING',
+        verifyToken,
+        verifiedAt: null,
+        createdAt: new Date(0),
+      }),
+    ),
     listByTenant: jest.fn(),
     findByHostForTenant: jest.fn().mockResolvedValue(null),
     findById: jest.fn(),
     markVerified: jest.fn(),
     ...overrides,
-  } as jest.Mocked<TenantDomainRepository>;
+  };
 }
 
 const config = {
@@ -34,10 +36,13 @@ describe('RegisterDomainUseCase', () => {
     const uc = new RegisterDomainUseCase(repo, config);
     const result = await uc.execute({ host: '  Citas.MiClinica.com  ' });
 
-    expect(repo.create).toHaveBeenCalledWith({
+    expect(repo.create.mock.calls).toHaveLength(1);
+    const [input] = repo.create.mock.calls[0];
+    expect(input).toEqual({
       host: 'citas.miclinica.com',
-      verifyToken: expect.any(String),
+      verifyToken: input.verifyToken,
     });
+    expect(typeof input.verifyToken).toBe('string');
     expect(result.domain.status).toBe('PENDING');
     expect(result.dns).toEqual({
       name: '_dentalix-verify.citas.miclinica.com',

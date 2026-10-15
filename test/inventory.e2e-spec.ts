@@ -356,9 +356,7 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
       expect(
-        (list5.body as ListInventoryItemsResponseBody).items.map(
-          (i) => i.id,
-        ),
+        (list5.body as ListInventoryItemsResponseBody).items.map((i) => i.id),
       ).not.toContain(item.id);
 
       await request(app.getHttpServer())

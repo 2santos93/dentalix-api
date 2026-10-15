@@ -233,7 +233,13 @@ describe('AcceptInvitationUseCase', () => {
       email: 'nuevo2@clinic.com',
       role: ClinicRole.RECEPTION,
     });
-    const tokens = makeTokens();
+    const issue = jest
+      .fn<
+        ReturnType<TokenService['issue']>,
+        Parameters<TokenService['issue']>
+      >()
+      .mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' });
+    const tokens = makeTokens({ issue });
     const ctx = new TenantContextService();
     const uc = new AcceptInvitationUseCase(repo, makePassword(), tokens, ctx);
 
@@ -241,13 +247,12 @@ describe('AcceptInvitationUseCase', () => {
       uc.execute({ token: 'tok-7', password: 'longenough1' }),
     );
 
-    expect(tokens.issue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tenantId: 'tenant-from-context',
-        role: ClinicRole.RECEPTION,
-      }),
-    );
-    const [[payload]] = (tokens.issue as jest.Mock).mock.calls;
-    expect(payload.sub).toEqual(expect.any(String));
+    expect(issue).toHaveBeenCalledTimes(1);
+    const [[payload]] = issue.mock.calls;
+    expect(payload).toMatchObject({
+      tenantId: 'tenant-from-context',
+      role: ClinicRole.RECEPTION,
+    });
+    expect(typeof payload.sub).toBe('string');
   });
 });

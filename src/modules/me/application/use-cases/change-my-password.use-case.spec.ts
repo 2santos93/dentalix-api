@@ -10,9 +10,10 @@ function makeRepo(
   sink: { saved?: string },
 ): UserProfileRepository {
   return {
-    getPasswordHash: async () => hash,
-    updatePasswordHash: async (_userId: string, newHash: string) => {
+    getPasswordHash: () => Promise.resolve(hash),
+    updatePasswordHash: (_userId: string, newHash: string) => {
       sink.saved = newHash;
+      return Promise.resolve();
     },
   } as unknown as UserProfileRepository;
 }

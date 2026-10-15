@@ -69,7 +69,12 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
 ];
 
 export function conflictMessageForTarget(target: unknown): string {
-  const key = Array.isArray(target) ? target.join(',') : String(target ?? '');
+  // Prisma da `meta.target` como string[] (columnas) o string (índice).
+  const key = Array.isArray(target)
+    ? target.join(',')
+    : typeof target === 'string'
+      ? target
+      : '';
   const hit = CONFLICT_MESSAGES.find((m) => key.includes(m.match));
   return hit?.message ?? 'Ya existe un registro con esos datos.';
 }

@@ -71,12 +71,12 @@ describe('PrismaExceptionFilter', () => {
     filter.catch(p2002(['tenantId', 'docNumber']), host);
 
     expect(status).toHaveBeenCalledWith(409);
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        statusCode: 409,
-        message: expect.stringMatching(/documento/i),
-      }),
-    );
+    expect(json).toHaveBeenCalledTimes(1);
+    const [[body]] = json.mock.calls as [
+      [{ statusCode: number; message: string }],
+    ];
+    expect(body.statusCode).toBe(409);
+    expect(body.message).toMatch(/documento/i);
   });
 
   it('leaves other Prisma errors as a 500 (does not masquerade them as conflicts)', () => {

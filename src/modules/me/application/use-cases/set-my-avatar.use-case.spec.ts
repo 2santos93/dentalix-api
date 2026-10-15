@@ -10,24 +10,29 @@ function makeDeps(currentAvatarUrl: string | null) {
     avatarUrl: undefined as string | null | undefined,
   };
   const repo = {
-    findUserById: async () => ({
-      id: 'u1',
-      email: 'a@b',
-      fullName: 'A',
-      avatarUrl: currentAvatarUrl,
-      emailVerifiedAt: null,
-    }),
-    updateAvatarUrl: async (_id: string, url: string | null) => {
+    findUserById: () =>
+      Promise.resolve({
+        id: 'u1',
+        email: 'a@b',
+        fullName: 'A',
+        avatarUrl: currentAvatarUrl,
+        emailVerifiedAt: null,
+      }),
+    updateAvatarUrl: (_id: string, url: string | null) => {
       calls.avatarUrl = url;
+      return Promise.resolve();
     },
   } as unknown as UserProfileRepository;
   const storage: FileStoragePort = {
-    save: async (ns, filename) => {
+    save: (ns, filename) => {
       calls.saved.push(`${ns}/${filename}`);
-      return { url: `http://h/api/v1/files/${ns}/${filename}` };
+      return Promise.resolve({
+        url: `http://h/api/v1/files/${ns}/${filename}`,
+      });
     },
-    delete: async (ns, filename) => {
+    delete: (ns, filename) => {
       calls.deleted.push(`${ns}/${filename}`);
+      return Promise.resolve();
     },
   };
   return { calls, repo, storage };

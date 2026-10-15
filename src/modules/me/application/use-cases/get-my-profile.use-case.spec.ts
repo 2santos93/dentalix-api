@@ -7,15 +7,16 @@ function makeRepo(
   over: Partial<UserProfileRepository> = {},
 ): UserProfileRepository {
   return {
-    findUserById: async () => ({
-      id: 'u1',
-      email: 'a@b.com',
-      fullName: 'Ana',
-      avatarUrl: null,
-      emailVerifiedAt: null,
-    }),
-    findClinicName: async () => 'Clínica Sur',
-    getPasswordHash: async () => 'h',
+    findUserById: () =>
+      Promise.resolve({
+        id: 'u1',
+        email: 'a@b.com',
+        fullName: 'Ana',
+        avatarUrl: null,
+        emailVerifiedAt: null,
+      }),
+    findClinicName: () => Promise.resolve('Clínica Sur'),
+    getPasswordHash: () => Promise.resolve('h'),
     updateName: async () => {},
     updatePasswordHash: async () => {},
     updateAvatarUrl: async () => {},
@@ -45,7 +46,7 @@ describe('GetMyProfileUseCase', () => {
 
   it('throws NotFound when the user does not exist', async () => {
     const uc = new GetMyProfileUseCase(
-      makeRepo({ findUserById: async () => null }),
+      makeRepo({ findUserById: () => Promise.resolve(null) }),
     );
     await expect(
       uc.execute({ userId: 'x', tenantId: 't1', role: ClinicRole.ADMIN }),

@@ -16,11 +16,6 @@ const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-interface RegisterResponseBody {
-  tenantId: string;
-  userId: string;
-}
-
 interface LoginResponseBody {
   accessToken: string;
   refreshToken: string;

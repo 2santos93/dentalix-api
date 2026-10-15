@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { GetPaymentPlanUseCase } from './get-payment-plan.use-case';
 import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-plan.repository';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 const TODAY = new Date('2026-03-01T00:00:00.000Z');
 
@@ -25,14 +26,16 @@ function seed(repo: InMemoryPaymentPlanRepository, downPayment = 0) {
 function makeUseCase(paid: number) {
   const repo = new InMemoryPaymentPlanRepository();
   const getPlanBalance = {
-    execute: jest.fn(async () => ({
-      planCurrency: 'USD',
-      billable: 300,
-      paid,
-      balance: 300 - paid,
-      paymentsCount: 1,
-    })),
-  } as any;
+    execute: jest.fn(() =>
+      Promise.resolve({
+        planCurrency: 'USD',
+        billable: 300,
+        paid,
+        balance: 300 - paid,
+        paymentsCount: 1,
+      }),
+    ),
+  } as unknown as GetPlanBalanceUseCase;
   // Inject a fixed clock so "overdue" is deterministic.
   const useCase = new GetPaymentPlanUseCase(repo, getPlanBalance, () => TODAY);
   return { repo, useCase };

@@ -11,7 +11,6 @@ import {
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
-import type { BusinessHours } from '../../../location-schedule/application/business-hours';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
