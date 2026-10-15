@@ -42,6 +42,7 @@ const TENANT_TABLES = [
   'tooth_records',
   'clinical_entries',
   'medical_history_versions',
+  'appointment_confirmations',
   'appointments',
   'inventory_movements',
   'inventory_items',
@@ -282,7 +283,32 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.inventory_movements).toBeGreaterThanOrEqual(10);
     // Catálogo por defecto del registro real.
     expect(firstCounts.dental_catalog_items).toBeGreaterThan(50);
+    // DX-005: una confirmación pendiente + una "pide llamada".
+    expect(firstCounts.appointment_confirmations).toBe(2);
+    expect(result.confirmationUrl).toMatch(
+      /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
+    );
   }, 120000);
+
+  it('deja una cita futura con confirmación pendiente y otra que pide llamada (DX-005)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const confirmations = await raw.appointmentConfirmation.findMany({
+      where: { tenantId },
+      include: { appointment: true },
+      orderBy: { appointmentStart: 'asc' },
+    });
+    expect(confirmations).toHaveLength(2);
+    const [pending, callMe] = confirmations;
+
+    expect(pending.respondedAt).toBeNull();
+    expect(pending.appointment.status).toBe('SCHEDULED');
+    expect(pending.appointment.confirmationSentAt).not.toBeNull();
+    expect(pending.appointment.start.getTime()).toBeGreaterThan(Date.now());
+
+    expect(callMe.response).toBe('CALL_ME');
+    expect(callMe.appointment.status).toBe('SCHEDULED');
+    expect(callMe.appointment.callbackRequestedAt).not.toBeNull();
+  });
 
   it('reparte los roles pedidos con la contraseña documentada', async () => {
     const tenantId = await liveDemoTenantId();

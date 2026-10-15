@@ -108,8 +108,17 @@ export class UpdateAppointmentUseCase {
     // was taken meanwhile — and that path never runs the pre-check above.
     // Without this, either case would surface as a raw 500 instead of the 409
     // the pre-check produces.
+    // DX-005: "confirmación pendiente" y "pide llamada" hablan de la cita tal
+    // como era al enviar el enlace (que además deja de valer al reagendar o
+    // cambiar el estado). Recepción que reagenda o cambia el estado a mano ya
+    // atendió esa conversación, así que se limpian.
+    const clearsConfirmation = isReschedule || patch.status !== undefined;
+    const effectivePatch: UpdateAppointmentRepoInput = clearsConfirmation
+      ? { ...patch, confirmationSentAt: null, callbackRequestedAt: null }
+      : patch;
+
     try {
-      return await this.repo.update(id, patch);
+      return await this.repo.update(id, effectivePatch);
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {

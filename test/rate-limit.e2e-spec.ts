@@ -24,6 +24,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'login-account': { limit: 6, ttlMs: 60_000 },
   invitation: { limit: 2, ttlMs: 60_000 },
   password: { limit: 2, ttlMs: 60_000 },
+  confirmation: { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -172,6 +173,25 @@ describe('Rate limiting (e2e)', () => {
         expect((await accept(`guess-${i}`)).status).not.toBe(429);
       }
       expectTooMany(await accept('guess-next'));
+    });
+
+    it('GET y POST public/appointment-confirmations/:token: 429 tras el límite por IP (balde por ruta)', async () => {
+      const view = (token: string) =>
+        request(app.getHttpServer()).get(
+          `/api/v1/public/appointment-confirmations/${token}`,
+        );
+      const respond = (token: string) =>
+        request(app.getHttpServer())
+          .post(`/api/v1/public/appointment-confirmations/${token}`)
+          .send({ action: 'confirm' });
+      for (let i = 0; i < LOW_LIMITS.confirmation.limit; i++) {
+        expect((await view(`guess-${i}`)).status).not.toBe(429);
+      }
+      expectTooMany(await view('guess-next'));
+      for (let i = 0; i < LOW_LIMITS.confirmation.limit; i++) {
+        expect((await respond(`guess-${i}`)).status).not.toBe(429);
+      }
+      expectTooMany(await respond('guess-next'));
     });
 
     it('POST me/password: 429 por IP+usuario (se aplica antes del JWT)', async () => {

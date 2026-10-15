@@ -44,6 +44,8 @@ function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
     reason: appointment.reason,
     notes: appointment.notes,
     createdById: appointment.createdById,
+    confirmationSentAt: appointment.confirmationSentAt,
+    callbackRequestedAt: appointment.callbackRequestedAt,
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };

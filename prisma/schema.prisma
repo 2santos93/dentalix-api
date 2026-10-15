@@ -9,17 +9,18 @@ datasource db {
 }
 
 model Tenant {
-  id           String             @id @default(uuid()) @db.Uuid
-  name         String
-  subdomain    String             @unique
-  primaryColor String             @default("#0F5E9C")
-  logoUrl      String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  deletedAt    DateTime?
-  memberships  ClinicMembership[]
-  domains      TenantDomain[]
-  invitations  ClinicInvitation[]
+  id                       String                    @id @default(uuid()) @db.Uuid
+  name                     String
+  subdomain                String                    @unique
+  primaryColor             String                    @default("#0F5E9C")
+  logoUrl                  String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  deletedAt                DateTime?
+  memberships              ClinicMembership[]
+  domains                  TenantDomain[]
+  invitations              ClinicInvitation[]
+  appointmentConfirmations AppointmentConfirmation[]
 
   @@map("tenants")
 }
@@ -103,8 +104,8 @@ model ClinicMembership {
 }
 
 model ClinicInvitation {
-  id          String    @id @default(uuid()) @db.Uuid
-  tenantId    String    @db.Uuid
+  id          String     @id @default(uuid()) @db.Uuid
+  tenantId    String     @db.Uuid
   email       String
   fullName    String
   role        ClinicRole
@@ -112,9 +113,9 @@ model ClinicInvitation {
   expiresAt   DateTime
   acceptedAt  DateTime?
   revokedAt   DateTime?
-  invitedById String?   @db.Uuid
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  invitedById String?    @db.Uuid
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
@@ -332,20 +333,28 @@ enum AppointmentStatus {
 }
 
 model Appointment {
-  id          String            @id @default(uuid()) @db.Uuid
-  tenantId    String            @db.Uuid
-  locationId  String            @db.Uuid
-  patientId   String            @db.Uuid
-  providerId  String            @db.Uuid
-  start       DateTime
-  end         DateTime
-  status      AppointmentStatus @default(SCHEDULED)
-  reason      String?
-  notes       String?
-  createdById String?           @db.Uuid
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  deletedAt   DateTime?
+  id                  String            @id @default(uuid()) @db.Uuid
+  tenantId            String            @db.Uuid
+  locationId          String            @db.Uuid
+  patientId           String            @db.Uuid
+  providerId          String            @db.Uuid
+  start               DateTime
+  end                 DateTime
+  status              AppointmentStatus @default(SCHEDULED)
+  reason              String?
+  notes               String?
+  createdById         String?           @db.Uuid
+  // DX-005: cuándo recepción generó el último enlace de confirmación vigente
+  // (null = nunca, o se invalidó al reagendar/cambiar el estado a mano).
+  confirmationSentAt  DateTime?
+  // DX-005: el paciente pulsó "Quiero que me llamen" en el enlace. Se limpia
+  // cuando recepción reagenda o cambia el estado de la cita.
+  callbackRequestedAt DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  deletedAt           DateTime?
+
+  confirmations AppointmentConfirmation[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -354,6 +363,9 @@ model Appointment {
   patient  Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id])
   location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
+  // Destino de la FK compuesta (tenantId, appointmentId) de
+  // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
+  @@unique([tenantId, id], map: "appointments_tenant_id_key")
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
@@ -361,6 +373,44 @@ model Appointment {
   // hijo de la FK compuesta (tenantId, locationId).
   @@index([tenantId, locationId])
   @@map("appointments")
+}
+
+// DX-005: respuesta del paciente en el enlace público de confirmación.
+enum AppointmentConfirmationResponse {
+  CONFIRM
+  CANCEL
+  CALL_ME
+}
+
+// DX-005: enlace firmado de un solo uso para que el paciente confirme, cancele
+// o pida que lo llamen. Solo se guarda el HASH del token (sha256); el texto
+// plano viaja únicamente en el enlace. `appointmentStart`/`appointmentStatus`
+// son la foto de la cita al emitirlo: si la cita se reagenda o cambia de
+// estado, el enlace deja de valer.
+model AppointmentConfirmation {
+  id                String                           @id @default(uuid()) @db.Uuid
+  tenantId          String                           @db.Uuid
+  appointmentId     String                           @db.Uuid
+  tokenHash         String
+  expiresAt         DateTime
+  appointmentStart  DateTime
+  appointmentStatus AppointmentStatus
+  respondedAt       DateTime?
+  response          AppointmentConfirmationResponse?
+  revokedAt         DateTime?
+  createdById       String?                          @db.Uuid
+  createdAt         DateTime                         @default(now())
+  updatedAt         DateTime                         @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  // FK COMPUESTA (SEC-004): la cita tiene que ser del MISMO tenant. CASCADE:
+  // el enlace es dato derivado de la cita, que en el producto nunca se borra
+  // en duro (no-hard-delete); solo afecta a la limpieza administrativa.
+  appointment Appointment @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tokenHash])
+  @@index([tenantId, appointmentId])
+  @@map("appointment_confirmations")
 }
 
 enum TreatmentPlanStatus {

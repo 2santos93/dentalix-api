@@ -39,6 +39,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     reason: null,
     notes: null,
     createdById: null,
+    confirmationSentAt: null,
+    callbackRequestedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -117,7 +119,12 @@ describe('UpdateAppointmentUseCase', () => {
     });
 
     expect(result).toBe(updated);
-    expect(receivedPatch).toEqual({ status: AppointmentStatus.CONFIRMED });
+    // DX-005: un cambio de estado limpia los indicadores del enlace de confirmación.
+    expect(receivedPatch).toEqual({
+      status: AppointmentStatus.CONFIRMED,
+      confirmationSentAt: null,
+      callbackRequestedAt: null,
+    });
     expect(overlapChecked).toBe(false);
   });
 
@@ -411,7 +418,11 @@ describe('UpdateAppointmentUseCase', () => {
       });
 
       expect(result.status).toBe(AppointmentStatus.COMPLETED);
-      expect(received).toEqual({ status: AppointmentStatus.COMPLETED });
+      expect(received).toEqual({
+        status: AppointmentStatus.COMPLETED,
+        confirmationSentAt: null,
+        callbackRequestedAt: null,
+      });
     });
 
     it('PERMITE editar las notas de una cita que ya pasó', async () => {
@@ -429,6 +440,68 @@ describe('UpdateAppointmentUseCase', () => {
       const result = await uc.execute('a1', { notes: 'El paciente asistió' });
 
       expect(result.notes).toBe('El paciente asistió');
+    });
+  });
+
+  // DX-005: los indicadores "confirmación pendiente" y "pide llamada" se
+  // refieren a la cita TAL COMO ERA cuando se envió el enlace. Si recepción la
+  // reagenda o le cambia el estado a mano, ya no aplican.
+  describe('indicadores de confirmación por enlace', () => {
+    const SENT = new Date('2026-01-02T00:00:00.000Z');
+
+    it('cambiar el estado limpia confirmationSentAt y callbackRequestedAt', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({
+        start: at('10:00'),
+        end: at('10:30'),
+        confirmationSentAt: SENT,
+        callbackRequestedAt: SENT,
+      });
+      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+
+      const result = await uc.execute(existing.id, {
+        status: AppointmentStatus.CONFIRMED,
+      });
+
+      expect(result.confirmationSentAt).toBeNull();
+      expect(result.callbackRequestedAt).toBeNull();
+    });
+
+    it('reagendar también los limpia', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({
+        start: at('10:00'),
+        end: at('10:30'),
+        confirmationSentAt: SENT,
+        callbackRequestedAt: SENT,
+      });
+      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+
+      const result = await uc.execute(existing.id, {
+        start: at('12:00'),
+        end: at('12:30'),
+      });
+
+      expect(result.confirmationSentAt).toBeNull();
+      expect(result.callbackRequestedAt).toBeNull();
+    });
+
+    it('editar solo notas/motivo los conserva', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({
+        start: at('10:00'),
+        end: at('10:30'),
+        confirmationSentAt: SENT,
+        callbackRequestedAt: SENT,
+      });
+      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+
+      const result = await uc.execute(existing.id, {
+        notes: 'Trae radiografía',
+      });
+
+      expect(result.confirmationSentAt).toEqual(SENT);
+      expect(result.callbackRequestedAt).toEqual(SENT);
     });
   });
 });

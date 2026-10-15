@@ -27,6 +27,8 @@ import { CreateClinicalEntryUseCase } from '../src/modules/clinical-entries/appl
 import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/add-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
+import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
 import { CreateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/create-treatment-plan.use-case';
 import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
@@ -122,6 +124,12 @@ export interface DemoSeedResult {
   /** La misma para todos los usuarios demo. */
   password: string;
   users: { email: string; role: string }[];
+  /**
+   * Enlace público de la cita con confirmación pendiente (DX-005). Solo al
+   * crear/reconstruir: el token en claro no se guarda, así que una corrida
+   * `skipped` no puede volver a mostrarlo.
+   */
+  confirmationUrl?: string;
 }
 
 const DEMO_URL = `http://${DEMO_SUBDOMAIN}.localhost:3001`;
@@ -190,12 +198,13 @@ export async function seedDemo(
 
     let status: DemoSeedStatus;
     let tenantId: string;
+    let confirmationUrl: string | undefined;
     if (existing && !options.reset) {
       status = 'skipped';
       tenantId = existing;
     } else {
       if (existing) await seeder.retire(existing);
-      tenantId = await seeder.build();
+      ({ tenantId, confirmationUrl } = await seeder.build());
       status = existing ? 'rebuilt' : 'created';
     }
 
@@ -205,6 +214,7 @@ export async function seedDemo(
       url: DEMO_URL,
       password: DEMO_PASSWORD,
       users: DEMO_USERS.map((u) => ({ email: u.email, role: u.role })),
+      ...(confirmationUrl ? { confirmationUrl } : {}),
     };
     if (!options.quiet) printSummary(result);
     return result;
@@ -324,7 +334,7 @@ class DemoSeeder {
     });
   }
 
-  async build(): Promise<string> {
+  async build(): Promise<{ tenantId: string; confirmationUrl?: string }> {
     // Usuarios demo huérfanos (p. ej. de un tenant retirado a mano) impedirían
     // el registro: se retiran, siempre que no pertenezcan a otra clínica.
     const orphans = await this.liveDemoUserIds();
@@ -349,8 +359,9 @@ class DemoSeeder {
       fullName: owner.fullName,
     });
 
+    let confirmationUrl: string | undefined;
     try {
-      await this.populate(tenantId, ownerId);
+      confirmationUrl = await this.populate(tenantId, ownerId);
     } catch (error) {
       try {
         await this.retire(tenantId);
@@ -362,7 +373,7 @@ class DemoSeeder {
       }
       throw error;
     }
-    return tenantId;
+    return { tenantId, confirmationUrl };
   }
 
   private inTenant<T>(
@@ -373,7 +384,11 @@ class DemoSeeder {
     return this.tenantContext.run(tenantId, locationId, fn);
   }
 
-  private async populate(tenantId: string, ownerId: string): Promise<void> {
+  /** Devuelve el enlace de la confirmación pendiente (ver `requestConfirmations`). */
+  private async populate(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<string | undefined> {
     // Branding (no hay caso de uso de edición; `tenants` no tiene RLS).
     await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -422,6 +437,54 @@ class DemoSeeder {
     );
 
     await this.createInventory(tenantId, locations, userIds[4]);
+
+    return this.requestConfirmations(tenantId, receptionId);
+  }
+
+  /**
+   * DX-005: las dos próximas citas agendadas reciben enlace de confirmación
+   * por los mismos casos de uso que la API. La primera queda PENDIENTE (se
+   * devuelve su enlace para probar la página pública); en la segunda el
+   * paciente ya pulsó "Quiero que me llamen", así que la agenda la muestra con
+   * el indicador "pide llamada".
+   */
+  private async requestConfirmations(
+    tenantId: string,
+    receptionId: string,
+  ): Promise<string | undefined> {
+    const upcoming = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.appointment.findMany({
+        where: {
+          deletedAt: null,
+          status: AppointmentStatus.SCHEDULED,
+          start: { gt: new Date(Date.now() + FUTURE_MARGIN_MS) },
+        },
+        orderBy: { start: 'asc' },
+        take: 2,
+        select: { id: true, locationId: true },
+      }),
+    );
+
+    const links: string[] = [];
+    for (const appointment of upcoming) {
+      const { token } = await this.inTenant(
+        tenantId,
+        appointment.locationId,
+        () =>
+          this.use(CreateConfirmationLinkUseCase).execute({
+            appointmentId: appointment.id,
+            createdById: receptionId,
+          }),
+      );
+      links.push(token);
+    }
+    const [pending, callMe] = links;
+    if (callMe) {
+      await this.inTenant(tenantId, undefined, () =>
+        this.use(RespondConfirmationUseCase).execute(callMe, 'call_me'),
+      );
+    }
+    return pending ? `${DEMO_URL}/confirmar/${pending}` : undefined;
   }
 
   /** Equipo por el flujo real: invitación del admin + aceptación con contraseña. */
@@ -740,6 +803,12 @@ function printSummary(result: DemoSeedResult): void {
     '',
     ...result.users.map((u) => `  ${u.role.padEnd(10)} ${u.email}`),
     '',
+    ...(result.confirmationUrl
+      ? [
+          `  Confirmación pendiente (enlace del paciente): ${result.confirmationUrl}`,
+          '',
+        ]
+      : []),
   ];
   console.log(lines.join('\n'));
 }

@@ -14,6 +14,8 @@ describe('loadRateLimitConfig', () => {
     expect(cfg.password).toEqual({ limit: 5, ttlMs: 15 * 60_000 });
     expect(cfg.auth.limit).toBeLessThanOrEqual(20);
     expect(cfg.invitation.limit).toBeLessThanOrEqual(10);
+    // Enlace público de confirmación de cita (DX-005): por IP, como invitación.
+    expect(cfg.confirmation).toEqual({ limit: 20, ttlMs: 60_000 });
     // Holgado: solo frena la fuerza bruta distribuida contra una cuenta.
     expect(cfg['login-account']).toEqual({ limit: 50, ttlMs: 60 * 60_000 });
   });
@@ -30,6 +32,7 @@ describe('loadRateLimitConfig', () => {
         RATE_LIMIT_PASSWORD_LIMIT: '2',
         RATE_LIMIT_LOGIN_ACCOUNT_LIMIT: '9',
         RATE_LIMIT_LOGIN_ACCOUNT_TTL_MS: '5000',
+        RATE_LIMIT_CONFIRMATION_LIMIT: '4',
       }),
     );
     expect(cfg.global).toEqual({ limit: 50, ttlMs: 1000 });
@@ -41,6 +44,10 @@ describe('loadRateLimitConfig', () => {
     });
     expect(cfg.password.limit).toBe(2);
     expect(cfg['login-account']).toEqual({ limit: 9, ttlMs: 5000 });
+    expect(cfg.confirmation).toEqual({
+      ...DEFAULT_RATE_LIMITS.confirmation,
+      limit: 4,
+    });
   });
 
   it('trata la cadena vacía como "no definida"', () => {

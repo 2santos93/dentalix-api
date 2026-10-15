@@ -49,6 +49,24 @@ export class AppointmentDto {
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Cuándo se generó el enlace de confirmación vigente (DX-005). null si nunca se envió o si la cita se reagendó / cambió de estado después.',
+  })
+  confirmationSentAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'El paciente pidió que lo llamen desde el enlace de confirmación (la cita sigue SCHEDULED).',
+  })
+  callbackRequestedAt!: Date | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 
