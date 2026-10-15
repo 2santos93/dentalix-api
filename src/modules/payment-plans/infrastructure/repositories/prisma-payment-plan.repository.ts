@@ -76,9 +76,13 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
           startDate: input.startDate,
           notes: input.notes,
           createdById: input.createdById,
+          // Sin `tenantId` en las cuotas: con la FK compuesta
+          // (tenantId, paymentPlanId) -> payment_plans(tenantId, id), el
+          // tenantId de la cuota ES parte de la relación y Prisma lo hereda
+          // del plan en el create anidado (pasarlo explícito es un error de
+          // validación en runtime).
           installments: {
             create: input.installments.map((i) => ({
-              tenantId,
               sequence: i.sequence,
               dueDate: i.dueDate,
               amount: i.amount,

@@ -69,6 +69,9 @@ model Location {
   inventoryItems     InventoryItem[]
   inventoryMovements InventoryMovement[]
 
+  // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
+  // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
+  @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@index([tenantId])
   @@map("locations")
 }
@@ -181,10 +184,11 @@ model Patient {
   city                   City?                   @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
-  // Requisito de la FK COMPUESTA de Appointment: permite referenciar un
+  // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
+  // MedicalHistoryVersion, ClinicalEntry y ToothRecord: permite referenciar un
   // paciente exigiendo que el tenant coincida, cerrando el cross-tenant a
   // nivel DB (las FK de Postgres se chequean saltando la RLS, así que una FK
-  // a `id` sola no basta).
+  // a `id` sola no basta). Ver 20261015120000_tenant_composite_fks (SEC-004).
   @@unique([tenantId, id], map: "patients_tenant_id_key")
   @@index([tenantId])
   @@map("patients")
@@ -212,7 +216,10 @@ model MedicalHistoryVersion {
   createdAt        DateTime  @default(now())
   deletedAt        DateTime?
 
-  patient Patient @relation(fields: [patientId], references: [id])
+  // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
+  // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
+  // SEC-004, 20261015120000_tenant_composite_fks).
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
   @@index([tenantId, patientId])
@@ -231,7 +238,10 @@ model ClinicalEntry {
   createdAt     DateTime  @default(now())
   deletedAt     DateTime?
 
-  patient Patient @relation(fields: [patientId], references: [id])
+  // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
+  // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
+  // SEC-004, 20261015120000_tenant_composite_fks).
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
   @@index([tenantId, patientId, entryDate])
   @@map("clinical_entries")
@@ -297,7 +307,10 @@ model ToothRecord {
   createdAt        DateTime          @default(now())
   deletedAt        DateTime?
 
-  patient Patient @relation(fields: [patientId], references: [id])
+  // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
+  // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
+  // SEC-004, 20261015120000_tenant_composite_fks).
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
   @@index([tenantId, patientId])
   @@index([tenantId, patientId, toothNumber])
@@ -334,10 +347,14 @@ model Appointment {
   // en algún tenant" (las FK saltan la RLS), así que se podía agendar contra
   // un paciente de otra clínica.
   patient  Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
+  // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
+  // declara para que migrate diff no lo vea como drift. Indexa además el lado
+  // hijo de la FK compuesta (tenantId, locationId).
+  @@index([tenantId, locationId])
   @@map("appointments")
 }
 
@@ -368,11 +385,19 @@ model TreatmentPlan {
   updatedAt   DateTime            @updatedAt
   deletedAt   DateTime?
 
-  patient      Patient             @relation(fields: [patientId], references: [id])
+  // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
+  // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
+  // SEC-004, 20261015120000_tenant_composite_fks).
+  patient      Patient             @relation(fields: [tenantId, patientId], references: [tenantId, id])
   items        TreatmentPlanItem[]
   payments     Payment[]
   paymentPlans PaymentPlan[]
 
+  // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
+  // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
+  // garantiza que su `patientId` denormalizado sea el del plan.
+  @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
+  @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
   @@map("treatment_plans")
 }
@@ -391,7 +416,7 @@ model TreatmentPlanItem {
   updatedAt     DateTime                @updatedAt
   deletedAt     DateTime?
 
-  plan TreatmentPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  plan TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, planId])
   @@map("treatment_plan_items")
@@ -499,8 +524,12 @@ model Payment {
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
 
-  plan     TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Restrict)
-  location Location      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
+  // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
+  // transitividad el paciente también es del tenant (treatment_plans ya tiene
+  // su FK compuesta a patients), sin una tercera FK.
+  plan     TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
+  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
@@ -512,6 +541,10 @@ model Payment {
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
+  // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
+  // declara para que migrate diff no lo vea como drift. Indexa además el lado
+  // hijo de la FK compuesta (tenantId, locationId).
+  @@index([tenantId, locationId])
   // Partial (WHERE "deletedAt" IS NULL) -- Prisma has no schema-DSL support
   // for filtered indexes, so the WHERE lives only in the migration SQL
   // (see 20260726010000_payments_tenant_paidat_index). The explicit `map`
@@ -561,9 +594,13 @@ model PaymentPlan {
   updatedAt         DateTime               @updatedAt
   deletedAt         DateTime?
 
-  plan         TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Restrict)
+  // FK COMPUESTA (SEC-004): mismo criterio que Payment.plan (tenant + paciente
+  // denormalizado coherentes con el plan de tratamiento).
+  plan         TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
   installments Installment[]
 
+  // Destino de la FK compuesta de Installment (SEC-004).
+  @@unique([tenantId, id], map: "payment_plans_tenant_id_key")
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
   // Hand-written partial unique index (WHERE status = 'ACTIVE' AND
@@ -591,7 +628,8 @@ model Installment {
   /// `Restrict`, no `Cascade`: `PaymentPlan` se anula en blando (status
   /// CANCELLED + deletedAt), nunca se borra. Un DELETE duro del plan sería un
   /// error, y con Cascade se llevaba las cuotas sin dejar rastro.
-  paymentPlan PaymentPlan @relation(fields: [paymentPlanId], references: [id], onDelete: Restrict)
+  /// FK compuesta (tenantId, paymentPlanId): el plan de pagos es del MISMO tenant (SEC-004).
+  paymentPlan PaymentPlan @relation(fields: [tenantId, paymentPlanId], references: [tenantId, id], onDelete: Restrict)
 
   @@unique([paymentPlanId, sequence])
   @@index([tenantId, dueDate])
@@ -619,7 +657,8 @@ model InventoryItem {
   deletedAt   DateTime?
 
   movements InventoryMovement[]
-  location  Location            @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  // FK compuesta: la sede es del MISMO tenant (SEC-004).
+  location  Location            @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   // Partial unique (WHERE "deletedAt" IS NULL) so two ACTIVE items can't share
   // a name, while soft-deleted rows don't block re-using the name. The WHERE
@@ -628,7 +667,13 @@ model InventoryItem {
   // Patient.@@unique(patients_tenant_doc_key). Do NOT accept a migrate-dev diff
   // that recreates this as a full index.
   @@unique([tenantId, name], map: "inventory_items_tenantId_name_key")
+  // Destino de la FK compuesta de InventoryMovement.item (SEC-004).
+  @@unique([tenantId, id], map: "inventory_items_tenant_id_key")
   @@index([tenantId])
+  // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
+  // declara para que migrate diff no lo vea como drift. Indexa además el lado
+  // hijo de la FK compuesta (tenantId, locationId).
+  @@index([tenantId, locationId])
   @@map("inventory_items")
 }
 
@@ -644,8 +689,10 @@ model InventoryMovement {
   createdById String?               @db.Uuid
   createdAt   DateTime              @default(now())
 
-  item     InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  location Location      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  // FK compuestas: ítem y sede son del MISMO tenant (SEC-004). Que la sede del
+  // movimiento coincida con la del ítem es otra regla (SEC-014), no esta.
+  item     InventoryItem @relation(fields: [tenantId, itemId], references: [tenantId, id], onDelete: Restrict)
+  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, itemId])
   @@map("inventory_movements")
@@ -684,6 +731,8 @@ model LocationSchedule {
   ranges LocationScheduleRange[]
 
   @@unique([tenantId, locationId], map: "location_schedule_tenant_location_key")
+  // Destino de la FK compuesta de LocationScheduleRange (SEC-004).
+  @@unique([tenantId, id], map: "location_schedules_tenant_id_key")
   @@index([tenantId])
   @@map("location_schedules")
 }
@@ -711,7 +760,8 @@ model LocationScheduleRange {
   /// `Restrict`, no `Cascade`: el padre se borra en blando, así que un borrado
   /// DURO de `location_schedules` solo puede venir de un error. Con Cascade se
   /// llevaba los tramos por delante en silencio; con Restrict la DB lo rechaza.
-  schedule LocationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  /// FK compuesta (tenantId, scheduleId): el horario es del MISMO tenant (SEC-004).
+  schedule LocationSchedule @relation(fields: [tenantId, scheduleId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, scheduleId, weekday])
   @@map("location_schedule_ranges")
