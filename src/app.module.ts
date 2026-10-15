@@ -27,11 +27,13 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { SecurityModule } from './shared/security/security.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
   imports: [
     ConfigModule,
+    SecurityModule,
     PrismaModule,
     TenantContextModule,
     AuthModule,

@@ -12,6 +12,7 @@ import { AcceptInvitationUseCase } from '../application/use-cases/accept-invitat
 import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { PublicInvitationDto } from './dto/public-invitation.dto';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
 
 // PUBLIC endpoints — no JwtAuthGuard/RolesGuard. Whoever is opening the
@@ -21,6 +22,8 @@ import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-t
 // public-branding.controller.ts; there is no JWT to cross-check.
 @ApiTags('public')
 @UseInterceptors(PublicTenantContextInterceptor)
+// Por IP: frena la enumeración de tokens (ver y aceptar comparten política).
+@RateLimit('invitation')
 @Controller('public/invitations')
 export class PublicInvitationsController {
   constructor(

@@ -11,6 +11,7 @@ import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -23,6 +24,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @RateLimit('auth')
   @ApiCreatedResponse({ type: RegisterResponseDto })
   register(
     @Body() dto: RegisterDto,
@@ -31,6 +33,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @RateLimit('auth', 'login')
   @ApiCreatedResponse({ type: AuthTokensDto })
   async loginHandler(
     @Req() req: TenantHostRequest,
@@ -60,6 +63,7 @@ export class AuthController {
   // tenant host. A 401 here means the refresh token is invalid or expired
   // and the client must send the user back to /login.
   @Post('refresh')
+  @RateLimit('auth')
   @ApiCreatedResponse({ type: AuthTokensDto })
   refreshHandler(
     @Body() dto: RefreshDto,

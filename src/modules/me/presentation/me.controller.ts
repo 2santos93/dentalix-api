@@ -31,6 +31,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { MyProfileDto } from './dto/my-profile.dto';
 import { AvatarResponseDto } from './dto/avatar-response.dto';
 import { MyProfile } from '../domain/entities/my-profile.entity';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 
 /**
  * `/me` describe el perfil DENTRO de una clínica (tenant + rol), y este
@@ -95,6 +96,7 @@ export class MeController {
   }
 
   @Post('password')
+  @RateLimit('password')
   @HttpCode(204)
   async changePassword(
     @Req() req: AuthenticatedRequest,
