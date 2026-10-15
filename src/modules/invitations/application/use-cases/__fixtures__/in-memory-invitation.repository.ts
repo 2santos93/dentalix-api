@@ -2,6 +2,7 @@ import { ClinicRole } from '@prisma/client';
 import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.entity';
 import {
   AcceptOutcome,
+  GlobalUserRecord,
   InvitationRepository,
 } from '../../../domain/ports/invitation-repository.port';
 import { hashInvitationToken } from '../../invitation-token';
@@ -17,6 +18,7 @@ interface StoredUser {
   email: string;
   fullName: string;
   passwordHash: string;
+  tokenVersion: number;
 }
 
 interface StoredMembership {
@@ -79,6 +81,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       email: overrides.email ?? `user${seq}@clinic.com`,
       fullName: overrides.fullName ?? 'Existing User',
       passwordHash: overrides.passwordHash ?? 'HASH',
+      tokenVersion: overrides.tokenVersion ?? 0,
     };
     this.users.push(user);
     return user;
@@ -145,12 +148,16 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     return Promise.resolve(membership ? { userId: user.id } : null);
   }
 
-  findUserByEmailGlobal(
-    email: string,
-  ): Promise<{ id: string; passwordHash: string } | null> {
+  findUserByEmailGlobal(email: string): Promise<GlobalUserRecord | null> {
     const user = this.users.find((u) => u.email === email);
     return Promise.resolve(
-      user ? { id: user.id, passwordHash: user.passwordHash } : null,
+      user
+        ? {
+            id: user.id,
+            passwordHash: user.passwordHash,
+            tokenVersion: user.tokenVersion,
+          }
+        : null,
     );
   }
 

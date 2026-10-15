@@ -14,7 +14,12 @@ function makeService(): TokenService {
 
 describe('TokenService', () => {
   const svc = makeService();
-  const payload = { sub: 'u1', tenantId: 't1', role: 'ADMIN' as const };
+  const payload = {
+    sub: 'u1',
+    tenantId: 't1',
+    role: 'ADMIN' as const,
+    tv: 2,
+  };
 
   it('issues an access token that verifies back to the payload', async () => {
     const { accessToken, refreshToken } = await svc.issue(payload);
@@ -38,6 +43,9 @@ describe('TokenService', () => {
     expect(decoded.sub).toBe('u1');
     expect(decoded.tenantId).toBe('t1');
     expect(decoded.role).toBe('ADMIN');
+    // La versión de sesión viaja en el refresh para que /auth/refresh pueda
+    // compararla con User.tokenVersion.
+    expect(decoded.tv).toBe(2);
   });
 
   it('rejects a tampered refresh token', async () => {

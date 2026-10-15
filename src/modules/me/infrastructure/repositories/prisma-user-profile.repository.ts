@@ -47,14 +47,16 @@ export class PrismaUserProfileRepository implements UserProfileRepository {
     });
   }
 
-  async updatePasswordHash(
+  async updatePasswordAndRevokeSessions(
     userId: string,
     passwordHash: string,
-  ): Promise<void> {
-    await this.prisma.user.update({
+  ): Promise<number> {
+    const user = await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+      select: { tokenVersion: true },
     });
+    return user.tokenVersion;
   }
 
   async updateAvatarUrl(

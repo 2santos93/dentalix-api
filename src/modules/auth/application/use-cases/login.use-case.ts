@@ -54,6 +54,7 @@ export class LoginUseCase {
       sub: membership.userId,
       tenantId: input.tenantId,
       role: membership.role,
+      tv: membership.tokenVersion,
     });
   }
 
@@ -80,6 +81,7 @@ export class LoginUseCase {
       sub: user.id,
       tenantId: input.tenantId,
       role: ClinicRole.ADMIN,
+      tv: user.tokenVersion,
     });
   }
 
@@ -101,6 +103,10 @@ export class LoginUseCase {
       throw new UnauthorizedException('Invalid credentials');
     }
     this.logger.warn(`Platform admin session opened: user=${user.id}`);
-    return this.tokens.issue({ sub: user.id, platform: true });
+    return this.tokens.issue({
+      sub: user.id,
+      platform: true,
+      tv: user.tokenVersion,
+    });
   }
 }

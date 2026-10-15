@@ -114,7 +114,7 @@ describe('Me (e2e)', () => {
       .post('/api/v1/me/password')
       .set('Authorization', `Bearer ${token}`)
       .send({ currentPassword: 'OldPass1!', newPassword: 'NewPass2!' })
-      .expect(204);
+      .expect(200);
     await login('NewPass2!'); // 201 or throws
   });
 

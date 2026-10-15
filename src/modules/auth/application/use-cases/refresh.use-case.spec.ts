@@ -1,70 +1,236 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { RefreshUseCase } from './refresh.use-case';
+import { SessionClaimsService } from '../session-claims.service';
+import type {
+  AuthRepository,
+  SessionState,
+} from '../../domain/ports/auth-repository.port';
+
+const EXP = 1893456000;
+
+const tenantPayload = {
+  sub: 'u1',
+  tenantId: 't1',
+  role: ClinicRole.ADMIN,
+  tv: 0,
+  jti: 'jti-1',
+  exp: EXP,
+};
+
+const platformPayload = {
+  sub: 'u1',
+  platform: true as const,
+  tv: 0,
+  jti: 'jti-p',
+  exp: EXP,
+};
+
+function activeMember(role: ClinicRole, tokenVersion = 0): SessionState {
+  return {
+    tokenVersion,
+    isPlatformAdmin: false,
+    tenant: { membershipRole: role },
+  };
+}
+
+function setup(opts: {
+  payload?: object;
+  verifyError?: boolean;
+  state: SessionState | null;
+  consumed?: boolean;
+}) {
+  const tokens = {
+    verifyRefresh: opts.verifyError
+      ? jest.fn().mockRejectedValue(new Error('bad token'))
+      : jest.fn().mockResolvedValue(opts.payload ?? tenantPayload),
+    issue: jest
+      .fn()
+      .mockResolvedValue({ accessToken: 'new-acc', refreshToken: 'new-ref' }),
+  };
+  const repo = {
+    findSessionState: jest.fn().mockResolvedValue(opts.state),
+    consumeRefreshToken: jest.fn().mockResolvedValue(opts.consumed ?? true),
+  };
+  const uc = new RefreshUseCase(
+    tokens as never,
+    repo as never,
+    new SessionClaimsService(repo as unknown as AuthRepository),
+  );
+  return { uc, tokens, repo };
+}
 
 describe('RefreshUseCase', () => {
-  const payload = {
-    sub: 'u1',
-    tenantId: 't1',
-    role: ClinicRole.ADMIN,
-    jti: 'jti-1',
-    exp: 1893456000,
-  };
+  it('re-issues from CURRENT state and consumes the used jti (rotation)', async () => {
+    const { uc, tokens, repo } = setup({
+      state: activeMember(ClinicRole.ADMIN),
+    });
 
-  it('verifies the refresh token and issues a fresh token pair (rotation)', async () => {
-    const tokens = {
-      verifyRefresh: jest.fn().mockResolvedValue(payload),
-      issue: jest
-        .fn()
-        .mockResolvedValue({ accessToken: 'new-acc', refreshToken: 'new-ref' }),
-    } as never;
-    const repo = {
-      isTokenRevoked: jest.fn().mockResolvedValue(false),
-    } as never;
-
-    const uc = new RefreshUseCase(tokens, repo);
     const result = await uc.execute({ refreshToken: 'old-ref' });
 
     expect(result).toEqual({ accessToken: 'new-acc', refreshToken: 'new-ref' });
-    expect(
-      (tokens as unknown as { issue: jest.Mock }).issue,
-    ).toHaveBeenCalledWith({
+    expect(repo.findSessionState).toHaveBeenCalledWith('u1', 't1');
+    expect(repo.consumeRefreshToken).toHaveBeenCalledWith(
+      'jti-1',
+      new Date(EXP * 1000),
+    );
+    expect(tokens.issue).toHaveBeenCalledWith({
       sub: 'u1',
       tenantId: 't1',
       role: ClinicRole.ADMIN,
+      tv: 0,
+    });
+  });
+
+  it('uses the CURRENT membership role, not the one in the old token', async () => {
+    const { uc, tokens } = setup({
+      state: activeMember(ClinicRole.ASSISTANT),
+    });
+
+    await uc.execute({ refreshToken: 'old-ref' });
+
+    expect(tokens.issue).toHaveBeenCalledWith({
+      sub: 'u1',
+      tenantId: 't1',
+      role: ClinicRole.ASSISTANT,
+      tv: 0,
+    });
+  });
+
+  it('rejects (401) when the membership is no longer active', async () => {
+    const { uc, tokens, repo } = setup({
+      state: {
+        tokenVersion: 0,
+        isPlatformAdmin: false,
+        tenant: { membershipRole: null },
+      },
+    });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects (401) when the clinic no longer exists', async () => {
+    const { uc, tokens } = setup({
+      state: { tokenVersion: 0, isPlatformAdmin: true, tenant: null },
+    });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+  });
+
+  it('rejects (401) when the user no longer exists (or was deleted)', async () => {
+    const { uc, tokens } = setup({ state: null });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+  });
+
+  it('keeps a platform admin who entered a clinic without membership as ADMIN', async () => {
+    // Mismo criterio que LoginUseCase.loginAsPlatformAdminInTenant.
+    const { uc, tokens } = setup({
+      state: {
+        tokenVersion: 0,
+        isPlatformAdmin: true,
+        tenant: { membershipRole: null },
+      },
+    });
+
+    await uc.execute({ refreshToken: 'old-ref' });
+
+    expect(tokens.issue).toHaveBeenCalledWith({
+      sub: 'u1',
+      tenantId: 't1',
+      role: ClinicRole.ADMIN,
+      tv: 0,
+    });
+  });
+
+  it('renews a platform session while the user is still platform admin', async () => {
+    const { uc, tokens, repo } = setup({
+      payload: platformPayload,
+      state: { tokenVersion: 0, isPlatformAdmin: true, tenant: null },
+    });
+
+    await uc.execute({ refreshToken: 'old-ref' });
+
+    expect(repo.findSessionState).toHaveBeenCalledWith('u1', null);
+    expect(tokens.issue).toHaveBeenCalledWith({
+      sub: 'u1',
+      platform: true,
+      tv: 0,
+    });
+  });
+
+  it('rejects (401) a platform session whose platform-admin flag was revoked', async () => {
+    const { uc, tokens } = setup({
+      payload: platformPayload,
+      state: { tokenVersion: 0, isPlatformAdmin: false, tenant: null },
+    });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+  });
+
+  it('rejects (401) a reused jti: the refresh token is single-use', async () => {
+    // consumeRefreshToken === false → el jti ya estaba en la denylist (otro
+    // refresh concurrente lo ganó, o se cerró la sesión con /auth/logout).
+    const { uc, tokens } = setup({
+      state: activeMember(ClinicRole.ADMIN),
+      consumed: false,
+    });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+  });
+
+  it('rejects (401) a token minted before the last password change', async () => {
+    const { uc, tokens, repo } = setup({
+      state: activeMember(ClinicRole.ADMIN, 1),
+    });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('accepts a legacy token without `tv` while the user is still on version 0', async () => {
+    const legacy = { ...tenantPayload, tv: undefined };
+    const { uc, tokens } = setup({
+      payload: legacy,
+      state: activeMember(ClinicRole.DENTIST),
+    });
+
+    await uc.execute({ refreshToken: 'old-ref' });
+
+    expect(tokens.issue).toHaveBeenCalledWith({
+      sub: 'u1',
+      tenantId: 't1',
+      role: ClinicRole.DENTIST,
+      tv: 0,
     });
   });
 
   it('rejects when the refresh token is invalid/expired', async () => {
-    const tokens = {
-      verifyRefresh: jest.fn().mockRejectedValue(new Error('bad token')),
-      issue: jest.fn(),
-    } as never;
-    const repo = { isTokenRevoked: jest.fn() } as never;
+    const { uc, tokens, repo } = setup({ verifyError: true, state: null });
 
-    const uc = new RefreshUseCase(tokens, repo);
     await expect(
       uc.execute({ refreshToken: 'garbage' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(
-      (tokens as unknown as { issue: jest.Mock }).issue,
-    ).not.toHaveBeenCalled();
-  });
-
-  it('rejects when the refresh token has been revoked (logout)', async () => {
-    const tokens = {
-      verifyRefresh: jest.fn().mockResolvedValue(payload),
-      issue: jest.fn(),
-    } as never;
-    const repo = { isTokenRevoked: jest.fn().mockResolvedValue(true) } as never;
-
-    const uc = new RefreshUseCase(tokens, repo);
-    await expect(
-      uc.execute({ refreshToken: 'revoked-ref' }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-    // No re-emite tokens de una sesión ya cerrada.
-    expect(
-      (tokens as unknown as { issue: jest.Mock }).issue,
-    ).not.toHaveBeenCalled();
+    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(repo.findSessionState).not.toHaveBeenCalled();
   });
 });

@@ -17,7 +17,8 @@ function makeRepo(
       Promise.resolve({ tenantId: 't1', userId: 'u1' }),
     findMembership: () => Promise.resolve(membership),
     revokeToken: jest.fn(),
-    isTokenRevoked: jest.fn(),
+    findSessionState: jest.fn(),
+    consumeRefreshToken: jest.fn(),
   };
 }
 
@@ -32,6 +33,7 @@ describe('LoginUseCase', () => {
       userId: 'u1',
       passwordHash: hash,
       role: ClinicRole.ADMIN,
+      tokenVersion: 0,
     });
     const uc = new LoginUseCase(repo, password, tokens);
     const result = await uc.execute({
@@ -40,6 +42,27 @@ describe('LoginUseCase', () => {
       password: 'S3cret!',
     });
     expect(result).toEqual({ accessToken: 'acc', refreshToken: 'ref' });
+  });
+
+  it("stamps the user's CURRENT session version (tv) on the issued pair", async () => {
+    const hash = await password.hash('S3cret!');
+    const repo = makeRepo({
+      userId: 'u1',
+      passwordHash: hash,
+      role: ClinicRole.DENTIST,
+      tokenVersion: 5,
+    });
+    const issue = jest
+      .fn()
+      .mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref' });
+    const uc = new LoginUseCase(repo, password, { issue } as never);
+    await uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'S3cret!' });
+    expect(issue).toHaveBeenCalledWith({
+      sub: 'u1',
+      tenantId: 't1',
+      role: ClinicRole.DENTIST,
+      tv: 5,
+    });
   });
 
   it('rejects when there is no membership', async () => {
@@ -55,6 +78,7 @@ describe('LoginUseCase', () => {
       userId: 'u1',
       passwordHash: hash,
       role: ClinicRole.ADMIN,
+      tokenVersion: 0,
     });
     const uc = new LoginUseCase(repo, password, tokens);
     await expect(

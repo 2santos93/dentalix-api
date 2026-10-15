@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 
 describe('PrismaAuthRepository — refresh-token denylist', () => {
@@ -25,22 +26,42 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
     });
   });
 
-  it('isTokenRevoked returns true only when a row exists', async () => {
+  it('consumeRefreshToken inserts the jti once and reports a reuse as false', async () => {
     const revokedToken = {
-      upsert: jest.fn(),
-      deleteMany: jest.fn(),
-      findUnique: jest.fn(({ where }: { where: { jti: string } }) =>
-        Promise.resolve(where.jti === 'jti-1' ? { jti: 'jti-1' } : null),
-      ),
+      create: jest
+        .fn()
+        .mockResolvedValueOnce({ jti: 'jti-1' })
+        .mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+            code: 'P2002',
+            clientVersion: 'test',
+          }),
+        ),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     };
     const prisma = { revokedToken } as never;
     const repo = new PrismaAuthRepository(prisma);
+    const exp = new Date('2030-01-01T00:00:00Z');
 
-    expect(await repo.isTokenRevoked('jti-1')).toBe(true);
-    expect(await repo.isTokenRevoked('missing')).toBe(false);
-    expect(revokedToken.findUnique).toHaveBeenCalledWith({
-      where: { jti: 'jti-1' },
-      select: { jti: true },
+    // INSERT (no upsert): la PK de `jti` es la que serializa dos refresh
+    // concurrentes con el mismo token — solo uno gana.
+    expect(await repo.consumeRefreshToken('jti-1', exp)).toBe(true);
+    expect(await repo.consumeRefreshToken('jti-1', exp)).toBe(false);
+    expect(revokedToken.create).toHaveBeenCalledWith({
+      data: { jti: 'jti-1', expiresAt: exp },
     });
+  });
+
+  it('consumeRefreshToken rethrows errors that are not a duplicate jti', async () => {
+    const boom = new Error('connection lost');
+    const revokedToken = {
+      create: jest.fn().mockRejectedValue(boom),
+      deleteMany: jest.fn(),
+    };
+    const repo = new PrismaAuthRepository({ revokedToken } as never);
+
+    await expect(
+      repo.consumeRefreshToken('jti-1', new Date('2030-01-01T00:00:00Z')),
+    ).rejects.toBe(boom);
   });
 });

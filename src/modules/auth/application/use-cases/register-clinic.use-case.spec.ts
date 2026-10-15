@@ -13,7 +13,8 @@ function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
       Promise.resolve({ tenantId: 't1', userId: 'u1' }),
     findMembership: () => Promise.resolve(null),
     revokeToken: jest.fn(),
-    isTokenRevoked: jest.fn(),
+    findSessionState: jest.fn(),
+    consumeRefreshToken: jest.fn(),
     ...overrides,
   };
 }

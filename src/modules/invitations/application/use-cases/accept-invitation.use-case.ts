@@ -70,6 +70,9 @@ export class AcceptInvitationUseCase {
     );
 
     let userId: string;
+    // Versión de sesión con la que nace el par (claim `tv`): la vigente del
+    // usuario existente, o 0 para una cuenta recién creada.
+    let tokenVersion = 0;
     if (existingUser) {
       const passwordMatches = await this.password.verify(
         input.password,
@@ -88,6 +91,7 @@ export class AcceptInvitationUseCase {
         existingUserId: existingUser.id,
       });
       userId = outcome.userId;
+      tokenVersion = existingUser.tokenVersion;
     } else {
       if (!input.password || input.password.length < 8) {
         throw new BadRequestException('password must be at least 8 characters');
@@ -104,6 +108,11 @@ export class AcceptInvitationUseCase {
 
     // El rol viene de la invitación (`invitation.role`), NUNCA de `input` —
     // que ni siquiera lo acepta. `tenantId` ya se validó al principio.
-    return this.tokens.issue({ sub: userId, tenantId, role: invitation.role });
+    return this.tokens.issue({
+      sub: userId,
+      tenantId,
+      role: invitation.role,
+      tv: tokenVersion,
+    });
   }
 }

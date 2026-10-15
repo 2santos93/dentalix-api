@@ -35,6 +35,11 @@ model User {
   // un ClinicRole, que siempre es por-clínica vía ClinicMembership). Se otorga
   // SOLO por migración; ningún endpoint lo concede.
   isPlatformAdmin Boolean            @default(false)
+  // Versión de sesión: viaja en el claim `tv` de cada token y /auth/refresh
+  // exige que coincida. Incrementarla invalida TODOS los refresh tokens del
+  // usuario a la vez (lo hace el cambio de contraseña). Los tokens anteriores
+  // a esta columna no traen `tv` y cuentan como 0.
+  tokenVersion    Int                @default(0)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   deletedAt       DateTime?

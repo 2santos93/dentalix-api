@@ -98,6 +98,7 @@ describe('AcceptInvitationUseCase', () => {
       id: 'user-existing',
       email: 'existente@clinic.com',
       passwordHash: 'OLD_HASH',
+      tokenVersion: 3,
     });
     repo.seedInvitation({
       token: 'tok-2',
@@ -107,7 +108,10 @@ describe('AcceptInvitationUseCase', () => {
     const password = makePassword({
       verify: jest.fn().mockResolvedValue(true),
     });
-    const tokens = makeTokens();
+    const issue = jest
+      .fn()
+      .mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' });
+    const tokens = makeTokens({ issue });
     const ctx = new TenantContextService();
     const uc = new AcceptInvitationUseCase(repo, password, tokens, ctx);
 
@@ -116,6 +120,11 @@ describe('AcceptInvitationUseCase', () => {
     );
 
     expect(result).toEqual({ accessToken: 'AT', refreshToken: 'RT' });
+    // La sesión nace con la versión VIGENTE del usuario: si llevara 0, el
+    // primer /auth/refresh la rechazaría por no coincidir.
+    expect(issue).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'user-existing', tv: 3 }),
+    );
     expect(password.hash).not.toHaveBeenCalled();
     const user = await repo.findUserByEmailGlobal('existente@clinic.com');
     expect(user?.passwordHash).toBe('OLD_HASH'); // sin cambios
@@ -252,6 +261,7 @@ describe('AcceptInvitationUseCase', () => {
     expect(payload).toMatchObject({
       tenantId: 'tenant-from-context',
       role: ClinicRole.RECEPTION,
+      tv: 0,
     });
     expect(typeof payload.sub).toBe('string');
   });

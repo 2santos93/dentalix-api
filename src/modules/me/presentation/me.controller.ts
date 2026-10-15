@@ -30,6 +30,7 @@ import { UpdateNameDto } from './dto/update-name.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { MyProfileDto } from './dto/my-profile.dto';
 import { AvatarResponseDto } from './dto/avatar-response.dto';
+import { AuthTokensDto } from '../../auth/presentation/dto/auth-tokens.dto';
 import { MyProfile } from '../domain/entities/my-profile.entity';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 
@@ -95,15 +96,19 @@ export class MeController {
     });
   }
 
+  // Cambiar la contraseña cierra TODAS las sesiones previas (los refresh
+  // tokens anteriores dejan de renovar) y devuelve un par nuevo para el
+  // cliente que la cambió, que debe sustituir el que tenía.
   @Post('password')
   @RateLimit('password')
-  @HttpCode(204)
-  async changePassword(
+  @HttpCode(200)
+  @ApiOkResponse({ type: AuthTokensDto })
+  changePassword(
     @Req() req: AuthenticatedRequest,
     @Body() dto: ChangePasswordDto,
-  ): Promise<void> {
-    await this.changeMyPassword.execute({
-      userId: req.user.sub,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    return this.changeMyPassword.execute({
+      session: req.user,
       currentPassword: dto.currentPassword,
       newPassword: dto.newPassword,
     });

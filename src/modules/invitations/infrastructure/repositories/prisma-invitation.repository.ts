@@ -8,6 +8,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   InvitationRepository,
   AcceptOutcome,
+  GlobalUserRecord,
 } from '../../domain/ports/invitation-repository.port';
 import { ClinicInvitation } from '../../domain/entities/clinic-invitation.entity';
 
@@ -87,15 +88,13 @@ export class PrismaInvitationRepository implements InvitationRepository {
     });
   }
 
-  async findUserByEmailGlobal(
-    email: string,
-  ): Promise<{ id: string; passwordHash: string } | null> {
+  async findUserByEmailGlobal(email: string): Promise<GlobalUserRecord | null> {
     // `users` has no RLS (global table, same as
     // `PrismaAuthRepository.findUserByEmail`) — plain query, no tenant
     // context needed.
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
-      select: { id: true, passwordHash: true },
+      select: { id: true, passwordHash: true, tokenVersion: true },
     });
   }
 

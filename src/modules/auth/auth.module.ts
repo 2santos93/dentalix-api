@@ -5,6 +5,7 @@ import { RegisterClinicUseCase } from './application/use-cases/register-clinic.u
 import { LoginUseCase } from './application/use-cases/login.use-case';
 import { RefreshUseCase } from './application/use-cases/refresh.use-case';
 import { LogoutUseCase } from './application/use-cases/logout.use-case';
+import { SessionClaimsService } from './application/session-claims.service';
 import { AUTH_REPOSITORY } from './domain/ports/auth-repository.port';
 import { PrismaAuthRepository } from './infrastructure/repositories/prisma-auth.repository';
 import { PasswordService } from '../../shared/crypto/password.service';
@@ -18,9 +19,13 @@ import { TokenService } from '../../shared/crypto/token.service';
     LoginUseCase,
     RefreshUseCase,
     LogoutUseCase,
+    SessionClaimsService,
     PasswordService,
     TokenService,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
   ],
+  // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
+  // con los claims ACTUALES, igual que /auth/refresh.
+  exports: [SessionClaimsService],
 })
 export class AuthModule {}

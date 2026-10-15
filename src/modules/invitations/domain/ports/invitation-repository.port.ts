@@ -8,6 +8,14 @@ export interface AcceptOutcome {
   role: ClinicRole;
 }
 
+/** Usuario global (tabla `users`) con lo necesario para aceptar y emitir. */
+export interface GlobalUserRecord {
+  id: string;
+  passwordHash: string;
+  /** `User.tokenVersion`: el par emitido al aceptar debe llevarla (`tv`). */
+  tokenVersion: number;
+}
+
 export interface InvitationRepository {
   /** Pendientes (no aceptadas, no revocadas, no borradas) del tenant en contexto. */
   listPending(): Promise<ClinicInvitation[]>;
@@ -29,9 +37,7 @@ export interface InvitationRepository {
    * sistema. Usado para decidir si la invitación crea un `User` nuevo o
    * reutiliza uno existente al aceptar.
    */
-  findUserByEmailGlobal(
-    email: string,
-  ): Promise<{ id: string; passwordHash: string } | null>;
+  findUserByEmailGlobal(email: string): Promise<GlobalUserRecord | null>;
 
   /** Revoca la invitación PENDIENTE de ese correo, si existe. Devuelve cuántas revocó. */
   revokePendingByEmail(email: string): Promise<number>;

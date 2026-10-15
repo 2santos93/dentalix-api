@@ -50,7 +50,9 @@ describe('PrismaUserProfileRepository (int)', () => {
     });
 
     await repo.updateName(userId, 'Después');
-    await repo.updatePasswordHash(userId, 'HASH1');
+    // Cada cambio de contraseña incrementa la versión de sesión (0 → 1 → 2).
+    expect(await repo.updatePasswordAndRevokeSessions(userId, 'HASH0')).toBe(1);
+    expect(await repo.updatePasswordAndRevokeSessions(userId, 'HASH1')).toBe(2);
     await repo.updateAvatarUrl(
       userId,
       'http://files.test/api/v1/files/avatars/x.png',

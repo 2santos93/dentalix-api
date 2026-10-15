@@ -6,7 +6,7 @@ import {
   AuthUserRecord,
 } from '../../domain/ports/auth-repository.port';
 import { PasswordService } from '../../../../shared/crypto/password.service';
-import { JwtPayload } from '../../../../shared/crypto/token.service';
+import { IssuablePayload } from '../../../../shared/crypto/token.service';
 
 const password = new PasswordService();
 
@@ -24,17 +24,18 @@ function makeRepo(user: AuthUserRecord | null): AuthRepository {
       Promise.resolve({ tenantId: 't1', userId: 'u1' }),
     findMembership: () => Promise.resolve(null),
     revokeToken: jest.fn(),
-    isTokenRevoked: jest.fn(),
+    findSessionState: jest.fn(),
+    consumeRefreshToken: jest.fn(),
   };
 }
 
 /** Captura el payload firmado para poder afirmar sobre su FORMA. */
 function makeTokens() {
-  const issued: JwtPayload[] = [];
+  const issued: IssuablePayload[] = [];
   return {
     issued,
     service: {
-      issue: (payload: JwtPayload) => {
+      issue: (payload: IssuablePayload) => {
         issued.push(payload);
         return Promise.resolve({ accessToken: 'acc', refreshToken: 'ref' });
       },
@@ -47,6 +48,7 @@ async function platformUser(pass: string): Promise<AuthUserRecord> {
     id: 'super-1',
     passwordHash: await password.hash(pass),
     isPlatformAdmin: true,
+    tokenVersion: 2,
   };
 }
 
@@ -70,7 +72,12 @@ describe('LoginUseCase — superadmin de plataforma', () => {
       // Token de clínica normal: el aislamiento sigue siendo por tenant, no hay
       // ningún permiso "global" viajando dentro del token.
       expect(tokens.issued).toEqual([
-        { sub: 'super-1', tenantId: 'tenant-ajeno', role: ClinicRole.ADMIN },
+        {
+          sub: 'super-1',
+          tenantId: 'tenant-ajeno',
+          role: ClinicRole.ADMIN,
+          tv: 2,
+        },
       ]);
     });
 
@@ -81,6 +88,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
           id: 'u-normal',
           passwordHash: await password.hash('S3cret!'),
           isPlatformAdmin: false,
+          tokenVersion: 0,
         }),
         password,
         tokens.service,
@@ -129,7 +137,9 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password: 'S3cret!',
       });
 
-      expect(tokens.issued).toEqual([{ sub: 'super-1', platform: true }]);
+      expect(tokens.issued).toEqual([
+        { sub: 'super-1', platform: true, tv: 2 },
+      ]);
     });
 
     it('rechaza a un usuario normal', async () => {
@@ -138,6 +148,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
           id: 'u-normal',
           passwordHash: await password.hash('S3cret!'),
           isPlatformAdmin: false,
+          tokenVersion: 0,
         }),
         password,
         makeTokens().service,

@@ -18,7 +18,7 @@ function makeRepo(
     findClinicName: () => Promise.resolve('Clínica Sur'),
     getPasswordHash: () => Promise.resolve('h'),
     updateName: async () => {},
-    updatePasswordHash: async () => {},
+    updatePasswordAndRevokeSessions: () => Promise.resolve(1),
     updateAvatarUrl: async () => {},
     ...over,
   };

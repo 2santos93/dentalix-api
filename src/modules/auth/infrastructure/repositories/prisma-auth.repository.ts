@@ -8,6 +8,7 @@ import {
   AuthUserRecord,
   CreateClinicWithOwnerInput,
   MembershipRecord,
+  SessionState,
 } from '../../domain/ports/auth-repository.port';
 
 @Injectable()
@@ -27,7 +28,12 @@ export class PrismaAuthRepository implements AuthRepository {
   async findUserForAuth(email: string): Promise<AuthUserRecord | null> {
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
-      select: { id: true, passwordHash: true, isPlatformAdmin: true },
+      select: {
+        id: true,
+        passwordHash: true,
+        isPlatformAdmin: true,
+        tokenVersion: true,
+      },
     });
   }
 
@@ -99,7 +105,7 @@ export class PrismaAuthRepository implements AuthRepository {
         select: {
           userId: true,
           role: true,
-          user: { select: { passwordHash: true } },
+          user: { select: { passwordHash: true, tokenVersion: true } },
         },
       });
       if (!membership) return null;
@@ -107,8 +113,41 @@ export class PrismaAuthRepository implements AuthRepository {
         userId: membership.userId,
         role: membership.role,
         passwordHash: membership.user.passwordHash,
+        tokenVersion: membership.user.tokenVersion,
       };
     });
+  }
+
+  // `users` y `tenants` son globales (sin RLS) → lectura directa. La membresía
+  // sí tiene RLS: se lee DENTRO de runWithTenant(tenantId), con el tenant que
+  // viene del refresh token VERIFICADO (firmado por nosotros), nunca del
+  // cliente.
+  async findSessionState(
+    userId: string,
+    tenantId: string | null,
+  ): Promise<SessionState | null> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { tokenVersion: true, isPlatformAdmin: true },
+    });
+    if (!user) return null;
+    if (tenantId === null) {
+      return { ...user, tenant: null };
+    }
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { id: tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!tenant) {
+      return { ...user, tenant: null };
+    }
+    const membership = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.clinicMembership.findFirst({
+        where: { tenantId, userId, deletedAt: null },
+        select: { role: true },
+      }),
+    );
+    return { ...user, tenant: { membershipRole: membership?.role ?? null } };
   }
 
   // Denylist de refresh tokens. Tabla global sin RLS → acceso directo, sin
@@ -119,23 +158,40 @@ export class PrismaAuthRepository implements AuthRepository {
       update: {},
       create: { jti, expiresAt },
     });
-    // Limpieza lazy: al revocar, purga los que ya expiraron (su token base ya
-    // es inválido por TTL, así que la fila no aporta nada).
-    // Excepción justificada al borrado blando: `revoked_tokens` no es un dato
-    // de negocio sino una denylist con TTL. Una fila cuyo `expiresAt` ya pasó
-    // no aporta nada (el token base es inválido por TTL), así que retenerla en
-    // blando sólo haría crecer la tabla sin que nadie pueda consultarla nunca.
+    // Limpieza lazy: al revocar, purga los que ya expiraron.
+    await this.purgeExpiredRevocations();
+  }
+
+  // INSERT a secas (no upsert): la PK `jti` es la que hace atómica la
+  // rotación. Si dos /auth/refresh llegan a la vez con el mismo token, Postgres
+  // serializa los dos INSERT y el segundo choca con P2002 → `false` → 401. Así
+  // un refresh token nunca puede producir dos pares válidos. La fila guarda el
+  // `exp` del token para que la limpieza lazy la pueda borrar cuando ya no
+  // aporta nada.
+  async consumeRefreshToken(jti: string, expiresAt: Date): Promise<boolean> {
+    try {
+      await this.prisma.revokedToken.create({ data: { jti, expiresAt } });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        return false;
+      }
+      throw err;
+    }
+    await this.purgeExpiredRevocations();
+    return true;
+  }
+
+  // Excepción justificada al borrado blando: `revoked_tokens` no es un dato
+  // de negocio sino una denylist con TTL. Una fila cuyo `expiresAt` ya pasó
+  // no aporta nada (el token base es inválido por TTL), así que retenerla en
+  // blando sólo haría crecer la tabla sin que nadie pueda consultarla nunca.
+  private async purgeExpiredRevocations(): Promise<void> {
     // eslint-disable-next-line no-restricted-syntax
     await this.prisma.revokedToken.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
-  }
-
-  async isTokenRevoked(jti: string): Promise<boolean> {
-    const row = await this.prisma.revokedToken.findUnique({
-      where: { jti },
-      select: { jti: true },
-    });
-    return row !== null;
   }
 }

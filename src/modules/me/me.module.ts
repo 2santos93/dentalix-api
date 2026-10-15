@@ -11,11 +11,13 @@ import { PrismaUserProfileRepository } from './infrastructure/repositories/prism
 import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
 import { StorageModule } from '../../shared/storage/storage.module';
+import { AuthModule } from '../auth/auth.module';
 
 // JwtModule.register({}) + TokenService: JwtAuthGuard depende de TokenService
-// (patrón de patients.module). StorageModule aporta FILE_STORAGE.
+// (patrón de patients.module). StorageModule aporta FILE_STORAGE. AuthModule
+// aporta SessionClaimsService (el cambio de contraseña re-emite la sesión).
 @Module({
-  imports: [JwtModule.register({}), StorageModule],
+  imports: [JwtModule.register({}), StorageModule, AuthModule],
   controllers: [MeController],
   providers: [
     GetMyProfileUseCase,
