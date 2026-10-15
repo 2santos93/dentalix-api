@@ -12,6 +12,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -50,6 +51,10 @@ export class ClinicalEntriesController {
 
   @Post()
   @ApiCreatedResponse({ type: ClinicalEntryDto })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
+  })
   create(
     @Param('patientId') patientId: string,
     @Body() dto: CreateClinicalEntryDto,

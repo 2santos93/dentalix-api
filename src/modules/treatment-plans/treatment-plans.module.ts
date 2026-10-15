@@ -14,6 +14,7 @@ import { CURRENCY_WHITELIST } from './domain/ports/currency-whitelist.port';
 import { PrismaCurrencyWhitelist } from './infrastructure/adapters/prisma-currency-whitelist.adapter';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { PatientsModule } from '../patients/patients.module';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
 import { OdontogramModule } from '../odontogram/odontogram.module';
 
@@ -27,7 +28,14 @@ import { OdontogramModule } from '../odontogram/odontogram.module';
   // cross-module use case. OdontogramModule is imported so
   // UpdateTreatmentPlanItemUseCase can inject TOOTH_RECORD_REPOSITORY to mirror
   // an item marked DONE into the odontogram (Pieza B).
-  imports: [JwtModule.register({}), DentalCatalogModule, OdontogramModule],
+  // PatientsModule exporta PATIENT_REPOSITORY: el use-case de alta valida que el
+  // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
+  imports: [
+    JwtModule.register({}),
+    DentalCatalogModule,
+    OdontogramModule,
+    PatientsModule,
+  ],
   controllers: [TreatmentPlansController],
   providers: [
     CreateTreatmentPlanUseCase,

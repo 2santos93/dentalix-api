@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { SaveMedicalHistoryUseCase } from './save-medical-history.use-case';
 import { MedicalHistory } from '../../domain/entities/medical-history.entity';
 import {
@@ -60,7 +62,10 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
 describe('SaveMedicalHistoryUseCase', () => {
   it('creates version 1 for the first save of a patient', async () => {
     const repo = new InMemoryMedicalHistoryRepository();
-    const uc = new SaveMedicalHistoryUseCase(repo);
+    const uc = new SaveMedicalHistoryUseCase(
+      repo,
+      patientsInClinic('p1', 'p2'),
+    );
 
     const result = await uc.execute('p1', { notes: 'Penicilina' }, 'user-1');
 
@@ -72,7 +77,10 @@ describe('SaveMedicalHistoryUseCase', () => {
 
   it('creates version+1 on a second save while the FIRST version remains retrievable in the store (append-only, never updates)', async () => {
     const repo = new InMemoryMedicalHistoryRepository();
-    const uc = new SaveMedicalHistoryUseCase(repo);
+    const uc = new SaveMedicalHistoryUseCase(
+      repo,
+      patientsInClinic('p1', 'p2'),
+    );
 
     const v1 = await uc.execute('p1', { notes: 'Penicilina' }, 'user-1');
     const v2 = await uc.execute('p1', { notes: 'Ninguna' }, 'user-1');
@@ -97,7 +105,10 @@ describe('SaveMedicalHistoryUseCase', () => {
 
   it('computes the next version independently per patient', async () => {
     const repo = new InMemoryMedicalHistoryRepository();
-    const uc = new SaveMedicalHistoryUseCase(repo);
+    const uc = new SaveMedicalHistoryUseCase(
+      repo,
+      patientsInClinic('p1', 'p2'),
+    );
 
     await uc.execute('p1', { notes: 'p1 v1' }, 'user-1');
     const p2v1 = await uc.execute('p2', { notes: 'p2 v1' }, 'user-1');
@@ -108,7 +119,10 @@ describe('SaveMedicalHistoryUseCase', () => {
 
   it('persiste listas estructuradas y deriva las banderas', async () => {
     const repo = new InMemoryMedicalHistoryRepository();
-    const uc = new SaveMedicalHistoryUseCase(repo);
+    const uc = new SaveMedicalHistoryUseCase(
+      repo,
+      patientsInClinic('p1', 'p2'),
+    );
 
     const result = await uc.execute(
       'p1',
@@ -153,7 +167,10 @@ describe('SaveMedicalHistoryUseCase', () => {
       captured = data;
       return originalCreateVersion(patientId, data, createdById);
     };
-    const uc = new SaveMedicalHistoryUseCase(repo);
+    const uc = new SaveMedicalHistoryUseCase(
+      repo,
+      patientsInClinic('p1', 'p2'),
+    );
 
     const maliciousInput = {
       notes: 'Latex',
@@ -172,5 +189,17 @@ describe('SaveMedicalHistoryUseCase', () => {
     expect(result.version).toBe(1); // computed by the repo, not the sneaked 999
     expect(result.tenantId).toBe('t1'); // comes from the repo/context, not input
     expect(result.hasCriticalAlert).toBe(false); // recalculated, not the sneaked true
+  });
+});
+
+describe('SaveMedicalHistoryUseCase — pertenencia del paciente (SEC-004)', () => {
+  it('rechaza con 404 "Paciente no encontrado" un paciente que no es de la clínica, sin crear versión', async () => {
+    const repo = new InMemoryMedicalHistoryRepository();
+    const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+
+    await expect(
+      uc.execute('p-otra-clinica', { notes: 'Penicilina' }, 'user-1'),
+    ).rejects.toThrow(new NotFoundException('Paciente no encontrado'));
+    expect(repo.rows).toHaveLength(0);
   });
 });

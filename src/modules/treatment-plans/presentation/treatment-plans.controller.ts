@@ -13,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -73,6 +74,10 @@ export class TreatmentPlansController {
 
   @Post('patients/:patientId/treatment-plans')
   @ApiCreatedResponse({ type: TreatmentPlanDto })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
+  })
   create(
     @Param('patientId') patientId: string,
     @Body() dto: CreateTreatmentPlanDto,

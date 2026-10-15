@@ -7,12 +7,15 @@ import { CLINICAL_ENTRY_REPOSITORY } from './domain/ports/clinical-entry-reposit
 import { PrismaClinicalEntryRepository } from './infrastructure/repositories/prisma-clinical-entry.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { PatientsModule } from '../patients/patients.module';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/MedicalHistoryModule:
   // JwtAuthGuard depends on TokenService, which depends on JwtService — must
   // be available here since the guard is applied on this module's controller.
-  imports: [JwtModule.register({})],
+  // PatientsModule exporta PATIENT_REPOSITORY: el use-case de alta valida que el
+  // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
+  imports: [JwtModule.register({}), PatientsModule],
   controllers: [ClinicalEntriesController],
   providers: [
     CreateClinicalEntryUseCase,

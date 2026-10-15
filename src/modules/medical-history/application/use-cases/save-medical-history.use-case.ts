@@ -5,6 +5,9 @@ import type {
   MedicalHistoryVersionData,
 } from '../../domain/ports/medical-history-repository.port';
 import { MedicalHistory } from '../../domain/entities/medical-history.entity';
+import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
+import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 
 // NOTE: deliberately NO `tenantId`/`version`/`id`/`safetyFlags`/
 // `hasCriticalAlert` fields — same rationale as MedicalHistoryVersionData
@@ -17,6 +20,11 @@ export class SaveMedicalHistoryUseCase {
   constructor(
     @Inject(MEDICAL_HISTORY_REPOSITORY)
     private readonly repo: MedicalHistoryRepository,
+    // Resuelve "¿este paciente es de ESTA clínica?" bajo RLS antes de insertar
+    // (SEC-004): la FK a patients se chequea saltando la RLS, así que sin esto
+    // se podía escribir contra un paciente de otra clínica.
+    @Inject(PATIENT_REPOSITORY)
+    private readonly patients: PatientRepository,
   ) {}
 
   /**
@@ -31,6 +39,8 @@ export class SaveMedicalHistoryUseCase {
     data: MedicalHistoryVersionData,
     createdById?: string,
   ): Promise<MedicalHistory> {
+    await assertPatientInClinic(this.patients, patientId);
+
     const normalized: MedicalHistoryVersionData = {
       allergies: data.allergies,
       conditions: data.conditions,

@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { CreateTreatmentPlanUseCase } from './create-treatment-plan.use-case';
 import {
@@ -69,7 +70,11 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
 describe('CreateTreatmentPlanUseCase', () => {
   it('creates a plan in DRAFT status and returns the mapped entity', async () => {
     const repo = makeRepo();
-    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
 
     const result = await uc.execute({ patientId: 'p1', createdById: 'u1' });
 
@@ -88,7 +93,11 @@ describe('CreateTreatmentPlanUseCase', () => {
         return Promise.resolve(fakePlan({ notes: input.notes ?? null }));
       },
     });
-    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
 
     await uc.execute({ patientId: 'p1', notes: 'Plan inicial' });
 
@@ -105,7 +114,11 @@ describe('CreateTreatmentPlanUseCase', () => {
         return Promise.resolve(fakePlan());
       },
     });
-    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
 
     const maliciousInput = {
       patientId: 'p1',
@@ -129,7 +142,11 @@ describe('CreateTreatmentPlanUseCase', () => {
         return Promise.resolve(fakePlan({ currency: input.currency }));
       },
     });
-    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
 
     const result = await uc.execute({ patientId: 'p1' });
 
@@ -147,7 +164,11 @@ describe('CreateTreatmentPlanUseCase', () => {
         return Promise.resolve(fakePlan({ currency: input.currency }));
       },
     });
-    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
 
     await uc.execute({ patientId: 'p1', currency: 'cop' });
 
@@ -159,10 +180,31 @@ describe('CreateTreatmentPlanUseCase', () => {
       createPlan: (): Promise<TreatmentPlan> =>
         Promise.reject(new Error('createPlan should not be called')),
     });
-    const uc = new CreateTreatmentPlanUseCase(repo, makeWhitelist());
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
 
     await expect(
       uc.execute({ patientId: 'p1', currency: 'XXX' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('CreateTreatmentPlanUseCase — pertenencia del paciente (SEC-004)', () => {
+  it('rechaza con 404 "Paciente no encontrado" un paciente que no es de la clínica, sin crear el plan', async () => {
+    const createPlan = jest.fn();
+    const repo = makeRepo({ createPlan });
+    const uc = new CreateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      patientsInClinic('p1'),
+    );
+
+    await expect(uc.execute({ patientId: 'p-otra-clinica' })).rejects.toThrow(
+      new NotFoundException('Paciente no encontrado'),
+    );
+    expect(createPlan).not.toHaveBeenCalled();
   });
 });

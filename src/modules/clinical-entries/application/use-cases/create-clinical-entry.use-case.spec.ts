@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
 import {
@@ -53,7 +55,7 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
 describe('CreateClinicalEntryUseCase', () => {
   it('appends a new entry and returns it', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo);
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute(
       'p1',
@@ -69,7 +71,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('defaults entryDate to now when not provided', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo);
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
     const before = new Date();
 
     const result = await uc.execute('p1', { notes: 'Nota' }, 'user-1');
@@ -81,7 +83,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('uses the provided entryDate when given', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo);
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
     const explicitDate = new Date('2025-01-15T10:00:00.000Z');
 
     const result = await uc.execute(
@@ -95,7 +97,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('rejects blank notes (notes is required content, not just a required field)', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo);
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
 
     await expect(
       uc.execute('p1', { notes: '   ' }, 'user-1'),
@@ -111,7 +113,7 @@ describe('CreateClinicalEntryUseCase', () => {
       captured = input;
       return originalCreate(input);
     };
-    const uc = new CreateClinicalEntryUseCase(repo);
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
 
     const maliciousInput = {
       notes: 'Nota',
@@ -125,10 +127,22 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('forwards performedById from the explicit argument, not from the input payload', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo);
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute('p1', { notes: 'Nota' }, 'user-77');
 
     expect(result.performedById).toBe('user-77');
+  });
+});
+
+describe('CreateClinicalEntryUseCase — pertenencia del paciente (SEC-004)', () => {
+  it('rechaza con 404 "Paciente no encontrado" un paciente que no es de la clínica, sin insertar', async () => {
+    const repo = new InMemoryClinicalEntryRepository();
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+
+    await expect(
+      uc.execute('p-otra-clinica', { notes: 'Nota' }, 'user-1'),
+    ).rejects.toThrow(new NotFoundException('Paciente no encontrado'));
+    expect(repo.rows).toHaveLength(0);
   });
 });

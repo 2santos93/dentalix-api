@@ -11,6 +11,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -54,6 +55,10 @@ export class OdontogramController {
 
   @Post('tooth-records')
   @ApiCreatedResponse({ type: ToothRecordDto })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
+  })
   create(
     @Param('patientId') patientId: string,
     @Body() dto: CreateToothRecordDto,

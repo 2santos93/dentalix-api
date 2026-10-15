@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { CatalogKind, ToothRecordStatus, ToothSurface } from '@prisma/client';
 import { AddToothRecordUseCase } from './add-tooth-record.use-case';
 import { ToothRecord } from '../../domain/entities/tooth-record.entity';
@@ -62,7 +64,7 @@ class InMemoryToothRecordRepository implements ToothRecordRepository {
 describe('AddToothRecordUseCase', () => {
   it('appends a new record and returns it', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute(
       'p1',
@@ -83,7 +85,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('accepts an empty surfaces array (means whole tooth)', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute('p1', {
       toothNumber: '48',
@@ -96,7 +98,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('defaults surfaces to empty when omitted entirely', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute('p1', {
       toothNumber: '21',
@@ -110,7 +112,7 @@ describe('AddToothRecordUseCase', () => {
     'accepts a valid permanent FDI tooth number (%s)',
     async (toothNumber) => {
       const repo = new InMemoryToothRecordRepository();
-      const uc = new AddToothRecordUseCase(repo);
+      const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
       const result = await uc.execute('p1', {
         toothNumber,
@@ -126,7 +128,7 @@ describe('AddToothRecordUseCase', () => {
     'accepts a valid primary (deciduous) FDI tooth number (%s)',
     async (toothNumber) => {
       const repo = new InMemoryToothRecordRepository();
-      const uc = new AddToothRecordUseCase(repo);
+      const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
       const result = await uc.execute('p1', {
         toothNumber,
@@ -142,7 +144,7 @@ describe('AddToothRecordUseCase', () => {
     'rejects an invalid FDI tooth number (%s)',
     async (toothNumber) => {
       const repo = new InMemoryToothRecordRepository();
-      const uc = new AddToothRecordUseCase(repo);
+      const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
       await expect(
         uc.execute('p1', {
@@ -157,7 +159,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('rejects an invalid surface value', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     await expect(
       uc.execute('p1', {
@@ -171,7 +173,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('rejects an invalid kind', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     await expect(
       uc.execute('p1', {
@@ -191,7 +193,7 @@ describe('AddToothRecordUseCase', () => {
       captured = input;
       return originalCreate(input);
     };
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     const maliciousInput = {
       toothNumber: '11',
@@ -207,7 +209,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('forwards performedById from the explicit argument, not from the input payload', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute(
       'p1',
@@ -220,7 +222,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('does NOT existence-check catalogItemId/clinicalEntryId — forwards them as given (RLS renders a bad/cross-tenant ref harmless; follow-up)', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo);
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
 
     const result = await uc.execute('p1', {
       toothNumber: '11',
@@ -232,5 +234,20 @@ describe('AddToothRecordUseCase', () => {
 
     expect(result.catalogItemId).toBe('not-a-real-item');
     expect(result.clinicalEntryId).toBe('not-a-real-entry');
+  });
+});
+
+describe('AddToothRecordUseCase — pertenencia del paciente (SEC-004)', () => {
+  it('rechaza con 404 "Paciente no encontrado" un paciente que no es de la clínica, sin insertar', async () => {
+    const repo = new InMemoryToothRecordRepository();
+    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+
+    await expect(
+      uc.execute('p-otra-clinica', {
+        toothNumber: '11',
+        kind: CatalogKind.DIAGNOSIS,
+      }),
+    ).rejects.toThrow(new NotFoundException('Paciente no encontrado'));
+    expect(repo.rows).toHaveLength(0);
   });
 });

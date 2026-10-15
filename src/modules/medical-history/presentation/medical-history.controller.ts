@@ -11,6 +11,7 @@ import {
 import {
   ApiBearerAuth,
   ApiExtraModels,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
   getSchemaPath,
@@ -65,6 +66,10 @@ export class MedicalHistoryController {
   // Always APPENDS a new version; never updates the previous one.
   @Put()
   @ApiOkResponse({ type: MedicalHistoryDto })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
+  })
   save(
     @Param('patientId') patientId: string,
     @Body() dto: SaveMedicalHistoryDto,

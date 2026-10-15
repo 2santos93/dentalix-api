@@ -2,6 +2,9 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { CLINICAL_ENTRY_REPOSITORY } from '../../domain/ports/clinical-entry-repository.port';
 import type { ClinicalEntryRepository } from '../../domain/ports/clinical-entry-repository.port';
 import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
+import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 
 // NOTE: deliberately NO `tenantId`/`id`/`createdAt`/`performedById` field —
 // tenant comes from the guarded request context (never the client, same
@@ -19,6 +22,11 @@ export class CreateClinicalEntryUseCase {
   constructor(
     @Inject(CLINICAL_ENTRY_REPOSITORY)
     private readonly repo: ClinicalEntryRepository,
+    // Resuelve "¿este paciente es de ESTA clínica?" bajo RLS antes de insertar
+    // (SEC-004): la FK a patients se chequea saltando la RLS, así que sin esto
+    // se podía escribir contra un paciente de otra clínica.
+    @Inject(PATIENT_REPOSITORY)
+    private readonly patients: PatientRepository,
   ) {}
 
   /**
@@ -34,6 +42,8 @@ export class CreateClinicalEntryUseCase {
     if (input.notes.trim() === '') {
       throw new BadRequestException('notes must not be blank');
     }
+
+    await assertPatientInClinic(this.patients, patientId);
 
     // Rebuild the payload from only the known fields — same defensive
     // convention as SaveMedicalHistoryUseCase / CreateCatalogItemUseCase:

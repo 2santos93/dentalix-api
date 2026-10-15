@@ -3,6 +3,9 @@ import { CatalogKind, ToothRecordStatus, ToothSurface } from '@prisma/client';
 import { TOOTH_RECORD_REPOSITORY } from '../../domain/ports/tooth-record-repository.port';
 import type { ToothRecordRepository } from '../../domain/ports/tooth-record-repository.port';
 import { ToothRecord } from '../../domain/entities/tooth-record.entity';
+import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
+import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 
 // FDI/ISO-3950 tooth codes: permanent dentition is quadrants 1-4 with tooth
 // position 1-8 (11-18, 21-28, 31-38, 41-48); primary (deciduous) dentition is
@@ -61,6 +64,11 @@ export class AddToothRecordUseCase {
   constructor(
     @Inject(TOOTH_RECORD_REPOSITORY)
     private readonly repo: ToothRecordRepository,
+    // Resuelve "¿este paciente es de ESTA clínica?" bajo RLS antes de insertar
+    // (SEC-004): la FK a patients se chequea saltando la RLS, así que sin esto
+    // se podía escribir contra un paciente de otra clínica.
+    @Inject(PATIENT_REPOSITORY)
+    private readonly patients: PatientRepository,
   ) {}
 
   /**
@@ -91,6 +99,8 @@ export class AddToothRecordUseCase {
         'kind must be one of: DIAGNOSIS, PROCEDURE',
       );
     }
+
+    await assertPatientInClinic(this.patients, patientId);
 
     // Rebuild the payload from only the known fields — same defensive
     // convention as CreateClinicalEntryUseCase / CreateCatalogItemUseCase:

@@ -4,6 +4,9 @@ import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-
 import { CURRENCY_WHITELIST } from '../../domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 import { TreatmentPlan } from '../../domain/entities/treatment-plan.entity';
+import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
+import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and a
@@ -22,6 +25,11 @@ export class CreateTreatmentPlanUseCase {
     private readonly repo: TreatmentPlanRepository,
     @Inject(CURRENCY_WHITELIST)
     private readonly whitelist: CurrencyWhitelist,
+    // Resuelve "¿este paciente es de ESTA clínica?" bajo RLS antes de insertar
+    // (SEC-004): la FK a patients se chequea saltando la RLS, así que sin esto
+    // se podía escribir contra un paciente de otra clínica.
+    @Inject(PATIENT_REPOSITORY)
+    private readonly patients: PatientRepository,
   ) {}
 
   async execute(input: CreateTreatmentPlanInput): Promise<TreatmentPlan> {
@@ -32,6 +40,8 @@ export class CreateTreatmentPlanUseCase {
     if (!(await this.whitelist.has(currency))) {
       throw new BadRequestException(`Unknown currency: ${currency}`);
     }
+
+    await assertPatientInClinic(this.patients, input.patientId);
 
     return this.repo.createPlan({
       patientId: input.patientId,
