@@ -51,6 +51,20 @@ $ npm run start:prod
    npm install
    ```
 2. Configurar variables de entorno (`.env`, ver `.env.test` para el entorno de tests) con `DATABASE_URL`/`DIRECT_URL` apuntando a Postgres.
+   Copia `.env.example` a `.env` y **genera los secretos JWT** (uno distinto
+   para cada variable; también en `.env.test`):
+   ```bash
+   openssl rand -hex 32   # → JWT_ACCESS_SECRET
+   openssl rand -hex 32   # → JWT_REFRESH_SECRET
+   ```
+   La API valida la configuración al arrancar y **no arranca** si
+   `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` faltan, tienen menos de 32
+   caracteres, son iguales entre sí o son valores conocidos de ejemplo
+   (`change-me…`, `changeme`, `secret`…); el error dice qué variable corregir
+   sin mostrar su valor. Con `NODE_ENV=production` además exige
+   `CORS_ROOT_DOMAIN`, `TENANT_BASE_DOMAINS` y `FILES_PUBLIC_BASE_URL` (https,
+   sin dominios locales), rechaza los secretos ficticios de CI (`solo-test…`) y
+   las contraseñas de base de datos de ejemplo (`changeme`, `dentalix_app`…).
 3. Aplicar las migraciones:
    ```bash
    npx prisma migrate deploy

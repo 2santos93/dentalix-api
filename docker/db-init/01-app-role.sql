@@ -1,4 +1,7 @@
 -- App role: non-superuser (RLS-enforced). The app connects as this at runtime.
+-- SOLO DESARROLLO/CI: la contraseña es pública. En producción crea el rol con
+-- una contraseña generada (`openssl rand -hex 24`); la API se niega a arrancar
+-- con NODE_ENV=production si DATABASE_URL/DIRECT_URL usan una de ejemplo.
 CREATE ROLE dentalix_app WITH LOGIN PASSWORD 'dentalix_app';
 GRANT USAGE ON SCHEMA public TO dentalix_app;
 -- No-op at init time (schema is empty pre-migration); real grants come from the
