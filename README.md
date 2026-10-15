@@ -40,9 +40,16 @@ $ npm run start
 # watch mode
 $ npm run start:dev
 
-# production mode
-$ npm run start:prod
+# production mode (compila antes: ejecuta dist/main.js)
+$ npm run build && npm run start:prod
 ```
+
+Requiere Node 22 o superior (`.nvmrc` y `engines` en `package.json`; con nvm:
+`nvm use`). `nest build` compila solo `src/` (`tsconfig.build.json`), así que la
+entrada queda en `dist/main.js`; `prisma/seed*.ts` no se compilan: se ejecutan
+con ts-node (`npx prisma db seed`, `npm run seed:demo`), así que en el entorno
+de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
+`PORT` (default 3000) y el health check es `GET /api/v1/health`.
 
 ## Local setup
 
