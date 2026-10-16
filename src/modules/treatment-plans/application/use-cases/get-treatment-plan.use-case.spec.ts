@@ -56,6 +56,7 @@ describe('GetTreatmentPlanUseCase', () => {
       createdById: null,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      acceptance: null,
       items: [
         {
           id: 'item1',
@@ -65,6 +66,7 @@ describe('GetTreatmentPlanUseCase', () => {
           surfaces: [],
           catalogItemId: 'cat1',
           price: 100,
+          discount: 0,
           status: TreatmentPlanItemStatus.PROPOSED,
           notes: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -78,6 +80,7 @@ describe('GetTreatmentPlanUseCase', () => {
           surfaces: [],
           catalogItemId: 'cat2',
           price: 50.5,
+          discount: 0,
           status: TreatmentPlanItemStatus.PROPOSED,
           notes: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -108,6 +111,7 @@ describe('GetTreatmentPlanUseCase', () => {
       createdById: null,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      acceptance: null,
       items: [],
     };
     const repo = makeRepo({

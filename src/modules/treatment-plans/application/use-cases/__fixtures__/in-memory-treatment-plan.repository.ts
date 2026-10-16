@@ -1,6 +1,7 @@
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import {
   TreatmentPlan,
+  TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../domain/entities/treatment-plan-item.entity';
@@ -17,7 +18,10 @@ import {
 // has to honour "non-deleted only" like the real Prisma repo, so it tracks
 // `deletedAt` on the stored rows and strips it via `toPlanEntity`/
 // `toItemEntity` (mirrors `mapToEntity` in prisma-treatment-plan.repository.ts).
-type StoredPlan = TreatmentPlan & { deletedAt: Date | null };
+type StoredPlan = TreatmentPlan & {
+  deletedAt: Date | null;
+  acceptance: TreatmentPlanAcceptanceSummary | null;
+};
 type StoredItem = TreatmentPlanItem & { deletedAt: Date | null };
 
 let seq = 0;
@@ -47,6 +51,7 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
       deletedAt: overrides.deletedAt ?? null,
+      acceptance: overrides.acceptance ?? null,
     };
     this.plans.push(row);
     return this.toPlanEntity(row);
@@ -62,6 +67,7 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       surfaces: overrides.surfaces ?? [],
       catalogItemId: overrides.catalogItemId ?? 'catalog-1',
       price: overrides.price ?? 100,
+      discount: overrides.discount ?? 0,
       status: overrides.status ?? TreatmentPlanItemStatus.PROPOSED,
       notes: overrides.notes ?? null,
       createdAt: overrides.createdAt ?? NOW,
@@ -98,6 +104,7 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       surfaces: row.surfaces,
       catalogItemId: row.catalogItemId,
       price: row.price,
+      discount: row.discount,
       status: row.status,
       notes: row.notes,
       createdAt: row.createdAt,
@@ -117,6 +124,7 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,
+      acceptance: null,
     };
     this.plans.push(row);
     return Promise.resolve(this.toPlanEntity(row));
@@ -130,7 +138,11 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
     const items = this.items
       .filter((i) => i.planId === id && i.deletedAt === null)
       .map((i) => this.toItemEntity(i));
-    return Promise.resolve({ ...this.toPlanEntity(row), items });
+    return Promise.resolve({
+      ...this.toPlanEntity(row),
+      items,
+      acceptance: row.acceptance,
+    });
   }
 
   listPlansByPatient(patientId: string): Promise<TreatmentPlan[]> {
@@ -169,6 +181,7 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       surfaces: input.surfaces ?? [],
       catalogItemId: input.catalogItemId,
       price: input.price,
+      discount: input.discount ?? 0,
       status: TreatmentPlanItemStatus.PROPOSED,
       notes: input.notes ?? null,
       createdAt: NOW,

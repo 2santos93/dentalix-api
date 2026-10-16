@@ -16,6 +16,8 @@ export interface TreatmentPlanItem {
   surfaces: ToothSurface[];
   catalogItemId: string;
   price: number;
+  /** Descuento del ítem en la moneda del plan (DX-012); 0 ≤ discount ≤ price. */
+  discount: number;
   status: TreatmentPlanItemStatus;
   notes: string | null;
   createdAt: Date;

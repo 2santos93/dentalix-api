@@ -15,6 +15,15 @@ const BILLABLE_ITEM_STATUSES: TreatmentPlanItemStatus[] = [
   TreatmentPlanItemStatus.DONE,
 ];
 
+/** Facturable de un plan: Σ precio − Σ descuento de sus ítems (DX-012). */
+function netOf(sum: {
+  price: Prisma.Decimal | null;
+  discount: Prisma.Decimal | null;
+}): number {
+  const price = sum.price ?? new Prisma.Decimal(0);
+  return price.minus(sum.discount ?? 0).toNumber();
+}
+
 @Injectable()
 export class PrismaAccountStatementRepository implements AccountStatementRepository {
   constructor(
@@ -91,7 +100,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 status: { in: BILLABLE_ITEM_STATUSES },
                 plan: livePlan,
               },
-              _sum: { price: true },
+              _sum: { price: true, discount: true },
             }),
             // Anulados INCLUIDOS (sin filtro de deletedAt): el estado de cuenta
             // los lista marcados; el cálculo no los suma.
@@ -167,7 +176,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
         );
 
         const billableByPlan = new Map(
-          itemSums.map((row) => [row.planId, row._sum.price?.toNumber() ?? 0]),
+          itemSums.map((row) => [row.planId, netOf(row._sum)]),
         );
 
         return {
@@ -279,7 +288,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 status: { in: BILLABLE_ITEM_STATUSES },
                 plan: billablePlan,
               },
-              _sum: { price: true },
+              _sum: { price: true, discount: true },
             }),
             tx.payment.groupBy({
               by: ['treatmentPlanId', 'currency'],
@@ -298,7 +307,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           ]);
 
         const billableByPlan = new Map(
-          itemSums.map((row) => [row.planId, row._sum.price?.toNumber() ?? 0]),
+          itemSums.map((row) => [row.planId, netOf(row._sum)]),
         );
         const paidByPlan = new Map<
           string,

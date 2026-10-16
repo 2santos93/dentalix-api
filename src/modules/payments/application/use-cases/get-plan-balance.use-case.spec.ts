@@ -110,6 +110,7 @@ function makeItem(
     surfaces: [],
     catalogItemId: 'cat-1',
     price: 100,
+    discount: 0,
     status: TreatmentPlanItemStatus.PROPOSED,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -131,6 +132,7 @@ function makePlan(
     createdById: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    acceptance: null,
     items: [],
     total: 0,
     ...overrides,
@@ -176,6 +178,34 @@ describe('GetPlanBalanceUseCase', () => {
 
     expect(result.billable).toBe(500);
     expect(result.planCurrency).toBe('USD');
+  });
+
+  it('billable resta el descuento de cada ítem (DX-012)', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan({
+      items: [
+        makeItem({
+          price: 200,
+          discount: 20.5,
+          status: TreatmentPlanItemStatus.ACCEPTED,
+        }),
+        makeItem({
+          price: 100,
+          discount: 100,
+          status: TreatmentPlanItemStatus.DONE,
+        }),
+        makeItem({
+          price: 50,
+          discount: 10,
+          status: TreatmentPlanItemStatus.PROPOSED,
+        }),
+      ],
+    });
+
+    const result = await uc.execute('plan-1');
+
+    expect(result.billable).toBe(179.5);
+    expect(result.balance).toBe(179.5);
   });
 
   it("paid = Σ payments converted to plan currency by each payment's own paidAt date", async () => {

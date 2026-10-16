@@ -2,6 +2,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { TreatmentPlanItemDto } from './treatment-plan-item.dto';
 
+/** Quién aceptó con firma el presupuesto y cuándo (DX-012). */
+export class TreatmentPlanAcceptanceSummaryDto {
+  @ApiProperty()
+  signerName!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  acceptedAt!: Date;
+}
+
 // Response shape for TreatmentPlan endpoints — documents the
 // TreatmentPlan/TreatmentPlanWithItems/TreatmentPlanDetail entity contracts
 // for Swagger in a single class (same convention as AppointmentDto /
@@ -41,7 +50,16 @@ export class TreatmentPlanDto {
   items?: TreatmentPlanItemDto[];
 
   @ApiPropertyOptional({
-    description: 'Sum of active items price — only present on GET by id',
+    description:
+      'Sum of active items price minus discount — only present on GET by id',
   })
   total?: number;
+
+  @ApiPropertyOptional({
+    type: TreatmentPlanAcceptanceSummaryDto,
+    nullable: true,
+    description:
+      'Aceptación firmada (DX-012); null si no se firmó. Con firma, los ítems quedan congelados (409). Solo en GET by id',
+  })
+  acceptance?: TreatmentPlanAcceptanceSummaryDto | null;
 }

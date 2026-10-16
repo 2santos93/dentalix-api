@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { TreatmentPlanStatus } from '@prisma/client';
 import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-repository.port';
 import type {
   TreatmentPlanRepository,
@@ -12,6 +14,7 @@ import type {
 import { CURRENCY_WHITELIST } from '../../domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 import { TreatmentPlan } from '../../domain/entities/treatment-plan.entity';
+import { SIGNED_PLAN_HEADER_LOCKED_MESSAGE } from './signed-plan-lock';
 
 export type UpdateTreatmentPlanInput = UpdateTreatmentPlanRepoInput;
 
@@ -46,6 +49,17 @@ export class UpdateTreatmentPlanUseCase {
         throw new BadRequestException(`Unknown currency: ${currency}`);
       }
       normalizedPatch = { ...patch, currency };
+    }
+
+    // Aceptado con firma (DX-012): los importes firmados no cambian de moneda
+    // y el plan no vuelve a borrador. Cerrarlo y las notas, sí.
+    if (
+      existing.acceptance &&
+      ((normalizedPatch.currency !== undefined &&
+        normalizedPatch.currency !== existing.currency) ||
+        normalizedPatch.status === TreatmentPlanStatus.DRAFT)
+    ) {
+      throw new ConflictException(SIGNED_PLAN_HEADER_LOCKED_MESSAGE);
     }
 
     return this.repo.updatePlan(id, normalizedPatch);

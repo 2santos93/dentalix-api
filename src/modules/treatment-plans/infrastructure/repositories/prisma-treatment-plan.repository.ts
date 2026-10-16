@@ -26,8 +26,12 @@ type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
 type PrismaTreatmentPlanItem = Prisma.TreatmentPlanItemGetPayload<
   Record<string, never>
 >;
+const ACCEPTANCE_SUMMARY = {
+  select: { signerName: true, acceptedAt: true },
+} satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
+
 type PrismaTreatmentPlanWithItems = Prisma.TreatmentPlanGetPayload<{
-  include: { items: true };
+  include: { items: true; acceptance: typeof ACCEPTANCE_SUMMARY };
 }>;
 
 function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
@@ -56,6 +60,7 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
     surfaces: item.surfaces.map((surface) => surface),
     catalogItemId: item.catalogItemId,
     price: item.price.toNumber(),
+    discount: item.discount.toNumber(),
     status: item.status,
     notes: item.notes,
     createdAt: item.createdAt,
@@ -69,6 +74,12 @@ function mapToEntityWithItems(
   return {
     ...mapToEntity(plan),
     items: plan.items.map(mapItemToEntity),
+    acceptance: plan.acceptance
+      ? {
+          signerName: plan.acceptance.signerName,
+          acceptedAt: plan.acceptance.acceptedAt,
+        }
+      : null,
   };
 }
 
@@ -119,7 +130,10 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     const plan = await this.prisma.runWithTenant(async (tx) => {
       return tx.treatmentPlan.findFirst({
         where: { id, deletedAt: null },
-        include: { items: { where: { deletedAt: null } } },
+        include: {
+          items: { where: { deletedAt: null } },
+          acceptance: ACCEPTANCE_SUMMARY,
+        },
       });
     });
     return plan ? mapToEntityWithItems(plan) : null;
@@ -169,6 +183,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           surfaces: input.surfaces ?? [],
           catalogItemId: input.catalogItemId,
           price: input.price,
+          discount: input.discount ?? 0,
           notes: input.notes,
         },
       });

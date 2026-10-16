@@ -11,7 +11,7 @@ export class PlanBalanceDto {
 
   @ApiProperty({
     example: 300,
-    description: 'Sum of ACCEPTED|DONE item prices',
+    description: 'Sum of ACCEPTED|DONE item prices minus their discounts',
   })
   billable!: number;
 

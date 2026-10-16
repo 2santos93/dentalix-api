@@ -10,6 +10,8 @@ import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-
 import { DENTAL_CATALOG_REPOSITORY } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import { assertItemsEditable } from './signed-plan-lock';
+import { assertDiscountWithinPrice } from './item-discount';
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — a new item always
 // starts PROPOSED (the schema default). `price` is OPTIONAL: when omitted,
@@ -19,6 +21,8 @@ export interface AddTreatmentPlanItemInput {
   surfaces?: ToothSurface[];
   catalogItemId: string;
   price?: number;
+  /** Descuento en la moneda del plan; 0 si se omite, nunca mayor que el precio. */
+  discount?: number;
   notes?: string;
 }
 
@@ -39,6 +43,7 @@ export class AddTreatmentPlanItemUseCase {
     if (!plan) {
       throw new NotFoundException('Treatment plan not found');
     }
+    assertItemsEditable(plan);
 
     // `catalogItemId` must resolve to a real, active-tenant catalog item —
     // a cross-tenant or made-up id must never silently succeed (that would
@@ -55,6 +60,8 @@ export class AddTreatmentPlanItemUseCase {
     if (price === undefined) {
       throw new BadRequestException('price is required');
     }
+    const discount = input.discount ?? 0;
+    assertDiscountWithinPrice(price, discount);
 
     return this.repo.addItem({
       planId,
@@ -62,6 +69,7 @@ export class AddTreatmentPlanItemUseCase {
       surfaces: input.surfaces,
       catalogItemId: input.catalogItemId,
       price,
+      discount,
       notes: input.notes,
     });
   }

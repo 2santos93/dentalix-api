@@ -27,6 +27,17 @@ export class UpdateTreatmentPlanItemDto {
   @IsMoney()
   price?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Descuento (máx. 2 decimales); nunca mayor que el precio (400). En un plan aceptado con firma: 409',
+    maximum: MONEY_MAX,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @IsMoney()
+  discount?: number;
+
   @ApiPropertyOptional({ enum: TreatmentPlanItemStatus })
   @IsOptional()
   @IsEnum(TreatmentPlanItemStatus)

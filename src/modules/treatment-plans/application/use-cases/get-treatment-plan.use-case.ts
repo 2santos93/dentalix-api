@@ -19,11 +19,17 @@ export class GetTreatmentPlanUseCase {
       throw new NotFoundException('Treatment plan not found');
     }
 
-    // v1: total is a simple sum of active items' price — no discounts/taxes
-    // (see plan doc "Notas"). Computed here, on every read, NEVER persisted
+    // Total = Σ(price − discount) of active items (DX-012 added the per-item
+    // discount; still no taxes). Computed here, on every read, NEVER persisted
     // on the plan row, so a soft-deleted item (already excluded by the
     // repository's `findPlanById`) can never linger in the total either.
-    const total = plan.items.reduce((sum, item) => sum + item.price, 0);
+    // Summed in integer cents: no floating point drift.
+    const cents = plan.items.reduce(
+      (sum, item) =>
+        sum + Math.round(item.price * 100) - Math.round(item.discount * 100),
+      0,
+    );
+    const total = cents / 100;
 
     return { ...plan, total };
   }

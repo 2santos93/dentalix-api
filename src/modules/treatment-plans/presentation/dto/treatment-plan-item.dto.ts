@@ -29,6 +29,9 @@ export class TreatmentPlanItemDto {
   @ApiProperty()
   price!: number;
 
+  @ApiProperty({ description: 'Descuento en la moneda del plan (0 si no hay)' })
+  discount!: number;
+
   @ApiProperty({ enum: TreatmentPlanItemStatus })
   status!: TreatmentPlanItemStatus;
 
