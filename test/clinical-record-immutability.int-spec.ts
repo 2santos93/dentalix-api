@@ -176,6 +176,27 @@ describe('historia clínica inalterable + adendas (DX-038, int)', () => {
       ).rejects.toThrow(IMMUTABLE);
     });
 
+    it('rechaza el DELETE aunque una tabla temporal suplante pg_roles', async () => {
+      // pg_temp va ANTES que pg_catalog en el search_path por defecto: sin
+      // search_path fijo en la función, el rol de la app se haría pasar por
+      // superusuario y borraría la HC.
+      await expect(
+        appRole.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          await tx.$executeRawUnsafe(
+            'CREATE TEMP TABLE pg_roles (rolname name, rolsuper boolean) ON COMMIT DROP',
+          );
+          await tx.$executeRawUnsafe(
+            'INSERT INTO pg_roles VALUES (current_user, true)',
+          );
+          return tx.$executeRawUnsafe(
+            `DELETE FROM "${table}" WHERE "id" = $1::uuid`,
+            id(),
+          );
+        }),
+      ).rejects.toThrow(IMMUTABLE);
+    });
+
     it('rechaza el UPDATE incluso al superusuario (solo la purga puede borrar)', async () => {
       await expect(
         raw.$executeRawUnsafe(

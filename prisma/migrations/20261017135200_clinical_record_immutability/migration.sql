@@ -33,12 +33,18 @@ SET LOCAL lock_timeout = '5s';
 -- 1. Inmutabilidad. Una función para los triggers de fila (UPDATE/DELETE) y de
 --    sentencia (TRUNCATE): en DELETE devolver OLD deja seguir el borrado; en
 --    TRUNCATE OLD es NULL y Postgres ignora lo que devuelva.
+--    search_path fijo con pg_temp AL FINAL: con el search_path por defecto
+--    pg_temp se busca antes que pg_catalog, y el rol de la app podría crear una
+--    tabla temporal "pg_roles" que lo declare superusuario y saltarse el
+--    trigger. Por eso además se califica pg_catalog.pg_roles.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION "dx_forbid_clinical_record_mutation"() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 BEGIN
   IF TG_OP IN ('DELETE', 'TRUNCATE') AND EXISTS (
-    SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = current_user AND rolsuper
   ) THEN
     RETURN OLD;
   END IF;
@@ -66,7 +72,9 @@ CREATE TRIGGER "medical_history_versions_no_truncate"
 --    puede antedatar o postdatar el momento en que quedó grabado el asiento.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION "dx_clinical_record_server_timestamp"() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 BEGIN
   NEW."createdAt" := CURRENT_TIMESTAMP;
   RETURN NEW;
