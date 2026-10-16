@@ -230,6 +230,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointments/:id': EVERY_ROLE,
   'PATCH /appointments/:id': EVERY_ROLE,
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
+  // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
+  // gestionarlos, solo ADMIN.
+  'GET /appointment-types': EVERY_ROLE,
+  'POST /appointment-types': ADMIN_ONLY,
+  'PATCH /appointment-types/:id': ADMIN_ONLY,
+  'DELETE /appointment-types/:id': ADMIN_ONLY,
 
   // --- Facturación: abonos, planes de pago, estado de cuenta ---------------
   // dentalix-docs/docs/plans/2026-07-24-payments-pivot.md (PAYMENT_ROLES),
