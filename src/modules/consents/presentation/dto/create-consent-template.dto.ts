@@ -29,7 +29,7 @@ export class CreateConsentTemplateDto {
   @MaxLength(CONSENT_BODY_MAX)
   body!: string;
 
-  @ApiPropertyOptional({ default: true })
+  @ApiPropertyOptional({ description: 'Por defecto, true' })
   @IsOptional()
   @IsBoolean()
   active?: boolean;
