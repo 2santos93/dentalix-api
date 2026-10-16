@@ -34,6 +34,7 @@ import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/appl
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
+import { VoidPaymentUseCase } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
@@ -411,7 +412,7 @@ class DemoSeeder {
     );
 
     const patientIds = await this.inTenant(tenantId, undefined, () =>
-      this.createPatients(receptionId),
+      this.createPatients(receptionId, dentists[0]),
     );
 
     await this.inTenant(tenantId, undefined, () =>
@@ -434,6 +435,7 @@ class DemoSeeder {
       dentists,
       receptionId,
       catalog,
+      ownerId,
     );
 
     await this.createInventory(tenantId, locations, userIds[4]);
@@ -568,7 +570,10 @@ class DemoSeeder {
     return byCode;
   }
 
-  private async createPatients(createdById: string): Promise<string[]> {
+  private async createPatients(
+    receptionId: string,
+    dentistId: string,
+  ): Promise<string[]> {
     const ids: string[] = [];
     for (const [index, p] of DEMO_PATIENTS.entries()) {
       const { city: cityName, birthDate, ...rest } = p;
@@ -586,7 +591,12 @@ class DemoSeeder {
         dataConsentAccepted: true,
         dataConsentAt: consentAt,
         dataConsentPolicyVersion: 'v1',
-        createdById,
+        // SEC-005: la anamnesis inicial solo la escribe un rol clínico. El
+        // paciente que llega con anamnesis lo da de alta el odontólogo; el
+        // resto, recepción (mostrador), sin historia clínica.
+        ...(rest.medicalHistory
+          ? { createdById: dentistId, actorRole: ClinicRole.DENTIST }
+          : { createdById: receptionId, actorRole: ClinicRole.RECEPTION }),
       });
       ids.push(patient.id);
     }
@@ -675,6 +685,7 @@ class DemoSeeder {
     dentists: string[],
     receptionId: string,
     catalog: Map<string, string>,
+    ownerId: string,
   ): Promise<void> {
     for (const spec of DEMO_PLANS) {
       const dentistId = dentists[spec.dentistIndex];
@@ -743,6 +754,31 @@ class DemoSeeder {
             receptionId,
           ),
         );
+      }
+
+      // SEC-013: el plan financiado enseña además un abono anulado con autor y
+      // motivo (un cobro registrado dos veces que la administradora anuló), para
+      // ver «Anulado por …: motivo» en el estado de cuenta demo.
+      const [first] = spec.payments;
+      if (spec.paymentPlan && first) {
+        await this.inTenant(tenantId, locations[first.location], async () => {
+          const duplicate = await this.use(RecordPaymentUseCase).execute(
+            planId,
+            {
+              amount: first.amount,
+              currency: DEMO_CURRENCY,
+              paidAt: daysAgoAt(this.now, first.daysAgo, 11 * 60 + 5),
+              method: first.method,
+            },
+            receptionId,
+          );
+          await this.use(VoidPaymentUseCase).execute({
+            paymentId: duplicate.id,
+            reason:
+              'Cobro registrado dos veces: el paciente pagó una sola vez.',
+            actor: { userId: ownerId, role: ClinicRole.ADMIN },
+          });
+        });
       }
     }
   }

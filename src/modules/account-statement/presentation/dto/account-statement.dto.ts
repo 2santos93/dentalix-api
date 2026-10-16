@@ -148,6 +148,21 @@ export class AccountStatementLocationRefDto {
   name!: string;
 }
 
+export class AccountStatementVoidedByDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Rita Recepción',
+    description:
+      'Nombre del usuario; `null` si no es miembro de esta clínica (p. ej. ' +
+      'soporte de plataforma).',
+  })
+  fullName!: string | null;
+}
+
 export class AccountStatementMovementDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -178,6 +193,23 @@ export class AccountStatementMovementDto {
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
+
+  @ApiProperty({
+    type: () => AccountStatementVoidedByDto,
+    nullable: true,
+    description:
+      'Quién anuló el abono. `null` si está activo o se anuló antes de ' +
+      'guardarse el autor.',
+  })
+  voidedBy!: AccountStatementVoidedByDto | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Motivo de la anulación. `null` si está activo o es una anulación antigua.',
+  })
+  voidReason!: string | null;
 }
 
 export class AccountStatementInstallmentDto {

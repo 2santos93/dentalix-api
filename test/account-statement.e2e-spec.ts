@@ -25,6 +25,7 @@ const PLAN_NOTE = 'Nota clínica que no debe salir en el estado de cuenta';
 
 interface Session {
   tenantId: string;
+  userId: string;
   accessToken: string;
   subdomain: string;
 }
@@ -61,6 +62,8 @@ interface StatementBody {
     amount: number;
     currency: string;
     voided: boolean;
+    voidedBy: { id: string; fullName: string | null } | null;
+    voidReason: string | null;
     location: { id: string; name: string };
     treatmentPlanId: string;
   }[];
@@ -118,11 +121,12 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
           .set('X-Tenant-Host', hostFor(session.subdomain))
           .set('Authorization', `Bearer ${token}`)
           .send(body),
-      delete: (path: string) =>
+      delete: (path: string, body: object = {}) =>
         request(server())
           .delete(`/api/v1${path}`)
           .set('X-Tenant-Host', hostFor(session.subdomain))
-          .set('Authorization', `Bearer ${token}`),
+          .set('Authorization', `Bearer ${token}`)
+          .send(body),
     };
   }
 
@@ -141,6 +145,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     const accessToken = await login(subdomain, email);
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
+      userId: (reg.body as { userId: string }).userId,
       accessToken,
       subdomain,
     };
@@ -291,7 +296,9 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       'USD',
       '2026-07-02T00:00:00.000Z',
     );
-    await as(clinicA).delete(`/payments/${voidedPaymentId}`).expect(200);
+    await as(clinicA)
+      .delete(`/payments/${voidedPaymentId}`, { reason: 'Cobro duplicado' })
+      .expect(200);
     await as(clinicA)
       .post(`/treatment-plans/${usdPlan}/payment-plan`, {
         installmentsCount: 3,
@@ -400,7 +407,16 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     // Movimientos: los 4 abonos, el anulado marcado, con su sede.
     expect(body.movements).toHaveLength(4);
     const voided = body.movements.find((m) => m.id === voidedPaymentId);
-    expect(voided).toMatchObject({ voided: true, amount: 100 });
+    expect(voided).toMatchObject({
+      voided: true,
+      amount: 100,
+      voidedBy: { id: clinicA.userId, fullName: 'Dr. Owner' },
+      voidReason: 'Cobro duplicado',
+    });
+    const active = body.movements.filter((m) => !m.voided);
+    expect(
+      active.every((m) => m.voidedBy === null && m.voidReason === null),
+    ).toBe(true);
     expect(body.movements.every((m) => m.location.name.length > 0)).toBe(true);
 
     // Cuotas: 3 vencidas/pagada del plan USD + 2 pendientes del futuro.

@@ -1,4 +1,5 @@
-import { DocType, Sex } from '@prisma/client';
+import { ForbiddenException } from '@nestjs/common';
+import { ClinicRole, DocType, Sex } from '@prisma/client';
 import { CreatePatientUseCase } from './create-patient.use-case';
 import { Patient } from '../../domain/entities/patient.entity';
 import {
@@ -77,6 +78,7 @@ describe('CreatePatientUseCase', () => {
     const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute({
+      actorRole: ClinicRole.ADMIN,
       firstName: 'Ana',
       lastName: 'Gomez',
       docType: DocType.CC,
@@ -101,6 +103,7 @@ describe('CreatePatientUseCase', () => {
     const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute({
+      actorRole: ClinicRole.ADMIN,
       firstName: 'Carlos',
       lastName: 'Ruiz',
       docType: DocType.CC,
@@ -117,6 +120,7 @@ describe('CreatePatientUseCase', () => {
     const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     const result = await uc.execute({
+      actorRole: ClinicRole.ADMIN,
       firstName: 'No',
       lastName: 'Email',
       docType: DocType.TI,
@@ -141,6 +145,7 @@ describe('CreatePatientUseCase', () => {
     // real guarantee (CreatePatientInput has no tenantId field) is enforced
     // at the type level for every legitimate caller.
     const maliciousInput = {
+      actorRole: ClinicRole.ADMIN,
       firstName: 'X',
       lastName: 'Y',
       docType: DocType.CC,
@@ -165,6 +170,7 @@ describe('CreatePatientUseCase', () => {
     const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     await uc.execute({
+      actorRole: ClinicRole.ADMIN,
       firstName: 'Jane',
       lastName: 'Doe',
       docType: DocType.PASSPORT,
@@ -186,6 +192,7 @@ describe('CreatePatientUseCase', () => {
     const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
 
     await uc.execute({
+      actorRole: ClinicRole.ADMIN,
       firstName: 'Ana',
       lastName: 'Ríos',
       docType: DocType.CC,
@@ -217,6 +224,7 @@ describe('CreatePatientUseCase', () => {
     });
     const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
     await uc.execute({
+      actorRole: ClinicRole.ADMIN,
       firstName: 'Ana',
       lastName: 'Ríos',
       docType: DocType.CC,
@@ -224,5 +232,62 @@ describe('CreatePatientUseCase', () => {
     });
     expect(captured).toBeDefined();
     expect(captured?.medicalHistory).toBeUndefined();
+  });
+
+  // SEC-005: la matriz de roles niega la historia clínica a recepción
+  // (CLINICAL_ROLES). POST /patients no puede ser la puerta trasera para
+  // escribir la anamnesis v1: se rechaza con 403 explícito, no se ignora.
+  describe('anamnesis inicial según el rol (SEC-005)', () => {
+    const demographics = {
+      firstName: 'Ana',
+      lastName: 'Ríos',
+      docType: DocType.CC,
+      sex: Sex.F,
+    };
+    const withHistory = {
+      ...demographics,
+      medicalHistory: {
+        medications: [{ nombre: 'Warfarina', esAlerta: true }],
+      },
+    };
+
+    it('RECEPTION con medicalHistory -> 403 y no crea nada', async () => {
+      const create = jest.fn();
+      const uc = new CreatePatientUseCase(
+        makeRepo({ create }),
+        makeReferenceLookup(),
+      );
+      await expect(
+        uc.execute({ ...withHistory, actorRole: ClinicRole.RECEPTION }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('RECEPTION sin medicalHistory crea el paciente', async () => {
+      const uc = new CreatePatientUseCase(makeRepo(), makeReferenceLookup());
+      await expect(
+        uc.execute({ ...demographics, actorRole: ClinicRole.RECEPTION }),
+      ).resolves.toMatchObject({ firstName: 'Ana' });
+    });
+
+    it.each([ClinicRole.DENTIST, ClinicRole.ASSISTANT, ClinicRole.ADMIN])(
+      '%s sigue creando la v1',
+      async (role) => {
+        let captured: CreatePatientRepoInput | undefined;
+        const uc = new CreatePatientUseCase(
+          makeRepo({
+            create: (input) => {
+              captured = input;
+              return Promise.resolve(fakePatientFrom('p1', input));
+            },
+          }),
+          makeReferenceLookup(),
+        );
+        await uc.execute({ ...withHistory, actorRole: role });
+        expect(captured?.medicalHistory?.data).toEqual({
+          medications: [{ nombre: 'Warfarina', esAlerta: true }],
+        });
+      },
+    );
   });
 });

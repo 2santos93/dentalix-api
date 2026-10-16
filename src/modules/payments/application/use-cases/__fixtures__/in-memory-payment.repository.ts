@@ -5,6 +5,8 @@ import {
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   PaymentRepository,
+  PaymentVoidAudit,
+  PaymentVoidTarget,
 } from '../../../domain/ports/payment-repository.port';
 
 // `Payment` (the API-facing entity) deliberately has no `deletedAt` field —
@@ -15,6 +17,7 @@ import {
 type StoredPayment = Payment & {
   deletedAt: Date | null;
   idempotencyKey: string | null;
+  voidAudit: PaymentVoidAudit | null;
 };
 
 let seq = 0;
@@ -28,6 +31,17 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
  */
 export class InMemoryPaymentRepository implements PaymentRepository {
   private readonly payments: StoredPayment[] = [];
+
+  /**
+   * @param timeZone zona de la sede de TODOS los abonos de este fake (el real
+   * la lee del horario de la sede de cada abono).
+   */
+  constructor(private readonly timeZone = 'America/Bogota') {}
+
+  /** Test helper: el rastro de anulación guardado, o `null` si sigue activo. */
+  voidAuditOf(id: string): PaymentVoidAudit | null {
+    return this.payments.find((p) => p.id === id)?.voidAudit ?? null;
+  }
 
   /** Test helper: seed a payment row directly, bypassing use-case validation. */
   seedPayment(overrides: Partial<StoredPayment> = {}): Payment {
@@ -46,6 +60,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       updatedAt: overrides.updatedAt ?? NOW,
       idempotencyKey: overrides.idempotencyKey ?? null,
       deletedAt: overrides.deletedAt ?? null,
+      voidAudit: overrides.voidAudit ?? null,
     };
     this.payments.push(row);
     return this.toEntity(row);
@@ -87,6 +102,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       updatedAt: NOW,
       idempotencyKey: input.idempotencyKey ?? null,
       deletedAt: null,
+      voidAudit: null,
     };
     this.payments.push(row);
     return Promise.resolve(this.toEntity(row));
@@ -123,7 +139,21 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve(rows);
   }
 
-  softDelete(id: string): Promise<boolean> {
+  findVoidTarget(id: string): Promise<PaymentVoidTarget | null> {
+    const row = this.payments.find((p) => p.id === id && p.deletedAt === null);
+    return Promise.resolve(
+      row
+        ? {
+            id: row.id,
+            createdById: row.createdById,
+            createdAt: row.createdAt,
+            timeZone: this.timeZone,
+          }
+        : null,
+    );
+  }
+
+  softDelete(id: string, audit: PaymentVoidAudit): Promise<boolean> {
     // Atomic check-and-set (mirrors PrismaPaymentRepository.softDelete's
     // `updateMany({ where: { id, deletedAt: null }, ... })`): find + mutate
     // in one synchronous step, never a separate find then update, so the
@@ -132,7 +162,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     if (!row) {
       return Promise.resolve(false);
     }
-    row.deletedAt = NOW;
+    row.deletedAt = audit.voidedAt;
+    row.voidAudit = audit;
     return Promise.resolve(true);
   }
 

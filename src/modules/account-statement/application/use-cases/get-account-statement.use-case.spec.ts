@@ -37,6 +37,8 @@ function data(): AccountStatementData {
           method: 'CASH',
           location: { id: 'l-1', name: 'Sede' },
           voidedAt: null,
+          voidedBy: null,
+          voidReason: null,
         },
         {
           id: 'pay-2',
@@ -47,6 +49,8 @@ function data(): AccountStatementData {
           method: 'CARD',
           location: { id: 'l-1', name: 'Sede' },
           voidedAt: null,
+          voidedBy: null,
+          voidReason: null,
         },
       ],
       paymentPlans: [],

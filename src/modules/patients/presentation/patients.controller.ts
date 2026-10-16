@@ -13,7 +13,9 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreatePatientDto } from './dto/create-patient.dto';
@@ -33,11 +35,13 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
+import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 
+// RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
+// (los de plataforma), así que aquí `user` es siempre un token de clínica.
 interface AuthenticatedRequest {
-  user: JwtPayload;
+  user: TenantJwtPayload;
 }
 
 @ApiTags('patients')
@@ -55,7 +59,19 @@ export class PatientsController {
   ) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Crear paciente (con anamnesis v1 opcional)',
+    description:
+      '`medicalHistory` crea la versión 1 de la historia clínica y solo lo ' +
+      'pueden enviar los roles clínicos (DENTIST, ASSISTANT, ADMIN). ' +
+      'RECEPTION crea el paciente sin ese campo; si lo envía, 403.',
+  })
   @ApiCreatedResponse({ type: PatientDto })
+  @ApiForbiddenResponse({
+    description:
+      'Rol sin acceso a pacientes, o rol no clínico (RECEPTION) enviando ' +
+      '`medicalHistory`',
+  })
   create(
     @Body() dto: CreatePatientDto,
     @Req() req: AuthenticatedRequest,
@@ -67,6 +83,7 @@ export class PatientsController {
         ? new Date(dto.dataConsentAt)
         : undefined,
       createdById: req.user.sub,
+      actorRole: req.user.role,
     });
   }
 

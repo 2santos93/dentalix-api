@@ -589,6 +589,11 @@ model Payment {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
+  // Anulación (SEC-013, migración 20261016160000_payment_void_audit): quién,
+  // cuándo y por qué. Puntero suave a User como createdById (sin relación).
+  voidedById      String?        @db.Uuid
+  voidedAt        DateTime?
+  voidReason      String?
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por

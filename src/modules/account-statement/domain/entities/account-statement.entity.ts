@@ -38,6 +38,20 @@ export interface StatementPaymentRow {
   location: { id: string; name: string };
   /** `deletedAt` del abono: no nulo = anulado. */
   voidedAt: Date | null;
+  /** Quién lo anuló (SEC-013); `null` si está activo o se anuló sin rastro. */
+  voidedBy: StatementVoidedBy | null;
+  /** Motivo de la anulación; `null` si está activo o es una anulación antigua. */
+  voidReason: string | null;
+}
+
+/**
+ * Autor de una anulación. `fullName` es `null` si el usuario ya no es (ni fue)
+ * miembro de esta clínica — p. ej. el superadmin de plataforma entrando como
+ * ADMIN —: su nombre no se lee fuera de la membresía.
+ */
+export interface StatementVoidedBy {
+  id: string;
+  fullName: string | null;
 }
 
 export interface StatementPaymentPlanRow {
@@ -108,6 +122,8 @@ export interface StatementMovement {
   treatmentPlanId: string;
   voided: boolean;
   voidedAt: Date | null;
+  voidedBy: StatementVoidedBy | null;
+  voidReason: string | null;
 }
 
 export type StatementInstallmentKind = 'DOWN_PAYMENT' | 'INSTALLMENT';

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { ClinicRole } from '@prisma/client';
 import { GetPaymentsTotalsUseCase } from './get-payments-totals.use-case';
 import { VoidPaymentUseCase } from './void-payment.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
@@ -131,7 +132,10 @@ describe('GetPaymentsTotalsUseCase', () => {
 
   it('excludes a voided payment from the totals', async () => {
     const { repo, uc } = makeUseCase();
-    const voidUc = new VoidPaymentUseCase(repo);
+    const voidUc = new VoidPaymentUseCase(
+      repo,
+      () => new Date('2026-03-06T15:00:00.000Z'),
+    );
     repo.seedPayment({
       id: 'p1',
       currency: 'USD',
@@ -145,7 +149,11 @@ describe('GetPaymentsTotalsUseCase', () => {
       paidAt: new Date('2026-03-06T00:00:00.000Z'),
     });
 
-    await voidUc.execute('p1');
+    await voidUc.execute({
+      paymentId: 'p1',
+      reason: 'Duplicado',
+      actor: { userId: 'u-admin', role: ClinicRole.ADMIN },
+    });
 
     const result = await uc.execute({
       from: new Date('2026-03-01T00:00:00.000Z'),

@@ -2,7 +2,10 @@ import { UnauthorizedException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { LoginUseCase } from './login.use-case';
 import { AuthRepository } from '../../domain/ports/auth-repository.port';
-import { PasswordService } from '../../../../shared/crypto/password.service';
+import {
+  DUMMY_PASSWORD_HASH,
+  PasswordService,
+} from '../../../../shared/crypto/password.service';
 
 const password = new PasswordService();
 
@@ -84,5 +87,50 @@ describe('LoginUseCase', () => {
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'wrong' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  // SEC-017: sin usuario/membresía no se responde antes que con un usuario
+  // real. Se verifica contra un hash ficticio constante para que el coste de
+  // argon2 sea el mismo y el tiempo de respuesta no delate el email.
+  describe('timing parity (SEC-017)', () => {
+    it('runs argon2 against the dummy hash when the email does not exist', async () => {
+      const spy = jest.spyOn(password, 'verify');
+      const uc = new LoginUseCase(makeRepo(null), password, tokens);
+      await expect(
+        uc.execute({ tenantId: 't1', email: 'nadie@x.com', password: 'pw' }),
+      ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith('pw', DUMMY_PASSWORD_HASH);
+      spy.mockRestore();
+    });
+
+    it('runs argon2 against the dummy hash when the user exists but is not a member nor superadmin', async () => {
+      const repo = makeRepo(null);
+      repo.findUserForAuth = () =>
+        Promise.resolve({
+          id: 'u9',
+          passwordHash: 'real-hash-never-checked',
+          isPlatformAdmin: false,
+          tokenVersion: 0,
+        });
+      const spy = jest.spyOn(password, 'verify');
+      const uc = new LoginUseCase(repo, password, tokens);
+      await expect(
+        uc.execute({ tenantId: 't1', email: 'otra@x.com', password: 'pw' }),
+      ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith('pw', DUMMY_PASSWORD_HASH);
+      spy.mockRestore();
+    });
+
+    it('runs argon2 against the dummy hash on the apex login when the email does not exist', async () => {
+      const spy = jest.spyOn(password, 'verify');
+      const uc = new LoginUseCase(makeRepo(null), password, tokens);
+      await expect(
+        uc.executePlatform({ email: 'nadie@x.com', password: 'pw' }),
+      ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+      expect(spy).toHaveBeenCalledWith('pw', DUMMY_PASSWORD_HASH);
+      spy.mockRestore();
+    });
   });
 });

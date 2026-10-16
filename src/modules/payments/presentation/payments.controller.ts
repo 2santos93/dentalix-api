@@ -17,11 +17,13 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiHeader,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import { VoidPaymentDto } from './dto/void-payment.dto';
 import { PaymentDto } from './dto/payment.dto';
 import { PlanBalanceDto } from './dto/plan-balance.dto';
 import { ListCashPaymentsQueryDto } from './dto/list-cash-payments-query.dto';
@@ -42,11 +44,13 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
+import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 
+// RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
+// (los de plataforma), así que aquí `user` es siempre un token de clínica.
 interface AuthenticatedRequest {
-  user: JwtPayload;
+  user: TenantJwtPayload;
 }
 
 // Pagos/abonos es dato FINANCIERO -> @Roles(...PAYMENT_ROLES) (ADMIN +
@@ -149,8 +153,35 @@ export class PaymentsController {
   }
 
   @Delete('payments/:id')
-  @ApiOkResponse({ description: 'Payment voided (deletedAt set)' })
-  remove(@Param('id') id: string): Promise<void> {
-    return this.voidPayment.execute(id);
+  @ApiOperation({
+    summary: 'Anular un abono (con motivo; queda quién y cuándo)',
+    description:
+      'Borrado lógico: el abono deja de sumar pero se conserva con ' +
+      '`voidedById`, `voidedAt` y `voidReason`. ADMIN anula cualquier abono; ' +
+      'RECEPTION solo los que registró ella misma el mismo día (calendario ' +
+      'de la sede del abono).',
+  })
+  @ApiOkResponse({ description: 'Abono anulado (cuerpo vacío)' })
+  @ApiBadRequestResponse({
+    description: 'Falta `reason` o no tiene 3–300 caracteres',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Rol sin acceso a pagos, o RECEPTION anulando un abono de otro usuario ' +
+      'o de otro día',
+  })
+  @ApiNotFoundResponse({
+    description: 'El abono no existe, ya está anulado o es de otra clínica',
+  })
+  remove(
+    @Param('id') id: string,
+    @Body() dto: VoidPaymentDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    return this.voidPayment.execute({
+      paymentId: id,
+      reason: dto.reason,
+      actor: { userId: req.user.sub, role: req.user.role },
+    });
   }
 }
