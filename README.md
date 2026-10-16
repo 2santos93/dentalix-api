@@ -230,6 +230,34 @@ Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
   defecto los últimos 30 días, como mucho 366), paginado por cursor
   (`nextCursor`, `limit` ≤ 100).
 
+## Días civiles y zona de la sede (DX-097)
+
+La caja (`GET /payments`), el dashboard (`GET /dashboard`) y el estado de
+cuenta (`GET /patients/:id/account-statement`) reciben días civiles
+`YYYY-MM-DD` y los cortan a **medianoche de la zona IANA de cada sede**, no a
+medianoche UTC: un abono de las 20:00 en Bogotá (01:00 UTC del día siguiente)
+cuenta en su día.
+
+- **Zona de la sede**: la de su horario (`location_schedules.timezone`); sin
+  horario, la de su país (CO → `America/Bogota`, ES → `Europe/Madrid`). Siempre
+  de la BD, nunca del cliente. `GET /locations` la publica (`timeZone`) para que
+  la web sepa qué día es «hoy» en la sede. Una sede nueva nace con el horario en
+  la zona de su país.
+- **Varias sedes**: en la vista consolidada cada sede corta su día en su zona;
+  la consulta lleva una rama `(locationId IN (...) AND paidAt en [a, b))` por
+  ZONA (no por sede), servida por `payments_tenantId_locationId_paidAt_active_idx`.
+- **Utilidad única**: `src/shared/time/civil-day.ts` (`civilRangeInZone`,
+  `civilDayRange`, `civilDateIn`…), solo con `Intl`; el cambio de hora (días de
+  23 y 25 h) está probado con `Europe/Madrid`.
+- **Registro de abonos**: `paidAt` puede ser un instante ISO con hora o solo el
+  día `YYYY-MM-DD`, que se guarda al mediodía de la sede. La migración
+  `20261017110000_payments_civil_day_noon` movió los abonos antiguos guardados a
+  medianoche UTC (los días del formulario) al mediodía de su sede, sin cambiar
+  su día civil ni su día UTC.
+- Las filas de caja y los movimientos del estado de cuenta traen `paidOn`: el
+  día civil del pago en la zona de su sede (es lo que hay que mostrar).
+- `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
+
 ## Run tests
 
 ```bash
