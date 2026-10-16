@@ -179,6 +179,22 @@ function constraintOf(
   );
 }
 
+/**
+ * Mensaje de un error de Prisma apto para el log de un 500: conserva lo que
+ * permite diagnosticarlo (p. ej. «Transaction already closed», «could not read
+ * block»), pero quita el DETAIL de Postgres, que lleva la fila o la clave con
+ * datos ("Failing row contains (...)", "Key (email)=(...)").
+ */
+export function redactedPrismaMessage(message: string): string {
+  return message
+    .replace(/detail: Some\("(?:[^"\\]|\\.)*"\)/g, 'detail: <oculto>')
+    .replace(/DETAIL:[^`\n]*/g, 'DETAIL: <oculto>')
+    .replace(/Failing row contains \([^\n]*\)/g, '<oculto>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
+}
+
 @Catch(
   Prisma.PrismaClientKnownRequestError,
   Prisma.PrismaClientUnknownRequestError,
@@ -229,10 +245,10 @@ export class PrismaExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    // Cualquier otro error sigue siendo un 500, registrado con su código para
-    // poder diagnosticarlo, pero sin su `message` (puede llevar datos).
+    // Cualquier otro error sigue siendo un 500, registrado con su código y su
+    // mensaje para poder diagnosticarlo, pero sin el DETAIL (lleva datos).
     this.logger.error(
-      `Prisma error ${prismaCode ?? sqlState ?? 'desconocido'}: ${constraintOf(exception)}`,
+      `Prisma error ${prismaCode ?? sqlState ?? 'desconocido'}: ${redactedPrismaMessage(exception.message)}`,
     );
     send(INTERNAL_ERROR);
   }

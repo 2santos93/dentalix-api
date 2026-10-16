@@ -225,7 +225,7 @@ describe('PrismaExceptionFilter', () => {
     },
   );
 
-  it('an unknown driver error stays a generic 500 and is logged without its message', () => {
+  it('an unknown driver error stays a generic 500 and is logged without the Postgres DETAIL', () => {
     const filter = new PrismaExceptionFilter();
     const { host, status, json } = mockHost();
     const errorSpy = jest
@@ -243,6 +243,46 @@ describe('PrismaExceptionFilter', () => {
     const logged = errorSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('XX000');
     expect(logged).not.toContain('Ana Pérez');
+    errorSpy.mockRestore();
+  });
+
+  // Un 500 tiene que seguir siendo diagnosticable: el log conserva el mensaje
+  // de Prisma/Postgres, pero sin el DETAIL (la fila con datos del paciente).
+  it('a 500 keeps the diagnostic message in the log, with the DETAIL redacted', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host } = mockHost();
+    const errorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        'XX000',
+        'could not read block 12 in file base/16384/2619',
+        `${SECRET_DETAIL} \\"quoted\\"`,
+      ),
+      host,
+    );
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError(
+        'Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms.',
+        { code: 'P2028', clientVersion: '6.19.3' },
+      ),
+      host,
+    );
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError(
+        'Raw query failed. Code: `23505`. Message: `ERROR: duplicate key value violates unique constraint "users_email_key"\nDETAIL: Key (email)=(ana@paciente.test) already exists.`',
+        { code: 'P2010', clientVersion: '6.19.3', meta: { code: '23505' } },
+      ),
+      host,
+    );
+
+    const logged = errorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('could not read block 12');
+    expect(logged).toContain('Transaction already closed');
+    expect(logged).toContain('duplicate key value');
+    expect(logged).not.toMatch(/Ana Pérez|1234567|quoted|ana@paciente/);
     errorSpy.mockRestore();
   });
 
