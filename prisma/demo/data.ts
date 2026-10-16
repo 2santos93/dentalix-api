@@ -930,6 +930,8 @@ interface DemoPlanItem {
   tooth: string;
   surfaces?: ToothSurface[];
   status: TreatmentPlanItemStatus;
+  /** Descuento en COP sobre la tarifa del catálogo (DX-012). */
+  discount?: number;
 }
 
 interface DemoPayment {
@@ -947,6 +949,12 @@ interface DemoPlan {
   notes: string;
   items: DemoPlanItem[];
   payments: DemoPayment[];
+  /**
+   * DX-012: el paciente acepta el presupuesto firmando en la tableta (en la
+   * sede principal). El plan se crea en DRAFT y la aceptación lo pasa a
+   * ACCEPTED, con sus ítems.
+   */
+  signedAcceptance?: true;
   /** Plan de pagos (cuotas) sobre el total facturable del plan. */
   paymentPlan?: {
     downPayment: number;
@@ -1029,6 +1037,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     patientIndex: 4,
     dentistIndex: 1,
     status: TreatmentPlanStatus.DRAFT,
+    // DX-012: el presupuesto «presentable» de la demo (sin firmar todavía),
+    // con un descuento para que la vista imprimible lo enseñe.
     notes: 'Presupuesto estético (pendiente de aprobación).',
     items: [
       { code: 'EST-BLANQ-CONSULTORIO', tooth: '11', status: PROPOSED },
@@ -1037,6 +1047,14 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
         tooth: '21',
         surfaces: [VESTIBULAR],
         status: PROPOSED,
+        discount: 38000,
+      },
+      {
+        code: 'EST-CARILLA-RESINA',
+        tooth: '22',
+        surfaces: [VESTIBULAR],
+        status: PROPOSED,
+        discount: 38000,
       },
     ],
     payments: [],
@@ -1120,6 +1138,26 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [
       { daysAgo: 7, amount: 230000, method: CARD, location: 'principal' },
     ],
+  },
+  {
+    // DX-012: presupuesto ACEPTADO CON FIRMA (fractura incisal del 21).
+    patientIndex: 11,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.DRAFT,
+    notes: 'Rehabilitación de 21 tras fractura incisal.',
+    items: [
+      { code: 'IMG-RX-PERIAPICAL', tooth: '21', status: PROPOSED },
+      { code: 'ENDO-UNI', tooth: '21', status: PROPOSED },
+      { code: 'PROT-CORONA-PROV', tooth: '21', status: PROPOSED },
+      {
+        code: 'PROT-CORONA-LM',
+        tooth: '21',
+        status: PROPOSED,
+        discount: 120000,
+      },
+    ],
+    signedAcceptance: true,
+    payments: [],
   },
 ];
 

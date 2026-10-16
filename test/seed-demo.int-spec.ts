@@ -45,6 +45,7 @@ const TENANT_TABLES = [
   'installments',
   'payment_plans',
   'payments',
+  'treatment_plan_acceptances',
   'treatment_plan_items',
   'treatment_plans',
   'tooth_records',
@@ -301,6 +302,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-006: 3 plantillas y 1 consentimiento firmado.
     expect(firstCounts.consent_templates).toBe(3);
     expect(firstCounts.patient_consents).toBe(1);
+    // DX-012: un presupuesto aceptado con firma.
+    expect(firstCounts.treatment_plan_acceptances).toBe(1);
     // DX-007: dos exámenes periodontales FINAL del mismo paciente.
     expect(firstCounts.perio_exams).toBe(2);
     expect(firstCounts.perio_site_measures).toBe(2 * 28 * 6);
@@ -463,7 +466,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     for (const plan of plans) {
       const billable = plan.items
         .filter((i) => i.status !== 'PROPOSED')
-        .reduce((s, i) => s + Number(i.price), 0);
+        .reduce((s, i) => s + Number(i.price) - Number(i.discount), 0);
       const paid = payments
         .filter((p) => p.treatmentPlanId === plan.id)
         .reduce((s, p) => s + Number(p.amount), 0);
@@ -493,6 +496,30 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(lowStock[0].n).toBeGreaterThanOrEqual(2);
     const items = await raw.inventoryItem.findMany({ where: { tenantId } });
     expect(new Set(items.map((i) => i.locationId)).size).toBe(2);
+  });
+
+  it('DX-012: un presupuesto presentable (borrador con descuento) y otro aceptado con firma', async () => {
+    const tenantId = await liveDemoTenantId();
+    const acceptance = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+      where: { tenantId },
+      include: { plan: { include: { items: true } } },
+    });
+    expect(acceptance.plan.status).toBe('ACCEPTED');
+    expect(acceptance.plan.items.every((i) => i.status === 'ACCEPTED')).toBe(
+      true,
+    );
+    expect(acceptance.signature.startsWith('iVBORw0KGgo')).toBe(true);
+    expect(acceptance.contentHash).toMatch(/^[0-9a-f]{64}$/);
+
+    const presentable = await raw.treatmentPlan.findMany({
+      where: {
+        tenantId,
+        status: 'DRAFT',
+        acceptance: null,
+        items: { some: { discount: { gt: 0 } } },
+      },
+    });
+    expect(presentable.length).toBeGreaterThanOrEqual(1);
   });
 
   it('el estado de cuenta demo enseña saldo y una cuota vencida (DX-011)', async () => {

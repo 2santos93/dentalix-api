@@ -36,6 +36,10 @@ import { CreateTreatmentPlanUseCase } from '../src/modules/treatment-plans/appli
 import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
+import {
+  AcceptTreatmentPlanUseCase,
+  GetPlanQuoteUseCase,
+} from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
 import { VoidPaymentUseCase } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
@@ -773,6 +777,7 @@ class DemoSeeder {
               toothNumber: item.tooth,
               surfaces: item.surfaces,
               catalogItemId: catalogId(catalog, item.code),
+              discount: item.discount,
             },
           );
           if (item.status !== 'PROPOSED') {
@@ -808,6 +813,16 @@ class DemoSeeder {
         }
         return plan.id;
       });
+
+      if (spec.signedAcceptance) {
+        await this.acceptWithSignature(
+          tenantId,
+          locations.principal,
+          patientIds[spec.patientIndex],
+          planId,
+          dentistId,
+        );
+      }
 
       for (const [i, payment] of spec.payments.entries()) {
         await this.inTenant(tenantId, locations[payment.location], () =>
@@ -850,6 +865,36 @@ class DemoSeeder {
         });
       }
     }
+  }
+
+  /**
+   * DX-012: el paciente acepta el presupuesto firmando en la sede principal,
+   * por los mismos casos de uso que la API: se muestra el presupuesto y se
+   * firma con su `contentHash`.
+   */
+  private async acceptWithSignature(
+    tenantId: string,
+    locationId: string,
+    patientId: string,
+    planId: string,
+    dentistId: string,
+  ): Promise<void> {
+    await this.inTenant(tenantId, locationId, async () => {
+      const shown = await this.use(GetPlanQuoteUseCase).execute(
+        patientId,
+        planId,
+      );
+      await this.use(AcceptTreatmentPlanUseCase).execute(
+        patientId,
+        planId,
+        {
+          signerName: shown.patient.name,
+          signature: DEMO_PATIENT_SIGNATURE_PNG,
+          contentHash: shown.contentHash,
+        },
+        { acceptedById: dentistId, ipAddress: null, userAgent: 'seed:demo' },
+      );
+    });
   }
 
   /**
