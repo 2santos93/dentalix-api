@@ -102,3 +102,14 @@ export const PRESCRIPTION_ISSUE_ROLES: ClinicRole[] = [
 export const PRESCRIPTION_TEMPLATE_WRITE_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
+
+// Presupuesto imprimible del plan (DX-012) — LEER: los cuatro roles. Recepción
+// lo imprime y lo archiva (es su trabajo en el mostrador) aunque no vea el
+// resto del plan clínico. ACEPTARLO con firma sigue las reglas del plan:
+// CLINICAL_ROLES.
+export const TREATMENT_PLAN_QUOTE_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
