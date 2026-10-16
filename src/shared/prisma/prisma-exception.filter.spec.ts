@@ -206,6 +206,29 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  it('turns a trigger restrict_violation (23001: signed or immutable record) into a generic 409', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        '23001',
+        'el plan está aceptado y firmado: sus ítems no se modifican',
+        SECRET_DETAIL,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(409);
+    expect(bodyOf(json)).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'El registro está cerrado o firmado y ya no admite ese cambio.',
+    });
+    jest.restoreAllMocks();
+  });
+
   it.each([
     ['23514', 400],
     ['23503', 409],

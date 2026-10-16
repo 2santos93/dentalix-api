@@ -24,7 +24,7 @@ import { stackWithoutMessage } from '../observability/safe-stack';
  *
  * DX-042: también traduce las demás reglas de la base a respuestas genéricas,
  * sin el `DETAIL` de Postgres: CHECK (23514) y desbordamiento numérico (22003)
- * → 400; FK (P2003 / 23503) → 409. Las violaciones de EXCLUDE (23P01) las
+ * → 400; FK (P2003 / 23503) y los triggers de inmutabilidad (23001) → 409. Las violaciones de EXCLUDE (23P01) las
  * mapean los casos de uso de citas antes de llegar aquí.
  */
 
@@ -143,6 +143,14 @@ const FK_VIOLATION: ErrorBody = {
   message:
     'La operación hace referencia a datos que no existen o que están en uso.',
 };
+// Un trigger de inmutabilidad (consentimiento o receta firmada, plan aceptado
+// con firma — DX-012) rechazó el cambio. Los casos de uso responden 409 antes;
+// esto es la red, sin el mensaje de Postgres.
+const RESTRICT_VIOLATION: ErrorBody = {
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  message: 'El registro está cerrado o firmado y ya no admite ese cambio.',
+};
 const INTERNAL_ERROR: ErrorBody = {
   statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
   error: 'Internal Server Error',
@@ -154,6 +162,7 @@ const BY_SQLSTATE: Record<string, ErrorBody> = {
   '23514': CHECK_VIOLATION, // check_violation
   '22003': NUMERIC_OVERFLOW, // numeric_value_out_of_range
   '23503': FK_VIOLATION, // foreign_key_violation
+  '23001': RESTRICT_VIOLATION, // restrict_violation (triggers de inmutabilidad)
 };
 
 /**
