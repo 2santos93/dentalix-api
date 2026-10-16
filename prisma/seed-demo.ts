@@ -1,7 +1,11 @@
 import { INestApplicationContext, Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { AppointmentStatus, ClinicRole } from '@prisma/client';
+import {
+  AppointmentStatus,
+  ClinicRole,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { config as loadDotenv } from 'dotenv';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -36,6 +40,13 @@ import { CreateTreatmentPlanUseCase } from '../src/modules/treatment-plans/appli
 import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
+import { RemoveTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/remove-treatment-plan-item.use-case';
+import { CreatePlanAlternativeUseCase } from '../src/modules/treatment-plans/application/use-cases/create-plan-alternative.use-case';
+import { PresentTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/present-treatment-plan.use-case';
+import {
+  TREATMENT_PLAN_REPOSITORY,
+  type TreatmentPlanRepository,
+} from '../src/modules/treatment-plans/domain/ports/treatment-plan-repository.port';
 import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
@@ -77,6 +88,7 @@ import {
   DEMO_PASSWORD,
   DEMO_PATIENTS,
   DEMO_PLANS,
+  DEMO_PLAN_OPTIONS,
   DEMO_PRICES,
   DEMO_PRIMARY_COLOR,
   DEMO_PRIVACY_POLICY,
@@ -476,6 +488,14 @@ class DemoSeeder {
       ownerId,
     );
 
+    await this.createPlanOptions(
+      tenantId,
+      locations,
+      patientIds,
+      dentists,
+      catalog,
+    );
+
     await this.createInventory(tenantId, locations, userIds[4]);
 
     await this.inTenant(tenantId, undefined, () =>
@@ -718,10 +738,16 @@ class DemoSeeder {
     dentists: string[],
     createdById: string,
   ): Promise<void> {
+    // DX-040: el paciente de las opciones A/B no tiene cita futura (por eso
+    // sale en «Presupuestos por seguir»); sus citas pasadas se quedan.
     const planned = planAppointments(
       this.now,
       patientIds.length,
       (key, start, end) => fitsBusinessHours(start, end, hours[key]),
+    ).filter(
+      (a) =>
+        a.patientIndex !== DEMO_PLAN_OPTIONS.patientIndex ||
+        a.end.getTime() <= this.now.getTime(),
     );
     const appointments = this.use(CreateAppointmentUseCase);
 
@@ -789,10 +815,20 @@ class DemoSeeder {
             );
           }
         }
-        if (spec.status !== 'DRAFT') {
-          await this.use(UpdateTreatmentPlanUseCase).execute(plan.id, {
-            status: spec.status,
-          });
+        // La máquina de estados (DX-040) no salta de borrador a completado:
+        // un plan completado se aceptó antes.
+        const path =
+          spec.status === TreatmentPlanStatus.COMPLETED
+            ? [TreatmentPlanStatus.ACCEPTED, TreatmentPlanStatus.COMPLETED]
+            : spec.status === TreatmentPlanStatus.DRAFT
+              ? []
+              : [spec.status];
+        for (const status of path) {
+          await this.use(UpdateTreatmentPlanUseCase).execute(
+            plan.id,
+            { status },
+            { role: ClinicRole.DENTIST },
+          );
         }
         if (spec.paymentPlan) {
           await this.use(CreatePaymentPlanUseCase).execute(
@@ -865,6 +901,74 @@ class DemoSeeder {
         });
       }
     }
+  }
+
+  /**
+   * DX-040: dos opciones del mismo tratamiento (A: implante, B: puente)
+   * presentadas hace unos días en la sede principal, por los mismos casos de
+   * uso que la API: se arma la opción A, se crea su alternativa (que copia los
+   * ítems y abre el grupo), se cambian los de la B y se presentan las dos.
+   * Presentar usa un reloj atrasado para fechar la presentación en el pasado.
+   */
+  private async createPlanOptions(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    dentists: string[],
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const spec = DEMO_PLAN_OPTIONS;
+    const dentistId = dentists[spec.dentistIndex];
+    const [optionA, optionB] = spec.options;
+    const addItems = async (
+      planId: string,
+      items: readonly { code: string; tooth: string }[],
+    ) => {
+      for (const item of items) {
+        await this.use(AddTreatmentPlanItemUseCase).execute(planId, {
+          toothNumber: item.tooth,
+          catalogItemId: catalogId(catalog, item.code),
+        });
+      }
+    };
+    const presentedAt = daysAgoAt(this.now, spec.presentedDaysAgo, 10 * 60);
+    const present = new PresentTreatmentPlanUseCase(
+      this.app.get<TreatmentPlanRepository>(TREATMENT_PLAN_REPOSITORY, {
+        strict: false,
+      }),
+      () => presentedAt,
+    );
+
+    await this.inTenant(tenantId, locations[spec.location], async () => {
+      const a = await this.use(CreateTreatmentPlanUseCase).execute({
+        patientId: patientIds[spec.patientIndex],
+        currency: DEMO_CURRENCY,
+        notes: spec.notes,
+        createdById: dentistId,
+      });
+      await addItems(a.id, optionA.items);
+      const b = await this.use(CreatePlanAlternativeUseCase).execute(a.id, {
+        optionLabel: optionB.label,
+        createdById: dentistId,
+      });
+      await this.use(UpdateTreatmentPlanUseCase).execute(
+        a.id,
+        { optionLabel: optionA.label },
+        { role: ClinicRole.DENTIST },
+      );
+      const copied = await this.prisma.runWithTenant((tx) =>
+        tx.treatmentPlanItem.findMany({
+          where: { planId: b.id, deletedAt: null },
+          select: { id: true },
+        }),
+      );
+      for (const item of copied) {
+        await this.use(RemoveTreatmentPlanItemUseCase).execute(item.id);
+      }
+      await addItems(b.id, optionB.items);
+      await present.execute(a.id);
+      await present.execute(b.id);
+    });
   }
 
   /**

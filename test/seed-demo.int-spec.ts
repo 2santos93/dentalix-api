@@ -522,6 +522,55 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(presentable.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('DX-040: un grupo A/B presentado hace más de 7 días, sin cita futura, sale en «Presupuestos por seguir»', async () => {
+    const tenantId = await liveDemoTenantId();
+    const options = await raw.treatmentPlan.findMany({
+      where: { tenantId, optionGroupId: { not: null } },
+      include: { items: { where: { deletedAt: null } } },
+      orderBy: { optionLabel: 'asc' },
+    });
+    expect(options.map((p) => p.optionLabel)).toEqual([
+      'Opción A: implante',
+      'Opción B: puente fijo',
+    ]);
+    expect(new Set(options.map((p) => p.optionGroupId)).size).toBe(1);
+    expect(new Set(options.map((p) => p.patientId)).size).toBe(1);
+    expect(options.map((p) => p.items.length)).toEqual([2, 3]);
+    for (const option of options) {
+      expect(option.status).toBe('PRESENTED');
+      expect(Date.now() - (option.presentedAt?.getTime() ?? 0)).toBeGreaterThan(
+        7 * 24 * 60 * 60 * 1000,
+      );
+    }
+    const future = await raw.appointment.count({
+      where: {
+        tenantId,
+        patientId: options[0].patientId,
+        deletedAt: null,
+        start: { gt: new Date() },
+      },
+    });
+    expect(future).toBe(0);
+
+    const reception = DEMO_USERS.find((u) => u.role === ClinicRole.RECEPTION);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: reception?.email, password: DEMO_PASSWORD })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/treatment-plans/pending-follow-up')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      (res.body as { items: { planId: string }[] }).items
+        .map((i) => i.planId)
+        .sort(),
+    ).toEqual(options.map((p) => p.id).sort());
+  });
+
   it('el estado de cuenta demo enseña saldo y una cuota vencida (DX-011)', async () => {
     const tenantId = await liveDemoTenantId();
     const paymentPlan = await raw.paymentPlan.findFirstOrThrow({
