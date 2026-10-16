@@ -107,7 +107,8 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones y odontograma, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados, planes de tratamiento en todos
-   sus estados, abonos en COP de los últimos 60 días en ambas sedes, un plan de
+   sus estados (con un presupuesto en borrador con descuentos, listo para
+   presentar, y otro aceptado con la firma del paciente — DX-012), abonos en COP de los últimos 60 días en ambas sedes, un plan de
    pagos con cuotas e inventario por sede con ítems bajo el stock mínimo.
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
