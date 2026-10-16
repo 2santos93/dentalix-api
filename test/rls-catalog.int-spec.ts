@@ -196,6 +196,18 @@ describe('Catálogo de RLS (DX-068)', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('ninguna tabla de public con RLS activada queda sin FORZAR, sea o no de clínica (DX-113)', () => {
+    // Las migraciones 2026…_dx113_unforce_* quitan FORCE durante una
+    // migración de datos y su pareja _reforce_* lo devuelve. Si una pareja se
+    // descuadra (o una migración falla a medias y el deploy no se repite), el
+    // owner de las migraciones se saltaría la RLS: aquí se ve.
+    const offenders = rls
+      .filter((t) => t.rls && !t.forced)
+      .map((t) => t.table)
+      .sort();
+    expect(offenders).toEqual([]);
+  });
+
   it('toda tabla de clínica tiene una política que la ata al tenant del contexto al leer y al escribir', () => {
     const offenders = checked()
       .filter(

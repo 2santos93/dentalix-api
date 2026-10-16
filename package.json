@@ -25,7 +25,8 @@
     "seed:demo": "ts-node --transpile-only prisma/seed-demo.ts",
     "audit:purge": "ts-node --transpile-only prisma/audit-purge.ts",
     "db:test:setup": "dotenv -e .env.test -- npx prisma migrate deploy && dotenv -e .env.test -- npx prisma db seed",
-    "test:int": "dotenv -e .env.test -- jest --config ./test/jest-int.json --runInBand"
+    "test:int": "dotenv -e .env.test -- jest --config ./test/jest-int.json --runInBand",
+    "test:owner-nosu": "jest --config ./test/jest-owner-nosu.json --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.7",
