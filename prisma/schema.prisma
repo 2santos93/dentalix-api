@@ -60,6 +60,7 @@ model User {
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
   tokens                   UserToken[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
+  retentionActions         PatientRetentionAction[]
 
   @@map("users")
 }
@@ -178,14 +179,14 @@ enum Sex {
 }
 
 model Patient {
-  id                           String    @id @default(uuid()) @db.Uuid
-  tenantId                     String    @db.Uuid
+  id                           String             @id @default(uuid()) @db.Uuid
+  tenantId                     String             @db.Uuid
   firstName                    String
   lastName                     String
-  docType                      DocType   @default(CC)
+  docType                      DocType            @default(CC)
   docNumber                    String?
   birthDate                    DateTime?
-  sex                          Sex       @default(UNSPECIFIED)
+  sex                          Sex                @default(UNSPECIFIED)
   phone                        String?
   email                        String?
   address                      String?
@@ -196,7 +197,7 @@ model Patient {
   // `data_processing_consents`, que es la prueba de la autorización Ley 1581.
   // Se sigue escribiendo (en la misma transacción que la fila) solo para no
   // romper a los clientes que lo leen; nunca es la fuente de verdad.
-  dataConsentAccepted          Boolean   @default(false)
+  dataConsentAccepted          Boolean            @default(false)
   dataConsentAt                DateTime?
   dataConsentPolicyVersion     String?
   // Identificación ampliada.
@@ -211,16 +212,23 @@ model Patient {
   emergencyContactPhone        String?
   guardianName                 String?
   guardianDocNumber            String?
-  createdById                  String?   @db.Uuid
-  createdAt                    DateTime  @default(now())
-  updatedAt                    DateTime  @updatedAt
+  createdById                  String?            @db.Uuid
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
   deletedAt                    DateTime?
   // DX-043: columna GENERADA (STORED) para la búsqueda: nombre, apellido y
   // documento sin tildes, en minúsculas y con espacios colapsados
   // (dx_search_normalize). La calcula Postgres; la app nunca la escribe ni la
   // lee (@ignore): se consulta solo desde dx_patient_search_ids/_count. Ver
   // docs/adr/0001-busqueda-pacientes-rls.md.
-  searchText                   String?   @default(dbgenerated("dx_search_normalize(((((\"firstName\" || ' '::text) || \"lastName\") || ' '::text) || COALESCE(\"docNumber\", ''::text)))")) @map("search_text") @ignore
+  // DX-039: retención legal de la HC (Res. 839/2017). `lastAttentionAt` lo
+  // mantienen triggers de BD (evolución insertada / cita COMPLETED) y nunca
+  // retrocede; la app solo lo lee. `retentionExtended` lo cambia solo ADMIN
+  // (rastro en patient_retention_actions + audit_events).
+  lastAttentionAt              DateTime?          @map("last_attention_at")
+  retentionExtended            RetentionExtension @default(NONE) @map("retention_extended")
+  partiallySuppressedAt        DateTime?          @map("partially_suppressed_at")
+  searchText                   String?            @default(dbgenerated("dx_search_normalize(((((\"firstName\" || ' '::text) || \"lastName\") || ' '::text) || COALESCE(\"docNumber\", ''::text)))")) @map("search_text") @ignore
 
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
@@ -232,8 +240,9 @@ model Patient {
   consents               PatientConsent[]
   perioExams             PerioExam[]
   prescriptions          Prescription[]
-  country                Country?                @relation(fields: [countryCode], references: [code])
-  city                   City?                   @relation(fields: [cityId], references: [id])
+  retentionActions       PatientRetentionAction[]
+  country                Country?                 @relation(fields: [countryCode], references: [code])
+  city                   City?                    @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -250,6 +259,8 @@ model Patient {
   //     -> página del listado sin Sort.
   //   patients_search_text_trgm_live_idx GIN (search_text gin_trgm_ops)
   //     -> búsqueda (dx_patient_search_ids/_count).
+  //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
+  //     -> historias que salen de retención (DX-039).
   @@map("patients")
 }
 
@@ -1547,4 +1558,41 @@ model UserToken {
   @@index([userId, purpose, createdAt(sort: Desc)])
   @@index([expiresAt])
   @@map("user_tokens")
+}
+
+// DX-039: retención legal extendida de la historia clínica.
+//   NONE      -> 15 años desde la última atención (Res. 839/2017).
+//   DOUBLE    -> 30 años (casos especiales que doblan el plazo).
+//   PERMANENT -> nunca se libera (p. ej. víctimas de violaciones de DD. HH./DIH).
+enum RetentionExtension {
+  NONE
+  DOUBLE
+  PERMANENT
+}
+
+enum PatientRetentionActionKind {
+  EXTENSION_CHANGED
+  PARTIAL_SUPPRESSION
+}
+
+/// DX-039: rastro APPEND-ONLY de los cambios de retención y de las supresiones
+/// parciales de un paciente, con el MOTIVO (texto libre, por eso no va en
+/// audit_events) y su autor. Trigger: ni UPDATE ni DELETE para la app;
+/// `createdAt` lo fija el servidor de BD. RLS forzada por tenant.
+model PatientRetentionAction {
+  id                String                     @id @default(uuid()) @db.Uuid
+  tenantId          String                     @db.Uuid
+  patientId         String                     @db.Uuid
+  kind              PatientRetentionActionKind
+  previousExtension RetentionExtension?
+  newExtension      RetentionExtension?
+  reason            String
+  actorId           String                     @db.Uuid
+  createdAt         DateTime                   @default(now())
+
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  actor   User    @relation(fields: [actorId], references: [id])
+
+  @@index([tenantId, patientId, createdAt], map: "patient_retention_actions_patient_created_idx")
+  @@map("patient_retention_actions")
 }

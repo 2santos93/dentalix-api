@@ -401,6 +401,30 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ firstName: 'Hackeado' }),
       status: 404,
     },
+    // DX-039: archivar, retención extendida y supresión parcial (ADMIN de B).
+    {
+      name: 'DELETE /patients/:id',
+      verb: 'delete',
+      path: () => `/patients/${a.patientId}`,
+      status: 404,
+    },
+    {
+      name: 'PATCH /patients/:id/retention',
+      verb: 'patch',
+      path: () => `/patients/${a.patientId}/retention`,
+      body: () => ({
+        retentionExtended: 'PERMANENT',
+        reason: 'Intento desde otra clínica',
+      }),
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:id/partial-suppression',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/partial-suppression`,
+      body: () => ({ reason: 'Intento desde otra clínica' }),
+      status: 404,
+    },
     // --- rutas clínicas colgadas del paciente de A (lecturas) ---
     // Contrato previo y deliberado (clinical-history, odontogram y
     // treatment-plans e2e): la RLS deja ver 0 filas y se responde 200 vacío,

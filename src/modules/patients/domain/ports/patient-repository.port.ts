@@ -1,4 +1,4 @@
-import { DocType, Sex } from '@prisma/client';
+import { DocType, RetentionExtension, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
 import type { SafetyFlags } from '../../../medical-history/domain/entities/medical-history.entity';
@@ -102,6 +102,48 @@ export interface ListPatientsResult {
   total: number;
 }
 
+/** Lo que la regla de retención necesita saber del paciente (DX-039). */
+export interface PatientRetentionState {
+  lastAttentionAt: Date | null;
+  retentionExtended: RetentionExtension;
+}
+
+/**
+ * Lo que archivar necesita saber: la retención y cuántas citas siguen abiertas
+ * (SCHEDULED/CONFIRMED, vivas). Una cita abierta de un paciente archivado
+ * seguiría en la agenda y en los recordatorios apuntando a una ficha 404, y al
+ * atenderla movería `last_attention_at` de un paciente ya archivado.
+ */
+export interface PatientArchiveState extends PatientRetentionState {
+  pendingAppointments: number;
+}
+
+/**
+ * Campos NO clínicos que vacía la supresión parcial (DX-039): contacto y notas
+ * administrativas. Se conserva la identificación que exige la HC (Res.
+ * 1995/1999: nombre, documento, nacimiento, sexo, residencia, estado civil,
+ * ocupación, aseguradora, médico tratante y responsable/acudiente). Ver
+ * docs/adr/0002-retencion-historia-clinica.md.
+ */
+export const PARTIAL_SUPPRESSION_FIELDS = [
+  'phone',
+  'email',
+  'address',
+  'notes',
+  'emergencyContactName',
+  'emergencyContactRelationship',
+  'emergencyContactPhone',
+] as const;
+
+export interface RetentionExpiringParams {
+  /** Última atención anterior a esta fecha con plazo NONE (hoy + horizonte − 15 años). */
+  noneBefore: Date;
+  /** Ídem con plazo DOUBLE (hoy + horizonte − 30 años). */
+  doubleBefore: Date;
+  skip: number;
+  take: number;
+}
+
 export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
 
 export interface PatientRepository {
@@ -112,4 +154,38 @@ export interface PatientRepository {
   /** Pacientes vivos del tenant del contexto, con un COUNT (sin listar). */
   count(): Promise<number>;
   update(id: string, patch: UpdatePatientRepoInput): Promise<Patient>;
+  /**
+   * Archiva (borrado blando) el paciente vivo `id`. En UNA transacción con el
+   * paciente bloqueado (FOR UPDATE: una evolución concurrente mueve
+   * `last_attention_at` en esa misma fila), llama a `assertCanArchive`, que
+   * lanza si la HC sigue en retención o hay citas abiertas. 404 si no existe
+   * en el tenant.
+   */
+  archive(
+    id: string,
+    assertCanArchive: (state: PatientArchiveState) => void,
+  ): Promise<void>;
+  /** Cambia la retención extendida y deja el rastro con motivo y autor. */
+  setRetentionExtension(
+    id: string,
+    input: { value: RetentionExtension; reason: string; actorId: string },
+  ): Promise<Patient>;
+  /**
+   * Supresión parcial: vacía `PARTIAL_SUPPRESSION_FIELDS`, retira la
+   * autorización de MARKETING vigente (fila nueva `granted=false`, la
+   * historia de consentimientos es append-only) y deja el rastro. Llama a
+   * `assertAllowed` con el paciente bloqueado antes de escribir.
+   */
+  partiallySuppress(
+    id: string,
+    input: {
+      reason: string;
+      actorId: string;
+      assertAllowed: (state: PatientRetentionState) => void;
+    },
+  ): Promise<Patient>;
+  /** Pacientes vivos cuya retención (no PERMANENT) termina antes del horizonte. */
+  listRetentionExpiring(
+    params: RetentionExpiringParams,
+  ): Promise<ListPatientsResult>;
 }

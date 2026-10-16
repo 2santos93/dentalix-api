@@ -44,6 +44,11 @@ function fakePatientFrom(
     guardianName: input.guardianName ?? null,
     guardianDocNumber: input.guardianDocNumber ?? null,
     createdById: input.createdById ?? null,
+    lastAttentionAt: null,
+    retentionExtended: 'NONE',
+    retentionUntil: null,
+    underRetention: false,
+    partiallySuppressedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
@@ -59,6 +64,14 @@ function makeRepo(
     list: (): Promise<ListPatientsResult> =>
       Promise.resolve({ items: [], total: 0 }),
     count: (): Promise<number> => Promise.resolve(0),
+    archive: (): Promise<void> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    setRetentionExtension: (): Promise<Patient> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    partiallySuppress: (): Promise<Patient> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    listRetentionExpiring: (): Promise<ListPatientsResult> =>
+      Promise.resolve({ items: [], total: 0 }),
     update: (): Promise<Patient> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,

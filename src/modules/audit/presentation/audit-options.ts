@@ -23,4 +23,9 @@ export interface AuditOptions {
   /** Id del recurso: un parámetro de la ruta o el `id` de la respuesta. */
   resourceId?: { param: string } | { response: 'id' };
   patient?: AuditPatientSource;
+  /**
+   * Código fijo que distingue una escritura dentro del recurso (p. ej.
+   * `PARTIAL_SUPPRESSION`, DX-039). Va a `metadata.reason`; formato CODE.
+   */
+  reason?: string;
 }

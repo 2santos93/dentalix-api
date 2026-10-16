@@ -6,6 +6,13 @@ import { ListPatientsUseCase } from './application/use-cases/list-patients.use-c
 import { CountPatientsUseCase } from './application/use-cases/count-patients.use-case';
 import { GetPatientUseCase } from './application/use-cases/get-patient.use-case';
 import { UpdatePatientUseCase } from './application/use-cases/update-patient.use-case';
+import {
+  ArchivePatientUseCase,
+  ListRetentionExpiringUseCase,
+  PartiallySuppressPatientUseCase,
+  RETENTION_CLOCK,
+  SetRetentionExtensionUseCase,
+} from './application/use-cases/retention.use-cases';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
 import { PrismaPatientRepository } from './infrastructure/repositories/prisma-patient.repository';
 import { REFERENCE_LOOKUP } from './domain/ports/reference-lookup.port';
@@ -25,6 +32,11 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     CountPatientsUseCase,
     GetPatientUseCase,
     UpdatePatientUseCase,
+    ArchivePatientUseCase,
+    SetRetentionExtensionUseCase,
+    PartiallySuppressPatientUseCase,
+    ListRetentionExpiringUseCase,
+    { provide: RETENTION_CLOCK, useValue: () => new Date() },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PatientsController.

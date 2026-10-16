@@ -113,6 +113,7 @@ export function buildAuditDraft(
         ? { changedFields: bodyFields(req.body) }
         : {}),
       params: req.params,
+      ...(options.reason ? { reason: options.reason } : {}),
     }),
   };
 }

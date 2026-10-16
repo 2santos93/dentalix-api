@@ -1,4 +1,4 @@
-import { DocType, Sex } from '@prisma/client';
+import { DocType, RetentionExtension, Sex } from '@prisma/client';
 
 /**
  * API-facing shape of a Patient. Deliberately NOT the raw Prisma model:
@@ -34,6 +34,19 @@ export interface Patient {
   guardianName: string | null;
   guardianDocNumber: string | null;
   createdById: string | null;
+  /** DX-039: última atención clínica (la mantiene la BD; nunca retrocede). */
+  lastAttentionAt: Date | null;
+  retentionExtended: RetentionExtension;
+  /**
+   * Último día (incluido, `YYYY-MM-DD`) hasta el que se conserva la HC.
+   * `null` sin atenciones clínicas o con retención PERMANENT (ver
+   * `underRetention`).
+   */
+  retentionUntil: string | null;
+  /** Si hoy la HC está en retención legal (no se puede archivar). */
+  underRetention: boolean;
+  /** DX-039: cuándo se vaciaron los datos no clínicos (supresión parcial). */
+  partiallySuppressedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
