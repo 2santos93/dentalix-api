@@ -474,12 +474,36 @@ CREATE ROLE dentalix_owner LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS CREATERO
 CREATE DATABASE dentalix OWNER dentalix_owner;
 SQL
 # 2. Como el owner: dentalix_app y sus privilegios por defecto (idempotente;
-#    comprueba que la app no salte la RLS).
+#    comprueba que la app no salte la RLS). `app_password` solo hace falta si
+#    dentalix_app aún no existe en el clúster; si existe, no cambia su contraseña.
 psql "${DIRECT_URL%%\?*}" -v ON_ERROR_STOP=1 -v app_password="$(openssl rand -hex 24)" \
   -f docker/prod/create-app-role.sql
 # 3. Como el owner, en un job previo al despliegue (no en el arranque de cada réplica):
 npx prisma migrate deploy && npx prisma db seed
+# 4. Comprobación tras el despliegue (DX-134): ninguna tabla de public con RLS
+#    sin FORCE. Sale con 0 si todo está bien, 1 (y la lista) si no, 2 si no pudo
+#    comprobarlo. Si no sale con 0, NO des el despliegue por bueno.
+npm run db:check-force
 ```
+
+**Si `db:check-force` falla** (sale con 1 y lista tablas): una migración que
+quita FORCE y lo devuelve (`…_dx113_reforce_*`, o una con `NO FORCE`/`FORCE`
+en su transacción) se quedó a medias, típicamente por el `lock_timeout` de 5 s
+con tráfico. Mientras tanto la app sigue aislada (`dentalix_app` no es dueña
+de las tablas), pero el owner, y con él `migrate`, `db seed` y `audit:purge`,
+ya no está sujeto a la RLS de esas tablas. Recuperación:
+
+```bash
+npx prisma migrate status                      # nombra la migración fallida
+npx prisma migrate resolve --rolled-back <migración>
+npx prisma migrate deploy                      # la repite (y su reforce)
+npm run db:check-force                         # ahora tiene que salir con 0
+```
+
+Si `migrate status` no muestra ninguna fallida, alguien quitó FORCE a mano:
+devuélvelo como el owner con `ALTER TABLE "<tabla>" FORCE ROW LEVEL SECURITY`
+y repite la comprobación. La CI la ejecuta en los jobs de integración y
+`owner-nosu`, y `test/rls-catalog.int-spec.ts` la cubre también.
 
 - **FORCE y el owner**: todas las tablas con `tenantId` tienen RLS ENABLE +
   FORCE, así que el owner también está sujeto a la RLS y, sin
@@ -495,6 +519,18 @@ npx prisma migrate deploy && npx prisma db seed
   este owner hace fallar la migración; y sin él, un UPDATE o un INSERT …
   SELECT actúa sobre 0 filas en silencio. Añade un tramo con filas previas a
   `test/owner-nosu/migrations-data.owner-spec.ts`.
+- **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
+  `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`) o `VALIDATE CONSTRAINT`
+  sobre una tabla que ya tenía FORCE necesita `NO FORCE` en la misma
+  transacción (y `FORCE` al final). Con FORCE, la validación recorre la tabla
+  hija con la RLS del owner: no ve ninguna fila de clínica y **acepta la FK
+  aunque haya filas huérfanas**, en silencio (los `CHECK` y los índices únicos
+  sí las ven). Con `NO FORCE` la misma migración falla de forma ruidosa si hay
+  huérfanas. Lo demuestra `test/owner-nosu/fk-under-force.owner-spec.ts`, y el
+  lint `test/migrations/fk-under-force.spec.ts` (en `npm test`) falla si una
+  migración nueva lo incumple. No cuenta una tabla creada en la misma migración
+  (está vacía). Las migraciones antiguas que ya lo hacían están en su allowlist,
+  comentadas, y no se editan.
 - **Migraciones antiguas**: las de datos van entre una pareja
   `…_dx113_unforce_<x>` / `…_dx113_reforce_<x>` que quita y devuelve FORCE
   solo a las tablas que tocan. En una base ya migrada las parejas se aplican
@@ -503,13 +539,19 @@ npx prisma migrate deploy && npx prisma db seed
   FORCE`/`FORCE` en su transacción; el esquema resultante es idéntico):
   `20261016170000_data_processing_consents`,
   `20261017113000_payments_civil_day_noon` y `20261017120000_email_outbox`.
+  DX-134 editó además la comprobación de miembros de los roles del clúster en
+  `20261017114000_patient_search_and_list_indexes` y
+  `20261017175000_dx113_email_outbox_dispatcher_role` (ver «Roles del clúster
+  y varias bases»; solo cambia el bloque `DO` de comprobación, nada del
+  esquema).
   `migrate deploy` no mira el checksum, pero en una base de desarrollo ya
   migrada `prisma migrate dev` dirá *«was modified after it was applied»* y
   propondrá un reset. **No lo aceptes**: actualiza el checksum (no toca datos)
   y sigue con `migrate deploy`:
 
   ```bash
-  for m in 20261016170000_data_processing_consents 20261017113000_payments_civil_day_noon 20261017120000_email_outbox; do
+  for m in 20261016170000_data_processing_consents 20261017113000_payments_civil_day_noon 20261017120000_email_outbox \
+           20261017114000_patient_search_and_list_indexes 20261017175000_dx113_email_outbox_dispatcher_role; do
     sum=$(sha256sum prisma/migrations/$m/migration.sql | cut -d' ' -f1)
     psql "${DIRECT_URL%%\?*}" -v ON_ERROR_STOP=1 \
       -c "UPDATE _prisma_migrations SET checksum = '$sum' WHERE migration_name = '$m'"
@@ -522,17 +564,44 @@ npx prisma migrate deploy && npx prisma db seed
   Repítela una vez con `BYPASSRLS` temporal (`prisma migrate resolve
   --rolled-back …` y `ALTER ROLE … BYPASSRLS` / `NOBYPASSRLS`). Un despliegue
   nuevo la aplica vacía y no lo necesita.
-- **Roles NOLOGIN del clúster**: `dentalix_patient_search` y
-  `dentalix_email_dispatcher` son del clúster, no de la base. Las migraciones
-  los reutilizan solo si nadie más que el migrador es miembro: usa **un mismo
-  owner para todas las bases del clúster**. Si los creó un superusuario (p. ej.
-  el `dentalix` del docker local) y migra un owner sin superusuario, el admin
-  le da antes `GRANT dentalix_patient_search, dentalix_email_dispatcher TO
-  <owner> WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`.
-- **En local**, con un Postgres aparte (los roles son del clúster): crea el
-  owner y la base como en el paso 1, aplica los pasos 2 y 3, y
+- **Roles del clúster y varias bases** (DX-134): `dentalix_app`,
+  `dentalix_patient_search` y `dentalix_email_dispatcher` son del clúster, no
+  de la base. Todas las bases de un mismo clúster los comparten (también la
+  contraseña de `dentalix_app`), así que forman **un único dominio de
+  confianza**: para aislar entornos (producción frente a staging) usa
+  clústeres distintos. Dentro de un clúster puede haber bases de owners
+  distintos:
+  - El owner sin superusuario que crea un rol NOLOGIN queda como miembro suyo
+    solo con ADMIN (PG16: sin SET ni INHERIT). Las migraciones toleran como
+    miembros al migrador y a **los owners de otras bases del clúster sin SET
+    ni INHERIT**; cualquier otro miembro (p. ej. uno con SET, que podría
+    reemplazar las funciones o leer sin RLS) aborta la migración con
+    *«tiene miembros inesperados: <roles>»*.
+  - Un owner que no creó los roles (un segundo owner, o los creó un
+    superusuario como el `dentalix` del docker local) necesita ADMIN OPTION.
+    Sin ella la migración aborta con *«<owner> no tiene ADMIN OPTION sobre el
+    rol …»* y el GRANT exacto, que el admin del clúster ejecuta antes:
+
+    ```sql
+    GRANT dentalix_patient_search, dentalix_email_dispatcher TO <owner>
+      WITH ADMIN OPTION, INHERIT FALSE, SET FALSE;
+    ```
+
+    Si ya falló, tras el GRANT: `npx prisma migrate resolve --rolled-back
+    <migración>` y `npx prisma migrate deploy`.
+  - `create-app-role.sql` en la segunda base no necesita `app_password`
+    (`dentalix_app` ya existe y conserva su contraseña).
+  - Al retirar una base, retira también a su owner de esos roles (`DROP ROLE`
+    o `REVOKE … FROM <owner>`): un miembro que ya no es owner de ninguna base
+    deja de tolerarse.
+
+  Lo prueba `test/owner-nosu/shared-cluster.owner-spec.ts`.
+- **En local**, con un Postgres aparte (los roles son del clúster; p. ej.
+  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`): crea
+  el owner y la base como en el paso 1, aplica los pasos 2 a 4, y
   `DIRECT_URL=<owner> DATABASE_URL=<app> OWNER_NOSU_ADMIN_URL=<admin>/postgres
-  npm run test:owner-nosu`.
+  npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
+  de clúster compartido, un segundo owner `<owner>_b134`.
 
 ## Run tests
 
