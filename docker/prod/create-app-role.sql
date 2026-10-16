@@ -16,9 +16,41 @@
 -- otra base del mismo servidor, o una ejecución anterior) no hace falta
 -- `-v app_password` y no cambia su contraseña aunque se pase; sí comprueba que
 -- no salte la RLS. Si no existe, la contraseña es obligatoria y no vacía: sin
--- ella aborta con un error claro. El nombre `dentalix_app` es fijo: lo citan
--- las migraciones (GRANT EXECUTE … TO dentalix_app, REVOKE … FROM dentalix_app).
+-- ella (o con solo espacios) aborta con un error claro. El nombre
+-- `dentalix_app` es fijo: lo citan las migraciones (GRANT EXECUTE … TO
+-- dentalix_app, REVOKE … FROM dentalix_app).
 \set ON_ERROR_STOP on
+
+-- DX-134: un owner por clúster. dentalix_patient_search y
+-- dentalix_email_dispatcher son roles del CLÚSTER que crean las migraciones, y
+-- ADMIN OPTION sobre ellos equivale a poder darse SET: quien la tenga lee
+-- `patients` y `email_outbox` de TODAS las bases del clúster sin RLS de
+-- clínica. Antes de crear nada (y de migrar), se aborta si ya tienen otro
+-- miembro que el owner actual, o si el owner actual no podrá traspasarles las
+-- funciones (sin ADMIN OPTION). Ver README, «Despliegue: roles de la BD».
+DO $$
+DECLARE
+  role_name text;
+  others text;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY['dentalix_patient_search', 'dentalix_email_dispatcher'] LOOP
+    CONTINUE WHEN to_regrole(role_name) IS NULL;
+    SELECT string_agg(DISTINCT u.rolname, ', ' ORDER BY u.rolname) INTO others
+      FROM pg_auth_members m JOIN pg_roles u ON u.oid = m.member
+     WHERE m.roleid = to_regrole(role_name) AND u.rolname <> current_user;
+    IF others IS NOT NULL THEN
+      RAISE EXCEPTION 'Este clúster ya tiene el rol % de otro owner (miembros: %). Un owner por clúster: migra esta base con ese owner o usa un clúster distinto (README, «Despliegue: roles de la BD»). No se ha creado nada.', role_name, others;
+    END IF;
+    IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)
+       AND NOT EXISTS (SELECT 1 FROM pg_auth_members m
+                        WHERE m.roleid = to_regrole(role_name)
+                          AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+                          AND m.admin_option) THEN
+      RAISE EXCEPTION 'El rol % ya existe en el clúster y % no tiene ADMIN OPTION sobre él (lo creó otro rol, p. ej. un superusuario). Si este clúster es solo de este owner, un admin del clúster debe ejecutar antes: GRANT dentalix_patient_search, dentalix_email_dispatcher TO % WITH ADMIN OPTION, INHERIT FALSE, SET FALSE. Si ya lo usa otro owner, usa ese owner o un clúster distinto (README, «Despliegue: roles de la BD»). No se ha creado nada.', role_name, current_user, quote_ident(current_user);
+    END IF;
+  END LOOP;
+END
+$$;
 
 \if :{?app_password}
 \else
@@ -26,7 +58,7 @@
 \endif
 
 SELECT CASE
-  WHEN :'app_password' = '' THEN format(
+  WHEN btrim(:'app_password') = '' THEN format(
     'DO $e$ BEGIN RAISE EXCEPTION %L; END $e$',
     'El rol dentalix_app no existe: pasa su contraseña con -v app_password="$(openssl rand -hex 24)" (README, «Despliegue: roles de la BD»).')
   ELSE format(

@@ -102,6 +102,13 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
     expect(await roleExists()).toBe(false);
   });
 
+  it('el rol no existe y app_password es solo espacios: falla igual', async () => {
+    const r = asOwner(['-v', 'app_password=   ', '-f', copy]);
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(`El rol ${appRole} no existe`);
+    expect(await roleExists()).toBe(false);
+  });
+
   it('con app_password crea el rol, que entra con esa contraseña', () => {
     const r = asOwner(['-v', 'app_password=primera-134', '-f', copy]);
     expect(r.out).toContain('CREATE ROLE');

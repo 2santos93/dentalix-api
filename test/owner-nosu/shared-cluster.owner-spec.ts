@@ -10,25 +10,33 @@ import {
 } from './owner-nosu-env';
 
 // DX-134: los roles NOLOGIN `dentalix_patient_search` y
-// `dentalix_email_dispatcher` son del CLÚSTER. El owner sin superusuario que
-// los crea queda como miembro con ADMIN OPTION (PG16, sin SET ni INHERIT), y
-// antes la migración de una segunda base, con OTRO owner, abortaba por
-// «miembros inesperados». Ahora:
-//   - se toleran los miembros que son owners de otra base del clúster con
-//     membresía solo ADMIN (sin SET ni INHERIT);
-//   - un owner nuevo necesita que el admin del clúster le dé ADMIN OPTION; si
-//     no lo tiene, la migración lo dice con el GRANT exacto;
-//   - cualquier otro miembro (p. ej. con SET) sigue abortando la migración.
-// Ver README, «Despliegue: roles de la BD» (roles NOLOGIN del clúster).
+// `dentalix_email_dispatcher` son del CLÚSTER, y ADMIN OPTION sobre ellos
+// equivale a poder darse SET: quien la tenga puede leer `patients` y
+// `email_outbox` de TODAS las bases del clúster. Por eso la restricción es
+// un owner por clúster (README, «Despliegue: roles de la BD»):
+//   - create-app-role.sql, que corre como el owner ANTES de migrar, aborta
+//     con un error que explica la restricción si los roles ya tienen otros
+//     miembros (otro owner) y la migración también se niega (nada en
+//     silencio);
+//   - el mismo owner sí puede tener varias bases en el clúster;
+//   - `npm run db:check-force` detecta en cada despliegue un miembro
+//     inesperado añadido después (aunque sea solo con ADMIN).
 
 const ROOT = join(__dirname, '..', '..');
 const ROLES = ['dentalix_patient_search', 'dentalix_email_dispatcher'];
 
-describe('DX-134 · dos bases de owners distintos en el mismo clúster (owner-nosu)', () => {
+/** psql no acepta el `?schema=public` de las URL de Prisma. */
+const psqlUrl = (url: string): string => {
+  const u = new URL(url);
+  u.search = '';
+  return u.toString();
+};
+
+describe('DX-134 · un owner por clúster: segundo owner con error claro (owner-nosu)', () => {
   const env = requireOwnerNosuEnv();
   const stamp = `${process.pid}_${Date.now()}`;
-  const ownerB = `${env.owner}_b134`.slice(0, 63);
-  const intruder = `${env.owner}_x134`.slice(0, 63);
+  const ownerB = `${env.owner.slice(0, 30)}_b_${stamp}`;
+  const intruder = `${env.owner.slice(0, 30)}_x_${stamp}`;
   const dbB = `dx134_b_${stamp}`;
   const dbA2 = `dx134_a2_${stamp}`;
   const dir = mkdtempSync(join(tmpdir(), 'dx134-cluster-'));
@@ -44,35 +52,63 @@ describe('DX-134 · dos bases de owners distintos en el mismo clúster (owner-no
     return u.toString();
   }
 
-  /** Prisma CLI con el esquema y TODAS las migraciones del repo. */
-  function prisma(url: string, args: string[]): void {
+  function createAppRole(url: string): { status: number | null; out: string } {
+    const r = spawnSync(
+      'psql',
+      [
+        psqlUrl(url),
+        '-X',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-f',
+        join(ROOT, 'docker/prod/create-app-role.sql'),
+      ],
+      { encoding: 'utf8' },
+    );
+    return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  }
+
+  function checkForce(url: string): { status: number | null; out: string } {
+    const r = spawnSync(
+      join(ROOT, 'node_modules/.bin/ts-node'),
+      ['--transpile-only', 'prisma/check-force.ts'],
+      {
+        cwd: ROOT,
+        env: { ...process.env, DIRECT_URL: url, DATABASE_URL: url },
+        encoding: 'utf8',
+      },
+    );
+    return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  }
+
+  /** Mensaje de error de `prisma migrate deploy` ('' si no falla). */
+  function deployError(url: string): string {
     try {
       execFileSync(
         join(ROOT, 'node_modules/.bin/prisma'),
-        [...args, '--schema', join(dir, 'schema.prisma')],
+        ['migrate', 'deploy', '--schema', join(dir, 'schema.prisma')],
         {
           cwd: ROOT,
           env: { ...process.env, DATABASE_URL: url, DIRECT_URL: url },
           stdio: 'pipe',
         },
       );
+      return '';
     } catch (err) {
       const { stdout, stderr } = err as { stdout?: Buffer; stderr?: Buffer };
-      throw new Error(
-        `prisma ${args.join(' ')} falló:\n${String(stdout ?? '')}${String(stderr ?? '')}`,
-      );
+      return `${String(stdout ?? '')}${String(stderr ?? '')}`;
     }
   }
 
-  async function withDb<T>(
-    db: string,
-    fn: (c: PrismaClient) => Promise<T>,
-  ): Promise<T> {
+  async function defaultAcls(db: string): Promise<number> {
     const c = new PrismaClient({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
     try {
-      return await fn(c);
+      const [row] = await c.$queryRaw<
+        { n: number }[]
+      >`SELECT count(*)::int AS n FROM pg_default_acl`;
+      return row.n;
     } finally {
       await c.$disconnect();
     }
@@ -87,7 +123,6 @@ describe('DX-134 · dos bases de owners distintos en el mismo clúster (owner-no
         JOIN pg_roles g ON g.oid = m.roleid
         JOIN pg_roles u ON u.oid = m.member
        WHERE g.rolname = ANY(${ROLES})
-         AND u.rolname IN (${env.owner}, ${ownerB}, ${intruder})
        ORDER BY 1`;
     return rows.map((r) => r.m);
   }
@@ -97,7 +132,8 @@ describe('DX-134 · dos bases de owners distintos en el mismo clúster (owner-no
     cpSync(join(ROOT, 'prisma/migrations'), join(dir, 'migrations'), {
       recursive: true,
     });
-    // Como admin del proveedor: un segundo owner sin superusuario y su base.
+    // Como admin del proveedor: un segundo owner sin superusuario y su base,
+    // y una segunda base del primer owner.
     await admin.$executeRawUnsafe(
       `CREATE ROLE "${ownerB}" LOGIN PASSWORD 'dx134_owner_b'
          NOSUPERUSER NOBYPASSRLS CREATEROLE NOCREATEDB NOREPLICATION`,
@@ -122,7 +158,7 @@ describe('DX-134 · dos bases de owners distintos en el mismo clúster (owner-no
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('el owner de la primera base ya es miembro solo con ADMIN (lo deja así la migración)', async () => {
+  it('el owner que creó los roles es su único miembro, solo con ADMIN', async () => {
     expect(await memberships()).toEqual(
       ROLES.slice()
         .sort()
@@ -130,106 +166,73 @@ describe('DX-134 · dos bases de owners distintos en el mismo clúster (owner-no
     );
   });
 
-  it('owner B sin ADMIN OPTION: create-app-role.sql pasa sin contraseña y la migración falla con el GRANT exacto', () => {
-    const app = spawnSync(
-      'psql',
-      [
-        (() => {
-          const u = new URL(ownerBUrl(dbB));
-          u.search = '';
-          return u.toString();
-        })(),
-        '-X',
-        '-v',
-        'ON_ERROR_STOP=1',
-        '-f',
-        join(ROOT, 'docker/prod/create-app-role.sql'),
-      ],
-      { encoding: 'utf8' },
+  it('un segundo owner: create-app-role.sql aborta ANTES de migrar explicando la restricción, y no crea nada', async () => {
+    const r = createAppRole(ownerBUrl(dbB));
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(
+      `Este clúster ya tiene el rol dentalix_patient_search de otro owner (miembros: ${env.owner}). Un owner por clúster: migra esta base con ese owner o usa un clúster distinto`,
     );
-    expect(`${app.stdout}${app.stderr}`).not.toContain('ERROR');
-    expect(app.status).toBe(0);
+    expect(await defaultAcls(dbB)).toBe(0);
+  });
 
-    expect(() => prisma(ownerBUrl(dbB), ['migrate', 'deploy'])).toThrow(
-      `${ownerB} no tiene ADMIN OPTION sobre el rol dentalix_patient_search. Un admin del clúster debe ejecutar antes: GRANT dentalix_patient_search, dentalix_email_dispatcher TO ${ownerB} WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
+  it('un segundo owner: la migración también se niega, de forma ruidosa', () => {
+    expect(deployError(ownerBUrl(dbB))).toContain(
+      'El rol dentalix_patient_search tiene miembros inesperados',
     );
   }, 300_000);
 
-  it('con el GRANT del admin, owner B termina la migración y owner A sigue siendo miembro', async () => {
+  it('un segundo owner con ADMIN OPTION del admin sigue rechazado (ADMIN equivale a poder darse SET)', async () => {
     await admin.$executeRawUnsafe(
-      `GRANT ${ROLES.join(', ')} TO ${ownerB} WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
+      `GRANT ${ROLES.join(', ')} TO "${ownerB}" WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
     );
-    prisma(ownerBUrl(dbB), [
-      'migrate',
-      'resolve',
-      '--rolled-back',
-      '20261017114000_patient_search_and_list_indexes',
-    ]);
-    prisma(ownerBUrl(dbB), ['migrate', 'deploy']);
+    try {
+      const r = createAppRole(ownerBUrl(dbB));
+      expect(r.status).not.toBe(0);
+      expect(r.out).toContain('Un owner por clúster');
+      // Y, para el primer owner, B pasa a ser un miembro inesperado.
+      const check = checkForce(env.ownerUrl);
+      expect(check.out).toContain(`dentalix_patient_search:${ownerB}`);
+      expect(check.status).toBe(1);
+    } finally {
+      await admin.$executeRawUnsafe(
+        `REVOKE ${ROLES.join(', ')} FROM "${ownerB}"`,
+      );
+    }
+    expect(await memberships()).not.toContain(expect.stringContaining(ownerB));
+  });
 
-    const fns = await withDb(
-      dbB,
-      (c) =>
-        c.$queryRaw<{ f: string }[]>`
-        SELECT proname || ':' || pg_get_userbyid(proowner) AS f FROM pg_proc
-         WHERE proname IN ('dx_patient_search_ids', 'dx_patient_search_count',
-                           'email_outbox_claim', 'email_outbox_settle',
-                           'email_outbox_enqueue_platform')
-         ORDER BY 1`,
-    );
-    expect(fns.map((r) => r.f)).toEqual([
-      'dx_patient_search_count:dentalix_patient_search',
-      'dx_patient_search_ids:dentalix_patient_search',
-      'email_outbox_claim:dentalix_email_dispatcher',
-      'email_outbox_enqueue_platform:dentalix_email_dispatcher',
-      'email_outbox_settle:dentalix_email_dispatcher',
-    ]);
-    const unforced = await withDb(
-      dbB,
-      (c) =>
-        c.$queryRaw<unknown[]>`
-        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-         WHERE n.nspname = 'public' AND c.relrowsecurity AND NOT c.relforcerowsecurity`,
-    );
-    expect(unforced).toEqual([]);
-    // Nadie se queda con SET ni INHERIT: solo ADMIN, como el primer owner.
-    expect(await memberships()).toEqual(
-      [
-        ...ROLES.map((r) => `${r}:${env.owner}:true/false/false`),
-        ...ROLES.map((r) => `${r}:${ownerB}:true/false/false`),
-      ].sort(),
-    );
+  it('el MISMO owner sí puede tener otra base en el clúster: create-app-role sin contraseña, migración y db:check-force en verde', () => {
+    const r = createAppRole(ownerUrlFor(env, dbA2));
+    expect(r.out).not.toContain('ERROR');
+    expect(r.status).toBe(0);
+    expect(deployError(ownerUrlFor(env, dbA2))).toBe('');
+    const check = checkForce(ownerUrlFor(env, dbA2));
+    expect(check.out).toContain('"event":"db.check_force_ok"');
+    expect(check.status).toBe(0);
   }, 300_000);
 
-  it('una base nueva del primer owner migra con owner B como miembro, pero un miembro con SET la sigue abortando', async () => {
+  it('un miembro añadido después, aunque sea solo con ADMIN: db:check-force lo detecta y create-app-role aborta', async () => {
     await admin.$executeRawUnsafe(`CREATE ROLE "${intruder}" NOLOGIN`);
     await admin.$executeRawUnsafe(
-      `GRANT dentalix_email_dispatcher TO "${intruder}" WITH SET TRUE, INHERIT FALSE`,
+      `GRANT dentalix_email_dispatcher TO "${intruder}" WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
     );
-    const a2 = ownerUrlFor(env, dbA2);
     try {
-      expect(() => prisma(a2, ['migrate', 'deploy'])).toThrow(
-        `El rol dentalix_email_dispatcher tiene miembros inesperados: ${intruder}`,
+      const check = checkForce(env.ownerUrl);
+      expect(check.out).toContain('"event":"db.check_force_failed"');
+      expect(check.out).toContain(
+        `"members":["dentalix_email_dispatcher:${intruder}"]`,
+      );
+      expect(check.status).toBe(1);
+      const r = createAppRole(ownerUrlFor(env, dbA2));
+      expect(r.status).not.toBe(0);
+      expect(r.out).toContain(
+        `Este clúster ya tiene el rol dentalix_email_dispatcher de otro owner (miembros: ${intruder})`,
       );
     } finally {
       await admin.$executeRawUnsafe(
         `REVOKE dentalix_email_dispatcher FROM "${intruder}"`,
       );
     }
-    prisma(a2, [
-      'migrate',
-      'resolve',
-      '--rolled-back',
-      '20261017175000_dx113_email_outbox_dispatcher_role',
-    ]);
-    prisma(a2, ['migrate', 'deploy']);
-    const owners = await withDb(
-      dbA2,
-      (c) =>
-        c.$queryRaw<{ n: number }[]>`
-        SELECT count(*)::int AS n FROM pg_proc
-         WHERE pg_get_userbyid(proowner) IN ('dentalix_patient_search', 'dentalix_email_dispatcher')`,
-    );
-    expect(owners[0].n).toBe(5);
-  }, 300_000);
+    expect(checkForce(env.ownerUrl).status).toBe(0);
+  }, 120_000);
 });
