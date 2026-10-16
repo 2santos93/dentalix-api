@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   HttpCode,
@@ -8,7 +9,16 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import {
+  ApiAcceptedResponse,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiGoneResponse,
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
@@ -18,7 +28,19 @@ import { LoginUseCase } from '../application/use-cases/login.use-case';
 import { RefreshUseCase } from '../application/use-cases/refresh.use-case';
 import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
-import { RegisterResponseDto } from './dto/register-response.dto';
+import {
+  RegisterAcceptedDto,
+  RegisterVerifiedDto,
+  VerifyRegistrationDto,
+} from './dto/register-response.dto';
+import {
+  PublicWebProtocol,
+  resolvePublicWebProtocol,
+  safeLinkHost,
+} from '../../../shared/tenancy/public-link';
+
+export const REGISTER_ACCEPTED_MESSAGE =
+  'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import {
@@ -36,7 +58,12 @@ export class AuthController {
     private readonly refresh: RefreshUseCase,
     private readonly logout: LogoutUseCase,
     private readonly cookie: SessionCookieService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
+  }
+
+  private readonly protocol: PublicWebProtocol;
 
   /**
    * Refresh de la petición: el del body si viene (clientes antiguos y la
@@ -53,13 +80,51 @@ export class AuthController {
     return { token: fromCookie, viaCookie: Boolean(fromCookie) };
   }
 
+  /**
+   * DX-029: siempre 202 con el mismo cuerpo, exista o no el email (sin
+   * enumeración). Si el email es nuevo llega un enlace de verificación; si ya
+   * tenía cuenta, su titular recibe un aviso. 409 solo si el SUBDOMINIO está
+   * ocupado (público: es el host de la clínica).
+   */
   @Post('register')
+  @HttpCode(202)
   @RateLimit('auth')
-  @ApiCreatedResponse({ type: RegisterResponseDto })
-  register(
+  @ApiOperation({
+    summary:
+      'Pide el alta de una clínica: envía un enlace de verificación al email (la clínica se crea al abrirlo)',
+  })
+  @ApiAcceptedResponse({ type: RegisterAcceptedDto })
+  @ApiConflictResponse({ description: 'El subdominio ya está en uso' })
+  async register(
+    @Req() req: TenantHostRequest,
     @Body() dto: RegisterDto,
-  ): Promise<{ tenantId: string; userId: string }> {
-    return this.registerClinic.execute(dto);
+  ): Promise<RegisterAcceptedDto> {
+    const host = safeLinkHost(req.tenantHost?.host);
+    if (!host) {
+      throw new BadRequestException('Host inválido');
+    }
+    await this.registerClinic.accept({
+      ...dto,
+      linkBase: `${this.protocol}://${host}`,
+    });
+    return { message: REGISTER_ACCEPTED_MESSAGE };
+  }
+
+  /** Abre el enlace del email: crea la clínica y su dueño (email verificado). */
+  @Post('register/verify')
+  @RateLimit('auth')
+  @ApiOperation({
+    summary:
+      'Confirma el registro con el token del email y crea la clínica y su dueño',
+  })
+  @ApiCreatedResponse({ type: RegisterVerifiedDto })
+  @ApiNotFoundResponse({ description: 'Enlace inexistente o ya usado' })
+  @ApiGoneResponse({ description: 'Enlace caducado' })
+  @ApiConflictResponse({ description: 'Subdominio o email ya en uso' })
+  verifyRegistration(
+    @Body() dto: VerifyRegistrationDto,
+  ): Promise<RegisterVerifiedDto> {
+    return this.registerClinic.verify(dto.token);
   }
 
   @Audit({ action: 'LOGIN', resource: 'SESSION' })

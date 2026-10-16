@@ -160,6 +160,7 @@ model ClinicInvitation {
   @@unique([tenantId, email], map: "clinic_invitations_pending_key")
   @@index([tenantId])
   @@index([tokenHash])
+  @@index([tenantId, createdAt(sort: Desc)])
   @@map("clinic_invitations")
 }
 
@@ -1499,6 +1500,7 @@ enum EmailTemplate {
   INVITATION           @map("invitation")
   PASSWORD_RESET       @map("password-reset")
   EMAIL_VERIFY         @map("email-verify")
+  REGISTRATION_NOTICE  @map("registration-notice")
   APPOINTMENT_REMINDER @map("appointment-reminder")
 }
 
@@ -1604,4 +1606,24 @@ model PatientRetentionAction {
 
   @@index([tenantId, patientId, createdAt], map: "patient_retention_actions_patient_created_idx")
   @@map("patient_retention_actions")
+}
+
+/// DX-029: alta de clínica pendiente de verificar el email. Tabla GLOBAL (aún
+/// no hay clínica): sin tenantId ni RLS. Nada se crea en `tenants`/`users`
+/// hasta que llega el enlace del email, así el registro no revela si el email
+/// ya tenía cuenta ni permite apropiarse de uno ajeno. Nunca guarda el token
+/// en claro (`tokenHash` = SHA-256 hex) ni la contraseña (`passwordHash`).
+model PendingRegistration {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  clinicName   String
+  subdomain    String
+  fullName     String
+  passwordHash String
+  tokenHash    String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("pending_registrations")
 }

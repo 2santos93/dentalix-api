@@ -16,6 +16,7 @@ import { computeConsentHash } from '../src/modules/consents/domain/consent-hash'
 import { MAX_SIGNATURE_BYTES } from '../src/modules/consents/domain/signature-image';
 import { hostFor } from './support/tenant-host';
 import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
+import { registerVerified } from './support/register-verified';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
@@ -143,16 +144,13 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    });
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),

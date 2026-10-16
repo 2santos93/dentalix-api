@@ -15,6 +15,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { MAX_SIGNATURE_BYTES } from '../src/modules/consents/domain/signature-image';
 import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
@@ -139,16 +140,13 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    });
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),

@@ -1,16 +1,32 @@
-import { ConflictException } from '@nestjs/common';
+import {
+  ConflictException,
+  GoneException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { RegisterClinicUseCase } from './register-clinic.use-case';
+import {
+  REGISTRATION_EMAIL_TAKEN,
+  RegisterClinicUseCase,
+} from './register-clinic.use-case';
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { AuthRepository } from '../../domain/ports/auth-repository.port';
+import type {
+  PendingRegistrationRecord,
+  RegistrationRepository,
+} from '../../domain/ports/registration-repository.port';
+import type { RegistrationNotifier } from '../../domain/ports/registration-notifier.port';
+import { hashRegistrationToken } from '../registration-token';
+
+const createClinic = jest.fn();
 
 function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
+  createClinic.mockReset();
+  createClinic.mockResolvedValue({ tenantId: 't1', userId: 'u1' });
   return {
     findUserByEmail: () => Promise.resolve(null),
     findUserForAuth: () => Promise.resolve(null),
     findTenantBySubdomain: () => Promise.resolve(null),
-    createClinicWithOwner: () =>
-      Promise.resolve({ tenantId: 't1', userId: 'u1' }),
+    createClinicWithOwner: createClinic,
     findMembership: () => Promise.resolve(null),
     revokeToken: jest.fn(),
     findSessionState: jest.fn(),
@@ -19,82 +35,219 @@ function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   };
 }
 
-describe('RegisterClinicUseCase', () => {
-  const password = new PasswordService();
+/** Pendientes en memoria, con la misma regla de «uno por email». */
+class InMemoryPending implements RegistrationRepository {
+  readonly rows: (PendingRegistrationRecord & { tokenHash: string })[] = [];
 
-  it('creates a clinic + owner and normalizes the email', async () => {
-    let captured: { email: string; passwordHash: string } | undefined;
-    const repo = makeRepo({
-      createClinicWithOwner: (input) => {
-        captured = { email: input.email, passwordHash: input.passwordHash };
-        return Promise.resolve({ tenantId: 't1', userId: 'u1' });
-      },
-    });
-    const uc = new RegisterClinicUseCase(repo, password);
+  savePending(
+    input: Omit<PendingRegistrationRecord, 'id'> & { tokenHash: string },
+  ): Promise<void> {
+    const i = this.rows.findIndex((r) => r.email === input.email);
+    const row = { id: `p-${this.rows.length + 1}`, ...input };
+    if (i >= 0) this.rows[i] = row;
+    else this.rows.push(row);
+    return Promise.resolve();
+  }
 
-    const result = await uc.execute({
-      clinicName: 'Sonrisa',
-      subdomain: 'sonrisa',
-      email: '  Owner@Clinic.COM ',
-      password: 'S3cret!',
-      fullName: 'Dr. Owner',
-    });
+  findPendingByTokenHash(
+    tokenHash: string,
+  ): Promise<PendingRegistrationRecord | null> {
+    return Promise.resolve(
+      this.rows.find((r) => r.tokenHash === tokenHash) ?? null,
+    );
+  }
 
-    expect(result).toEqual({ tenantId: 't1', userId: 'u1' });
-    expect(captured?.email).toBe('owner@clinic.com');
-    expect(captured?.passwordHash).not.toBe('S3cret!');
+  consumePending(id: string): Promise<boolean> {
+    const i = this.rows.findIndex((r) => r.id === id);
+    if (i < 0) return Promise.resolve(false);
+    this.rows.splice(i, 1);
+    return Promise.resolve(true);
+  }
+}
+
+function makeNotifier() {
+  return {
+    sendVerification: jest
+      .fn<Promise<void>, Parameters<RegistrationNotifier['sendVerification']>>()
+      .mockResolvedValue(undefined),
+    sendExistingAccountNotice: jest
+      .fn<
+        Promise<void>,
+        Parameters<RegistrationNotifier['sendExistingAccountNotice']>
+      >()
+      .mockResolvedValue(undefined),
+  } satisfies RegistrationNotifier;
+}
+
+const INPUT = {
+  clinicName: 'Sonrisa',
+  subdomain: 'Sonrisa',
+  email: '  Owner@Clinic.COM ',
+  password: 'S3cret!!x',
+  fullName: 'Dr. Owner',
+  linkBase: 'http://localhost:3001',
+};
+
+function tokenFrom(url: string): string {
+  return url.split('/').pop() as string;
+}
+
+describe('RegisterClinicUseCase (DX-029)', () => {
+  const realPassword = new PasswordService();
+
+  it('email NUEVO: no crea nada aún; guarda el pendiente (hash, nunca la clave) y envía el enlace', async () => {
+    const repo = makeRepo();
+    const pending = new InMemoryPending();
+    const notifier = makeNotifier();
+    const uc = new RegisterClinicUseCase(repo, pending, notifier, realPassword);
+
+    const outcome = await uc.execute(INPUT);
+
+    expect(outcome).toBe('VERIFICATION_SENT');
+    expect(createClinic).not.toHaveBeenCalled();
+    expect(pending.rows).toHaveLength(1);
+    expect(pending.rows[0].email).toBe('owner@clinic.com');
+    expect(pending.rows[0].subdomain).toBe('sonrisa');
+    expect(pending.rows[0].passwordHash).toMatch(/^\$argon2id\$/);
+    const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
+    expect(verifyUrl).toMatch(
+      /^http:\/\/localhost:3001\/register\/verificar\/[A-Za-z0-9_-]{43}$/,
+    );
+    // En la BD solo el hash del token.
+    expect(pending.rows[0].tokenHash).toBe(
+      hashRegistrationToken(tokenFrom(verifyUrl)),
+    );
+    expect(notifier.sendExistingAccountNotice).not.toHaveBeenCalled();
   });
 
-  it('rejects a taken subdomain', async () => {
+  it('email YA registrado: no guarda nada, avisa al titular y hace el MISMO hash (sin enumeración por tiempo)', async () => {
+    const repo = makeRepo({
+      findUserByEmail: () =>
+        Promise.resolve({ id: 'u0', fullName: 'Dra. Titular' }),
+    });
+    const pending = new InMemoryPending();
+    const notifier = makeNotifier();
+    const password = {
+      hash: jest.fn().mockResolvedValue('H'),
+      verify: jest.fn(),
+    };
+    const uc = new RegisterClinicUseCase(repo, pending, notifier, password);
+
+    const outcome = await uc.execute(INPUT);
+
+    expect(outcome).toBe('EXISTING_ACCOUNT_NOTIFIED');
+    expect(password.hash).toHaveBeenCalledTimes(1);
+    expect(pending.rows).toHaveLength(0);
+    expect(notifier.sendVerification).not.toHaveBeenCalled();
+    expect(notifier.sendExistingAccountNotice).toHaveBeenCalledWith({
+      to: 'owner@clinic.com',
+      userName: 'Dra. Titular',
+      loginUrl: 'http://localhost:3001/login',
+    });
+  });
+
+  it('accept(): resuelve igual exista o no el email (el trabajo sigue en segundo plano)', async () => {
+    const existing = makeRepo({
+      findUserByEmail: () => Promise.resolve({ id: 'u0', fullName: 'X' }),
+    });
+    const fresh = makeRepo();
+    const password = {
+      hash: jest.fn().mockResolvedValue('H'),
+      verify: jest.fn(),
+    };
+    for (const repo of [existing, fresh]) {
+      const uc = new RegisterClinicUseCase(
+        repo,
+        new InMemoryPending(),
+        makeNotifier(),
+        password,
+      );
+      await expect(uc.accept(INPUT)).resolves.toBeUndefined();
+    }
+    expect(password.hash).toHaveBeenCalledTimes(2);
+  });
+
+  it('subdominio ocupado: 409 en español (el subdominio es público)', async () => {
     const repo = makeRepo({
       findTenantBySubdomain: () => Promise.resolve({ id: 't0' }),
     });
-    const uc = new RegisterClinicUseCase(repo, password);
-    await expect(
-      uc.execute({
-        clinicName: 'X',
-        subdomain: 'taken',
-        email: 'a@b.com',
-        password: 'x',
-        fullName: 'A',
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('rejects a taken email', async () => {
-    const repo = makeRepo({
-      findUserByEmail: () => Promise.resolve({ id: 'u0' }),
-    });
-    const uc = new RegisterClinicUseCase(repo, password);
-    await expect(
-      uc.execute({
-        clinicName: 'X',
-        subdomain: 'new',
-        email: 'a@b.com',
-        password: 'x',
-        fullName: 'A',
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('maps a P2002 unique-violation from the repo create to a 409 (ConflictException), not a raw 500', async () => {
-    const p2002 = new Prisma.PrismaClientKnownRequestError(
-      'Unique constraint failed on the fields: (`subdomain`)',
-      { code: 'P2002', clientVersion: '6.19.3' },
+    const uc = new RegisterClinicUseCase(
+      repo,
+      new InMemoryPending(),
+      makeNotifier(),
+      realPassword,
     );
-    const repo = makeRepo({
-      createClinicWithOwner: () => Promise.reject(p2002),
-    });
-    const uc = new RegisterClinicUseCase(repo, password);
+    await expect(uc.accept(INPUT)).rejects.toThrow(
+      'Ese subdominio ya está en uso. Elige otro.',
+    );
+  });
 
-    await expect(
-      uc.execute({
-        clinicName: 'Race Condition Clinic',
-        subdomain: 'racey',
-        email: 'racey@b.com',
-        password: 'x',
-        fullName: 'A',
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
+  describe('verify', () => {
+    async function pendingWithToken() {
+      const repo = makeRepo();
+      const pending = new InMemoryPending();
+      const notifier = makeNotifier();
+      const uc = new RegisterClinicUseCase(
+        repo,
+        pending,
+        notifier,
+        realPassword,
+      );
+      await uc.execute(INPUT);
+      const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
+      return { repo, pending, uc, token: tokenFrom(verifyUrl) };
+    }
+
+    it('crea la clínica con el email VERIFICADO y consume el enlace (un solo uso)', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+
+      const result = await uc.verify(token);
+
+      expect(result).toEqual({
+        tenantId: 't1',
+        userId: 'u1',
+        subdomain: 'sonrisa',
+      });
+      expect(createClinic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'owner@clinic.com',
+          subdomain: 'sonrisa',
+          emailVerifiedAt: expect.any(Date) as Date,
+        }),
+      );
+      expect(pending.rows).toHaveLength(0);
+      await expect(uc.verify(token)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('enlace con forma inválida o desconocido -> 404', async () => {
+      const { uc } = await pendingWithToken();
+      await expect(uc.verify('nope')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(uc.verify('A'.repeat(43))).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('enlace caducado -> 410', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+      pending.rows[0].expiresAt = new Date(Date.now() - 1000);
+      await expect(uc.verify(token)).rejects.toBeInstanceOf(GoneException);
+    });
+
+    it('el email ya tiene cuenta al verificar -> 409 en español', async () => {
+      const { repo, uc, token } = await pendingWithToken();
+      repo.findUserByEmail = () => Promise.resolve({ id: 'u9', fullName: 'X' });
+      await expect(uc.verify(token)).rejects.toThrow(REGISTRATION_EMAIL_TAKEN);
+    });
+
+    it('carrera de índices únicos (P2002) -> 409, no 500', async () => {
+      const { uc, token } = await pendingWithToken();
+      createClinic.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('dup', {
+          code: 'P2002',
+          clientVersion: 'x',
+        }),
+      );
+      await expect(uc.verify(token)).rejects.toBeInstanceOf(ConflictException);
+    });
   });
 });

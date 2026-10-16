@@ -99,7 +99,7 @@ describe('GetInvitationUseCase', () => {
     expect(result).toEqual({ status: 'REVOKED' });
   });
 
-  it('invitación válida -> email enmascarado, role, clinicName y userExists', async () => {
+  it('invitación válida -> email enmascarado, role, clinicName y requiresCurrentPassword (nunca userExists)', async () => {
     const repo = new InMemoryInvitationRepository();
     repo.tenantName = 'Sonrisas SAS';
     repo.seedInvitation({
@@ -117,11 +117,11 @@ describe('GetInvitationUseCase', () => {
       clinicName: 'Sonrisas SAS',
       role: ClinicRole.DENTIST,
       maskedEmail: 'an***@clinic.com',
-      userExists: false,
+      requiresCurrentPassword: false,
     });
   });
 
-  it('invitación válida con usuario ya existente -> userExists true', async () => {
+  it('DX-029: cuenta VERIFICADA -> requiresCurrentPassword true', async () => {
     const repo = new InMemoryInvitationRepository();
     repo.seedUser({ email: 'ana@clinic.com' });
     repo.seedInvitation({ token: 'valid-token', email: 'ana@clinic.com' });
@@ -130,7 +130,20 @@ describe('GetInvitationUseCase', () => {
 
     const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
 
-    expect(result.userExists).toBe(true);
+    expect(result.requiresCurrentPassword).toBe(true);
+    expect(result).not.toHaveProperty('userExists');
+  });
+
+  it('DX-029: cuenta SIN verificar -> igual que sin cuenta (se puede reclamar)', async () => {
+    const repo = new InMemoryInvitationRepository();
+    repo.seedUser({ email: 'ana@clinic.com', emailVerifiedAt: null });
+    repo.seedInvitation({ token: 'valid-token', email: 'ana@clinic.com' });
+    const ctx = new TenantContextService();
+    const uc = new GetInvitationUseCase(ctx, repo);
+
+    const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
+
+    expect(result.requiresCurrentPassword).toBe(false);
   });
 
   it('invitación válida pero el tenant fue borrado (findTenantName -> null) -> clinicName ausente, no rompe', async () => {

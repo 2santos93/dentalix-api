@@ -7,6 +7,7 @@ import { AppModule } from '../../src/app.module';
 import { PasswordService } from '../../src/shared/crypto/password.service';
 import { PrismaExceptionFilter } from '../../src/shared/prisma/prisma-exception.filter';
 import { hostFor } from './tenant-host';
+import { registerVerified } from '../support/register-verified';
 
 // Fixtures compartidas por las matrices de DX-068 (role-matrix y
 // tenant-isolation-matrix).
@@ -75,16 +76,13 @@ export async function registerClinic(
   subdomain: string,
 ): Promise<Clinic> {
   const email = `owner@${subdomain}.test`;
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: SEEDED_PASSWORD,
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  const register = await registerVerified(app, {
+    clinicName: `Clinica ${subdomain}`,
+    subdomain,
+    email,
+    password: SEEDED_PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const { tenantId, userId } = register.body as {
     tenantId: string;
     userId: string;

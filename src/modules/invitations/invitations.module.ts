@@ -2,7 +2,13 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { StaffInvitationsController } from './presentation/staff-invitations.controller';
 import { PublicInvitationsController } from './presentation/public-invitations.controller';
-import { CreateInvitationUseCase } from './application/use-cases/create-invitation.use-case';
+import { ConfigService } from '@nestjs/config';
+import {
+  CreateInvitationUseCase,
+  DEFAULT_INVITATION_TENANT_DAILY,
+  INVITATION_LIMITS,
+  InvitationLimits,
+} from './application/use-cases/create-invitation.use-case';
 import { ListInvitationsUseCase } from './application/use-cases/list-invitations.use-case';
 import { RevokeInvitationUseCase } from './application/use-cases/revoke-invitation.use-case';
 import { GetInvitationUseCase } from './application/use-cases/get-invitation.use-case';
@@ -44,6 +50,19 @@ import { EmailInvitationNotifier } from './infrastructure/email-invitation-notif
     PublicTenantContextInterceptor,
     { provide: INVITATION_REPOSITORY, useClass: PrismaInvitationRepository },
     { provide: INVITATION_NOTIFIER, useClass: EmailInvitationNotifier },
+    {
+      provide: INVITATION_LIMITS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService): InvitationLimits => {
+        const raw = config.get<string>('INVITATION_TENANT_DAILY_LIMIT')?.trim();
+        return {
+          tenantDaily:
+            raw && /^\d+$/.test(raw)
+              ? Number(raw)
+              : DEFAULT_INVITATION_TENANT_DAILY,
+        };
+      },
+    },
   ],
 })
 export class InvitationsModule {}

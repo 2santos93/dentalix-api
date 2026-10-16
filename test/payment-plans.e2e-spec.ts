@@ -12,6 +12,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // Same admin/superuser connection convention as payments.e2e-spec.ts /
 // dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts: DIRECT_URL bypasses RLS
@@ -97,16 +98,13 @@ async function registerAndLogin(
   accessToken: string;
   subdomain: string;
 }> {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: opts.clinicName,
-      subdomain: opts.subdomain,
-      email: opts.email,
-      password: SEEDED_PASSWORD,
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  const register = await registerVerified(app, {
+    clinicName: opts.clinicName,
+    subdomain: opts.subdomain,
+    email: opts.email,
+    password: SEEDED_PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())

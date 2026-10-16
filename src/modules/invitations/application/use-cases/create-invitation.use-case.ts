@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
 } from '@nestjs/common';
@@ -19,6 +21,15 @@ import {
 } from '../invitation-token';
 
 export const INVITATION_TTL_DAYS = 7;
+
+/** Tope de invitaciones nuevas por clínica en 24 h (DX-029). */
+export const INVITATION_LIMITS = Symbol('INVITATION_LIMITS');
+export interface InvitationLimits {
+  /** INVITATION_TENANT_DAILY_LIMIT (default 30). */
+  tenantDaily: number;
+}
+export const DEFAULT_INVITATION_TENANT_DAILY = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
 export const INVITATION_TTL_MS = INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 export interface CreateInvitationInput {
@@ -35,7 +46,10 @@ export interface CreateInvitationInput {
 
 export interface CreateInvitationResult {
   invitation: ClinicInvitation;
-  /** Texto plano del token — se entrega SOLO aquí, nunca se persiste ni se vuelve a exponer. */
+  /**
+   * Texto plano del token: solo para el email (y el seed demo). Nunca se
+   * persiste ni sale por la API (DX-029).
+   */
   token: string;
   /** Estado del email: PENDING si se encoló, `null` si no hubo email. */
   emailDelivery: InvitationEmailDelivery | null;
@@ -48,6 +62,8 @@ export class CreateInvitationUseCase {
     private readonly repo: InvitationRepository,
     @Inject(INVITATION_NOTIFIER)
     private readonly notifier: InvitationNotifier,
+    @Inject(INVITATION_LIMITS)
+    private readonly limits: InvitationLimits,
   ) {}
 
   async execute(input: CreateInvitationInput): Promise<CreateInvitationResult> {
@@ -58,6 +74,24 @@ export class CreateInvitationUseCase {
     }
     if (!Object.values(ClinicRole).includes(input.role)) {
       throw new BadRequestException('invalid role');
+    }
+
+    // Tope diario por clínica (DX-029, SEC-006): una clínica gratis no puede
+    // invitar en bucle. Solo cuenta las invitaciones NUEVAS: reenviar ya
+    // tiene sus topes por destinatario (DX-088).
+    const createdToday = await this.repo.countCreatedSince(
+      new Date(Date.now() - DAY_MS),
+    );
+    if (createdToday >= this.limits.tenantDaily) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          error: 'Too Many Requests',
+          message: `La clínica alcanzó el máximo de ${this.limits.tenantDaily} invitaciones en 24 horas. Vuelve a intentarlo mañana o escribe a soporte si necesitas más.`,
+          retryAfterSeconds: 60 * 60,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     const activeMembership = await this.repo.findActiveMembershipByEmail(email);

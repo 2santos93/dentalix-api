@@ -78,6 +78,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // dentalix-docs/docs/plans/2026-07-24-login-drop-subdomain-host-tenant.md,
   // 2026-07-28-logout.md; cookie de refresh: loop/informes/DX-062.md.
   'POST /auth/register': PUBLIC,
+  'POST /auth/register/verify': PUBLIC,
   'POST /auth/login': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,

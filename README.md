@@ -314,12 +314,47 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
 **Invitaciones**: `POST /staff/invitations` encola el email `invitation` con
 el enlace `<protocolo>://<host de la clínica>/invitacion/<token>` (el host con
 el que llegó la petición, validado; el protocolo sale de
-`PUBLIC_WEB_PROTOCOL`) y sigue devolviendo el token para que el ADMIN pueda
-copiar el enlace. `POST /staff/invitations/:id/resend` (solo ADMIN) regenera
+`PUBLIC_WEB_PROTOCOL`). Desde DX-029 **el token ya no se devuelve al ADMIN**:
+solo viaja en el email, así quien lo abre demuestra que controla ese correo.
+`POST /staff/invitations/:id/resend` (solo ADMIN) regenera
 el token —el anterior deja de servir— y reinicia los 7 días; revocar o
 reenviar cancela el email que siguiera pendiente con el enlace viejo.
 `GET /staff/directory` devuelve en cada invitación `emailDelivery`
 (`PENDING` | `SENT` | `FAILED` | `null`).
+
+## Cuentas sin enumeración ni pre-secuestro (DX-029)
+
+La tabla `users` es global: nada público ni de ADMIN debe revelar si un email
+arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
+
+- **Registro** `POST /auth/register` → **siempre 202** `{ message }`, el mismo
+  cuerpo exista o no el email, y no crea nada todavía. El hash argon2 de la
+  contraseña se calcula en los dos casos antes de responder; la búsqueda del
+  email y el envío corren en segundo plano (ni cuerpo ni tiempo delatan nada).
+  Email nuevo → registro pendiente (`pending_registrations`, solo hash del
+  token y de la contraseña, uno por email, 24 h) y email `email-verify` con
+  `<protocolo>://<host>/register/verificar/<token>`. Email ya registrado → no
+  se guarda nada y el titular recibe `registration-notice` («alguien intentó
+  registrar una clínica con tu correo…»). 409 solo si el **subdominio** está
+  ocupado (es público). `POST /auth/register/verify { token }` crea la
+  clínica, su sede y su dueño con `emailVerifiedAt` puesto (201
+  `{ tenantId, userId, subdomain }`; 404 usado/inexistente, 410 caducado, 409
+  subdominio o email tomados entretanto).
+- **Invitaciones**: el token solo va por email; `GET /public/invitations/:token`
+  ya no trae `userExists` sino `requiresCurrentPassword` (true solo para una
+  cuenta **verificada**), que solo ve quien recibió el correo. Aceptar:
+  - sin cuenta → se crea con `emailVerifiedAt`;
+  - cuenta verificada → exige su contraseña (401 en español; si la olvidó,
+    «¿Olvidaste tu contraseña?», DX-010);
+  - cuenta **sin verificar** (pudo crearla alguien sin acceso al correo): con
+    su contraseña actual se une y queda verificada; con otra, **la reclama**:
+    contraseña nueva, `emailVerifiedAt`, `tokenVersion + 1` (mueren todas las
+    sesiones y refresh anteriores), se invalidan sus enlaces de
+    restablecimiento y se audita `PASSWORD_RESET` con
+    `metadata.reason = INVITATION_ACCOUNT_CLAIM`.
+- **Tope diario** de invitaciones NUEVAS por clínica:
+  `INVITATION_TENANT_DAILY_LIMIT` (default 30/24 h) → 429 en español.
+- El login sigue sin enumeración por tiempo (DX-049, hash ficticio).
 
 ## Recuperar la contraseña (DX-010)
 

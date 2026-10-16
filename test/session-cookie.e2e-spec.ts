@@ -12,6 +12,9 @@ import {
   SessionCookieService,
 } from '../src/modules/auth/presentation/session-cookie.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
+import { CapturingMailer } from './support/capture-mailer';
+import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 
 // DX-062: el refresh de la web viaja en una cookie HttpOnly del host de la
 // clínica (la web llama a la API por su mismo origen). Compatibilidad con el
@@ -92,16 +95,13 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
   const http = () => request(app.getHttpServer());
 
   async function register(sub: string, email: string): Promise<void> {
-    await http()
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clínica ${sub}`,
-        subdomain: sub,
-        email,
-        password: PASSWORD,
-        fullName: 'Dueña Cookie',
-      })
-      .expect(201);
+    await registerVerified(app, {
+      clinicName: `Clínica ${sub}`,
+      subdomain: sub,
+      email,
+      password: PASSWORD,
+      fullName: 'Dueña Cookie',
+    });
   }
 
   /** Login en modo cookie desde la web de `sub`; devuelve la respuesta. */
@@ -117,6 +117,8 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
       .expect(201);
   }
 
+  const mailer = new CapturingMailer();
+
   beforeAll(async () => {
     const env = (k: string) => ENV[k] ?? process.env[k];
     const moduleRef = await Test.createTestingModule({
@@ -128,6 +130,8 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
           get: env,
         } as unknown as ConfigService),
       )
+      .overrideProvider(MAILER)
+      .useValue(mailer)
       .compile();
     app = moduleRef.createNestApplication();
     applySecurity(app, loadSecuritySettings(env));
@@ -426,7 +430,9 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
           role: ClinicRole.ASSISTANT,
         })
         .expect(201);
-      const { token } = invite.body as { token: string };
+      expect(invite.body).not.toHaveProperty('token');
+      // DX-029: el enlace solo viaja por email.
+      const token = await mailer.invitationToken(`invitada${DOMAIN}`);
 
       const res = await http()
         .post(`/api/v1/public/invitations/${token}/accept`)

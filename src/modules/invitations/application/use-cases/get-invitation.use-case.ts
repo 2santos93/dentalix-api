@@ -15,7 +15,15 @@ export interface GetInvitationResult {
   clinicName?: string;
   role?: ClinicRole;
   maskedEmail?: string;
-  userExists?: boolean;
+  /**
+   * `true` solo si el email ya tiene una cuenta VERIFICADA: la pantalla pide
+   * su contraseña actual. Si no (sin cuenta, o cuenta sin verificar que se
+   * puede reclamar), pide crear una. Revelarlo aquí es seguro porque el token
+   * solo llega por email a la persona invitada (DX-029): el ADMIN que invita
+   * ya no lo recibe, así que no sirve para averiguar si un email arbitrario
+   * tiene cuenta.
+   */
+  requiresCurrentPassword?: boolean;
 }
 
 /**
@@ -70,7 +78,7 @@ export class GetInvitationUseCase {
       ...(clinicName !== null ? { clinicName } : {}),
       role: invitation.role,
       maskedEmail: maskEmail(invitation.email),
-      userExists: existingUser !== null,
+      requiresCurrentPassword: Boolean(existingUser?.emailVerifiedAt),
     };
   }
 }

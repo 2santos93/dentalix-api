@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
 // un contexto de tenant los triggers de inmutabilidad dejan borrar.
@@ -103,16 +104,13 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    });
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),

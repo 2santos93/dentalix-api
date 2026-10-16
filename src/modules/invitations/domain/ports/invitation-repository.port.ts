@@ -14,7 +14,35 @@ export interface GlobalUserRecord {
   passwordHash: string;
   /** `User.tokenVersion`: el par emitido al aceptar debe llevarla (`tv`). */
   tokenVersion: number;
+  /**
+   * Cuándo se probó que la persona controla el email (DX-029). `null` = la
+   * cuenta se creó sin probarlo (p. ej. antes de DX-029) y se puede
+   * «reclamar» desde un enlace que llegó a ese email.
+   */
+  emailVerifiedAt: Date | null;
 }
+
+/**
+ * Cómo se resuelve el usuario al aceptar (DX-029):
+ * - `newUser`: no había cuenta; nace con el email verificado.
+ * - `existingUserId`: cuenta existente cuya contraseña se comprobó; si no
+ *   estaba verificada, se marca (el enlace llegó a su email).
+ * - `claim`: cuenta existente NO verificada y contraseña distinta: quien abre
+ *   el enlace controla el email y se queda con la cuenta. Nueva contraseña,
+ *   `tokenVersion` + 1 (todas las sesiones y refresh anteriores dejan de
+ *   valer) y se invalidan los enlaces de restablecimiento pendientes.
+ */
+/** La cuenta a reclamar se verificó mientras tanto (carrera): no se tocó nada. */
+export class AccountClaimConflictError extends Error {
+  constructor() {
+    super('account claim lost a race');
+  }
+}
+
+export type AcceptUserResolution =
+  | { newUser: { fullName: string; passwordHash: string } }
+  | { existingUserId: string }
+  | { claim: { userId: string; passwordHash: string } };
 
 export interface InvitationRepository {
   /** Pendientes (no aceptadas, no revocadas, no borradas) del tenant en contexto. */
@@ -76,15 +104,22 @@ export interface InvitationRepository {
   }): Promise<ClinicInvitation>;
 
   /**
-   * Transacción de aceptación: crea el usuario si `newUser` viene, crea o
-   * REACTIVA la membresía (limpiando `deletedAt` y aplicando el rol), y marca
-   * la invitación como aceptada. Todo o nada.
+   * Invitaciones CREADAS en la clínica en contexto desde `since` (límite
+   * diario por clínica, DX-029).
+   */
+  countCreatedSince(since: Date): Promise<number>;
+
+  /**
+   * Transacción de aceptación: resuelve el usuario (`user`, ver
+   * AcceptUserResolution) marcando su email como verificado, crea o REACTIVA
+   * la membresía (limpiando `deletedAt` y aplicando el rol), y marca la
+   * invitación como aceptada. Todo o nada. `tokenVersion` es la vigente tras
+   * la transacción (la del par que se emite).
    */
   acceptTransactional(input: {
     invitationId: string;
     email: string;
     role: ClinicRole;
-    existingUserId?: string;
-    newUser?: { fullName: string; passwordHash: string };
-  }): Promise<AcceptOutcome>;
+    user: AcceptUserResolution;
+  }): Promise<AcceptOutcome & { tokenVersion: number }>;
 }

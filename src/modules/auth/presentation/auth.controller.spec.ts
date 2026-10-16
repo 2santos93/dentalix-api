@@ -20,6 +20,7 @@ function setup(refreshError: Error) {
     refresh as never,
     {} as never,
     cookie as unknown as SessionCookieService,
+    { get: () => undefined } as never,
   );
   const req = {
     headers: {},

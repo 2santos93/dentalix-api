@@ -10,7 +10,9 @@ import { config as loadDotenv } from 'dotenv';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
-import { RegisterClinicUseCase } from '../src/modules/auth/application/use-cases/register-clinic.use-case';
+import { AUTH_REPOSITORY } from '../src/modules/auth/domain/ports/auth-repository.port';
+import type { AuthRepository } from '../src/modules/auth/domain/ports/auth-repository.port';
+import { PasswordService } from '../src/shared/crypto/password.service';
 import { CreateInvitationUseCase } from '../src/modules/invitations/application/use-cases/create-invitation.use-case';
 import { AcceptInvitationUseCase } from '../src/modules/invitations/application/use-cases/accept-invitation.use-case';
 import {
@@ -391,16 +393,20 @@ class DemoSeeder {
     }
 
     const owner = DEMO_USERS[0];
-    // Registro REAL: tenant + dueño ADMIN + "Sede principal" con horario por
-    // defecto + catálogo semilla, en una sola transacción.
-    const { tenantId, userId: ownerId } = await this.use(
-      RegisterClinicUseCase,
-    ).execute({
+    // El MISMO alta que completa el enlace del registro (DX-029): tenant +
+    // dueño ADMIN + "Sede principal" con horario por defecto + catálogo
+    // semilla, en una sola transacción. La demo la crea el operador, sin
+    // email que verificar: los correos demo se dan por verificados.
+    const authRepo = this.app.get<AuthRepository>(AUTH_REPOSITORY, {
+      strict: false,
+    });
+    const { tenantId, userId: ownerId } = await authRepo.createClinicWithOwner({
       clinicName: DEMO_CLINIC_NAME,
       subdomain: DEMO_SUBDOMAIN,
       email: owner.email,
-      password: DEMO_PASSWORD,
+      passwordHash: await this.use(PasswordService).hash(DEMO_PASSWORD),
       fullName: owner.fullName,
+      emailVerifiedAt: new Date(),
     });
 
     let confirmationUrl: string | undefined;

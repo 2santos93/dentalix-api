@@ -12,6 +12,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y para
 // limpiar entre tenants — mismo criterio que payment-plans.e2e-spec.ts.
@@ -132,16 +133,13 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    });
     const accessToken = await login(subdomain, email);
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,

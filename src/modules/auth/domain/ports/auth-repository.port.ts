@@ -6,6 +6,8 @@ export interface CreateClinicWithOwnerInput {
   email: string;
   passwordHash: string;
   fullName: string;
+  /** Cuándo se probó el control del email (enlace de verificación, DX-029). */
+  emailVerifiedAt: Date;
 }
 
 export interface MembershipRecord {
@@ -45,7 +47,9 @@ export interface SessionState {
 export const AUTH_REPOSITORY = Symbol('AUTH_REPOSITORY');
 
 export interface AuthRepository {
-  findUserByEmail(email: string): Promise<{ id: string } | null>;
+  findUserByEmail(
+    email: string,
+  ): Promise<{ id: string; fullName: string } | null>;
   /** Usuario + hash + flag de plataforma, sin exigir membresía. */
   findUserForAuth(email: string): Promise<AuthUserRecord | null>;
   findTenantBySubdomain(subdomain: string): Promise<{ id: string } | null>;

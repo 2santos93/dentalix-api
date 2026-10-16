@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaClient, DocType, Sex, CatalogKind } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -70,16 +71,13 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: opts.clinicName,
-      subdomain: opts.subdomain,
-      email: opts.email,
-      password: 'S3cret!!',
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  const register = await registerVerified(app, {
+    clinicName: opts.clinicName,
+    subdomain: opts.subdomain,
+    email: opts.email,
+    password: 'S3cret!!',
+    fullName: 'Dr. Owner',
+  });
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())
