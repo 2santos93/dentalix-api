@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaExceptionFilter } from '../prisma/prisma-exception.filter';
 import { AppLogger } from './app-logger';
 import { currentRequestId } from './request-context';
+import { stackWithoutMessage } from './safe-stack';
 import {
   ObservedRequest,
   routeTemplate,
@@ -16,6 +17,7 @@ import {
 
 interface FilterResponse {
   headersSent: boolean;
+  end(): unknown;
   status(code: number): { json(body: unknown): unknown };
 }
 
@@ -44,12 +46,20 @@ function isHttpishError(value: unknown): value is HttpishError {
  *
  * - 4xx: misma respuesta que el filtro por defecto de Nest; no es un error
  *   del servidor y no se registra como tal.
- * - 5xx: se registra con su stack, el request id, el método y la ruta
- *   plantilla (nunca la URL, la query ni el cuerpo), y la respuesta solo
- *   añade el `requestId` para que soporte lo encuentre en el log: el stack y
- *   el mensaje de un error no controlado nunca salen al cliente.
- * - Prisma: lo resuelve PrismaExceptionFilter (409/400 o un 500 sin el
- *   DETAIL de Postgres), que también añade el request id a sus 500.
+ * - 5xx lanzado a propósito (HttpException, p. ej. el 503 de la readiness):
+ *   UNA línea `warn` sin stack (es un estado previsto, no un fallo del
+ *   código), con el tipo de su `cause` si la trae.
+ * - Error no controlado: 500 genérico y una línea `error` con el request id,
+ *   el método, la ruta plantilla (nunca la URL, la query ni el cuerpo), el
+ *   tipo del error y los marcos del stack, SIN su mensaje: el de Prisma
+ *   (ValidationError, RustPanic, Initialization...) lleva los argumentos de
+ *   la query y uno propio puede llevar lo que el código interpoló. Para
+ *   diagnosticarlo bastan el tipo, el marco que lo lanzó y el request id.
+ * - La respuesta de un 5xx solo añade el `requestId`, para que soporte lo
+ *   encuentre en el log; el stack y el mensaje interno nunca salen.
+ * - Prisma Known/Unknown: lo resuelve PrismaExceptionFilter (409/400 o un 500
+ *   con el mensaje sin el DETAIL de Postgres), que también añade el request
+ *   id a sus 500.
  */
 @Catch()
 export class AppExceptionFilter implements ExceptionFilter {
@@ -79,7 +89,12 @@ export class AppExceptionFilter implements ExceptionFilter {
         Object.assign(body, { requestId });
       }
     }
-    if (res.headersSent) return;
+    if (res.headersSent) {
+      // La respuesta ya salió a medias: no se puede reescribir, pero se
+      // cierra para que el cliente no quede esperando.
+      res.end();
+      return;
+    }
     res.status(status).json(body);
   }
 
@@ -113,19 +128,25 @@ export class AppExceptionFilter implements ExceptionFilter {
     req: ObservedRequest,
     status: number,
   ): void {
-    const error = exception instanceof Error ? exception : undefined;
     const route = routeTemplate(req);
+    const msg = `${req.method} ${route ?? '-'} ${status}`;
+    const fields = { method: req.method, route, status };
+    if (exception instanceof HttpException) {
+      const cause = exception.cause;
+      this.logger.entry('warn', 'ExceptionFilter', msg, {
+        ...fields,
+        error: exception.name,
+        ...(cause instanceof Error ? { cause: cause.name } : {}),
+      });
+      return;
+    }
+    const error = exception instanceof Error ? exception : undefined;
     this.logger.entry(
       'error',
       'ExceptionFilter',
-      `${req.method} ${route ?? '-'} ${status}`,
-      {
-        method: req.method,
-        route,
-        status,
-        error: error?.name ?? 'NonError',
-      },
-      error?.stack,
+      msg,
+      { ...fields, error: error?.name ?? 'NonError' },
+      error ? stackWithoutMessage(error) : undefined,
     );
   }
 }

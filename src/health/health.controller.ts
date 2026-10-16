@@ -2,7 +2,6 @@ import {
   Controller,
   Get,
   Inject,
-  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -28,13 +27,14 @@ class DatabaseTimeoutError extends Error {
  * - `GET /health` (liveness): el proceso vive. Nunca toca la base: una caída
  *   de Postgres no debe hacer que el orquestador reinicie la API.
  * - `GET /health/ready` (readiness): `SELECT 1` con timeout; 503 si la base
- *   no responde, para que el balanceador saque la instancia de rotación.
+ *   no responde, para que el balanceador saque la instancia de rotación. El
+ *   fallo va como `cause` del 503: el filtro global deja UNA línea warn con
+ *   su tipo (DatabaseTimeoutError, PrismaClientInitializationError...), sin
+ *   el mensaje del driver, que puede llevar la URL de la base.
  */
 @SkipThrottle()
 @Controller('health')
 export class HealthController {
-  private readonly logger = new Logger(HealthController.name);
-
   constructor(@Inject(PrismaService) private readonly db: DatabasePing) {}
 
   @Get()
@@ -55,15 +55,10 @@ export class HealthController {
       await Promise.race([this.db.$queryRaw`SELECT 1`, timeout]);
       return { status: 'ok', database: 'up' };
     } catch (error) {
-      // Solo el tipo de error: el mensaje del driver puede llevar la URL.
-      this.logger.warn(
-        `Readiness: la base de datos no responde (${error instanceof Error ? error.name : 'desconocido'})`,
+      throw new ServiceUnavailableException(
+        { statusCode: 503, status: 'unavailable', database: 'down' },
+        { cause: error },
       );
-      throw new ServiceUnavailableException({
-        statusCode: 503,
-        status: 'unavailable',
-        database: 'down',
-      });
     } finally {
       clearTimeout(timer);
     }

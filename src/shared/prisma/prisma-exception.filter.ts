@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { currentRequestId } from '../observability/request-context';
+import { stackWithoutMessage } from '../observability/safe-stack';
 
 /**
  * Global filter that turns a Prisma **P2002 unique-constraint violation** into
@@ -216,13 +217,10 @@ export function redactedPrismaMessage(message: string): string {
  * el mensaje crudo, con el DETAIL de Postgres, así que no se usa tal cual.
  */
 export function redactedPrismaStack(error: Error): string {
-  const frames = (error.stack ?? '')
-    .split('\n')
-    .filter((line) => /^\s+at /.test(line));
-  return [
+  return stackWithoutMessage(
+    error,
     `${error.name}: ${redactedPrismaMessage(error.message)}`,
-    ...frames,
-  ].join('\n');
+  );
 }
 
 @Catch(

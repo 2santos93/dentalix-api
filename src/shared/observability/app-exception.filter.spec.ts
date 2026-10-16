@@ -13,6 +13,7 @@ import { requestContext } from './request-context';
 interface Sent {
   status?: number;
   body?: unknown;
+  ended?: boolean;
 }
 
 function setup(): {
@@ -41,6 +42,9 @@ function setup(): {
         }),
         getResponse: () => ({
           headersSent: opts.headersSent ?? false,
+          end() {
+            sent.ended = true;
+          },
           status(code: number) {
             sent.status = code;
             return {
@@ -93,9 +97,9 @@ describe('AppExceptionFilter', () => {
     expect(text).not.toContain('Juan');
   });
 
-  it('el 500 se registra en el log con stack, request id, método y ruta plantilla', () => {
+  it('el 500 se registra con request id, método, ruta plantilla y los marcos del stack, SIN el mensaje', () => {
     const { filter, lines, host } = setup();
-    const boom = new TypeError('x is not a function');
+    const boom = new TypeError('fallo con el paciente Juan Pérez');
     inRequest(() => filter.catch(boom, host()));
     const errors = lines.filter((l) => l.level === 'error');
     expect(errors).toHaveLength(1);
@@ -107,18 +111,59 @@ describe('AppExceptionFilter', () => {
       status: 500,
       error: 'TypeError',
     });
-    expect(errors[0].stack).toBe(boom.stack);
-    // Ni la query ni el cuerpo de la petición.
-    expect(JSON.stringify(errors[0])).not.toContain('query=Juan');
-    expect(JSON.stringify(errors[0])).not.toContain('firstName');
+    const stack = String(errors[0].stack);
+    expect(stack.split('\n')[0]).toBe('TypeError');
+    expect(stack).toMatch(/\n\s+at /);
+    // Ni el mensaje (puede llevar datos), ni la query, ni el cuerpo.
+    const text = JSON.stringify(errors[0]);
+    expect(text).not.toContain('Juan');
+    expect(text).not.toContain('query=');
+    expect(text).not.toContain('firstName');
   });
 
-  it('un HttpException 5xx conserva su cuerpo, añade el request id y se registra', () => {
+  it.each([
+    [
+      'PrismaClientValidationError',
+      () =>
+        new Prisma.PrismaClientValidationError(
+          'Invalid `prisma.patient.create()` invocation:\n{ data: { fullName: "Juan Pérez" } }\nUnknown argument `fullName`.',
+          { clientVersion: '6.19.3' },
+        ),
+    ],
+    [
+      'PrismaClientRustPanicError',
+      () =>
+        new Prisma.PrismaClientRustPanicError(
+          'panic: query { where: { fullName: "Juan Pérez" } }',
+          '6.19.3',
+        ),
+    ],
+    [
+      'PrismaClientInitializationError',
+      () =>
+        new Prisma.PrismaClientInitializationError(
+          "Can't reach database server for Juan Pérez",
+          '6.19.3',
+        ),
+    ],
+  ])('%s: 500 genérico y log sin los argumentos de la query', (name, make) => {
     const { filter, lines, host, sent } = setup();
-    const exception = new ServiceUnavailableException({
-      status: 'unavailable',
-      database: 'down',
-    });
+    inRequest(() => filter.catch(make(), host()));
+    expect(sent.status).toBe(500);
+    const errors = lines.filter((l) => l.level === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ error: name, requestId: 'req-abcdef12' });
+    expect(String(errors[0].stack).split('\n')[0]).toBe(name);
+    expect(JSON.stringify(lines)).not.toContain('Juan');
+    expect(JSON.stringify(sent.body)).not.toContain('Juan');
+  });
+
+  it('un HttpException 5xx lanzado a propósito conserva su cuerpo, añade el request id y queda en UNA línea warn sin stack', () => {
+    const { filter, lines, host, sent } = setup();
+    const exception = new ServiceUnavailableException(
+      { status: 'unavailable', database: 'down' },
+      { cause: new Error('timeout hablando con Juan') },
+    );
     inRequest(() => filter.catch(exception, host()));
     expect(sent).toEqual({
       status: 503,
@@ -128,10 +173,16 @@ describe('AppExceptionFilter', () => {
         requestId: 'req-abcdef12',
       },
     });
-    const errors = lines.filter((l) => l.level === 'error');
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatchObject({ status: 503, requestId: 'req-abcdef12' });
-    expect(String(errors[0].stack)).toContain('ServiceUnavailableException');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: 'warn',
+      status: 503,
+      requestId: 'req-abcdef12',
+      error: 'ServiceUnavailableException',
+      cause: 'Error',
+    });
+    expect(lines[0]).not.toHaveProperty('stack');
+    expect(JSON.stringify(lines[0])).not.toContain('Juan');
   });
 
   it('lanzar algo que no es un Error también es un 500 genérico', () => {
@@ -156,12 +207,12 @@ describe('AppExceptionFilter', () => {
     expect(sent.status).toBe(409);
   });
 
-  it('si la respuesta ya salió no intenta escribirla otra vez', () => {
+  it('si la respuesta ya salió no la reescribe, pero la cierra', () => {
     const { filter, lines, host, sent } = setup();
     inRequest(() =>
       filter.catch(new Error('tarde'), host({ headersSent: true })),
     );
-    expect(sent).toEqual({});
+    expect(sent).toEqual({ ended: true });
     expect(lines.filter((l) => l.level === 'error')).toHaveLength(1);
   });
 
