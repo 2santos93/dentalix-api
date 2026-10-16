@@ -12,14 +12,27 @@
 -- para las extensiones trusted) y del esquema `public` (en PG15+ el dueño de la
 -- base lo es vía pg_database_owner). Ver README, «Despliegue: roles de la BD».
 --
--- Idempotente: si `dentalix_app` ya existe no cambia su contraseña, pero
--- comprueba que no salte la RLS. El nombre `dentalix_app` es fijo: lo citan
+-- Idempotente (DX-134): si `dentalix_app` ya existe (es un rol del CLÚSTER:
+-- otra base del mismo servidor, o una ejecución anterior) no hace falta
+-- `-v app_password` y no cambia su contraseña aunque se pase; sí comprueba que
+-- no salte la RLS. Si no existe, la contraseña es obligatoria y no vacía: sin
+-- ella aborta con un error claro. El nombre `dentalix_app` es fijo: lo citan
 -- las migraciones (GRANT EXECUTE … TO dentalix_app, REVOKE … FROM dentalix_app).
 \set ON_ERROR_STOP on
 
-SELECT format(
-  'CREATE ROLE dentalix_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
-  :'app_password')
+\if :{?app_password}
+\else
+  \set app_password ''
+\endif
+
+SELECT CASE
+  WHEN :'app_password' = '' THEN format(
+    'DO $e$ BEGIN RAISE EXCEPTION %L; END $e$',
+    'El rol dentalix_app no existe: pasa su contraseña con -v app_password="$(openssl rand -hex 24)" (README, «Despliegue: roles de la BD»).')
+  ELSE format(
+    'CREATE ROLE dentalix_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
+    :'app_password')
+  END
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dentalix_app')
 \gexec
 
