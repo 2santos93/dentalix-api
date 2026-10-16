@@ -32,6 +32,15 @@ describe('selectHost', () => {
     ).toBe('internal');
   });
 
+  it('uses X-Forwarded-Host outside production even without trustProxy (rewrite /api/v1 de next dev)', () => {
+    expect(
+      selectHost(
+        { 'x-forwarded-host': 'demo.localhost:3001', host: 'localhost:3000' },
+        { isProd: false, trustProxy: false },
+      ),
+    ).toBe('demo.localhost:3001');
+  });
+
   it('takes the first value of a comma-joined X-Forwarded-Host', () => {
     expect(
       selectHost(
