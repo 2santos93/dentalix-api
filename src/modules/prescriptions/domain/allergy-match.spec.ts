@@ -44,6 +44,55 @@ describe('findAllergyMatches (alerta de alergia contra la anamnesis)', () => {
     expect(findAllergyMatches(['Clindamicina'], ['Penicilina'])).toEqual([]);
   });
 
+  it('coincide con miembros de la familia que no están en la lista (sufijos)', () => {
+    const cases: [string, string][] = [
+      ['Bencilpenicilina benzatínica', 'Penicilina'],
+      ['Cloxacilina', 'Penicilinas'],
+      ['Amoxicillin', 'Penicilina'],
+      ['Cefazolina', 'Cefalosporinas'],
+      ['Cefixima', 'Cefalexina'],
+      ['Aceclofenaco', 'AINE'],
+      ['Dexibuprofeno', 'Ibuprofeno'],
+      ['Celecoxib', 'Antiinflamatorios no esteroideos'],
+      ['Ácido acetilsalicílico', 'AAS'],
+      ['Roxitromicina', 'Macrólidos'],
+      ['Levofloxacino', 'Ciprofloxacino'],
+      ['Moxifloxacino', 'Quinolonas'],
+      ['Doxiciclina', 'Tetraciclinas'],
+      ['Clindamicina', 'Lincosamidas'],
+      ['Tinidazol', 'Metronidazol'],
+      ['Articaína con epinefrina', 'Anestesia local'],
+    ];
+    for (const [ingredient, allergen] of cases) {
+      expect([
+        ingredient,
+        allergen,
+        findAllergyMatches([ingredient], [allergen]).length,
+      ]).toEqual([ingredient, allergen, 1]);
+    }
+  });
+
+  it('casa plurales y la forma inglesa como palabra completa', () => {
+    expect(
+      findAllergyMatches(['Metronidazol'], ['metronidazole']),
+    ).toHaveLength(1);
+    expect(
+      findAllergyMatches(['Clorhexidina'], ['Clorhexidinas']),
+    ).toHaveLength(1);
+  });
+
+  it('no confunde «sulfato» con una alergia a las sulfas', () => {
+    expect(findAllergyMatches(['Sulfato ferroso'], ['Sulfas'])).toEqual([]);
+    expect(
+      findAllergyMatches(['Sulfametoxazol + trimetoprim'], ['Sulfas']),
+    ).toHaveLength(1);
+  });
+
+  it('el texto de la alergia no se interpreta como patrón (sin inyección)', () => {
+    expect(findAllergyMatches(['Amoxicilina'], ['.*'])).toEqual([]);
+    expect(findAllergyMatches(['Amoxicilina'], ['(a+)+$'])).toEqual([]);
+  });
+
   it('ignora entradas vacías y no repite el mismo par', () => {
     expect(findAllergyMatches(['', '  '], ['Penicilina'])).toEqual([]);
     expect(

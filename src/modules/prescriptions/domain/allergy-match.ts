@@ -5,6 +5,8 @@
  * Coincide si:
  *  - uno contiene al otro como palabras completas («ibuprofeno» dentro de
  *    «AINEs (ibuprofeno)»), con al menos 4 letras para no casar «de» o «sal»;
+ *    desde 5 letras una palabra casa también con su plural o su forma inglesa
+ *    («metronidazol» / «metronidazole», «penicilina» / «penicilinas»);
  *  - o los dos son de la misma familia farmacológica de una lista corta y
  *    conservadora (alergia a «penicilina» y se prescribe «amoxicilina»).
  *
@@ -18,47 +20,65 @@ export interface AllergyMatch {
 }
 
 const MIN_DIRECT_LENGTH = 4;
+/** Desde esta longitud, una palabra casa con su plural o su forma inglesa. */
+const MIN_FUZZY_WORD_LENGTH = 5;
+const MAX_FUZZY_SUFFIX = 2;
 
-/** Raíces por familia; una palabra del texto pertenece si EMPIEZA por la raíz. */
-const FAMILIES: readonly (readonly string[])[] = [
-  // Penicilinas y betalactámicos de ese grupo.
+/**
+ * Familias farmacológicas. Cada patrón se prueba contra UNA palabra ya
+ * normalizada; los sufijos (`cilin`, `profen`, `floxacin`…) cubren los
+ * miembros de la familia que no están en la lista (bencilpenicilina,
+ * cloxacilina, cefazolina, aceclofenaco…). Lista conservadora: avisar de más
+ * es preferible a callar.
+ */
+const FAMILIES: readonly (readonly RegExp[])[] = [
+  // Penicilinas.
+  [/penicil/, /cil{1,2}in/, /^betalactam/],
+  // AINE (incluye coxibs, metamizol y salicilatos).
   [
-    'penicilin',
-    'amoxicilin',
-    'ampicilin',
-    'dicloxacilin',
-    'oxacilin',
-    'piperacilin',
-    'betalactam',
-  ],
-  // AINE.
-  [
-    'aine',
-    'aines',
-    'ibuprofen',
-    'naproxen',
-    'diclofenac',
-    'ketorolac',
-    'ketoprofen',
-    'dexketoprofen',
-    'meloxicam',
-    'piroxicam',
-    'nimesulid',
-    'aspirina',
-    'acetilsalicil',
-    'metamizol',
-    'dipirona',
+    /^aines?$/,
+    /^antiinflamatori/,
+    /profen/,
+    /^naproxen/,
+    /fenac/,
+    /xicam/,
+    /^ketorolac/,
+    /^nimesulid/,
+    /^aspirin/,
+    /acetilsalicil/,
+    /^aas$/,
+    /^metamizol/,
+    /^dipiron/,
+    /coxib/,
   ],
   // Cefalosporinas.
-  ['cefalosporin', 'cefalexin', 'cefadroxil', 'cefuroxim', 'ceftriaxon'],
+  [/^cef/, /^cephal/],
   // Macrólidos.
-  ['macrolid', 'eritromicin', 'azitromicin', 'claritromicin'],
-  // Sulfonamidas.
-  ['sulfa', 'sulfonamid', 'sulfametoxazol'],
-  // Anestésicos locales tipo amida.
-  ['lidocain', 'mepivacain', 'articain', 'prilocain', 'bupivacain'],
+  [/^macrolid/, /tromicin/, /thromycin/],
+  // Sulfonamidas (no «sulfato»: no es una sulfa).
+  [/^sulfas?$/, /^sulfonamid/, /^sulfametox/, /^sulfadiazin/, /^cotrimoxazol/],
+  // Anestésicos locales tipo amida (y la alergia genérica a «anestesia»).
+  [
+    /^anestesi/,
+    /^lidocain/,
+    /^xilocain/,
+    /^mepivacain/,
+    /^articain/,
+    /^prilocain/,
+    /^bupivacain/,
+    /^levobupivacain/,
+    /^ropivacain/,
+  ],
   // Paracetamol.
-  ['paracetamol', 'acetaminofen'],
+  [/^paracetamol/, /^acetaminofen/],
+  // Quinolonas.
+  [/quinolon/, /floxacin/],
+  // Tetraciclinas.
+  [/ciclin/, /cyclin/],
+  // Lincosamidas.
+  [/^lincosamid/, /^clindami/, /^lincomi/],
+  // Nitroimidazoles.
+  [/nidazol/],
 ];
 
 export function normalizeDrugText(value: string): string {
@@ -70,20 +90,40 @@ export function normalizeDrugText(value: string): string {
     .trim();
 }
 
-function containsWords(haystack: string, needle: string): boolean {
-  return ` ${haystack} `.includes(` ${needle} `);
+/** Igual, o la misma palabra con hasta 2 letras más (plural, «-e» inglesa). */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return (
+    shorter.length >= MIN_FUZZY_WORD_LENGTH &&
+    longer.length - shorter.length <= MAX_FUZZY_SUFFIX &&
+    longer.startsWith(shorter)
+  );
+}
+
+/** `needle` aparece en `haystack` como palabras completas y seguidas. */
+function containsWords(haystack: string[], needle: string[]): boolean {
+  for (let i = 0; i + needle.length <= haystack.length; i++) {
+    if (needle.every((word, j) => sameWord(haystack[i + j], word))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function directMatch(a: string, b: string): boolean {
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
-  return shorter.length >= MIN_DIRECT_LENGTH && containsWords(longer, shorter);
+  return (
+    shorter.length >= MIN_DIRECT_LENGTH &&
+    containsWords(longer.split(' '), shorter.split(' '))
+  );
 }
 
 function familiesOf(text: string): Set<number> {
   const words = text.split(' ');
   const out = new Set<number>();
-  FAMILIES.forEach((stems, index) => {
-    if (words.some((w) => stems.some((stem) => w.startsWith(stem)))) {
+  FAMILIES.forEach((patterns, index) => {
+    if (words.some((w) => patterns.some((pattern) => pattern.test(w)))) {
       out.add(index);
     }
   });
