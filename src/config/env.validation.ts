@@ -203,7 +203,7 @@ function productionProblems(env: Env): string[] {
   return problems;
 }
 
-const MAIL_TRANSPORTS = ['console', 'smtp'];
+const MAIL_TRANSPORTS = ['console', 'smtp', 'file'];
 
 /** "no-reply@dominio" o "Nombre <no-reply@dominio>". */
 const MAIL_FROM_PATTERN =
@@ -218,6 +218,11 @@ function mailProblems(env: Env, isProd: boolean): string[] {
   if (transport != null && !MAIL_TRANSPORTS.includes(transport)) {
     problems.push(
       `MAIL_TRANSPORT debe ser uno de: ${MAIL_TRANSPORTS.join(', ')}.`,
+    );
+  }
+  if (transport === 'file' && !str(env, 'MAIL_FILE_DIR')?.trim()) {
+    problems.push(
+      'MAIL_FILE_DIR es obligatoria con MAIL_TRANSPORT="file" (carpeta donde se dejan los emails; solo desarrollo y e2e).',
     );
   }
   if (isProd && transport !== 'smtp') {

@@ -321,6 +321,31 @@ reenviar cancela el email que siguiera pendiente con el enlace viejo.
 `GET /staff/directory` devuelve en cada invitación `emailDelivery`
 (`PENDING` | `SENT` | `FAILED` | `null`).
 
+## Recuperar la contraseña (DX-010)
+
+- `POST /auth/forgot-password` `{ email }` → **siempre 202** con el mismo
+  cuerpo, exista o no la cuenta y esté o no activa: la búsqueda, el token y el
+  encolado del email corren en segundo plano, así que ni el cuerpo ni el tiempo
+  de respuesta delatan nada. Solo se envía a un **miembro activo de la clínica
+  del host**, con su marca y un enlace `<PUBLIC_WEB_PROTOCOL>://<host>/restablecer/<token>`.
+  Si se superan los topes `MAIL_*` no se envía (y tampoco se dice).
+- `POST /auth/reset-password/check` `{ token }` → `{ status: VALID | EXPIRED | USED | INVALID }`.
+- `POST /auth/reset-password` `{ token, password }` → 204. Exige la política de
+  contraseña (8–200), consume el token (un solo uso, check-and-set), invalida
+  los demás e incrementa `tokenVersion` (cierra todas las sesiones, como el
+  cambio de contraseña). Errores en español: 404 (inexistente, reemplazado o de
+  otra clínica) y 410 (caducado o usado). Deja un evento `PASSWORD_RESET` en la
+  auditoría, sin datos sensibles.
+- Token: 32 bytes aleatorios (base64url); en `user_tokens` solo su SHA-256,
+  caduca a los 30 min y pedir otro invalida los anteriores. Tabla global de
+  usuario (sin `tenantId` ni RLS, como `users`): el enlace solo vale en el host
+  de una clínica donde el usuario tiene membresía activa.
+- Rate limit `password-reset` por IP, un balde por ruta
+  (`RATE_LIMIT_PASSWORD_RESET_LIMIT`/`_TTL_MS`, 10 cada 15 min).
+- En local, para abrir el enlace sin SMTP: `MAIL_TRANSPORT=file
+  MAIL_FILE_DIR=./.mail` deja cada email como JSON en esa carpeta (prohibido en
+  producción; lo usa el Playwright de la web).
+
 ## Días civiles y zona de la sede (DX-097)
 
 La caja (`GET /payments`), el dashboard (`GET /dashboard`) y el estado de

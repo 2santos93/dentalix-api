@@ -273,6 +273,20 @@ describe('validateEnv', () => {
       );
     });
 
+    it('file (DX-010) exige MAIL_FILE_DIR y está prohibido en producción', () => {
+      expect(errorOf(baseEnv({ MAIL_TRANSPORT: 'file' }))).toContain(
+        'MAIL_FILE_DIR',
+      );
+      expect(() =>
+        validateEnv(
+          baseEnv({ MAIL_TRANSPORT: 'file', MAIL_FILE_DIR: '/tmp/mail' }),
+        ),
+      ).not.toThrow();
+      expect(
+        errorOf(prodEnv({ MAIL_TRANSPORT: 'file', MAIL_FILE_DIR: '/tmp/m' })),
+      ).toContain('MAIL_TRANSPORT');
+    });
+
     it('producción exige MAIL_ENCRYPTION_KEY', () => {
       expect(errorOf(prodEnv({ MAIL_ENCRYPTION_KEY: undefined }))).toContain(
         'MAIL_ENCRYPTION_KEY',

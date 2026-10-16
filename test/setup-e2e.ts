@@ -16,6 +16,7 @@ for (const policy of [
   'CONFIRMATION',
   'REFRESH',
   'INVITATION_EMAIL',
+  'PASSWORD_RESET',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

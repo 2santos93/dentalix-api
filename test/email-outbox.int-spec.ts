@@ -33,6 +33,7 @@ function config(overrides: Partial<MailConfig> = {}): MailConfig {
   return {
     transport: 'console',
     smtpUrl: null,
+    fileDir: null,
     from: 'no-reply@x.co',
     dispatchIntervalMs: 0,
     retryBaseMs: 60_000,

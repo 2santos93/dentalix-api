@@ -1,5 +1,9 @@
 import { Logger } from '@nestjs/common';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ConsoleMailer } from './console.mailer';
+import { FileMailer } from './file.mailer';
 import { SmtpMailer, SmtpTransport, smtpTransportOptions } from './smtp.mailer';
 
 const message = {
@@ -21,6 +25,32 @@ describe('ConsoleMailer', () => {
     expect(logged).not.toContain('ana.perez@clinica.co');
     expect(logged).not.toContain('TOKEN-SECRETO');
     spy.mockRestore();
+  });
+});
+
+describe('FileMailer (DX-010, solo dev y e2e)', () => {
+  it('deja el email completo como JSON 0600 y el log solo lleva el destinatario enmascarado', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mail-'));
+    const spy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    try {
+      await new FileMailer(join(dir, 'sub')).send(message);
+      const [file] = await readdir(join(dir, 'sub'));
+      expect(file).toMatch(/^\d+-[0-9a-f-]{36}\.json$/);
+      const saved = JSON.parse(
+        await readFile(join(dir, 'sub', file), 'utf8'),
+      ) as typeof message;
+      expect(saved).toEqual(message);
+      expect((await stat(join(dir, 'sub', file))).mode & 0o777).toBe(0o600);
+      const logged = JSON.stringify(spy.mock.calls);
+      expect(logged).toContain('an***@clinica.co');
+      expect(logged).not.toContain('ana.perez@clinica.co');
+      expect(logged).not.toContain('TOKEN-SECRETO');
+    } finally {
+      spy.mockRestore();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

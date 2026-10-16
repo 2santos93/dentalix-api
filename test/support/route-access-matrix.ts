@@ -81,6 +81,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /auth/login': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
+  // DX-010: recuperar la contraseña, en el host de la clínica.
+  'POST /auth/forgot-password': PUBLIC_TENANT,
+  'POST /auth/reset-password/check': PUBLIC_TENANT,
+  'POST /auth/reset-password': PUBLIC_TENANT,
 
   // --- Públicas por host de clínica ---------------------------------------
   // Invitaciones: dentalix-docs/docs/plans/2026-08-01-invitaciones-backend.md;

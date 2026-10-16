@@ -11,10 +11,18 @@ import { AUTH_REPOSITORY } from './domain/ports/auth-repository.port';
 import { PrismaAuthRepository } from './infrastructure/repositories/prisma-auth.repository';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
+import { EmailModule } from '../notifications/email/email.module';
+import { PasswordResetController } from './presentation/password-reset.controller';
+import { RequestPasswordResetUseCase } from './application/use-cases/request-password-reset.use-case';
+import { ResetPasswordUseCase } from './application/use-cases/reset-password.use-case';
+import { PASSWORD_RESET_REPOSITORY } from './domain/ports/password-reset-repository.port';
+import { PASSWORD_RESET_NOTIFIER } from './domain/ports/password-reset-notifier.port';
+import { PrismaPasswordResetRepository } from './infrastructure/repositories/prisma-password-reset.repository';
+import { EmailPasswordResetNotifier } from './infrastructure/email-password-reset.notifier';
 
 @Module({
-  imports: [JwtModule.register({})],
-  controllers: [AuthController],
+  imports: [JwtModule.register({}), EmailModule],
+  controllers: [AuthController, PasswordResetController],
   providers: [
     RegisterClinicUseCase,
     LoginUseCase,
@@ -25,6 +33,14 @@ import { TokenService } from '../../shared/crypto/token.service';
     PasswordService,
     TokenService,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
+    // Recuperar la contraseña por email (DX-010).
+    RequestPasswordResetUseCase,
+    ResetPasswordUseCase,
+    {
+      provide: PASSWORD_RESET_REPOSITORY,
+      useClass: PrismaPasswordResetRepository,
+    },
+    { provide: PASSWORD_RESET_NOTIFIER, useClass: EmailPasswordResetNotifier },
   ],
   // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
   // con los claims ACTUALES, igual que /auth/refresh. Él y aceptar invitación

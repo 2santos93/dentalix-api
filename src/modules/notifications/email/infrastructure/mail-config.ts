@@ -3,9 +3,13 @@ import { parseMailEncryptionKey } from './email-payload-cipher';
 
 export const MAIL_CONFIG = Symbol('MAIL_CONFIG');
 
+export type MailTransport = 'console' | 'smtp' | 'file';
+
 export interface MailConfig {
-  transport: 'console' | 'smtp';
+  transport: MailTransport;
   smtpUrl: string | null;
+  /** Carpeta del FileMailer (MAIL_TRANSPORT=file, solo dev y e2e). */
+  fileDir: string | null;
   from: string;
   /** Cada cuánto barre el despachador; 0 = sin barrido (tests). */
   dispatchIntervalMs: number;
@@ -54,7 +58,9 @@ function intOr(raw: string | undefined, fallback: number): number {
  * Configuración del email (DX-088) a partir del entorno ya validado por
  * `validateEnv` (env.validation.ts).
  *
- * - `MAIL_TRANSPORT`: `console` (default fuera de producción) | `smtp`.
+ * - `MAIL_TRANSPORT`: `console` (default fuera de producción) | `smtp` |
+ *   `file` (DX-010: deja cada email en `MAIL_FILE_DIR`; solo dev y e2e, la
+ *   validación del arranque lo prohíbe en producción).
  * - `SMTP_URL`, `MAIL_FROM`: el proveedor (obligatorios con smtp).
  * - `MAIL_ENCRYPTION_KEY`: 32 bytes hex/base64; cifra los pendientes.
  * - `MAIL_DISPATCH_INTERVAL_MS`: barrido periódico; default 30 s, y 0 con
@@ -67,13 +73,15 @@ function intOr(raw: string | undefined, fallback: number): number {
 export function loadMailConfig(
   get: (key: string) => string | undefined,
 ): MailConfig {
-  const transport =
-    get('MAIL_TRANSPORT')?.trim().toLowerCase() === 'smtp' ? 'smtp' : 'console';
+  const requested = get('MAIL_TRANSPORT')?.trim().toLowerCase();
+  const transport: MailTransport =
+    requested === 'smtp' || requested === 'file' ? requested : 'console';
   const configuredKey = parseMailEncryptionKey(get('MAIL_ENCRYPTION_KEY'));
   const isTest = get('NODE_ENV') === 'test';
   return {
     transport,
     smtpUrl: get('SMTP_URL')?.trim() || null,
+    fileDir: get('MAIL_FILE_DIR')?.trim() || null,
     from: get('MAIL_FROM')?.trim() || DEFAULT_FROM,
     dispatchIntervalMs: intOr(
       get('MAIL_DISPATCH_INTERVAL_MS'),

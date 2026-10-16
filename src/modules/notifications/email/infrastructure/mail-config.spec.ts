@@ -27,6 +27,15 @@ describe('loadMailConfig', () => {
     ).toBe(500);
   });
 
+  it('file (DX-010) con su carpeta', () => {
+    const config = loadMailConfig(
+      env({ MAIL_TRANSPORT: 'file', MAIL_FILE_DIR: ' /tmp/mail ' }),
+    );
+    expect(config.transport).toBe('file');
+    expect(config.fileDir).toBe('/tmp/mail');
+    expect(loadMailConfig(env({})).fileDir).toBeNull();
+  });
+
   it('smtp con su URL, remitente y clave configurada', () => {
     const key = 'ab'.repeat(16) + 'cd'.repeat(16);
     const config = loadMailConfig(
