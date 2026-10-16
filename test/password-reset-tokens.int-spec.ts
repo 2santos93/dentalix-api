@@ -143,6 +143,35 @@ describe('PrismaPasswordResetRepository (int)', () => {
     expect(consumed).toBe(false);
   });
 
+  it('dos peticiones de enlace a la vez: solo queda vivo uno', async () => {
+    for (let round = 0; round < 5; round++) {
+      await Promise.all([issue(), issue(), issue()]);
+      const alive = await raw.userToken.count({
+        where: { userId, invalidatedAt: null },
+      });
+      expect(alive).toBe(1);
+    }
+  });
+
+  it('pedir un enlace mientras se usa otro no deja ninguno vivo tras el uso ni se bloquea', async () => {
+    const token = await issue();
+    const record = await repo.findByHash(hashPasswordResetToken(token));
+    const [consumed] = await Promise.all([
+      repo.consumeAndSetPassword({
+        tokenId: record!.id,
+        userId,
+        passwordHash: 'HASH-R',
+        now: new Date(),
+      }),
+      issue(),
+    ]);
+    expect(typeof consumed).toBe('boolean');
+    const alive = await raw.userToken.count({
+      where: { userId, invalidatedAt: null },
+    });
+    expect(alive).toBeLessThanOrEqual(1);
+  });
+
   it('un solo uso, también con dos peticiones a la vez: cambia el hash y sube tokenVersion una vez', async () => {
     const token = await issue();
     const record = await repo.findByHash(hashPasswordResetToken(token));

@@ -9,6 +9,18 @@ import type {
 
 const PURPOSE = UserTokenPurpose.PASSWORD_RESET;
 
+/**
+ * Bloquea la fila del usuario hasta el final de la transacción. `issue` y
+ * `consumeInTx` lo hacen PRIMERO, así se serializan entre sí (dos peticiones
+ * de enlace a la vez no dejan dos vivos) y en el mismo orden (sin deadlock).
+ */
+async function lockUser(
+  tx: Prisma.TransactionClient,
+  userId: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT 1 FROM "users" WHERE "id" = ${userId}::uuid FOR UPDATE`;
+}
+
 /** Interno: deshace la transacción cuando el usuario ya no existe. */
 class UserGoneError extends Error {
   constructor() {
@@ -68,6 +80,7 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
     now: Date;
   }): Promise<void> {
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await lockUser(tx, input.userId);
       await tx.userToken.updateMany({
         where: { userId: input.userId, purpose: PURPOSE, invalidatedAt: null },
         data: { invalidatedAt: input.now },
@@ -119,6 +132,7 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
     now: Date;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await lockUser(tx, input.userId);
       // Check-and-set: dos peticiones con el mismo token → solo una cuenta 1.
       const consumed = await tx.userToken.updateMany({
         where: {
