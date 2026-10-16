@@ -46,6 +46,10 @@
 -- Reversible: crear una tabla sin particionar e INSERT ... SELECT desde esta.
 
 SET LOCAL lock_timeout = '10s';
+-- row_security = off: si alguna lectura o escritura de la copia quedara sujeta
+-- a RLS (owner sin superusuario ni BYPASSRLS con la tabla en FORCE), falla
+-- en vez de leer 0 filas en silencio (ver 20261016130000_domain_checks).
+SET LOCAL row_security = off;
 
 -- ---------------------------------------------------------------------------
 -- 1. Apartar la tabla de DX-009 (mismos nombres de índice que la nueva).
@@ -56,6 +60,10 @@ ALTER TABLE "audit_events_dx009" RENAME CONSTRAINT "audit_events_pkey" TO "audit
 ALTER INDEX "audit_events_tenantId_occurredAt_idx" RENAME TO "audit_events_dx009_t_o_idx";
 ALTER INDEX "audit_events_tenantId_patientId_occurredAt_idx" RENAME TO "audit_events_dx009_t_p_o_idx";
 ALTER INDEX "audit_events_tenantId_actorUserId_occurredAt_idx" RENAME TO "audit_events_dx009_t_a_o_idx";
+-- La tabla vieja tiene RLS FORCE (DX-009): sin esto, un owner que no es
+-- superusuario (producción) no ve ninguna fila y la copia saldría vacía. Se
+-- borra al final de esta misma transacción.
+ALTER TABLE "audit_events_dx009" NO FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- 2. Tabla particionada (mismas columnas y CHECK que DX-009).
@@ -317,8 +325,13 @@ FROM generate_series(
 SELECT dx_audit_events_harden('public.audit_events'::regclass);
 
 -- ---------------------------------------------------------------------------
--- 9. Copia sin pérdida y retirada de la tabla de DX-009.
+-- 9. Copia sin pérdida y retirada de la tabla de DX-009. Durante la copia
+--    el padre va sin FORCE para que el owner (sin superusuario en
+--    producción) pueda escribir filas de todas las clínicas; vuelve a FORCE
+--    antes de terminar la transacción, así que nadie lo ve sin forzar.
 -- ---------------------------------------------------------------------------
+ALTER TABLE "audit_events" NO FORCE ROW LEVEL SECURITY;
+
 INSERT INTO "audit_events"
   ("id", "tenantId", "locationId", "actorUserId", "actorRole", "action",
    "resourceType", "resourceId", "patientId", "requestId", "ip", "userAgent",
@@ -342,6 +355,7 @@ END;
 $$;
 
 DROP TABLE "audit_events_dx009";
+ALTER TABLE "audit_events" FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- 10. Grants: la app lee e inserta por el padre y asegura el horizonte de

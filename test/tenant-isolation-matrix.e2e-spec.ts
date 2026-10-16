@@ -102,8 +102,7 @@ async function snapshot(
     // B (también la lectura que devuelve 200 vacío), así que su recuento de B
     // cambia a propósito. Lo que no puede cambiar son las filas de A. Igual en
     // sus particiones mensuales (DX-102: audit_events_pYYYYMM y _default).
-    const isAudit =
-      table === 'audit_events' || table.startsWith('audit_events_');
+    const isAudit = /^audit_events(_p\d{6}|_default)?$/.test(table);
     shot[`${table}.${column}`] = isAudit ? { rows } : { rows, countB };
   }
   shot.tenant = await raw.tenant.findUnique({ where: { id: tenantA } });
