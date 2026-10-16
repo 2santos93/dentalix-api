@@ -265,6 +265,73 @@ describe('Patients (e2e)', () => {
     expect((after.body as { firstName: string }).firstName).toBeTruthy();
   });
 
+  // DX-043 (DB-004/DB-005): búsqueda sin tildes ni mayúsculas, por documento,
+  // aislada por tenant, y `page` con tope (400 en español por encima).
+  it('searches ignoring accents and case, by document, only in the own tenant, and caps page', async () => {
+    const clinicA = await registerAndLogin(app, {
+      clinicName: 'Clinica Busqueda A',
+      subdomain: 'clinica-busca-a',
+      email: 'owner@clinica-busca-a.com',
+    });
+    const clinicB = await registerAndLogin(app, {
+      clinicName: 'Clinica Busqueda B',
+      subdomain: 'clinica-busca-b',
+      email: 'owner@clinica-busca-b.com',
+    });
+    const createIn = async (
+      clinic: { subdomain: string; accessToken: string },
+      body: Record<string, string>,
+    ) =>
+      (
+        await request(app.getHttpServer())
+          .post('/api/v1/patients')
+          .set('X-Tenant-Host', hostFor(clinic.subdomain))
+          .set('Authorization', `Bearer ${clinic.accessToken}`)
+          .send({ docType: DocType.CC, sex: Sex.M, ...body })
+          .expect(201)
+      ).body as PatientResponseBody;
+    const jose = await createIn(clinicA, {
+      firstName: 'José',
+      lastName: 'Pérez',
+      docNumber: '71234567',
+    });
+    await createIn(clinicB, {
+      firstName: 'Jose',
+      lastName: 'Ajeno',
+      docNumber: '71234567',
+    });
+    const search = async (query: string) =>
+      (
+        await request(app.getHttpServer())
+          .get('/api/v1/patients')
+          .query({ query })
+          .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200)
+      ).body as ListPatientsResponseBody;
+
+    for (const q of ['jose', 'JOSE PEREZ', 'pérez', '1234']) {
+      const body = await search(q);
+      expect(body.items.map((p) => p.id)).toEqual([jose.id]);
+      expect(body.total).toBe(1);
+    }
+
+    const tooFar = await request(app.getHttpServer())
+      .get('/api/v1/patients')
+      .query({ page: 5001 })
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Authorization', `Bearer ${clinicA.accessToken}`)
+      .expect(400);
+    expect(JSON.stringify(tooFar.body)).toContain('page admite hasta 5000.');
+
+    await request(app.getHttpServer())
+      .get('/api/v1/patients')
+      .query({ page: 5000 })
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Authorization', `Bearer ${clinicA.accessToken}`)
+      .expect(200);
+  });
+
   it('rejects requests without a bearer token', async () => {
     await request(app.getHttpServer()).get('/api/v1/patients').expect(401);
   });

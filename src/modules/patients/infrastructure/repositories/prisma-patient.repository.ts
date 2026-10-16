@@ -17,6 +17,15 @@ import {
 
 type PrismaPatient = Prisma.PatientGetPayload<Record<string, never>>;
 
+/**
+ * Desde cuántos caracteres (normalizados) se busca por la función indexada;
+ * `dx_patient_search_*` devuelve nada por debajo (misma regla en SQL).
+ */
+const MIN_INDEXED_QUERY_LENGTH = 2;
+
+/** Página por defecto de la búsqueda si el llamador no fija `take`. */
+const DEFAULT_SEARCH_TAKE = 20;
+
 function mapToEntity(patient: PrismaPatient): Patient {
   return {
     id: patient.id,
@@ -178,31 +187,81 @@ export class PrismaPatientRepository implements PatientRepository {
   }
 
   async list(params: ListPatientsParams): Promise<ListPatientsResult> {
+    const query = params.query?.replace(/\s+/g, ' ').trim();
+    if (query && query.length >= MIN_INDEXED_QUERY_LENGTH) {
+      return this.search(query, params);
+    }
+
+    // Sin término, o de 1 carácter (sin trigramas útiles): camino normal bajo
+    // la RLS. Así la función SECURITY DEFINER nunca recorre el índice de
+    // todos los tenants por un término que no lo acota.
     const where: Prisma.PatientWhereInput = {
       deletedAt: null,
-      ...(params.query
+      ...(query
         ? {
             OR: [
-              { firstName: { contains: params.query, mode: 'insensitive' } },
-              { lastName: { contains: params.query, mode: 'insensitive' } },
-              { docNumber: { contains: params.query, mode: 'insensitive' } },
+              { firstName: { contains: query, mode: 'insensitive' } },
+              { lastName: { contains: query, mode: 'insensitive' } },
+              { docNumber: { contains: query, mode: 'insensitive' } },
             ],
           }
         : {}),
     };
-
     return this.prisma.runWithTenant(async (tx) => {
       const [items, total] = await Promise.all([
         tx.patient.findMany({
           where,
           skip: params.skip,
           take: params.take,
-          orderBy: { createdAt: 'desc' },
+          // Desempate por id: orden estable entre páginas. Lo sirve sin Sort
+          // `patients_tenant_created_live_idx` (DX-043, DB-005).
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         }),
         tx.patient.count({ where }),
       ]);
       return { items: items.map(mapToEntity), total };
     });
+  }
+
+  /**
+   * DX-043 (DB-004): la búsqueda va por `dx_patient_search_ids/_count`
+   * (SECURITY DEFINER), que usan el índice trigram de `search_text` aunque la
+   * RLS esté activa y filtran por el tenant del CONTEXTO de esta transacción
+   * (`app.current_tenant`, el que fija `runWithTenant`), nunca por un
+   * parámetro. Solo devuelven ids; las filas se leen después con la RLS normal
+   * y se reordenan como vinieron. Ver docs/adr/0001-busqueda-pacientes-rls.md.
+   */
+  private search(
+    query: string,
+    params: ListPatientsParams,
+  ): Promise<ListPatientsResult> {
+    const take = params.take ?? DEFAULT_SEARCH_TAKE;
+    const skip = params.skip ?? 0;
+    return this.prisma.runWithTenant(async (tx) => {
+      const idRows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM dx_patient_search_ids(${query}, ${take}::int, ${skip}::int)`;
+      const [{ total }] = await tx.$queryRaw<{ total: bigint }[]>`
+        SELECT dx_patient_search_count(${query}) AS total`;
+      if (idRows.length === 0) {
+        return { items: [], total: Number(total) };
+      }
+      const ids = idRows.map((row) => row.id);
+      const rows = await tx.patient.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+      });
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const items = ids.flatMap((id) => {
+        const row = byId.get(id);
+        return row ? [mapToEntity(row)] : [];
+      });
+      return { items, total: Number(total) };
+    });
+  }
+
+  async count(): Promise<number> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.patient.count({ where: { deletedAt: null } }),
+    );
   }
 
   async update(id: string, patch: UpdatePatientRepoInput): Promise<Patient> {

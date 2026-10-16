@@ -4,6 +4,7 @@ import {
   AppointmentRepository,
   CreateAppointmentRepoInput,
   ListAppointmentsByRangeParams,
+  ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
 } from '../../../domain/ports/appointment-repository.port';
 
@@ -125,6 +126,12 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       .sort((a, b) => a.start.getTime() - b.start.getTime())
       .map((r) => this.toEntity(r));
     return Promise.resolve(items);
+  }
+
+  listUpcoming(params: ListUpcomingAppointmentsParams): Promise<Appointment[]> {
+    return this.listByRange({ from: params.from, to: params.to }).then(
+      (items) => items.slice(0, params.limit),
+    );
   }
 
   findOverlapping(

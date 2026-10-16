@@ -5,7 +5,15 @@ import { Patient } from '../../domain/entities/patient.entity';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
+export const PATIENTS_MAX_PAGE_SIZE = 100;
+/**
+ * Tope de `page` (DX-043, DB-005): el OFFSET recorre todas las filas que salta,
+ * así que una página desorbitada es una consulta cara. 5000 páginas cubren
+ * 100k pacientes con la página por defecto (20); más allá se busca. Lo valida
+ * el DTO (400 en español); aquí solo se documenta junto a los demás topes.
+ */
+export const PATIENTS_MAX_PAGE = 5000;
+export const PATIENTS_MAX_QUERY_LENGTH = 100;
 
 export interface ListPatientsInput {
   query?: string;
@@ -31,7 +39,7 @@ function normalizePageSize(pageSize?: number): number {
   if (pageSize === undefined || !Number.isFinite(pageSize) || pageSize < 1) {
     return DEFAULT_PAGE_SIZE;
   }
-  return Math.min(Math.floor(pageSize), MAX_PAGE_SIZE);
+  return Math.min(Math.floor(pageSize), PATIENTS_MAX_PAGE_SIZE);
 }
 
 @Injectable()

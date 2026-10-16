@@ -14,15 +14,11 @@ import {
 } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { InventoryItemWithStock } from '../../../inventory/domain/entities/inventory-item.entity';
 import {
-  ListAppointmentsUseCase,
-  ListAppointmentsInput,
-} from '../../../appointments/application/use-cases/list-appointments.use-case';
+  ListUpcomingAppointmentsUseCase,
+  ListUpcomingAppointmentsInput,
+} from '../../../appointments/application/use-cases/list-upcoming-appointments.use-case';
 import { Appointment } from '../../../appointments/domain/entities/appointment.entity';
-import {
-  ListPatientsUseCase,
-  ListPatientsInput,
-  ListPatientsOutput,
-} from '../../../patients/application/use-cases/list-patients.use-case';
+import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
 import { AppointmentStatus } from '@prisma/client';
 
 /**
@@ -78,28 +74,32 @@ class FakeListInventoryItemsUseCase {
   }
 }
 
-class FakeListAppointmentsUseCase {
-  public readonly calls: ListAppointmentsInput[] = [];
+// Fake REAL (no un stub): aplica la ventana [from, to), ordena por inicio y
+// corta en `limit`, igual que `PrismaAppointmentRepository.listUpcoming`. Así
+// los specs comprueban que el dashboard pide el tope a la BD (DB-008) en vez
+// de recibir todas las citas y cortarlas en memoria.
+class FakeListUpcomingAppointmentsUseCase {
+  public readonly calls: ListUpcomingAppointmentsInput[] = [];
   public items: Appointment[] = [];
 
-  execute(input: ListAppointmentsInput): Promise<Appointment[]> {
+  execute(input: ListUpcomingAppointmentsInput): Promise<Appointment[]> {
     this.calls.push(input);
-    return Promise.resolve(this.items);
+    return Promise.resolve(
+      this.items
+        .filter((a) => a.start >= input.from && a.start < input.to)
+        .sort((a, b) => a.start.getTime() - b.start.getTime())
+        .slice(0, input.limit),
+    );
   }
 }
 
-class FakeListPatientsUseCase {
-  public readonly calls: ListPatientsInput[] = [];
-  public output: ListPatientsOutput = {
-    items: [],
-    total: 0,
-    page: 1,
-    pageSize: 20,
-  };
+class FakeCountPatientsUseCase {
+  public calls = 0;
+  public total = 0;
 
-  execute(input: ListPatientsInput): Promise<ListPatientsOutput> {
-    this.calls.push(input);
-    return Promise.resolve(this.output);
+  execute(): Promise<number> {
+    this.calls += 1;
+    return Promise.resolve(this.total);
   }
 }
 
@@ -149,14 +149,14 @@ describe('GetDoctorDashboardUseCase', () => {
   function makeUseCase() {
     const incomesUc = new FakeGetPaymentsTotalsUseCase();
     const inventoryUc = new FakeListInventoryItemsUseCase();
-    const appointmentsUc = new FakeListAppointmentsUseCase();
-    const patientsUc = new FakeListPatientsUseCase();
+    const appointmentsUc = new FakeListUpcomingAppointmentsUseCase();
+    const patientsUc = new FakeCountPatientsUseCase();
 
     const uc = new GetDoctorDashboardUseCase(
       incomesUc as unknown as GetPaymentsTotalsUseCase,
       inventoryUc as unknown as ListInventoryItemsUseCase,
-      appointmentsUc as unknown as ListAppointmentsUseCase,
-      patientsUc as unknown as ListPatientsUseCase,
+      appointmentsUc as unknown as ListUpcomingAppointmentsUseCase,
+      patientsUc as unknown as CountPatientsUseCase,
     );
 
     return { incomesUc, inventoryUc, appointmentsUc, patientsUc, uc };
@@ -286,6 +286,15 @@ describe('GetDoctorDashboardUseCase', () => {
       'future-early',
       'future-mid',
     ]);
+    // DB-008: el tope y la ventana se piden a la BD; nunca se leen todas las
+    // citas de 90 días para mostrar `upcomingLimit`.
+    expect(appointmentsUc.calls).toEqual([
+      {
+        from: now,
+        to: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
+        limit: 2,
+      },
+    ]);
     expect(result.upcomingAppointments[0]).toEqual({
       id: 'future-early',
       patientId: 'patient-1',
@@ -343,6 +352,7 @@ describe('GetDoctorDashboardUseCase', () => {
     const result = await uc.execute(baseInput);
 
     expect(result.upcomingAppointments).toHaveLength(5);
+    expect(appointmentsUc.calls[0].limit).toBe(5);
     expect(result.upcomingAppointments.map((a) => a.id)).toEqual([
       'future-0',
       'future-1',
@@ -354,13 +364,22 @@ describe('GetDoctorDashboardUseCase', () => {
     jest.useRealTimers();
   });
 
-  it('equals patientCount to the mocked ListPatientsUseCase total', async () => {
+  it('takes patientCount from CountPatientsUseCase (a COUNT, never a findMany)', async () => {
     const { patientsUc, uc } = makeUseCase();
-    patientsUc.output = { items: [], total: 42, page: 1, pageSize: 20 };
+    patientsUc.total = 42;
 
     const result = await uc.execute(baseInput);
 
     expect(result.patientCount).toBe(42);
+    expect(patientsUc.calls).toBe(1);
+  });
+
+  it('rejects an upcomingLimit above the cap', async () => {
+    const { uc } = makeUseCase();
+
+    await expect(
+      uc.execute({ ...baseInput, upcomingLimit: 51 }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('rejects a from > to range with a clear error', async () => {
@@ -435,15 +454,15 @@ describe('GetDoctorDashboardUseCase', () => {
     );
 
     const inventoryUc = new FakeListInventoryItemsUseCase();
-    const appointmentsUc = new FakeListAppointmentsUseCase();
-    const patientsUc = new FakeListPatientsUseCase();
-    patientsUc.output = { items: [], total: 7, page: 1, pageSize: 20 };
+    const appointmentsUc = new FakeListUpcomingAppointmentsUseCase();
+    const patientsUc = new FakeCountPatientsUseCase();
+    patientsUc.total = 7;
 
     const uc = new GetDoctorDashboardUseCase(
       realIncomesUc,
       inventoryUc as unknown as ListInventoryItemsUseCase,
-      appointmentsUc as unknown as ListAppointmentsUseCase,
-      patientsUc as unknown as ListPatientsUseCase,
+      appointmentsUc as unknown as ListUpcomingAppointmentsUseCase,
+      patientsUc as unknown as CountPatientsUseCase,
     );
 
     const result = await uc.execute({

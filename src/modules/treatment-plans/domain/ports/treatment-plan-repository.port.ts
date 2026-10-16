@@ -122,7 +122,11 @@ export interface TreatmentPlanRepository {
    */
   findPlanById(id: string): Promise<TreatmentPlanWithItems | null>;
 
-  /** Active plans for the patient, ordered by `createdAt` DESC. */
+  /**
+   * Active plans for the patient, ordered by `createdAt` DESC (ties by id).
+   * Sin tope a propósito (revisión DX-043): es dato clínico y financiero y la
+   * respuesta no tiene forma de avisar de un corte.
+   */
   listPlansByPatient(patientId: string): Promise<TreatmentPlan[]>;
 
   /**

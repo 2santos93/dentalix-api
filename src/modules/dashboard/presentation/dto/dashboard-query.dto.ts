@@ -5,8 +5,10 @@ import {
   IsISO4217CurrencyCode,
   IsOptional,
   Matches,
+  Max,
   Min,
 } from 'class-validator';
+import { MAX_UPCOMING_LIMIT } from '../../application/use-cases/get-doctor-dashboard.use-case';
 
 // Uppercase-normalizes ISO 4217 codes before validation -- same convention
 // as CreatePaymentDto (payments, PAY-T3).
@@ -51,12 +53,16 @@ export class DashboardQueryDto {
 
   @ApiPropertyOptional({
     minimum: 1,
+    maximum: MAX_UPCOMING_LIMIT,
     default: 5,
-    description: 'Max number of upcoming appointments to return.',
+    description: `Cuántas próximas citas devolver. Tope: ${MAX_UPCOMING_LIMIT} (un valor mayor responde 400).`,
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'upcomingLimit debe ser un número entero.' })
+  @Min(1, { message: 'upcomingLimit debe ser al menos 1.' })
+  @Max(MAX_UPCOMING_LIMIT, {
+    message: `upcomingLimit admite hasta ${MAX_UPCOMING_LIMIT}.`,
+  })
   upcomingLimit?: number;
 }

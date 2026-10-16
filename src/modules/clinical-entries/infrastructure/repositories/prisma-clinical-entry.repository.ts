@@ -91,7 +91,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.clinicalEntry.findMany({
         where,
-        orderBy: { entryDate: 'desc' },
+        orderBy: [{ entryDate: 'desc' }, { id: 'desc' }],
       });
       return rows.map(mapToEntity);
     });

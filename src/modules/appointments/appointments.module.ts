@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { AppointmentsController } from './presentation/appointments.controller';
 import { CreateAppointmentUseCase } from './application/use-cases/create-appointment.use-case';
 import { ListAppointmentsUseCase } from './application/use-cases/list-appointments.use-case';
+import { ListUpcomingAppointmentsUseCase } from './application/use-cases/list-upcoming-appointments.use-case';
 import { GetAppointmentUseCase } from './application/use-cases/get-appointment.use-case';
 import { UpdateAppointmentUseCase } from './application/use-cases/update-appointment.use-case';
 import { APPOINTMENT_REPOSITORY } from './domain/ports/appointment-repository.port';
@@ -30,6 +31,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   providers: [
     CreateAppointmentUseCase,
     ListAppointmentsUseCase,
+    ListUpcomingAppointmentsUseCase,
     GetAppointmentUseCase,
     UpdateAppointmentUseCase,
     TokenService,
@@ -38,8 +40,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     TenantContextInterceptor,
     { provide: APPOINTMENT_REPOSITORY, useClass: PrismaAppointmentRepository },
   ],
-  // Exported (additive) so DashboardModule can inject ListAppointmentsUseCase
-  // by class for the upcoming-appointments aggregation.
-  exports: [ListAppointmentsUseCase],
+  // ListUpcomingAppointmentsUseCase exportado para las «próximas citas» del
+  // dashboard: la BD devuelve ya cortado en `limit` (DX-043, DB-008).
+  exports: [ListUpcomingAppointmentsUseCase],
 })
 export class AppointmentsModule {}

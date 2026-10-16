@@ -231,7 +231,7 @@ export class PrismaInventoryRepository implements InventoryRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const movements = await tx.inventoryMovement.findMany({
         where: { itemId },
-        orderBy: { occurredAt: 'desc' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
       });
       return movements.map(mapMovementToEntity);
     });

@@ -101,7 +101,7 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.toothRecord.findMany({
         where: { patientId, toothNumber, deletedAt: null },
-        orderBy: { recordedAt: 'desc' },
+        orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
       });
       return rows.map(mapToEntity);
     });

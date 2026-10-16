@@ -38,3 +38,29 @@ describe('DashboardQueryDto currency validation', () => {
     },
   );
 });
+
+// DX-043 (DB-008): el dashboard lee de la BD como mucho `upcomingLimit` citas,
+// así que el parámetro tiene tope (400 en español por encima).
+describe('DashboardQueryDto upcomingLimit', () => {
+  const base = { from: '2026-07-01', to: '2026-07-31', currency: 'USD' };
+
+  it('acepta hasta 50', async () => {
+    const dto = plainToInstance(DashboardQueryDto, {
+      ...base,
+      upcomingLimit: '50',
+    });
+    expect(await validate(dto)).toEqual([]);
+  });
+
+  it('rechaza más de 50 con un mensaje en español', async () => {
+    const dto = plainToInstance(DashboardQueryDto, {
+      ...base,
+      upcomingLimit: '51',
+    });
+    const errors = await validate(dto);
+    expect(errors).toHaveLength(1);
+    expect(Object.values(errors[0].constraints ?? {})).toEqual([
+      'upcomingLimit admite hasta 50.',
+    ]);
+  });
+});

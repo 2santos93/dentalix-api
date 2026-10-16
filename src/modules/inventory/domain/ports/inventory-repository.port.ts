@@ -73,7 +73,11 @@ export interface InventoryRepository {
     input: CreateInventoryMovementRepoInput,
   ): Promise<InventoryMovement>;
 
-  /** All movements for one item, ordered by `occurredAt` DESC. */
+  /**
+   * All movements for one item, ordered by `occurredAt` DESC (ties by id).
+   * Sin tope a propósito (revisión DX-043): la lista tiene que cuadrar con el
+   * stock, que suma todos los movimientos; acotarla exige paginar con aviso.
+   */
   listMovements(itemId: string): Promise<InventoryMovement[]>;
 
   /**

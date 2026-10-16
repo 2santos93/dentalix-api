@@ -36,13 +36,16 @@ export interface ToothRecordRepository {
    * All non-deleted records for the patient (every tooth). Used by
    * GetOdontogramUseCase to build the whole-mouth projection; ordering is
    * chronological (recordedAt ASC) so a consumer that folds over the list
-   * naturally lands on the most recent state last.
+   * naturally lands on the most recent state last. NO limit on purpose
+   * (DX-043): the projection needs every record, and truncating the oldest
+   * or the newest would draw a wrong mouth.
    */
   listByPatient(patientId: string): Promise<ToothRecord[]>;
 
   /**
    * Non-deleted records for a single tooth, ordered by `recordedAt` DESC
-   * (most recent first) — this is the per-tooth timeline.
+   * (most recent first) — this is the per-tooth timeline. Sin tope a
+   * propósito (revisión DX-043): es dato clínico.
    */
   listByTooth(patientId: string, toothNumber: string): Promise<ToothRecord[]>;
 }

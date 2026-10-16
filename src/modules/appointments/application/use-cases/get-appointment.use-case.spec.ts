@@ -40,6 +40,7 @@ function makeRepo(
       ),
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
     listByRange: (): Promise<Appointment[]> => Promise.resolve([]),
+    listUpcoming: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),

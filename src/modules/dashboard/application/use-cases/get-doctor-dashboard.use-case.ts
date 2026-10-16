@@ -5,16 +5,20 @@ import {
   GetPaymentsTotalsResult,
 } from '../../../payments/application/use-cases/get-payments-totals.use-case';
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
-import { ListAppointmentsUseCase } from '../../../appointments/application/use-cases/list-appointments.use-case';
-import { ListPatientsUseCase } from '../../../patients/application/use-cases/list-patients.use-case';
+import { ListUpcomingAppointmentsUseCase } from '../../../appointments/application/use-cases/list-upcoming-appointments.use-case';
+import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
 
 const DEFAULT_UPCOMING_LIMIT = 5;
-// Wide-enough window to surface "next N" appointments without requiring the
-// caller to know the range in advance: ListAppointmentsUseCase.execute()
-// takes a mandatory {from,to} range (see appointments/list-appointments.
-// use-case.ts), so we pass [now, now + UPCOMING_WINDOW_DAYS] and then
-// filter/sort/limit here -- composing in the dashboard use case rather than
-// changing the owner module's contract (per the plan's guidance).
+/**
+ * Tope de `upcomingLimit` (DX-043, DB-008): la BD devuelve exactamente esas
+ * citas, así que el parámetro no puede ser arbitrario. El DTO responde 400 en
+ * español por encima; aquí se repite para los llamadores internos.
+ */
+export const MAX_UPCOMING_LIMIT = 50;
+// Ventana de las «próximas citas»: [ahora, ahora + 90 días). El corte en
+// `upcomingLimit` lo hace la BD (ListUpcomingAppointmentsUseCase, con take e
+// índice por (tenantId, start)); antes se leían todas las citas de la ventana
+// y se cortaban aquí en memoria.
 const UPCOMING_WINDOW_DAYS = 90;
 
 // Cuántos insumos bajo mínimo se listan en la tarjeta. El CONTADOR no depende
@@ -86,8 +90,8 @@ export class GetDoctorDashboardUseCase {
   constructor(
     private readonly getPaymentsTotals: GetPaymentsTotalsUseCase,
     private readonly listInventoryItems: ListInventoryItemsUseCase,
-    private readonly listAppointments: ListAppointmentsUseCase,
-    private readonly listPatients: ListPatientsUseCase,
+    private readonly listUpcomingAppointments: ListUpcomingAppointmentsUseCase,
+    private readonly countPatients: CountPatientsUseCase,
   ) {}
 
   async execute(
@@ -106,14 +110,20 @@ export class GetDoctorDashboardUseCase {
       throw new BadRequestException('currency is required');
     }
     const upcomingLimit = input.upcomingLimit ?? DEFAULT_UPCOMING_LIMIT;
-    if (!Number.isInteger(upcomingLimit) || upcomingLimit < 1) {
-      throw new BadRequestException('upcomingLimit must be an integer >= 1');
+    if (
+      !Number.isInteger(upcomingLimit) ||
+      upcomingLimit < 1 ||
+      upcomingLimit > MAX_UPCOMING_LIMIT
+    ) {
+      throw new BadRequestException(
+        `upcomingLimit debe ser un entero entre 1 y ${MAX_UPCOMING_LIMIT}.`,
+      );
     }
 
     // Currency format/support itself is validated downstream by
     // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
     // throws BadRequestException there) -- not duplicated here.
-    const [incomes, inventoryPage, patients] = await Promise.all([
+    const [incomes, inventoryPage, patientCount] = await Promise.all([
       this.getPaymentsTotals.execute({
         from: input.from,
         to: input.to,
@@ -129,7 +139,8 @@ export class GetDoctorDashboardUseCase {
         lowStockOnly: true,
         pageSize: LOW_STOCK_PREVIEW_SIZE,
       }),
-      this.listPatients.execute({}),
+      // COUNT, no una página de pacientes (DB-008).
+      this.countPatients.execute(),
     ]);
 
     // Ya vienen todos bajo mínimo: filtrar otra vez sería redundante.
@@ -139,25 +150,22 @@ export class GetDoctorDashboardUseCase {
     const windowEnd = new Date(
       now.getTime() + UPCOMING_WINDOW_DAYS * 24 * 60 * 60 * 1000,
     );
-    const appointmentsInWindow = await this.listAppointments.execute({
+    const upcoming = await this.listUpcomingAppointments.execute({
       from: now,
       to: windowEnd,
+      limit: upcomingLimit,
     });
 
-    const upcomingAppointments = appointmentsInWindow
-      .filter((appt) => appt.start >= now)
-      .sort((a, b) => a.start.getTime() - b.start.getTime())
-      .slice(0, upcomingLimit)
-      .map((appt) => ({
-        id: appt.id,
-        patientId: appt.patientId,
-        patientFirstName: appt.patientFirstName,
-        patientLastName: appt.patientLastName,
-        providerId: appt.providerId,
-        start: appt.start,
-        end: appt.end,
-        status: appt.status,
-      }));
+    const upcomingAppointments = upcoming.map((appt) => ({
+      id: appt.id,
+      patientId: appt.patientId,
+      patientFirstName: appt.patientFirstName,
+      patientLastName: appt.patientLastName,
+      providerId: appt.providerId,
+      start: appt.start,
+      end: appt.end,
+      status: appt.status,
+    }));
 
     return {
       period: { from: input.from, to: input.to },
@@ -174,7 +182,7 @@ export class GetDoctorDashboardUseCase {
         })),
       },
       upcomingAppointments,
-      patientCount: patients.total,
+      patientCount,
     };
   }
 }

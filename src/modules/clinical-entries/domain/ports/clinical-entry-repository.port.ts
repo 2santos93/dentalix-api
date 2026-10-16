@@ -31,7 +31,8 @@ export interface ClinicalEntryRepository {
   /**
    * Non-deleted entries for the patient, ordered by `entryDate` DESC
    * (most recent first). `from`/`to` narrow the range when provided
-   * (inclusive).
+   * (inclusive). Sin tope a propósito (revisión DX-043): la historia
+   * clínica no puede llegar incompleta sin aviso.
    */
   listByPatient(
     patientId: string,
