@@ -40,6 +40,23 @@ describe('assertNotUnderRetention (DX-039)', () => {
     expect(body.code).toBe(CLINICAL_RECORD_RETENTION);
     expect(body.retentionUntil).toBe('2039-02-28');
     expect(body.message).toContain('retención legal hasta el 28/02/2039');
+    expect(body.message).toContain('15 años desde la última atención');
+  });
+
+  it('DOUBLE: el mensaje cita el plazo doble (30 años), no los 15 años', () => {
+    const body = conflictBody(() =>
+      assertNotUnderRetention(
+        {
+          lastAttentionAt: new Date('2026-10-12T21:00:00Z'),
+          retentionExtended: 'DOUBLE',
+        },
+        now,
+      ),
+    );
+    expect(body.retentionUntil).toBe('2056-10-12');
+    expect(body.message).toContain('retención legal hasta el 12/10/2056');
+    expect(body.message).toContain('plazo doble: 30 años');
+    expect(body.message).not.toContain('15 años');
   });
 
   it('vencida (más de 15 años) deja archivar; DOUBLE la sigue reteniendo', () => {

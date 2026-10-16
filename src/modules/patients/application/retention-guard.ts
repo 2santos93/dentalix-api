@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import type { RetentionExtension } from '@prisma/client';
 import type { PatientRetentionState } from '../domain/ports/patient-repository.port';
 import {
   formatRetentionDate,
@@ -30,11 +31,23 @@ export function assertNoPendingAppointments(pendingAppointments: number): void {
   });
 }
 
-/** Mensaje en español con la fecha hasta la que se conserva la HC. */
-export function retentionMessage(until: Date | 'PERMANENT'): string {
-  return until === 'PERMANENT'
-    ? 'La historia clínica de este paciente tiene retención legal permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.'
-    : `La historia clínica de este paciente está en retención legal hasta el ${formatRetentionDate(until)} (Res. 839/2017: 15 años desde la última atención): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+/**
+ * Mensaje en español con la fecha hasta la que se conserva la HC. La base
+ * legal entre paréntesis sigue al plazo: con DOUBLE la fecha es a 30 años y
+ * decir «15 años» contradiría la fecha.
+ */
+export function retentionMessage(
+  until: Date | 'PERMANENT',
+  extension: RetentionExtension = 'NONE',
+): string {
+  if (until === 'PERMANENT') {
+    return 'La historia clínica de este paciente tiene retención legal permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.';
+  }
+  const basis =
+    extension === 'DOUBLE'
+      ? 'plazo doble: 30 años desde la última atención'
+      : 'Res. 839/2017: 15 años desde la última atención';
+  return `La historia clínica de este paciente está en retención legal hasta el ${formatRetentionDate(until)} (${basis}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
 }
 
 /**
@@ -52,7 +65,7 @@ export function assertNotUnderRetention(
     statusCode: 409,
     error: 'Conflict',
     code: CLINICAL_RECORD_RETENTION,
-    message: retentionMessage(until),
+    message: retentionMessage(until, state.retentionExtended),
     retentionUntil:
       until === 'PERMANENT' ? null : until.toISOString().slice(0, 10),
   });
