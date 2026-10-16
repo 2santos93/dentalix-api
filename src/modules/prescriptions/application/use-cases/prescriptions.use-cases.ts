@@ -212,8 +212,13 @@ export class IssuePrescriptionUseCase {
     }
     const issuer = await this.repo.loadIssuer(professionalUserId);
     const country = issuer.location.country;
-    const providedLicense = trimmedOrNull(input.professionalLicense);
-    const license = providedLicense ?? issuer.professional.license;
+    // El registro del perfil (lo gestiona ADMIN en Personal) manda: el del
+    // cuerpo solo cubre el hueco de un perfil que aún no lo tiene, para que un
+    // profesional no selle recetas con un registro distinto al de su ficha.
+    const providedLicense = issuer.professional.license
+      ? null
+      : trimmedOrNull(input.professionalLicense);
+    const license = issuer.professional.license ?? providedLicense;
 
     const errors = validatePrescription(country, {
       items: input.items,
@@ -279,7 +284,7 @@ export class IssuePrescriptionUseCase {
       contentHash: computePrescriptionHash(content),
     });
 
-    if (providedLicense && providedLicense !== issuer.professional.license) {
+    if (providedLicense) {
       await this.repo.saveProfessionalLicense(
         professionalUserId,
         providedLicense,

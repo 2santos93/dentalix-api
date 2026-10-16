@@ -137,6 +137,16 @@ describe('IssuePrescriptionUseCase', () => {
     ]);
   });
 
+  it('con registro ya guardado (lo gestiona ADMIN) ignora el del cuerpo: ni lo sella ni pisa el perfil', async () => {
+    const rx = await useCase.execute(
+      PATIENT_ID,
+      input({ professionalLicense: 'FALSO-999' }),
+      DENTIST_ID,
+    );
+    expect(rx.professionalLicense).toBe('RM-12345');
+    expect(repo.savedLicenses).toEqual([]);
+  });
+
   describe('alerta de alergia', () => {
     beforeEach(() => {
       repo.patients.set(

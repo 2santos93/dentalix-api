@@ -385,6 +385,26 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         where: { tenantId: clinicA.tenantId, role: ClinicRole.ADMIN },
       });
       expect(owner.professionalLicense).toBe('TP-55');
+
+      // Con el registro ya en el perfil, el del cuerpo se ignora: ni se sella
+      // ni pisa el perfil (eso solo lo hace un ADMIN en Personal).
+      const again = await as(clinicA)
+        .post(rxPath(patientA), {
+          items: [amoxicilina],
+          professionalLicense: 'OTRO-1',
+        })
+        .expect(201);
+      expect((again.body as RxBody).professionalLicense).toBe('TP-55');
+      const ownerAfter = await raw.clinicMembership.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId, role: ClinicRole.ADMIN },
+      });
+      expect(ownerAfter.professionalLicense).toBe('TP-55');
+    });
+
+    it('un odontólogo no puede editar el registro de otro miembro en Personal (403)', async () => {
+      await as(clinicA, dentistA.token)
+        .patch(`/staff/${dentist2A.userId}`, { professionalLicense: 'X-1' })
+        .expect(403);
     });
 
     it('el ADMIN edita el registro profesional de un miembro en Personal', async () => {

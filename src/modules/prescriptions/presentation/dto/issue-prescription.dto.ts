@@ -49,7 +49,7 @@ export class IssuePrescriptionDto {
   @ApiPropertyOptional({
     maxLength: 60,
     description:
-      'Registro profesional (CO) / nº de colegiado (ES) si tu perfil aún no lo tiene; queda guardado en la receta y en tu perfil de la clínica.',
+      'Registro profesional (CO) / nº de colegiado (ES) si tu perfil aún no lo tiene; queda guardado en la receta y en tu perfil de la clínica. Si el perfil ya lo tiene, se ignora (lo cambia un ADMIN en Personal).',
   })
   @IsOptional()
   @IsString({ message: 'El registro profesional debe ser un texto' })
