@@ -97,7 +97,11 @@ async function snapshot(
       tenantA,
       tenantB,
     );
-    shot[`${table}.${column}`] = { rows, countB };
+    // `audit_events` (DX-009): cada petición correcta de B deja SU evento en
+    // B (también la lectura que devuelve 200 vacío), así que su recuento de B
+    // cambia a propósito. Lo que no puede cambiar son las filas de A.
+    shot[`${table}.${column}`] =
+      table === 'audit_events' ? { rows } : { rows, countB };
   }
   shot.tenant = await raw.tenant.findUnique({ where: { id: tenantA } });
   shot.users = await raw.user.findMany({
@@ -365,6 +369,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'clinic_invitations',
       'tenant_domains',
       'prescription_templates',
+      // La siembra de A por la API ya deja eventos de auditoría (DX-009).
+      'audit_events',
     ]) {
       expect({
         table,
@@ -685,6 +691,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/staff/invitations/${a.invitationId}`,
       status: 404,
     },
+    // --- auditoría (DX-009) ---
+    // Sin `:param`, pero con ids de A en los filtros: B recibe su propia
+    // lista vacía, nunca un evento de A.
+    ...(
+      [
+        ['patientId', () => a.patientId],
+        ['actorUserId', () => clinicA.adminUserId],
+      ] as const
+    ).map(([filter, id]): IsolationCase => ({
+      name: `GET /audit-events?${filter} de A`,
+      verb: 'get',
+      path: () => `/audit-events?${filter}=${id()}`,
+      status: 200,
+      responseBody: {
+        items: [],
+        nextCursor: null,
+        timeZone: 'America/Bogota',
+      },
+    })),
     // --- domains ---
     {
       name: 'POST /domains/:id/verify',
