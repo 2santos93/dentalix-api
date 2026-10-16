@@ -265,3 +265,14 @@ export class AffectedAppointmentDto {
   @ApiProperty({ type: String, nullable: true })
   patientLastName!: string | null;
 }
+
+/** Citas afectadas por un bloqueo: las primeras 50 y cuántas hay en total. */
+export class AffectedAppointmentsPageDto {
+  @ApiProperty({ type: [AffectedAppointmentDto] })
+  items!: AffectedAppointmentDto[];
+
+  @ApiProperty({
+    description: 'Total de citas afectadas (puede ser mayor que items).',
+  })
+  total!: number;
+}

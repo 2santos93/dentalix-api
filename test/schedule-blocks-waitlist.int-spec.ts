@@ -394,6 +394,27 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
       });
     });
 
+    it('reactivar la cita (CANCELLED → SCHEDULED) cierra su entrada en la misma transacción', async () => {
+      const appt = await newAppointment('09:00', '09:30');
+      await inA(() =>
+        update.execute(appt.id, { status: AppointmentStatus.CANCELLED }),
+      );
+      await inA(() =>
+        update.execute(appt.id, { status: AppointmentStatus.SCHEDULED }),
+      );
+
+      const entries = await raw.appointmentWaitlistEntry.findMany({
+        where: { sourceAppointmentId: appt.id },
+      });
+      expect(entries).toEqual([
+        expect.objectContaining({
+          status: 'SCHEDULED',
+          resolvedAppointmentId: appt.id,
+        }),
+      ]);
+      expect(entries[0].resolvedAt).not.toBeNull();
+    });
+
     it('dos cancelaciones simultáneas de la misma cita: una sola entrada', async () => {
       const appt = await newAppointment('11:00', '11:30');
       const results = await Promise.allSettled([

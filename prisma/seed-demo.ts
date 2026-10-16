@@ -952,14 +952,28 @@ class DemoSeeder {
       const open = await this.use(ListWaitlistUseCase).execute({
         pageSize: 50,
       });
+      // Se quedan abiertas las `keepOpen` más recientes de pacientes
+      // DISTINTOS (un paciente no sale dos veces en la lista); el resto se
+      // descarta con motivo, como historial.
+      const keep: typeof open.items = [];
+      for (const entry of [...open.items].reverse()) {
+        if (keep.length === DEMO_WAITLIST.keepOpen) break;
+        if (!keep.some((k) => k.patientId === entry.patientId))
+          keep.push(entry);
+      }
       const dismiss = this.use(DismissWaitlistEntryUseCase);
-      for (const entry of open.items.slice(0, -DEMO_WAITLIST.keepOpen)) {
+      for (const entry of open.items.filter((e) => !keep.includes(e))) {
         await dismiss.execute(entry.id, DEMO_WAITLIST.dismissReason, ctx);
       }
+      // El alta manual: el primer paciente de la lista candidata que no esté ya.
       const manual = DEMO_WAITLIST.manual;
+      const pending = new Set(keep.map((k) => k.patientId));
+      const manualPatientId = [manual.patientIndex, ...patientIds.keys()]
+        .map((i) => patientIds[i])
+        .find((id) => !pending.has(id))!;
       await this.use(CreateWaitlistEntryUseCase).execute(
         {
-          patientId: patientIds[manual.patientIndex],
+          patientId: manualPatientId,
           locationId: locations.principal,
           providerId: dentists[manual.dentistIndex],
           priority: WaitlistPriority.URGENT,

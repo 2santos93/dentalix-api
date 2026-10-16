@@ -287,7 +287,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
 
     const rejected = await book(dentist.userId, WED, '10:00').expect(409);
     expect((rejected.body as { message: string }).message).toMatch(
-      /^La agenda del profesional está bloqueada \(Vacaciones\) del \d\d\/\d\d 00:00 al \d\d\/\d\d 00:00\. Elige otro horario\.$/,
+      /^La agenda del profesional está bloqueada \(Vacaciones\) del \d\d\/\d\d al \d\d\/\d\d\. Elige otro horario\.$/,
     );
 
     const monday = await book(dentist.userId, MON, '10:00').expect(201);
@@ -337,18 +337,21 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       ),
       reception.token,
     ).expect(200);
-    expect(affected.body).toEqual([
-      expect.objectContaining({
-        patientFirstName: 'Carla',
-        status: 'SCHEDULED',
-      }),
-    ]);
+    expect(affected.body).toEqual({
+      items: [
+        expect.objectContaining({
+          patientFirstName: 'Carla',
+          status: 'SCHEDULED',
+        }),
+      ],
+      total: 1,
+    });
     const confirmed = await block(reception.token, {
       ...scope,
       kind: 'MEETING',
       confirmAffected: true,
     }).expect(201);
-    const appointmentId = (affected.body as Body[])[0].id;
+    const appointmentId = (affected.body as { items: Body[] }).items[0].id;
     const still = await as(
       api().get(`/api/v1/appointments/${appointmentId}`),
       reception.token,
@@ -540,7 +543,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       .send({ patientId: otherPatientId })
       .expect(404);
     await as(api().post('/api/v1/waitlist'), reception.token)
-      .send({ patientId: patients[0], locationId: otherLocationId })
+      .send({ patientId: patients[1], locationId: otherLocationId })
       .expect(404);
     await as(api().post('/api/v1/waitlist'), reception.token)
       .send({ patientId: patients[0], preferredWindow: 'x'.repeat(81) })
@@ -609,5 +612,78 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     })
       .set('X-Tenant-Host', other.host)
       .expect(404);
+  });
+
+  describe('cambios tras revisión y QA', () => {
+    it('reactivar una cita cancelada la saca de pendientes (queda SCHEDULED con la propia cita)', async () => {
+      const appt = await book(dentist2.userId, THU, '17:00', 0).expect(201);
+      const id = (appt.body as Body).id;
+      const patch = (status: string) =>
+        as(api().patch(`/api/v1/appointments/${id}`), reception.token)
+          .send({ status })
+          .expect(200);
+      await patch('CANCELLED');
+      expect(
+        (await waitlist()).items.map((e) => e.sourceAppointmentId),
+      ).toContain(id);
+      await patch('SCHEDULED');
+      expect(
+        (await waitlist()).items.map((e) => e.sourceAppointmentId),
+      ).not.toContain(id);
+      const done = await waitlist('?status=SCHEDULED');
+      expect(
+        done.items.find((e) => e.sourceAppointmentId === id),
+      ).toMatchObject({
+        resolvedAppointmentId: id,
+      });
+      await expect(
+        auditCount('WAITLIST_ENTRY', 'UPDATE'),
+      ).resolves.toBeGreaterThanOrEqual(2);
+    });
+
+    it('el alta manual no duplica a un paciente que ya está en pendientes (409)', async () => {
+      await as(api().post('/api/v1/waitlist'), reception.token)
+        .send({ patientId: patients[2] })
+        .expect(201);
+      const dup = await as(api().post('/api/v1/waitlist'), reception.token)
+        .send({ patientId: patients[2] })
+        .expect(409);
+      expect((dup.body as { message: string }).message).toBe(
+        'Este paciente ya está en pendientes por agendar.',
+      );
+    });
+
+    it('no se bloquea ni se buscan huecos de quien no atiende (recepción): 400', async () => {
+      await block(reception.token, {
+        providerId: reception.userId,
+        start: local(MON, '08:00'),
+        end: local(MON, '09:00'),
+        kind: 'MEETING',
+      }).expect(400);
+      await as(
+        api().get(
+          `/api/v1/appointments/openings?providerId=${reception.userId}&locationId=${locationId}&from=${MON}&to=${MON}&durationMinutes=30`,
+        ),
+        reception.token,
+      ).expect(400);
+    });
+
+    it('endurecer un bloqueo con citas dentro pide confirmación', async () => {
+      const lunch = await block(reception.token, {
+        providerId: dentist2.userId,
+        start: local(THU, '17:00'),
+        end: local(THU, '18:00'),
+        kind: 'LUNCH',
+        allowsBooking: true,
+        confirmAffected: true,
+      }).expect(201);
+      const id = (lunch.body as Body).id;
+      await as(api().patch(`/api/v1/schedule-blocks/${id}`), reception.token)
+        .send({ allowsBooking: false })
+        .expect(409);
+      await as(api().patch(`/api/v1/schedule-blocks/${id}`), reception.token)
+        .send({ allowsBooking: false, confirmAffected: true })
+        .expect(200);
+    });
   });
 });

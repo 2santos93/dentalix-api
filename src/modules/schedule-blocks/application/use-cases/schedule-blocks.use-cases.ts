@@ -7,17 +7,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClinicRole, ScheduleBlockKind } from '@prisma/client';
-import type {
-  AffectedAppointment,
-  ScheduleBlock,
-} from '../../domain/entities/schedule-block.entity';
+import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
 import {
   SCHEDULE_BLOCK_REPOSITORY,
+  type AffectedAppointmentsPage,
   type ScheduleBlockRepository,
   type ScheduleBlockScope,
 } from '../../domain/ports/schedule-block-repository.port';
 import {
+  ATTENDING_ROLES,
+  MAX_AFFECTED_APPOINTMENTS,
   MAX_BLOCK_LIST_DAYS,
+  NOT_ATTENDING_MESSAGE,
   SCHEDULE_BLOCK_NOT_FOUND_MESSAGE,
   SCHEDULE_BLOCK_OWN_ONLY_MESSAGE,
   scheduleBlockNoteError,
@@ -107,8 +108,12 @@ async function assertScopeBelongs(
   ) {
     throw new NotFoundException('Sede no encontrada');
   }
-  if (scope.providerId !== null && !(await staff.findById(scope.providerId))) {
-    throw new NotFoundException('Profesional no encontrado');
+  if (scope.providerId !== null) {
+    const member = await staff.findById(scope.providerId);
+    if (!member) throw new NotFoundException('Profesional no encontrado');
+    if (!ATTENDING_ROLES.includes(member.role)) {
+      throw new BadRequestException(NOT_ATTENDING_MESSAGE);
+    }
   }
 }
 
@@ -158,9 +163,7 @@ export class ListScheduleBlocksUseCase {
     }
     for (const id of providerIds ?? []) {
       if (!(await this.staff.findById(id))) {
-        throw new BadRequestException(
-          'Algún profesional no pertenece a esta clínica',
-        );
+        throw new NotFoundException('Profesional no encontrado');
       }
     }
     return this.repo.list({ ...params, providerIds });
@@ -184,7 +187,7 @@ export class ListAffectedAppointmentsUseCase {
     locationId?: string;
     start: Date;
     end: Date;
-  }): Promise<AffectedAppointment[]> {
+  }): Promise<AffectedAppointmentsPage> {
     const scope: ScheduleBlockScope = {
       providerId: input.providerId ?? null,
       locationId: input.locationId ?? null,
@@ -192,11 +195,10 @@ export class ListAffectedAppointmentsUseCase {
     assertValid(scheduleBlockScopeError(scope));
     assertValid(scheduleBlockRangeError(input.start, input.end));
     await assertScopeBelongs(scope, this.locations, this.staff);
-    return this.repo.findAffectedAppointments({
-      ...scope,
-      start: input.start,
-      end: input.end,
-    });
+    return this.repo.findAffectedAppointments(
+      { ...scope, start: input.start, end: input.end },
+      MAX_AFFECTED_APPOINTMENTS,
+    );
   }
 }
 
@@ -228,14 +230,11 @@ export class CreateScheduleBlockUseCase {
     // Crear un bloqueo NUNCA borra ni mueve citas: si hay alguna dentro, se
     // pide confirmación explícita (la web enseña la lista antes).
     if (!input.confirmAffected) {
-      const affected = await this.repo.findAffectedAppointments({
-        ...scope,
-        start: input.start,
-        end: input.end,
-      });
-      if (affected.length > 0) {
-        throw new ConflictException(affectedMessage(affected.length));
-      }
+      const { total } = await this.repo.findAffectedAppointments(
+        { ...scope, start: input.start, end: input.end },
+        1,
+      );
+      if (total > 0) throw new ConflictException(affectedMessage(total));
     }
 
     return this.repo.create({
@@ -279,16 +278,20 @@ export class UpdateScheduleBlockUseCase {
     const rangeChanged =
       start.getTime() !== current.start.getTime() ||
       end.getTime() !== current.end.getTime();
-    if (rangeChanged && !input.confirmAffected) {
-      const affected = await this.repo.findAffectedAppointments({
-        providerId: current.providerId,
-        locationId: current.locationId,
-        start,
-        end,
-      });
-      if (affected.length > 0) {
-        throw new ConflictException(affectedMessage(affected.length));
-      }
+    // Endurecer un bloqueo (pasa a no dejar agendar) también deja citas
+    // «dentro de un bloqueo»: se confirma igual que al ampliar el rango.
+    const hardened = current.allowsBooking && input.allowsBooking === false;
+    if ((rangeChanged || hardened) && !input.confirmAffected) {
+      const { total } = await this.repo.findAffectedAppointments(
+        {
+          providerId: current.providerId,
+          locationId: current.locationId,
+          start,
+          end,
+        },
+        1,
+      );
+      if (total > 0) throw new ConflictException(affectedMessage(total));
     }
 
     return this.repo.update(id, {

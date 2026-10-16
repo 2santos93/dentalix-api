@@ -65,3 +65,31 @@ export async function markWaitlistEntryScheduled(
   });
   return count === 1;
 }
+
+/**
+ * La cita `appointmentId` dejó de estar cancelada o no-show (revisión H1): su
+ * entrada OPEN, si la hay, pasa a SCHEDULED resuelta por la propia cita. Así el
+ * paciente sale de «Pendientes» y nadie le agenda una segunda cita. Devuelve el
+ * id de la entrada cerrada, o `null`.
+ */
+export async function resolveWaitlistForReactivated(
+  tx: Prisma.TransactionClient,
+  appointmentId: string,
+  resolvedById: string | null,
+): Promise<string | null> {
+  const open = await tx.appointmentWaitlistEntry.findFirst({
+    where: { sourceAppointmentId: appointmentId, status: WaitlistStatus.OPEN },
+    select: { id: true },
+  });
+  if (!open) return null;
+  const { count } = await tx.appointmentWaitlistEntry.updateMany({
+    where: { id: open.id, status: WaitlistStatus.OPEN },
+    data: {
+      status: WaitlistStatus.SCHEDULED,
+      resolvedAppointmentId: appointmentId,
+      resolvedById,
+      resolvedAt: new Date(),
+    },
+  });
+  return count === 1 ? open.id : null;
+}

@@ -21,6 +21,7 @@ import {
 import {
   WAITLIST_DEFAULT_DURATION_MINUTES,
   WAITLIST_DEFAULT_PAGE_SIZE,
+  WAITLIST_DUPLICATE_MESSAGE,
   WAITLIST_MAX_PAGE_SIZE,
   WAITLIST_NOTE_MAX,
   WAITLIST_NOT_FOUND_MESSAGE,
@@ -161,6 +162,12 @@ export class CreateWaitlistEntryUseCase {
     // Cada id del cliente tiene que ser de ESTA clínica (RLS: uno ajeno no se ve).
     if (!(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');
+    }
+    // Ya está en la lista (p. ej. canceló hace poco): no se duplica. Dos altas
+    // manuales simultáneas podrían colar dos; el panel las enseña y se
+    // descarta una (las automáticas son una por cita).
+    if (await this.repo.hasOpenForPatient(input.patientId)) {
+      throw new ConflictException(WAITLIST_DUPLICATE_MESSAGE);
     }
     if (
       input.locationId &&

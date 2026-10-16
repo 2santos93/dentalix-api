@@ -73,6 +73,8 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
     const locationId = params.locationId ?? this.tenantContext.getLocationId();
     const where: Prisma.AppointmentWaitlistEntryWhereInput = {
       status: params.status,
+      // Un paciente archivado no se llama: sale de la lista (su entrada queda).
+      patient: { deletedAt: null },
       ...(locationId ? { locationId } : {}),
     };
     // Página y total en la MISMA foto (como la caja): una entrada que se
@@ -112,6 +114,16 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
         include: INCLUDE_VIEW,
       });
       return row ? mapToEntity(row) : null;
+    });
+  }
+
+  hasOpenForPatient(patientId: string): Promise<boolean> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const found = await tx.appointmentWaitlistEntry.findFirst({
+        where: { patientId, status: WaitlistStatus.OPEN },
+        select: { id: true },
+      });
+      return found !== null;
     });
   }
 

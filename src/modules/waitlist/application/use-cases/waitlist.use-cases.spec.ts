@@ -152,6 +152,17 @@ describe('pendientes por agendar (DX-122)', () => {
       ]);
     });
 
+    it('un paciente que ya está en pendientes no se duplica: 409', async () => {
+      waitlist.seed({ patientId: 'p1' });
+      await expect(useCase().execute({ patientId: 'p1' }, CTX)).rejects.toThrow(
+        new ConflictException(
+          'Este paciente ya está en pendientes por agendar.',
+        ),
+      );
+      expect(waitlist.rows).toHaveLength(1);
+      expect(drafts).toHaveLength(0);
+    });
+
     it('rechaza paciente, sede o profesional ajenos (404) y tipo desactivado (400)', async () => {
       await expect(
         useCase().execute({ patientId: 'ajeno' }, CTX),

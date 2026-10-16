@@ -16,7 +16,11 @@ import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
-import { blockAffects } from '../../../schedule-blocks/domain/schedule-block-rules';
+import {
+  ATTENDING_ROLES,
+  NOT_ATTENDING_MESSAGE,
+  blockAffects,
+} from '../../../schedule-blocks/domain/schedule-block-rules';
 import { LOCATION_REPOSITORY } from '../../../locations/domain/ports/location-repository.port';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
@@ -94,8 +98,10 @@ export class FindOpeningsUseCase {
 
     const location = await this.locations.findById(input.locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
-    if (!(await this.staff.findById(input.providerId))) {
-      throw new NotFoundException('Profesional no encontrado');
+    const provider = await this.staff.findById(input.providerId);
+    if (!provider) throw new NotFoundException('Profesional no encontrado');
+    if (!ATTENDING_ROLES.includes(provider.role)) {
+      throw new BadRequestException(NOT_ATTENDING_MESSAGE);
     }
     if (input.patientId && !(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');

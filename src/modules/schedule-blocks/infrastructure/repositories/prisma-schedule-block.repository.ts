@@ -12,6 +12,7 @@ import type {
 import type {
   AffectingBlocks,
   AffectingBlocksQuery,
+  AffectedAppointmentsPage,
   CreateScheduleBlockRepoInput,
   ListScheduleBlocksParams,
   ScheduleBlockRepository,
@@ -201,39 +202,48 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
 
   findAffectedAppointments(
     scope: ScheduleBlockScope & { start: Date; end: Date },
-  ): Promise<AffectedAppointment[]> {
+    limit: number,
+  ): Promise<AffectedAppointmentsPage> {
+    const where: Prisma.AppointmentWhereInput = {
+      ...affectedAppointmentsWhere(scope),
+      deletedAt: null,
+      status: {
+        in: [AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED],
+      },
+      start: { lt: scope.end },
+      end: { gt: scope.start },
+    };
     return this.prisma.runWithTenant(async (tx) => {
-      const rows = await tx.appointment.findMany({
-        where: {
-          ...affectedAppointmentsWhere(scope),
-          deletedAt: null,
-          status: {
-            in: [AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED],
+      const [rows, total] = await Promise.all([
+        tx.appointment.findMany({
+          where,
+          orderBy: [{ start: 'asc' }, { id: 'asc' }],
+          take: limit,
+          select: {
+            id: true,
+            locationId: true,
+            providerId: true,
+            start: true,
+            end: true,
+            status: true,
+            patient: { select: { firstName: true, lastName: true } },
           },
-          start: { lt: scope.end },
-          end: { gt: scope.start },
-        },
-        orderBy: [{ start: 'asc' }, { id: 'asc' }],
-        select: {
-          id: true,
-          locationId: true,
-          providerId: true,
-          start: true,
-          end: true,
-          status: true,
-          patient: { select: { firstName: true, lastName: true } },
-        },
-      });
-      return rows.map((r) => ({
-        id: r.id,
-        locationId: r.locationId,
-        providerId: r.providerId,
-        start: r.start,
-        end: r.end,
-        status: r.status,
-        patientFirstName: r.patient.firstName,
-        patientLastName: r.patient.lastName,
-      }));
+        }),
+        tx.appointment.count({ where }),
+      ]);
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          locationId: r.locationId,
+          providerId: r.providerId,
+          start: r.start,
+          end: r.end,
+          status: r.status,
+          patientFirstName: r.patient.firstName,
+          patientLastName: r.patient.lastName,
+        })),
+        total,
+      };
     });
   }
 }

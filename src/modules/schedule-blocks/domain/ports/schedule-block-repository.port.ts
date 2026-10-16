@@ -59,6 +59,11 @@ export interface AffectingBlocks {
   blocks: ScheduleBlock[];
 }
 
+export interface AffectedAppointmentsPage {
+  items: AffectedAppointment[];
+  total: number;
+}
+
 export interface ScheduleBlockRepository {
   list(params: ListScheduleBlocksParams): Promise<ScheduleBlock[]>;
   /** Vivo (sin `deletedAt`) y de esta clínica (RLS), o `null`. */
@@ -77,9 +82,11 @@ export interface ScheduleBlockRepository {
   findAffecting(query: AffectingBlocksQuery): Promise<AffectingBlocks>;
   /**
    * Citas vivas (SCHEDULED o CONFIRMED) dentro del rango y del alcance de un
-   * bloqueo. No se tocan: se listan para que alguien decida.
+   * bloqueo, las primeras `limit` por hora y el total. No se tocan: se listan
+   * para que alguien decida.
    */
   findAffectedAppointments(
     scope: ScheduleBlockScope & { start: Date; end: Date },
-  ): Promise<AffectedAppointment[]>;
+    limit: number,
+  ): Promise<AffectedAppointmentsPage>;
 }

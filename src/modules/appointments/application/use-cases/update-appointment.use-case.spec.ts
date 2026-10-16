@@ -87,6 +87,7 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
         ? update(id, patch).then((appointment) => ({
             appointment,
             waitlistEntryId: null,
+            resolvedWaitlistEntryId: null,
           }))
         : Promise.reject(new Error('not implemented in this fake')),
   };
@@ -1038,6 +1039,83 @@ describe('UpdateAppointmentUseCase', () => {
       await uc.execute(existing.id, { start: at('11:00'), end: at('11:30') });
       await uc.execute(existing.id, { status: AppointmentStatus.COMPLETED });
       expect(waitlist.rows).toHaveLength(0);
+    });
+  });
+
+  describe('reactivar una cita cancelada (DX-122, revisión H1)', () => {
+    const ctx: AppointmentAuditContext = {
+      tenantId: 't1',
+      locationId: null,
+      actor: { userId: 'u-rec', role: 'RECEPTION' },
+      requestId: 'req-1',
+      ip: null,
+      userAgent: null,
+    };
+
+    it.each([
+      AppointmentStatus.SCHEDULED,
+      AppointmentStatus.CONFIRMED,
+      AppointmentStatus.COMPLETED,
+    ])(
+      'CANCELLED → %s cierra la entrada OPEN con la propia cita y lo audita',
+      async (status) => {
+        const waitlist = new InMemoryWaitlistRepository();
+        const repo = new InMemoryAppointmentRepository(waitlist);
+        const existing = repo.seed({
+          patientId: 'p9',
+          start: at('10:00'),
+          end: at('10:30'),
+        });
+        const drafts: AuditEventDraft[] = [];
+        const uc = new UpdateAppointmentUseCase(
+          repo,
+          makeSchedule(),
+          makeStaff(),
+          makeAudit(drafts),
+          makeBlocks(),
+        );
+
+        await uc.execute(
+          existing.id,
+          { status: AppointmentStatus.CANCELLED },
+          ctx,
+        );
+        await uc.execute(existing.id, { status }, ctx);
+
+        expect(waitlist.rows).toEqual([
+          expect.objectContaining({
+            status: 'SCHEDULED',
+            resolvedAppointmentId: existing.id,
+            resolvedById: 'u-rec',
+          }),
+        ]);
+        expect(
+          drafts
+            .filter((d) => d.resourceType === 'WAITLIST_ENTRY')
+            .map((d) => [d.action, d.metadata]),
+        ).toEqual([
+          ['CREATE', { reason: 'WAITLIST_FROM_APPOINTMENT' }],
+          ['UPDATE', { reason: 'APPOINTMENT_REACTIVATED' }],
+        ]);
+      },
+    );
+
+    it('pasar de cancelada a no-show no la cierra; editar notas tampoco', async () => {
+      const waitlist = new InMemoryWaitlistRepository();
+      const repo = new InMemoryAppointmentRepository(waitlist);
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(),
+      );
+
+      await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
+      await uc.execute(existing.id, { status: AppointmentStatus.NO_SHOW });
+      await uc.execute(existing.id, { notes: 'llamar' });
+      expect(waitlist.rows[0].status).toBe('OPEN');
     });
   });
 });

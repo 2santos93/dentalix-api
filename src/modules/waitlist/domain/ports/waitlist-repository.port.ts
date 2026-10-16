@@ -31,6 +31,8 @@ export interface WaitlistRepository {
   /** Urgentes primero y, dentro, la más antigua primero. */
   list(params: ListWaitlistParams): Promise<WaitlistPage>;
   findById(id: string): Promise<WaitlistEntry | null>;
+  /** ¿El paciente ya tiene una entrada OPEN? (no se duplica a mano). */
+  hasOpenForPatient(patientId: string): Promise<boolean>;
   create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry>;
   /**
    * Descarta la entrada SOLO si sigue OPEN (a prueba de carreras). `null` si

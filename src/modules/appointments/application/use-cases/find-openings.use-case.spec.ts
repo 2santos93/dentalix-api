@@ -33,7 +33,13 @@ const locations = {
 } as unknown as LocationRepository;
 const staff = {
   findById: (id: string) =>
-    Promise.resolve(id === 'prov1' ? { userId: id } : null),
+    Promise.resolve(
+      id === 'prov1'
+        ? { userId: id, role: 'DENTIST' }
+        : id === 'rec1'
+          ? { userId: id, role: 'RECEPTION' }
+          : null,
+    ),
 } as unknown as StaffRepository;
 const patients = {
   findById: (id: string) => Promise.resolve(id === 'p1' ? { id } : null),
@@ -151,6 +157,10 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     );
     await expect(uc.execute({ ...query, patientId: 'ajeno' })).rejects.toThrow(
       NotFoundException,
+    );
+    // Recepción no atiende: no tiene huecos que buscar.
+    await expect(uc.execute({ ...query, providerId: 'rec1' })).rejects.toThrow(
+      BadRequestException,
     );
   });
 });

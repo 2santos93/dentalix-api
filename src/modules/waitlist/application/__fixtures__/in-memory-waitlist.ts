@@ -99,6 +99,14 @@ export class InMemoryWaitlistRepository implements WaitlistRepository {
     return Promise.resolve(this.rows.find((r) => r.id === id) ?? null);
   }
 
+  hasOpenForPatient(patientId: string): Promise<boolean> {
+    return Promise.resolve(
+      this.rows.some(
+        (r) => r.patientId === patientId && r.status === WaitlistStatus.OPEN,
+      ),
+    );
+  }
+
   create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry> {
     return Promise.resolve(
       this.seed({
@@ -157,6 +165,23 @@ export class InMemoryWaitlistRepository implements WaitlistRepository {
       ),
       createdById,
     }).id;
+  }
+
+  /** La cita de origen se reactivó: su entrada OPEN se cierra con ella. */
+  resolveReactivated(appointmentId: string, by: string | null): string | null {
+    const row = this.rows.find(
+      (r) =>
+        r.sourceAppointmentId === appointmentId &&
+        r.status === WaitlistStatus.OPEN,
+    );
+    if (!row) return null;
+    Object.assign(row, {
+      status: WaitlistStatus.SCHEDULED,
+      resolvedAppointmentId: appointmentId,
+      resolvedById: by,
+      resolvedAt: this.tick(),
+    });
+    return row.id;
   }
 
   /** Agendar desde la entrada: solo si sigue OPEN. */

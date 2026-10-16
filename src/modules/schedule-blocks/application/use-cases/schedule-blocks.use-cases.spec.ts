@@ -35,11 +35,20 @@ function makeLocations(known: string[] = ['loc1', 'loc2']): LocationRepository {
 }
 
 function makeStaff(
-  known: string[] = ['doc', 'doc2', 'admin'],
+  known: string[] = ['doc', 'doc2', 'admin', 'rec'],
 ): StaffRepository {
+  // 'rec' es recepción: no atiende pacientes (no tiene agenda que bloquear).
   return {
     findById: (userId: string) =>
-      Promise.resolve(known.includes(userId) ? { userId } : null),
+      Promise.resolve(
+        known.includes(userId)
+          ? {
+              userId,
+              role:
+                userId === 'rec' ? ClinicRole.RECEPTION : ClinicRole.DENTIST,
+            }
+          : null,
+      ),
   } as unknown as StaffRepository;
 }
 
@@ -271,10 +280,112 @@ describe('bloqueos de agenda (DX-122)', () => {
           start: VACATION.start,
           end: VACATION.end,
         }),
-      ).resolves.toEqual([expect.objectContaining({ id: 'a1' })]);
+      ).resolves.toEqual({
+        items: [expect.objectContaining({ id: 'a1' })],
+        total: 1,
+      });
       await expect(
         affected.execute({ start: VACATION.start, end: VACATION.end }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('cambios tras revisión (DX-122)', () => {
+    function appointmentAt(start: string, end: string) {
+      return {
+        id: `a-${start}`,
+        locationId: 'loc1',
+        providerId: 'doc',
+        start: z(start),
+        end: z(end),
+        status: 'SCHEDULED' as const,
+        patientFirstName: 'Ana',
+        patientLastName: 'Ruiz',
+      };
+    }
+
+    it('solo se bloquea la agenda de quien atiende (odontólogo o ADMIN): recepción, 400', async () => {
+      await expect(
+        create.execute({ ...VACATION, providerId: 'rec' }, ADMIN),
+      ).rejects.toThrow(BadRequestException);
+      const affected = new ListAffectedAppointmentsUseCase(
+        repo,
+        makeLocations(),
+        makeStaff(),
+      );
+      await expect(
+        affected.execute({
+          providerId: 'rec',
+          start: VACATION.start,
+          end: VACATION.end,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('endurecer un bloqueo (deja agendar → no) sobre citas pide confirmación', async () => {
+      const block = repo.seed({
+        providerId: 'doc',
+        allowsBooking: true,
+        start: z('2026-10-20T13:00:00.000Z'),
+        end: z('2026-10-20T14:00:00.000Z'),
+      });
+      repo.appointments.push(
+        appointmentAt('2026-10-20T13:00:00.000Z', '2026-10-20T13:30:00.000Z'),
+      );
+      await expect(
+        update.execute(block.id, { allowsBooking: false }, ADMIN),
+      ).rejects.toThrow(ConflictException);
+      await expect(
+        update.execute(
+          block.id,
+          { allowsBooking: false, confirmAffected: true },
+          ADMIN,
+        ),
+      ).resolves.toMatchObject({ allowsBooking: false });
+    });
+
+    it('las afectadas llegan con tope y el total', async () => {
+      for (let i = 0; i < 60; i++) {
+        const h = String(i % 24).padStart(2, '0');
+        const d = 21 + Math.floor(i / 24);
+        repo.appointments.push({
+          ...appointmentAt(
+            `2026-10-${d}T${h}:00:00.000Z`,
+            `2026-10-${d}T${h}:30:00.000Z`,
+          ),
+          id: `a${i}`,
+        });
+      }
+      const affected = new ListAffectedAppointmentsUseCase(
+        repo,
+        makeLocations(),
+        makeStaff(),
+      );
+      const page = await affected.execute({
+        providerId: 'doc',
+        start: VACATION.start,
+        end: VACATION.end,
+      });
+      expect(page.total).toBe(60);
+      expect(page.items).toHaveLength(50);
+      await expect(create.execute(VACATION, ADMIN)).rejects.toThrow(
+        /Hay 60 citas/,
+      );
+    });
+
+    it('un profesional ajeno en el listado es 404, como en el resto', async () => {
+      const list = new ListScheduleBlocksUseCase(
+        repo,
+        makeLocations(),
+        makeStaff(),
+      );
+      await expect(
+        list.execute({
+          from: z('2026-10-19T00:00:00Z'),
+          to: z('2026-10-26T00:00:00Z'),
+          providerIds: ['ajeno'],
+        }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

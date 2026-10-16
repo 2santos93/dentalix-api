@@ -42,12 +42,10 @@ import {
   UpdateScheduleBlockUseCase,
   type ScheduleBlockActor,
 } from '../application/use-cases/schedule-blocks.use-cases';
-import type {
-  AffectedAppointment,
-  ScheduleBlock,
-} from '../domain/entities/schedule-block.entity';
+import type { ScheduleBlock } from '../domain/entities/schedule-block.entity';
+import type { AffectedAppointmentsPage } from '../domain/ports/schedule-block-repository.port';
 import {
-  AffectedAppointmentDto,
+  AffectedAppointmentsPageDto,
   AffectedAppointmentsQueryDto,
   CreateScheduleBlockDto,
   ListScheduleBlocksQueryDto,
@@ -87,9 +85,9 @@ export class ScheduleBlocksController {
   @Get()
   @ApiOkResponse({ type: [ScheduleBlockDto] })
   @ApiBadRequestResponse({
-    description: 'Rango vacío o de más de 92 días, o profesional ajeno',
+    description: 'Rango vacío o de más de 92 días',
   })
-  @ApiNotFoundResponse({ description: 'Sede de otra clínica' })
+  @ApiNotFoundResponse({ description: 'Sede o profesional de otra clínica' })
   list(@Query() query: ListScheduleBlocksQueryDto): Promise<ScheduleBlock[]> {
     return this.listBlocks.execute({
       from: new Date(query.from),
@@ -101,9 +99,9 @@ export class ScheduleBlocksController {
 
   @Get('affected-appointments')
   @ApiOkResponse({
-    type: [AffectedAppointmentDto],
+    type: AffectedAppointmentsPageDto,
     description:
-      'Citas vivas (programadas o confirmadas) que quedarían dentro de un bloqueo con ese alcance y rango. No se tocan.',
+      'Citas vivas (programadas o confirmadas) que quedarían dentro de un bloqueo con ese alcance y rango: las primeras 50 por hora y el total. No se tocan.',
   })
   @ApiBadRequestResponse({
     description: 'Sin sede ni profesional, o rango inválido',
@@ -111,7 +109,7 @@ export class ScheduleBlocksController {
   @ApiNotFoundResponse({ description: 'Sede o profesional de otra clínica' })
   affected(
     @Query() query: AffectedAppointmentsQueryDto,
-  ): Promise<AffectedAppointment[]> {
+  ): Promise<AffectedAppointmentsPage> {
     return this.listAffected.execute({
       start: new Date(query.start),
       end: new Date(query.end),

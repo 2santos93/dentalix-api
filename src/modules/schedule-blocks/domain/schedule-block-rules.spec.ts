@@ -116,4 +116,21 @@ describe('reglas de bloqueos (DX-122)', () => {
       'La cita cae en un bloqueo que permite agendar: Almuerzo (13:00–14:00).',
     );
   });
+
+  it('un bloqueo de días completos se dice con el último día elegido (no «al 23 00:00»)', () => {
+    const wholeDays = block({
+      start: z('2026-10-21T05:00:00.000Z'), // 21/10 00:00 en Bogotá
+      end: z('2026-10-23T05:00:00.000Z'), // 23/10 00:00 = fin del 22
+    });
+    expect(blockConflictMessage(wholeDays, 'America/Bogota')).toBe(
+      'La agenda del profesional está bloqueada (Vacaciones) del 21/10 al 22/10. Elige otro horario.',
+    );
+    const oneDay = block({
+      start: z('2026-10-21T05:00:00.000Z'),
+      end: z('2026-10-22T05:00:00.000Z'),
+    });
+    expect(blockConflictMessage(oneDay, 'America/Bogota')).toBe(
+      'La agenda del profesional está bloqueada (Vacaciones) el 21/10. Elige otro horario.',
+    );
+  });
 });

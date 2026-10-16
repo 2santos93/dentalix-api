@@ -40,7 +40,7 @@ import {
  */
 export type UpdateAppointmentInput = Omit<
   UpdateAppointmentRepoInput,
-  'revokeConfirmations' | 'enqueueWaitlist'
+  'revokeConfirmations' | 'enqueueWaitlist' | 'resolveWaitlist'
 >;
 
 /** Estados que mandan al paciente a «Pendientes por agendar» (DX-122). */
@@ -189,6 +189,12 @@ export class UpdateAppointmentUseCase {
     // agendar», en la MISMA transacción (el repo es idempotente por cita).
     const enqueuesWaitlist =
       patch.status !== undefined && WAITLIST_STATUSES.has(patch.status);
+    // Y al revés (revisión H1): deja de estar cancelada o no-show → su entrada
+    // OPEN se cierra con ella, en la misma transacción.
+    const reactivates =
+      patch.status !== undefined &&
+      WAITLIST_STATUSES.has(existing.status) &&
+      !WAITLIST_STATUSES.has(patch.status);
     const effectivePatch: UpdateAppointmentRepoInput = {
       ...patch,
       ...(clearsConfirmation
@@ -202,15 +208,24 @@ export class UpdateAppointmentUseCase {
             },
           }
         : {}),
+      ...(reactivates
+        ? {
+            resolveWaitlist: {
+              resolvedById: auditContext?.actor.userId ?? null,
+            },
+          }
+        : {}),
     };
 
     let updated: Appointment;
     let waitlistEntryId: string | null;
+    let resolvedWaitlistEntryId: string | null;
     try {
-      ({ appointment: updated, waitlistEntryId } = await this.repo.update(
-        id,
-        effectivePatch,
-      ));
+      ({
+        appointment: updated,
+        waitlistEntryId,
+        resolvedWaitlistEntryId,
+      } = await this.repo.update(id, effectivePatch));
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {
@@ -225,27 +240,41 @@ export class UpdateAppointmentUseCase {
     if (waitlistEntryId !== null && auditContext) {
       await this.recordWaitlistEntry(updated, waitlistEntryId, auditContext);
     }
+    if (resolvedWaitlistEntryId !== null && auditContext) {
+      await this.recordWaitlistEntry(
+        updated,
+        resolvedWaitlistEntryId,
+        auditContext,
+        'UPDATE',
+        'APPOINTMENT_REACTIVATED',
+      );
+    }
     return { ...updated, warnings };
   }
 
-  /** `audit_event` del alta automática en «Pendientes por agendar» (DX-122). */
+  /**
+   * `audit_event` del alta automática en «Pendientes por agendar» (DX-122) o
+   * de su cierre al reactivar la cita (revisión H1).
+   */
   private recordWaitlistEntry(
     appointment: Appointment,
     entryId: string,
     ctx: AppointmentAuditContext,
+    action: 'CREATE' | 'UPDATE' = 'CREATE',
+    reason = 'WAITLIST_FROM_APPOINTMENT',
   ): Promise<void> {
     return this.audit.record({
       tenantId: ctx.tenantId,
       locationId: ctx.locationId,
       actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
-      action: 'CREATE',
+      action,
       resourceType: 'WAITLIST_ENTRY',
       resourceId: entryId,
       patient: { kind: 'patient', id: appointment.patientId },
       requestId: ctx.requestId,
       ip: ctx.ip,
       userAgent: ctx.userAgent,
-      metadata: { reason: 'WAITLIST_FROM_APPOINTMENT' },
+      metadata: { reason },
     });
   }
 

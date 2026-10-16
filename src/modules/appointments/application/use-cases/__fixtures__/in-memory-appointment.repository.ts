@@ -221,7 +221,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         ([key, value]) =>
           value !== undefined &&
           key !== 'revokeConfirmations' &&
-          key !== 'enqueueWaitlist',
+          key !== 'enqueueWaitlist' &&
+          key !== 'resolveWaitlist',
       ),
     );
     Object.assign(row, definedPatch, {
@@ -234,9 +235,17 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
             patch.enqueueWaitlist.createdById,
           )
         : null;
+    const resolvedWaitlistEntryId =
+      patch.resolveWaitlist && this.waitlist
+        ? this.waitlist.resolveReactivated(
+            row.id,
+            patch.resolveWaitlist.resolvedById,
+          )
+        : null;
     return Promise.resolve({
       appointment: this.toEntity(row),
       waitlistEntryId,
+      resolvedWaitlistEntryId,
     });
   }
 }

@@ -9,6 +9,8 @@ export const WAITLIST_DISMISS_REASON_MAX = 200;
 export const WAITLIST_DEFAULT_DURATION_MINUTES = 30;
 
 export const WAITLIST_NOT_FOUND_MESSAGE = 'Pendiente no encontrado';
+export const WAITLIST_DUPLICATE_MESSAGE =
+  'Este paciente ya está en pendientes por agendar.';
 export const WAITLIST_NOT_OPEN_MESSAGE =
   'Este paciente ya no está en pendientes: alguien lo agendó o lo descartó.';
 

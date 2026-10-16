@@ -1,4 +1,4 @@
-import { ScheduleBlockKind } from '@prisma/client';
+import { ClinicRole, ScheduleBlockKind } from '@prisma/client';
 import type { ScheduleBlock } from './entities/schedule-block.entity';
 import type { ScheduleBlockScope } from './ports/schedule-block-repository.port';
 
@@ -18,6 +18,21 @@ export const SCHEDULE_BLOCK_KIND_LABELS: Record<ScheduleBlockKind, string> = {
 };
 
 export const SCHEDULE_BLOCK_NOT_FOUND_MESSAGE = 'Bloqueo no encontrado';
+
+/** Tope de citas afectadas que se devuelven (el total se dice aparte). */
+export const MAX_AFFECTED_APPOINTMENTS = 50;
+
+/**
+ * Quién tiene agenda de pacientes: odontología y administración (el titular).
+ * Recepción y asistencia no atienden, así que ni se les bloquea la agenda ni se
+ * les buscan huecos (revisión de DX-122).
+ */
+export const ATTENDING_ROLES: readonly ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const NOT_ATTENDING_MESSAGE =
+  'Ese miembro del equipo no atiende pacientes: no tiene agenda que bloquear ni huecos que buscar.';
 export const SCHEDULE_BLOCK_OWN_ONLY_MESSAGE =
   'Solo puedes bloquear o cambiar tu propia agenda.';
 
@@ -101,7 +116,11 @@ function dayAndTime(
   return { day: `${p.day}/${p.month}`, time: `${p.hour}:${p.minute}` };
 }
 
-/** «del 20/10 08:00 al 24/10 19:00» o, el mismo día, «13:00–14:00». */
+/**
+ * «del 20/10 08:00 al 24/10 19:00», el mismo día «13:00–14:00» y, si son días
+ * completos (de medianoche a medianoche en la sede), «del 21/10 al 22/10» o
+ * «el 21/10»: el último día que eligió quien bloqueó, no «al 23/10 00:00».
+ */
 function describeRange(
   block: ScheduleBlock,
   timeZone: string,
@@ -109,6 +128,15 @@ function describeRange(
 ): string {
   const from = dayAndTime(block.start, timeZone);
   const to = dayAndTime(block.end, timeZone);
+  if (from.time === '00:00' && to.time === '00:00') {
+    const lastDay = dayAndTime(
+      new Date(block.end.getTime() - 60_000),
+      timeZone,
+    ).day;
+    return lastDay === from.day
+      ? `el ${from.day}`
+      : `del ${from.day} al ${lastDay}`;
+  }
   if (sameDayShort && from.day === to.day) return `${from.time}–${to.time}`;
   return `del ${from.day} ${from.time} al ${to.day} ${to.time}`;
 }

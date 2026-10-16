@@ -5,6 +5,7 @@ import type {
 import type {
   AffectingBlocks,
   AffectingBlocksQuery,
+  AffectedAppointmentsPage,
   CreateScheduleBlockRepoInput,
   ListScheduleBlocksParams,
   ScheduleBlockRepository,
@@ -152,12 +153,13 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
 
   findAffectedAppointments(
     scope: ScheduleBlockScope & { start: Date; end: Date },
-  ): Promise<AffectedAppointment[]> {
-    return Promise.resolve(
-      this.appointments
-        .filter((a) => a.status === 'SCHEDULED' || a.status === 'CONFIRMED')
-        .filter((a) => a.start < scope.end && a.end > scope.start)
-        .filter((a) => blockAffects(scope, a.providerId, a.locationId)),
-    );
+    limit: number,
+  ): Promise<AffectedAppointmentsPage> {
+    const all: AffectedAppointment[] = this.appointments
+      .filter((a) => a.status === 'SCHEDULED' || a.status === 'CONFIRMED')
+      .filter((a) => a.start < scope.end && a.end > scope.start)
+      .filter((a) => blockAffects(scope, a.providerId, a.locationId))
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+    return Promise.resolve({ items: all.slice(0, limit), total: all.length });
   }
 }

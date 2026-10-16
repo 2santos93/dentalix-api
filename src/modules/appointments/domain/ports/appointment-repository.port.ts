@@ -53,6 +53,12 @@ export interface UpdateAppointmentRepoInput {
    * estado cambie dos veces).
    */
   enqueueWaitlist?: { createdById: string | null };
+  /**
+   * DX-122 (revisión H1): la cita deja de estar cancelada o no-show (vuelve a
+   * agendada, confirmada o completada): su entrada OPEN de «Pendientes» se
+   * cierra en la MISMA transacción, resuelta por la propia cita.
+   */
+  resolveWaitlist?: { resolvedById: string | null };
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */
@@ -60,6 +66,8 @@ export interface AppointmentUpdate {
   appointment: Appointment;
   /** Id de la entrada OPEN creada ahora; `null` si no se creó (o ya existía). */
   waitlistEntryId: string | null;
+  /** Id de la entrada que se cerró al reactivar la cita; `null` si no había. */
+  resolvedWaitlistEntryId: string | null;
 }
 
 export interface ListAppointmentsByRangeParams {

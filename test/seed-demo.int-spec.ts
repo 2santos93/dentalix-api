@@ -367,6 +367,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId, status: 'OPEN' },
     });
     expect(open).toHaveLength(3);
+    // Revisión H2: ningún paciente sale dos veces en la lista.
+    expect(new Set(open.map((e) => e.patientId)).size).toBe(3);
     expect(open.filter((e) => e.sourceAppointmentId === null)).toEqual([
       expect.objectContaining({ priority: 'URGENT' }),
     ]);

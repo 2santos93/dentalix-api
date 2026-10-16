@@ -10,6 +10,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   enqueueWaitlistFromAppointment,
   markWaitlistEntryScheduled,
+  resolveWaitlistForReactivated,
 } from '../../../waitlist/infrastructure/waitlist-transitions';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../waitlist/domain/waitlist-rules';
 import {
@@ -281,7 +282,8 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         throw new NotFoundException('Appointment not found');
       }
 
-      const { revokeConfirmations, enqueueWaitlist, ...data } = patch;
+      const { revokeConfirmations, enqueueWaitlist, resolveWaitlist, ...data } =
+        patch;
       const appointment = await tx.appointment.update({
         where: { id },
         data,
@@ -302,7 +304,19 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             enqueueWaitlist.createdById,
           )
         : null;
-      return { appointment: mapToEntity(appointment), waitlistEntryId };
+      // DX-122 (revisión H1): reactivada → su entrada sale de la lista.
+      const resolvedWaitlistEntryId = resolveWaitlist
+        ? await resolveWaitlistForReactivated(
+            tx,
+            id,
+            resolveWaitlist.resolvedById,
+          )
+        : null;
+      return {
+        appointment: mapToEntity(appointment),
+        waitlistEntryId,
+        resolvedWaitlistEntryId,
+      };
     });
   }
 }
