@@ -59,6 +59,27 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { param: 'id' },
   },
+  // DX-039: archivar y retención legal de la HC.
+  'DELETE /patients/:id': {
+    action: 'DELETE',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+  },
+  'PATCH /patients/:id/retention': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'RETENTION_EXTENSION_CHANGED',
+  },
+  'POST /patients/:id/partial-suppression': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'PARTIAL_SUPPRESSION',
+  },
 
   'GET /patients/:patientId/medical-history': {
     action: 'VIEW',

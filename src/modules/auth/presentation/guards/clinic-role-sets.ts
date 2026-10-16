@@ -142,3 +142,9 @@ export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];
+
+// Retención legal de la HC (DX-039): archivar un paciente, cambiar su
+// retención extendida, la supresión parcial y la lista de historias que salen
+// de retención. Solo gestión: quien responde ante la Res. 839/2017 es el
+// titular de la clínica.
+export const PATIENT_RETENTION_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

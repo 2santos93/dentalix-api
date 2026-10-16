@@ -98,6 +98,30 @@ describe('buildAuditDraft (DX-009)', () => {
     expect(JSON.stringify(draft)).not.toMatch(/Penicilina|3001234567/);
   });
 
+  it('código de la escritura (DX-039): va a metadata.reason; el motivo libre no', () => {
+    const draft = buildAuditDraft(
+      {
+        action: 'UPDATE',
+        resource: 'PATIENT',
+        resourceId: { param: 'id' },
+        patient: { param: 'id' },
+        reason: 'PARTIAL_SUPPRESSION',
+      },
+      req({
+        params: { id: PATIENT },
+        body: { reason: 'Reclamo del titular por Ley 1581' },
+      }),
+      { id: PATIENT },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: ['reason'],
+      params: { id: PATIENT },
+      reason: 'PARTIAL_SUPPRESSION',
+    });
+    expect(JSON.stringify(draft)).not.toMatch(/Reclamo/);
+  });
+
   it('el paciente se busca por el recurso cuando la ruta no lo trae', () => {
     const draft = buildAuditDraft(
       {

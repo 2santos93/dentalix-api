@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { DocType, Sex } from '@prisma/client';
+import { DocType, RetentionExtension, Sex } from '@prisma/client';
 
 // Response shape for Patient endpoints — documents the Patient entity
 // contract for Swagger (same convention as BrandingDto / StaffMemberDto).
@@ -107,6 +107,53 @@ export class PatientDto {
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    type: String,
+    description:
+      'DX-039: fecha de la última atención clínica (evolución registrada o ' +
+      'cita atendida). La mantiene la BD y nunca retrocede.',
+  })
+  lastAttentionAt!: Date | null;
+
+  @ApiProperty({
+    enum: RetentionExtension,
+    enumName: 'RetentionExtension',
+    description:
+      'Retención extendida de la HC: NONE = 15 años desde la última ' +
+      'atención (Res. 839/2017), DOUBLE = 30 años, PERMANENT = nunca se ' +
+      'libera. Solo ADMIN la cambia.',
+  })
+  retentionExtended!: RetentionExtension;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2039-02-28',
+    description:
+      'Último día (incluido) en que la HC debe conservarse. null sin ' +
+      'atenciones clínicas o con retención PERMANENT.',
+  })
+  retentionUntil!: string | null;
+
+  @ApiProperty({
+    description:
+      'Si hoy la HC está en retención legal: archivar o borrar al paciente ' +
+      'responde 409 CLINICAL_RECORD_RETENTION.',
+  })
+  underRetention!: boolean;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    type: String,
+    description:
+      'DX-039: cuándo se vaciaron sus datos no clínicos (supresión parcial).',
+  })
+  partiallySuppressedAt!: Date | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

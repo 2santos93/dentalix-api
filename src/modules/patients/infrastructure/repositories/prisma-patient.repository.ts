@@ -1,14 +1,21 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, RetentionExtension } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CreatePatientRepoInput,
   ListPatientsParams,
   ListPatientsResult,
+  PARTIAL_SUPPRESSION_FIELDS,
   PatientRepository,
+  PatientRetentionState,
+  RetentionExpiringParams,
   UpdatePatientRepoInput,
 } from '../../domain/ports/patient-repository.port';
+import {
+  isUnderRetention,
+  retentionUntil,
+} from '../../domain/retention/clinical-record-retention';
 import { Patient } from '../../domain/entities/patient.entity';
 import {
   recordConsentsInTx,
@@ -26,7 +33,35 @@ const MIN_INDEXED_QUERY_LENGTH = 2;
 /** Página por defecto de la búsqueda si el llamador no fija `take`. */
 const DEFAULT_SEARCH_TAKE = 20;
 
-function mapToEntity(patient: PrismaPatient): Patient {
+type TxClient = Prisma.TransactionClient;
+
+const PATIENT_NOT_FOUND = 'Patient not found';
+
+/**
+ * Bloquea la fila del paciente vivo (FOR UPDATE) y devuelve lo que la regla de
+ * retención necesita. Bajo RLS: un id de otro tenant no aparece (404).
+ */
+async function lockRetentionState(
+  tx: TxClient,
+  id: string,
+): Promise<PatientRetentionState> {
+  const rows = await tx.$queryRaw<
+    { lastAttentionAt: Date | null; retentionExtended: RetentionExtension }[]
+  >`
+    SELECT "last_attention_at" AS "lastAttentionAt",
+           "retention_extended" AS "retentionExtended"
+    FROM "patients"
+    WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
+    FOR UPDATE`;
+  if (rows.length === 0) throw new NotFoundException(PATIENT_NOT_FOUND);
+  return rows[0];
+}
+
+function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
+  const until = retentionUntil(
+    patient.lastAttentionAt,
+    patient.retentionExtended,
+  );
   return {
     id: patient.id,
     tenantId: patient.tenantId,
@@ -56,6 +91,12 @@ function mapToEntity(patient: PrismaPatient): Patient {
     guardianName: patient.guardianName,
     guardianDocNumber: patient.guardianDocNumber,
     createdById: patient.createdById,
+    lastAttentionAt: patient.lastAttentionAt,
+    retentionExtended: patient.retentionExtended,
+    retentionUntil:
+      until instanceof Date ? until.toISOString().slice(0, 10) : null,
+    underRetention: isUnderRetention(until, now),
+    partiallySuppressedAt: patient.partiallySuppressedAt,
     createdAt: patient.createdAt,
     updatedAt: patient.updatedAt,
   };
@@ -219,7 +260,7 @@ export class PrismaPatientRepository implements PatientRepository {
         }),
         tx.patient.count({ where }),
       ]);
-      return { items: items.map(mapToEntity), total };
+      return { items: items.map((p) => mapToEntity(p)), total };
     });
   }
 
@@ -279,6 +320,128 @@ export class PrismaPatientRepository implements PatientRepository {
         data: patch,
       });
       return mapToEntity(patient);
+    });
+  }
+
+  async archive(
+    id: string,
+    assertCanArchive: (state: PatientRetentionState) => void,
+  ): Promise<void> {
+    await this.prisma.runWithTenant(async (tx) => {
+      assertCanArchive(await lockRetentionState(tx, id));
+      await tx.patient.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+    });
+  }
+
+  async setRetentionExtension(
+    id: string,
+    input: { value: RetentionExtension; reason: string; actorId: string },
+  ): Promise<Patient> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const state = await lockRetentionState(tx, id);
+      await tx.patientRetentionAction.create({
+        data: {
+          tenantId,
+          patientId: id,
+          kind: 'EXTENSION_CHANGED',
+          previousExtension: state.retentionExtended,
+          newExtension: input.value,
+          reason: input.reason,
+          actorId: input.actorId,
+        },
+      });
+      const patient = await tx.patient.update({
+        where: { id },
+        data: { retentionExtended: input.value },
+      });
+      return mapToEntity(patient);
+    });
+  }
+
+  async partiallySuppress(
+    id: string,
+    input: {
+      reason: string;
+      actorId: string;
+      assertAllowed: (state: PatientRetentionState) => void;
+    },
+  ): Promise<Patient> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      input.assertAllowed(await lockRetentionState(tx, id));
+      // Autorización de MARKETING: la historia es append-only (DX-037), así
+      // que se retira con una fila nueva contra la misma versión de política.
+      const marketing = await tx.dataProcessingConsent.findFirst({
+        where: { patientId: id, scope: 'MARKETING' },
+        orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        select: { granted: true, policyVersionId: true },
+      });
+      if (marketing?.granted && marketing.policyVersionId) {
+        await tx.dataProcessingConsent.create({
+          data: {
+            tenantId,
+            patientId: id,
+            policyVersionId: marketing.policyVersionId,
+            scope: 'MARKETING',
+            granted: false,
+            channel: 'IN_PERSON',
+            recordedById: input.actorId,
+          },
+        });
+      }
+      await tx.patientRetentionAction.create({
+        data: {
+          tenantId,
+          patientId: id,
+          kind: 'PARTIAL_SUPPRESSION',
+          reason: input.reason,
+          actorId: input.actorId,
+        },
+      });
+      const cleared = Object.fromEntries(
+        PARTIAL_SUPPRESSION_FIELDS.map((field) => [field, null]),
+      ) as Record<(typeof PARTIAL_SUPPRESSION_FIELDS)[number], null>;
+      const patient = await tx.patient.update({
+        where: { id },
+        data: { ...cleared, partiallySuppressedAt: new Date() },
+      });
+      return mapToEntity(patient);
+    });
+  }
+
+  async listRetentionExpiring(
+    params: RetentionExpiringParams,
+  ): Promise<ListPatientsResult> {
+    // Lo sirve patients_tenant_last_attention_live_idx (parcial: vivos y con
+    // atención). Orden: la que antes vence primero.
+    const where: Prisma.PatientWhereInput = {
+      deletedAt: null,
+      OR: [
+        {
+          retentionExtended: 'NONE',
+          lastAttentionAt: { lt: params.noneBefore },
+        },
+        {
+          retentionExtended: 'DOUBLE',
+          lastAttentionAt: { lt: params.doubleBefore },
+        },
+      ],
+    };
+    return this.prisma.runWithTenant(async (tx) => {
+      const [items, total] = await Promise.all([
+        tx.patient.findMany({
+          where,
+          skip: params.skip,
+          take: params.take,
+          orderBy: [{ lastAttentionAt: 'asc' }, { id: 'asc' }],
+        }),
+        tx.patient.count({ where }),
+      ]);
+      return { items: items.map((p) => mapToEntity(p)), total };
     });
   }
 }

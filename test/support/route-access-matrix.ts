@@ -119,6 +119,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients': EVERY_ROLE,
   'GET /patients/:id': EVERY_ROLE,
   'PATCH /patients/:id': EVERY_ROLE,
+  // Retención legal de la HC (loop/informes/DX-039.md): archivar, cambiar la
+  // retención extendida, supresión parcial e historias que salen de
+  // retención, solo gestión.
+  'DELETE /patients/:id': ADMIN_ONLY,
+  'PATCH /patients/:id/retention': ADMIN_ONLY,
+  'POST /patients/:id/partial-suppression': ADMIN_ONLY,
+  'GET /patients/retention/expiring': ADMIN_ONLY,
 
   // --- Clínico: historia, evoluciones, odontograma, periodontograma --------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (CLINICAL_ROLES);
