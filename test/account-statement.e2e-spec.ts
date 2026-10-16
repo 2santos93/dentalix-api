@@ -289,13 +289,8 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     catalogItemId = (catalog.body as { id: string }).id;
 
     usdPlan = await createPlan('USD', 1000);
-    await pay(usdPlan, 300, 'USD', '2026-07-01T00:00:00.000Z');
-    voidedPaymentId = await pay(
-      usdPlan,
-      100,
-      'USD',
-      '2026-07-02T00:00:00.000Z',
-    );
+    await pay(usdPlan, 300, 'USD', '2026-07-01');
+    voidedPaymentId = await pay(usdPlan, 100, 'USD', '2026-07-02');
     await as(clinicA)
       .delete(`/payments/${voidedPaymentId}`, { reason: 'Cobro duplicado' })
       .expect(200);
@@ -318,10 +313,10 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       .expect(201);
 
     copPlan = await createPlan('COP', 500000);
-    await pay(copPlan, 200000, 'COP', '2026-08-01T00:00:00.000Z');
+    await pay(copPlan, 200000, 'COP', '2026-08-01');
 
     cancelledPlan = await createPlan('USD', 500);
-    await pay(cancelledPlan, 50, 'USD', '2026-06-01T00:00:00.000Z');
+    await pay(cancelledPlan, 50, 'USD', '2026-06-01');
     await as(clinicA)
       .patch(`/treatment-plans/${cancelledPlan}`, { status: 'CANCELLED' })
       .expect(200);
