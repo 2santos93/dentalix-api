@@ -26,7 +26,15 @@ export interface StaffDirectoryEntry {
   status: StaffDirectoryStatus;
   /** Solo en invitaciones: cuándo caduca el enlace. */
   expiresAt: Date | null;
+  /**
+   * Solo en invitaciones: estado del ÚLTIMO email con el enlace (DX-088).
+   * `PENDING` incluye el que está saliendo; `null` = nunca se encoló uno (o
+   * es un miembro).
+   */
+  emailDelivery: StaffInvitationEmailDelivery | null;
 }
+
+export type StaffInvitationEmailDelivery = 'PENDING' | 'SENT' | 'FAILED';
 
 /** Filtros y paginación del directorio. */
 export interface StaffDirectoryQuery {

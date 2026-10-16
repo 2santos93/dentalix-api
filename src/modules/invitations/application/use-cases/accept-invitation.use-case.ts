@@ -12,6 +12,16 @@ import { PasswordService } from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { hashInvitationToken, invitationStatus } from '../invitation-token';
+import { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
+
+export const INVITATION_NOT_FOUND =
+  'La invitación no existe o el enlace ya no es válido (puede que te hayan enviado uno más reciente).';
+
+const GONE_MESSAGE: Record<Exclude<InvitationStatus, 'VALID'>, string> = {
+  EXPIRED: 'La invitación caducó. Pide a la clínica que te la reenvíe.',
+  USED: 'Esta invitación ya se usó.',
+  REVOKED: 'La clínica revocó esta invitación.',
+};
 
 export interface AcceptInvitationInput {
   token: string;
@@ -50,19 +60,20 @@ export class AcceptInvitationUseCase {
     // instead of a clean 404.
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) {
-      throw new NotFoundException('Invitation not found');
+      throw new NotFoundException(INVITATION_NOT_FOUND);
     }
 
     const invitation = await this.repo.findByTokenHash(
       hashInvitationToken(input.token),
     );
+    // Un token reemplazado por «Reenviar invitación» ya no existe (DX-088).
     if (!invitation) {
-      throw new NotFoundException('Invitation not found');
+      throw new NotFoundException(INVITATION_NOT_FOUND);
     }
 
     const status = invitationStatus(invitation, new Date());
     if (status !== 'VALID') {
-      throw new GoneException(`Invitation is ${status.toLowerCase()}`);
+      throw new GoneException(GONE_MESSAGE[status]);
     }
 
     const existingUser = await this.repo.findUserByEmailGlobal(
@@ -79,7 +90,9 @@ export class AcceptInvitationUseCase {
         existingUser.passwordHash,
       );
       if (!passwordMatches) {
-        throw new UnauthorizedException('Invalid password');
+        throw new UnauthorizedException(
+          'La contraseña no es correcta. Usa la de tu cuenta de Dentalix.',
+        );
       }
       // No cambia su contraseña ni crea un usuario nuevo: solo reutiliza la
       // cuenta. `acceptTransactional` crea/reactiva la membresía sin
@@ -94,7 +107,9 @@ export class AcceptInvitationUseCase {
       tokenVersion = existingUser.tokenVersion;
     } else {
       if (!input.password || input.password.length < 8) {
-        throw new BadRequestException('password must be at least 8 characters');
+        throw new BadRequestException(
+          'La contraseña debe tener al menos 8 caracteres.',
+        );
       }
       const passwordHash = await this.password.hash(input.password);
       const outcome = await this.repo.acceptTransactional({

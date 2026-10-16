@@ -16,6 +16,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { ROUTE_ACCESS } from './support/route-access-matrix';
+import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 
 /**
@@ -339,6 +340,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     a = await seedA(app, clinicA);
     b = await seedClinicData(app, clinicB, '9101');
     tables = await clinicTables(raw);
+    // La invitación de A encola su email (DX-088): se espera a que el
+    // despachador lo deje SENT para que la fotografía no cambie por él.
+    await app.get(EmailDispatcher).whenIdle();
   });
 
   afterAll(async () => {
@@ -367,6 +371,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'locations',
       'clinic_memberships',
       'clinic_invitations',
+      'email_outbox',
       'tenant_domains',
       'prescription_templates',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
@@ -710,6 +715,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /staff/invitations/:id',
       verb: 'delete',
       path: () => `/staff/invitations/${a.invitationId}`,
+      status: 404,
+    },
+    {
+      // DX-088: reenviar (regenera token y encola email) la de A desde B.
+      name: 'POST /staff/invitations/:id/resend',
+      verb: 'post',
+      path: () => `/staff/invitations/${a.invitationId}/resend`,
+      body: () => ({}),
       status: 404,
     },
     // --- auditoría (DX-009) ---

@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { CreateConfirmationLinkUseCase } from '../application/use-cases/create-confirmation-link.use-case';
 import { ConfirmationLinkDto } from './dto/appointment-confirmation.dto';
 import { buildConfirmationUrl, safeLinkHost } from './confirmation-url';
+import { resolvePublicWebProtocol } from '../../../shared/tenancy/public-link';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -40,13 +41,7 @@ export class ConfirmationLinksController {
     private readonly createLink: CreateConfirmationLinkUseCase,
     config: ConfigService,
   ) {
-    const configured = config.get<string>('PUBLIC_WEB_PROTOCOL');
-    this.protocol =
-      configured === 'http' || configured === 'https'
-        ? configured
-        : config.get<string>('NODE_ENV') === 'production'
-          ? 'https'
-          : 'http';
+    this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
   }
 
   @Post(':id/confirmation-link')

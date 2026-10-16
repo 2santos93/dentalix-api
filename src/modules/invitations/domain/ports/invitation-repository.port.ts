@@ -39,11 +39,22 @@ export interface InvitationRepository {
    */
   findUserByEmailGlobal(email: string): Promise<GlobalUserRecord | null>;
 
-  /** Revoca la invitación PENDIENTE de ese correo, si existe. Devuelve cuántas revocó. */
-  revokePendingByEmail(email: string): Promise<number>;
+  /** Revoca la invitación PENDIENTE de ese correo, si existe. Devuelve los ids revocados. */
+  revokePendingByEmail(email: string): Promise<string[]>;
 
   /** Revoca la invitación por id. Devuelve si afectó una fila. */
   revokeById(id: string): Promise<boolean>;
+
+  /**
+   * «Reenviar invitación» (DX-088): a una invitación aún no aceptada ni
+   * revocada (caducada o no) le pone un token y una caducidad nuevos. El hash
+   * anterior se sobrescribe, así que el enlace viejo deja de existir. `null`
+   * si no hay ninguna invitación así con ese id en el tenant en contexto.
+   */
+  reissue(
+    id: string,
+    input: { tokenHash: string; expiresAt: Date },
+  ): Promise<ClinicInvitation | null>;
 
   /**
    * Nombre del tenant en contexto, para mostrarlo en la pantalla pública de

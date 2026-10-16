@@ -1,6 +1,9 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { InvitationStatus } from '../domain/entities/clinic-invitation.entity';
 
+// Compartido con el registro de envíos de email (DX-088).
+export { maskEmail } from '../../../shared/privacy/mask-email';
+
 /**
  * Token de invitación en texto plano, entregado únicamente en el enlace que
  * recibe la persona invitada. NUNCA se persiste — solo su hash (ver
@@ -15,16 +18,6 @@ export function generateInvitationToken(): string {
 /** Hash estable de un token, para buscar/almacenar sin guardar el texto plano. */
 export function hashInvitationToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
-}
-
-/**
- * Enmascara un correo para mostrarlo en listados sin exponerlo completo:
- * conserva hasta 2 caracteres locales + `***` + el dominio tal cual.
- */
-export function maskEmail(email: string): string {
-  const [local, domain] = email.split('@');
-  const visible = local.slice(0, 2);
-  return `${visible}***@${domain}`;
 }
 
 /**

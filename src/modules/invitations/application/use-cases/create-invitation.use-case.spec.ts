@@ -1,3 +1,4 @@
+import { FakeInvitationNotifier } from './__fixtures__/fake-invitation-notifier';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { CreateInvitationUseCase } from './create-invitation.use-case';
@@ -11,7 +12,7 @@ describe('CreateInvitationUseCase', () => {
 
   it('normaliza el correo a minúsculas y sin espacios', async () => {
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo);
+    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
 
     const { invitation } = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -24,7 +25,7 @@ describe('CreateInvitationUseCase', () => {
 
   it('revoca la invitación pendiente previa del mismo correo (reenviar)', async () => {
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo);
+    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
 
     await uc.execute({
       fullName: 'Ana Ruiz',
@@ -45,7 +46,7 @@ describe('CreateInvitationUseCase', () => {
   it('409 si el correo ya es miembro activo de la clínica', async () => {
     const repo = new InMemoryInvitationRepository();
     repo.seedActiveMember({ email: 'ana@clinic.com' });
-    const uc = new CreateInvitationUseCase(repo);
+    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
 
     await expect(
       uc.execute({
@@ -59,7 +60,7 @@ describe('CreateInvitationUseCase', () => {
   it('expiresAt es 7 días desde ahora', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-01T00:00:00.000Z'));
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo);
+    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
 
     const { invitation } = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -78,7 +79,7 @@ describe('CreateInvitationUseCase', () => {
       captured = input;
       return originalCreate(input);
     };
-    const uc = new CreateInvitationUseCase(repo);
+    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
 
     const result = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -95,7 +96,10 @@ describe('CreateInvitationUseCase', () => {
   });
 
   it('400 si fullName tiene menos de 2 caracteres', async () => {
-    const uc = new CreateInvitationUseCase(new InMemoryInvitationRepository());
+    const uc = new CreateInvitationUseCase(
+      new InMemoryInvitationRepository(),
+      new FakeInvitationNotifier(),
+    );
 
     await expect(
       uc.execute({
@@ -107,7 +111,10 @@ describe('CreateInvitationUseCase', () => {
   });
 
   it('400 si el rol no es válido', async () => {
-    const uc = new CreateInvitationUseCase(new InMemoryInvitationRepository());
+    const uc = new CreateInvitationUseCase(
+      new InMemoryInvitationRepository(),
+      new FakeInvitationNotifier(),
+    );
 
     await expect(
       uc.execute({
@@ -120,7 +127,7 @@ describe('CreateInvitationUseCase', () => {
 
   it('forwards invitedById to the repository', async () => {
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo);
+    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
 
     const { invitation } = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -130,5 +137,72 @@ describe('CreateInvitationUseCase', () => {
     });
 
     expect(invitation.invitedById).toBe('user-99');
+  });
+
+  describe('email de invitación (DX-088)', () => {
+    it('encola UN email con el enlace del host de la clínica', async () => {
+      const repo = new InMemoryInvitationRepository();
+      const notifier = new FakeInvitationNotifier();
+      const uc = new CreateInvitationUseCase(repo, notifier);
+
+      const result = await uc.execute({
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        linkBase: 'https://demo.dentalix.app',
+      });
+
+      expect(result.emailDelivery).toBe('PENDING');
+      expect(notifier.sent).toHaveLength(1);
+      expect(notifier.sent[0]).toEqual({
+        invitation: result.invitation,
+        token: result.token,
+        linkBase: 'https://demo.dentalix.app',
+      });
+    });
+
+    it('sin linkBase (seed demo) no hay email', async () => {
+      const notifier = new FakeInvitationNotifier();
+      const uc = new CreateInvitationUseCase(
+        new InMemoryInvitationRepository(),
+        notifier,
+      );
+      const result = await uc.execute({
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+      });
+      expect(result.emailDelivery).toBeNull();
+      expect(notifier.sent).toHaveLength(0);
+    });
+
+    it('si no se pudo encolar, la invitación se crea igual (sin 500)', async () => {
+      const repo = new InMemoryInvitationRepository();
+      const notifier = new FakeInvitationNotifier();
+      notifier.failNext = true;
+      const result = await new CreateInvitationUseCase(repo, notifier).execute({
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        linkBase: 'https://demo.dentalix.app',
+      });
+      expect(result.emailDelivery).toBeNull();
+      expect(await repo.listPending()).toHaveLength(1);
+    });
+
+    it('invitar de nuevo al mismo correo cancela el email de la anterior', async () => {
+      const repo = new InMemoryInvitationRepository();
+      const notifier = new FakeInvitationNotifier();
+      const uc = new CreateInvitationUseCase(repo, notifier);
+      const input = {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        linkBase: 'https://demo.dentalix.app',
+      };
+      const first = await uc.execute(input);
+      await uc.execute(input);
+      expect(notifier.cancelled).toEqual([first.invitation.id]);
+    });
   });
 });

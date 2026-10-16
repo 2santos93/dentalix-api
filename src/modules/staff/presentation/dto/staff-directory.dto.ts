@@ -37,6 +37,15 @@ export class StaffDirectoryEntryDto {
     description: 'Caducidad del enlace; null en los miembros',
   })
   expiresAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    enum: ['PENDING', 'SENT', 'FAILED'],
+    nullable: true,
+    description:
+      'Solo en invitaciones: estado del último email con el enlace (PENDING = por enviar o saliendo). null en los miembros o si nunca se encoló',
+  })
+  emailDelivery!: 'PENDING' | 'SENT' | 'FAILED' | null;
 }
 
 export class StaffDirectoryPageDto {

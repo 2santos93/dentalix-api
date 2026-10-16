@@ -34,10 +34,19 @@ export class InvitationDto {
   status!: InvitationStatus;
 }
 
-// POST /staff/invitations returns the clear-text token ONCE alongside the
-// invitation — the frontend composes the accept URL with
-// `window.location.origin`, the backend never guesses protocol/port.
+// POST /staff/invitations (y /:id/resend) devuelve el token en claro UNA vez
+// junto a la invitación: la web arma el enlace con `window.location.origin`
+// para que el ADMIN pueda copiarlo además del email (DX-088).
 export class CreatedInvitationDto extends InvitationDto {
   @ApiProperty()
   token!: string;
+
+  @ApiProperty({
+    enum: ['PENDING', 'SENT', 'FAILED'],
+    nullable: true,
+    type: String,
+    description:
+      'Estado del email con el enlace: PENDING = encolado (se envía en segundo plano); null = no se pudo encolar (comparte el enlace o reenvía)',
+  })
+  emailDelivery!: 'PENDING' | 'SENT' | 'FAILED' | null;
 }

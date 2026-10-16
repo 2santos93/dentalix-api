@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { ClinicRole, Prisma } from '@prisma/client';
+import {
+  ClinicRole,
+  EmailOutboxStatus,
+  EmailTemplate,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   DeactivateStaffOutcome,
@@ -12,7 +17,15 @@ import {
   StaffDirectoryEntry,
   StaffDirectoryPage,
   StaffDirectoryQuery,
+  StaffInvitationEmailDelivery,
 } from '../../domain/entities/staff-directory-entry.entity';
+
+const DELIVERY: Record<EmailOutboxStatus, StaffInvitationEmailDelivery> = {
+  PENDING: 'PENDING',
+  SENDING: 'PENDING',
+  SENT: 'SENT',
+  FAILED: 'FAILED',
+};
 
 @Injectable()
 export class PrismaStaffRepository implements StaffRepository {
@@ -82,6 +95,7 @@ export class PrismaStaffRepository implements StaffRepository {
             role: m.role,
             status: m.deletedAt ? 'INACTIVE' : 'ACTIVE',
             expiresAt: null,
+            emailDelivery: null,
           })),
         );
       }
@@ -116,6 +130,24 @@ export class PrismaStaffRepository implements StaffRepository {
               : {}),
           },
         });
+        // Estado del último email de cada invitación (DX-088). Mismo tenant
+        // por RLS; índice (tenantId, referenceId, createdAt DESC).
+        const deliveries = new Map<string, StaffInvitationEmailDelivery>();
+        if (invitations.length > 0) {
+          const emails = await tx.emailOutbox.findMany({
+            where: {
+              template: EmailTemplate.INVITATION,
+              referenceId: { in: invitations.map((i) => i.id) },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { referenceId: true, status: true },
+          });
+          for (const email of emails) {
+            if (email.referenceId && !deliveries.has(email.referenceId)) {
+              deliveries.set(email.referenceId, DELIVERY[email.status]);
+            }
+          }
+        }
         entries.push(
           ...invitations.map((i): StaffDirectoryEntry => ({
             kind: 'INVITATION',
@@ -125,6 +157,7 @@ export class PrismaStaffRepository implements StaffRepository {
             role: i.role,
             status: 'PENDING',
             expiresAt: i.expiresAt,
+            emailDelivery: deliveries.get(i.id) ?? null,
           })),
         );
       }

@@ -14,18 +14,24 @@ import { PasswordService } from '../../shared/crypto/password.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
 import { AuthModule } from '../auth/auth.module';
+import { EmailModule } from '../notifications/email/email.module';
+import { ResendInvitationUseCase } from './application/use-cases/resend-invitation.use-case';
+import { INVITATION_NOTIFIER } from './domain/ports/invitation-notifier.port';
+import { EmailInvitationNotifier } from './infrastructure/email-invitation-notifier';
 
 @Module({
   // JwtModule.register({}) mirrors StaffModule: JwtAuthGuard (applied on
   // StaffInvitationsController) depends on TokenService, which depends on
   // JwtService — must be available here. AuthModule aporta
   // SessionCookieService: aceptar una invitación abre sesión (DX-062).
-  imports: [JwtModule.register({}), AuthModule],
+  // EmailModule: el email con el enlace de aceptación (DX-088).
+  imports: [JwtModule.register({}), AuthModule, EmailModule],
   controllers: [StaffInvitationsController, PublicInvitationsController],
   providers: [
     CreateInvitationUseCase,
     ListInvitationsUseCase,
     RevokeInvitationUseCase,
+    ResendInvitationUseCase,
     GetInvitationUseCase,
     AcceptInvitationUseCase,
     PasswordService,
@@ -37,6 +43,7 @@ import { AuthModule } from '../auth/auth.module';
     TenantContextInterceptor,
     PublicTenantContextInterceptor,
     { provide: INVITATION_REPOSITORY, useClass: PrismaInvitationRepository },
+    { provide: INVITATION_NOTIFIER, useClass: EmailInvitationNotifier },
   ],
 })
 export class InvitationsModule {}
