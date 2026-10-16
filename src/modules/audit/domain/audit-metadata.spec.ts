@@ -81,4 +81,45 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
       {},
     );
   });
+
+  describe('move (DX-121: mover una cita)', () => {
+    const from = {
+      start: '2031-03-03T14:00:00.000Z',
+      end: '2031-03-03T14:30:00.000Z',
+      providerId: '11111111-1111-4111-8111-111111111111',
+    };
+    const to = {
+      start: '2031-03-03T15:00:00.000Z',
+      end: '2031-03-03T15:30:00.000Z',
+      providerId: '22222222-2222-4222-8222-222222222222',
+    };
+
+    it('guarda la hora y el profesional antes y después', () => {
+      expect(sanitizeAuditMetadata({ move: { from, to } })).toEqual({
+        move: { from, to },
+      });
+    });
+
+    it('descarta el movimiento entero si algún valor no es una fecha ISO o un uuid', () => {
+      expect(
+        sanitizeAuditMetadata({
+          move: { from: { ...from, start: 'mañana a las 3' }, to },
+        }),
+      ).toEqual({});
+      expect(
+        sanitizeAuditMetadata({
+          move: { from, to: { ...to, providerId: 'Dra. Pérez' } },
+        }),
+      ).toEqual({});
+      expect(sanitizeAuditMetadata({ move: 'x' })).toEqual({});
+    });
+
+    it('no deja pasar claves de más dentro del movimiento', () => {
+      expect(
+        sanitizeAuditMetadata({
+          move: { from: { ...from, notes: 'alergia' }, to },
+        }),
+      ).toEqual({ move: { from, to } });
+    });
+  });
 });

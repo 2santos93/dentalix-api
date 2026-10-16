@@ -19,9 +19,24 @@ export class CreateAppointmentDto {
   @IsDateString()
   start!: string;
 
-  @ApiProperty({ type: String, format: 'date-time' })
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description:
+      'Opcional si viene `appointmentTypeId`: entonces la hora de fin es `start` + la duración del tipo (DX-121).',
+  })
+  @IsOptional()
   @IsDateString()
-  end!: string;
+  end?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Tipo de cita (DX-121): de esta clínica y activo; si no, 400. Fija la duración si no viene `end`.',
+  })
+  @IsOptional()
+  @IsUUID()
+  appointmentTypeId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -1,4 +1,5 @@
 import { AppointmentStatus } from '@prisma/client';
+import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
 
 /**
  * API-facing shape of an Appointment. Deliberately NOT the raw Prisma model:
@@ -8,6 +9,8 @@ import { AppointmentStatus } from '@prisma/client';
 export interface Appointment {
   id: string;
   tenantId: string;
+  /** Sede donde ocurre la cita: su horario es el que vale al reagendarla. */
+  locationId: string;
   patientId: string;
   /**
    * Patient's name, joined from `Patient` so a client can label an appointment
@@ -25,6 +28,14 @@ export interface Appointment {
   reason: string | null;
   notes: string | null;
   createdById: string | null;
+  /** DX-121: tipo de la cita; null en las citas sin tipo. */
+  appointmentTypeId: string | null;
+  /**
+   * DX-121: el tipo embebido (nombre, duración y color) para pintar la tarjeta
+   * sin otra petición. Se embebe aunque el tipo se haya desactivado o retirado
+   * después: la cita no cambia.
+   */
+  appointmentType: AppointmentTypeSummary | null;
   /**
    * DX-005: cuándo se generó el enlace de confirmación vigente. null si nunca
    * se envió, o si la cita se reagendó / cambió de estado después (el enlace

@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
@@ -22,6 +23,9 @@ import {
 } from '../../../location-schedule/application/business-hours';
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
+import { APPOINTMENT_TYPE_REPOSITORY } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
+import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
+import { endFromDuration } from '../../../appointment-types/domain/appointment-type-rules';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -30,11 +34,20 @@ export interface CreateAppointmentInput {
   patientId: string;
   providerId: string;
   start: Date;
-  end: Date;
+  /** DX-121: opcional si viene `appointmentTypeId` (sale de su duración). */
+  end?: Date;
   reason?: string;
   notes?: string;
   createdById?: string;
+  /** DX-121: tipo de cita (de esta clínica y activo). */
+  appointmentTypeId?: string;
 }
+
+/** La entrada con la hora de fin ya resuelta (explícita o por el tipo). */
+type ResolvedAppointmentInput = CreateAppointmentInput & { end: Date };
+
+export const APPOINTMENT_TYPE_UNAVAILABLE_MESSAGE =
+  'El tipo de cita no existe o está desactivado';
 
 @Injectable()
 export class CreateAppointmentUseCase {
@@ -50,12 +63,12 @@ export class CreateAppointmentUseCase {
     private readonly staff: StaffRepository,
     @Inject(LOCATION_SCHEDULE_REPOSITORY)
     private readonly schedule: LocationScheduleRepository,
+    @Inject(APPOINTMENT_TYPE_REPOSITORY)
+    private readonly types: AppointmentTypeRepository,
   ) {}
 
   async execute(input: CreateAppointmentInput): Promise<Appointment> {
-    if (input.end <= input.start) {
-      throw new BadRequestException('End must be after start');
-    }
+    const resolved = await this.resolveEnd(input);
 
     // No agendar en el pasado: una cita nueva siempre es a futuro. Se compara
     // el INSTANTE (no solo la fecha), así que "hoy a una hora ya pasada" también
@@ -65,13 +78,13 @@ export class CreateAppointmentUseCase {
     // Nota: esto aplica a CREAR; registrar/cerrar una cita YA pasada se hace
     // cambiando su estado (ver UpdateAppointmentUseCase, que solo valida el
     // pasado cuando se re-agenda).
-    if (input.start.getTime() < Date.now()) {
+    if (resolved.start.getTime() < Date.now()) {
       throw new BadRequestException(
         'No se puede agendar una cita en el pasado',
       );
     }
 
-    return this.createChecked(input);
+    return this.createChecked(resolved);
   }
 
   /**
@@ -84,14 +97,41 @@ export class CreateAppointmentUseCase {
   async registerHistorical(
     input: CreateAppointmentInput,
   ): Promise<Appointment> {
-    if (input.end <= input.start) {
+    return this.createChecked(await this.resolveEnd(input));
+  }
+
+  /**
+   * Hora de fin (DX-121): la explícita si viene; si no, la duración del tipo.
+   * El tipo tiene que ser de ESTA clínica (RLS) y estar activo: uno
+   * desactivado ya no se ofrece en el selector, así que tampoco se acepta.
+   */
+  private async resolveEnd(
+    input: CreateAppointmentInput,
+  ): Promise<ResolvedAppointmentInput> {
+    let durationMinutes: number | undefined;
+    if (input.appointmentTypeId !== undefined) {
+      const type = await this.types.findById(input.appointmentTypeId);
+      if (!type || !type.active) {
+        throw new BadRequestException(APPOINTMENT_TYPE_UNAVAILABLE_MESSAGE);
+      }
+      durationMinutes = type.durationMinutes;
+    }
+    const end =
+      input.end ??
+      (durationMinutes !== undefined
+        ? endFromDuration(input.start, durationMinutes)
+        : undefined);
+    if (end === undefined) {
+      throw new BadRequestException('Indica la hora de fin o un tipo de cita');
+    }
+    if (end <= input.start) {
       throw new BadRequestException('End must be after start');
     }
-    return this.createChecked(input);
+    return { ...input, end };
   }
 
   private async createChecked(
-    input: CreateAppointmentInput,
+    input: ResolvedAppointmentInput,
   ): Promise<Appointment> {
     // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
     // clínica, antes de mirar solapes (un id inválido hace que el solape no
@@ -116,9 +156,10 @@ export class CreateAppointmentUseCase {
     // fitsBusinessHours), así que esto no cambia nada hasta que la clínica lo
     // configure. Se lee la sede EN CONTEXTO, la misma en la que el repo escribirá
     // la cita.
+    // 422 (DX-121): la petición es válida, pero ese hueco no existe.
     const hours = await this.schedule.findForCurrentLocation();
     if (!fitsBusinessHours(input.start, input.end, hours)) {
-      throw new BadRequestException(
+      throw new UnprocessableEntityException(
         businessHoursErrorMessage(input.start, input.end, hours!),
       );
     }
@@ -161,6 +202,7 @@ export class CreateAppointmentUseCase {
         reason: input.reason,
         notes: input.notes,
         createdById: input.createdById,
+        appointmentTypeId: input.appointmentTypeId,
       });
     } catch (error) {
       const scope = overlapExclusionScope(error);

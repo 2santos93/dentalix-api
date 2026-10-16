@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { UpdateAppointmentUseCase } from './update-appointment.use-case';
@@ -12,6 +13,11 @@ import {
 } from '../../domain/ports/appointment-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
+import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
+import type { BusinessHours } from '../../../location-schedule/application/business-hours';
+import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
+import type { AuditEventDraft } from '../../../audit/domain/audit-event';
+import type { AppointmentAuditContext } from './update-appointment.use-case';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -29,6 +35,7 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
     id: 'a1',
     tenantId: 't1',
+    locationId: 'loc1',
     patientId: 'p1',
     patientFirstName: null,
     patientLastName: null,
@@ -39,6 +46,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     reason: null,
     notes: null,
     createdById: null,
+    appointmentTypeId: null,
+    appointmentType: null,
     confirmationSentAt: null,
     callbackRequestedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -79,6 +88,27 @@ function makeSchedule(hours: unknown = null): LocationScheduleRepository {
   };
 }
 
+// Doble del personal: por defecto cualquier profesional SÍ es de la clínica.
+// `known` acota los ids que existen (para el 404 de mover a un desconocido).
+function makeStaff(known?: string[]): StaffRepository {
+  return {
+    findById: (userId: string): Promise<never> =>
+      Promise.resolve(
+        !known || known.includes(userId) ? { userId } : null,
+      ) as Promise<never>,
+  } as unknown as StaffRepository;
+}
+
+// Doble de la auditoría que guarda lo que recibe.
+function makeAudit(drafts: AuditEventDraft[] = []): RecordAuditEventUseCase {
+  return {
+    record: (draft: AuditEventDraft): Promise<void> => {
+      drafts.push(draft);
+      return Promise.resolve();
+    },
+  } as unknown as RecordAuditEventUseCase;
+}
+
 describe('UpdateAppointmentUseCase', () => {
   it('throws NotFoundException when the appointment does not exist (or belongs to another tenant)', async () => {
     const repo = makeRepo({
@@ -86,7 +116,12 @@ describe('UpdateAppointmentUseCase', () => {
       update: (): Promise<Appointment> =>
         Promise.reject(new Error('update should not be called')),
     });
-    const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+    );
 
     await expect(
       uc.execute('missing-id', { status: AppointmentStatus.CONFIRMED }),
@@ -113,7 +148,12 @@ describe('UpdateAppointmentUseCase', () => {
         return Promise.resolve(updated);
       },
     });
-    const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+    );
 
     const result = await uc.execute(existing.id, {
       status: AppointmentStatus.CONFIRMED,
@@ -151,7 +191,12 @@ describe('UpdateAppointmentUseCase', () => {
       },
       update: (): Promise<Appointment> => Promise.resolve(updated),
     });
-    const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+    );
 
     const result = await uc.execute(existing.id, {
       start: newStart,
@@ -177,7 +222,12 @@ describe('UpdateAppointmentUseCase', () => {
       update: (): Promise<Appointment> =>
         Promise.reject(new Error('update should not be called on conflict')),
     });
-    const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+    );
 
     await expect(
       uc.execute(existing.id, {
@@ -195,7 +245,12 @@ describe('UpdateAppointmentUseCase', () => {
       update: (): Promise<Appointment> =>
         Promise.reject(new Error('update should not be called')),
     });
-    const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+    );
 
     await expect(
       uc.execute(existing.id, {
@@ -215,7 +270,12 @@ describe('UpdateAppointmentUseCase', () => {
         start: at('10:00'),
         end: at('11:00'),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       // Shift by 15 minutes — the new window still overlaps the row's OWN
       // current [10:00,11:00) slot, so if `excludeId` were not applied this
@@ -241,7 +301,12 @@ describe('UpdateAppointmentUseCase', () => {
         start: at('14:00'),
         end: at('15:00'),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       await expect(
         uc.execute(existing.id, {
@@ -265,7 +330,12 @@ describe('UpdateAppointmentUseCase', () => {
         end: at('15:00'),
         status: AppointmentStatus.CANCELLED,
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       const result = await uc.execute(existing.id, {
         start: at('14:30'),
@@ -297,7 +367,12 @@ describe('UpdateAppointmentUseCase', () => {
           Promise.resolve([]), // pre-check passes
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       await expect(
         uc.execute('a1', {
@@ -317,7 +392,12 @@ describe('UpdateAppointmentUseCase', () => {
           ),
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       await expect(
         uc.execute('a1', { status: AppointmentStatus.SCHEDULED }),
@@ -339,7 +419,12 @@ describe('UpdateAppointmentUseCase', () => {
           Promise.resolve([]),
         update: (): Promise<Appointment> => Promise.reject(boom),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       await expect(uc.execute('a1', { notes: 'x' })).rejects.toBe(boom);
     });
@@ -362,7 +447,12 @@ describe('UpdateAppointmentUseCase', () => {
         update: (): Promise<Appointment> =>
           Promise.reject(new Error('update should not be called')),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       await expect(
         uc.execute('a1', { start: at('14:00'), end: at('14:30') }),
@@ -380,7 +470,12 @@ describe('UpdateAppointmentUseCase', () => {
         update: (): Promise<Appointment> =>
           Promise.reject(new Error('update should not be called')),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       await expect(
         uc.execute('a1', {
@@ -412,7 +507,12 @@ describe('UpdateAppointmentUseCase', () => {
           });
         },
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       const result = await uc.execute('a1', {
         status: AppointmentStatus.COMPLETED,
@@ -436,7 +536,12 @@ describe('UpdateAppointmentUseCase', () => {
         update: (): Promise<Appointment> =>
           Promise.resolve({ ...past, notes: 'El paciente asistió' }),
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       const result = await uc.execute('a1', { notes: 'El paciente asistió' });
 
@@ -458,7 +563,12 @@ describe('UpdateAppointmentUseCase', () => {
         confirmationSentAt: SENT,
         callbackRequestedAt: SENT,
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       const result = await uc.execute(existing.id, {
         status: AppointmentStatus.CONFIRMED,
@@ -476,7 +586,12 @@ describe('UpdateAppointmentUseCase', () => {
         confirmationSentAt: SENT,
         callbackRequestedAt: SENT,
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       const result = await uc.execute(existing.id, {
         start: at('12:00'),
@@ -495,7 +610,12 @@ describe('UpdateAppointmentUseCase', () => {
         confirmationSentAt: SENT,
         callbackRequestedAt: SENT,
       });
-      const uc = new UpdateAppointmentUseCase(repo, makeSchedule());
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
 
       const result = await uc.execute(existing.id, {
         notes: 'Trae radiografía',
@@ -503,6 +623,195 @@ describe('UpdateAppointmentUseCase', () => {
 
       expect(result.confirmationSentAt).toEqual(SENT);
       expect(result.callbackRequestedAt).toEqual(SENT);
+    });
+  });
+
+  // DX-121: mover una cita a otra hora y/o a otro profesional («Mover a…» y el
+  // arrastre de la vista Día usan este mismo PATCH).
+  describe('mover a otro profesional (DX-121)', () => {
+    const PROV2 = 'prov2';
+    const ctx: AppointmentAuditContext = {
+      tenantId: 't1',
+      locationId: null,
+      actor: { userId: 'u-recepcion', role: 'RECEPTION' },
+      requestId: 'req-1',
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+    };
+
+    it('mueve la cita y comprueba el solape contra el profesional NUEVO', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      repo.seed({
+        patientId: 'p2',
+        providerId: PROV2,
+        start: at('10:00'),
+        end: at('10:30'),
+      });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
+
+      await expect(
+        uc.execute(existing.id, { providerId: PROV2 }),
+      ).rejects.toThrow('El profesional ya tiene una cita en ese horario');
+
+      const moved = await uc.execute(existing.id, {
+        providerId: PROV2,
+        start: at('11:00'),
+        end: at('11:30'),
+      });
+      expect(moved).toMatchObject({ providerId: PROV2, start: at('11:00') });
+    });
+
+    it('404 si el profesional nuevo no es de la clínica', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(['prov1']),
+        makeAudit(),
+      );
+      await expect(
+        uc.execute(existing.id, { providerId: 'intruso' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('cambiar solo de profesional (misma hora) también anula el enlace de confirmación', async () => {
+      const existing = fakeAppointment({
+        confirmationSentAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+      let receivedPatch: UpdateAppointmentRepoInput | undefined;
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(existing),
+        update: (
+          _id: string,
+          patch: UpdateAppointmentRepoInput,
+        ): Promise<Appointment> => {
+          receivedPatch = patch;
+          return Promise.resolve(fakeAppointment({ providerId: PROV2 }));
+        },
+      });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+      );
+
+      await uc.execute(existing.id, { providerId: PROV2 });
+
+      expect(receivedPatch).toMatchObject({
+        providerId: PROV2,
+        confirmationSentAt: null,
+        callbackRequestedAt: null,
+        revokeConfirmations: true,
+      });
+    });
+
+    it('fuera del horario de la sede DE LA CITA responde 422 y no escribe', async () => {
+      const existing = fakeAppointment();
+      // La sede atiende solo OTRO día de la semana: ese día está cerrado.
+      const otherDay = (at('12:00').getUTCDay() + 1) % 7;
+      const hours: BusinessHours = {
+        timezone: 'UTC',
+        ranges: [{ weekday: otherDay, startMinute: 480, endMinute: 1080 }],
+      };
+      const asked: string[] = [];
+      const schedule = {
+        ...makeSchedule(),
+        findByLocation: (locationId: string): Promise<BusinessHours> => {
+          asked.push(locationId);
+          return Promise.resolve(hours);
+        },
+      } as LocationScheduleRepository;
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(existing),
+        update: (): Promise<Appointment> =>
+          Promise.reject(new Error('update should not be called')),
+      });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        schedule,
+        makeStaff(),
+        makeAudit(),
+      );
+
+      await expect(
+        uc.execute(existing.id, { start: at('12:00'), end: at('12:30') }),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(asked).toEqual(['loc1']);
+    });
+
+    it('audita el movimiento con la hora y el profesional antes y después', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const drafts: AuditEventDraft[] = [];
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(drafts),
+      );
+
+      await uc.execute(
+        existing.id,
+        { providerId: PROV2, start: at('11:00'), end: at('11:30') },
+        ctx,
+      );
+
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]).toMatchObject({
+        tenantId: 't1',
+        action: 'UPDATE',
+        resourceType: 'APPOINTMENT',
+        resourceId: existing.id,
+        patient: { kind: 'patient', id: existing.patientId },
+        actor: { kind: 'user', userId: 'u-recepcion', role: 'RECEPTION' },
+        metadata: {
+          reason: 'APPOINTMENT_MOVED',
+          move: {
+            from: {
+              start: at('10:00').toISOString(),
+              end: at('10:30').toISOString(),
+              providerId: 'prov1',
+            },
+            to: {
+              start: at('11:00').toISOString(),
+              end: at('11:30').toISOString(),
+              providerId: PROV2,
+            },
+          },
+        },
+      });
+    });
+
+    it('no audita un cambio de estado ni un movimiento rechazado', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      repo.seed({ patientId: 'p9', start: at('11:00'), end: at('11:30') });
+      const drafts: AuditEventDraft[] = [];
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(drafts),
+      );
+
+      await uc.execute(
+        existing.id,
+        { status: AppointmentStatus.CONFIRMED },
+        ctx,
+      );
+      await expect(
+        uc.execute(existing.id, { start: at('11:00'), end: at('11:30') }, ctx),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(drafts).toHaveLength(0);
     });
   });
 });

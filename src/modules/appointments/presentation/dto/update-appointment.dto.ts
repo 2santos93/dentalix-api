@@ -1,5 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 import { AppointmentStatus } from '@prisma/client';
 
 // All fields optional (partial update: reschedule start/end and/or change
@@ -15,6 +21,15 @@ export class UpdateAppointmentDto {
   @IsOptional()
   @IsDateString()
   end?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-121: mover la cita a otro profesional de la clínica. Mismas reglas que reagendar: solape 409, horario de la sede 422, y anula el enlace de confirmación.',
+  })
+  @IsOptional()
+  @IsUUID()
+  providerId?: string;
 
   @ApiPropertyOptional({ enum: AppointmentStatus })
   @IsOptional()

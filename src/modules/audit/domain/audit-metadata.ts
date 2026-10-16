@@ -11,12 +11,26 @@ export interface AuditMetadata {
   params?: Record<string, string>;
   /** Código de resultado, p. ej. `INVALID_CREDENTIALS` en un login fallido. */
   reason?: string;
+  /**
+   * DX-121: cita movida — hora y profesional antes y después. Solo instantes
+   * ISO y uuids: ni paciente, ni motivo, ni notas.
+   */
+  move?: { from: AuditAppointmentSlot; to: AuditAppointmentSlot };
+}
+
+/** Hueco de una cita en un movimiento auditado (DX-121). */
+export interface AuditAppointmentSlot {
+  start: string;
+  end: string;
+  providerId: string;
 }
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHORT_NUMBER = /^\d{1,6}$/;
 const CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
+/** Instante ISO 8601 en UTC tal como lo emite `Date.toISOString()`. */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_FIELDS = 50;
 const MAX_PARAMS = 10;
 
@@ -43,6 +57,30 @@ function routeParams(value: unknown): Record<string, string> {
   return out;
 }
 
+function appointmentSlot(value: unknown): AuditAppointmentSlot | null {
+  if (!isRecord(value)) return null;
+  const { start, end, providerId } = value;
+  if (
+    typeof start !== 'string' ||
+    typeof end !== 'string' ||
+    typeof providerId !== 'string' ||
+    !ISO_INSTANT.test(start) ||
+    !ISO_INSTANT.test(end) ||
+    !UUID.test(providerId)
+  ) {
+    return null;
+  }
+  return { start, end, providerId: providerId.toLowerCase() };
+}
+
+/** El movimiento entero, o nada: medio movimiento no le sirve a nadie. */
+function appointmentMove(value: unknown): AuditMetadata['move'] | null {
+  if (!isRecord(value)) return null;
+  const from = appointmentSlot(value.from);
+  const to = appointmentSlot(value.to);
+  return from && to ? { from, to } : null;
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -58,5 +96,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (typeof input.reason === 'string' && CODE.test(input.reason)) {
     out.reason = input.reason;
   }
+  const move = appointmentMove(input.move);
+  if (move) out.move = move;
   return out;
 }

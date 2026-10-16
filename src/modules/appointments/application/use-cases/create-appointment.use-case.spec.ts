@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { CreateAppointmentUseCase } from './create-appointment.use-case';
@@ -15,6 +16,8 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import type { BusinessHours } from '../../../location-schedule/application/business-hours';
+import { InMemoryAppointmentTypeRepository } from '../../../appointment-types/application/__fixtures__/in-memory-appointment-types';
+import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -32,6 +35,7 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
     id: 'a1',
     tenantId: 't1',
+    locationId: 'loc1',
     patientId: 'p1',
     patientFirstName: null,
     patientLastName: null,
@@ -42,6 +46,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     reason: null,
     notes: null,
     createdById: null,
+    appointmentTypeId: null,
+    appointmentType: null,
     confirmationSentAt: null,
     callbackRequestedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -101,6 +107,13 @@ function makeSchedule(hours: unknown = null): LocationScheduleRepository {
   };
 }
 
+// Tipos de cita (DX-121): por defecto la clínica no tiene ninguno.
+function makeTypes(
+  repo: AppointmentTypeRepository = new InMemoryAppointmentTypeRepository(),
+): AppointmentTypeRepository {
+  return repo;
+}
+
 function makeStaff(found: unknown = { userId: 'prov1' }): StaffRepository {
   return {
     findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
@@ -122,6 +135,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -145,6 +159,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       // Una hora atrás: mismo día, instante pasado.
       const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -166,6 +181,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       const soon = new Date(Date.now() + 1000);
 
@@ -194,6 +210,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       const created = await uc.registerHistorical({
         patientId: 'p1',
@@ -210,6 +227,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       await expect(
         uc.registerHistorical({
@@ -227,6 +245,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(null),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       await expect(
         noPatient.registerHistorical({
@@ -242,6 +261,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(null),
         makeSchedule(),
+        makeTypes(),
       );
       await expect(
         noProvider.registerHistorical({
@@ -261,6 +281,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
       await expect(
         uc.registerHistorical({
@@ -290,6 +311,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(closedThatDay),
+        makeTypes(),
       );
       await expect(
         uc.registerHistorical({
@@ -298,7 +320,7 @@ describe('CreateAppointmentUseCase', () => {
           start: pastStart,
           end: pastEnd,
         }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
   });
 
@@ -329,6 +351,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(mondayHours()),
+        makeTypes(),
       );
       const start = nextMondayLocal(20); // 20:00 local, cierra 13:00
 
@@ -340,6 +363,15 @@ describe('CreateAppointmentUseCase', () => {
           end: new Date(start.getTime() + 30 * 60 * 1000),
         }),
       ).rejects.toThrow(/Fuera del horario de atención \(lunes: 09:00–13:00\)/);
+      // DX-121: 422 — la petición es válida, pero el hueco no existe.
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start,
+          end: new Date(start.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
 
     it('acepta una cita dentro del horario', async () => {
@@ -348,6 +380,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(mondayHours()),
+        makeTypes(),
       );
       const start = nextMondayLocal(10); // 10:00 local
 
@@ -367,6 +400,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(null),
+        makeTypes(),
       );
       const start = nextMondayLocal(3); // 03:00 local, madrugada
 
@@ -392,6 +426,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(null), // el repo de pacientes filtra por tenant vía RLS
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -414,6 +449,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(null),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -439,6 +475,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(null),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -455,6 +492,7 @@ describe('CreateAppointmentUseCase', () => {
       makePatients(),
       makeStaff(),
       makeSchedule(),
+      makeTypes(),
     );
 
     const result = await uc.execute({
@@ -478,6 +516,7 @@ describe('CreateAppointmentUseCase', () => {
       makePatients(),
       makeStaff(),
       makeSchedule(),
+      makeTypes(),
     );
 
     await expect(
@@ -497,6 +536,7 @@ describe('CreateAppointmentUseCase', () => {
       makePatients(),
       makeStaff(),
       makeSchedule(),
+      makeTypes(),
     );
 
     await expect(
@@ -522,6 +562,7 @@ describe('CreateAppointmentUseCase', () => {
       makePatients(),
       makeStaff(),
       makeSchedule(),
+      makeTypes(),
     );
 
     await expect(
@@ -546,6 +587,7 @@ describe('CreateAppointmentUseCase', () => {
       makePatients(),
       makeStaff(),
       makeSchedule(),
+      makeTypes(),
     );
 
     await uc.execute({ patientId: 'p1', providerId: 'prov1', start, end });
@@ -566,6 +608,7 @@ describe('CreateAppointmentUseCase', () => {
       makePatients(),
       makeStaff(),
       makeSchedule(),
+      makeTypes(),
     );
 
     const maliciousInput = {
@@ -599,6 +642,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       const result = await uc.execute({
@@ -625,6 +669,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       const result = await uc.execute({
@@ -649,6 +694,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -677,6 +723,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -702,6 +749,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       const result = await uc.execute({
@@ -728,6 +776,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       const result = await uc.execute({
@@ -752,6 +801,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       const result = await uc.execute({
@@ -802,6 +852,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -830,6 +881,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -849,6 +901,7 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
@@ -874,11 +927,97 @@ describe('CreateAppointmentUseCase', () => {
         makePatients(),
         makeStaff(),
         makeSchedule(),
+        makeTypes(),
       );
 
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
       ).rejects.toBe(boom);
+    });
+  });
+
+  // DX-121: elegir un tipo («Endodoncia 90 min») fija la hora de fin.
+  describe('tipo de cita', () => {
+    it('sin `end`, la hora de fin sale de la duración del tipo', async () => {
+      const types = new InMemoryAppointmentTypeRepository();
+      const endo = types.seed({ name: 'Endodoncia', durationMinutes: 90 });
+      const repo = new InMemoryAppointmentRepository();
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(types),
+      );
+
+      const created = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('10:00'),
+        appointmentTypeId: endo.id,
+      });
+
+      expect(created.end).toEqual(at('11:30'));
+      expect(created.appointmentTypeId).toBe(endo.id);
+    });
+
+    it('un `end` explícito manda sobre la duración del tipo', async () => {
+      const types = new InMemoryAppointmentTypeRepository();
+      const endo = types.seed({ durationMinutes: 90 });
+      const uc = new CreateAppointmentUseCase(
+        new InMemoryAppointmentRepository(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(types),
+      );
+      const created = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('10:00'),
+        end: at('10:45'),
+        appointmentTypeId: endo.id,
+      });
+      expect(created.end).toEqual(at('10:45'));
+    });
+
+    it('rechaza un tipo desactivado, retirado o de otra clínica con 400', async () => {
+      const types = new InMemoryAppointmentTypeRepository();
+      const inactive = types.seed({ active: false });
+      const uc = new CreateAppointmentUseCase(
+        new InMemoryAppointmentRepository(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(types),
+      );
+      for (const appointmentTypeId of [inactive.id, 'de-otra-clinica']) {
+        await expect(
+          uc.execute({
+            patientId: 'p1',
+            providerId: 'prov1',
+            start: at('10:00'),
+            appointmentTypeId,
+          }),
+        ).rejects.toThrow('El tipo de cita no existe o está desactivado');
+      }
+    });
+
+    it('sin `end` ni tipo no hay forma de saber la duración: 400', async () => {
+      const uc = new CreateAppointmentUseCase(
+        new InMemoryAppointmentRepository(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(),
+      );
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: at('10:00'),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

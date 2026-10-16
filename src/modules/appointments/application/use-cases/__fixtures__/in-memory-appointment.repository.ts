@@ -29,7 +29,7 @@ let seq = 0;
  *   where one's `end` equals the other's `start` do NOT overlap), optionally
  *   excluding `excludeId` (self-exclusion on reschedule).
  * - `listByRange`: `start >= from && start < to`, optional `providerId`,
- *   ASC by `start`.
+ *   `providerIds` and `locationId`, ASC by `start`.
  * - `create` appends a SCHEDULED row; `findById` returns a non-deleted row by
  *   id; `update` merges only the defined keys of the patch (an explicit
  *   `null` clears a field, `undefined` leaves it untouched).
@@ -43,6 +43,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     const row: StoredAppointment = {
       id: overrides.id ?? `seed-${++seq}`,
       tenantId: overrides.tenantId ?? 't1',
+      locationId: overrides.locationId ?? 'loc1',
       patientId: overrides.patientId ?? 'p1',
       patientFirstName: overrides.patientFirstName ?? null,
       patientLastName: overrides.patientLastName ?? null,
@@ -53,6 +54,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       reason: overrides.reason ?? null,
       notes: overrides.notes ?? null,
       createdById: overrides.createdById ?? null,
+      appointmentTypeId: overrides.appointmentTypeId ?? null,
+      appointmentType: overrides.appointmentType ?? null,
       confirmationSentAt: overrides.confirmationSentAt ?? null,
       callbackRequestedAt: overrides.callbackRequestedAt ?? null,
       createdAt: overrides.createdAt ?? now,
@@ -71,6 +74,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return {
       id: row.id,
       tenantId: row.tenantId,
+      locationId: row.locationId,
       patientId: row.patientId,
       patientFirstName: row.patientFirstName,
       patientLastName: row.patientLastName,
@@ -81,6 +85,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       reason: row.reason,
       notes: row.notes,
       createdById: row.createdById,
+      appointmentTypeId: row.appointmentTypeId,
+      appointmentType: row.appointmentType,
       confirmationSentAt: row.confirmationSentAt,
       callbackRequestedAt: row.callbackRequestedAt,
       createdAt: row.createdAt,
@@ -93,6 +99,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     const row: StoredAppointment = {
       id: `a-${++seq}`,
       tenantId: 't1',
+      locationId: 'loc1',
       patientId: input.patientId,
       patientFirstName: null,
       patientLastName: null,
@@ -103,6 +110,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       reason: input.reason ?? null,
       notes: input.notes ?? null,
       createdById: input.createdById ?? null,
+      appointmentTypeId: input.appointmentTypeId ?? null,
+      appointmentType: null,
       confirmationSentAt: null,
       callbackRequestedAt: null,
       createdAt: now,
@@ -123,6 +132,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       .filter((r) => r.deletedAt === null)
       .filter((r) => r.start >= params.from && r.start < params.to)
       .filter((r) => !params.providerId || r.providerId === params.providerId)
+      .filter(
+        (r) => !params.providerIds || params.providerIds.includes(r.providerId),
+      )
+      .filter((r) => !params.locationId || r.locationId === params.locationId)
       .sort((a, b) => a.start.getTime() - b.start.getTime())
       .map((r) => this.toEntity(r));
     return Promise.resolve(items);
@@ -177,8 +190,11 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         new Error(`InMemoryAppointmentRepository.update: not found ${id}`),
       );
     }
+    // `revokeConfirmations` es una orden al repo (revocar enlaces), no un campo.
     const definedPatch = Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => value !== undefined),
+      Object.entries(patch).filter(
+        ([key, value]) => value !== undefined && key !== 'revokeConfirmations',
+      ),
     );
     Object.assign(row, definedPatch, {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),

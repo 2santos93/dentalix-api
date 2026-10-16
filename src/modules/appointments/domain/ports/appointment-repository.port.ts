@@ -14,23 +14,38 @@ export interface CreateAppointmentRepoInput {
   reason?: string;
   notes?: string;
   createdById?: string;
+  /** DX-121: tipo ya validado (de esta clínica y activo) por el use-case. */
+  appointmentTypeId?: string;
 }
 
 export interface UpdateAppointmentRepoInput {
   start?: Date;
   end?: Date;
+  /** DX-121: mover la cita a otro profesional (ya validado por el use-case). */
+  providerId?: string;
   status?: AppointmentStatus;
   reason?: string | null;
   notes?: string | null;
   /** Solo para limpiarlos (DX-005): los fija el flujo de confirmación, no el PATCH. */
   confirmationSentAt?: null;
   callbackRequestedAt?: null;
+  /**
+   * DX-005/DX-121: revoca, en la MISMA transacción, los enlaces de confirmación
+   * aún sin responder. Hace falta además de limpiar `confirmationSentAt`: el
+   * enlace caduca solo si cambia la hora de inicio o el estado, así que mover la
+   * cita a otro profesional a la misma hora lo dejaría vigente.
+   */
+  revokeConfirmations?: boolean;
 }
 
 export interface ListAppointmentsByRangeParams {
   from: Date;
   to: Date;
   providerId?: string;
+  /** DX-121: columnas de la vista Día (ids ya validados contra el personal). */
+  providerIds?: string[];
+  /** DX-121: sede explícita; si falta, la sede del request (X-Location-Id). */
+  locationId?: string;
 }
 
 export interface ListUpcomingAppointmentsParams {
