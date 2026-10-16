@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  TreatmentPlanItemStatus,
   TreatmentPlanRejectionReason,
   TreatmentPlanStatus,
 } from '@prisma/client';
@@ -73,6 +74,30 @@ describe('RejectTreatmentPlanUseCase (DX-040)', () => {
       expect(repo.stored(plan.id).status).toBe(status);
     },
   );
+
+  it('un plan con procedimientos realizados no se rechaza (409 en español)', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: PRESENTED });
+    repo.seedItem({ planId: plan.id, status: TreatmentPlanItemStatus.DONE });
+    await expect(uc.execute(plan.id, { reason: PRICE })).rejects.toThrow(
+      new ConflictException(
+        'El plan tiene procedimientos realizados: no se puede marcar como rechazado.',
+      ),
+    );
+    expect(repo.stored(plan.id).status).toBe(PRESENTED);
+  });
+
+  it('un plan con abonos vivos no se rechaza (409 en español)', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: PRESENTED });
+    repo.livePaymentPlanIds.add(plan.id);
+    await expect(uc.execute(plan.id, { reason: PRICE })).rejects.toThrow(
+      new ConflictException(
+        'El plan tiene abonos registrados: no se puede marcar como rechazado. Anula los abonos o cancela el plan.',
+      ),
+    );
+    expect(repo.stored(plan.id).status).toBe(PRESENTED);
+  });
 
   it('rechazar una opción no toca a sus hermanas', async () => {
     const { repo, uc } = setup();

@@ -12,6 +12,7 @@ import { TreatmentPlan } from '../../domain/entities/treatment-plan.entity';
 import {
   defaultOptionLabel,
   hasClosedOption,
+  nextOptionLabel,
   normalizeOptionLabel,
 } from '../../domain/plan-options';
 import { PLAN_NOT_FOUND_MESSAGE } from './plan-quote.use-cases';
@@ -48,12 +49,15 @@ export class CreatePlanAlternativeUseCase {
         if (hasClosedOption([plan, ...siblings])) {
           throw new ConflictException(OPTION_ALREADY_CHOSEN_MESSAGE);
         }
-        const members = 1 + siblings.length;
+        const sourceLabel = plan.optionLabel ?? defaultOptionLabel(0);
         return {
-          sourceLabel: plan.optionLabel ?? defaultOptionLabel(0),
+          sourceLabel,
           label:
             normalizeOptionLabel(input.optionLabel) ??
-            defaultOptionLabel(members),
+            nextOptionLabel([
+              sourceLabel,
+              ...siblings.map((sibling) => sibling.optionLabel),
+            ]),
           createdById: input.createdById,
         };
       },

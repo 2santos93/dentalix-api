@@ -6,9 +6,12 @@ import {
   daysSince,
   defaultOptionLabel,
   hasClosedOption,
+  nextOptionLabel,
   normalizeOptionLabel,
   optionSiblingsToReject,
+  rejectionBlocker,
   rejectionInputError,
+  siblingRejectionBlockedMessage,
 } from './plan-options';
 
 const { DRAFT, PRESENTED, ACCEPTED, REJECTED, COMPLETED, CANCELLED } =
@@ -136,5 +139,44 @@ describe('opciones de un plan (DX-040)', () => {
       expect(daysSince(new Date('2026-10-08T12:00:00.000Z'), now)).toBe(8);
       expect(daysSince(new Date('2026-10-08T12:00:01.000Z'), now)).toBe(7);
     });
+  });
+});
+
+describe('rejectionBlocker', () => {
+  it('un plan con trabajo hecho o con abonos no se rechaza', () => {
+    expect(
+      rejectionBlocker({ hasDoneItems: false, hasLivePayments: false }),
+    ).toBeNull();
+    expect(
+      rejectionBlocker({ hasDoneItems: true, hasLivePayments: false }),
+    ).toMatch(/procedimientos realizados/);
+    expect(
+      rejectionBlocker({ hasDoneItems: false, hasLivePayments: true }),
+    ).toMatch(/abonos registrados/);
+  });
+
+  it('el 409 de una hermana la nombra (o dice «otra opción del grupo»)', () => {
+    expect(siblingRejectionBlockedMessage('Opción B')).toMatch(
+      /^La opción «Opción B» tiene abonos/,
+    );
+    expect(siblingRejectionBlockedMessage(null)).toMatch(
+      /^La opción otra opción del grupo/,
+    );
+  });
+});
+
+describe('nextOptionLabel', () => {
+  it('la letra siguiente a la mayor usada, sin repetir', () => {
+    expect(nextOptionLabel(['Opción A'])).toBe('Opción B');
+    expect(nextOptionLabel(['Opción A', 'Opción C'])).toBe('Opción D');
+    expect(nextOptionLabel(['Opción A: implante', 'Opción B: puente'])).toBe(
+      'Opción C',
+    );
+  });
+
+  it('sin letras, la que toca por número de opciones (y nunca una usada)', () => {
+    expect(nextOptionLabel(['Implante'])).toBe('Opción B');
+    expect(nextOptionLabel(['Implante', 'Opción C'])).toBe('Opción D');
+    expect(nextOptionLabel(['Implante', 'Puente'])).toBe('Opción C');
   });
 });

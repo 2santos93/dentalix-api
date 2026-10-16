@@ -75,6 +75,14 @@ describe('CreatePlanAlternativeUseCase (DX-040)', () => {
     });
   });
 
+  it('no repite letra aunque falte una del medio', async () => {
+    const { repo, uc } = setup();
+    repo.seedPlan({ id: 'a', optionGroupId: 'a', optionLabel: 'Opción A' });
+    repo.seedPlan({ id: 'c', optionGroupId: 'a', optionLabel: 'Opción C' });
+    const created = await uc.execute('a', {});
+    expect(created.optionLabel).toBe('Opción D');
+  });
+
   it.each([ACCEPTED, COMPLETED])(
     'si una opción del grupo ya está %s, no se abren más alternativas (409)',
     async (status) => {

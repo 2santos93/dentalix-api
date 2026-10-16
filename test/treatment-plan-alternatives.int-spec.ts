@@ -6,6 +6,7 @@ import { PrismaPlanQuoteRepository } from '../src/modules/treatment-plans/infras
 import { PrismaPlanOptionsRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-plan-options.repository';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
 import { PresentTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/present-treatment-plan.use-case';
+import { RejectTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/reject-treatment-plan.use-case';
 import { CreatePlanAlternativeUseCase } from '../src/modules/treatment-plans/application/use-cases/create-plan-alternative.use-case';
 import { ListPendingFollowUpUseCase } from '../src/modules/treatment-plans/application/use-cases/list-pending-follow-up.use-case';
 import {
@@ -206,6 +207,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
     const where = { tenantId: { in: clinics.map((c) => c.tenantId) } };
     // Sin `app.current_tenant` (owner): los triggers dejan borrar.
     await raw.treatmentPlanAcceptance.deleteMany({ where });
+    await raw.payment.deleteMany({ where });
     await raw.treatmentPlanItem.deleteMany({ where });
     await raw.treatmentPlan.deleteMany({ where });
     await raw.appointment.deleteMany({ where });
@@ -374,6 +376,62 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         [3500000, 100000, 'PROPOSED'],
         [1200000, 0, 'PROPOSED'],
       ]);
+    });
+  });
+
+  describe('no se rechaza lo ya cobrado o realizado (revisión)', () => {
+    it('aceptar A con una hermana B con abonos vivos: 409 y no cambia nada; anulado el abono, sí', async () => {
+      const p = await patient(a, 'Cobrada');
+      const g = await group(a, p);
+      const payment = await raw.payment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.mainLocationId,
+          treatmentPlanId: g.b,
+          patientId: p,
+          amount: 50,
+          currency: 'COP',
+          paidAt: new Date(),
+        },
+      });
+      const update = new UpdateTreatmentPlanUseCase(
+        plans,
+        whitelist,
+        () => new Date(),
+      );
+      await expect(
+        inClinic(a, () => update.execute(g.a, { status: 'ACCEPTED' }, DENTIST)),
+      ).rejects.toMatchObject({
+        status: 409,
+        message:
+          'La opción «Opción B» tiene abonos o procedimientos realizados: no se puede rechazar al aceptar esta. Revísala antes de aceptar.',
+      });
+      expect((await statusOf(g.a)).status).toBe('PRESENTED');
+      expect((await statusOf(g.b)).status).toBe('PRESENTED');
+      expect((await statusOf(g.c)).status).toBe('DRAFT');
+
+      await raw.payment.update({
+        where: { id: payment.id },
+        data: { voidedAt: new Date(), voidedById: a.userId, voidReason: 'x' },
+      });
+      await inClinic(a, () =>
+        update.execute(g.a, { status: 'ACCEPTED' }, DENTIST),
+      );
+      expect((await statusOf(g.b)).status).toBe('REJECTED');
+    });
+
+    it('rechazar un plan con un procedimiento realizado: 409', async () => {
+      const p = await patient(a, 'Realizado');
+      const id = await plan(a, p, presented(1, a.mainLocationId));
+      await raw.treatmentPlanItem.updateMany({
+        where: { planId: id },
+        data: { status: 'DONE' },
+      });
+      const reject = new RejectTreatmentPlanUseCase(plans, () => new Date());
+      await expect(
+        inClinic(a, () => reject.execute(id, { reason: 'PRICE' })),
+      ).rejects.toMatchObject({ status: 409 });
+      expect((await statusOf(id)).status).toBe('PRESENTED');
     });
   });
 

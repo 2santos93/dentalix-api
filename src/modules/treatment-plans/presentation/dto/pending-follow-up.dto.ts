@@ -8,6 +8,8 @@ import {
 } from '../../application/use-cases/list-pending-follow-up.use-case';
 
 const MAX_DAYS = 3650;
+// Tope de página: evita un OFFSET desorbitado (una lista de llamadas no llega ahí).
+const MAX_PAGE = 100000;
 
 // Query de GET /treatment-plans/pending-follow-up (DX-040).
 export class PendingFollowUpQueryDto {
@@ -24,11 +26,12 @@ export class PendingFollowUpQueryDto {
   @Max(MAX_DAYS, { message: `olderThanDays admite hasta ${MAX_DAYS} días.` })
   olderThanDays?: number;
 
-  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  @ApiPropertyOptional({ minimum: 1, maximum: MAX_PAGE, default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: 'page debe ser un número entero.' })
   @Min(1, { message: 'page empieza en 1.' })
+  @Max(MAX_PAGE, { message: `page admite hasta ${MAX_PAGE}.` })
   page?: number;
 
   @ApiPropertyOptional({

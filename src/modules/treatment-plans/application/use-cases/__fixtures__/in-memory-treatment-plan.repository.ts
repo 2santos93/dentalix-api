@@ -24,7 +24,10 @@ import {
   PendingFollowUpRow,
   PlanOptionsRepository,
 } from '../../../domain/ports/plan-options-repository.port';
-import { optionSiblingsToReject } from '../../../domain/plan-options';
+import {
+  optionSiblingsToReject,
+  siblingRejectionBlockedMessage,
+} from '../../../domain/plan-options';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
 // have no `deletedAt` field — same convention as Appointment. The fake still
@@ -57,6 +60,8 @@ export class InMemoryTreatmentPlanRepository
   /** Filas que devuelve `listPendingFollowUp` (el filtro SQL se prueba en integración). */
   pendingFollowUp: PendingFollowUpRow[] = [];
   lastFollowUpQuery: PendingFollowUpQuery | null = null;
+  /** Planes con abonos vivos (los abonos son de otro módulo). */
+  readonly livePaymentPlanIds = new Set<string>();
 
   /** Test helper: seed a plan row directly, bypassing use-case validation. */
   seedPlan(overrides: Partial<StoredPlan> = {}): TreatmentPlan {
@@ -222,11 +227,29 @@ export class InMemoryTreatmentPlanRepository
     if (!current || !row) {
       throw new NotFoundException('Plan de tratamiento no encontrado');
     }
-    const change = decide(current);
+    const change = decide(current, {
+      hasLivePayments: this.livePaymentPlanIds.has(id),
+    });
     const siblings = this.liveSiblings(row);
     if (change.acceptedAt) {
       const { reject, conflict } = optionSiblingsToReject(siblings);
       if (conflict) throw new ConflictException('Otra opción ya aceptada');
+      const charged = siblings.find(
+        (sibling) =>
+          reject.includes(sibling.id) &&
+          (this.livePaymentPlanIds.has(sibling.id) ||
+            this.items.some(
+              (i) =>
+                i.planId === sibling.id &&
+                i.deletedAt === null &&
+                i.status === TreatmentPlanItemStatus.DONE,
+            )),
+      );
+      if (charged) {
+        throw new ConflictException(
+          siblingRejectionBlockedMessage(charged.optionLabel),
+        );
+      }
       for (const sibling of siblings.filter((s) => reject.includes(s.id))) {
         Object.assign(sibling, {
           status: TreatmentPlanStatus.REJECTED,

@@ -70,12 +70,6 @@ export class UpdateTreatmentPlanUseCase {
     ) {
       throw new BadRequestException(USE_PLAN_ACTIONS_MESSAGE);
     }
-    if (
-      status === TreatmentPlanStatus.ACCEPTED &&
-      !PLAN_DECISION_ROLES.includes(actor.role)
-    ) {
-      throw new ForbiddenException(ACCEPT_ROLE_MESSAGE);
-    }
 
     // Only validate when the caller actually wants to change the currency —
     // an omitted `currency` must never re-validate (or otherwise touch) the
@@ -100,6 +94,14 @@ export class UpdateTreatmentPlanUseCase {
       if (status !== undefined && status !== existing.status) {
         const error = planTransitionError(existing.status, status);
         if (error) throw new ConflictException(error);
+        // Solo cuenta si de verdad pasa a aceptado: repetir ACCEPTED junto a
+        // unas notas no es aceptar.
+        if (
+          status === TreatmentPlanStatus.ACCEPTED &&
+          !PLAN_DECISION_ROLES.includes(actor.role)
+        ) {
+          throw new ForbiddenException(ACCEPT_ROLE_MESSAGE);
+        }
         patch.status = status;
         if (status === TreatmentPlanStatus.ACCEPTED) patch.acceptedAt = at;
       }

@@ -60,10 +60,11 @@ describe('computeBillablePlans', () => {
     expect(plan.balance).toBe(0.2);
   });
 
-  it('deja fuera los planes cancelados y los que no tienen nada facturable', () => {
+  it('deja fuera los planes cancelados, los rechazados (DX-040) y los que no tienen nada facturable', () => {
     const plans = computeBillablePlans([
       row({ id: 'ok' }),
       row({ id: 'cancelled', status: 'CANCELLED' }),
+      row({ id: 'rejected', status: 'REJECTED' }),
       row({ id: 'zero', billable: 0 }),
     ]);
     expect(plans.map((p) => p.id)).toEqual(['ok']);

@@ -16,6 +16,12 @@ const { PRESENTED, ACCEPTED, REJECTED, COMPLETED, CANCELLED } =
  *  - cualquiera salvo COMPLETED → CANCELLED. COMPLETED y CANCELLED son finales.
  *
  * Quedarse en el mismo estado no es una transición.
+ *
+ * Esta es la tabla de lo que pide el PERSONAL. Hay además una transición del
+ * SISTEMA que no está aquí a propósito: al aceptar una opción, sus hermanas en
+ * DRAFT (o PRESENTED) pasan a REJECTED con el motivo OTHER_OPTION_ACCEPTED
+ * (`rejectOpenSiblings`, `domain/plan-options.ts`). Por eso un borrador puede
+ * aparecer rechazado aunque DRAFT → REJECTED no se pueda pedir.
  */
 export const PLAN_STATUS_TRANSITIONS: Readonly<
   Record<TreatmentPlanStatus, readonly TreatmentPlanStatus[]>
@@ -66,3 +72,18 @@ export const PLAN_DECISION_ROLES: readonly ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,
 ];
+
+/**
+ * Planes que NO se cobran: el cancelado y el rechazado por el paciente
+ * (DX-040). Su facturable no suma al saldo ni se ofrece para cobrar; los
+ * abonos que tuviera siguen contando como recibidos. Única fuente para el
+ * estado de cuenta y los planes cobrables.
+ */
+export const NON_BILLABLE_PLAN_STATUSES: readonly TreatmentPlanStatus[] = [
+  CANCELLED,
+  REJECTED,
+];
+
+export function isPlanBillable(status: TreatmentPlanStatus): boolean {
+  return !NON_BILLABLE_PLAN_STATUSES.includes(status);
+}

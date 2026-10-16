@@ -147,6 +147,38 @@ describe('UpdateTreatmentPlanUseCase', () => {
     expect(repo.stored('loose').status).toBe(DRAFT);
   });
 
+  it('aceptar con una hermana ya cobrada (abonos) es 409 claro y no cambia nada', async () => {
+    const { repo, uc } = setup();
+    const a = repo.seedPlan({ id: 'a', status: PRESENTED, optionGroupId: 'a' });
+    repo.seedPlan({
+      id: 'b',
+      status: PRESENTED,
+      optionGroupId: 'a',
+      optionLabel: 'Opción B',
+    });
+    repo.livePaymentPlanIds.add('b');
+    await expect(
+      uc.execute(a.id, { status: ACCEPTED }, DENTIST),
+    ).rejects.toThrow(
+      new ConflictException(
+        'La opción «Opción B» tiene abonos o procedimientos realizados: no se puede rechazar al aceptar esta. Revísala antes de aceptar.',
+      ),
+    );
+    expect(repo.stored('a').status).toBe(PRESENTED);
+    expect(repo.stored('b').status).toBe(PRESENTED);
+  });
+
+  it('la comprobación de rol solo aplica si de verdad cambia a ACCEPTED', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: ACCEPTED });
+    const result = await uc.execute(
+      plan.id,
+      { status: ACCEPTED, notes: 'Revisado por la asistente' },
+      { role: ClinicRole.ASSISTANT },
+    );
+    expect(result.notes).toBe('Revisado por la asistente');
+  });
+
   it('cancelar o completar no toca a las hermanas', async () => {
     const { repo, uc } = setup();
     const a = repo.seedPlan({ id: 'a', status: DRAFT, optionGroupId: 'a' });

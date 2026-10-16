@@ -336,6 +336,38 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       });
     });
 
+    it('un plan presentado con abonos no se rechaza (409 en español)', async () => {
+      const paid = await planWithItem(clinicA, patientA, catalogA);
+      await as(clinicA).post(`/treatment-plans/${paid}/present`).expect(200);
+      await as(clinicA)
+        .post(`/treatment-plans/${paid}/payments`, {
+          amount: 10000,
+          currency: 'COP',
+          paidAt: new Date().toISOString(),
+          method: 'CASH',
+        })
+        .expect(201);
+      const res = await as(clinicA, tokens.RECEPTION)
+        .post(`/treatment-plans/${paid}/reject`, { reason: 'PRICE' })
+        .expect(409);
+      expect((res.body as { message: string }).message).toBe(
+        'El plan tiene abonos registrados: no se puede marcar como rechazado. Anula los abonos o cancela el plan.',
+      );
+    });
+
+    it('estado fuera del enum → 400 en español; id que no es UUID → 400', async () => {
+      const res = await as(clinicA)
+        .patch(`/treatment-plans/${presented}`, { status: 'CERRADO' })
+        .expect(400);
+      expect((res.body as { message: string[] }).message).toContain(
+        'Estado de plan no válido.',
+      );
+      await as(clinicA).get('/treatment-plans/no-es-uuid').expect(400);
+      await as(clinicA)
+        .get('/treatment-plans/pending-follow-up?page=100001')
+        .expect(400);
+    });
+
     it('un borrador no se rechaza (409)', async () => {
       const draft = await planWithItem(clinicA, patientA, catalogA);
       await as(clinicA)

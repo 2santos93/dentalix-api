@@ -236,6 +236,23 @@ describe('computeAccountStatement', () => {
     });
   });
 
+  it('un plan REJECTED (DX-040) no suma al saldo, igual que uno cancelado', () => {
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [
+          plan('tp-ok', { billable: 1000 }),
+          plan('tp-rejected', { status: 'REJECTED', billable: 800 }),
+        ],
+      }),
+      { today: TODAY },
+    );
+    expect(out.summary[0]).toMatchObject({ budgeted: 1000, balance: 1000 });
+    expect(out.plans.find((p) => p.id === 'tp-rejected')).toMatchObject({
+      countsTowardsBalance: false,
+      balance: 0,
+    });
+  });
+
   it('counts DRAFT and COMPLETED plans by their billable items', () => {
     const out = computeAccountStatement(
       snapshot({

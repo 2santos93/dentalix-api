@@ -12,7 +12,8 @@ export class BillablePlanDto {
 
   @ApiProperty({
     enum: TreatmentPlanStatus,
-    description: 'Nunca CANCELLED: un plan cancelado no se cobra.',
+    description:
+      'Nunca CANCELLED ni REJECTED: un plan cancelado o rechazado no se cobra.',
   })
   status!: TreatmentPlanStatus;
 

@@ -15,7 +15,7 @@ export class UpdateTreatmentPlanDto {
       'Sigue la máquina de estados (DX-040; 409 si la transición no existe). PRESENTED y REJECTED tienen su propia acción (400 aquí); ACCEPTED solo DENTIST y ADMIN (403)',
   })
   @IsOptional()
-  @IsEnum(TreatmentPlanStatus)
+  @IsEnum(TreatmentPlanStatus, { message: 'Estado de plan no válido.' })
   status?: TreatmentPlanStatus;
 
   @ApiPropertyOptional({ example: 'USD', description: 'ISO 4217' })

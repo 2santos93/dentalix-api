@@ -18,6 +18,7 @@ import {
   canVoidPayment,
   type VoidActor,
 } from '../../payments/domain/void-window';
+import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
 
 export interface ComputeAccountStatementOptions {
   /** "Hoy" para decidir qué cuota está vencida (inyectado, nunca el reloj). */
@@ -39,7 +40,7 @@ export interface ComputeAccountStatementOptions {
  * - Presupuestado = Σ ítems vivos ACCEPTED|DONE de los planes NO cancelados. Es
  *   el mismo "facturable" de GetPlanBalanceUseCase: un ítem PROPOSED todavía no
  *   se debe, así que un DRAFT sin ítems aceptados suma 0 por sí solo. El esquema
- *   no tiene estado "rechazado"; CANCELLED es el único que saca un plan del
+ *   CANCELLED y REJECTED (el paciente no lo aceptó, DX-040) sacan un plan del
  *   saldo. COMPLETED sí cuenta (lo hecho se debe hasta que se pague).
  * - Abonado = Σ abonos NO anulados, de cualquier plan (también de uno
  *   cancelado: ese dinero se recibió y queda a favor del paciente).
@@ -67,7 +68,7 @@ function fromCents(cents: number): number {
 }
 
 function countsTowardsBalance(status: TreatmentPlanStatus): boolean {
-  return status !== TreatmentPlanStatus.CANCELLED;
+  return isPlanBillable(status);
 }
 
 function isActive(payment: StatementPaymentRow): boolean {

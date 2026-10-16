@@ -1,10 +1,14 @@
 import { ConflictException } from '@nestjs/common';
 import {
   Prisma,
+  TreatmentPlanItemStatus,
   TreatmentPlanRejectionReason,
   TreatmentPlanStatus,
 } from '@prisma/client';
-import { optionSiblingsToReject } from '../../domain/plan-options';
+import {
+  optionSiblingsToReject,
+  siblingRejectionBlockedMessage,
+} from '../../domain/plan-options';
 
 export const OTHER_OPTION_ALREADY_ACCEPTED_MESSAGE =
   'Otra opción de este grupo ya está aceptada: un grupo admite una sola opción elegida.';
@@ -56,7 +60,8 @@ export async function lockPlanGroup(
  * (borrador o presentadas) pasan a REJECTED con el motivo «otra opción
  * aceptada», a la misma hora y en la MISMA transacción que la aceptación. Se
  * llama con el grupo ya bloqueado por `lockPlanGroup`. 409 si otra opción del
- * grupo ya estaba aceptada o completada.
+ * grupo ya estaba aceptada o completada, o si una hermana a rechazar tiene
+ * abonos vivos o procedimientos realizados.
  */
 export async function rejectOpenSiblings(
   tx: Prisma.TransactionClient,
@@ -70,13 +75,40 @@ export async function rejectOpenSiblings(
       id: { not: plan.id },
       deletedAt: null,
     },
-    select: { id: true, status: true },
+    select: { id: true, status: true, optionLabel: true },
   });
   const { reject, conflict } = optionSiblingsToReject(siblings);
   if (conflict) {
     throw new ConflictException(OTHER_OPTION_ALREADY_ACCEPTED_MESSAGE);
   }
   if (reject.length === 0) return;
+  // Una hermana ya cobrada o con trabajo hecho no se rechaza en silencio: 409
+  // y no se acepta nada (la transacción entera se deshace).
+  const [doneItem, livePayment] = await Promise.all([
+    tx.treatmentPlanItem.findFirst({
+      where: {
+        planId: { in: reject },
+        deletedAt: null,
+        status: TreatmentPlanItemStatus.DONE,
+      },
+      select: { planId: true },
+    }),
+    tx.payment.findFirst({
+      where: {
+        treatmentPlanId: { in: reject },
+        deletedAt: null,
+        voidedAt: null,
+      },
+      select: { treatmentPlanId: true },
+    }),
+  ]);
+  const chargedId = doneItem?.planId ?? livePayment?.treatmentPlanId;
+  if (chargedId) {
+    const charged = siblings.find((s) => s.id === chargedId);
+    throw new ConflictException(
+      siblingRejectionBlockedMessage(charged?.optionLabel ?? null),
+    );
+  }
   await tx.treatmentPlan.updateMany({
     where: { id: { in: reject } },
     data: {

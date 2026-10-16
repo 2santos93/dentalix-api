@@ -18,6 +18,25 @@ export function defaultOptionLabel(index: number): string {
     : `Opción ${index + 1}`;
 }
 
+/**
+ * Etiqueta por defecto de la opción NUEVA de un grupo, sin repetir letra: la
+ * siguiente a la mayor «Opción X» usada (con «Opción A» y «Opción C», la D).
+ * Si nadie lleva letra, la que toca por número de opciones (`labels` incluye
+ * la del plan de origen ya resuelta).
+ */
+export function nextOptionLabel(labels: readonly (string | null)[]): string {
+  const used = new Set(
+    labels.filter((l): l is string => l !== null).map((l) => l.trim()),
+  );
+  const lettered = labels
+    .map((l) => /^Opción ([A-Z])\b/.exec(l?.trim() ?? '')?.[1])
+    .filter((letter): letter is string => letter !== undefined)
+    .map((letter) => LETTERS.indexOf(letter));
+  let index = lettered.length > 0 ? Math.max(...lettered) + 1 : labels.length;
+  while (used.has(defaultOptionLabel(index))) index++;
+  return defaultOptionLabel(index);
+}
+
 /** La etiqueta tal como se guarda: sin espacios en los bordes; vacía = null. */
 export function normalizeOptionLabel(
   label: string | null | undefined,
@@ -90,4 +109,28 @@ export function rejectionInputError(
 /** Días completos transcurridos desde `from` hasta `now`. */
 export function daysSince(from: Date, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - from.getTime()) / DAY_MS));
+}
+
+/**
+ * `null` si el plan se puede marcar rechazado; si no, el motivo en español
+ * (409). Un plan con procedimientos realizados o con abonos vivos ya se está
+ * cobrando: rechazarlo lo sacaría del saldo con dinero o trabajo de por medio.
+ */
+export function rejectionBlocker(facts: {
+  hasDoneItems: boolean;
+  hasLivePayments: boolean;
+}): string | null {
+  if (facts.hasDoneItems) {
+    return 'El plan tiene procedimientos realizados: no se puede marcar como rechazado.';
+  }
+  if (facts.hasLivePayments) {
+    return 'El plan tiene abonos registrados: no se puede marcar como rechazado. Anula los abonos o cancela el plan.';
+  }
+  return null;
+}
+
+/** 409 al aceptar una opción cuya hermana abierta ya tiene abonos o trabajo hecho. */
+export function siblingRejectionBlockedMessage(label: string | null): string {
+  const name = label ? `«${label}»` : 'otra opción del grupo';
+  return `La opción ${name} tiene abonos o procedimientos realizados: no se puede rechazar al aceptar esta. Revísala antes de aceptar.`;
 }

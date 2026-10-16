@@ -161,7 +161,7 @@ export class TreatmentPlansController {
   })
   @Get('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
-  get(@Param('id') id: string): Promise<TreatmentPlanDetail> {
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<TreatmentPlanDetail> {
     return this.getTreatmentPlan.execute(id);
   }
 
@@ -185,7 +185,7 @@ export class TreatmentPlansController {
     description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada`,
   })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlan> {
@@ -289,7 +289,7 @@ export class TreatmentPlansController {
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
   @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
   addItem(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddTreatmentPlanItemDto,
   ): Promise<TreatmentPlanItem> {
     return this.addTreatmentPlanItem.execute(id, {
@@ -314,7 +314,7 @@ export class TreatmentPlansController {
     description: `${SIGNED_PLAN_CONFLICT}; solo admite avanzar el estado (no volver a PROPOSED)`,
   })
   updateItem(
-    @Param('itemId') itemId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlanItem> {
@@ -342,7 +342,7 @@ export class TreatmentPlansController {
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
   @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
-  removeItem(@Param('itemId') itemId: string): Promise<void> {
+  removeItem(@Param('itemId', ParseUUIDPipe) itemId: string): Promise<void> {
     return this.removeTreatmentPlanItem.execute(itemId);
   }
 }

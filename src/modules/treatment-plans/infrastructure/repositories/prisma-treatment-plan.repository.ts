@@ -177,7 +177,13 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Plan de tratamiento no encontrado');
       }
 
-      const change = decide(mapToEntityWithItems(current));
+      const livePayment = await tx.payment.findFirst({
+        where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
+        select: { id: true },
+      });
+      const change = decide(mapToEntityWithItems(current), {
+        hasLivePayments: livePayment !== null,
+      });
       const data: Prisma.TreatmentPlanUncheckedUpdateInput = {
         status: change.status,
         currency: change.currency,

@@ -51,7 +51,8 @@ export interface UpdateTreatmentPlanRepoInput {
    * Aceptar (DX-040): con este campo la escritura ACEPTA la opción, y el
    * repositorio rechaza en la MISMA transacción a sus hermanas abiertas del
    * grupo (motivo OTHER_OPTION_ACCEPTED, a esta hora). 409 si otra opción del
-   * grupo ya estaba aceptada.
+   * grupo ya estaba aceptada, o si una hermana que habría que rechazar tiene
+   * abonos vivos o procedimientos realizados.
    */
   acceptedAt?: Date;
 }
@@ -64,7 +65,14 @@ export interface UpdateTreatmentPlanRepoInput {
  */
 export type DecidePlanChange = (
   current: TreatmentPlanWithItems,
+  facts: PlanFacts,
 ) => UpdateTreatmentPlanRepoInput;
+
+/** Lo que el plan no lleva en su detalle y algunas decisiones necesitan. */
+export interface PlanFacts {
+  /** ¿Tiene abonos vivos (ni retirados ni anulados)? */
+  hasLivePayments: boolean;
+}
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — a newly added item
 // always starts PROPOSED (the schema default). `price` is REQUIRED here: the
