@@ -197,6 +197,39 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
     una sola línea `warn` con la causa (`DatabaseTimeoutError`,
     `PrismaClientInitializationError`…).
 
+## Auditoría (DX-009)
+
+Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
+1995/1999, RGPD), en la tabla `audit_events` (módulo `src/modules/audit`).
+
+- **Qué se audita**: los endpoints marcados con `@Audit({ action, resource,
+  resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
+  odontograma, periodontograma, consentimientos, autorizaciones de datos,
+  recetas, planes de tratamiento (presupuesto y aceptación), abonos y
+  anulaciones, planes de cuotas, estado de cuenta y el login (correcto y
+  fallido). La lista exacta la fija `src/modules/audit/audit-coverage.spec.ts`.
+  No se audita la búsqueda `GET /patients` ni la propia lectura del registro.
+- **Un evento por petición** que termina bien (una sola escritura, nunca N):
+  actor, rol, acción, recurso, paciente, sede activa, request id
+  (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,
+  403...) no deja evento, salvo el login fallido (401), que guarda el miembro
+  si el email es de la clínica y ningún actor si no.
+- **Cuándo**: justo después del éxito del handler y antes de responder, en su
+  propia transacción. Si la escritura falla, la petición (lectura o escritura)
+  sigue y queda una línea `error` en el log con el request id.
+- **Sin contenido clínico**: la metadata solo admite nombres de campo, ids de la
+  ruta y códigos (`sanitizeAuditMetadata`); ni texto de la historia, ni
+  alergias, ni diagnósticos, ni firmas, ni importes.
+- **Append-only**: un trigger rechaza UPDATE siempre y DELETE/TRUNCATE salvo a
+  un superusuario (purga administrativa y limpieza de las bases de test). RLS
+  forzada por tenant. Sin claves foráneas, a propósito: es evidencia y no
+  bloquea ni sigue en cascada el borrado de lo que referencia.
+- **Retención**: no se borra; va con la historia clínica.
+- **Consulta**: `GET /api/v1/audit-events` (solo ADMIN), filtros `patientId`,
+  `actorUserId`, `action`, `resourceType`, `from`/`to` (instantes ISO; por
+  defecto los últimos 30 días, como mucho 366), paginado por cursor
+  (`nextCursor`, `limit` ≤ 100).
+
 ## Run tests
 
 ```bash
