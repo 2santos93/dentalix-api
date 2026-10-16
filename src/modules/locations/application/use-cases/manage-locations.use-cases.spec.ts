@@ -14,6 +14,7 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     tenantId: 't1',
     name: 'Sede principal',
     address: null,
+    country: 'CO',
     isActive: true,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
@@ -99,5 +100,31 @@ describe('UpdateLocationUseCase', () => {
     await expect(
       uc.execute('loc-1', { isActive: false, name: 'Sede vieja' }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('país de la sede (DX-013)', () => {
+  it('se crea con el país pedido y por defecto CO', async () => {
+    const create = jest.fn((input: { country?: 'CO' | 'ES' }) =>
+      Promise.resolve(makeLocation({ country: input.country ?? 'CO' })),
+    );
+    const uc = new CreateLocationUseCase(makeRepo({ create }));
+    await uc.execute({ name: 'Madrid', country: 'ES' });
+    expect(create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ country: 'ES' }),
+    );
+  });
+
+  it('se cambia al editar', async () => {
+    const update = jest.fn((_id: string, patch: { country?: 'CO' | 'ES' }) =>
+      Promise.resolve(makeLocation({ ...patch })),
+    );
+    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    const updated = await uc.execute('loc-1', { country: 'ES' });
+    expect(update).toHaveBeenCalledWith(
+      'loc-1',
+      expect.objectContaining({ country: 'ES' }),
+    );
+    expect(updated.country).toBe('ES');
   });
 });

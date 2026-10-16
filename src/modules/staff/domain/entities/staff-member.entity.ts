@@ -11,4 +11,9 @@ export interface StaffMember {
   fullName: string;
   email: string;
   role: ClinicRole;
+  /**
+   * Registro profesional (CO) / nº de colegiado (ES) en esta clínica (DX-013).
+   * Solo lo traen el perfil (`findDetailById`) y la respuesta del PATCH.
+   */
+  professionalLicense?: string | null;
 }

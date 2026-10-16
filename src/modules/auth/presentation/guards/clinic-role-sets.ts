@@ -88,3 +88,17 @@ export const DATA_CONSENT_ROLES: ClinicRole[] = [
 
 // Publicar una versión de la política de tratamiento de datos: solo gestión.
 export const PRIVACY_POLICY_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Recetas (DX-013) — EMITIR y ANULAR: quien puede prescribir (odontólogo) y
+// gestión (ADMIN, que en la clínica suele ser el odontólogo titular). La
+// asistente las LEE (CLINICAL_ROLES) pero no prescribe; recepción, nada.
+export const PRESCRIPTION_ISSUE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+
+// Plantillas de receta — crear/editar/retirar: solo gestión. Leerlas:
+// CLINICAL_ROLES.
+export const PRESCRIPTION_TEMPLATE_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+];

@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { ClinicCountry } from '@prisma/client';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
 import type {
   Location,
@@ -25,10 +26,15 @@ export class CreateLocationUseCase {
   constructor(
     @Inject(LOCATION_REPOSITORY) private readonly repo: LocationRepository,
   ) {}
-  execute(input: { name: string; address?: string }): Promise<Location> {
+  execute(input: {
+    name: string;
+    address?: string;
+    country?: ClinicCountry;
+  }): Promise<Location> {
     return this.repo.create({
       name: input.name.trim(),
       address: input.address?.trim() || undefined,
+      country: input.country,
     });
   }
 }
@@ -41,7 +47,12 @@ export class UpdateLocationUseCase {
 
   async execute(
     id: string,
-    patch: { name?: string; address?: string; isActive?: boolean },
+    patch: {
+      name?: string;
+      address?: string;
+      country?: ClinicCountry;
+      isActive?: boolean;
+    },
   ): Promise<Location> {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException('Location not found');
@@ -60,6 +71,7 @@ export class UpdateLocationUseCase {
     const updated = await this.repo.update(id, {
       name: patch.name?.trim(),
       address: patch.address?.trim(),
+      country: patch.country,
       isActive: patch.isActive,
     });
     if (!updated) throw new NotFoundException('Location not found');

@@ -3,6 +3,7 @@ import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   DeactivateStaffOutcome,
+  StaffPatch,
   StaffRepository,
   UpdateStaffOutcome,
 } from '../../domain/ports/staff-repository.port';
@@ -154,6 +155,7 @@ export class PrismaStaffRepository implements StaffRepository {
             fullName: membership.user.fullName,
             email: membership.user.email,
             role: membership.role,
+            professionalLicense: membership.professionalLicense,
             status: membership.deletedAt
               ? ('INACTIVE' as const)
               : ('ACTIVE' as const),
@@ -227,7 +229,7 @@ export class PrismaStaffRepository implements StaffRepository {
 
   async updateById(
     userId: string,
-    patch: { fullName?: string; role?: ClinicRole },
+    patch: StaffPatch,
   ): Promise<UpdateStaffOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
       // Solo una degradación puede retirar un ADMIN; renombrar o ascender no
@@ -244,10 +246,13 @@ export class PrismaStaffRepository implements StaffRepository {
       if (demotes && (await isLastActiveAdmin(tx, membership.role))) {
         return { kind: 'LAST_ADMIN' };
       }
-      if (patch.role) {
+      if (patch.role || patch.professionalLicense !== undefined) {
         await tx.clinicMembership.update({
           where: { id: membership.id },
-          data: { role: patch.role },
+          data: {
+            role: patch.role,
+            professionalLicense: patch.professionalLicense,
+          },
         });
       }
       if (patch.fullName) {
@@ -267,6 +272,7 @@ export class PrismaStaffRepository implements StaffRepository {
           fullName: updated.user.fullName,
           email: updated.user.email,
           role: updated.role,
+          professionalLicense: updated.professionalLicense,
         },
       };
     });

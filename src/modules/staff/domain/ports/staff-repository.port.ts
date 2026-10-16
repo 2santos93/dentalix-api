@@ -7,6 +7,13 @@ import {
 
 export const STAFF_REPOSITORY = Symbol('STAFF_REPOSITORY');
 
+/** Cambios de `PATCH /staff/:userId`; `professionalLicense: null` lo borra. */
+export interface StaffPatch {
+  fullName?: string;
+  role?: ClinicRole;
+  professionalLicense?: string | null;
+}
+
 /**
  * Resultado de una escritura que puede retirar un ADMIN. `NOT_FOUND`: no hay
  * membresía activa de ese usuario en la clínica. `LAST_ADMIN`: es el último
@@ -67,10 +74,7 @@ export interface StaffRepository {
    * concurrentes de los dos últimos ADMIN se serializan: la segunda ve un solo
    * ADMIN y devuelve `LAST_ADMIN` sin escribir nada.
    */
-  updateById(
-    userId: string,
-    patch: { fullName?: string; role?: ClinicRole },
-  ): Promise<UpdateStaffOutcome>;
+  updateById(userId: string, patch: StaffPatch): Promise<UpdateStaffOutcome>;
 
   /**
    * Soft-deletes (sets `deletedAt`) the active `ClinicMembership` for

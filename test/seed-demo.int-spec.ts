@@ -34,6 +34,9 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  'prescription_items',
+  'prescriptions',
+  'prescription_templates',
   'perio_site_measures',
   'perio_tooth_measures',
   'perio_exams',
@@ -301,6 +304,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-007: dos exámenes periodontales FINAL del mismo paciente.
     expect(firstCounts.perio_exams).toBe(2);
     expect(firstCounts.perio_site_measures).toBe(2 * 28 * 6);
+    // DX-013: 3 plantillas de receta y una receta emitida con 2 medicamentos.
+    expect(firstCounts.prescription_templates).toBe(3);
+    expect(firstCounts.prescriptions).toBe(1);
+    expect(firstCounts.prescription_items).toBe(2);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
 
 // Response shape for GET /staff — documents the `{userId, fullName, email, role}`
@@ -17,4 +17,12 @@ export class StaffMemberDto {
 
   @ApiProperty({ enum: ClinicRole })
   role!: ClinicRole;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Registro profesional / nº de colegiado (DX-013). Solo en el perfil y en la respuesta del PATCH.',
+  })
+  professionalLicense?: string | null;
 }
