@@ -25,6 +25,7 @@ model Tenant {
   dataProcessingConsents   DataProcessingConsent[]
   consentTemplates         ConsentTemplate[]
   prescriptionTemplates    PrescriptionTemplate[]
+  emailOutbox              EmailOutbox[]
 
   @@map("tenants")
 }
@@ -1418,4 +1419,56 @@ model AuditEvent {
   @@index([tenantId, patientId, occurredAt])
   @@index([tenantId, actorUserId, occurredAt])
   @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Email transaccional (DX-088)
+// ---------------------------------------------------------------------------
+
+enum EmailOutboxStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+enum EmailTemplate {
+  INVITATION           @map("invitation")
+  PASSWORD_RESET       @map("password-reset")
+  EMAIL_VERIFY         @map("email-verify")
+  APPOINTMENT_REMINDER @map("appointment-reminder")
+}
+
+/// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
+/// ni el token en claro: `toHash` (HMAC-SHA256) y `toMasked` identifican al
+/// destinatario y `payload` es el mensaje renderizado cifrado con AES-256-GCM
+/// (MAIL_ENCRYPTION_KEY), que se borra al quedar SENT o FAILED. Ver la
+/// migración 20261017110000_email_outbox.
+model EmailOutbox {
+  id            String            @id @default(uuid()) @db.Uuid
+  /// NULL = email de plataforma (sin clínica); solo lo inserta y lo lee la
+  /// función SECURITY DEFINER de la migración.
+  tenantId      String?           @db.Uuid
+  template      EmailTemplate
+  toHash        String
+  toMasked      String
+  /// Entidad que originó el envío (p. ej. la invitación). Sin FK: el registro
+  /// sobrevive a lo que referencia.
+  referenceId   String?           @db.Uuid
+  /// iv (12 bytes) | tag (16 bytes) | texto cifrado. NULL al terminar.
+  payload       Bytes?
+  status        EmailOutboxStatus @default(PENDING)
+  attempts      Int               @default(0)
+  nextAttemptAt DateTime          @default(now())
+  /// Tipo de error y código del proveedor; nunca su mensaje (puede llevar PII).
+  lastError     String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  sentAt        DateTime?
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, referenceId, createdAt(sort: Desc)])
+  @@map("email_outbox")
 }
