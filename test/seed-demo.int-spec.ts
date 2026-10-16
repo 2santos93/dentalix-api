@@ -54,10 +54,12 @@ const TENANT_TABLES = [
   'clinical_entries',
   'medical_history_versions',
   'appointment_confirmations',
+  'appointment_waitlist',
   'appointments',
   'appointment_types',
   'inventory_movements',
   'inventory_items',
+  'schedule_blocks',
   'location_schedule_ranges',
   'location_schedules',
   'data_processing_consents',
@@ -319,6 +321,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.prescription_items).toBe(2);
     // DX-121: 5 tipos de cita con color.
     expect(firstCounts.appointment_types).toBe(5);
+    // DX-122: vacaciones y almuerzo; pendientes del calendario + uno manual.
+    expect(firstCounts.schedule_blocks).toBe(2);
+    expect(firstCounts.appointment_waitlist).toBeGreaterThanOrEqual(3);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );
@@ -332,6 +337,41 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId, appointmentTypeId: { not: null } },
     });
     expect(typed).toBeGreaterThanOrEqual(10);
+  });
+
+  it('deja un bloqueo de vacaciones, uno de almuerzo y 3 pendientes abiertos (DX-122)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const blocks = await raw.scheduleBlock.findMany({
+      where: { tenantId },
+      orderBy: { start: 'asc' },
+    });
+    expect(blocks.map((b) => [b.kind, b.allowsBooking])).toEqual([
+      ['LUNCH', true],
+      ['VACATION', false],
+    ]);
+    // Las vacaciones no pisan ninguna cita viva de la dentista.
+    const vacation = blocks[1];
+    await expect(
+      raw.appointment.count({
+        where: {
+          tenantId,
+          providerId: vacation.providerId!,
+          deletedAt: null,
+          status: { not: 'CANCELLED' },
+          start: { lt: vacation.end },
+          end: { gt: vacation.start },
+        },
+      }),
+    ).resolves.toBe(0);
+    const open = await raw.appointmentWaitlistEntry.findMany({
+      where: { tenantId, status: 'OPEN' },
+    });
+    expect(open).toHaveLength(3);
+    // Revisión H2: ningún paciente sale dos veces en la lista.
+    expect(new Set(open.map((e) => e.patientId)).size).toBe(3);
+    expect(open.filter((e) => e.sourceAppointmentId === null)).toEqual([
+      expect.objectContaining({ priority: 'URGENT' }),
+    ]);
   });
 
   it('deja una cita futura con confirmación pendiente y otra que pide llamada (DX-005)', async () => {

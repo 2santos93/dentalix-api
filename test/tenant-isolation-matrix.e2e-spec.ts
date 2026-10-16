@@ -144,6 +144,8 @@ interface SeedA {
   domainId: string;
   prescriptionTemplateId: string;
   appointmentTypeId: string;
+  scheduleBlockId: string;
+  waitlistEntryId: string;
 }
 
 interface SeedB {
@@ -310,6 +312,19 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     color: '#7C3AED',
   });
 
+  // DX-122: un bloqueo de la sede y un pendiente (alta manual) de A.
+  const scheduleBlock = await create(app, a, '/schedule-blocks', {
+    locationId: location.id,
+    start: futureAt(60, 13),
+    end: futureAt(60, 14),
+    kind: 'MEETING',
+  });
+  const waitlistEntry = await create(app, a, '/waitlist', {
+    patientId,
+    priority: 'URGENT',
+    note: 'Llamar por la mañana',
+  });
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -328,6 +343,8 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     domainId: (domainRes.body as { domain: IdBody }).domain.id,
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
+    scheduleBlockId: scheduleBlock.id,
+    waitlistEntryId: waitlistEntry.id,
   };
 }
 
@@ -680,6 +697,37 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- schedule-blocks y waitlist (DX-122) ---
+    {
+      name: 'PATCH /schedule-blocks/:id',
+      verb: 'patch',
+      path: () => `/schedule-blocks/${a.scheduleBlockId}`,
+      body: () => ({ allowsBooking: true }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /schedule-blocks/:id',
+      verb: 'delete',
+      path: () => `/schedule-blocks/${a.scheduleBlockId}`,
+      status: 404,
+    },
+    {
+      name: 'POST /waitlist/:id/dismiss',
+      verb: 'post',
+      path: () => `/waitlist/${a.waitlistEntryId}/dismiss`,
+      body: () => ({ reason: 'Hackeado' }),
+      status: 404,
+    },
+    {
+      name: 'POST /waitlist/:id/schedule',
+      verb: 'post',
+      path: () => `/waitlist/${a.waitlistEntryId}/schedule`,
+      body: () => ({
+        providerId: clinicB.adminUserId,
+        start: futureAt(61, 15),
+      }),
       status: 404,
     },
     // --- data-consents (sobre un paciente de A) ---

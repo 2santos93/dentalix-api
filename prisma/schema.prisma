@@ -9,13 +9,13 @@ datasource db {
 }
 
 model Tenant {
-  id                       String                    @id @default(uuid()) @db.Uuid
+  id                       String                     @id @default(uuid()) @db.Uuid
   name                     String
-  subdomain                String                    @unique
-  primaryColor             String                    @default("#0F5E9C")
+  subdomain                String                     @unique
+  primaryColor             String                     @default("#0F5E9C")
   logoUrl                  String?
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
   deletedAt                DateTime?
   memberships              ClinicMembership[]
   domains                  TenantDomain[]
@@ -31,6 +31,8 @@ model Tenant {
   appointmentTypes         AppointmentType[]
   jobs                     Job[]
   outboundMessages         OutboundMessage[]
+  scheduleBlocks           ScheduleBlock[]
+  waitlistEntries          AppointmentWaitlistEntry[]
 
   @@map("tenants")
 }
@@ -108,6 +110,9 @@ model Location {
   prescriptions      Prescription[]
   planAcceptances    TreatmentPlanAcceptance[]
   presentedPlans     TreatmentPlan[]
+  // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
+  scheduleBlocks     ScheduleBlock[]
+  waitlistEntries    AppointmentWaitlistEntry[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -248,8 +253,10 @@ model Patient {
   perioExams             PerioExam[]
   prescriptions          Prescription[]
   retentionActions       PatientRetentionAction[]
-  country                Country?                 @relation(fields: [countryCode], references: [code])
-  city                   City?                    @relation(fields: [cityId], references: [id])
+  // DX-122: pendientes por agendar del paciente.
+  waitlistEntries        AppointmentWaitlistEntry[]
+  country                Country?                   @relation(fields: [countryCode], references: [code])
+  city                   City?                      @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -525,6 +532,10 @@ model Appointment {
 
   confirmations    AppointmentConfirmation[]
   outboundMessages OutboundMessage[]
+  // DX-122: la entrada de «Pendientes por agendar» que creó su cancelación o
+  // no-show, y la que se resolvió agendando esta cita.
+  waitlistSourced  AppointmentWaitlistEntry[] @relation("WaitlistSource")
+  waitlistResolved AppointmentWaitlistEntry[] @relation("WaitlistResolved")
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -573,8 +584,9 @@ model AppointmentType {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id])
-  appointments Appointment[]
+  tenant          Tenant                     @relation(fields: [tenantId], references: [id])
+  appointments    Appointment[]
+  waitlistEntries AppointmentWaitlistEntry[]
 
   // Destino de la FK compuesta de appointments.appointmentTypeId.
   @@unique([tenantId, id], map: "appointment_types_tenant_id_key")
@@ -582,6 +594,112 @@ model AppointmentType {
   // expresa. NO aceptar un diff de migrate dev que lo recree sin el WHERE.
   @@unique([tenantId, name], map: "appointment_types_tenant_name_key")
   @@map("appointment_types")
+}
+
+// DX-122: bloqueo de agenda. `providerId` NULL = toda la sede (`locationId`
+// obligatorio); con profesional y sin sede, el bloqueo es suyo en TODAS las
+// sedes (vacaciones, congreso); con profesional y sede, solo en esa sede.
+// `allowsBooking = false` impide agendar encima (409); `true` deja agendar con
+// aviso (p. ej. el almuerzo). Nunca se borra físicamente: `deletedAt` lo retira.
+enum ScheduleBlockKind {
+  VACATION
+  MEETING
+  LUNCH
+  OTHER
+}
+
+model ScheduleBlock {
+  id            String            @id @default(uuid()) @db.Uuid
+  tenantId      String            @db.Uuid
+  // NULL = el profesional en todas las sedes (CHECK: sede o profesional).
+  locationId    String?           @db.Uuid
+  // Usuario del personal (como `Appointment.providerId`, sin FK: la membresía
+  // solo tiene un único PARCIAL). NULL = toda la sede.
+  providerId    String?           @db.Uuid
+  // [start, end) medio abierto, como las citas. CHECK end > start.
+  start         DateTime
+  end           DateTime
+  kind          ScheduleBlockKind
+  allowsBooking Boolean           @default(false)
+  // Hasta 200 caracteres (CHECK); la API rechaza antes con 400.
+  note          String?
+  createdById   String?           @db.Uuid
+  updatedById   String?           @db.Uuid
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  deletedAt     DateTime?
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  // FK COMPUESTA: la sede tiene que ser del MISMO tenant (SEC-004).
+  location Location? @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+
+  // Rango por sede (también lado hijo de la FK compuesta, por eso NO es
+  // parcial) y por profesional. `end` va en el índice: una consulta de rango
+  // pide `end > desde AND start < hasta`, y lo que ya terminó queda fuera.
+  @@index([tenantId, locationId, end], map: "schedule_blocks_tenant_location_end_idx")
+  @@index([tenantId, providerId, end], map: "schedule_blocks_tenant_provider_end_idx")
+  @@map("schedule_blocks")
+}
+
+// DX-122: «Pendientes por agendar». Una cita CANCELLED o NO_SHOW crea su entrada
+// OPEN en la MISMA transacción (una sola por cita: único parcial por
+// `sourceAppointmentId`); recepción también las da de alta a mano. Se cierra
+// agendando (SCHEDULED, con la cita nueva) o descartando con motivo
+// (DISMISSED). Datos personales y de salud: RLS FORCE por tenant.
+enum WaitlistPriority {
+  NORMAL
+  URGENT
+}
+
+enum WaitlistStatus {
+  OPEN
+  SCHEDULED
+  DISMISSED
+}
+
+model AppointmentWaitlistEntry {
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @db.Uuid
+  locationId            String           @db.Uuid
+  patientId             String           @db.Uuid
+  sourceAppointmentId   String?          @db.Uuid
+  providerId            String?          @db.Uuid
+  appointmentTypeId     String?          @db.Uuid
+  // Duración de la cita a buscar (múltiplo de 5 entre 5 y 480, CHECK).
+  durationMinutes       Int              @default(30)
+  priority              WaitlistPriority @default(NORMAL)
+  // «Mañanas», «después de las 17:00»… hasta 80 caracteres (CHECK).
+  preferredWindow       String?
+  note                  String?
+  status                WaitlistStatus   @default(OPEN)
+  resolvedAppointmentId String?          @db.Uuid
+  dismissReason         String?
+  createdById           String?          @db.Uuid
+  resolvedById          String?          @db.Uuid
+  resolvedAt            DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  tenant              Tenant           @relation(fields: [tenantId], references: [id])
+  // FK COMPUESTAS: todo lo referenciado es del MISMO tenant (SEC-004). CASCADE
+  // en paciente y citas: la entrada es dato derivado, y el producto nunca
+  // borra en duro (no-hard-delete); solo afecta a la limpieza administrativa.
+  location            Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  patient             Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Cascade)
+  sourceAppointment   Appointment?     @relation("WaitlistSource", fields: [tenantId, sourceAppointmentId], references: [tenantId, id], onDelete: Cascade)
+  resolvedAppointment Appointment?     @relation("WaitlistResolved", fields: [tenantId, resolvedAppointmentId], references: [tenantId, id], onDelete: Cascade)
+  appointmentType     AppointmentType? @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "appointment_waitlist_tenant_id_key")
+  // Único PARCIAL (WHERE "sourceAppointmentId" IS NOT NULL): el WHERE vive en
+  // la migración. Es la idempotencia de «cancelar dos veces = una entrada».
+  @@unique([tenantId, sourceAppointmentId], map: "appointment_waitlist_tenant_source_key")
+  // El panel: OPEN de una sede, por antigüedad. También lado hijo de la FK a la sede.
+  @@index([tenantId, locationId, status, createdAt], map: "appointment_waitlist_tenant_location_status_idx")
+  @@index([tenantId, patientId])
+  @@index([tenantId, resolvedAppointmentId])
+  @@index([tenantId, appointmentTypeId])
+  @@map("appointment_waitlist")
 }
 
 enum AppointmentConfirmationResponse {
@@ -1547,6 +1665,9 @@ enum AuditResourceType {
   CLINICAL_ENTRY_ADDENDUM
   // DX-121: mover una cita (hora y profesional antes/después).
   APPOINTMENT
+  // DX-122: bloqueos de agenda y «Pendientes por agendar».
+  SCHEDULE_BLOCK
+  WAITLIST_ENTRY
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

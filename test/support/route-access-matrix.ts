@@ -238,6 +238,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointment-types': ADMIN_ONLY,
   'PATCH /appointment-types/:id': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
+  // «Buscar hueco», bloqueos y pendientes (DX-122, loop/informes/DX-122.md):
+  // leer y agendar, quien agenda; los bloqueos los escriben ADMIN, recepción y
+  // el odontólogo (solo su agenda: 403 del caso de uso), no la asistente.
+  'GET /appointments/openings': EVERY_ROLE,
+  'GET /schedule-blocks': EVERY_ROLE,
+  'GET /schedule-blocks/affected-appointments': EVERY_ROLE,
+  'POST /schedule-blocks': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'PATCH /schedule-blocks/:id': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'DELETE /schedule-blocks/:id': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'GET /waitlist': EVERY_ROLE,
+  'POST /waitlist': EVERY_ROLE,
+  'POST /waitlist/:id/dismiss': EVERY_ROLE,
+  'POST /waitlist/:id/schedule': EVERY_ROLE,
 
   // --- Facturación: abonos, planes de pago, estado de cuenta ---------------
   // dentalix-docs/docs/plans/2026-07-24-payments-pivot.md (PAYMENT_ROLES),

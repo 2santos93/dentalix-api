@@ -4,7 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import {
   AppointmentStatus,
   ClinicRole,
+  ScheduleBlockKind,
   TreatmentPlanStatus,
+  WaitlistPriority,
 } from '@prisma/client';
 import { config as loadDotenv } from 'dotenv';
 import { AppModule } from '../src/app.module';
@@ -76,14 +78,26 @@ import {
   DemoLocationKey,
   DEMO_TIMEZONE,
   daysAgoAt,
+  daysUntilMondayAfterNext,
+  daysUntilNextWeekday,
   planAppointments,
 } from './demo/calendar';
+import { CreateScheduleBlockUseCase } from '../src/modules/schedule-blocks/application/use-cases/schedule-blocks.use-cases';
+import {
+  CreateWaitlistEntryUseCase,
+  DismissWaitlistEntryUseCase,
+  ListWaitlistUseCase,
+} from '../src/modules/waitlist/application/use-cases/waitlist.use-cases';
+import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
   DEMO_CLINICAL_ADDENDA,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
+  DEMO_LUNCH,
+  DEMO_VACATION,
+  DEMO_WAITLIST,
   DEMO_PERIO,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
@@ -497,6 +511,14 @@ class DemoSeeder {
       typeByReason,
     );
 
+    await this.createScheduleBlocksAndWaitlist(
+      tenantId,
+      locations,
+      patientIds,
+      dentists,
+      receptionId,
+    );
+
     await this.createPlansAndPayments(
       tenantId,
       locations,
@@ -875,6 +897,92 @@ class DemoSeeder {
         }
       });
     }
+  }
+
+  /**
+   * DX-122: un bloqueo de vacaciones y uno de almuerzo, y «Pendientes por
+   * agendar» con 3 abiertos. Recepción lo hace por los mismos casos de uso que
+   * la API (validaciones, auditoría). Las cancelaciones y no-shows del
+   * calendario ya crearon sus entradas al cambiar de estado.
+   */
+  private async createScheduleBlocksAndWaitlist(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+  ): Promise<void> {
+    const actor = { userId: receptionId, role: ClinicRole.RECEPTION };
+    const ctx: AuditRequestContext = {
+      tenantId,
+      locationId: null,
+      actor,
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+    await this.inTenant(tenantId, undefined, async () => {
+      const blocks = this.use(CreateScheduleBlockUseCase);
+      const monday = daysUntilMondayAfterNext(this.now);
+      await blocks.execute(
+        {
+          providerId: dentists[DEMO_VACATION.dentistIndex],
+          start: daysAgoAt(this.now, -monday, 0),
+          end: daysAgoAt(this.now, -(monday + 5), 0),
+          kind: ScheduleBlockKind.VACATION,
+          note: DEMO_VACATION.note,
+        },
+        actor,
+      );
+      const day = daysUntilNextWeekday(this.now);
+      await blocks.execute(
+        {
+          locationId: locations.principal,
+          start: daysAgoAt(this.now, -day, DEMO_LUNCH.startMinute),
+          end: daysAgoAt(this.now, -day, DEMO_LUNCH.endMinute),
+          kind: ScheduleBlockKind.LUNCH,
+          allowsBooking: true,
+          note: DEMO_LUNCH.note,
+          // Deja agendar: las citas que caigan dentro se quedan, con aviso.
+          confirmAffected: true,
+        },
+        actor,
+      );
+
+      const open = await this.use(ListWaitlistUseCase).execute({
+        pageSize: 50,
+      });
+      // Se quedan abiertas las `keepOpen` más recientes de pacientes
+      // DISTINTOS (un paciente no sale dos veces en la lista); el resto se
+      // descarta con motivo, como historial.
+      const keep: typeof open.items = [];
+      for (const entry of [...open.items].reverse()) {
+        if (keep.length === DEMO_WAITLIST.keepOpen) break;
+        if (!keep.some((k) => k.patientId === entry.patientId))
+          keep.push(entry);
+      }
+      const dismiss = this.use(DismissWaitlistEntryUseCase);
+      for (const entry of open.items.filter((e) => !keep.includes(e))) {
+        await dismiss.execute(entry.id, DEMO_WAITLIST.dismissReason, ctx);
+      }
+      // El alta manual: el primer paciente de la lista candidata que no esté ya.
+      const manual = DEMO_WAITLIST.manual;
+      const pending = new Set(keep.map((k) => k.patientId));
+      const manualPatientId = [manual.patientIndex, ...patientIds.keys()]
+        .map((i) => patientIds[i])
+        .find((id) => !pending.has(id))!;
+      await this.use(CreateWaitlistEntryUseCase).execute(
+        {
+          patientId: manualPatientId,
+          locationId: locations.principal,
+          providerId: dentists[manual.dentistIndex],
+          priority: WaitlistPriority.URGENT,
+          preferredWindow: manual.preferredWindow,
+          note: manual.note,
+        },
+        ctx,
+      );
+    });
   }
 
   private async createPlansAndPayments(

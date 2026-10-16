@@ -1,10 +1,21 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  enqueueWaitlistFromAppointment,
+  markWaitlistEntryScheduled,
+  resolveWaitlistForReactivated,
+} from '../../../waitlist/infrastructure/waitlist-transitions';
+import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../waitlist/domain/waitlist-rules';
+import {
   AppointmentRepository,
+  AppointmentUpdate,
   CreateAppointmentRepoInput,
   ListAppointmentsByRangeParams,
   ListUpcomingAppointmentsParams,
@@ -103,12 +114,13 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const tenantId = this.requireTenantId();
     const appointment = await this.prisma.runWithTenant(async (tx) => {
-      return tx.appointment.create({
+      const created = await tx.appointment.create({
         data: {
-          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la sede por defecto — que es lo que
-          // hacen hoy todos los clientes y mantiene el comportamiento igual.
+          // Sede explícita del caso de uso (DX-122: la de la entrada de
+          // pendientes); si no, la del request (X-Location-Id, ya validada
+          // contra esta clínica); si no, la sede por defecto.
           locationId:
+            input.locationId ??
             this.tenantContext.getLocationId() ??
             (await resolveDefaultLocationId(tx)),
           tenantId,
@@ -123,6 +135,20 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         },
         include: INCLUDE_PATIENT_NAME,
       });
+      // DX-122: «Agendar aquí» desde pendientes. Si otra persona ya la agendó o
+      // la descartó, el 409 deshace también la cita (misma transacción).
+      if (
+        input.waitlistEntryId !== undefined &&
+        !(await markWaitlistEntryScheduled(
+          tx,
+          input.waitlistEntryId,
+          created.id,
+          input.createdById ?? null,
+        ))
+      ) {
+        throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
+      }
+      return created;
     });
     return mapToEntity(appointment);
   }
@@ -246,7 +272,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   async update(
     id: string,
     patch: UpdateAppointmentRepoInput,
-  ): Promise<Appointment> {
+  ): Promise<AppointmentUpdate> {
     return this.prisma.runWithTenant(async (tx) => {
       const existing = await tx.appointment.findFirst({
         where: { id, deletedAt: null },
@@ -256,7 +282,8 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         throw new NotFoundException('Appointment not found');
       }
 
-      const { revokeConfirmations, ...data } = patch;
+      const { revokeConfirmations, enqueueWaitlist, resolveWaitlist, ...data } =
+        patch;
       const appointment = await tx.appointment.update({
         where: { id },
         data,
@@ -268,7 +295,30 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           data: { revokedAt: new Date() },
         });
       }
-      return mapToEntity(appointment);
+      // DX-122: cancelada o no-show → «Pendientes por agendar», en esta misma
+      // transacción (si algo falla, ni la cita cambia ni aparece la entrada).
+      const enqueued = enqueueWaitlist
+        ? await enqueueWaitlistFromAppointment(
+            tx,
+            id,
+            enqueueWaitlist.createdById,
+          )
+        : null;
+      // DX-122 (revisión H1): reactivada → su entrada sale de la lista.
+      const resolvedWaitlistEntryId = resolveWaitlist
+        ? await resolveWaitlistForReactivated(
+            tx,
+            id,
+            resolveWaitlist.resolvedById,
+          )
+        : null;
+      return {
+        appointment: mapToEntity(appointment),
+        waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
+        reopenedWaitlistEntryId:
+          enqueued && enqueued.reopened ? enqueued.id : null,
+        resolvedWaitlistEntryId,
+      };
     });
   }
 }

@@ -50,6 +50,16 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
 // Leerlos (selector del formulario de cita): APPOINTMENT_ROLES.
 export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Bloqueos de agenda (DX-122) — crear/cambiar/retirar: recepción y ADMIN, que
+// gestionan la agenda de todos, y el odontólogo, solo la SUYA (lo comprueba el
+// caso de uso: 403 si toca otra agenda o la de toda la sede). La asistente los
+// ve en la agenda (APPOINTMENT_ROLES) pero no los crea.
+export const SCHEDULE_BLOCK_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+  ClinicRole.DENTIST,
+];
+
 // Pagos / abonos (facturación): ADMIN (gestión) + RECEPTION (mostrador
 // -- registra el abono del paciente), pero NO DENTIST/ASSISTANT (dato
 // financiero, no clínico -- ver docs/plans/2026-07-24-payments-pivot.md

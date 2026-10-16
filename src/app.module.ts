@@ -14,6 +14,8 @@ import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entri
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
+import { ScheduleBlocksModule } from './modules/schedule-blocks/schedule-blocks.module';
+import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { AppointmentConfirmationsModule } from './modules/appointment-confirmations/appointment-confirmations.module';
 import { TreatmentPlansModule } from './modules/treatment-plans/treatment-plans.module';
 import { StaffModule } from './modules/staff/staff.module';
@@ -63,6 +65,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OdontogramModule,
     AppointmentsModule,
     AppointmentTypesModule,
+    ScheduleBlocksModule,
+    WaitlistModule,
     AppointmentConfirmationsModule,
     TreatmentPlansModule,
     StaffModule,

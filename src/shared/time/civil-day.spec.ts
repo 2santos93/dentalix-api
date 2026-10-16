@@ -8,6 +8,8 @@ import {
   isValidTimeZone,
   parseCivilDate,
   zonedStartOfDay,
+  zonedWallTime,
+  civilWeekday,
 } from './civil-day';
 
 const iso = (d: Date) => d.toISOString();
@@ -189,5 +191,46 @@ describe('civilNoonIn', () => {
     );
     const noon = civilNoonIn('2026-10-25', 'Europe/Madrid');
     expect(civilDateIn(noon, 'Europe/Madrid')).toBe('2026-10-25');
+  });
+
+  describe('zonedWallTime (DX-122)', () => {
+    it('una hora de pared de Bogotá (UTC−5 fijo)', () => {
+      expect(iso(zonedWallTime('2026-10-20', 9 * 60, 'America/Bogota'))).toBe(
+        '2026-10-20T14:00:00.000Z',
+      );
+    });
+
+    it('Madrid antes y después del cambio de hora de primavera (29-03-2026)', () => {
+      // Sábado: CET (+1); domingo, ya CEST (+2).
+      expect(iso(zonedWallTime('2026-03-28', 9 * 60, 'Europe/Madrid'))).toBe(
+        '2026-03-28T08:00:00.000Z',
+      );
+      expect(iso(zonedWallTime('2026-03-29', 9 * 60, 'Europe/Madrid'))).toBe(
+        '2026-03-29T07:00:00.000Z',
+      );
+    });
+
+    it('Madrid en el día del cambio de otoño (25-10-2026)', () => {
+      expect(iso(zonedWallTime('2026-10-25', 9 * 60, 'Europe/Madrid'))).toBe(
+        '2026-10-25T08:00:00.000Z',
+      );
+      expect(iso(zonedWallTime('2026-10-24', 9 * 60, 'Europe/Madrid'))).toBe(
+        '2026-10-24T07:00:00.000Z',
+      );
+    });
+
+    it('el minuto 1440 es la medianoche del día siguiente', () => {
+      expect(zonedWallTime('2026-10-20', 24 * 60, 'America/Bogota')).toEqual(
+        zonedStartOfDay('2026-10-21', 'America/Bogota'),
+      );
+    });
+  });
+
+  describe('civilWeekday (DX-122)', () => {
+    it('0 = domingo … 6 = sábado, sin depender de la zona del servidor', () => {
+      expect(civilWeekday('2026-10-18')).toBe(0);
+      expect(civilWeekday('2026-10-20')).toBe(2);
+      expect(civilWeekday('2026-10-24')).toBe(6);
+    });
   });
 });

@@ -50,6 +50,24 @@ export function daysAgoAt(
   return at(bogotaDay(now, -daysAgo), minuteOfDay);
 }
 
+/**
+ * DX-122: días desde hoy (Bogotá) hasta el lunes de la semana siguiente a la
+ * próxima, el primer lunes FUERA del calendario de citas de la demo (que llega
+ * hasta el sábado de la semana próxima): ahí caen las vacaciones de ejemplo
+ * sin pisar ninguna cita.
+ */
+export function daysUntilMondayAfterNext(now: Date): number {
+  const daysSinceMonday = (bogotaDay(now, 0).weekday + 6) % 7;
+  return 14 - daysSinceMonday;
+}
+
+/** DX-122: días desde hoy hasta el próximo día laborable (lunes a viernes). */
+export function daysUntilNextWeekday(now: Date): number {
+  let offset = 1;
+  while ([0, 6].includes(bogotaDay(now, offset).weekday)) offset++;
+  return offset;
+}
+
 export type DemoLocationKey = 'principal' | 'norte';
 
 /** Huecos candidatos por sede: [inicio en minutos de pared, duración]. */

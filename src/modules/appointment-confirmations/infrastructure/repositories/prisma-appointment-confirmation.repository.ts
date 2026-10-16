@@ -4,6 +4,7 @@ import {
   AppointmentStatus,
   Prisma,
 } from '@prisma/client';
+import { enqueueWaitlistFromAppointment } from '../../../waitlist/infrastructure/waitlist-transitions';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -216,6 +217,11 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           data: appointmentPatchFor(input.response, input.now),
         });
         if (updated.count === 0) throw new StaleAppointmentError();
+        // DX-122: el paciente canceló desde el enlace → «Pendientes por
+        // agendar», en esta misma transacción (sin autor: lo hizo el paciente).
+        if (input.response === AppointmentConfirmationResponse.CANCEL) {
+          await enqueueWaitlistFromAppointment(tx, input.appointmentId, null);
+        }
         return 'OK';
       });
     } catch (error) {

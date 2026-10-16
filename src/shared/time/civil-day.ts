@@ -268,3 +268,33 @@ export function civilPeriodByZone(
 export function civilNoonIn(day: string, timeZone: string): Date {
   return new Date(zonedStartOfDay(day, timeZone).getTime() + 12 * HOUR_MS);
 }
+
+/** Día de la semana del día civil `day` (0 = domingo … 6 = sábado). */
+export function civilWeekday(day: string): number {
+  const [y, m, d] = requireCivilDate(day);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * Instante de la hora de PARED `minute` (minutos desde las 00:00, hasta 1440)
+ * del día civil `day` en `timeZone` (DX-122: los tramos del horario de la sede
+ * son hora de pared). Se resuelve con el desfase que la zona tiene ESE día, así
+ * que las 9:00 del domingo de un cambio de hora caen donde deben. En la hora
+ * que no existe (adelanto de primavera) se devuelve el instante equivalente
+ * con el desfase anterior; en la repetida (otoño), la primera.
+ */
+export function zonedWallTime(
+  day: string,
+  minute: number,
+  timeZone: string,
+): Date {
+  assertTimeZone(timeZone);
+  const days = Math.floor(minute / (24 * 60));
+  const civil = days === 0 ? day : addCivilDays(day, days);
+  const rest = minute - days * 24 * 60;
+  if (rest === 0) return zonedStartOfDay(civil, timeZone);
+  const [y, m, d] = requireCivilDate(civil);
+  const wall = Date.UTC(y, m - 1, d, 0, rest);
+  const first = wall - offsetAt(wall, timeZone);
+  return new Date(wall - offsetAt(first, timeZone));
+}

@@ -8,7 +8,8 @@ import {
 } from '@nestjs/common';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
-import { Appointment } from '../../domain/entities/appointment.entity';
+import { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
+import { checkScheduleBlocks } from '../schedule-block-check';
 import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
@@ -26,6 +27,8 @@ import type { StaffRepository } from '../../../staff/domain/ports/staff-reposito
 import { APPOINTMENT_TYPE_REPOSITORY } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import { endFromDuration } from '../../../appointment-types/domain/appointment-type-rules';
+import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
+import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -41,6 +44,14 @@ export interface CreateAppointmentInput {
   createdById?: string;
   /** DX-121: tipo de cita (de esta clínica y activo). */
   appointmentTypeId?: string;
+  /**
+   * DX-122: sede de la cita cuando no es la del request (agendar desde
+   * «Pendientes»: la de la entrada, ya validada). Manda en el horario y en los
+   * bloqueos que se miran. No llega del cliente.
+   */
+  locationId?: string;
+  /** DX-122: la entrada de pendientes que esta cita resuelve (pasa a SCHEDULED). */
+  waitlistEntryId?: string;
 }
 
 /** La entrada con la hora de fin ya resuelta (explícita o por el tipo). */
@@ -65,9 +76,14 @@ export class CreateAppointmentUseCase {
     private readonly schedule: LocationScheduleRepository,
     @Inject(APPOINTMENT_TYPE_REPOSITORY)
     private readonly types: AppointmentTypeRepository,
+    // DX-122: no agendar encima de un bloqueo que no lo permite.
+    @Inject(SCHEDULE_BLOCK_REPOSITORY)
+    private readonly blocks: ScheduleBlockRepository,
   ) {}
 
-  async execute(input: CreateAppointmentInput): Promise<Appointment> {
+  async execute(
+    input: CreateAppointmentInput,
+  ): Promise<AppointmentWriteResult> {
     const resolved = await this.resolveEnd(input);
 
     // No agendar en el pasado: una cita nueva siempre es a futuro. Se compara
@@ -96,7 +112,7 @@ export class CreateAppointmentUseCase {
    */
   async registerHistorical(
     input: CreateAppointmentInput,
-  ): Promise<Appointment> {
+  ): Promise<AppointmentWriteResult> {
     return this.createChecked(await this.resolveEnd(input));
   }
 
@@ -132,7 +148,7 @@ export class CreateAppointmentUseCase {
 
   private async createChecked(
     input: ResolvedAppointmentInput,
-  ): Promise<Appointment> {
+  ): Promise<AppointmentWriteResult> {
     // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
     // clínica, antes de mirar solapes (un id inválido hace que el solape no
     // signifique nada). Ambos repos filtran por tenant vía RLS, así que un
@@ -157,12 +173,25 @@ export class CreateAppointmentUseCase {
     // configure. Se lee la sede EN CONTEXTO, la misma en la que el repo escribirá
     // la cita.
     // 422 (DX-121): la petición es válida, pero ese hueco no existe.
-    const hours = await this.schedule.findForCurrentLocation();
+    // DX-122: desde «Pendientes» la sede es la de la entrada, no la del request.
+    const hours =
+      input.locationId !== undefined
+        ? await this.schedule.findByLocation(input.locationId)
+        : await this.schedule.findForCurrentLocation();
     if (!fitsBusinessHours(input.start, input.end, hours)) {
       throw new UnprocessableEntityException(
         businessHoursErrorMessage(input.start, input.end, hours!),
       );
     }
+
+    // DX-122: bloqueos de la agenda del profesional o de la sede. Uno que no
+    // deja agendar es un 409; uno que sí (almuerzo), un aviso en la respuesta.
+    const warnings = await checkScheduleBlocks(this.blocks, {
+      providerId: input.providerId,
+      start: input.start,
+      end: input.end,
+      locationId: input.locationId,
+    });
 
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff
     // s1 < e2 AND s2 < e1 — enforced by the repository's findOverlapping
@@ -194,7 +223,7 @@ export class CreateAppointmentUseCase {
     // (appointments_no_overlap_per_provider / ..._per_patient, SQLSTATE 23P01)
     // reject the INSERT — se mapea al MISMO 409 del pre-check correspondiente.
     try {
-      return await this.repo.create({
+      const created = await this.repo.create({
         patientId: input.patientId,
         providerId: input.providerId,
         start: input.start,
@@ -203,7 +232,10 @@ export class CreateAppointmentUseCase {
         notes: input.notes,
         createdById: input.createdById,
         appointmentTypeId: input.appointmentTypeId,
+        locationId: input.locationId,
+        waitlistEntryId: input.waitlistEntryId,
       });
+      return { ...created, warnings };
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {

@@ -6,13 +6,20 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { ClinicRole } from '@prisma/client';
+import { AppointmentStatus } from '@prisma/client';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type {
   AppointmentRepository,
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
-import { Appointment } from '../../domain/entities/appointment.entity';
+import {
+  Appointment,
+  AppointmentWriteResult,
+} from '../../domain/entities/appointment.entity';
+import { checkScheduleBlocks } from '../schedule-block-check';
+import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
+import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import {
@@ -33,22 +40,21 @@ import {
  */
 export type UpdateAppointmentInput = Omit<
   UpdateAppointmentRepoInput,
-  'revokeConfirmations'
+  'revokeConfirmations' | 'enqueueWaitlist' | 'resolveWaitlist'
 >;
+
+/** Estados que mandan al paciente a «Pendientes por agendar» (DX-122). */
+const WAITLIST_STATUSES: ReadonlySet<AppointmentStatus> = new Set([
+  AppointmentStatus.CANCELLED,
+  AppointmentStatus.NO_SHOW,
+]);
 
 /**
  * Quién mueve la cita y desde dónde (DX-121): con esto el use-case deja el
  * `audit_event` del movimiento, que necesita la hora y el profesional ANTES del
  * cambio — algo que el AuditInterceptor, que solo ve la respuesta, no tiene.
  */
-export interface AppointmentAuditContext {
-  tenantId: string;
-  locationId: string | null;
-  actor: { userId: string; role: ClinicRole | null };
-  requestId: string | null;
-  ip: string | null;
-  userAgent: string | null;
-}
+export type AppointmentAuditContext = AuditRequestContext;
 
 @Injectable()
 export class UpdateAppointmentUseCase {
@@ -62,13 +68,16 @@ export class UpdateAppointmentUseCase {
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
     private readonly audit: RecordAuditEventUseCase,
+    // DX-122: no mover encima de un bloqueo que no lo permite.
+    @Inject(SCHEDULE_BLOCK_REPOSITORY)
+    private readonly blocks: ScheduleBlockRepository,
   ) {}
 
   async execute(
     id: string,
     patch: UpdateAppointmentInput,
     auditContext?: AppointmentAuditContext,
-  ): Promise<Appointment> {
+  ): Promise<AppointmentWriteResult> {
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as the Patient use cases: a missing row and a row
@@ -79,6 +88,7 @@ export class UpdateAppointmentUseCase {
 
     // Reagendar = cambiar la hora O el profesional (DX-121: «Mover a…» y el
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
+    let warnings: string[] = [];
     const isReschedule =
       patch.start !== undefined ||
       patch.end !== undefined ||
@@ -121,6 +131,16 @@ export class UpdateAppointmentUseCase {
           businessHoursErrorMessage(nextStart, nextEnd, hours!),
         );
       }
+
+      // DX-122: bloqueos del profesional DESTINO en la sede de la cita. Solo al
+      // reagendar, como el horario: cancelar o completar una cita que quedó
+      // dentro de un bloqueo creado después tiene que seguir siendo posible.
+      warnings = await checkScheduleBlocks(this.blocks, {
+        providerId: nextProviderId,
+        start: nextStart,
+        end: nextEnd,
+        locationId: existing.locationId,
+      });
 
       // Re-check overlap EXCLUDING this appointment's own id — otherwise an
       // unchanged appointment would always "collide" with itself. Contra el
@@ -165,18 +185,49 @@ export class UpdateAppointmentUseCase {
     // revocan los enlaces sin responder: cambiar SOLO de profesional no cambia
     // la hora, y el enlace seguiría vigente.
     const clearsConfirmation = isReschedule || patch.status !== undefined;
-    const effectivePatch: UpdateAppointmentRepoInput = clearsConfirmation
-      ? {
-          ...patch,
-          confirmationSentAt: null,
-          callbackRequestedAt: null,
-          ...(isReschedule ? { revokeConfirmations: true } : {}),
-        }
-      : patch;
+    // DX-122: cancelar o marcar no-show deja al paciente en «Pendientes por
+    // agendar», en la MISMA transacción (el repo es idempotente por cita).
+    const enqueuesWaitlist =
+      patch.status !== undefined && WAITLIST_STATUSES.has(patch.status);
+    // Y al revés (revisión H1): deja de estar cancelada o no-show → su entrada
+    // OPEN se cierra con ella, en la misma transacción.
+    const reactivates =
+      patch.status !== undefined &&
+      WAITLIST_STATUSES.has(existing.status) &&
+      !WAITLIST_STATUSES.has(patch.status);
+    const effectivePatch: UpdateAppointmentRepoInput = {
+      ...patch,
+      ...(clearsConfirmation
+        ? { confirmationSentAt: null, callbackRequestedAt: null }
+        : {}),
+      ...(isReschedule ? { revokeConfirmations: true } : {}),
+      ...(enqueuesWaitlist
+        ? {
+            enqueueWaitlist: {
+              createdById: auditContext?.actor.userId ?? null,
+            },
+          }
+        : {}),
+      ...(reactivates
+        ? {
+            resolveWaitlist: {
+              resolvedById: auditContext?.actor.userId ?? null,
+            },
+          }
+        : {}),
+    };
 
     let updated: Appointment;
+    let waitlistEntryId: string | null;
+    let reopenedWaitlistEntryId: string | null;
+    let resolvedWaitlistEntryId: string | null;
     try {
-      updated = await this.repo.update(id, effectivePatch);
+      ({
+        appointment: updated,
+        waitlistEntryId,
+        reopenedWaitlistEntryId,
+        resolvedWaitlistEntryId,
+      } = await this.repo.update(id, effectivePatch));
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {
@@ -188,7 +239,55 @@ export class UpdateAppointmentUseCase {
     if (isReschedule && auditContext) {
       await this.recordMove(existing, updated, auditContext);
     }
-    return updated;
+    if (waitlistEntryId !== null && auditContext) {
+      await this.recordWaitlistEntry(updated, waitlistEntryId, auditContext);
+    }
+    if (reopenedWaitlistEntryId !== null && auditContext) {
+      await this.recordWaitlistEntry(
+        updated,
+        reopenedWaitlistEntryId,
+        auditContext,
+        'UPDATE',
+        'WAITLIST_REOPENED',
+      );
+    }
+    if (resolvedWaitlistEntryId !== null && auditContext) {
+      await this.recordWaitlistEntry(
+        updated,
+        resolvedWaitlistEntryId,
+        auditContext,
+        'UPDATE',
+        'APPOINTMENT_REACTIVATED',
+      );
+    }
+    return { ...updated, warnings };
+  }
+
+  /**
+   * `audit_event` del alta automática en «Pendientes por agendar» (DX-122),
+   * de su cierre al reactivar la cita (revisión H1) o de su reapertura si la
+   * cita vuelve a cancelarse.
+   */
+  private recordWaitlistEntry(
+    appointment: Appointment,
+    entryId: string,
+    ctx: AppointmentAuditContext,
+    action: 'CREATE' | 'UPDATE' = 'CREATE',
+    reason = 'WAITLIST_FROM_APPOINTMENT',
+  ): Promise<void> {
+    return this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action,
+      resourceType: 'WAITLIST_ENTRY',
+      resourceId: entryId,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: { reason },
+    });
   }
 
   /** `audit_event` del movimiento: hora y profesional antes y después. */
