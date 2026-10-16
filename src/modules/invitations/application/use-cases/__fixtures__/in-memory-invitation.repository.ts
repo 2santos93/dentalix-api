@@ -171,6 +171,13 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     return Promise.resolve(pending.map((i) => i.id));
   }
 
+  findPendingById(id: string): Promise<ClinicInvitation | null> {
+    const row = this.invitations.find(
+      (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
+    );
+    return Promise.resolve(row ? this.toEntity(row) : null);
+  }
+
   reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },

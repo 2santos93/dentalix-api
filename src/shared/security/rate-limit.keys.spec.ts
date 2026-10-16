@@ -2,6 +2,7 @@ import {
   loginAccountRateLimitKey,
   loginRateLimitKey,
   passwordRateLimitKey,
+  staffActorRateLimitKey,
 } from './rate-limit.keys';
 
 // JWT sin firma válida: la clave solo DECODIFICA el payload (la verificación
@@ -118,5 +119,31 @@ describe('passwordRateLimitKey', () => {
     expect(passwordRateLimitKey(prefix, '1.2.3.4', undefined)).toBe(
       passwordRateLimitKey(prefix, '1.2.3.4', ''),
     );
+  });
+});
+
+describe('staffActorRateLimitKey (DX-088)', () => {
+  const token = (claims: object): string =>
+    `Bearer x.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.y`;
+
+  it('mismo usuario y clínica comparten balde; otro usuario u otra clínica no', () => {
+    const a = staffActorRateLimitKey('p', token({ sub: 'u1', tenantId: 't1' }));
+    expect(a).toBe(
+      staffActorRateLimitKey('p', token({ sub: 'u1', tenantId: 't1', iat: 2 })),
+    );
+    expect(a).not.toBe(
+      staffActorRateLimitKey('p', token({ sub: 'u2', tenantId: 't1' })),
+    );
+    expect(a).not.toBe(
+      staffActorRateLimitKey('p', token({ sub: 'u1', tenantId: 't2' })),
+    );
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('sin token decodificable usa la cabecera (acabará en 401)', () => {
+    expect(staffActorRateLimitKey('p', 'Bearer basura')).toBe(
+      staffActorRateLimitKey('p', 'Bearer basura'),
+    );
+    expect(staffActorRateLimitKey('p', undefined)).toMatch(/^[0-9a-f]{64}$/);
   });
 });

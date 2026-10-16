@@ -161,6 +161,27 @@ describe('CreateInvitationUseCase', () => {
       });
     });
 
+    it('con el tope de envío alcanzado no revoca ni crea nada (B1)', async () => {
+      const repo = new InMemoryInvitationRepository();
+      const notifier = new FakeInvitationNotifier();
+      const uc = new CreateInvitationUseCase(repo, notifier);
+      const input = {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        linkBase: 'https://demo.dentalix.app',
+      };
+      const first = await uc.execute(input);
+      notifier.quotaError = new Error('429');
+      await expect(uc.execute(input)).rejects.toThrow('429');
+      const pending = await repo.listPending();
+      expect(pending.map((i) => i.id)).toEqual([first.invitation.id]);
+      expect(notifier.quotaChecks).toEqual([
+        'ana@clinic.com',
+        'ana@clinic.com',
+      ]);
+    });
+
     it('sin linkBase (seed demo) no hay email', async () => {
       const notifier = new FakeInvitationNotifier();
       const uc = new CreateInvitationUseCase(

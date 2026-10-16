@@ -85,4 +85,21 @@ describe('ResendInvitationUseCase', () => {
       ).execute({ id: 'otra', linkBase: LINK_BASE }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('con el tope alcanzado no regenera el token: el enlace vigente sigue valiendo (B1)', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const original = repo.seedInvitation({ token: 'token-vigente' });
+    const notifier = new FakeInvitationNotifier();
+    notifier.quotaError = new Error('429');
+    await expect(
+      new ResendInvitationUseCase(repo, notifier).execute({
+        id: original.id,
+        linkBase: LINK_BASE,
+      }),
+    ).rejects.toThrow('429');
+    expect(
+      (await repo.findByTokenHash(hashInvitationToken('token-vigente')))?.id,
+    ).toBe(original.id);
+    expect(notifier.quotaChecks).toEqual([original.email]);
+  });
 });

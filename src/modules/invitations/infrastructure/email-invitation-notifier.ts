@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
 import { ClinicRole } from '@prisma/client';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import { describeDeliveryError } from '../../notifications/email/application/retry-policy';
@@ -65,6 +66,27 @@ export class EmailInvitationNotifier implements InvitationNotifier {
         error: describeDeliveryError(err),
       });
       return null;
+    }
+  }
+
+  async assertCanSend(email: string): Promise<void> {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) return;
+    try {
+      await this.outbox.assertWithinQuota(tenantId, email);
+    } catch (err) {
+      if (err instanceof EmailQuotaExceededError) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.TOO_MANY_REQUESTS,
+            error: 'Too Many Requests',
+            message: err.message,
+            retryAfterSeconds: err.retryAfterSeconds,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      throw err;
     }
   }
 

@@ -28,6 +28,7 @@ describe('escape', () => {
 
   it('singleLine quita saltos y controles (asunto sin inyección de cabeceras)', () => {
     expect(singleLine('Hola\r\nBcc: x@y.co\t ')).toBe('Hola Bcc: x@y.co');
+    expect(singleLine('A\u2028B\u2029C\u0085D\u009bE\u007f')).toBe('A B C D E');
   });
 });
 

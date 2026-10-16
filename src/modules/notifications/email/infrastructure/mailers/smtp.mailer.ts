@@ -12,6 +12,37 @@ export const SMTP_TIMEOUTS = {
   socketTimeout: 60_000,
 } as const;
 
+/**
+ * Opciones del transporte a partir de `SMTP_URL` (revisión D2). Se arman a
+ * mano en vez de pasar `{ url }` a nodemailer porque nodemailer lee opciones
+ * de la query de la URL y les da PRIORIDAD (`?ignoreTLS=true`,
+ * `?tls.rejectUnauthorized=false`): aquí la query se ignora siempre (y en
+ * producción la validación del arranque la rechaza). TLS obligatorio:
+ * smtps:// cifra desde el inicio y smtp:// exige STARTTLS (`requireTLS`), así
+ * que un intermediario no puede degradar la conexión a texto plano; TLS ≥ 1.2
+ * y certificado verificado.
+ */
+export function smtpTransportOptions(smtpUrl: string) {
+  const url = new URL(smtpUrl);
+  const secure = url.protocol === 'smtps:';
+  return {
+    host: url.hostname,
+    port: url.port ? Number(url.port) : secure ? 465 : 587,
+    secure,
+    requireTLS: true,
+    tls: { minVersion: 'TLSv1.2' as const, rejectUnauthorized: true },
+    ...(url.username
+      ? {
+          auth: {
+            user: decodeURIComponent(url.username),
+            pass: decodeURIComponent(url.password),
+          },
+        }
+      : {}),
+    ...SMTP_TIMEOUTS,
+  };
+}
+
 /** Lo que el adaptador usa del transporte de nodemailer (sustituible en tests). */
 export interface SmtpTransport {
   sendMail(mail: {
@@ -39,8 +70,7 @@ export class SmtpMailer implements Mailer {
   ) {}
 
   static fromUrl(smtpUrl: string, from: string): SmtpMailer {
-    const transporter = createTransport({ url: smtpUrl, ...SMTP_TIMEOUTS });
-    return new SmtpMailer(from, transporter);
+    return new SmtpMailer(from, createTransport(smtpTransportOptions(smtpUrl)));
   }
 
   async send(message: OutgoingEmail): Promise<void> {

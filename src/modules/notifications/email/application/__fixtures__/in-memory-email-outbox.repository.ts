@@ -16,6 +16,7 @@ export interface StoredOutboxEmail extends NewOutboxEmail {
   nextAttemptAt: Date;
   lastError: string | null;
   sentAt: Date | null;
+  createdAt: Date;
 }
 
 let seq = 0;
@@ -38,6 +39,7 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
       ...row,
       id,
       storedPayload: row.payload,
+      createdAt: new Date(),
       status: 'PENDING',
       attempts: 0,
       nextAttemptAt: new Date(),
@@ -72,8 +74,14 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     );
   }
 
-  settle(id: string, outcome: OutboxSettlement): Promise<boolean> {
-    const row = this.rows.find((r) => r.id === id && r.status === 'SENDING');
+  settle(
+    id: string,
+    attempts: number,
+    outcome: OutboxSettlement,
+  ): Promise<boolean> {
+    const row = this.rows.find(
+      (r) => r.id === id && r.status === 'SENDING' && r.attempts === attempts,
+    );
     if (!row) return Promise.resolve(false);
     row.status = outcome.status;
     row.lastError = outcome.status === 'SENT' ? null : outcome.lastError;
@@ -101,6 +109,37 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
       r.lastError = 'Superseded';
     }
     return Promise.resolve(pending.length);
+  }
+
+  access = { executable: true, ownerBypassesRls: true };
+
+  recentSends(
+    tenantId: string,
+    toHash: string,
+    since: Date,
+  ): Promise<{
+    tenant: number;
+    recipient: number;
+    lastToRecipient: Date | null;
+  }> {
+    const ofTenant = this.rows.filter((r) => r.tenantId === tenantId);
+    const toRecipient = ofTenant.filter((r) => r.toHash === toHash);
+    const last = toRecipient.reduce<Date | null>(
+      (acc, r) => (acc && acc > r.createdAt ? acc : r.createdAt),
+      null,
+    );
+    return Promise.resolve({
+      tenant: ofTenant.filter((r) => r.createdAt >= since).length,
+      recipient: toRecipient.filter((r) => r.createdAt >= since).length,
+      lastToRecipient: last,
+    });
+  }
+
+  dispatcherAccess(): Promise<{
+    executable: boolean;
+    ownerBypassesRls: boolean;
+  }> {
+    return Promise.resolve(this.access);
   }
 
   findBrand(tenantId: string): Promise<{

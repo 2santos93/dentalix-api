@@ -13,6 +13,16 @@ export class FakeInvitationNotifier implements InvitationNotifier {
   }> = [];
   readonly cancelled: string[] = [];
   failNext = false;
+  readonly quotaChecks: string[] = [];
+  /** Si se pone, `assertCanSend` lanza este error (tope alcanzado). */
+  quotaError: Error | null = null;
+
+  assertCanSend(email: string): Promise<void> {
+    this.quotaChecks.push(email);
+    return this.quotaError
+      ? Promise.reject(this.quotaError)
+      : Promise.resolve();
+  }
 
   sendInvitation(input: {
     invitation: ClinicInvitation;

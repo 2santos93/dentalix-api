@@ -40,18 +40,20 @@ function config(overrides: Partial<MailConfig> = {}): MailConfig {
     batchSize: 20,
     encryptionKey: randomBytes(32),
     ephemeralKey: false,
+    production: false,
+    quotas: {
+      tenantDaily: 1000,
+      recipientDaily: 1000,
+      recipientCooldownSeconds: 0,
+    },
     ...overrides,
   };
 }
 
 function services(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
-  const dispatcher = new EmailDispatcher(
-    repo,
-    mailer,
-    cipher,
-    config(overrides),
-  );
-  const outbox = new EmailOutbox(repo, cipher, dispatcher);
+  const cfg = config(overrides);
+  const dispatcher = new EmailDispatcher(repo, mailer, cipher, cfg);
+  const outbox = new EmailOutbox(repo, cipher, dispatcher, cfg);
   return { dispatcher, outbox };
 }
 
@@ -366,6 +368,91 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       status: 'FAILED',
       lastError: 'Superseded',
       payload: null,
+    });
+  });
+
+  it('el arriendo se acota a 900 s aunque se pida más (revisión D1)', async () => {
+    const { outbox, dispatcher } = services(new ConsoleMailer());
+    await dispatcher.onModuleDestroy();
+    const { id } = await outbox.enqueue(invitation(tenantA));
+    await repo.claimDue(1, 2_147_483_647);
+    const lease = (await row(id)).nextAttemptAt.getTime() - Date.now();
+    expect(lease).toBeLessThanOrEqual(901_000);
+    expect(lease).toBeGreaterThan(890_000);
+  });
+
+  it('settle solo cierra SU intento: el cierre tardío de una réplica no pisa al de la que la reclamó después (fencing)', async () => {
+    const { outbox, dispatcher } = services(new ConsoleMailer());
+    await dispatcher.onModuleDestroy();
+    const { id } = await outbox.enqueue(invitation(tenantA));
+    const [first] = await repo.claimDue(1, 300);
+    await owner.emailOutbox.update({
+      where: { id },
+      data: { nextAttemptAt: new Date(Date.now() - 1000) },
+    });
+    const [second] = await repo.claimDue(1, 300);
+    expect([first.attempts, second.attempts]).toEqual([1, 2]);
+
+    expect(await repo.settle(id, first.attempts, { status: 'SENT' })).toBe(
+      false,
+    );
+    expect((await row(id)).status).toBe('SENDING');
+    expect(await repo.settle(id, second.attempts, { status: 'SENT' })).toBe(
+      true,
+    );
+    expect((await row(id)).status).toBe('SENT');
+  });
+
+  it('topes en BD: enfriamiento y máximo diario por destinatario, y máximo diario por clínica', async () => {
+    const { dispatcher } = services(new ConsoleMailer());
+    await dispatcher.onModuleDestroy();
+    const strict = services(new ConsoleMailer(), {
+      quotas: {
+        tenantDaily: 3,
+        recipientDaily: 2,
+        recipientCooldownSeconds: 60,
+      },
+    });
+    await strict.dispatcher.onModuleDestroy();
+    await owner.emailOutbox.deleteMany({ where: { tenantId: tenantB } });
+
+    await strict.outbox.assertWithinQuota(tenantB, EMAIL);
+    await strict.outbox.enqueue(invitation(tenantB));
+    await expect(
+      strict.outbox.assertWithinQuota(tenantB, EMAIL),
+    ).rejects.toThrow(/hace un momento/);
+    // Pasado el enfriamiento, el 2.º vale; el 3.º supera el diario del destinatario.
+    await owner.emailOutbox.updateMany({
+      where: { tenantId: tenantB },
+      data: { createdAt: new Date(Date.now() - 120_000) },
+    });
+    await strict.outbox.enqueue(invitation(tenantB));
+    await owner.emailOutbox.updateMany({
+      where: { tenantId: tenantB },
+      data: { createdAt: new Date(Date.now() - 120_000) },
+    });
+    await expect(
+      strict.outbox.assertWithinQuota(tenantB, EMAIL),
+    ).rejects.toThrow(/últimas 24 horas/);
+    // Otro destinatario sí, hasta el tope de la clínica (3).
+    await strict.outbox.enqueue({
+      ...invitation(tenantB),
+      to: 'otra@clinica-outbox.co',
+    });
+    await expect(
+      strict.outbox.assertWithinQuota(tenantB, 'tercera@clinica-outbox.co'),
+    ).rejects.toThrow(/máximo de 3 correos/);
+    // La clínica A no comparte cuenta con B (A sin envíos propios).
+    await owner.emailOutbox.deleteMany({ where: { tenantId: tenantA } });
+    await expect(
+      strict.outbox.assertWithinQuota(tenantA, 'nadie@clinica-outbox.co'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('el despachador puede trabajar: funciones ejecutables por la app y owner que salta la RLS (revisión D4)', async () => {
+    expect(await repo.dispatcherAccess()).toEqual({
+      executable: true,
+      ownerBypassesRls: true,
     });
   });
 

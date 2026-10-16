@@ -263,14 +263,34 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
 - **RLS**: la tabla lleva la política estándar por clínica. El despachador, que
   trabaja para todas a la vez, y los emails de plataforma (`tenantId` NULL)
   pasan por tres funciones `SECURITY DEFINER` de la migración
-  `20261017110000_email_outbox`, propiedad del owner de las migraciones (que
-  debe saltarse la RLS, como ya exige DX-025) y concedidas solo al rol de la
-  app. Si el rol de la app se crea después de migrar, concédele
+  `20261017120000_email_outbox`, propiedad del owner de las migraciones (que
+  debe saltarse la RLS, como ya exige DX-025) y concedidas explícitamente a
+  `dentalix_app`. El arriendo de un reclamo se acota a 900 s y el cierre de
+  un intento solo vale para ESE intento (fencing por `attempts`). Si el rol de la app se crea después de migrar, concédele
   `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle` y
   `email_outbox_enqueue_platform`.
 - **Producción**: la API **no arranca** sin `MAIL_TRANSPORT="smtp"`,
-  `SMTP_URL` (smtp:// o smtps://), `MAIL_FROM` y `MAIL_ENCRYPTION_KEY`
-  (`openssl rand -hex 32`). Ver `.env.example`.
+  `SMTP_URL` (smtp:// o smtps://, sin `?query`), `MAIL_FROM` y
+  `MAIL_ENCRYPTION_KEY` (`openssl rand -hex 32`), ni con
+  `MAIL_DISPATCH_INTERVAL_MS` < 5000. Tampoco arranca si el despachador no
+  tiene acceso (el rol de la app no puede ejecutar las funciones o su owner no
+  se salta la RLS): es un fallo de despliegue permanente, no un corte de la BD,
+  así que se trata como la configuración inválida y no como la readiness
+  (DX-023). Fuera de producción solo deja un `error`
+  `email.dispatcher_misconfigured`. Ver `.env.example`.
+- **SMTP**: TLS obligatorio (smtps://, o STARTTLS exigido en smtp://), TLS ≥
+  1.2 y certificado verificado; la query de `SMTP_URL` se ignora. El
+  transporte se cierra al apagar.
+- **Anti-abuso** (cualquiera puede registrar una clínica e invitar a
+  cualquier correo): `POST /staff/invitations` y `/:id/resend` llevan la
+  política de rate limit `invitation-email` (por clínica + usuario, 10/min,
+  `RATE_LIMIT_INVITATION_EMAIL_*`) y, contados en la BD (valen entre
+  réplicas), un enfriamiento de 60 s y un máximo de 5 emails/24 h al mismo
+  destinatario de la clínica, y 50 emails/24 h por clínica
+  (`MAIL_RECIPIENT_COOLDOWN_SECONDS`, `MAIL_RECIPIENT_DAILY_LIMIT`,
+  `MAIL_TENANT_DAILY_LIMIT`). Al pasarlos: 429 con el motivo en español, sin
+  tocar la invitación (el enlace vigente sigue valiendo). `fullName` ≤ 120 y
+  `email` ≤ 254 caracteres.
 
 **Invitaciones**: `POST /staff/invitations` encola el email `invitation` con
 el enlace `<protocolo>://<host de la clínica>/invitacion/<token>` (el host con

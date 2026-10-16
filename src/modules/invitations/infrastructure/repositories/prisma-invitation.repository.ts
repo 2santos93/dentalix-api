@@ -120,6 +120,15 @@ export class PrismaInvitationRepository implements InvitationRepository {
     });
   }
 
+  async findPendingById(id: string): Promise<ClinicInvitation | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.clinicInvitation.findFirst({
+        where: { id, acceptedAt: null, revokedAt: null, deletedAt: null },
+      }),
+    );
+    return row ? mapToEntity(row) : null;
+  }
+
   async reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },

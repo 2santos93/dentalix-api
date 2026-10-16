@@ -237,6 +237,16 @@ function mailProblems(env: Env, isProd: boolean): string[] {
         validUrl = false;
       }
     }
+    if (
+      validUrl &&
+      isProd &&
+      smtpUrl != null &&
+      new URL(smtpUrl).search !== ''
+    ) {
+      problems.push(
+        'SMTP_URL no puede llevar parámetros (?...) en producción: nodemailer los aplica por encima de la configuración (p. ej. ?ignoreTLS=true desactivaría TLS).',
+      );
+    }
     if (!validUrl) {
       problems.push(
         'SMTP_URL es obligatoria con MAIL_TRANSPORT="smtp" y tiene que ser una URL smtp:// o smtps:// (p. ej. "smtps://usuario:clave@smtp.proveedor.com:465").',
@@ -268,18 +278,29 @@ function mailProblems(env: Env, isProd: boolean): string[] {
     );
   }
 
+  const interval = str(env, 'MAIL_DISPATCH_INTERVAL_MS');
+  if (
+    isProd &&
+    interval != null &&
+    /^\d{1,9}$/.test(interval.trim()) &&
+    Number(interval) < 5000
+  ) {
+    problems.push(
+      'MAIL_DISPATCH_INTERVAL_MS debe ser ≥ 5000 en producción: sin barrido, los reintentos y los envíos de una réplica caída no se recogen nunca.',
+    );
+  }
+
   for (const [key, min] of [
     ['MAIL_DISPATCH_INTERVAL_MS', 0],
     ['MAIL_RETRY_BASE_MS', 1],
+    ['MAIL_TENANT_DAILY_LIMIT', 1],
+    ['MAIL_RECIPIENT_DAILY_LIMIT', 1],
+    ['MAIL_RECIPIENT_COOLDOWN_SECONDS', 0],
   ] as const) {
     const raw = str(env, key);
     if (raw == null) continue;
     if (!/^\d{1,9}$/.test(raw.trim()) || Number(raw) < min) {
-      problems.push(
-        min === 0
-          ? `${key} debe ser un entero de milisegundos ≥ 0 (0 lo desactiva).`
-          : `${key} debe ser un entero de milisegundos ≥ ${min}.`,
-      );
+      problems.push(`${key} debe ser un entero ≥ ${min}.`);
     }
   }
 

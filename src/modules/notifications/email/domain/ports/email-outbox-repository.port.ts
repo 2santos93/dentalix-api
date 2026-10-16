@@ -39,8 +39,40 @@ export interface EmailOutboxRepository {
    */
   claimDue(limit: number, leaseSeconds: number): Promise<ClaimedOutboxEmail[]>;
 
-  /** Cierra un intento reclamado. Devuelve si la fila seguía en SENDING. */
-  settle(id: string, outcome: OutboxSettlement): Promise<boolean>;
+  /**
+   * Cierra el intento número `attempts` de una fila reclamada. Devuelve si la
+   * fila seguía en SENDING en ESE intento (si otra réplica la reclamó tras
+   * vencer el arriendo, el cierre tardío no la pisa).
+   */
+  settle(
+    id: string,
+    attempts: number,
+    outcome: OutboxSettlement,
+  ): Promise<boolean>;
+
+  /**
+   * Envíos de la clínica creados desde `since` (todos los estados), en total o
+   * solo al destinatario `toHash`, y el más reciente a ese destinatario. Para
+   * los topes anti-abuso.
+   */
+  recentSends(
+    tenantId: string,
+    toHash: string,
+    since: Date,
+  ): Promise<{
+    tenant: number;
+    recipient: number;
+    lastToRecipient: Date | null;
+  }>;
+
+  /**
+   * ¿Puede el despachador trabajar? Las funciones existen, este rol puede
+   * ejecutarlas y su owner se salta la RLS (superusuario o BYPASSRLS).
+   */
+  dispatcherAccess(): Promise<{
+    executable: boolean;
+    ownerBypassesRls: boolean;
+  }>;
 
   /**
    * Cancela (FAILED, sin mensaje) los envíos aún PENDING de esa referencia en

@@ -22,6 +22,8 @@ describe('loadRateLimitConfig', () => {
     // por UNA IP; el refresh es un JWT firmado (no se adivina), así que su
     // límite es holgado y va aparte del de login/register.
     expect(cfg.refresh).toEqual({ limit: 120, ttlMs: 60_000 });
+    // DX-088: invitar/reenviar, por clínica + usuario.
+    expect(cfg['invitation-email']).toEqual({ limit: 10, ttlMs: 60_000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {

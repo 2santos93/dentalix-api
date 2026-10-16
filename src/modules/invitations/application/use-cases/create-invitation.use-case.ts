@@ -67,6 +67,12 @@ export class CreateInvitationUseCase {
 
     // "Reenviar" = superseder la invitación pendiente anterior, nunca
     // apilarla — así solo hay un token válido vigente por correo.
+    // Topes anti-abuso ANTES de tocar nada: si no se puede mandar el email,
+    // no se revoca la anterior ni se crea otra.
+    if (input.linkBase) {
+      await this.notifier.assertCanSend(email);
+    }
+
     const revokedIds = await this.repo.revokePendingByEmail(email);
     // Su email, si seguía pendiente, llevaría un enlace que ya no sirve.
     for (const id of revokedIds) {

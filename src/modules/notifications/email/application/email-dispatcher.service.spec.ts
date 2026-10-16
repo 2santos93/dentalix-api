@@ -7,6 +7,7 @@ import { MailConfig } from '../infrastructure/mail-config';
 import { InMemoryEmailOutboxRepository } from './__fixtures__/in-memory-email-outbox.repository';
 import { EmailDispatcher } from './email-dispatcher.service';
 import { EmailOutbox } from './email-outbox.service';
+import { EmailQuotaExceededError } from '../domain/email-quota-exceeded.error';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 
@@ -22,6 +23,12 @@ function setup(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
     batchSize: 20,
     encryptionKey: key,
     ephemeralKey: false,
+    production: false,
+    quotas: {
+      tenantDaily: 1000,
+      recipientDaily: 1000,
+      recipientCooldownSeconds: 0,
+    },
     ...overrides,
   };
   const repo = new InMemoryEmailOutboxRepository();
@@ -32,7 +39,7 @@ function setup(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
   });
   const cipher = new EmailPayloadCipher(key);
   const dispatcher = new EmailDispatcher(repo, mailer, cipher, config);
-  const outbox = new EmailOutbox(repo, cipher, dispatcher);
+  const outbox = new EmailOutbox(repo, cipher, dispatcher, config);
   return { repo, cipher, dispatcher, outbox, config };
 }
 
@@ -244,7 +251,7 @@ describe('EmailOutbox + EmailDispatcher', () => {
     const mailer = new RecordingMailer();
     const { dispatcher, repo } = setup(mailer, { dispatchIntervalMs: 1_000 });
     const claim = jest.spyOn(repo, 'claimDue');
-    dispatcher.onApplicationBootstrap();
+    await dispatcher.onApplicationBootstrap();
     expect(claim).toHaveBeenCalledTimes(1);
     await dispatcher.whenIdle();
     jest.advanceTimersByTime(1_000);
@@ -256,11 +263,92 @@ describe('EmailOutbox + EmailDispatcher', () => {
     expect(claim).toHaveBeenCalledTimes(2);
   });
 
-  it('con el barrido a 0 no programa nada', () => {
+  it('con el barrido a 0 no programa nada', async () => {
     const spy = jest.spyOn(global, 'setInterval');
     const { dispatcher } = setup(new RecordingMailer());
-    dispatcher.onApplicationBootstrap();
+    await dispatcher.onApplicationBootstrap();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  describe('acceso del despachador al arrancar (revisión D4)', () => {
+    it('en producción, sin acceso, la API no arranca', async () => {
+      const { dispatcher, repo } = setup(new RecordingMailer(), {
+        production: true,
+      });
+      repo.access = { executable: true, ownerBypassesRls: false };
+      await expect(dispatcher.onApplicationBootstrap()).rejects.toThrow(
+        /BYPASSRLS/,
+      );
+      repo.access = { executable: false, ownerBypassesRls: true };
+      await expect(dispatcher.onApplicationBootstrap()).rejects.toThrow(
+        /EXECUTE/,
+      );
+    });
+
+    it('fuera de producción solo lo registra; con la BD caída no decide nada', async () => {
+      const { dispatcher, repo } = setup(new RecordingMailer());
+      repo.access = { executable: false, ownerBypassesRls: false };
+      await expect(
+        dispatcher.onApplicationBootstrap(),
+      ).resolves.toBeUndefined();
+      const prod = setup(new RecordingMailer(), { production: true });
+      jest
+        .spyOn(prod.repo, 'dispatcherAccess')
+        .mockRejectedValueOnce(new Error('db down'));
+      await expect(prod.dispatcher.onModuleDestroy()).resolves.toBeUndefined();
+      await expect(
+        prod.dispatcher.onApplicationBootstrap(),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  it('al apagar cierra el transporte del proveedor', async () => {
+    const close = jest.fn();
+    const mailer: Mailer = { send: () => Promise.resolve(), close };
+    const { dispatcher } = setup(mailer);
+    await dispatcher.onModuleDestroy();
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('topes: enfriamiento por destinatario, máximo diario por destinatario y por clínica', async () => {
+    const { outbox, dispatcher, repo } = setup(new RecordingMailer(), {
+      quotas: {
+        tenantDaily: 3,
+        recipientDaily: 2,
+        recipientCooldownSeconds: 60,
+      },
+    });
+    await dispatcher.onModuleDestroy();
+    await outbox.assertWithinQuota(TENANT, invitationInput.to);
+    await outbox.enqueue(invitationInput);
+    await expect(
+      outbox.assertWithinQuota(TENANT, ' ANA.perez@clinica.co '),
+    ).rejects.toBeInstanceOf(EmailQuotaExceededError);
+    for (const r of repo.rows) r.createdAt = new Date(Date.now() - 120_000);
+    await outbox.enqueue(invitationInput);
+    for (const r of repo.rows) r.createdAt = new Date(Date.now() - 120_000);
+    await expect(
+      outbox.assertWithinQuota(TENANT, invitationInput.to),
+    ).rejects.toThrow('2 correos a esta persona');
+    await outbox.enqueue({ ...invitationInput, to: 'otra@clinica.co' });
+    await expect(
+      outbox.assertWithinQuota(TENANT, 'tercera@clinica.co'),
+    ).rejects.toThrow('máximo de 3 correos');
+  });
+
+  it('el cierre tardío de un intento ya re-reclamado no pisa el estado (fencing)', async () => {
+    const { repo, outbox, dispatcher } = setup(new RecordingMailer());
+    await dispatcher.onModuleDestroy();
+    await outbox.enqueue(invitationInput);
+    const [first] = await repo.claimDue(1, 300);
+    repo.rows[0].nextAttemptAt = new Date(Date.now() - 1);
+    const [second] = await repo.claimDue(1, 300);
+    expect(
+      await repo.settle(first.id, first.attempts, { status: 'SENT' }),
+    ).toBe(false);
+    expect(
+      await repo.settle(second.id, second.attempts, { status: 'SENT' }),
+    ).toBe(true);
   });
 });

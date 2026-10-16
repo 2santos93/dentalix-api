@@ -12,6 +12,8 @@ import {
   INVITATION_TTL_MS,
 } from './create-invitation.use-case';
 
+const NOT_PENDING = 'No encontramos una invitación pendiente con ese id.';
+
 export interface ResendInvitationInput {
   id: string;
   /** Origen público de la web de la clínica, para el enlace del email. */
@@ -34,6 +36,14 @@ export class ResendInvitationUseCase {
   ) {}
 
   async execute(input: ResendInvitationInput): Promise<CreateInvitationResult> {
+    const pending = await this.repo.findPendingById(input.id);
+    if (!pending) {
+      throw new NotFoundException(NOT_PENDING);
+    }
+    // Topes anti-abuso antes de regenerar: con 429 el enlace vigente sigue
+    // valiendo.
+    await this.notifier.assertCanSend(pending.email);
+
     const token = generateInvitationToken();
     const invitation = await this.repo.reissue(input.id, {
       tokenHash: hashInvitationToken(token),
@@ -41,9 +51,7 @@ export class ResendInvitationUseCase {
     });
     if (!invitation) {
       // Otra clínica (RLS), aceptada, revocada o inexistente: nada que reenviar.
-      throw new NotFoundException(
-        'No encontramos una invitación pendiente con ese id.',
-      );
+      throw new NotFoundException(NOT_PENDING);
     }
 
     const emailDelivery = await this.notifier.sendInvitation({

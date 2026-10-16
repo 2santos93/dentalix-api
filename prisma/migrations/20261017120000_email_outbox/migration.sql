@@ -27,8 +27,7 @@
 -- row-level security policy" en vez de devolver 0 filas en silencio.
 --
 -- Grants: ALTER DEFAULT PRIVILEGES ya cubre a dentalix_app en la tabla. Las
--- funciones se retiran de PUBLIC y se conceden a los roles que ya pueden
--- escribir en clinic_invitations (el rol de la app, se llame como se llame).
+-- funciones se retiran de PUBLIC y se conceden explícitamente a dentalix_app.
 
 -- ---------------------------------------------------------------------------
 -- 1. Enums
@@ -81,6 +80,11 @@ CREATE INDEX "email_outbox_status_nextAttemptAt_idx" ON "email_outbox"("status",
 -- Indexa además el lado hijo de la FK a tenants.
 CREATE INDEX "email_outbox_tenantId_referenceId_createdAt_idx" ON "email_outbox"("tenantId", "referenceId", "createdAt" DESC);
 
+-- Topes anti-abuso (DX-088, revisión B1): envíos al mismo destinatario en la
+-- clínica (enfriamiento y máximo diario) y envíos de la clínica en el día.
+CREATE INDEX "email_outbox_tenantId_toHash_createdAt_idx" ON "email_outbox"("tenantId", "toHash", "createdAt" DESC);
+CREATE INDEX "email_outbox_tenantId_createdAt_idx" ON "email_outbox"("tenantId", "createdAt" DESC);
+
 -- CASCADE a propósito (como appointment_confirmations): el registro es dato
 -- derivado de la clínica y los tenants nunca se borran en duro en el producto;
 -- así una limpieza administrativa no queda bloqueada por envíos.
@@ -101,7 +105,8 @@ CREATE POLICY tenant_isolation ON "email_outbox"
 -- ---------------------------------------------------------------------------
 
 -- Reclama hasta p_limit envíos vencidos de cualquier clínica: los pasa a
--- SENDING, suma un intento y les da un arriendo de p_lease_seconds. Un
+-- SENDING, suma un intento y les da un arriendo de p_lease_seconds (acotado a
+-- [1, 900] s: nadie puede "aparcar" filas durante años). Un
 -- SENDING cuyo arriendo venció (la réplica murió a mitad) vuelve a ser
 -- reclamable. FOR UPDATE SKIP LOCKED: dos réplicas nunca reclaman la misma
 -- fila ni se esperan entre sí.
@@ -117,7 +122,7 @@ AS $$
      SET "status" = 'SENDING',
          "attempts" = o."attempts" + 1,
          "nextAttemptAt" = timezone('utc', now())
-                           + make_interval(secs => greatest(p_lease_seconds, 1)),
+                           + make_interval(secs => least(greatest(p_lease_seconds, 1), 900)),
          "updatedAt" = timezone('utc', now())
    WHERE o."id" IN (
      SELECT c."id"
@@ -132,10 +137,14 @@ AS $$
 $$;
 
 -- Cierra un intento reclamado: SENT, FAILED (definitivo) o de vuelta a
--- PENDING con su próximo intento. Solo actúa sobre una fila en SENDING, y al
--- terminar borra el mensaje cifrado. Devuelve si cerró algo.
+-- PENDING con su próximo intento. Solo actúa sobre una fila en SENDING Y en
+-- el MISMO intento que se reclamó (p_attempts, "fencing"): si el arriendo
+-- venció y otra réplica la reclamó de nuevo, el cierre tardío del primero no
+-- pisa el del segundo. Al terminar borra el mensaje cifrado. Devuelve si cerró
+-- algo.
 CREATE FUNCTION email_outbox_settle(
   p_id uuid,
+  p_attempts integer,
   p_status "EmailOutboxStatus",
   p_next_attempt_at timestamp(3),
   p_last_error text
@@ -164,7 +173,7 @@ BEGIN
          "sentAt" = CASE WHEN p_status = 'SENT' THEN timezone('utc', now()) ELSE "sentAt" END,
          "payload" = CASE WHEN p_status IN ('SENT', 'FAILED') THEN NULL ELSE "payload" END,
          "updatedAt" = timezone('utc', now())
-   WHERE "id" = p_id AND "status" = 'SENDING';
+   WHERE "id" = p_id AND "status" = 'SENDING' AND "attempts" = p_attempts;
   GET DIAGNOSTICS affected = ROW_COUNT;
   RETURN affected > 0;
 END;
@@ -198,25 +207,18 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION email_outbox_claim(integer, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION email_outbox_settle(uuid, "EmailOutboxStatus", timestamp(3), text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION email_outbox_settle(uuid, integer, "EmailOutboxStatus", timestamp(3), text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION email_outbox_enqueue_platform("EmailTemplate", text, text, bytea, uuid) FROM PUBLIC;
 
+-- GRANT explícito al rol de la app (revisión M3), no a "quien pueda escribir
+-- en X": un rol futuro (soporte, analítica) no lo hereda en silencio. En una
+-- BD cuyo rol de la app tenga otro nombre, concede EXECUTE a mano (README).
 DO $$
-DECLARE
-  app_role text;
 BEGIN
-  FOR app_role IN
-    SELECT DISTINCT r.rolname
-      FROM pg_class c
-      CROSS JOIN LATERAL aclexplode(c.relacl) AS a
-      JOIN pg_roles r ON r.oid = a.grantee
-     WHERE c.oid = 'public.clinic_invitations'::regclass
-       AND a.privilege_type = 'INSERT'
-       AND a.grantee <> c.relowner
-  LOOP
-    EXECUTE format('GRANT EXECUTE ON FUNCTION email_outbox_claim(integer, integer) TO %I', app_role);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION email_outbox_settle(uuid, "EmailOutboxStatus", timestamp(3), text) TO %I', app_role);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION email_outbox_enqueue_platform("EmailTemplate", text, text, bytea, uuid) TO %I', app_role);
-  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dentalix_app') THEN
+    GRANT EXECUTE ON FUNCTION email_outbox_claim(integer, integer) TO dentalix_app;
+    GRANT EXECUTE ON FUNCTION email_outbox_settle(uuid, integer, "EmailOutboxStatus", timestamp(3), text) TO dentalix_app;
+    GRANT EXECUTE ON FUNCTION email_outbox_enqueue_platform("EmailTemplate", text, text, bytea, uuid) TO dentalix_app;
+  END IF;
 END;
 $$;

@@ -26,6 +26,7 @@ const LOW_LIMITS: RateLimitConfig = {
   password: { limit: 2, ttlMs: 60_000 },
   confirmation: { limit: 2, ttlMs: 60_000 },
   refresh: { limit: 4, ttlMs: 60_000 },
+  'invitation-email': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -207,6 +208,39 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await change('user-1'));
       // Otro usuario de la misma clínica (misma IP por NAT) no queda bloqueado.
       expect((await change('user-2')).status).toBe(401);
+    });
+
+    it('invitar y reenviar: 429 por clínica+usuario, no por IP (DX-088)', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const invite = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post('/api/v1/staff/invitations')
+          .set('Authorization', bearer(sub, tenantId))
+          .send({ fullName: 'Ana', email: 'ana@x.co', role: 'ASSISTANT' });
+      const resend = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post(
+            '/api/v1/staff/invitations/00000000-0000-4000-8000-000000000000/resend',
+          )
+          .set('Authorization', bearer(sub, tenantId));
+      for (let i = 0; i < LOW_LIMITS['invitation-email'].limit; i++) {
+        expect((await invite('admin-1', 'clinica-1')).status).toBe(401);
+      }
+      expectTooMany(await invite('admin-1', 'clinica-1'));
+      // Mismo usuario en otra clínica, u otro ADMIN de la clínica: su balde.
+      expect((await invite('admin-1', 'clinica-2')).status).toBe(401);
+      expect((await invite('admin-2', 'clinica-1')).status).toBe(401);
+      // Reenviar tiene su propio balde (por ruta) con la misma política.
+      for (let i = 0; i < LOW_LIMITS['invitation-email'].limit; i++) {
+        expect((await resend('admin-1', 'clinica-1')).status).toBe(401);
+      }
+      expectTooMany(await resend('admin-1', 'clinica-1'));
     });
 
     it('health nunca se limita (@SkipThrottle)', async () => {

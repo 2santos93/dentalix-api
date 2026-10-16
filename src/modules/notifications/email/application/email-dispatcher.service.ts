@@ -57,12 +57,45 @@ export class EmailDispatcher
     @Inject(MAIL_CONFIG) private readonly config: MailConfig,
   ) {}
 
-  onApplicationBootstrap(): void {
+  async onApplicationBootstrap(): Promise<void> {
+    await this.verifyAccess();
     if (this.config.dispatchIntervalMs <= 0) return;
     this.timer = setInterval(() => this.kick(), this.config.dispatchIntervalMs);
     // El barrido no mantiene vivo el proceso por sí solo.
     this.timer.unref();
     this.kick();
+  }
+
+  /**
+   * Revisión D4: si el rol de la app no puede ejecutar las funciones del
+   * despachador o su owner no se salta la RLS, ningún email saldría nunca y
+   * la web diría «Pendiente» para siempre. En producción la API NO ARRANCA
+   * (como con la configuración inválida: es un fallo de despliegue, no un
+   * corte pasajero de la BD, que es lo que mide /health/ready). Fuera de
+   * producción, una línea `error`. Si la BD no responde en este momento, no
+   * se decide nada aquí (eso sí es cosa de la readiness).
+   */
+  private async verifyAccess(): Promise<void> {
+    let access: { executable: boolean; ownerBypassesRls: boolean };
+    try {
+      access = await this.repo.dispatcherAccess();
+    } catch (err) {
+      this.logger.warn({
+        event: 'email.dispatcher_check_failed',
+        error: describeDeliveryError(err),
+      });
+      return;
+    }
+    if (access.executable && access.ownerBypassesRls) return;
+    const hint = !access.executable
+      ? 'El rol de la app no puede ejecutar email_outbox_claim/settle/enqueue_platform: concédele EXECUTE (README, «Email transaccional»).'
+      : 'El owner de las funciones email_outbox_* no se salta la RLS: tiene que ser superusuario o tener BYPASSRLS (el mismo requisito que las migraciones, DX-025).';
+    this.logger.error({ event: 'email.dispatcher_misconfigured', hint });
+    if (this.config.production) {
+      throw new Error(
+        `Configuración inválida; la API no arranca:\n- Despachador de email sin acceso. ${hint}`,
+      );
+    }
   }
 
   /** Apagado ordenado: sin barridos nuevos y esperando la tanda en vuelo. */
@@ -82,6 +115,7 @@ export class EmailDispatcher
       ]);
       clearTimeout(grace);
     }
+    this.mailer.close?.();
   }
 
   /**
@@ -183,7 +217,7 @@ export class EmailDispatcher
       | { status: 'FAILED'; lastError: string }
       | { status: 'PENDING'; lastError: string; nextAttemptAt: Date },
   ): Promise<void> {
-    await this.repo.settle(email.id, outcome);
+    await this.repo.settle(email.id, email.attempts, outcome);
     const fields = {
       event: `email.${outcome.status.toLowerCase()}`,
       outboxId: email.id,

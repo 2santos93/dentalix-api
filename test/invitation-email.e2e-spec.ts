@@ -8,6 +8,10 @@ import type { Mailer } from '../src/modules/notifications/email/domain/ports/mai
 import type { OutgoingEmail } from '../src/modules/notifications/email/domain/email-message';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { createE2eApp } from './support/create-e2e-app';
+import {
+  MAIL_CONFIG,
+  loadMailConfig,
+} from '../src/modules/notifications/email/infrastructure/mail-config';
 import { hostFor } from './support/tenant-host';
 
 // DX-088 (e2e): invitar encola el email con el enlace del host de la clínica
@@ -364,6 +368,91 @@ describe('Email de invitación (e2e, DX-088)', () => {
         lastError: 'Superseded',
         payload: null,
       });
+    });
+  });
+
+  it('fullName y email con longitud máxima (120 / 254): 400', async () => {
+    await api('post', '/staff/invitations')
+      .send({
+        fullName: 'x'.repeat(121),
+        email: 'largo@mail-e2e.test',
+        role: 'ASSISTANT',
+      })
+      .expect(400);
+    await api('post', '/staff/invitations')
+      .send({
+        fullName: 'Ana',
+        email: `${'a'.repeat(250)}@mail-e2e.test`,
+        role: 'ASSISTANT',
+      })
+      .expect(400);
+  });
+
+  describe('topes anti-abuso en BD (revisión B1)', () => {
+    let limited: INestApplication<App>;
+
+    beforeAll(async () => {
+      limited = await createE2eApp({
+        override: (builder) => {
+          builder.overrideProvider(MAILER).useValue(mailer);
+          builder.overrideProvider(MAIL_CONFIG).useValue({
+            ...loadMailConfig((key) => process.env[key]),
+            quotas: {
+              tenantDaily: 50,
+              recipientDaily: 5,
+              recipientCooldownSeconds: 60,
+            },
+          });
+        },
+      });
+    });
+
+    afterAll(async () => {
+      await limited.get(EmailDispatcher).whenIdle();
+      await limited.close();
+    });
+
+    const call = (verb: 'post', path: string) =>
+      request(limited.getHttpServer())
+        [verb](`/api/v1${path}`)
+        .set('X-Tenant-Host', HOST)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+    it('reenviar al momento → 429 en español, y el enlace vigente sigue valiendo', async () => {
+      const created = (
+        await call('post', '/staff/invitations')
+          .send({
+            fullName: 'Tope',
+            email: 'tope@mail-e2e.test',
+            role: 'ASSISTANT',
+          })
+          .expect(201)
+      ).body as CreatedInvitation;
+
+      const res = await call(
+        'post',
+        `/staff/invitations/${created.id}/resend`,
+      ).expect(429);
+      expect((res.body as { message: string }).message).toMatch(
+        /^Ya enviamos un correo a esta persona hace un momento\. Espera \d+ segundos/,
+      );
+      // Invitar otra vez al mismo correo tampoco esquiva el tope.
+      await call('post', '/staff/invitations')
+        .send({
+          fullName: 'Tope',
+          email: 'tope@mail-e2e.test',
+          role: 'ASSISTANT',
+        })
+        .expect(429);
+
+      const lookup = await request(limited.getHttpServer())
+        .get(`/api/v1/public/invitations/${created.token}`)
+        .set('X-Tenant-Host', HOST)
+        .expect(200);
+      expect((lookup.body as { status: string }).status).toBe('VALID');
+      expect(
+        await raw.emailOutbox.count({ where: { referenceId: created.id } }),
+      ).toBe(1);
     });
   });
 });

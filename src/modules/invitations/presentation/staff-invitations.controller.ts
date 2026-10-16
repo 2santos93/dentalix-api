@@ -36,6 +36,7 @@ import { STAFF_WRITE_ROLES } from '../../auth/presentation/guards/clinic-role-se
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { invitationStatus } from '../application/invitation-token';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import {
   PublicWebProtocol,
@@ -91,6 +92,8 @@ export class StaffInvitationsController {
   }
 
   @Post()
+  // Cada una manda un email: límite por clínica + usuario (DX-088, B1).
+  @RateLimit('invitation-email')
   @ApiOperation({
     summary:
       'Invita a una persona: crea la invitación y encola el email con el enlace (se envía en segundo plano)',
@@ -111,6 +114,7 @@ export class StaffInvitationsController {
 
   @Post(':id/resend')
   @HttpCode(200)
+  @RateLimit('invitation-email')
   @ApiOperation({
     summary:
       'Reenvía una invitación pendiente: token nuevo (el anterior deja de servir), 7 días más y un email nuevo',

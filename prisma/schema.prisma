@@ -1443,7 +1443,7 @@ enum EmailTemplate {
 /// ni el token en claro: `toHash` (HMAC-SHA256) y `toMasked` identifican al
 /// destinatario y `payload` es el mensaje renderizado cifrado con AES-256-GCM
 /// (MAIL_ENCRYPTION_KEY), que se borra al quedar SENT o FAILED. Ver la
-/// migración 20261017110000_email_outbox.
+/// migración 20261017120000_email_outbox.
 model EmailOutbox {
   id            String            @id @default(uuid()) @db.Uuid
   /// NULL = email de plataforma (sin clínica); solo lo inserta y lo lee la
@@ -1470,5 +1470,7 @@ model EmailOutbox {
 
   @@index([status, nextAttemptAt])
   @@index([tenantId, referenceId, createdAt(sort: Desc)])
+  @@index([tenantId, toHash, createdAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc)])
   @@map("email_outbox")
 }

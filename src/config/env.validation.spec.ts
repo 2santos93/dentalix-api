@@ -316,6 +316,40 @@ describe('validateEnv', () => {
       ).toContain('MAIL_ENCRYPTION_KEY');
     });
 
+    it('producción rechaza SMTP_URL con query (nodemailer la leería: ?ignoreTLS=true)', () => {
+      const msg = errorOf(
+        prodEnv({
+          SMTP_URL: 'smtp://u:Secreto99@smtp.x.com:587?ignoreTLS=true',
+        }),
+      );
+      expect(msg).toContain('SMTP_URL');
+      expect(msg).not.toContain('Secreto99');
+    });
+
+    it('producción exige un barrido de al menos 5000 ms (si no, los reintentos no corren)', () => {
+      expect(errorOf(prodEnv({ MAIL_DISPATCH_INTERVAL_MS: '0' }))).toContain(
+        'MAIL_DISPATCH_INTERVAL_MS',
+      );
+      expect(errorOf(prodEnv({ MAIL_DISPATCH_INTERVAL_MS: '4999' }))).toContain(
+        'MAIL_DISPATCH_INTERVAL_MS',
+      );
+      expect(() =>
+        validateEnv(prodEnv({ MAIL_DISPATCH_INTERVAL_MS: '5000' })),
+      ).not.toThrow();
+    });
+
+    it('topes de envío: enteros positivos (enfriamiento ≥ 0)', () => {
+      expect(errorOf(baseEnv({ MAIL_TENANT_DAILY_LIMIT: '0' }))).toContain(
+        'MAIL_TENANT_DAILY_LIMIT',
+      );
+      expect(errorOf(baseEnv({ MAIL_RECIPIENT_DAILY_LIMIT: 'x' }))).toContain(
+        'MAIL_RECIPIENT_DAILY_LIMIT',
+      );
+      expect(() =>
+        validateEnv(baseEnv({ MAIL_RECIPIENT_COOLDOWN_SECONDS: '0' })),
+      ).not.toThrow();
+    });
+
     it('intervalos: enteros no negativos (0 apaga el barrido)', () => {
       expect(() =>
         validateEnv(baseEnv({ MAIL_DISPATCH_INTERVAL_MS: '0' })),

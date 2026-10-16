@@ -45,6 +45,9 @@ export interface InvitationRepository {
   /** Revoca la invitación por id. Devuelve si afectó una fila. */
   revokeById(id: string): Promise<boolean>;
 
+  /** Invitación aún no aceptada ni revocada (caducada o no) por id, o `null`. */
+  findPendingById(id: string): Promise<ClinicInvitation | null>;
+
   /**
    * «Reenviar invitación» (DX-088): a una invitación aún no aceptada ni
    * revocada (caducada o no) le pone un token y una caducidad nuevos. El hash

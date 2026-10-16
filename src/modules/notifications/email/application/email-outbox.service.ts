@@ -8,6 +8,9 @@ import {
 import { EMAIL_OUTBOX_REPOSITORY } from '../domain/ports/email-outbox-repository.port';
 import type { EmailOutboxRepository } from '../domain/ports/email-outbox-repository.port';
 import { EmailPayloadCipher } from '../infrastructure/email-payload-cipher';
+import { MAIL_CONFIG } from '../infrastructure/mail-config';
+import type { MailConfig } from '../infrastructure/mail-config';
+import { EmailQuotaExceededError } from '../domain/email-quota-exceeded.error';
 import { maskEmail } from '../../../../shared/privacy/mask-email';
 import { EmailDispatcher } from './email-dispatcher.service';
 import { renderEmail } from './templates/templates';
@@ -38,7 +41,50 @@ export class EmailOutbox {
     private readonly repo: EmailOutboxRepository,
     private readonly cipher: EmailPayloadCipher,
     private readonly dispatcher: EmailDispatcher,
+    @Inject(MAIL_CONFIG) private readonly config: MailConfig,
   ) {}
+
+  /**
+   * Topes anti-abuso (DX-088, revisión B1), contados en la BD (valen con
+   * varias réplicas): como mucho un email cada N s y M al día al MISMO
+   * destinatario de la clínica (cubre reenviar e invitar otra vez al mismo
+   * correo), y un máximo diario por clínica. Se llama ANTES de cambiar nada
+   * (crear la invitación, regenerar el token). Lanza EmailQuotaExceededError.
+   */
+  async assertWithinQuota(tenantId: string, to: string): Promise<void> {
+    const { quotas } = this.config;
+    const now = Date.now();
+    const dayAgo = new Date(now - 24 * 60 * 60 * 1000);
+    const sends = await this.repo.recentSends(
+      tenantId,
+      this.cipher.hashRecipient(to),
+      dayAgo,
+    );
+    if (sends.lastToRecipient && quotas.recipientCooldownSeconds > 0) {
+      const elapsed = Math.floor(
+        (now - sends.lastToRecipient.getTime()) / 1000,
+      );
+      if (elapsed < quotas.recipientCooldownSeconds) {
+        const wait = quotas.recipientCooldownSeconds - elapsed;
+        throw new EmailQuotaExceededError(
+          `Ya enviamos un correo a esta persona hace un momento. Espera ${wait} ${wait === 1 ? 'segundo' : 'segundos'} antes de volver a enviarlo.`,
+          wait,
+        );
+      }
+    }
+    if (sends.recipient >= quotas.recipientDaily) {
+      throw new EmailQuotaExceededError(
+        `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana o comparte el enlace por otro medio.`,
+        60 * 60,
+      );
+    }
+    if (sends.tenant >= quotas.tenantDaily) {
+      throw new EmailQuotaExceededError(
+        `La clínica alcanzó el máximo de ${quotas.tenantDaily} correos en 24 horas. Vuelve a intentarlo más tarde o escribe a soporte si necesitas más.`,
+        60 * 60,
+      );
+    }
+  }
 
   async enqueue<T extends EmailTemplateName>(
     input: EnqueueEmailInput<T>,

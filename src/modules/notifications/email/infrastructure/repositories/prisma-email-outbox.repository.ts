@@ -20,7 +20,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
  * Persistencia del registro de envíos. Desde una petición (encolar, cancelar
  * pendientes) se escribe con `runWithTenant`, bajo la RLS de la clínica. El
  * despachador, que trabaja para todas las clínicas a la vez, pasa por las
- * funciones SECURITY DEFINER de la migración 20261017110000_email_outbox
+ * funciones SECURITY DEFINER de la migración 20261017120000_email_outbox
  * (reclamar, cerrar) y los emails de plataforma (sin clínica) se insertan por
  * la suya.
  */
@@ -76,13 +76,18 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     }));
   }
 
-  async settle(id: string, outcome: OutboxSettlement): Promise<boolean> {
+  async settle(
+    id: string,
+    attempts: number,
+    outcome: OutboxSettlement,
+  ): Promise<boolean> {
     const next =
       outcome.status === 'PENDING' ? outcome.nextAttemptAt.toISOString() : null;
     const lastError = outcome.status === 'SENT' ? null : outcome.lastError;
     const [result] = await this.prisma.$queryRaw<{ settled: boolean }[]>`
       SELECT email_outbox_settle(
         ${id}::uuid,
+        ${attempts}::int,
         ${outcome.status}::"EmailOutboxStatus",
         (${next}::timestamptz AT TIME ZONE 'UTC')::timestamp(3),
         ${lastError}
@@ -110,6 +115,50 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
       });
       return result.count;
     });
+  }
+
+  async recentSends(
+    tenantId: string,
+    toHash: string,
+    since: Date,
+  ): Promise<{
+    tenant: number;
+    recipient: number;
+    lastToRecipient: Date | null;
+  }> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const [tenant, recipient, last] = await Promise.all([
+        tx.emailOutbox.count({ where: { createdAt: { gte: since } } }),
+        tx.emailOutbox.count({ where: { toHash, createdAt: { gte: since } } }),
+        tx.emailOutbox.findFirst({
+          where: { toHash },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        }),
+      ]);
+      return { tenant, recipient, lastToRecipient: last?.createdAt ?? null };
+    });
+  }
+
+  async dispatcherAccess(): Promise<{
+    executable: boolean;
+    ownerBypassesRls: boolean;
+  }> {
+    const rows = await this.prisma.$queryRaw<
+      { executable: boolean; bypass: boolean }[]
+    >`
+      SELECT bool_and(has_function_privilege(p.oid, 'EXECUTE')) AS executable,
+             bool_and(r.rolsuper OR r.rolbypassrls) AS bypass
+        FROM pg_proc p
+        JOIN pg_roles r ON r.oid = p.proowner
+       WHERE p.proname IN ('email_outbox_claim', 'email_outbox_settle',
+                           'email_outbox_enqueue_platform')
+      HAVING count(*) = 3`;
+    const row = rows[0];
+    return {
+      executable: row?.executable ?? false,
+      ownerBypassesRls: row?.bypass ?? false,
+    };
   }
 
   async findBrand(tenantId: string): Promise<{

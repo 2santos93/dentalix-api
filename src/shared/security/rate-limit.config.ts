@@ -20,6 +20,10 @@
  * - password:      cambio de contraseña, por IP+usuario (contraseña actual).
  * - confirmation:  ver y responder el enlace público de confirmación de cita
  *                  (DX-005); por IP (enumeración de tokens).
+ * - invitation-email: invitar y reenviar invitación (DX-088), por clínica +
+ *                  usuario (no por IP): cada una manda un email. Primera
+ *                  barrera, en memoria de cada réplica; los topes que valen
+ *                  entre réplicas están en la BD (EmailOutbox.assertWithinQuota).
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -28,7 +32,8 @@ export type RateLimitPolicy =
   | 'invitation'
   | 'password'
   | 'confirmation'
-  | 'refresh';
+  | 'refresh'
+  | 'invitation-email';
 
 export interface RateLimitRule {
   limit: number;
@@ -50,6 +55,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   password: { limit: 5, ttlMs: 15 * MINUTE },
   confirmation: { limit: 20, ttlMs: MINUTE },
   refresh: { limit: 120, ttlMs: MINUTE },
+  'invitation-email': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -83,5 +89,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     password: rule('password'),
     confirmation: rule('confirmation'),
     refresh: rule('refresh'),
+    'invitation-email': rule('invitation-email'),
   };
 }

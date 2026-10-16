@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConsoleMailer } from './console.mailer';
-import { SmtpMailer, SmtpTransport } from './smtp.mailer';
+import { SmtpMailer, SmtpTransport, smtpTransportOptions } from './smtp.mailer';
 
 const message = {
   to: 'ana.perez@clinica.co',
@@ -56,5 +56,30 @@ describe('SmtpMailer', () => {
     );
     expect(mailer).toBeInstanceOf(SmtpMailer);
     mailer.close();
+  });
+
+  it('TLS obligatorio (≥1.2, certificado verificado) y la query de la URL se ignora', () => {
+    const opts = smtpTransportOptions(
+      'smtp://us%40er:cl%3Ave@smtp.x.com:587?ignoreTLS=true&tls.rejectUnauthorized=false',
+    );
+    expect(opts).toMatchObject({
+      host: 'smtp.x.com',
+      port: 587,
+      secure: false,
+      requireTLS: true,
+      tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
+      auth: { user: 'us@er', pass: 'cl:ve' },
+    });
+    expect(opts).not.toHaveProperty('ignoreTLS');
+    expect(smtpTransportOptions('smtps://smtp.x.com')).toMatchObject({
+      port: 465,
+      secure: true,
+    });
+  });
+
+  it('close() cierra el transporte', () => {
+    const close = jest.fn();
+    new SmtpMailer('a@b.co', { sendMail: jest.fn(), close }).close();
+    expect(close).toHaveBeenCalled();
   });
 });

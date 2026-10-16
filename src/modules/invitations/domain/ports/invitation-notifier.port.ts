@@ -18,6 +18,13 @@ export interface InvitationNotifier {
     linkBase: string;
   }): Promise<InvitationEmailDelivery | null>;
 
+  /**
+   * Topes anti-abuso del email (DX-088, revisión B1) para `email` en la
+   * clínica en contexto. Se llama ANTES de crear o regenerar nada; si se
+   * superan, lanza un 429 con el mensaje en español.
+   */
+  assertCanSend(email: string): Promise<void>;
+
   /** Cancela los emails aún pendientes de la invitación (revocada o reemplazada). */
   cancelPending(invitationId: string): Promise<void>;
 }

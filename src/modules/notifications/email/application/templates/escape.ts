@@ -38,9 +38,10 @@ export function safeUrl(value: string | null | undefined): string | null {
  * si un proveedor no lo saneara).
  */
 export function singleLine(value: string): string {
-  const withoutControls = Array.from(value, (ch) => {
-    const code = ch.charCodeAt(0);
-    return code < 0x20 || code === 0x7f ? ' ' : ch;
-  }).join('');
-  return withoutControls.replace(/\s+/g, ' ').trim();
+  // \p{Cc}: controles C0 y C1 (U+0080–U+009F) y DEL; más los separadores
+  // de línea y párrafo Unicode (U+2028/U+2029).
+  return value
+    .replace(/[\p{Cc}\u2028\u2029]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

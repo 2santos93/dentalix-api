@@ -8,4 +8,6 @@ export const MAILER = Symbol('MAILER');
  */
 export interface Mailer {
   send(message: OutgoingEmail): Promise<void>;
+  /** Libera conexiones al apagar (SMTP); opcional. */
+  close?(): void;
 }
