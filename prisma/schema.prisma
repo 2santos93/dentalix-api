@@ -1286,3 +1286,71 @@ model PrescriptionItem {
   @@unique([tenantId, prescriptionId, position], map: "prescription_items_rx_position_key")
   @@map("prescription_items")
 }
+
+// DX-009: qué se hizo con un dato clínico o financiero.
+enum AuditAction {
+  VIEW
+  CREATE
+  UPDATE
+  DELETE
+  SIGN
+  VOID
+  LOGIN
+  LOGIN_FAILED
+  EXPORT
+  PRINT
+}
+
+// DX-009: sobre qué tipo de recurso.
+enum AuditResourceType {
+  SESSION
+  PATIENT
+  MEDICAL_HISTORY
+  CLINICAL_ENTRY
+  ODONTOGRAM
+  PERIO_EXAM
+  CONSENT
+  DATA_CONSENT
+  PRESCRIPTION
+  TREATMENT_PLAN
+  TREATMENT_PLAN_ITEM
+  PAYMENT
+  PAYMENT_PLAN
+  ACCOUNT_STATEMENT
+}
+
+/// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
+/// financiero, cuándo y desde dónde. APPEND-ONLY en la BD (trigger: ni UPDATE
+/// ni DELETE ni TRUNCATE para el rol de la app) y con RLS forzada por tenant.
+///
+/// Sin FKs a propósito: es evidencia y no puede bloquear ni seguir en cascada
+/// el borrado de lo que referencia (usuario, paciente, sede). Los ids se
+/// resuelven bajo RLS al escribir, así que siempre son de la misma clínica.
+///
+/// `metadata` NUNCA lleva contenido clínico: solo ids, nombres de campos y
+/// códigos (lo garantiza `sanitizeAuditMetadata`). Retención: no se borra; se
+/// conserva con la historia clínica.
+model AuditEvent {
+  id           String            @id @default(uuid()) @db.Uuid
+  tenantId     String            @db.Uuid
+  // Sede activa de la petición (X-Location-Id); NULL = vista consolidada.
+  locationId   String?           @db.Uuid
+  // NULL solo en LOGIN_FAILED con un email que no es de esta clínica.
+  actorUserId  String?           @db.Uuid
+  actorRole    ClinicRole?
+  action       AuditAction
+  resourceType AuditResourceType
+  resourceId   String?           @db.Uuid
+  patientId    String?           @db.Uuid
+  // X-Request-Id de la petición (DX-023): enlaza el evento con su línea de log.
+  requestId    String?
+  ip           String?
+  userAgent    String?
+  occurredAt   DateTime          @default(now())
+  metadata     Json              @default("{}")
+
+  @@index([tenantId, occurredAt(sort: Desc)])
+  @@index([tenantId, patientId, occurredAt])
+  @@index([tenantId, actorUserId, occurredAt])
+  @@map("audit_events")
+}
