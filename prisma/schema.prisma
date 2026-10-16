@@ -1759,7 +1759,8 @@ model Job {
   maxAttempts    Int       @default(5)
   /// PENDING: cuándo puede empezar. RUNNING: cuándo vence el arriendo.
   runAt          DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
-  idempotencyKey String?   @unique
+  /// Única por (tenantId, idempotencyKey): ver el índice parcial abajo.
+  idempotencyKey String?
   lockedBy       String?
   /// Tipo y código del error; nunca su mensaje.
   lastError      String?
@@ -1771,8 +1772,12 @@ model Job {
 
   @@index([state, runAt])
   @@index([state, finishedAt])
-  // PARCIAL (WHERE "tenantId" IS NOT NULL), no declarable en Prisma:
-  //   jobs_tenantId_idx ("tenantId") -> lado hijo de la FK a tenants.
+  // PARCIALES, no declarables en Prisma:
+  //   jobs_tenantId_idempotencyKey_key UNIQUE ("tenantId", "idempotencyKey")
+  //     NULLS NOT DISTINCT WHERE "idempotencyKey" IS NOT NULL -> idempotencia
+  //     por clínica (ON CONFLICT en PrismaJobRepository.insert).
+  //   jobs_tenantId_idx ("tenantId") WHERE "tenantId" IS NOT NULL -> lado
+  //     hijo de la FK a tenants.
   @@map("jobs")
 }
 

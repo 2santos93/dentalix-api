@@ -20,7 +20,11 @@
 
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
-import { parseAppRole } from '../modules/jobs/infrastructure/jobs-config';
+import {
+  DEFAULT_LEASE_SECONDS,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  parseAppRole,
+} from '../modules/jobs/infrastructure/jobs-config';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -369,6 +373,19 @@ function jobsProblems(env: Env): string[] {
     if (!/^\d{1,9}$/.test(raw.trim()) || value < min || value > max) {
       problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
     }
+  }
+  // Revisión H1: si el apagado espera más que el arriendo, otro worker
+  // retoma trabajos que siguen en curso en el que se apaga.
+  const intOf = (key: string, fallback: number): number => {
+    const raw = str(env, key)?.trim();
+    return raw && /^\d{1,9}$/.test(raw) ? Number(raw) : fallback;
+  };
+  const leaseMs = intOf('JOBS_LEASE_SECONDS', DEFAULT_LEASE_SECONDS) * 1000;
+  const graceMs = intOf('JOBS_SHUTDOWN_GRACE_MS', DEFAULT_SHUTDOWN_GRACE_MS);
+  if (graceMs >= leaseMs) {
+    problems.push(
+      `JOBS_SHUTDOWN_GRACE_MS debe ser menor que JOBS_LEASE_SECONDS (en ms): ${graceMs} ≥ ${leaseMs}; si no, otro worker retoma trabajos aún en curso durante el apagado.`,
+    );
   }
   return problems;
 }

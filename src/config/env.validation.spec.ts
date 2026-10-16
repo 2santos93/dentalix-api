@@ -430,5 +430,24 @@ describe('validateEnv', () => {
         ),
       ).not.toThrow();
     });
+
+    it('la gracia del apagado tiene que ser menor que el arriendo (si no, otro worker retoma trabajos aún en curso)', () => {
+      expect(
+        errorOf(
+          baseEnv({
+            JOBS_LEASE_SECONDS: '60',
+            JOBS_SHUTDOWN_GRACE_MS: '60000',
+          }),
+        ),
+      ).toContain(
+        'JOBS_SHUTDOWN_GRACE_MS debe ser menor que JOBS_LEASE_SECONDS',
+      );
+      // Con los defaults (20 s < 300 s) y con solo uno definido, se compara
+      // contra el default del otro.
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(errorOf(baseEnv({ JOBS_LEASE_SECONDS: '15' }))).toContain(
+        'JOBS_SHUTDOWN_GRACE_MS debe ser menor',
+      );
+    });
   });
 });

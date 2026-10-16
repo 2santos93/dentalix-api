@@ -46,6 +46,7 @@ describe('DX-085 · apagado ordenado del worker (int)', () => {
           maxAttempts: 3,
           retryBaseMs: 1000,
           shutdownGraceMs: 30_000,
+          heartbeatMs: 100,
           retentionDays: 14,
         }),
       })

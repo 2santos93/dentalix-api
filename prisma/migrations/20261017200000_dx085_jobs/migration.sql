@@ -66,9 +66,13 @@ CREATE TABLE "jobs" (
       CHECK (("state" IN ('COMPLETED', 'FAILED')) = ("finishedAt" IS NOT NULL))
 );
 
--- Idempotencia: un segundo enqueue con la misma clave no crea otra fila
--- (INSERT ... ON CONFLICT DO NOTHING). Los NULL no chocan entre sí.
-CREATE UNIQUE INDEX "jobs_idempotencyKey_key" ON "jobs"("idempotencyKey");
+-- Idempotencia POR CLÍNICA: un segundo enqueue con la misma clave en la misma
+-- clínica (o en plataforma, tenantId NULL) no crea otra fila (INSERT ... ON
+-- CONFLICT ... DO NOTHING). Dos clínicas con la misma clave no se pisan.
+-- NULLS NOT DISTINCT (PG 15+): los trabajos de plataforma comparten ámbito.
+-- Parcial: los trabajos sin clave no participan.
+CREATE UNIQUE INDEX "jobs_tenantId_idempotencyKey_key" ON "jobs"("tenantId", "idempotencyKey")
+  NULLS NOT DISTINCT WHERE "idempotencyKey" IS NOT NULL;
 
 -- El reclamo de los workers: PENDING/RUNNING cuya hora llegó, en orden.
 CREATE INDEX "jobs_state_runAt_idx" ON "jobs"("state", "runAt");
@@ -77,7 +81,8 @@ CREATE INDEX "jobs_state_runAt_idx" ON "jobs"("state", "runAt");
 -- purga de terminados por antigüedad.
 CREATE INDEX "jobs_state_finishedAt_idx" ON "jobs"("state", "finishedAt");
 
--- Lado hijo de la FK a tenants (solo las filas con clínica).
+-- Lado hijo de la FK a tenants: lo cubre el prefijo "tenantId" del índice
+-- de idempotencia solo para filas con clave, así que hace falta el suyo.
 CREATE INDEX "jobs_tenantId_idx" ON "jobs"("tenantId") WHERE "tenantId" IS NOT NULL;
 
 -- CASCADE como email_outbox: los tenants nunca se borran en duro en el

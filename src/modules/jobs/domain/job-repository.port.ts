@@ -6,11 +6,8 @@ export const JOB_REPOSITORY = Symbol('JOB_REPOSITORY');
 export interface NewJob {
   name: string;
   payload: JobPayload;
-  /**
-   * undefined = la clínica de la transacción (`app.current_tenant`) o ninguna;
-   * null = plataforma; string = esa clínica.
-   */
-  tenantId?: string | null;
+  /** Ya resuelta por JobQueue: null = plataforma. */
+  tenantId: string | null;
   runAt?: Date;
   idempotencyKey?: string;
   maxAttempts: number;
@@ -25,6 +22,8 @@ export interface ScheduleSync {
 
 export interface ScheduleToFire {
   name: string;
+  /** Cron de esta réplica: solo dispara si coincide con el de la fila. */
+  cron: string;
   job: string;
   payload: JobPayload;
   maxAttempts: number;
@@ -34,8 +33,22 @@ export interface ScheduleToFire {
 
 /** Persistencia de la cola (DX-085). Ver PrismaJobRepository. */
 export interface JobRepository {
-  /** INSERT … ON CONFLICT (idempotencyKey) DO NOTHING, en `tx` si se da. */
+  /**
+   * INSERT … ON CONFLICT (tenantId, idempotencyKey) DO NOTHING, en `tx` si se
+   * da. En conflicto devuelve el trabajo existente DE ESA MISMA clínica.
+   */
   insert(job: NewJob, tx?: Prisma.TransactionClient): Promise<EnqueueResult>;
+  /** `app.current_tenant` de la transacción (null si no lo fija). */
+  transactionTenant(tx: Prisma.TransactionClient): Promise<string | null>;
+  /**
+   * Latido: renueva el arriendo `leaseSeconds` más SOLO si el trabajo sigue
+   * RUNNING en ese intento (fencing). false = otro worker lo retomó.
+   */
+  heartbeat(
+    id: string,
+    attempts: number,
+    leaseSeconds: number,
+  ): Promise<boolean>;
   /**
    * Reclama hasta `limit` trabajos vencidos con esos nombres (FOR UPDATE SKIP
    * LOCKED): RUNNING, intento + 1 y arriendo de `leaseSeconds`.
@@ -60,7 +73,9 @@ export interface JobRepository {
   /**
    * Un solo worker por tick: bloquea las tareas vencidas (SKIP LOCKED), encola
    * su trabajo con idempotencyKey `schedule:<nombre>:<tick>` y las mueve al
-   * siguiente tick, todo en una transacción. Devuelve cuántas disparó.
+   * siguiente tick, todo en una transacción. Una tarea cuyo cron en la BD no
+   * es el de esta réplica (despliegue escalonado) no la toca: la dispara la
+   * réplica que la sincronizó. Devuelve cuántas disparó.
    */
   fireDueSchedules(schedules: ScheduleToFire[]): Promise<number>;
   listFailed(limit: number): Promise<FailedJob[]>;

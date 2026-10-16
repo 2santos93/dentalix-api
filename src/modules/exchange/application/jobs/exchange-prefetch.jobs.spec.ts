@@ -13,6 +13,7 @@ const ctx: JobContext = {
   attempt: 1,
   maxAttempts: 5,
   tenantId: null,
+  signal: new AbortController().signal,
 };
 
 function setup(appId: string | undefined) {

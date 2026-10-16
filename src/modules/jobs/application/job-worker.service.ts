@@ -35,10 +35,19 @@ import { JobRegistry } from './job-registry';
  * espera a los trabajos en curso hasta JOBS_SHUTDOWN_GRACE_MS. Vive en un
  * módulo NO global para que Nest lo destruya antes que PrismaModule (global).
  */
+interface RunningAttempt {
+  attempts: number;
+  abort: AbortController;
+  /** Este proceso ya no es dueño del intento: no se cierra. */
+  lost: boolean;
+}
+
 @Injectable()
 export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('Jobs');
   private readonly inFlight = new Set<Promise<void>>();
+  /** Intentos en curso en este proceso, para el latido y el apagado. */
+  private readonly running = new Map<string, RunningAttempt>();
   private readonly synced = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private loop: Promise<void> | null = null;
@@ -116,12 +125,34 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
     ]);
     clearTimeout(grace);
     if (!finished) {
-      // Lo que quede lo retoma otro worker cuando venza su arriendo.
+      // Lo que quede vuelve a PENDING ya (con fencing), sin esperar a que
+      // venza el arriendo; su handler recibe abort y su cierre no cuenta.
       this.logger.warn({
         event: 'jobs.shutdown_grace_expired',
         workerId: this.config.workerId,
         inFlight: this.inFlight.size,
       });
+      await Promise.all(
+        [...this.running.entries()].map(async ([id, attempt]) => {
+          if (attempt.lost) return;
+          attempt.lost = true;
+          attempt.abort.abort();
+          try {
+            await this.repo.reschedule(
+              id,
+              attempt.attempts,
+              0,
+              'ShutdownInterrupted',
+            );
+          } catch (err) {
+            this.logger.warn({
+              event: 'jobs.release_failed',
+              jobId: id,
+              error: describeJobError(err),
+            });
+          }
+        }),
+      );
     }
   }
 
@@ -207,6 +238,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
         const cron = parseCron(s.cron);
         return {
           name: s.name,
+          cron: s.cron,
           job: s.job,
           payload: s.payload,
           maxAttempts:
@@ -252,13 +284,27 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
         });
         return;
       }
+      const attempt: RunningAttempt = {
+        attempts: job.attempts,
+        abort: new AbortController(),
+        lost: false,
+      };
       const context: JobContext = {
         jobId: job.id,
         attempt: job.attempts,
         maxAttempts: job.maxAttempts,
         tenantId: job.tenantId,
+        signal: attempt.abort.signal,
       };
       const startedAt = Date.now();
+      this.running.set(job.id, attempt);
+      // Latido: mientras el handler trabaja, el arriendo no vence.
+      const heartbeat = setInterval(
+        () => void this.beat(job, attempt),
+        this.config.heartbeatMs,
+      );
+      let failure: unknown = null;
+      let failed = false;
       try {
         await (job.tenantId
           ? this.tenantContext.run(job.tenantId, () =>
@@ -266,7 +312,22 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
             )
           : definition.handle(job.payload, context));
       } catch (err) {
-        const error = describeJobError(err);
+        failed = true;
+        failure = err;
+      } finally {
+        clearInterval(heartbeat);
+        // Map en memoria (no la BD): la regla de borrado duro no aplica.
+        // eslint-disable-next-line no-restricted-syntax
+        this.running.delete(job.id);
+      }
+      if (attempt.lost) {
+        // Otro worker retomó el intento (o el apagado lo devolvió a la
+        // cola): su resultado no cuenta y no se cierra nada.
+        this.logger.warn({ event: 'jobs.attempt_lost', ...fields });
+        return;
+      }
+      if (failed) {
+        const error = describeJobError(failure);
         if (job.attempts >= job.maxAttempts) {
           await this.repo.fail(job.id, job.attempts, error);
           this.logger.warn({ event: 'jobs.failed', ...fields, error });
@@ -299,6 +360,31 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
         ...fields,
         error: describeJobError(err),
       });
+    }
+  }
+
+  /** Renueva el arriendo; si el intento ya no es de este worker, aborta. */
+  private async beat(job: ClaimedJob, attempt: RunningAttempt): Promise<void> {
+    if (attempt.lost) return;
+    let renewed: boolean;
+    try {
+      renewed = await this.repo.heartbeat(
+        job.id,
+        attempt.attempts,
+        this.config.leaseSeconds,
+      );
+    } catch (err) {
+      // BD caída un momento: el siguiente latido lo vuelve a intentar.
+      this.logger.warn({
+        event: 'jobs.heartbeat_failed',
+        jobId: job.id,
+        error: describeJobError(err),
+      });
+      return;
+    }
+    if (!renewed && !attempt.lost) {
+      attempt.lost = true;
+      attempt.abort.abort();
     }
   }
 }

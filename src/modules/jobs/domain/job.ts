@@ -20,6 +20,13 @@ export interface JobContext {
    * tenant explícito lo usa.
    */
   tenantId: string | null;
+  /**
+   * Se aborta si este worker pierde el intento (el latido no pudo renovar el
+   * arriendo porque otro worker lo retomó) o si el apagado agota su gracia.
+   * Un handler largo debe consultarla y dejar de producir efectos: su
+   * resultado ya no cuenta.
+   */
+  signal: AbortSignal;
 }
 
 export type JobHandler<P extends JobPayload = JobPayload> = (
@@ -51,22 +58,32 @@ export interface EnqueueOptions {
   /** Cuándo puede empezar (default: ya). */
   runAt?: Date;
   /**
-   * Clave de idempotencia global: un segundo enqueue con la misma clave no
-   * crea otro trabajo (aunque el primero ya terminara), mientras la fila
-   * exista (los terminados se purgan a los JOBS_RETENTION_DAYS).
+   * Clave de idempotencia POR CLÍNICA (o de plataforma): un segundo enqueue
+   * con la misma clave en la misma clínica no crea otro trabajo (aunque el
+   * primero ya terminara), mientras la fila exista (los terminados se purgan
+   * a los JOBS_RETENTION_DAYS).
    */
   idempotencyKey?: string;
   /**
-   * Clínica bajo la que corre el handler. Default: la de la transacción
-   * (`app.current_tenant` de `runWithTenant`) si se encola dentro de una; si
-   * no, ninguna (trabajo de plataforma).
+   * Clínica bajo la que corre el handler (null = plataforma). Default: la del
+   * contexto (`TenantContextService`) o, si no hay, la de la transacción
+   * (`app.current_tenant` de `runWithTenant`); sin ninguna, plataforma. Si se
+   * da y no coincide con el contexto o con la transacción, es un error.
    */
   tenantId?: string | null;
   /**
    * Transacción de negocio (outbox): el trabajo solo existe si ella hace
-   * commit. Sin ella, se encola en su propia sentencia.
+   * commit. Con contexto de clínica es OBLIGATORIA salvo
+   * `outsideTransaction: true`. Exige READ COMMITTED (el default): en
+   * REPEATABLE READ un conflicto de idempotencyKey con una fila confirmada
+   * después del snapshot no se puede releer.
    */
   tx?: Prisma.TransactionClient;
+  /**
+   * Encolar con contexto de clínica pero SIN transacción de negocio, a
+   * propósito (no hay nada que confirmar junto al trabajo).
+   */
+  outsideTransaction?: boolean;
   maxAttempts?: number;
 }
 

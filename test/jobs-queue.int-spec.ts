@@ -35,6 +35,7 @@ function config(overrides: Partial<JobsConfig> = {}): JobsConfig {
     maxAttempts: 5,
     retryBaseMs: 60_000,
     shutdownGraceMs: 5_000,
+    heartbeatMs: 50,
     retentionDays: 14,
     ...overrides,
   };
@@ -61,7 +62,7 @@ function node(id: string, overrides: Partial<JobsConfig> = {}): Node {
     tenantContext,
     registry,
     repo,
-    queue: new JobQueue(repo, registry, cfg),
+    queue: new JobQueue(repo, registry, cfg, tenantContext),
     worker: new JobWorker(registry, repo, tenantContext, cfg),
   };
 }
@@ -261,11 +262,14 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       await Promise.all([a.worker.runOnce(), b.worker.runOnce()]);
       expect(runs).toBe(1);
 
-      // Ya terminado, la misma clave sigue sin crear otro.
-      expect(await b.queue.enqueue(name, {}, { idempotencyKey: key })).toEqual({
-        id: ra.id,
-        created: false,
-      });
+      // Ya terminado, la misma clave en la misma clínica sigue sin crear otro.
+      expect(
+        await b.queue.enqueue(
+          name,
+          {},
+          { idempotencyKey: key, tenantId: tenantA },
+        ),
+      ).toEqual({ id: ra.id, created: false });
     });
 
     it('si la primera transacción hace rollback, la segunda con la misma clave sí lo crea', async () => {
@@ -310,6 +314,161 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       expect([...runs.values()].every((count) => count === 1)).toBe(true);
       const rows = await jobsNamed(name);
       expect(rows.every((r) => r.state === 'COMPLETED')).toBe(true);
+    });
+  });
+
+  describe('tenant del trabajo (revisión H2, H3) e idempotencia por clínica (H4)', () => {
+    it('dentro de una petición de clínica, enqueue sin tx es un error (el outbox exige tx)', async () => {
+      const name = `${PREFIX}.ctx-sin-tx`;
+      onBoth(name, () => Promise.resolve());
+      await expect(
+        a.tenantContext.run(tenantA, () => a.queue.enqueue(name, {})),
+      ).rejects.toThrow(/exige `tx`/);
+      expect(await jobsNamed(name)).toEqual([]);
+    });
+
+    it('con contexto de clínica, el trabajo es de esa clínica (con tx, o fuera de transacción si se pide a propósito)', async () => {
+      const name = `${PREFIX}.ctx-tenant`;
+      onBoth(name, () => Promise.resolve());
+      const inTx = await a.tenantContext.run(tenantA, () =>
+        a.prisma.runWithTenant((tx) => a.queue.enqueue(name, {}, { tx })),
+      );
+      const outside = await a.tenantContext.run(tenantA, () =>
+        a.queue.enqueue(name, {}, { outsideTransaction: true }),
+      );
+      const rows = await jobsNamed(name);
+      expect(rows.map((r) => [r.id, r.tenantId]).sort()).toEqual(
+        [
+          [inTx.id, tenantA],
+          [outside.id, tenantA],
+        ].sort(),
+      );
+    });
+
+    it('un tenantId explícito que no casa con el contexto o con la transacción es un error', async () => {
+      const name = `${PREFIX}.ctx-mismatch`;
+      onBoth(name, () => Promise.resolve());
+      await expect(
+        a.tenantContext.run(tenantA, () =>
+          a.queue.enqueue(
+            name,
+            {},
+            { tenantId: tenantB, outsideTransaction: true },
+          ),
+        ),
+      ).rejects.toThrow(/no coincide/);
+      await expect(
+        a.prisma.runWithTenant(tenantA, (tx) =>
+          a.queue.enqueue(name, {}, { tx, tenantId: tenantB }),
+        ),
+      ).rejects.toThrow(/no coincide/);
+      await expect(
+        a.prisma.runWithTenant(tenantA, (tx) =>
+          a.queue.enqueue(name, {}, { tx, tenantId: null }),
+        ),
+      ).rejects.toThrow(/no coincide/);
+      expect(await jobsNamed(name)).toEqual([]);
+    });
+
+    it('la misma idempotencyKey en dos clínicas (y en plataforma) son tres trabajos distintos', async () => {
+      const name = `${PREFIX}.key-scope`;
+      onBoth(name, () => Promise.resolve());
+      const key = `${PREFIX}:informe-diario:2026-10-16`;
+      const inA = await a.prisma.runWithTenant(tenantA, (tx) =>
+        a.queue.enqueue(name, {}, { tx, idempotencyKey: key }),
+      );
+      const inB = await a.prisma.runWithTenant(tenantB, (tx) =>
+        a.queue.enqueue(name, {}, { tx, idempotencyKey: key }),
+      );
+      const platform = await a.queue.enqueue(name, {}, { idempotencyKey: key });
+      const again = await a.queue.enqueue(name, {}, { idempotencyKey: key });
+      const againB = await a.queue.enqueue(
+        name,
+        {},
+        { idempotencyKey: key, tenantId: tenantB },
+      );
+
+      expect([inA.created, inB.created, platform.created]).toEqual([
+        true,
+        true,
+        true,
+      ]);
+      expect(new Set([inA.id, inB.id, platform.id]).size).toBe(3);
+      expect(again).toEqual({ id: platform.id, created: false });
+      expect(againB).toEqual({ id: inB.id, created: false });
+    });
+  });
+
+  describe('latido del arriendo (revisión H1)', () => {
+    it('mientras el handler trabaja, el latido renueva el arriendo y otro worker no lo retoma', async () => {
+      const name = `${PREFIX}.heartbeat`;
+      const started = deferred();
+      const release = deferred();
+      let runs = 0;
+      onBoth(name, async () => {
+        runs += 1;
+        started.resolve();
+        await release.promise;
+      });
+      const { id } = await a.queue.enqueue(name, {});
+      const running = a.worker.runOnce();
+      await started.promise;
+
+      // El arriendo «vence» (como si el handler llevara más de lo pactado).
+      const expired = new Date(Date.now() - 1000);
+      await owner.job.update({ where: { id }, data: { runAt: expired } });
+      await waitFor(async () => {
+        const row = await owner.job.findUniqueOrThrow({ where: { id } });
+        return row.runAt.getTime() > Date.now();
+      }, 'el latido renueva el arriendo');
+
+      await b.worker.runOnce();
+      expect(runs).toBe(1);
+
+      release.resolve();
+      await running;
+      expect(
+        await owner.job.findUniqueOrThrow({ where: { id } }),
+      ).toMatchObject({ state: 'COMPLETED', attempts: 1, lastError: null });
+    });
+
+    it('si el intento ya lo reclamó otro worker, el latido falla, el handler recibe abort y su cierre no pisa nada', async () => {
+      const name = `${PREFIX}.heartbeat-lost`;
+      const started = deferred();
+      let aborted = false;
+      onBoth(
+        name,
+        (_payload, ctx) => {
+          started.resolve();
+          return new Promise<void>((resolve) => {
+            ctx.signal.addEventListener('abort', () => {
+              aborted = true;
+              resolve();
+            });
+          });
+        },
+        { maxAttempts: 2 },
+      );
+      const { id } = await a.queue.enqueue(name, {});
+      const running = a.worker.runOnce();
+      await started.promise;
+
+      // Otro worker lo retomó (intento 2) mientras A seguía.
+      await owner.job.update({
+        where: { id },
+        data: { attempts: 2, lockedBy: 'otro:1:00000000' },
+      });
+      await running;
+
+      expect(aborted).toBe(true);
+      expect(
+        await owner.job.findUniqueOrThrow({ where: { id } }),
+      ).toMatchObject({
+        state: 'RUNNING',
+        attempts: 2,
+        lockedBy: 'otro:1:00000000',
+      });
+      expect(await a.repo.heartbeat(id, 1, 300)).toBe(false);
     });
   });
 
@@ -367,6 +526,37 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           `schedule:${schedule}:${due.toISOString()}`,
         );
       }
+    });
+
+    it('una réplica con otro cron (despliegue escalonado) no dispara ni reprograma la tarea (revisión H5)', async () => {
+      const job = `${PREFIX}.cron-stale`;
+      const schedule = `${PREFIX}.cron-stale.every-minute`;
+      let runs = 0;
+      a.registry.register({
+        name: job,
+        handle: () => {
+          runs += 1;
+          return Promise.resolve();
+        },
+      });
+      a.registry.schedule({ name: schedule, cron: '* * * * *', job });
+      await a.worker.runOnce();
+      // La réplica nueva ya sincronizó otro cron.
+      const due = new Date(Date.now() - 60_000);
+      due.setUTCSeconds(0, 0);
+      await owner.jobSchedule.update({
+        where: { name: schedule },
+        data: { cron: '7 3 * * *', nextRunAt: due },
+      });
+
+      await a.worker.drain();
+
+      expect(runs).toBe(0);
+      expect(
+        await owner.jobSchedule.findUniqueOrThrow({
+          where: { name: schedule },
+        }),
+      ).toMatchObject({ cron: '7 3 * * *', nextRunAt: due });
     });
 
     it('cambiar el cron de una tarea reprograma su próximo tick', async () => {

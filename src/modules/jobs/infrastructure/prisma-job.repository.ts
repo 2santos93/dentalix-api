@@ -39,35 +39,56 @@ export class PrismaJobRepository implements JobRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<EnqueueResult> {
     const client = tx ?? this.prisma;
-    // Sin tenant explícito: el de la transacción de negocio (runWithTenant lo
-    // fija con set_config local; fuera de una transacción vale '' -> NULL).
-    const tenant =
-      job.tenantId === undefined
-        ? Prisma.sql`NULLIF(current_setting('app.current_tenant', true), '')::uuid`
-        : Prisma.sql`${job.tenantId}::uuid`;
     const runAt = job.runAt ? utc(job.runAt) : NOW;
     const key = job.idempotencyKey ?? null;
+    // Inferencia del índice parcial jobs_tenantId_idempotencyKey_key
+    // ((tenantId, idempotencyKey) NULLS NOT DISTINCT WHERE key IS NOT NULL).
     const inserted = await client.$queryRaw<{ id: string }[]>`
       INSERT INTO "jobs"
         ("name", "tenantId", "payload", "maxAttempts", "runAt", "idempotencyKey")
       VALUES
-        (${job.name}, ${tenant}, ${JSON.stringify(job.payload)}::jsonb,
+        (${job.name}, ${job.tenantId}::uuid, ${JSON.stringify(job.payload)}::jsonb,
          ${job.maxAttempts}, ${runAt}, ${key})
-      ON CONFLICT ("idempotencyKey") DO NOTHING
+      ON CONFLICT ("tenantId", "idempotencyKey") WHERE "idempotencyKey" IS NOT NULL
+      DO NOTHING
       RETURNING "id"`;
     if (inserted.length > 0) {
       return { id: inserted[0].id, created: true };
     }
-    // Conflicto: otra transacción ya lo encoló (o lo hizo y ya terminó). Una
-    // sentencia NUEVA, para ver la fila que acaba de confirmarse.
+    // Conflicto: otra transacción de la MISMA clínica ya lo encoló (o lo hizo
+    // y ya terminó). Una sentencia NUEVA, para ver la fila que acaba de
+    // confirmarse (READ COMMITTED).
     const [existing] = await client.$queryRaw<{ id: string }[]>`
-      SELECT "id" FROM "jobs" WHERE "idempotencyKey" = ${key}`;
+      SELECT "id" FROM "jobs"
+       WHERE "tenantId" IS NOT DISTINCT FROM ${job.tenantId}::uuid
+         AND "idempotencyKey" = ${key}`;
     if (!existing) {
       throw new Error(
-        'jobs: conflicto de idempotencyKey sin fila visible (se borró entretanto)',
+        'jobs: conflicto de idempotencyKey sin fila visible (se borró entretanto, o la transacción no es READ COMMITTED)',
       );
     }
     return { id: existing.id, created: false };
+  }
+
+  async transactionTenant(
+    tx: Prisma.TransactionClient,
+  ): Promise<string | null> {
+    const [{ tenant }] = await tx.$queryRaw<{ tenant: string | null }[]>`
+      SELECT NULLIF(current_setting('app.current_tenant', true), '') AS "tenant"`;
+    return tenant;
+  }
+
+  async heartbeat(
+    id: string,
+    attempts: number,
+    leaseSeconds: number,
+  ): Promise<boolean> {
+    const n = await this.prisma.$executeRaw`
+      UPDATE "jobs"
+         SET "runAt" = ${NOW} + make_interval(secs => ${leaseSeconds}::double precision),
+             "updatedAt" = ${NOW}
+       WHERE "id" = ${id}::uuid AND "state" = 'RUNNING' AND "attempts" = ${attempts}`;
+    return n > 0;
   }
 
   claim(
@@ -167,16 +188,20 @@ export class PrismaJobRepository implements JobRepository {
     const byName = new Map(schedules.map((s) => [s.name, s]));
     return this.prisma.$transaction(async (tx) => {
       const due = await tx.$queryRaw<
-        { name: string; nextRunAt: Date; now: Date }[]
+        { name: string; cron: string; nextRunAt: Date; now: Date }[]
       >`
-        SELECT "name", "nextRunAt", ${NOW} AS "now"
+        SELECT "name", "cron", "nextRunAt", ${NOW} AS "now"
           FROM "job_schedules"
          WHERE "name" = ANY(${[...byName.keys()]}::text[])
            AND "nextRunAt" <= ${NOW}
          FOR UPDATE SKIP LOCKED`;
+      let fired = 0;
       for (const row of due) {
         const s = byName.get(row.name);
-        if (!s) continue;
+        // Despliegue escalonado: la fila tiene el cron de otra réplica (la que
+        // sincronizó la versión vigente). Esta no la dispara ni la reprograma.
+        if (!s || s.cron !== row.cron) continue;
+        fired += 1;
         // La clave por tick es la segunda red: aunque dos workers llegaran
         // a disparar el mismo tick, solo habría un trabajo.
         await this.insert(
@@ -198,7 +223,7 @@ export class PrismaJobRepository implements JobRepository {
                  "updatedAt" = ${NOW}
            WHERE "name" = ${s.name}`;
       }
-      return due.length;
+      return fired;
     });
   }
 

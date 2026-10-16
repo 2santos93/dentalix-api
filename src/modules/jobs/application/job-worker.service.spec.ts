@@ -16,6 +16,7 @@ const config: JobsConfig = {
   maxAttempts: 5,
   retryBaseMs: 1000,
   shutdownGraceMs: 5000,
+  heartbeatMs: 10,
   retentionDays: 14,
 };
 
@@ -23,6 +24,7 @@ function fakeRepo(queue: ClaimedJob[]) {
   const calls: string[] = [];
   const repo: JobRepository = {
     insert: jest.fn(),
+    transactionTenant: jest.fn(),
     claim: jest.fn((names: string[], limit: number) =>
       Promise.resolve(
         queue.splice(0, limit).filter((j) => names.includes(j.name)),
@@ -38,6 +40,7 @@ function fakeRepo(queue: ClaimedJob[]) {
         return Promise.resolve(true);
       },
     ),
+    heartbeat: jest.fn(() => Promise.resolve(true)),
     fail: jest.fn((id: string, attempts: number, error: string) => {
       calls.push(`fail ${id} ${attempts} ${error}`);
       return Promise.resolve(true);
@@ -169,6 +172,60 @@ describe('JobWorker (unit)', () => {
       300,
       'unit:1:00000000',
     );
+  });
+
+  it('si el latido pierde el arriendo (otro worker reclamó el intento), aborta la señal y NO cierra el intento', async () => {
+    const { repo, calls } = fakeRepo([job({})]);
+    (repo.heartbeat as jest.Mock).mockResolvedValue(false);
+    const registry = new JobRegistry();
+    registry.register({
+      name: 'unit.job',
+      // Trabaja hasta que le quitan el arriendo.
+      handle: (_payload, ctx) =>
+        new Promise<void>((resolve) =>
+          ctx.signal.addEventListener('abort', () => resolve()),
+        ),
+    });
+    const worker = new JobWorker(
+      registry,
+      repo,
+      new TenantContextService(),
+      config,
+    );
+
+    await worker.runOnce();
+
+    expect(repo.heartbeat).toHaveBeenCalledWith('j1', 1, 300);
+    expect(calls).toEqual([]);
+  });
+
+  it('mientras el handler trabaja, renueva el arriendo con fencing por intento', async () => {
+    const { repo, calls } = fakeRepo([job({ attempts: 2 })]);
+    let beats = 0;
+    (repo.heartbeat as jest.Mock).mockImplementation(() => {
+      beats += 1;
+      return Promise.resolve(true);
+    });
+    const registry = new JobRegistry();
+    registry.register({
+      name: 'unit.job',
+      handle: async () => {
+        while (beats < 3) {
+          await new Promise((r) => setTimeout(r, 5));
+        }
+      },
+    });
+    const worker = new JobWorker(
+      registry,
+      repo,
+      new TenantContextService(),
+      config,
+    );
+
+    await worker.runOnce();
+
+    expect(repo.heartbeat).toHaveBeenCalledWith('j1', 2, 300);
+    expect(calls).toEqual(['complete j1 2']);
   });
 
   it('al pararse espera al trabajo en curso antes de resolver', async () => {

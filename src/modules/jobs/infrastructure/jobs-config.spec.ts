@@ -16,7 +16,8 @@ describe('loadJobsConfig', () => {
       leaseSeconds: 300,
       maxAttempts: 5,
       retryBaseMs: 30_000,
-      shutdownGraceMs: 30_000,
+      shutdownGraceMs: 20_000,
+      heartbeatMs: 100_000,
       retentionDays: 14,
     });
     expect(config.workerId).toMatch(/^[\w.-]+:\d+:[0-9a-f]{8}$/);
@@ -31,6 +32,27 @@ describe('loadJobsConfig', () => {
       role: 'all',
       workerEnabled: true,
     });
+  });
+
+  it('con NODE_ENV=test el worker NUNCA arranca aunque .env traiga APP_ROLE (salvo JOBS_WORKER_IN_TESTS=1)', () => {
+    expect(
+      loadJobsConfig(from({ NODE_ENV: 'test', APP_ROLE: 'all' })),
+    ).toMatchObject({ role: 'all', workerEnabled: false });
+    expect(
+      loadJobsConfig(
+        from({
+          NODE_ENV: 'test',
+          APP_ROLE: 'worker',
+          JOBS_WORKER_IN_TESTS: '1',
+        }),
+      ),
+    ).toMatchObject({ workerEnabled: true });
+  });
+
+  it('el latido renueva el arriendo a un tercio de su duración', () => {
+    expect(loadJobsConfig(from({ JOBS_LEASE_SECONDS: '60' })).heartbeatMs).toBe(
+      20_000,
+    );
   });
 
   it('lee los ajustes numéricos y cae al default con un valor raro (la validación del arranque ya lo rechaza)', () => {
