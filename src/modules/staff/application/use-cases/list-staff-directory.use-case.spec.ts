@@ -105,6 +105,7 @@ describe('ListStaffDirectoryUseCase', () => {
           role: ClinicRole.DENTIST,
           status: 'ACTIVE',
           expiresAt: null,
+          emailDelivery: null,
         },
         {
           kind: 'INVITATION',
@@ -114,6 +115,7 @@ describe('ListStaffDirectoryUseCase', () => {
           role: ClinicRole.ASSISTANT,
           status: 'PENDING',
           expiresAt: new Date('2026-08-08T00:00:00.000Z'),
+          emailDelivery: 'SENT',
         },
       ],
       total: 2,

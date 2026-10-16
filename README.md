@@ -230,6 +230,78 @@ Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
   defecto los últimos 30 días, como mucho 366), paginado por cursor
   (`nextCursor`, `limit` ≤ 100).
 
+## Email transaccional (DX-088)
+
+Módulo `src/modules/notifications/email` (hexagonal, como el resto):
+
+- **Puerto** `Mailer.send({to, subject, html, text})` con dos adaptadores:
+  `ConsoleMailer` (desarrollo y test: una línea de log `email.console` con el
+  destinatario **enmascarado** y el tamaño del mensaje; nunca el cuerpo, que
+  lleva el enlace con el token) y `SmtpMailer` (nodemailer; cualquier
+  proveedor con SMTP). Se elige con `MAIL_TRANSPORT=console|smtp`.
+- **Encolar**: `EmailOutbox.enqueue({tenantId?, to, template, vars, locale,
+  referenceId?})` renderiza la plantilla con la marca de la clínica (nombre, y
+  logo si es una URL http(s)), cifra el mensaje y lo deja `PENDING` en
+  `email_outbox`. Devuelve en cuanto la fila está guardada: **la petición
+  nunca espera al proveedor** (y un fallo del proveedor nunca es un 500).
+- **Plantillas** en español, HTML sencillo + texto, con todas las variables
+  escapadas: `invitation` (en uso), `password-reset`, `email-verify` y
+  `appointment-reminder` (listas para DX-010, DX-029 y DX-026).
+- **Despachador en proceso** (`EmailDispatcher`, hasta la cola de DX-085): se
+  despierta tras cada encolado y barre cada `MAIL_DISPATCH_INTERVAL_MS`
+  (default 30 s; 0 lo apaga, y es 0 con `NODE_ENV=test`). Reclama filas con
+  `FOR UPDATE SKIP LOCKED` y un arriendo de 5 min, así que con varias réplicas
+  ninguna fila se envía dos veces y la de una réplica caída se recupera. 3
+  intentos con backoff exponencial (`MAIL_RETRY_BASE_MS`, 1 min y 2 min por
+  defecto); tras el 3.er fallo queda `FAILED`. Al apagar (SIGTERM,
+  `enableShutdownHooks`) deja de barrer y espera la tanda en vuelo.
+- **Datos personales**: `email_outbox` nunca guarda el email ni el token en
+  claro: `toHash` (HMAC-SHA256), `toMasked` (`an***@dominio`) y el mensaje
+  cifrado con AES-256-GCM (`MAIL_ENCRYPTION_KEY`), que se borra al quedar
+  `SENT` o `FAILED` (un `CHECK` de la tabla lo garantiza). `lastError` guarda
+  solo el tipo y el código del proveedor, nunca su mensaje.
+- **RLS**: la tabla lleva la política estándar por clínica. El despachador, que
+  trabaja para todas a la vez, y los emails de plataforma (`tenantId` NULL)
+  pasan por tres funciones `SECURITY DEFINER` de la migración
+  `20261017120000_email_outbox`, propiedad del owner de las migraciones (que
+  debe saltarse la RLS, como ya exige DX-025) y concedidas explícitamente a
+  `dentalix_app`. El arriendo de un reclamo se acota a 900 s y el cierre de
+  un intento solo vale para ESE intento (fencing por `attempts`). Si el rol de la app se crea después de migrar, concédele
+  `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle` y
+  `email_outbox_enqueue_platform`.
+- **Producción**: la API **no arranca** sin `MAIL_TRANSPORT="smtp"`,
+  `SMTP_URL` (smtp:// o smtps://, sin `?query`), `MAIL_FROM` y
+  `MAIL_ENCRYPTION_KEY` (`openssl rand -hex 32`), ni con
+  `MAIL_DISPATCH_INTERVAL_MS` < 5000. Tampoco arranca si el despachador no
+  tiene acceso (el rol de la app no puede ejecutar las funciones o su owner no
+  se salta la RLS): es un fallo de despliegue permanente, no un corte de la BD,
+  así que se trata como la configuración inválida y no como la readiness
+  (DX-023). Fuera de producción solo deja un `error`
+  `email.dispatcher_misconfigured`. Ver `.env.example`.
+- **SMTP**: TLS obligatorio (smtps://, o STARTTLS exigido en smtp://), TLS ≥
+  1.2 y certificado verificado; la query de `SMTP_URL` se ignora. El
+  transporte se cierra al apagar.
+- **Anti-abuso** (cualquiera puede registrar una clínica e invitar a
+  cualquier correo): `POST /staff/invitations` y `/:id/resend` llevan la
+  política de rate limit `invitation-email` (por clínica + usuario, 10/min,
+  `RATE_LIMIT_INVITATION_EMAIL_*`) y, contados en la BD (valen entre
+  réplicas), un enfriamiento de 60 s y un máximo de 5 emails/24 h al mismo
+  destinatario de la clínica, y 50 emails/24 h por clínica
+  (`MAIL_RECIPIENT_COOLDOWN_SECONDS`, `MAIL_RECIPIENT_DAILY_LIMIT`,
+  `MAIL_TENANT_DAILY_LIMIT`). Al pasarlos: 429 con el motivo en español, sin
+  tocar la invitación (el enlace vigente sigue valiendo). `fullName` ≤ 120 y
+  `email` ≤ 254 caracteres.
+
+**Invitaciones**: `POST /staff/invitations` encola el email `invitation` con
+el enlace `<protocolo>://<host de la clínica>/invitacion/<token>` (el host con
+el que llegó la petición, validado; el protocolo sale de
+`PUBLIC_WEB_PROTOCOL`) y sigue devolviendo el token para que el ADMIN pueda
+copiar el enlace. `POST /staff/invitations/:id/resend` (solo ADMIN) regenera
+el token —el anterior deja de servir— y reinicia los 7 días; revocar o
+reenviar cancela el email que siguiera pendiente con el enlace viejo.
+`GET /staff/directory` devuelve en cada invitación `emailDelivery`
+(`PENDING` | `SENT` | `FAILED` | `null`).
+
 ## Run tests
 
 ```bash

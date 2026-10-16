@@ -13,6 +13,7 @@ import {
   loginAccountRateLimitKey,
   loginRateLimitKey,
   passwordRateLimitKey,
+  staffActorRateLimitKey,
 } from './rate-limit.keys';
 import { RateLimitGuard } from './rate-limit.guard';
 
@@ -91,6 +92,14 @@ function throttlers(
         ),
     },
     strict('confirmation'),
+    {
+      ...strict('invitation-email'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(
+          routePrefix(context, name),
+          request(context).headers.authorization,
+        ),
+    },
   ];
 }
 

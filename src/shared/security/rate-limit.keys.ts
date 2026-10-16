@@ -39,22 +39,50 @@ export function loginAccountRateLimitKey(
   return sha256(`${prefix}-account-${normalizedEmail(body)}`);
 }
 
-// `sub` del JWT de la cabecera, DECODIFICADO SIN VERIFICAR: el limitador corre
-// antes de JwtAuthGuard. Falsearlo no da nada: con un token inválido la
-// petición acaba en 401 sin llegar a comprobar la contraseña.
-function unverifiedSubject(authorization: string): string | null {
+// Claims del JWT de la cabecera, DECODIFICADOS SIN VERIFICAR: el limitador
+// corre antes de JwtAuthGuard. Falsearlos no da nada: con un token inválido la
+// petición acaba en 401 sin llegar a la acción.
+function unverifiedClaims(authorization: string): {
+  sub: string | null;
+  tenantId: string | null;
+} {
   const token = authorization.replace(/^Bearer\s+/i, '');
   const payload = token.split('.')[1];
-  if (!payload) return null;
+  if (!payload) return { sub: null, tenantId: null };
   try {
-    const decoded: unknown = JSON.parse(
+    const decoded = JSON.parse(
       Buffer.from(payload, 'base64url').toString('utf8'),
-    );
-    const sub = (decoded as { sub?: unknown } | null)?.sub;
-    return typeof sub === 'string' && sub !== '' ? sub : null;
+    ) as { sub?: unknown; tenantId?: unknown } | null;
+    const pick = (v: unknown): string | null =>
+      typeof v === 'string' && v !== '' ? v : null;
+    return { sub: pick(decoded?.sub), tenantId: pick(decoded?.tenantId) };
   } catch {
-    return null;
+    return { sub: null, tenantId: null };
   }
+}
+
+function unverifiedSubject(authorization: string): string | null {
+  return unverifiedClaims(authorization).sub;
+}
+
+/**
+ * Balde `invitation-email` (DX-088): clínica + usuario del token, SIN IP: el
+ * límite es de quien manda los emails, salga por la IP que salga. Sin token
+ * decodificable cae en la cabecera completa (acabará en 401 igualmente).
+ */
+export function staffActorRateLimitKey(
+  prefix: string,
+  authorization: unknown,
+): string {
+  const header = typeof authorization === 'string' ? authorization : '';
+  const { sub, tenantId } = header
+    ? unverifiedClaims(header)
+    : { sub: null, tenantId: null };
+  const who =
+    sub && tenantId
+      ? `actor:${sha256(`${tenantId}:${sub}`)}`
+      : `hdr:${sha256(header)}`;
+  return sha256(`${prefix}-${who}`);
 }
 
 /**

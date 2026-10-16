@@ -10,6 +10,9 @@ async function bootstrap(): Promise<void> {
   // mismo que montan los e2e (ver configure-app.ts).
   configureApp(app);
   setupSwagger(app);
+  // SIGTERM/SIGINT cierran la app con orden: el despachador de email
+  // (DX-088) deja de barrer y espera la tanda en vuelo antes de salir.
+  app.enableShutdownHooks();
 
   await app.listen(process.env.PORT ?? 3000);
 }

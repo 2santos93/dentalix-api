@@ -161,14 +161,34 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     );
   }
 
-  revokePendingByEmail(email: string): Promise<number> {
+  revokePendingByEmail(email: string): Promise<string[]> {
     const pending = this.invitations.filter(
       (i) => i.email === email && i.acceptedAt === null && i.revokedAt === null,
     );
     pending.forEach((i) => {
       i.revokedAt = NOW;
     });
-    return Promise.resolve(pending.length);
+    return Promise.resolve(pending.map((i) => i.id));
+  }
+
+  findPendingById(id: string): Promise<ClinicInvitation | null> {
+    const row = this.invitations.find(
+      (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
+    );
+    return Promise.resolve(row ? this.toEntity(row) : null);
+  }
+
+  reissue(
+    id: string,
+    input: { tokenHash: string; expiresAt: Date },
+  ): Promise<ClinicInvitation | null> {
+    const row = this.invitations.find(
+      (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
+    );
+    if (!row) return Promise.resolve(null);
+    row.tokenHash = input.tokenHash;
+    row.expiresAt = input.expiresAt;
+    return Promise.resolve(this.toEntity(row));
   }
 
   revokeById(id: string): Promise<boolean> {

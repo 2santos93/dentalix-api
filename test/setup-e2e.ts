@@ -15,6 +15,7 @@ for (const policy of [
   'PASSWORD',
   'CONFIRMATION',
   'REFRESH',
+  'INVITATION_EMAIL',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }
@@ -30,3 +31,10 @@ process.env.CORS_ROOT_DOMAIN ??= 'dentalix.local';
 // que un LOG_LEVEL de desarrollo no ensucie la salida; uno pasado por la
 // línea de comandos (LOG_LEVEL=debug npm run test:e2e) sigue ganando.
 process.env.LOG_LEVEL ??= 'silent';
+
+// Topes de email en BD (DX-088): los e2e reenvían al mismo correo al momento
+// y crean decenas de invitaciones por clínica. El 429 se prueba con topes
+// propios en test/invitation-email.e2e-spec.ts.
+process.env.MAIL_RECIPIENT_COOLDOWN_SECONDS ??= '0';
+process.env.MAIL_RECIPIENT_DAILY_LIMIT ??= '1000';
+process.env.MAIL_TENANT_DAILY_LIMIT ??= '1000';

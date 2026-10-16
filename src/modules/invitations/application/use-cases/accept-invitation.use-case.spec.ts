@@ -5,7 +5,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
-import { AcceptInvitationUseCase } from './accept-invitation.use-case';
+import {
+  AcceptInvitationUseCase,
+  INVITATION_NOT_FOUND,
+} from './accept-invitation.use-case';
 import { InMemoryInvitationRepository } from './__fixtures__/in-memory-invitation.repository';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PasswordService } from '../../../../shared/crypto/password.service';
@@ -155,28 +158,43 @@ describe('AcceptInvitationUseCase', () => {
   });
 
   it.each([
-    ['expirada', { expiresAt: new Date('2020-01-01T00:00:00.000Z') }],
-    ['revocada', { revokedAt: new Date('2026-01-01T00:00:00.000Z') }],
-    ['ya usada', { acceptedAt: new Date('2026-01-01T00:00:00.000Z') }],
-  ])('invitación %s -> GoneException', async (_label, overrides) => {
-    const repo = new InMemoryInvitationRepository();
-    repo.seedInvitation({ token: 'tok-4', ...overrides });
-    const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(
-      repo,
-      makePassword(),
-      makeTokens(),
-      ctx,
-    );
+    [
+      'expirada',
+      { expiresAt: new Date('2020-01-01T00:00:00.000Z') },
+      'La invitación caducó. Pide a la clínica que te la reenvíe.',
+    ],
+    [
+      'revocada',
+      { revokedAt: new Date('2026-01-01T00:00:00.000Z') },
+      'La clínica revocó esta invitación.',
+    ],
+    [
+      'ya usada',
+      { acceptedAt: new Date('2026-01-01T00:00:00.000Z') },
+      'Esta invitación ya se usó.',
+    ],
+  ])(
+    'invitación %s -> GoneException en español',
+    async (_label, overrides, message) => {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedInvitation({ token: 'tok-4', ...overrides });
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        makePassword(),
+        makeTokens(),
+        ctx,
+      );
 
-    await expect(
-      withTenant(ctx, 't1', () =>
-        uc.execute({ token: 'tok-4', password: 'longenough1' }),
-      ),
-    ).rejects.toBeInstanceOf(GoneException);
-  });
+      await expect(
+        withTenant(ctx, 't1', () =>
+          uc.execute({ token: 'tok-4', password: 'longenough1' }),
+        ),
+      ).rejects.toThrow(new GoneException(message));
+    },
+  );
 
-  it('token inexistente -> NotFoundException', async () => {
+  it('token inexistente (o reemplazado al reenviar) -> NotFoundException en español', async () => {
     const ctx = new TenantContextService();
     const uc = new AcceptInvitationUseCase(
       new InMemoryInvitationRepository(),
@@ -189,7 +207,7 @@ describe('AcceptInvitationUseCase', () => {
       withTenant(ctx, 't1', () =>
         uc.execute({ token: 'does-not-exist', password: 'longenough1' }),
       ),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    ).rejects.toThrow(new NotFoundException(INVITATION_NOT_FOUND));
   });
 
   it('contraseña < 8 caracteres para usuario NUEVO -> BadRequestException', async () => {

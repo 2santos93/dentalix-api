@@ -11,7 +11,12 @@
  * SEC-020: en producción, además, se exigen los dominios y la URL pública de
  * archivos (sus defaults son de desarrollo) y se rechazan las contraseñas de
  * base de datos de ejemplo.
+ * DX-088: en producción hace falta un proveedor de email (SMTP) y la clave
+ * que cifra los mensajes pendientes; fuera de producción, por defecto, los
+ * emails van al ConsoleMailer.
  */
+
+import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -197,6 +202,111 @@ function productionProblems(env: Env): string[] {
   return problems;
 }
 
+const MAIL_TRANSPORTS = ['console', 'smtp'];
+
+/** "no-reply@dominio" o "Nombre <no-reply@dominio>". */
+const MAIL_FROM_PATTERN =
+  /^(?:[^<>\r\n]{1,100} <[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+)$/;
+
+const HOW_TO_GENERATE_MAIL_KEY = 'Genera una con `openssl rand -hex 32`.';
+
+function mailProblems(env: Env, isProd: boolean): string[] {
+  const problems: string[] = [];
+  const transport = str(env, 'MAIL_TRANSPORT')?.trim().toLowerCase();
+
+  if (transport != null && !MAIL_TRANSPORTS.includes(transport)) {
+    problems.push(
+      `MAIL_TRANSPORT debe ser uno de: ${MAIL_TRANSPORTS.join(', ')}.`,
+    );
+  }
+  if (isProd && transport !== 'smtp') {
+    problems.push(
+      'En producción hace falta un proveedor de email: MAIL_TRANSPORT="smtp" con SMTP_URL y MAIL_FROM (el ConsoleMailer no envía nada y las invitaciones no llegarían).',
+    );
+  }
+  if (transport === 'smtp' || isProd) {
+    const smtpUrl = str(env, 'SMTP_URL');
+    let validUrl = false;
+    if (smtpUrl != null) {
+      try {
+        const url = new URL(smtpUrl);
+        validUrl =
+          (url.protocol === 'smtp:' || url.protocol === 'smtps:') &&
+          url.hostname !== '';
+      } catch {
+        validUrl = false;
+      }
+    }
+    if (
+      validUrl &&
+      isProd &&
+      smtpUrl != null &&
+      new URL(smtpUrl).search !== ''
+    ) {
+      problems.push(
+        'SMTP_URL no puede llevar parámetros (?...) en producción: nodemailer los aplica por encima de la configuración (p. ej. ?ignoreTLS=true desactivaría TLS).',
+      );
+    }
+    if (!validUrl) {
+      problems.push(
+        'SMTP_URL es obligatoria con MAIL_TRANSPORT="smtp" y tiene que ser una URL smtp:// o smtps:// (p. ej. "smtps://usuario:clave@smtp.proveedor.com:465").',
+      );
+    }
+    const from = str(env, 'MAIL_FROM')?.trim();
+    if (from == null || !MAIL_FROM_PATTERN.test(from)) {
+      problems.push(
+        'MAIL_FROM es obligatoria con MAIL_TRANSPORT="smtp": "no-reply@dominio" o "Nombre <no-reply@dominio>".',
+      );
+    }
+  }
+
+  const rawKey = str(env, 'MAIL_ENCRYPTION_KEY');
+  if (rawKey != null) {
+    const key = parseMailEncryptionKey(rawKey);
+    if (key == null) {
+      problems.push(
+        `MAIL_ENCRYPTION_KEY debe ser de 32 bytes, en hex (64 caracteres) o base64. ${HOW_TO_GENERATE_MAIL_KEY}`,
+      );
+    } else if (new Set(key).size < JWT_SECRET_MIN_DISTINCT_CHARS) {
+      problems.push(
+        `MAIL_ENCRYPTION_KEY es demasiado repetitiva (un valor de ejemplo). ${HOW_TO_GENERATE_MAIL_KEY}`,
+      );
+    }
+  } else if (isProd) {
+    problems.push(
+      `MAIL_ENCRYPTION_KEY es obligatoria en producción: cifra los emails pendientes (llevan enlaces con token). ${HOW_TO_GENERATE_MAIL_KEY}`,
+    );
+  }
+
+  const interval = str(env, 'MAIL_DISPATCH_INTERVAL_MS');
+  if (
+    isProd &&
+    interval != null &&
+    /^\d{1,9}$/.test(interval.trim()) &&
+    Number(interval) < 5000
+  ) {
+    problems.push(
+      'MAIL_DISPATCH_INTERVAL_MS debe ser ≥ 5000 en producción: sin barrido, los reintentos y los envíos de una réplica caída no se recogen nunca.',
+    );
+  }
+
+  for (const [key, min] of [
+    ['MAIL_DISPATCH_INTERVAL_MS', 0],
+    ['MAIL_RETRY_BASE_MS', 1],
+    ['MAIL_TENANT_DAILY_LIMIT', 1],
+    ['MAIL_RECIPIENT_DAILY_LIMIT', 1],
+    ['MAIL_RECIPIENT_COOLDOWN_SECONDS', 0],
+  ] as const) {
+    const raw = str(env, key);
+    if (raw == null) continue;
+    if (!/^\d{1,9}$/.test(raw.trim()) || Number(raw) < min) {
+      problems.push(`${key} debe ser un entero ≥ ${min}.`);
+    }
+  }
+
+  return problems;
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -212,6 +322,7 @@ export function validateEnv(env: Env): Env {
   const isProd = str(env, 'NODE_ENV') === 'production';
   problems.push(...jwtSecretProblems(env, isProd));
   if (isProd) problems.push(...productionProblems(env));
+  problems.push(...mailProblems(env, isProd));
 
   if (problems.length > 0) {
     throw new Error(

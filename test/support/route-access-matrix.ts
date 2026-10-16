@@ -263,6 +263,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /staff/invitations': ADMIN_ONLY,
   'GET /staff/invitations': ADMIN_ONLY,
   'DELETE /staff/invitations/:id': ADMIN_ONLY,
+  // Reenviar invitación (DX-088): loop/informes/DX-088.md.
+  'POST /staff/invitations/:id/resend': ADMIN_ONLY,
 
   // --- Dominios propios ----------------------------------------------------
   // docs/superpowers/specs/2026-07-23-tenant-host-resolution-design.md (este repo).

@@ -98,13 +98,53 @@ export class PrismaInvitationRepository implements InvitationRepository {
     });
   }
 
-  async revokePendingByEmail(email: string): Promise<number> {
+  async revokePendingByEmail(email: string): Promise<string[]> {
     return this.prisma.runWithTenant(async (tx) => {
-      const result = await tx.clinicInvitation.updateMany({
-        where: { email, acceptedAt: null, revokedAt: null, deletedAt: null },
+      const where = {
+        email,
+        acceptedAt: null,
+        revokedAt: null,
+        deletedAt: null,
+      };
+      // Por el único parcial (tenantId, email) de pendientes hay a lo sumo una.
+      const pending = await tx.clinicInvitation.findMany({
+        where,
+        select: { id: true },
+      });
+      if (pending.length === 0) return [];
+      await tx.clinicInvitation.updateMany({
+        where: { ...where, id: { in: pending.map((p) => p.id) } },
         data: { revokedAt: new Date() },
       });
-      return result.count;
+      return pending.map((p) => p.id);
+    });
+  }
+
+  async findPendingById(id: string): Promise<ClinicInvitation | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.clinicInvitation.findFirst({
+        where: { id, acceptedAt: null, revokedAt: null, deletedAt: null },
+      }),
+    );
+    return row ? mapToEntity(row) : null;
+  }
+
+  async reissue(
+    id: string,
+    input: { tokenHash: string; expiresAt: Date },
+  ): Promise<ClinicInvitation | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Check-and-set atómico: solo una invitación pendiente (no aceptada ni
+      // revocada) de ESTE tenant (RLS); una de otra clínica no existe.
+      const result = await tx.clinicInvitation.updateMany({
+        where: { id, acceptedAt: null, revokedAt: null, deletedAt: null },
+        data: { tokenHash: input.tokenHash, expiresAt: input.expiresAt },
+      });
+      if (result.count === 0) return null;
+      const row = await tx.clinicInvitation.findUniqueOrThrow({
+        where: { id },
+      });
+      return mapToEntity(row);
     });
   }
 
