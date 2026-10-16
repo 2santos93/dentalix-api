@@ -181,6 +181,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /treatment-plans/:id/items': CLINICAL,
   'PATCH /treatment-plans/:id/items/:itemId': CLINICAL,
   'DELETE /treatment-plans/:id/items/:itemId': CLINICAL,
+  // Presupuesto imprimible y aceptación firmada: loop/informes/DX-012.md.
+  // Imprimirlo, los cuatro roles (recepción lo imprime y lo archiva);
+  // aceptarlo con firma sigue las reglas del plan (CLINICAL).
+  'GET /patients/:patientId/treatment-plans/:planId/quote': EVERY_ROLE,
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance': CLINICAL,
 
   // --- Agenda --------------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase3-appointments.md; enlace de

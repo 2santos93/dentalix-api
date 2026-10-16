@@ -37,6 +37,10 @@ import { clinicTables, TenantTable } from './support/tenant-tables';
  * un 404 solo pueda venir de que el recurso de la RUTA es de A.
  */
 
+// PNG real de 1x1 con un píxel visible (la API rechaza una firma en blanco).
+const SIGNATURE_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -123,6 +127,8 @@ interface SeedA {
   planId: string;
   planItemId: string;
   bareplanId: string;
+  /** Plan aceptado con firma (DX-012). */
+  signedPlanId: string;
   paymentId: string;
   consentTemplateId: string;
   locationId: string;
@@ -227,6 +233,34 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     `/patients/${patientId}/treatment-plans`,
     { currency: 'USD', notes: 'Plan de A sin plan de pagos' },
   );
+  // DX-012: un plan de A aceptado con firma, para que la fotografía incluya
+  // treatment_plan_acceptances.
+  const signedPlan = await create(
+    app,
+    a,
+    `/patients/${patientId}/treatment-plans`,
+    { currency: 'USD', notes: 'Plan de A firmado' },
+  );
+  await create(app, a, `/treatment-plans/${signedPlan.id}/items`, {
+    toothNumber: '21',
+    catalogItemId,
+  });
+  const quote = await api(
+    app,
+    a,
+    'get',
+    `/patients/${patientId}/treatment-plans/${signedPlan.id}/quote`,
+  ).expect(200);
+  await create(
+    app,
+    a,
+    `/patients/${patientId}/treatment-plans/${signedPlan.id}/acceptance`,
+    {
+      signerName: 'Paciente de A',
+      signature: SIGNATURE_PNG,
+      contentHash: (quote.body as { contentHash: string }).contentHash,
+    },
+  );
 
   const consentTemplate = await create(app, a, '/consent-templates', {
     title: 'Consentimiento de A',
@@ -271,6 +305,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     planId: plan.id,
     planItemId: planItem.id,
     bareplanId: bareplan.id,
+    signedPlanId: signedPlan.id,
     paymentId: payment.id,
     consentTemplateId: consentTemplate.id,
     locationId: location.id,
@@ -320,6 +355,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'inventory_movements',
       'treatment_plans',
       'treatment_plan_items',
+      'treatment_plan_acceptances',
       'payment_plans',
       'installments',
       'payments',
@@ -461,6 +497,26 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'patch',
       path: () => `/treatment-plans/${a.planId}/items/${a.planItemId}`,
       body: () => ({ price: 1, notes: 'Hackeado' }),
+      status: 404,
+    },
+    // DX-012: presupuesto y aceptación firmada de un plan de A.
+    {
+      name: 'GET /patients/:patientId/treatment-plans/:planId/quote',
+      verb: 'get',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.signedPlanId}/quote`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/acceptance`,
+      body: () => ({
+        signerName: 'Hackeado',
+        signature: SIGNATURE_PNG,
+        contentHash: 'a'.repeat(64),
+      }),
       status: 404,
     },
     {
