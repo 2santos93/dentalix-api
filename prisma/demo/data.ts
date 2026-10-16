@@ -1515,8 +1515,7 @@ export const DEMO_PRESCRIPTION_TEMPLATES: readonly DemoPrescriptionTemplate[] =
   [
     {
       name: 'Antibiótico — Amoxicilina 500 mg',
-      notes:
-        'Profilaxis o infección odontogénica en paciente sin alergia a penicilinas.',
+      notes: 'Profilaxis o infección odontogénica.',
       items: [AMOXICILINA_500],
     },
     {
