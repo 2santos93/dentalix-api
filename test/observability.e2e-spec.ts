@@ -3,26 +3,21 @@ import {
   Get,
   INestApplication,
   InternalServerErrorException,
-  ValidationPipe,
 } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
-import { setupSwagger } from '../src/config/swagger';
-import { applyBodyLimits } from '../src/config/body-limits';
-import { applyObservability } from '../src/shared/observability/apply-observability';
 import { AppLogger, LogSink } from '../src/shared/observability/app-logger';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
-import { applySecurity } from '../src/shared/security/apply-security';
 import { TenantResolverService } from '../src/shared/tenancy/tenant-resolver.service';
+import { E2eAppOptions, createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 
 // DX-023: request id, log de acceso sin datos clínicos ni PII, 5xx sin stack
-// para el cliente y sondas de salud. La app se arma igual que main.ts, con un
-// AppLogger que escribe en memoria (nivel debug) en vez de en la consola: así
-// el test lee cada línea y la salida de jest queda limpia.
+// para el cliente y sondas de salud. La app se arma con configureApp, como
+// main.ts (createE2eApp), con un AppLogger que escribe en memoria (nivel
+// debug) en vez de en la consola: así el test lee cada línea y la salida de
+// jest queda limpia.
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -41,6 +36,18 @@ type LogLine = Record<string, unknown>;
 // Rutas que solo existen en este test, para provocar errores 5xx.
 @Controller('test-boom')
 class BoomController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  // Argumento desconocido: Prisma lanza un PrismaClientValidationError cuyo
+  // mensaje reproduce la query con sus argumentos (el nombre del paciente).
+  @Get('prisma-validation')
+  async prismaValidation(): Promise<unknown> {
+    const args = {
+      where: { name: PATIENT_NAME, fullName: PATIENT_NAME },
+    } as unknown as Prisma.TenantFindFirstArgs;
+    return this.prisma.tenant.findFirst(args);
+  }
+
   @Get()
   boom(): never {
     throw new Error(`fallo interno con ${PATIENT_NAME}`);
@@ -52,32 +59,19 @@ class BoomController {
   }
 }
 
-async function buildApp(
+const buildApp = (
   lines: LogLine[],
-  override?: (b: ReturnType<typeof Test.createTestingModule>) => void,
-): Promise<INestApplication<App>> {
-  const builder = Test.createTestingModule({
-    imports: [AppModule],
-    controllers: [BoomController],
-  });
-  override?.(builder);
-  const moduleRef = await builder.compile();
-  const app = moduleRef.createNestApplication<INestApplication<App>>();
+  override?: E2eAppOptions['override'],
+): Promise<INestApplication<App>> => {
   const sink: LogSink = (_stream, line) => {
     lines.push(JSON.parse(line) as LogLine);
   };
-  applyObservability(
-    app,
-    new AppLogger({ level: 'debug', format: 'json' }, sink),
-  );
-  applySecurity(app);
-  applyBodyLimits(app);
-  app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  setupSwagger(app);
-  await app.init();
-  return app;
-}
+  return createE2eApp({
+    controllers: [BoomController],
+    override,
+    logger: new AppLogger({ level: 'debug', format: 'json' }, sink),
+  });
+};
 
 const accessLines = (lines: LogLine[]): LogLine[] =>
   lines.filter((l) => l.context === 'Access');
@@ -278,13 +272,36 @@ describe('Observabilidad (e2e, DX-023)', () => {
         error: 'Error',
       });
       expect(String(errors[0].stack)).toMatch(/\n\s+at /);
+      // El mensaje del error (lleva el nombre) tampoco llega al log.
+      expect(JSON.stringify(lines)).not.toContain(PATIENT_NAME);
       expect(accessLines(lines)[0]).toMatchObject({
         requestId: res.headers['x-request-id'],
         status: 500,
       });
     });
 
-    it('un HttpException 5xx conserva su cuerpo y añade el request id', async () => {
+    it('un PrismaClientValidationError: 500 genérico y el log sin los argumentos de la query', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/test-boom/prisma-validation')
+        .expect(500);
+      expect(res.body).toEqual({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Ocurrió un error procesando la solicitud.',
+        requestId: res.headers['x-request-id'],
+      });
+      const errors = lines.filter((l) => l.level === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({
+        error: 'PrismaClientValidationError',
+        requestId: res.headers['x-request-id'],
+      });
+      expect(String(errors[0].stack)).toMatch(/\n\s+at /);
+      expect(JSON.stringify(lines)).not.toContain(PATIENT_NAME);
+      expect(res.text).not.toContain(PATIENT_NAME);
+    });
+
+    it('un HttpException 5xx lanzado a propósito: conserva su cuerpo, añade el request id y deja una línea warn sin stack', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/test-boom/http')
         .expect(500);
@@ -294,7 +311,14 @@ describe('Observabilidad (e2e, DX-023)', () => {
         message: 'dependencia caída',
         requestId: res.headers['x-request-id'],
       });
-      expect(lines.filter((l) => l.level === 'error')).toHaveLength(1);
+      const problems = lines.filter((l) => l.context !== 'Access');
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatchObject({
+        level: 'warn',
+        status: 500,
+        error: 'InternalServerErrorException',
+      });
+      expect(problems[0]).not.toHaveProperty('stack');
     });
 
     it('un 4xx no lleva requestId en el cuerpo ni se registra como error', async () => {
@@ -350,6 +374,7 @@ describe('Observabilidad sin base de datos (e2e, DX-023)', () => {
     app = await buildApp(lines, (builder) => {
       builder.overrideProvider(PrismaService).useValue(unreachable);
     });
+    lines.length = 0;
   });
 
   afterAll(async () => {
@@ -368,9 +393,19 @@ describe('Observabilidad sin base de datos (e2e, DX-023)', () => {
       requestId: res.headers['x-request-id'],
     });
     expect(res.text).not.toContain('127.0.0.1');
-    expect(
-      lines.find((l) => l.level === 'warn' && l.context === 'HealthController'),
-    ).toMatchObject({ requestId: res.headers['x-request-id'] });
+    // Una sola línea warn por fallo (más la de acceso), con el tipo de la
+    // causa, sin stack ni el mensaje del driver (lleva la URL de la base).
+    const problems = lines.filter((l) => l.context !== 'Access');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatchObject({
+      level: 'warn',
+      context: 'ExceptionFilter',
+      requestId: res.headers['x-request-id'],
+      status: 503,
+      cause: 'PrismaClientInitializationError',
+    });
+    expect(problems[0]).not.toHaveProperty('stack');
+    expect(JSON.stringify(lines)).not.toContain('127.0.0.1');
   });
 
   it('/health: 200 aunque no haya base', async () => {

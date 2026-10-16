@@ -7,10 +7,9 @@ import { requestObservabilityMiddleware } from './request-observability.middlewa
 
 /**
  * Observabilidad de la app (DX-023): logger estructurado, request id + línea
- * de acceso y filtro global de errores. La usan main.ts y los e2e que la
- * verifican, para que ambos salgan idénticos. Debe llamarse LO PRIMERO, antes
- * de applySecurity: así el request id va también en las respuestas que cortan
- * helmet, CORS o el parser del cuerpo.
+ * de acceso y filtro global de errores. La llama configureApp (main.ts y los
+ * e2e) LO PRIMERO, antes de applySecurity: así el request id va también en
+ * las respuestas que cortan helmet, CORS o el parser del cuerpo.
  */
 export function applyObservability(
   app: INestApplication,

@@ -1,11 +1,9 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
-import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
-import { PrismaExceptionFilter } from '../src/shared/prisma/prisma-exception.filter';
+import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol, mirar
@@ -188,16 +186,8 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
   }
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
-    app.useGlobalFilters(new PrismaExceptionFilter());
-    await app.init();
+    // Montada como main.ts: el filtro global (con el de Prisma) da los 409.
+    app = await createE2eApp();
     await cleanup();
 
     clinicA = await register('datos-a');
