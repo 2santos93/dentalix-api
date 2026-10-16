@@ -333,7 +333,7 @@ export class TreatmentPlansController {
   @Patch('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ type: TreatmentPlanItemDto })
   @ApiConflictResponse({
-    description: `${ITEMS_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED)`,
+    description: `${ITEMS_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio`,
   })
   updateItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
