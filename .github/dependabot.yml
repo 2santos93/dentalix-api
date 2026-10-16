@@ -1,0 +1,27 @@
+# Actualizaciones de dependencias (DX-080). Semanal, agrupadas para no inundar
+# de PRs. Los saltos mayores llegan en PR aparte y se revisan a mano.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Bogota
+    open-pull-requests-limit: 10
+    groups:
+      produccion-menores:
+        dependency-type: production
+        update-types: [minor, patch]
+      desarrollo-menores:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Bogota
+    groups:
+      acciones:
+        patterns: ['*']
