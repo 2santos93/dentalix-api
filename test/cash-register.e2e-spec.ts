@@ -12,6 +12,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // `raw` es la conexión de ADMINISTRACIÓN (DIRECT_URL, owner `dentalix`) solo
 // para sembrar y limpiar: con RLS, el rol de la app sin tenant en contexto ve
@@ -61,10 +62,11 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({ ...opts, password: PASSWORD, fullName: 'Dr. Owner' })
-    .expect(201);
+  const register = await registerVerified(app, {
+    ...opts,
+    password: PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const accessToken = await loginAs(app, opts.subdomain, opts.email);
   return {
     tenantId: (register.body as { tenantId: string }).tenantId,

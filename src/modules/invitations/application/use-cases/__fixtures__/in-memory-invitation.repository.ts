@@ -2,6 +2,8 @@ import { ClinicRole } from '@prisma/client';
 import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.entity';
 import {
   AcceptOutcome,
+  AcceptUserResolution,
+  AccountClaimConflictError,
   GlobalUserRecord,
   InvitationRepository,
 } from '../../../domain/ports/invitation-repository.port';
@@ -19,6 +21,8 @@ interface StoredUser {
   fullName: string;
   passwordHash: string;
   tokenVersion: number;
+  /** Por defecto verificado; `null` = cuenta reclamable (DX-029). */
+  emailVerifiedAt: Date | null;
 }
 
 interface StoredMembership {
@@ -82,6 +86,10 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       fullName: overrides.fullName ?? 'Existing User',
       passwordHash: overrides.passwordHash ?? 'HASH',
       tokenVersion: overrides.tokenVersion ?? 0,
+      emailVerifiedAt:
+        overrides.emailVerifiedAt === undefined
+          ? NOW
+          : overrides.emailVerifiedAt,
     };
     this.users.push(user);
     return user;
@@ -156,6 +164,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
             id: user.id,
             passwordHash: user.passwordHash,
             tokenVersion: user.tokenVersion,
+            emailVerifiedAt: user.emailVerifiedAt,
           }
         : null,
     );
@@ -220,36 +229,55 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       acceptedAt: null,
       revokedAt: null,
       invitedById: input.invitedById ?? null,
-      createdAt: NOW,
+      createdAt: new Date(),
       tokenHash: input.tokenHash,
     };
     this.invitations.push(row);
     return Promise.resolve(this.toEntity(row));
   }
 
+  /** Test helper: el usuario tal como quedó guardado. */
+  userById(id: string): StoredUser | undefined {
+    return this.users.find((u) => u.id === id);
+  }
+
+  countCreatedSince(since: Date): Promise<number> {
+    return Promise.resolve(
+      this.invitations.filter((i) => i.createdAt >= since).length,
+    );
+  }
+
   acceptTransactional(input: {
     invitationId: string;
     email: string;
     role: ClinicRole;
-    existingUserId?: string;
-    newUser?: { fullName: string; passwordHash: string };
-  }): Promise<AcceptOutcome> {
-    let userId: string;
-    if (input.newUser) {
-      const user = this.seedUser({
+    user: AcceptUserResolution;
+  }): Promise<AcceptOutcome & { tokenVersion: number }> {
+    let user: StoredUser;
+    const resolution = input.user;
+    if ('newUser' in resolution) {
+      user = this.seedUser({
         email: input.email,
-        fullName: input.newUser.fullName,
-        passwordHash: input.newUser.passwordHash,
+        fullName: resolution.newUser.fullName,
+        passwordHash: resolution.newUser.passwordHash,
+        emailVerifiedAt: NOW,
       });
-      userId = user.id;
-    } else {
-      if (!input.existingUserId) {
-        throw new Error(
-          'acceptTransactional requires newUser or existingUserId',
-        );
+    } else if ('claim' in resolution) {
+      const found = this.userById(resolution.claim.userId);
+      if (!found || found.emailVerifiedAt !== null) {
+        return Promise.reject(new AccountClaimConflictError());
       }
-      userId = input.existingUserId;
+      found.passwordHash = resolution.claim.passwordHash;
+      found.emailVerifiedAt = NOW;
+      found.tokenVersion += 1;
+      user = found;
+    } else {
+      const found = this.userById(resolution.existingUserId);
+      if (!found) throw new Error('unknown user');
+      found.emailVerifiedAt ??= NOW;
+      user = found;
     }
+    const userId = user.id;
 
     // Reuse (reactivate) an existing membership instead of duplicating it —
     // same "already an active member" idempotency the Prisma repo provides.
@@ -275,7 +303,11 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       invitation.acceptedAt = NOW;
     }
 
-    return Promise.resolve({ userId, role: input.role });
+    return Promise.resolve({
+      userId,
+      role: input.role,
+      tokenVersion: user.tokenVersion,
+    });
   }
 
   findTenantName(): Promise<string | null> {

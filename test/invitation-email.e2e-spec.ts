@@ -13,6 +13,7 @@ import {
   loadMailConfig,
 } from '../src/modules/notifications/email/infrastructure/mail-config';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DX-088 (e2e): invitar encola el email con el enlace del host de la clínica
 // y responde sin esperar al proveedor; «Reenviar invitación» regenera el
@@ -34,7 +35,7 @@ type LogLine = Record<string, unknown>;
 
 interface CreatedInvitation {
   id: string;
-  token: string;
+  email: string;
   expiresAt: string;
   emailDelivery: 'PENDING' | 'SENT' | 'FAILED' | null;
 }
@@ -43,6 +44,15 @@ interface DirectoryEntry {
   kind: string;
   id: string;
   emailDelivery: 'PENDING' | 'SENT' | 'FAILED' | null;
+}
+
+/** Token del enlace del último email a `to` (DX-029: solo viaja por email). */
+function tokenSentTo(sent: OutgoingEmail[], to: string): string {
+  for (let i = sent.length - 1; i >= 0; i--) {
+    const match = /\/invitacion\/([0-9a-f]{64})/.exec(sent[i].text);
+    if (sent[i].to === to && match) return match[1];
+  }
+  throw new Error(`sin email de invitación para ${to}`);
 }
 
 /** Proveedor de pega: graba lo que recibe, puede tardar y puede fallar. */
@@ -116,16 +126,13 @@ describe('Email de invitación (e2e, DX-088)', () => {
     });
     dispatcher = app.get(EmailDispatcher);
 
-    const register = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Clínica <b>Correo</b>',
-        subdomain: SUB,
-        email: ADMIN_EMAIL,
-        password: PASSWORD,
-        fullName: 'Dra. Correo',
-      })
-      .expect(201);
+    const register = await registerVerified(app, {
+      clinicName: 'Clínica <b>Correo</b>',
+      subdomain: SUB,
+      email: ADMIN_EMAIL,
+      password: PASSWORD,
+      fullName: 'Dra. Correo',
+    });
     tenantId = (register.body as { tenantId: string }).tenantId;
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
@@ -155,10 +162,11 @@ describe('Email de invitación (e2e, DX-088)', () => {
       fullName: 'Ana <i>Pérez</i>',
     });
     expect(created.emailDelivery).toBe('PENDING');
-    // El flujo de siempre: el ADMIN sigue recibiendo el token para copiar el enlace.
-    expect(created.token).toMatch(/^[0-9a-f]{64}$/);
+    // DX-029: el ADMIN ya no recibe el token; solo viaja en el email.
+    expect(created).not.toHaveProperty('token');
 
     await dispatcher.whenIdle();
+    const token = tokenSentTo(mailer.sent, 'ana.perez@mail-e2e.test');
     const rows = await raw.emailOutbox.findMany({
       where: { referenceId: created.id },
     });
@@ -176,10 +184,8 @@ describe('Email de invitación (e2e, DX-088)', () => {
     const email = mailer.sent[0];
     expect(email.to).toBe('ana.perez@mail-e2e.test');
     expect(email.subject).toBe('Te invitaron a unirte a Clínica <b>Correo</b>');
-    expect(email.text).toContain(`http://${HOST}/invitacion/${created.token}`);
-    expect(email.html).toContain(
-      `href="http://${HOST}/invitacion/${created.token}"`,
-    );
+    expect(email.text).toContain(`http://${HOST}/invitacion/${token}`);
+    expect(email.html).toContain(`href="http://${HOST}/invitacion/${token}"`);
     // Nombres escapados en el HTML (sin HTML injection).
     expect(email.html).toContain('Clínica &lt;b&gt;Correo&lt;/b&gt;');
     expect(email.html).toContain('Hola, Ana &lt;i&gt;Pérez&lt;/i&gt;');
@@ -240,25 +246,27 @@ describe('Email de invitación (e2e, DX-088)', () => {
     const email = 'secreta.persona@mail-e2e.test';
     const created = await invite({ email });
     await dispatcher.whenIdle();
+    const token = tokenSentTo(mailer.sent, email);
 
     const log = JSON.stringify(lines);
     expect(lines.some((l) => l.event === 'email.enqueued')).toBe(true);
     expect(lines.some((l) => l.event === 'email.sent')).toBe(true);
     expect(log).not.toContain(email);
-    expect(log).not.toContain(created.token);
+    expect(log).not.toContain(token);
     expect(log).toContain('se***@mail-e2e.test');
 
     const [{ text }] = await raw.$queryRaw<{ text: string }[]>`
       SELECT string_agg(to_jsonb(o)::text, ' ') AS text
         FROM email_outbox o WHERE o."referenceId" = ${created.id}::uuid`;
     expect(text).not.toContain(email);
-    expect(text).not.toContain(created.token);
+    expect(text).not.toContain(token);
   });
 
   describe('POST /staff/invitations/:id/resend', () => {
     it('regenera el token: el anterior ya no sirve (mensaje en español) y el nuevo caduca a los 7 días', async () => {
       const created = await invite();
       await dispatcher.whenIdle();
+      const oldToken = tokenSentTo(mailer.sent, created.email);
       mailer.sent.length = 0;
 
       const before = Date.now();
@@ -268,7 +276,7 @@ describe('Email de invitación (e2e, DX-088)', () => {
       ).expect(200);
       const resent = res.body as CreatedInvitation;
       expect(resent.id).toBe(created.id);
-      expect(resent.token).not.toBe(created.token);
+      expect(resent).not.toHaveProperty('token');
       expect(resent.emailDelivery).toBe('PENDING');
       const expiresAt = new Date(resent.expiresAt).getTime();
       expect(expiresAt).toBeGreaterThanOrEqual(before + SEVEN_DAYS_MS - 1_000);
@@ -276,13 +284,13 @@ describe('Email de invitación (e2e, DX-088)', () => {
 
       // El enlace viejo: la pantalla pública lo ve como inexistente…
       const oldLookup = await request(app.getHttpServer())
-        .get(`/api/v1/public/invitations/${created.token}`)
+        .get(`/api/v1/public/invitations/${oldToken}`)
         .set('X-Tenant-Host', HOST)
         .expect(200);
       expect(oldLookup.body).toEqual({ status: 'NOT_FOUND' });
       // …y aceptarlo falla con un mensaje en español.
       const oldAccept = await request(app.getHttpServer())
-        .post(`/api/v1/public/invitations/${created.token}/accept`)
+        .post(`/api/v1/public/invitations/${oldToken}/accept`)
         .set('X-Tenant-Host', HOST)
         .send({ password: 'Clave-Nueva-2026!' })
         .expect(404);
@@ -293,8 +301,9 @@ describe('Email de invitación (e2e, DX-088)', () => {
       // Un email nuevo con el enlace nuevo; los dos envíos quedan registrados.
       await dispatcher.whenIdle();
       expect(mailer.sent).toHaveLength(1);
-      expect(mailer.sent[0].text).toContain(`/invitacion/${resent.token}`);
-      expect(mailer.sent[0].text).not.toContain(created.token);
+      const newToken = tokenSentTo(mailer.sent, created.email);
+      expect(newToken).not.toBe(oldToken);
+      expect(mailer.sent[0].text).not.toContain(oldToken);
       const rows = await raw.emailOutbox.findMany({
         where: { referenceId: created.id },
         orderBy: { createdAt: 'asc' },
@@ -303,7 +312,7 @@ describe('Email de invitación (e2e, DX-088)', () => {
 
       // El nuevo sí sirve.
       await request(app.getHttpServer())
-        .post(`/api/v1/public/invitations/${resent.token}/accept`)
+        .post(`/api/v1/public/invitations/${newToken}/accept`)
         .set('X-Tenant-Host', HOST)
         .send({ password: 'Clave-Nueva-2026!' })
         .expect(201);
@@ -428,6 +437,8 @@ describe('Email de invitación (e2e, DX-088)', () => {
           })
           .expect(201)
       ).body as CreatedInvitation;
+      await limited.get(EmailDispatcher).whenIdle();
+      const token = tokenSentTo(mailer.sent, 'tope@mail-e2e.test');
 
       const res = await call(
         'post',
@@ -446,7 +457,7 @@ describe('Email de invitación (e2e, DX-088)', () => {
         .expect(429);
 
       const lookup = await request(limited.getHttpServer())
-        .get(`/api/v1/public/invitations/${created.token}`)
+        .get(`/api/v1/public/invitations/${token}`)
         .set('X-Tenant-Host', HOST)
         .expect(200);
       expect((lookup.body as { status: string }).status).toBe('VALID');

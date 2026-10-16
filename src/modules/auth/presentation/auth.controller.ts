@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   HttpCode,
@@ -8,7 +9,17 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import {
+  ApiAcceptedResponse,
+  ApiBadRequestResponse,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiGoneResponse,
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
@@ -18,7 +29,16 @@ import { LoginUseCase } from '../application/use-cases/login.use-case';
 import { RefreshUseCase } from '../application/use-cases/refresh.use-case';
 import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
-import { RegisterResponseDto } from './dto/register-response.dto';
+import {
+  RegisterAcceptedDto,
+  RegisterVerifiedDto,
+  VerifyRegistrationDto,
+} from './dto/register-response.dto';
+import {
+  PublicWebProtocol,
+  platformLinkHost,
+  resolvePublicWebProtocol,
+} from '../../../shared/tenancy/public-link';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import {
@@ -26,6 +46,9 @@ import {
   SessionCookieService,
 } from './session-cookie.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
+
+export const REGISTER_ACCEPTED_MESSAGE =
+  'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -36,7 +59,20 @@ export class AuthController {
     private readonly refresh: RefreshUseCase,
     private readonly logout: LogoutUseCase,
     private readonly cookie: SessionCookieService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
+    this.baseDomains = (
+      config.get<string>('TENANT_BASE_DOMAINS') ?? 'localhost'
+    )
+      .split(',')
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  private readonly protocol: PublicWebProtocol;
+  /** Dominios de la plataforma: el enlace del registro solo apunta a ellos. */
+  private readonly baseDomains: string[];
 
   /**
    * Refresh de la petición: el del body si viene (clientes antiguos y la
@@ -53,13 +89,62 @@ export class AuthController {
     return { token: fromCookie, viaCookie: Boolean(fromCookie) };
   }
 
+  /**
+   * DX-029: siempre 202 con el mismo cuerpo, exista o no el email (sin
+   * enumeración). Si el email es nuevo llega un enlace de verificación; si ya
+   * tenía cuenta, su titular recibe un aviso. 409 solo si el SUBDOMINIO está
+   * ocupado (público: es el host de la clínica).
+   */
   @Post('register')
+  @HttpCode(202)
   @RateLimit('auth')
-  @ApiCreatedResponse({ type: RegisterResponseDto })
-  register(
+  @ApiOperation({
+    summary:
+      'Pide el alta de una clínica: envía un enlace de verificación al email (la clínica se crea al abrirlo)',
+  })
+  @ApiAcceptedResponse({ type: RegisterAcceptedDto })
+  @ApiConflictResponse({ description: 'El subdominio ya está en uso' })
+  @ApiBadRequestResponse({
+    description:
+      'Datos inválidos, o la petición no llegó por un host de Dentalix (el enlace del email solo apunta a la plataforma)',
+  })
+  async register(
+    @Req() req: TenantHostRequest,
     @Body() dto: RegisterDto,
-  ): Promise<{ tenantId: string; userId: string }> {
-    return this.registerClinic.execute(dto);
+  ): Promise<RegisterAcceptedDto> {
+    // Solo un host de Dentalix: el enlace lleva el token (ver platformLinkHost).
+    const host = platformLinkHost(req.tenantHost?.host, this.baseDomains);
+    if (!host) {
+      throw new BadRequestException('Host inválido');
+    }
+    await this.registerClinic.accept({
+      ...dto,
+      linkBase: `${this.protocol}://${host}`,
+    });
+    return { message: REGISTER_ACCEPTED_MESSAGE };
+  }
+
+  /**
+   * Abre el enlace del email con la contraseña del registro: crea la clínica y
+   * su dueño (email verificado). Mismo rate limit `auth` que el registro.
+   */
+  @Post('register/verify')
+  @RateLimit('auth')
+  @ApiOperation({
+    summary:
+      'Confirma el registro con el token del email y crea la clínica y su dueño',
+  })
+  @ApiCreatedResponse({ type: RegisterVerifiedDto })
+  @ApiNotFoundResponse({
+    description:
+      'Genérico: enlace inexistente o ya usado, o contraseña distinta de la del registro',
+  })
+  @ApiGoneResponse({ description: 'Enlace caducado' })
+  @ApiConflictResponse({ description: 'Subdominio o email ya en uso' })
+  verifyRegistration(
+    @Body() dto: VerifyRegistrationDto,
+  ): Promise<RegisterVerifiedDto> {
+    return this.registerClinic.verify(dto.token, dto.password);
   }
 
   @Audit({ action: 'LOGIN', resource: 'SESSION' })

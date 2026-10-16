@@ -302,6 +302,7 @@ function mailProblems(env: Env, isProd: boolean): string[] {
     ['MAIL_TENANT_DAILY_LIMIT', 1],
     ['MAIL_RECIPIENT_DAILY_LIMIT', 1],
     ['MAIL_RECIPIENT_COOLDOWN_SECONDS', 0],
+    ['INVITATION_TENANT_DAILY_LIMIT', 1],
   ] as const) {
     const raw = str(env, key);
     if (raw == null) continue;

@@ -9,6 +9,8 @@ import {
   InvitationRepository,
   AcceptOutcome,
   GlobalUserRecord,
+  AcceptUserResolution,
+  AccountClaimConflictError,
 } from '../../domain/ports/invitation-repository.port';
 import { ClinicInvitation } from '../../domain/entities/clinic-invitation.entity';
 
@@ -94,8 +96,19 @@ export class PrismaInvitationRepository implements InvitationRepository {
     // context needed.
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
-      select: { id: true, passwordHash: true, tokenVersion: true },
+      select: {
+        id: true,
+        passwordHash: true,
+        tokenVersion: true,
+        emailVerifiedAt: true,
+      },
     });
+  }
+
+  async countCreatedSince(since: Date): Promise<number> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.clinicInvitation.count({ where: { createdAt: { gte: since } } }),
+    );
   }
 
   async revokePendingByEmail(email: string): Promise<string[]> {
@@ -198,31 +211,68 @@ export class PrismaInvitationRepository implements InvitationRepository {
     invitationId: string;
     email: string;
     role: ClinicRole;
-    existingUserId?: string;
-    newUser?: { fullName: string; passwordHash: string };
-  }): Promise<AcceptOutcome> {
+    user: AcceptUserResolution;
+  }): Promise<AcceptOutcome & { tokenVersion: number }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      // 1. Usuario: crea uno nuevo (tabla global, sin RLS) o reutiliza el
-      // existente que ya resolvió el caso de uso.
+      // 1. Usuario (tabla global, sin RLS). El enlace llegó al email, así que
+      // en los tres casos el email queda verificado (DX-029).
+      const now = new Date();
       let userId: string;
-      if (input.newUser) {
+      let tokenVersion: number;
+      const resolution = input.user;
+      if ('newUser' in resolution) {
         const user = await tx.user.create({
           data: {
             email: input.email,
-            fullName: input.newUser.fullName,
-            passwordHash: input.newUser.passwordHash,
+            fullName: resolution.newUser.fullName,
+            passwordHash: resolution.newUser.passwordHash,
+            emailVerifiedAt: now,
           },
-          select: { id: true },
+          select: { id: true, tokenVersion: true },
         });
         userId = user.id;
-      } else {
-        if (!input.existingUserId) {
-          throw new Error(
-            'acceptTransactional requires newUser or existingUserId',
-          );
+        tokenVersion = user.tokenVersion;
+      } else if ('claim' in resolution) {
+        // Reclamar: solo si SIGUE sin verificar (check-and-set frente a una
+        // verificación concurrente).
+        const claimed = await tx.user.updateMany({
+          where: {
+            id: resolution.claim.userId,
+            deletedAt: null,
+            emailVerifiedAt: null,
+          },
+          data: {
+            passwordHash: resolution.claim.passwordHash,
+            emailVerifiedAt: now,
+            tokenVersion: { increment: 1 },
+          },
+        });
+        if (claimed.count !== 1) {
+          throw new AccountClaimConflictError();
         }
-        userId = input.existingUserId;
+        // Los enlaces de restablecimiento que pidiera el anterior dueño.
+        await tx.userToken.updateMany({
+          where: { userId: resolution.claim.userId, invalidatedAt: null },
+          data: { invalidatedAt: now },
+        });
+        userId = resolution.claim.userId;
+        const user = await tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { tokenVersion: true },
+        });
+        tokenVersion = user.tokenVersion;
+      } else {
+        userId = resolution.existingUserId;
+        await tx.user.updateMany({
+          where: { id: userId, emailVerifiedAt: null },
+          data: { emailVerifiedAt: now },
+        });
+        const user = await tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { tokenVersion: true },
+        });
+        tokenVersion = user.tokenVersion;
       }
 
       // 2. Membresía: crea o REACTIVA (limpia deletedAt y aplica el rol
@@ -247,7 +297,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
         data: { acceptedAt: new Date() },
       });
 
-      return { userId, role: input.role };
+      return { userId, role: input.role, tokenVersion };
     });
   }
 }

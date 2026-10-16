@@ -22,6 +22,28 @@ export function safeLinkHost(host: string | undefined): string | null {
   return normalized && SAFE_HOST.test(normalized) ? normalized : null;
 }
 
+/**
+ * Host de la PLATAFORMA para un enlace que no pertenece a ninguna clínica (el
+ * de verificar el registro, DX-029): el dominio raíz o uno de sus subdominios
+ * (`TENANT_BASE_DOMAINS`, DNS de Dentalix). Cualquier otro host —un `Host` /
+ * `X-Forwarded-Host` inyectado o el dominio personalizado de una clínica, cuyo
+ * DNS controla un tercero— devuelve `null`: si no, el enlace con el token iría
+ * a un servidor ajeno y su dueño podría confirmar el registro (y quedarse con
+ * el email) en lugar de la persona.
+ */
+export function platformLinkHost(
+  host: string | undefined,
+  baseDomains: readonly string[],
+): string | null {
+  const safe = safeLinkHost(host);
+  if (!safe) return null;
+  const hostname = safe.split(':')[0];
+  const isPlatform = baseDomains.some(
+    (base) => hostname === base || hostname.endsWith(`.${base}`),
+  );
+  return isPlatform ? safe : null;
+}
+
 export type PublicWebProtocol = 'http' | 'https';
 
 /**

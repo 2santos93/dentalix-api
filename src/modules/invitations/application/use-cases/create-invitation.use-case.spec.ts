@@ -1,18 +1,56 @@
 import { FakeInvitationNotifier } from './__fixtures__/fake-invitation-notifier';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+} from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { CreateInvitationUseCase } from './create-invitation.use-case';
 import { InMemoryInvitationRepository } from './__fixtures__/in-memory-invitation.repository';
 import { hashInvitationToken } from '../invitation-token';
 
+const LIMITS = { tenantDaily: 30 };
+
 describe('CreateInvitationUseCase', () => {
+  it('DX-029: tope diario de invitaciones por clínica -> 429 en español sin crear nada', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const notifier = new FakeInvitationNotifier();
+    const uc = new CreateInvitationUseCase(repo, notifier, { tenantDaily: 2 });
+    for (const email of ['a@x.com', 'b@x.com']) {
+      await uc.execute({
+        fullName: 'Persona',
+        email,
+        role: ClinicRole.ASSISTANT,
+      });
+    }
+
+    const err = await uc
+      .execute({
+        fullName: 'Persona',
+        email: 'c@x.com',
+        role: ClinicRole.ASSISTANT,
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(HttpException);
+    expect((err as HttpException).getStatus()).toBe(429);
+    expect(JSON.stringify((err as HttpException).getResponse())).toContain(
+      'máximo de 2 invitaciones en 24 horas',
+    );
+    expect(await repo.listPending()).toHaveLength(2);
+  });
+
   afterEach(() => {
     jest.useRealTimers();
   });
 
   it('normaliza el correo a minúsculas y sin espacios', async () => {
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
 
     const { invitation } = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -25,7 +63,11 @@ describe('CreateInvitationUseCase', () => {
 
   it('revoca la invitación pendiente previa del mismo correo (reenviar)', async () => {
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
 
     await uc.execute({
       fullName: 'Ana Ruiz',
@@ -46,7 +88,11 @@ describe('CreateInvitationUseCase', () => {
   it('409 si el correo ya es miembro activo de la clínica', async () => {
     const repo = new InMemoryInvitationRepository();
     repo.seedActiveMember({ email: 'ana@clinic.com' });
-    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
 
     await expect(
       uc.execute({
@@ -60,7 +106,11 @@ describe('CreateInvitationUseCase', () => {
   it('expiresAt es 7 días desde ahora', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-01T00:00:00.000Z'));
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
 
     const { invitation } = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -79,7 +129,11 @@ describe('CreateInvitationUseCase', () => {
       captured = input;
       return originalCreate(input);
     };
-    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
 
     const result = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -99,6 +153,7 @@ describe('CreateInvitationUseCase', () => {
     const uc = new CreateInvitationUseCase(
       new InMemoryInvitationRepository(),
       new FakeInvitationNotifier(),
+      LIMITS,
     );
 
     await expect(
@@ -114,6 +169,7 @@ describe('CreateInvitationUseCase', () => {
     const uc = new CreateInvitationUseCase(
       new InMemoryInvitationRepository(),
       new FakeInvitationNotifier(),
+      LIMITS,
     );
 
     await expect(
@@ -127,7 +183,11 @@ describe('CreateInvitationUseCase', () => {
 
   it('forwards invitedById to the repository', async () => {
     const repo = new InMemoryInvitationRepository();
-    const uc = new CreateInvitationUseCase(repo, new FakeInvitationNotifier());
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
 
     const { invitation } = await uc.execute({
       fullName: 'Ana Ruiz',
@@ -143,7 +203,7 @@ describe('CreateInvitationUseCase', () => {
     it('encola UN email con el enlace del host de la clínica', async () => {
       const repo = new InMemoryInvitationRepository();
       const notifier = new FakeInvitationNotifier();
-      const uc = new CreateInvitationUseCase(repo, notifier);
+      const uc = new CreateInvitationUseCase(repo, notifier, LIMITS);
 
       const result = await uc.execute({
         fullName: 'Ana Ruiz',
@@ -164,7 +224,7 @@ describe('CreateInvitationUseCase', () => {
     it('con el tope de envío alcanzado no revoca ni crea nada (B1)', async () => {
       const repo = new InMemoryInvitationRepository();
       const notifier = new FakeInvitationNotifier();
-      const uc = new CreateInvitationUseCase(repo, notifier);
+      const uc = new CreateInvitationUseCase(repo, notifier, LIMITS);
       const input = {
         fullName: 'Ana Ruiz',
         email: 'ana@clinic.com',
@@ -187,6 +247,7 @@ describe('CreateInvitationUseCase', () => {
       const uc = new CreateInvitationUseCase(
         new InMemoryInvitationRepository(),
         notifier,
+        LIMITS,
       );
       const result = await uc.execute({
         fullName: 'Ana Ruiz',
@@ -201,7 +262,11 @@ describe('CreateInvitationUseCase', () => {
       const repo = new InMemoryInvitationRepository();
       const notifier = new FakeInvitationNotifier();
       notifier.failNext = true;
-      const result = await new CreateInvitationUseCase(repo, notifier).execute({
+      const result = await new CreateInvitationUseCase(
+        repo,
+        notifier,
+        LIMITS,
+      ).execute({
         fullName: 'Ana Ruiz',
         email: 'ana@clinic.com',
         role: ClinicRole.DENTIST,
@@ -214,7 +279,7 @@ describe('CreateInvitationUseCase', () => {
     it('invitar de nuevo al mismo correo cancela el email de la anterior', async () => {
       const repo = new InMemoryInvitationRepository();
       const notifier = new FakeInvitationNotifier();
-      const uc = new CreateInvitationUseCase(repo, notifier);
+      const uc = new CreateInvitationUseCase(repo, notifier, LIMITS);
       const input = {
         fullName: 'Ana Ruiz',
         email: 'ana@clinic.com',

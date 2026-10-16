@@ -6,6 +6,7 @@ import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DX-036 / DB-003: las EXCLUDE anti-solape de citas se evalúan SALTANDO la RLS.
 // Antes no incluían `tenantId`, así que un profesional que trabaja en dos
@@ -55,16 +56,13 @@ async function registerClinic(
   subdomain: string,
 ): Promise<Clinic> {
   const email = `owner@${subdomain}.com`;
-  const res = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  const res = await registerVerified(app, {
+    clinicName: `Clinica ${subdomain}`,
+    subdomain,
+    email,
+    password: PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const body = res.body as { tenantId: string; userId: string };
   const token = await login(app, subdomain, email);
   // La sede principal nace con horario por defecto; sin franjas, los casos no

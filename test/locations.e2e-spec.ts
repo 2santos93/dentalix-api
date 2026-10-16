@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -31,10 +32,11 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ) {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({ ...opts, password: PASSWORD, fullName: 'Dr. Owner' })
-    .expect(201);
+  const register = await registerVerified(app, {
+    ...opts,
+    password: PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(opts.subdomain))

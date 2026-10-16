@@ -82,11 +82,11 @@ export class StaffInvitationsController {
   }
 
   private toCreatedDto(result: CreateInvitationResult): CreatedInvitationDto {
-    const { invitation, token, emailDelivery } = result;
+    // El token NO sale de aquí (DX-029): solo viaja en el email.
+    const { invitation, emailDelivery } = result;
     return {
       ...invitation,
       status: invitationStatus(invitation, new Date()),
-      token,
       emailDelivery,
     };
   }

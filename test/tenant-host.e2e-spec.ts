@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -16,16 +17,13 @@ interface LoginResponseBody {
 }
 
 async function register(app: INestApplication<App>, subdomain: string) {
-  await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: subdomain,
-      subdomain,
-      email: `owner@${subdomain}.com`,
-      password: 'S3cret!!',
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  await registerVerified(app, {
+    clinicName: subdomain,
+    subdomain,
+    email: `owner@${subdomain}.com`,
+    password: 'S3cret!!',
+    fullName: 'Dr. Owner',
+  });
 }
 
 async function login(app: INestApplication<App>, subdomain: string) {

@@ -6,6 +6,7 @@ import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // SEC-013 — DELETE /payments/:id exige motivo, guarda quién/cuándo/por qué y
 // limita a recepción a sus propios abonos del día. DIRECT_URL (superusuario,
@@ -85,16 +86,13 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dra. Admin',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dra. Admin',
+    });
     const body = reg.body as { tenantId: string; userId: string };
     return {
       tenantId: body.tenantId,

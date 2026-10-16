@@ -74,7 +74,7 @@ export class EmailOutbox {
     }
     if (sends.recipient >= quotas.recipientDaily) {
       throw new EmailQuotaExceededError(
-        `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana o comparte el enlace por otro medio.`,
+        `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana.`,
         60 * 60,
       );
     }

@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { CatalogKind, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
 
 // DX-109 · reglas de cobro por HTTP: un solo «aceptar», nada cobrable en
@@ -102,16 +103,13 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dra. Owner',
-      })
-      .expect(201);
+    await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dra. Owner',
+    });
     const login = await request(server())
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor(subdomain))

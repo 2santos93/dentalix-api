@@ -17,10 +17,12 @@ export class PrismaAuthRepository implements AuthRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+  async findUserByEmail(
+    email: string,
+  ): Promise<{ id: string; fullName: string } | null> {
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
-      select: { id: true },
+      select: { id: true, fullName: true },
     });
   }
 
@@ -66,6 +68,8 @@ export class PrismaAuthRepository implements AuthRepository {
           email: input.email,
           passwordHash: input.passwordHash,
           fullName: input.fullName,
+          // DX-029: el registro solo llega aquí tras el enlace del email.
+          emailVerifiedAt: input.emailVerifiedAt,
         },
         select: { id: true },
       });

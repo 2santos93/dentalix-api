@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en beforeAll —
 // usa DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -51,16 +52,13 @@ describe('Auth (e2e)', () => {
   });
 
   it('registers a clinic and logs the owner in', async () => {
-    const register = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Sonrisa',
-        subdomain: 'sonrisa',
-        email: 'owner@sonrisa.com',
-        password: 'S3cret!!',
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const register = await registerVerified(app, {
+      clinicName: 'Sonrisa',
+      subdomain: 'sonrisa',
+      email: 'owner@sonrisa.com',
+      password: 'S3cret!!',
+      fullName: 'Dr. Owner',
+    });
     const registerBody = register.body as RegisterResponseBody;
     expect(registerBody.tenantId).toBeDefined();
 
@@ -98,16 +96,13 @@ describe('Auth (e2e)', () => {
 
   it('sets up a clinic and confirms refresh works before logout', async () => {
     // Nueva clínica aislada para no chocar con los otros tests.
-    await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Muela',
-        subdomain: 'muela',
-        email: 'owner@muela.com',
-        password: 'S3cret!!',
-        fullName: 'Dra. Muela',
-      })
-      .expect(201);
+    await registerVerified(app, {
+      clinicName: 'Muela',
+      subdomain: 'muela',
+      email: 'owner@muela.com',
+      password: 'S3cret!!',
+      fullName: 'Dra. Muela',
+    });
 
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')

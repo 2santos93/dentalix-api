@@ -7,6 +7,7 @@ import {
   EmailVerifyEmailVars,
   InvitationEmailVars,
   PasswordResetEmailVars,
+  RegistrationNoticeEmailVars,
   RenderedEmail,
 } from '../../domain/email-message';
 import { renderLayout } from './layout';
@@ -80,10 +81,32 @@ function emailVerify(
       },
       {
         kind: 'note',
-        text: `El enlace caduca en ${plural(vars.expiresInHours, 'hora', 'horas')}. Si no creaste una cuenta, ignora este correo.`,
+        text: `El enlace caduca en ${plural(vars.expiresInHours, 'hora', 'horas')}. Para confirmar te pediremos la contraseña que elegiste. Si no has pedido crear una clínica en Dentalix, ignora este correo.`,
       },
     ],
     action: { label: 'Confirmar correo', url: vars.verifyUrl },
+  });
+}
+
+function registrationNotice(
+  vars: RegistrationNoticeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: 'Intento de registro con tu correo',
+    heading: `Hola, ${vars.userName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `Alguien intentó registrar una clínica nueva en ${PRODUCT_NAME} con este correo, que ya tiene una cuenta. No creamos nada nuevo.`,
+      },
+      {
+        kind: 'note',
+        text: 'Si eras tú, inicia sesión en tu clínica o recupera tu contraseña desde la pantalla de inicio de sesión. Si no fuiste tú, ignora este correo: tu cuenta no cambia.',
+      },
+    ],
+    action: { label: 'Ir a Dentalix', url: vars.loginUrl },
   });
 }
 
@@ -127,6 +150,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'password-reset': passwordReset,
   'email-verify': emailVerify,
   'appointment-reminder': appointmentReminder,
+  'registration-notice': registrationNotice,
 };
 
 /**

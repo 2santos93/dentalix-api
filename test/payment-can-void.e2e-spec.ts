@@ -6,6 +6,7 @@ import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DX-057 — la caja (GET /payments) y el estado de cuenta exponen, por abono,
 // `createdById` y `canVoid` para QUIEN CONSULTA, con la misma regla que aplica
@@ -88,16 +89,13 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dra. Admin',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dra. Admin',
+    });
     const body = reg.body as { tenantId: string; userId: string };
     return {
       tenantId: body.tenantId,

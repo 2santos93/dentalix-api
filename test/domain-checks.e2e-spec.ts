@@ -12,6 +12,7 @@ import {
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DX-042, por HTTP: topes de importes y cantidades en las DTO (400, nunca 500
 // ni redondeo), insumo único por sede y sin mayúsculas, y las tres carreras
@@ -104,16 +105,13 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
     app = await createE2eApp();
     await cleanup();
 
-    const register = await api()
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'DX-042',
-        subdomain: SUBDOMAIN,
-        email: ADMIN_EMAIL,
-        password: PASSWORD,
-        fullName: 'Dra. Admin',
-      })
-      .expect(201);
+    const register = await registerVerified(app, {
+      clinicName: 'DX-042',
+      subdomain: SUBDOMAIN,
+      email: ADMIN_EMAIL,
+      password: PASSWORD,
+      fullName: 'Dra. Admin',
+    });
     tenantId = (register.body as { tenantId: string }).tenantId;
     token = await login(ADMIN_EMAIL);
 

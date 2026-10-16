@@ -19,6 +19,10 @@ import { PASSWORD_RESET_REPOSITORY } from './domain/ports/password-reset-reposit
 import { PASSWORD_RESET_NOTIFIER } from './domain/ports/password-reset-notifier.port';
 import { PrismaPasswordResetRepository } from './infrastructure/repositories/prisma-password-reset.repository';
 import { EmailPasswordResetNotifier } from './infrastructure/email-password-reset.notifier';
+import { REGISTRATION_REPOSITORY } from './domain/ports/registration-repository.port';
+import { REGISTRATION_NOTIFIER } from './domain/ports/registration-notifier.port';
+import { PrismaRegistrationRepository } from './infrastructure/repositories/prisma-registration.repository';
+import { EmailRegistrationNotifier } from './infrastructure/email-registration.notifier';
 
 @Module({
   imports: [JwtModule.register({}), EmailModule],
@@ -33,6 +37,12 @@ import { EmailPasswordResetNotifier } from './infrastructure/email-password-rese
     PasswordService,
     TokenService,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
+    // Registro con verificación del email (DX-029).
+    {
+      provide: REGISTRATION_REPOSITORY,
+      useClass: PrismaRegistrationRepository,
+    },
+    { provide: REGISTRATION_NOTIFIER, useClass: EmailRegistrationNotifier },
     // Recuperar la contraseña por email (DX-010).
     RequestPasswordResetUseCase,
     ResetPasswordUseCase,

@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para cleanup -- usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -64,16 +65,13 @@ describe('treatment plan currency whitelist (e2e)', () => {
 
     await cleanup();
 
-    await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Currency Clinic',
-        subdomain: sub,
-        email: 'owner@currency-clinic.com',
-        password: PASSWORD,
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    await registerVerified(app, {
+      clinicName: 'Currency Clinic',
+      subdomain: sub,
+      email: 'owner@currency-clinic.com',
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    });
 
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')

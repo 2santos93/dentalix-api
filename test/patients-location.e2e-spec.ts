@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -39,16 +40,13 @@ describe('patient location (e2e)', () => {
     await raw.tenantDomain.deleteMany();
     await raw.tenant.deleteMany();
 
-    await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Loc',
-        subdomain: sub,
-        email: 'o@loc.com',
-        password: PASSWORD,
-        fullName: 'Dr',
-      })
-      .expect(201);
+    await registerVerified(app, {
+      clinicName: 'Loc',
+      subdomain: sub,
+      email: 'o@loc.com',
+      password: PASSWORD,
+      fullName: 'Dr',
+    });
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor(sub))

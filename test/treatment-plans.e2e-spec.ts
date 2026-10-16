@@ -12,6 +12,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -77,16 +78,13 @@ async function registerAndLogin(
   accessToken: string;
   subdomain: string;
 }> {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: opts.clinicName,
-      subdomain: opts.subdomain,
-      email: opts.email,
-      password: SEEDED_PASSWORD,
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  const register = await registerVerified(app, {
+    clinicName: opts.clinicName,
+    subdomain: opts.subdomain,
+    email: opts.email,
+    password: SEEDED_PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())

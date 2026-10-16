@@ -5,6 +5,7 @@ import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol, mirar
 // filas y limpiar — mismo criterio que account-statement.e2e-spec.ts.
@@ -124,16 +125,13 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await request(server())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: `Clinica ${subdomain}`,
-        subdomain,
-        email,
-        password: PASSWORD,
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    });
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),

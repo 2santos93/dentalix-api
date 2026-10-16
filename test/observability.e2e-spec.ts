@@ -12,6 +12,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantResolverService } from '../src/shared/tenancy/tenant-resolver.service';
 import { E2eAppOptions, createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // DX-023: request id, log de acceso sin datos clínicos ni PII, 5xx sin stack
 // para el cliente y sondas de salud. La app se arma con configureApp, como
@@ -94,16 +95,13 @@ describe('Observabilidad (e2e, DX-023)', () => {
   beforeAll(async () => {
     app = await buildApp(lines);
     await cleanup();
-    const register = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Observa E2E',
-        subdomain: SUB,
-        email: EMAIL,
-        password: PASSWORD,
-        fullName: 'Dra. Observa',
-      })
-      .expect(201);
+    const register = await registerVerified(app, {
+      clinicName: 'Observa E2E',
+      subdomain: SUB,
+      email: EMAIL,
+      password: PASSWORD,
+      fullName: 'Dra. Observa',
+    });
     ({ tenantId, userId } = register.body as {
       tenantId: string;
       userId: string;

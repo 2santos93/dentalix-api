@@ -14,6 +14,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
 import { hashInvitationToken } from '../invitation-token';
+import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 
 function makePassword(overrides: Partial<PasswordService> = {}) {
   return {
@@ -21,6 +22,14 @@ function makePassword(overrides: Partial<PasswordService> = {}) {
     verify: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
+}
+
+function makeAudit() {
+  const recordMock = jest.fn().mockResolvedValue(undefined);
+  return Object.assign(
+    { record: recordMock } as unknown as RecordAuditEventUseCase,
+    { recordMock },
+  );
 }
 
 function makeTokens(overrides: Partial<TokenService> = {}) {
@@ -55,6 +64,7 @@ describe('AcceptInvitationUseCase', () => {
       makePassword(),
       makeTokens(),
       new TenantContextService(),
+      makeAudit(),
     );
 
     // Deliberately NOT wrapped in ctx.run(...): mirrors a request that hit an
@@ -78,7 +88,13 @@ describe('AcceptInvitationUseCase', () => {
     const password = makePassword();
     const tokens = makeTokens();
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, password, tokens, ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      password,
+      tokens,
+      ctx,
+      makeAudit(),
+    );
 
     const result = await ctx.run('t1', () =>
       uc.execute({ token: 'tok-1', password: 'longenough1' }),
@@ -116,7 +132,13 @@ describe('AcceptInvitationUseCase', () => {
       .mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' });
     const tokens = makeTokens({ issue });
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, password, tokens, ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      password,
+      tokens,
+      ctx,
+      makeAudit(),
+    );
 
     const result = await ctx.run('t1', () =>
       uc.execute({ token: 'tok-2', password: 'whatever-they-typed' }),
@@ -146,7 +168,13 @@ describe('AcceptInvitationUseCase', () => {
     });
     const acceptSpy = jest.spyOn(repo, 'acceptTransactional');
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, password, makeTokens(), ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      password,
+      makeTokens(),
+      ctx,
+      makeAudit(),
+    );
 
     await expect(
       withTenant(ctx, 't1', () =>
@@ -184,6 +212,7 @@ describe('AcceptInvitationUseCase', () => {
         makePassword(),
         makeTokens(),
         ctx,
+        makeAudit(),
       );
 
       await expect(
@@ -201,6 +230,7 @@ describe('AcceptInvitationUseCase', () => {
       makePassword(),
       makeTokens(),
       ctx,
+      makeAudit(),
     );
 
     await expect(
@@ -219,6 +249,7 @@ describe('AcceptInvitationUseCase', () => {
       makePassword(),
       makeTokens(),
       ctx,
+      makeAudit(),
     );
 
     await expect(
@@ -244,7 +275,13 @@ describe('AcceptInvitationUseCase', () => {
       verify: jest.fn().mockResolvedValue(true),
     });
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, password, makeTokens(), ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      password,
+      makeTokens(),
+      ctx,
+      makeAudit(),
+    );
 
     await expect(
       withTenant(ctx, 't1', () =>
@@ -268,7 +305,13 @@ describe('AcceptInvitationUseCase', () => {
       .mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' });
     const tokens = makeTokens({ issue });
     const ctx = new TenantContextService();
-    const uc = new AcceptInvitationUseCase(repo, makePassword(), tokens, ctx);
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      tokens,
+      ctx,
+      makeAudit(),
+    );
 
     await ctx.run('tenant-from-context', () =>
       uc.execute({ token: 'tok-7', password: 'longenough1' }),
@@ -282,5 +325,151 @@ describe('AcceptInvitationUseCase', () => {
       tv: 0,
     });
     expect(typeof payload.sub).toBe('string');
+  });
+
+  describe('DX-029: verificación del email y reclamo de cuentas', () => {
+    it('cuenta NUEVA: nace con el email verificado', async () => {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedInvitation({ token: 'tok-new', email: 'nueva@clinic.com' });
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        makePassword(),
+        makeTokens(),
+        ctx,
+        makeAudit(),
+      );
+
+      await ctx.run('t1', () =>
+        uc.execute({ token: 'tok-new', password: 'longenough1' }),
+      );
+
+      const user = await repo.findUserByEmailGlobal('nueva@clinic.com');
+      expect(user?.emailVerifiedAt).toBeInstanceOf(Date);
+    });
+
+    it('cuenta SIN verificar y otra contraseña: la RECLAMA (nueva contraseña, sesiones invalidadas, auditoría)', async () => {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedUser({
+        id: 'user-squatted',
+        email: 'dra@clinic.com',
+        passwordHash: 'ATTACKER_HASH',
+        tokenVersion: 2,
+        emailVerifiedAt: null,
+      });
+      repo.seedInvitation({ token: 'tok-claim', email: 'dra@clinic.com' });
+      const password = makePassword({
+        verify: jest.fn().mockResolvedValue(false),
+      });
+      const issue = jest
+        .fn()
+        .mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' });
+      const audit = makeAudit();
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        password,
+        makeTokens({ issue }),
+        ctx,
+        audit,
+      );
+
+      await ctx.run('t1', () =>
+        uc.execute({
+          token: 'tok-claim',
+          password: 'la-de-la-doctora',
+          meta: { ip: '10.0.0.1', userAgent: 'jest', requestId: 'req-1' },
+        }),
+      );
+
+      const user = repo.userById('user-squatted');
+      expect(user?.passwordHash).toBe('NEW_HASH');
+      expect(user?.emailVerifiedAt).toBeInstanceOf(Date);
+      // tokenVersion + 1: los refresh/sesiones del anterior dueño mueren.
+      expect(user?.tokenVersion).toBe(3);
+      expect(issue).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'user-squatted', tv: 3 }),
+      );
+      expect(audit.recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: 't1',
+          action: 'PASSWORD_RESET',
+          resourceType: 'SESSION',
+          metadata: { reason: 'INVITATION_ACCOUNT_CLAIM' },
+          ip: '10.0.0.1',
+        }),
+      );
+    });
+
+    it('cuenta SIN verificar con su contraseña actual: se une, queda verificada y NO cierra sesiones', async () => {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedUser({
+        id: 'user-legacy',
+        email: 'legado@clinic.com',
+        tokenVersion: 4,
+        emailVerifiedAt: null,
+      });
+      repo.seedInvitation({ token: 'tok-legacy', email: 'legado@clinic.com' });
+      const audit = makeAudit();
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        makePassword(),
+        makeTokens(),
+        ctx,
+        audit,
+      );
+
+      await ctx.run('t1', () =>
+        uc.execute({ token: 'tok-legacy', password: 'su-clave-de-siempre' }),
+      );
+
+      const user = repo.userById('user-legacy');
+      expect(user?.passwordHash).toBe('HASH');
+      expect(user?.tokenVersion).toBe(4);
+      expect(user?.emailVerifiedAt).toBeInstanceOf(Date);
+      expect(audit.recordMock).not.toHaveBeenCalled();
+    });
+
+    it('cuenta SIN verificar: reclamar exige una contraseña válida (8+)', async () => {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedUser({ email: 'dra@clinic.com', emailVerifiedAt: null });
+      repo.seedInvitation({ token: 'tok-short', email: 'dra@clinic.com' });
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        makePassword({ verify: jest.fn().mockResolvedValue(false) }),
+        makeTokens(),
+        ctx,
+        makeAudit(),
+      );
+
+      await expect(
+        ctx.run('t1', () =>
+          uc.execute({ token: 'tok-short', password: 'corta' }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('cuenta VERIFICADA con contraseña incorrecta: no se puede reclamar (401 en español)', async () => {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedUser({ id: 'user-ok', email: 'ok@clinic.com' });
+      repo.seedInvitation({ token: 'tok-ok', email: 'ok@clinic.com' });
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        makePassword({ verify: jest.fn().mockResolvedValue(false) }),
+        makeTokens(),
+        ctx,
+        makeAudit(),
+      );
+
+      await expect(
+        ctx.run('t1', () =>
+          uc.execute({ token: 'tok-ok', password: 'otra-clave-larga' }),
+        ),
+      ).rejects.toThrow(/contraseña no es correcta/);
+      expect(repo.userById('user-ok')?.passwordHash).toBe('HASH');
+    });
   });
 });

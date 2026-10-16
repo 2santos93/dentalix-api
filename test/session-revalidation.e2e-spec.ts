@@ -6,6 +6,7 @@ import { ClinicRole, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // SEC-001 / SEC-002: el refresh revalida la sesión contra el estado ACTUAL
 // (membresía, rol, usuario, superadmin), es de un solo uso (rotación real) y
@@ -98,16 +99,13 @@ describe('Session revalidation on refresh (e2e)', () => {
     await app.init();
     await cleanup();
 
-    const reg = await http()
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Sesiones E2E',
-        subdomain: SUB,
-        email: OWNER,
-        password: PASSWORD,
-        fullName: 'Dra. Dueña',
-      })
-      .expect(201);
+    const reg = await registerVerified(app, {
+      clinicName: 'Sesiones E2E',
+      subdomain: SUB,
+      email: OWNER,
+      password: PASSWORD,
+      fullName: 'Dra. Dueña',
+    });
     tenantId = (reg.body as { tenantId: string }).tenantId;
     ownerAccess = (await login(OWNER)).accessToken;
   });

@@ -6,6 +6,9 @@ import { ClinicRole, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
+import { CapturingMailer } from './support/capture-mailer';
+import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -43,7 +46,6 @@ interface CreatedInvitationResponseBody {
   role: ClinicRole;
   expiresAt: string;
   status: string;
-  token: string;
 }
 
 interface PublicInvitationResponseBody {
@@ -51,7 +53,7 @@ interface PublicInvitationResponseBody {
   clinicName?: string;
   role?: ClinicRole;
   maskedEmail?: string;
-  userExists?: boolean;
+  requiresCurrentPassword?: boolean;
 }
 
 async function registerAndLogin(
@@ -63,16 +65,13 @@ async function registerAndLogin(
   accessToken: string;
   subdomain: string;
 }> {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: opts.clinicName,
-      subdomain: opts.subdomain,
-      email: opts.email,
-      password: SEEDED_PASSWORD,
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
+  const register = await registerVerified(app, {
+    clinicName: opts.clinicName,
+    subdomain: opts.subdomain,
+    email: opts.email,
+    password: SEEDED_PASSWORD,
+    fullName: 'Dr. Owner',
+  });
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())
@@ -137,11 +136,16 @@ async function loginAs(
 
 describe('Staff invitations (e2e)', () => {
   let app: INestApplication<App>;
+  // DX-029: el token solo viaja por email; los tests lo leen del transporte.
+  const mailer = new CapturingMailer();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(MAILER)
+      .useValue(mailer)
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(
@@ -184,12 +188,13 @@ describe('Staff invitations (e2e)', () => {
       })
       .expect(201);
     const created = createRes.body as CreatedInvitationResponseBody;
-    expect(created.token).toEqual(expect.any(String));
+    // DX-029: el ADMIN ya no recibe el token; llega solo en el email.
+    expect(created).not.toHaveProperty('token');
     expect(created.status).toBe('VALID');
     expect(created.role).toBe(ClinicRole.DENTIST);
-    const token = created.token;
+    const token = await mailer.invitationToken(newEmail);
 
-    // GET público, SIN Authorization -> 200, VALID, userExists false, correo
+    // GET público, SIN Authorization -> 200, VALID, requiresCurrentPassword false, correo
     // enmascarado (no el correo completo).
     const publicGet = await request(app.getHttpServer())
       .get(`/api/v1/public/invitations/${token}`)
@@ -197,7 +202,8 @@ describe('Staff invitations (e2e)', () => {
       .expect(200);
     const publicGetBody = publicGet.body as PublicInvitationResponseBody;
     expect(publicGetBody.status).toBe('VALID');
-    expect(publicGetBody.userExists).toBe(false);
+    expect(publicGetBody.requiresCurrentPassword).toBe(false);
+    expect(publicGetBody).not.toHaveProperty('userExists');
     expect(publicGetBody.role).toBe(ClinicRole.DENTIST);
     expect(publicGetBody.maskedEmail).toBeDefined();
     expect(publicGetBody.maskedEmail).not.toBe(newEmail);
@@ -260,7 +266,7 @@ describe('Staff invitations (e2e)', () => {
       email: 'owner@clinica-inv-b.com',
     });
 
-    const createResB = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .set('Authorization', `Bearer ${clinicB.accessToken}`)
@@ -270,16 +276,18 @@ describe('Staff invitations (e2e)', () => {
         role: ClinicRole.RECEPTION,
       })
       .expect(201);
-    const tokenB = (createResB.body as CreatedInvitationResponseBody).token;
+    mailer.clear();
+    const tokenB = await mailer.invitationToken(newEmail);
 
-    // GET público en B: la persona YA existe globalmente.
+    // GET público en B: la persona YA tiene cuenta verificada (el token le
+    // llegó a su email, así que solo ella lo ve).
     const publicGetB = await request(app.getHttpServer())
       .get(`/api/v1/public/invitations/${tokenB}`)
       .set('X-Tenant-Host', hostFor(clinicB.subdomain))
       .expect(200);
-    expect((publicGetB.body as PublicInvitationResponseBody).userExists).toBe(
-      true,
-    );
+    expect(
+      (publicGetB.body as PublicInvitationResponseBody).requiresCurrentPassword,
+    ).toBe(true);
 
     await request(app.getHttpServer())
       .post(`/api/v1/public/invitations/${tokenB}/accept`)
@@ -372,7 +380,7 @@ describe('Staff invitations (e2e)', () => {
       email: 'owner@clinica-inv-d.com',
     });
 
-    const createRes = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/api/v1/staff/invitations')
       .set('X-Tenant-Host', hostFor(clinicD.subdomain))
       .set('Authorization', `Bearer ${clinicD.accessToken}`)
@@ -382,7 +390,7 @@ describe('Staff invitations (e2e)', () => {
         role: ClinicRole.RECEPTION,
       })
       .expect(201);
-    const token = (createRes.body as CreatedInvitationResponseBody).token;
+    const token = await mailer.invitationToken(existingEmail);
 
     await request(app.getHttpServer())
       .post(`/api/v1/public/invitations/${token}/accept`)
@@ -418,6 +426,7 @@ describe('Staff invitations (e2e)', () => {
       })
       .expect(201);
     const created = createRes.body as CreatedInvitationResponseBody;
+    const revokedToken = await mailer.invitationToken('revocada@example.com');
 
     await request(app.getHttpServer())
       .delete(`/api/v1/staff/invitations/${created.id}`)
@@ -426,7 +435,7 @@ describe('Staff invitations (e2e)', () => {
       .expect(204);
 
     const getAfterRevoke = await request(app.getHttpServer())
-      .get(`/api/v1/public/invitations/${created.token}`)
+      .get(`/api/v1/public/invitations/${revokedToken}`)
       .set('X-Tenant-Host', hostFor(clinicE.subdomain))
       .expect(200);
     expect((getAfterRevoke.body as PublicInvitationResponseBody).status).toBe(
@@ -434,7 +443,7 @@ describe('Staff invitations (e2e)', () => {
     );
 
     await request(app.getHttpServer())
-      .post(`/api/v1/public/invitations/${created.token}/accept`)
+      .post(`/api/v1/public/invitations/${revokedToken}/accept`)
       .set('X-Tenant-Host', hostFor(clinicE.subdomain))
       .send({ password: 'CualquierPass123!' })
       .expect(410);

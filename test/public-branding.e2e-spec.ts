@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
+import { registerVerified } from './support/register-verified';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup/seed en
 // beforeAll — usa DIRECT_URL (rol owner `dentalix`, superuser), mismo patrón
@@ -42,16 +43,13 @@ describe('Public tenant branding (e2e)', () => {
     await raw.user.deleteMany();
     await raw.tenant.deleteMany();
 
-    const register = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({
-        clinicName: 'Sonrisa Branding',
-        subdomain: 'sonrisa-branding',
-        email: 'owner@sonrisa-branding.com',
-        password: 'S3cret!!',
-        fullName: 'Dr. Owner',
-      })
-      .expect(201);
+    const register = await registerVerified(app, {
+      clinicName: 'Sonrisa Branding',
+      subdomain: 'sonrisa-branding',
+      email: 'owner@sonrisa-branding.com',
+      password: 'S3cret!!',
+      fullName: 'Dr. Owner',
+    });
     tenantId = (register.body as RegisterResponseBody).tenantId;
 
     await raw.tenant.update({

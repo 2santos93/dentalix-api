@@ -15,6 +15,7 @@ export const EMAIL_TEMPLATES = [
   'password-reset',
   'email-verify',
   'appointment-reminder',
+  'registration-notice',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -49,6 +50,16 @@ export interface EmailVerifyEmailVars {
   expiresInHours: number;
 }
 
+/**
+ * DX-029: alguien intentó registrar una clínica con un email que ya tiene
+ * cuenta. Va al titular (nunca a quien lo intentó) y no lleva token.
+ */
+export interface RegistrationNoticeEmailVars {
+  userName: string;
+  /** Página de la web para iniciar sesión o recuperar la contraseña. */
+  loginUrl: string;
+}
+
 export interface AppointmentReminderEmailVars {
   patientName: string;
   /** Fecha y hora ya formateadas en la zona de la sede ("lunes 20 de octubre, 9:30 a. m."). */
@@ -64,6 +75,7 @@ export interface EmailVarsByTemplate {
   'password-reset': PasswordResetEmailVars;
   'email-verify': EmailVerifyEmailVars;
   'appointment-reminder': AppointmentReminderEmailVars;
+  'registration-notice': RegistrationNoticeEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

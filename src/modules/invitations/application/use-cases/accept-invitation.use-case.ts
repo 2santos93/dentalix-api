@@ -1,13 +1,22 @@
 import {
   BadRequestException,
+  ConflictException,
   GoneException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.port';
-import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
+import {
+  AccountClaimConflictError,
+  INVITATION_REPOSITORY,
+} from '../../domain/ports/invitation-repository.port';
+import type {
+  AcceptUserResolution,
+  InvitationRepository,
+} from '../../domain/ports/invitation-repository.port';
+import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -23,9 +32,26 @@ const GONE_MESSAGE: Record<Exclude<InvitationStatus, 'VALID'>, string> = {
   REVOKED: 'La clínica revocó esta invitación.',
 };
 
+/** Motivo del evento de auditoría al reclamar una cuenta no verificada. */
+export const ACCOUNT_CLAIM_AUDIT_REASON = 'INVITATION_ACCOUNT_CLAIM';
+
 export interface AcceptInvitationInput {
   token: string;
   password: string;
+  /** Para la auditoría del reclamo de cuenta (DX-029). */
+  meta?: {
+    ip: string | null;
+    userAgent: string | null;
+    requestId: string | null;
+  };
+}
+
+function assertNewPassword(password: string): void {
+  if (!password || password.length < 8) {
+    throw new BadRequestException(
+      'La contraseña debe tener al menos 8 caracteres.',
+    );
+  }
 }
 
 export interface AcceptInvitationResult {
@@ -43,12 +69,15 @@ export interface AcceptInvitationResult {
  */
 @Injectable()
 export class AcceptInvitationUseCase {
+  private readonly logger = new Logger('Invitations');
+
   constructor(
     @Inject(INVITATION_REPOSITORY)
     private readonly repo: InvitationRepository,
     private readonly password: PasswordService,
     private readonly tokens: TokenService,
     private readonly tenantContext: TenantContextService,
+    private readonly audit: RecordAuditEventUseCase,
   ) {}
 
   async execute(input: AcceptInvitationInput): Promise<AcceptInvitationResult> {
@@ -80,45 +109,86 @@ export class AcceptInvitationUseCase {
       invitation.email,
     );
 
-    let userId: string;
-    // Versión de sesión con la que nace el par (claim `tv`): la vigente del
-    // usuario existente, o 0 para una cuenta recién creada.
-    let tokenVersion = 0;
+    // DX-029 (SEC-007). El token solo llega por email (nunca al ADMIN que
+    // invita), así que quien lo abre controla ese buzón:
+    // - sin cuenta → se crea con el email verificado;
+    // - cuenta VERIFICADA → hay que demostrar su contraseña (si la olvidó,
+    //   la recupera por email: DX-010);
+    // - cuenta SIN verificar (pudo crearla alguien sin acceso al email) → si
+    //   trae su contraseña actual se une y queda verificada; si trae otra, la
+    //   RECLAMA: contraseña nueva, sesiones y enlaces previos invalidados y
+    //   evento de auditoría.
+    let resolution: AcceptUserResolution;
     if (existingUser) {
       const passwordMatches = await this.password.verify(
         input.password,
         existingUser.passwordHash,
       );
-      if (!passwordMatches) {
+      if (passwordMatches) {
+        resolution = { existingUserId: existingUser.id };
+      } else if (existingUser.emailVerifiedAt) {
         throw new UnauthorizedException(
-          'La contraseña no es correcta. Usa la de tu cuenta de Dentalix.',
+          'La contraseña no es correcta. Usa la de tu cuenta de Dentalix o recupérala desde «¿Olvidaste tu contraseña?».',
         );
+      } else {
+        assertNewPassword(input.password);
+        resolution = {
+          claim: {
+            userId: existingUser.id,
+            passwordHash: await this.password.hash(input.password),
+          },
+        };
       }
-      // No cambia su contraseña ni crea un usuario nuevo: solo reutiliza la
-      // cuenta. `acceptTransactional` crea/reactiva la membresía sin
-      // duplicarla si ya era miembro activo (caso 7 del brief).
-      const outcome = await this.repo.acceptTransactional({
-        invitationId: invitation.id,
-        email: invitation.email,
-        role: invitation.role,
-        existingUserId: existingUser.id,
-      });
-      userId = outcome.userId;
-      tokenVersion = existingUser.tokenVersion;
     } else {
-      if (!input.password || input.password.length < 8) {
-        throw new BadRequestException(
-          'La contraseña debe tener al menos 8 caracteres.',
-        );
-      }
-      const passwordHash = await this.password.hash(input.password);
-      const outcome = await this.repo.acceptTransactional({
+      assertNewPassword(input.password);
+      resolution = {
+        newUser: {
+          fullName: invitation.fullName,
+          passwordHash: await this.password.hash(input.password),
+        },
+      };
+    }
+
+    let outcome: Awaited<
+      ReturnType<InvitationRepository['acceptTransactional']>
+    >;
+    try {
+      outcome = await this.repo.acceptTransactional({
         invitationId: invitation.id,
         email: invitation.email,
         role: invitation.role,
-        newUser: { fullName: invitation.fullName, passwordHash },
+        user: resolution,
       });
-      userId = outcome.userId;
+    } catch (err) {
+      if (err instanceof AccountClaimConflictError) {
+        throw new ConflictException(
+          'Tu cuenta cambió mientras aceptabas. Vuelve a abrir el enlace e inténtalo de nuevo.',
+        );
+      }
+      throw err;
+    }
+    const { userId, tokenVersion } = outcome;
+
+    if ('claim' in resolution) {
+      this.logger.log({
+        event: 'invitation.account_claimed',
+        tenantId,
+        userId,
+        invitationId: invitation.id,
+      });
+      await this.audit.record({
+        tenantId,
+        locationId: null,
+        actor: { kind: 'user', userId, role: invitation.role },
+        action: 'PASSWORD_RESET',
+        resourceType: 'SESSION',
+        resourceId: null,
+        patient: null,
+        requestId: input.meta?.requestId ?? null,
+        ip: input.meta?.ip ?? null,
+        userAgent: input.meta?.userAgent ?? null,
+        metadata: { reason: ACCOUNT_CLAIM_AUDIT_REASON },
+      });
     }
 
     // El rol viene de la invitación (`invitation.role`), NUNCA de `input` —
