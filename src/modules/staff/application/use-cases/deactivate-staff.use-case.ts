@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
 import { STAFF_REPOSITORY } from '../../domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../domain/ports/staff-repository.port';
 
@@ -21,15 +20,12 @@ export class DeactivateStaffUseCase {
   async execute(input: DeactivateStaffInput): Promise<void> {
     if (input.userId === input.requestingUserId)
       throw new ConflictException('You cannot deactivate yourself');
-    const current = await this.repo.findById(input.userId);
-    if (!current) throw new NotFoundException('Staff member not found');
-    if (
-      current.role === ClinicRole.ADMIN &&
-      (await this.repo.countActiveAdmins()) <= 1
-    ) {
+    // "No dejar la clínica sin ADMIN" se comprueba y se escribe en la misma
+    // transacción (ver StaffRepository.deactivateById, DB-012).
+    const outcome = await this.repo.deactivateById(input.userId);
+    if (outcome === 'NOT_FOUND')
+      throw new NotFoundException('Staff member not found');
+    if (outcome === 'LAST_ADMIN')
       throw new ConflictException('Cannot deactivate the last admin');
-    }
-    const ok = await this.repo.deactivateById(input.userId);
-    if (!ok) throw new NotFoundException('Staff member not found');
   }
 }

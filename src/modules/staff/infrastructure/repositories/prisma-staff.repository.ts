@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { StaffRepository } from '../../domain/ports/staff-repository.port';
+import {
+  DeactivateStaffOutcome,
+  StaffRepository,
+  UpdateStaffOutcome,
+} from '../../domain/ports/staff-repository.port';
 import { StaffMember } from '../../domain/entities/staff-member.entity';
 import {
   StaffDirectoryEntry,
@@ -224,14 +228,21 @@ export class PrismaStaffRepository implements StaffRepository {
   async updateById(
     userId: string,
     patch: { fullName?: string; role?: ClinicRole },
-  ): Promise<StaffMember | null> {
+  ): Promise<UpdateStaffOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
-      const membership = await tx.clinicMembership.findFirst({
-        where: { userId, deletedAt: null },
-        select: { id: true },
-      });
+      // Solo una degradación puede retirar un ADMIN; renombrar o ascender no
+      // compite por la regla y no necesita el bloqueo.
+      const demotes =
+        patch.role !== undefined && patch.role !== ClinicRole.ADMIN;
+      if (demotes) {
+        await lockActiveAdmins(tx);
+      }
+      const membership = await findActiveMembership(tx, userId);
       if (!membership) {
-        return null;
+        return { kind: 'NOT_FOUND' };
+      }
+      if (demotes && (await isLastActiveAdmin(tx, membership.role))) {
+        return { kind: 'LAST_ADMIN' };
       }
       if (patch.role) {
         await tx.clinicMembership.update({
@@ -245,40 +256,82 @@ export class PrismaStaffRepository implements StaffRepository {
           data: { fullName: patch.fullName },
         });
       }
-      const updated = await tx.clinicMembership.findFirst({
+      const updated = await tx.clinicMembership.findFirstOrThrow({
         where: { id: membership.id },
         include: { user: true },
       });
-      return updated
-        ? {
-            userId: updated.userId,
-            fullName: updated.user.fullName,
-            email: updated.user.email,
-            role: updated.role,
-          }
-        : null;
+      return {
+        kind: 'UPDATED',
+        member: {
+          userId: updated.userId,
+          fullName: updated.user.fullName,
+          email: updated.user.email,
+          role: updated.role,
+        },
+      };
     });
   }
 
-  async deactivateById(userId: string): Promise<boolean> {
+  async deactivateById(userId: string): Promise<DeactivateStaffOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
-      const result = await tx.clinicMembership.updateMany({
-        where: { userId, deletedAt: null },
+      await lockActiveAdmins(tx);
+      const membership = await findActiveMembership(tx, userId);
+      if (!membership) {
+        return 'NOT_FOUND';
+      }
+      if (await isLastActiveAdmin(tx, membership.role)) {
+        return 'LAST_ADMIN';
+      }
+      await tx.clinicMembership.update({
+        where: { id: membership.id },
         data: { deletedAt: new Date() },
       });
-      return result.count > 0;
+      return 'DEACTIVATED';
     });
   }
+}
 
-  async countActiveAdmins(): Promise<number> {
-    return this.prisma.runWithTenant(async (tx) =>
-      tx.clinicMembership.count({
-        where: {
-          deletedAt: null,
-          role: ClinicRole.ADMIN,
-          user: { deletedAt: null },
-        },
-      }),
-    );
+/**
+ * DB-012: bloquea (FOR UPDATE) las membresías ADMIN vivas de la clínica (la RLS
+ * acota a este tenant) ANTES de leer nada. Dos transacciones que pueden
+ * retirar un ADMIN se serializan aquí: la segunda espera al COMMIT de la
+ * primera, Postgres re-evalúa el WHERE sobre las filas ya cambiadas (la
+ * degradada o desactivada deja de cumplirlo) y, como en READ COMMITTED cada
+ * sentencia toma una foto nueva, las lecturas siguientes ven el cambio. Orden
+ * fijo por `id`: sin interbloqueos entre ellas.
+ */
+async function lockActiveAdmins(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$queryRaw`
+    SELECT "id" FROM "clinic_memberships"
+     WHERE "role" = 'ADMIN' AND "deletedAt" IS NULL
+     ORDER BY "id"
+     FOR UPDATE`;
+}
+
+function findActiveMembership(
+  tx: Prisma.TransactionClient,
+  userId: string,
+): Promise<{ id: string; role: ClinicRole } | null> {
+  return tx.clinicMembership.findFirst({
+    where: { userId, deletedAt: null, user: { deletedAt: null } },
+    select: { id: true, role: true },
+  });
+}
+
+/** ¿Retirar a este miembro dejaría la clínica sin ADMIN activo? */
+async function isLastActiveAdmin(
+  tx: Prisma.TransactionClient,
+  role: ClinicRole,
+): Promise<boolean> {
+  if (role !== ClinicRole.ADMIN) {
+    return false;
   }
+  const admins = await tx.clinicMembership.count({
+    where: {
+      deletedAt: null,
+      role: ClinicRole.ADMIN,
+      user: { deletedAt: null },
+    },
+  });
+  return admins <= 1;
 }

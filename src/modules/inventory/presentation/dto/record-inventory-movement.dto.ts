@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
 import { InventoryMovementType } from '@prisma/client';
+import {
+  IsQuantity,
+  QUANTITY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // NOTE: deliberately NO `itemId`/`tenantId`/`createdById`/`occurredAt`
 // field -- `itemId` comes from the route param (never duplicated in the
@@ -27,9 +31,12 @@ export class RecordInventoryMovementDto {
   @ApiProperty({
     example: 10,
     description:
-      'Always > 0 for IN/OUT; may be negative (and never 0) for ADJUSTMENT.',
+      'Always > 0 for IN/OUT; may be negative (and never 0) for ADJUSTMENT. At most 3 decimal places.',
+    maximum: QUANTITY_MAX,
+    minimum: -QUANTITY_MAX,
   })
   @IsNumber()
+  @IsQuantity()
   quantity!: number;
 
   @ApiPropertyOptional()

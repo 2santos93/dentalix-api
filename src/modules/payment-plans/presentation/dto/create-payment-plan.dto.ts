@@ -9,6 +9,10 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import {
+  IsMoney,
+  MONEY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 export class CreatePaymentPlanDto {
   @ApiProperty({
@@ -34,20 +38,25 @@ export class CreatePaymentPlanDto {
 
   @ApiPropertyOptional({
     example: 200,
-    description: 'Pie/abono inicial esperado (>= 0)',
+    description: 'Pie/abono inicial esperado (>= 0, como mucho 2 decimales)',
+    maximum: MONEY_MAX,
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsMoney()
   downPayment?: number;
 
   @ApiPropertyOptional({
     example: 1200,
-    description: 'Monto total a financiar. Default = saldo actual del plan.',
+    description:
+      'Monto total a financiar (como mucho 2 decimales). Default = saldo actual del plan.',
+    maximum: MONEY_MAX,
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsMoney()
   totalToFinance?: number;
 
   @ApiPropertyOptional()

@@ -11,14 +11,10 @@ import {
 } from '../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import {
+  DoneMirrorInput,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
-import { ToothRecord } from '../../../odontogram/domain/entities/tooth-record.entity';
-import {
-  CreateToothRecordRepoInput,
-  ToothRecordRepository,
-} from '../../../odontogram/domain/ports/tooth-record-repository.port';
 import { DentalCatalogItem } from '../../../dental-catalog/domain/entities/dental-catalog-item.entity';
 import { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 
@@ -64,20 +60,6 @@ function makeRepo(
   };
 }
 
-function makeToothRepo(
-  overrides: Partial<ToothRecordRepository> = {},
-): ToothRecordRepository {
-  return {
-    create: (): Promise<ToothRecord> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    listByPatient: (): Promise<ToothRecord[]> => Promise.resolve([]),
-    listByTooth: (): Promise<ToothRecord[]> => Promise.resolve([]),
-    findBySourcePlanItem: (): Promise<ToothRecord | null> =>
-      Promise.resolve(null),
-    ...overrides,
-  };
-}
-
 function makeCatalogRepo(
   overrides: Partial<DentalCatalogRepository> = {},
 ): DentalCatalogRepository {
@@ -107,11 +89,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       updateItem: (): Promise<TreatmentPlanItem> =>
         Promise.reject(new Error('updateItem should not be called')),
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(
-      repo,
-      makeToothRepo(),
-      makeCatalogRepo(),
-    );
+    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
 
     await expect(
       uc.execute('missing-id', { price: 100 }),
@@ -135,11 +113,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         });
       },
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(
-      repo,
-      makeToothRepo(),
-      makeCatalogRepo(),
-    );
+    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
 
     const result = await uc.execute(existing.id, { price: 999 });
 
@@ -159,11 +133,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       updateItem: (): Promise<TreatmentPlanItem> =>
         Promise.resolve({ ...existing, status }),
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(
-      repo,
-      makeToothRepo(),
-      makeCatalogRepo(),
-    );
+    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
 
     const result = await uc.execute(existing.id, { status });
 
@@ -188,11 +158,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         });
       },
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(
-      repo,
-      makeToothRepo(),
-      makeCatalogRepo(),
-    );
+    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
 
     const result = await uc.execute(existing.id, {
       surfaces: [ToothSurface.DISTAL],
@@ -207,34 +173,43 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     });
   });
 
+  // DX-042 (DB-013): la transición a DONE y su registro en el odontograma van
+  // en UNA transacción del repositorio (con el ítem bloqueado), así que el caso
+  // de uso solo resuelve los datos del espejo y se los pasa a `updateItem`.
   describe('Pieza B — mirror to odontogram on DONE', () => {
-    it('creates a tooth record linked to the item when it transitions to DONE', async () => {
-      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
+    function capture(existing: TreatmentPlanItem) {
+      const calls: {
+        patch: UpdateTreatmentPlanItemRepoInput;
+        mirror: DoneMirrorInput | undefined;
+      }[] = [];
       const repo = makeRepo({
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
-        updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({
+        updateItem: (
+          _id: string,
+          patch: UpdateTreatmentPlanItemRepoInput,
+          mirror?: DoneMirrorInput,
+        ): Promise<TreatmentPlanItem> => {
+          calls.push({ patch, mirror });
+          return Promise.resolve({
             ...existing,
-            status: TreatmentPlanItemStatus.DONE,
-          }),
+            status: patch.status ?? existing.status,
+          });
+        },
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
       });
-      let received: CreateToothRecordRepoInput | undefined;
-      const toothRepo = makeToothRepo({
-        findBySourcePlanItem: (): Promise<ToothRecord | null> =>
-          Promise.resolve(null),
-        create: (input: CreateToothRecordRepoInput): Promise<ToothRecord> => {
-          received = input;
-          return Promise.resolve({} as ToothRecord);
-        },
-      });
+      return { repo, calls };
+    }
+
+    it('asks the repository to mirror the item when it transitions to DONE', async () => {
+      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
+      const { repo, calls } = capture(existing);
       const catalog = makeCatalogRepo({
         findById: (): Promise<DentalCatalogItem | null> =>
-          Promise.resolve({ kind: CatalogKind.PROCEDURE } as DentalCatalogItem),
+          Promise.resolve({ kind: CatalogKind.DIAGNOSIS } as DentalCatalogItem),
       });
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, toothRepo, catalog);
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, catalog);
 
       const result = await uc.execute(
         existing.id,
@@ -243,99 +218,66 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       );
 
       expect(result.status).toBe(TreatmentPlanItemStatus.DONE);
-      expect(received).toEqual({
+      expect(calls).toEqual([
+        {
+          patch: { status: TreatmentPlanItemStatus.DONE },
+          mirror: {
+            patientId: 'pat1',
+            kind: CatalogKind.DIAGNOSIS,
+            performedById: 'user1',
+          },
+        },
+      ]);
+    });
+
+    it('defaults the record kind to PROCEDURE when the catalog item is gone', async () => {
+      const { repo, calls } = capture(fakeItem());
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+
+      await uc.execute('item1', { status: TreatmentPlanItemStatus.DONE });
+
+      expect(calls[0].mirror).toEqual({
         patientId: 'pat1',
-        toothNumber: '11',
-        surfaces: [],
         kind: CatalogKind.PROCEDURE,
-        catalogItemId: 'cat1',
-        status: 'COMPLETED',
-        performedById: 'user1',
-        sourcePlanItemId: 'item1',
+        performedById: undefined,
       });
     });
 
-    it('does not create a second tooth record if the item was already mirrored (dedupe)', async () => {
-      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
+    it('does not ask for a mirror when the item was already DONE (no transition)', async () => {
+      const { repo, calls } = capture(
+        fakeItem({ status: TreatmentPlanItemStatus.DONE }),
+      );
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+
+      await uc.execute('item1', { status: TreatmentPlanItemStatus.DONE });
+
+      expect(calls[0].mirror).toBeUndefined();
+    });
+
+    it('does not ask for a mirror on a patch that does not touch the status', async () => {
+      const { repo, calls } = capture(fakeItem());
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+
+      await uc.execute('item1', { price: 300 });
+
+      expect(calls[0].mirror).toBeUndefined();
+    });
+
+    it('fails as a whole if the mirror cannot be written (never DONE without its record)', async () => {
+      const existing = fakeItem();
       const repo = makeRepo({
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
-        updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({
-            ...existing,
-            status: TreatmentPlanItemStatus.DONE,
-          }),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
-      });
-      const create = jest.fn();
-      const toothRepo = makeToothRepo({
-        findBySourcePlanItem: (): Promise<ToothRecord | null> =>
-          Promise.resolve({ id: 'existing-record' } as ToothRecord),
-        create,
-      });
-      const uc = new UpdateTreatmentPlanItemUseCase(
-        repo,
-        toothRepo,
-        makeCatalogRepo(),
-      );
-
-      await uc.execute(existing.id, { status: TreatmentPlanItemStatus.DONE });
-
-      expect(create).not.toHaveBeenCalled();
-    });
-
-    it('does not mirror when the item was already DONE (no transition)', async () => {
-      const existing = fakeItem({ status: TreatmentPlanItemStatus.DONE });
-      const repo = makeRepo({
-        findItemById: (): Promise<TreatmentPlanItem | null> =>
-          Promise.resolve(existing),
         updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({ ...existing, price: 300 }),
-      });
-      const create = jest.fn();
-      const uc = new UpdateTreatmentPlanItemUseCase(
-        repo,
-        makeToothRepo({ create }),
-        makeCatalogRepo(),
-      );
-
-      const result = await uc.execute(existing.id, { price: 300 });
-
-      expect(result.price).toBe(300);
-      expect(create).not.toHaveBeenCalled();
-    });
-
-    it('still succeeds if mirroring fails (best-effort)', async () => {
-      const existing = fakeItem({ status: TreatmentPlanItemStatus.PROPOSED });
-      const repo = makeRepo({
-        findItemById: (): Promise<TreatmentPlanItem | null> =>
-          Promise.resolve(existing),
-        updateItem: (): Promise<TreatmentPlanItem> =>
-          Promise.resolve({
-            ...existing,
-            status: TreatmentPlanItemStatus.DONE,
-          }),
-        findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
-          Promise.resolve(planWithPatient),
-      });
-      const toothRepo = makeToothRepo({
-        findBySourcePlanItem: (): Promise<ToothRecord | null> =>
-          Promise.resolve(null),
-        create: (): Promise<ToothRecord> =>
           Promise.reject(new Error('odontogram write failed')),
       });
-      const catalog = makeCatalogRepo({
-        findById: (): Promise<DentalCatalogItem | null> =>
-          Promise.resolve({ kind: CatalogKind.PROCEDURE } as DentalCatalogItem),
-      });
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, toothRepo, catalog);
+      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
 
-      const result = await uc.execute(existing.id, {
-        status: TreatmentPlanItemStatus.DONE,
-      });
-
-      expect(result.status).toBe(TreatmentPlanItemStatus.DONE);
+      await expect(
+        uc.execute(existing.id, { status: TreatmentPlanItemStatus.DONE }),
+      ).rejects.toThrow('odontogram write failed');
     });
   });
 });

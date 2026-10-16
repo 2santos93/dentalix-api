@@ -67,6 +67,12 @@ export interface CashRegisterPage {
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 
 export interface PaymentRepository {
+  /**
+   * Inserta el abono. Dentro de la MISMA transacción vuelve a comprobar que el
+   * plan sigue vivo y es del paciente (404 si no; DB-014). Si otra petición
+   * con la misma `idempotencyKey` se le adelantó (carrera entre reintentos),
+   * devuelve el abono ORIGINAL en vez de fallar.
+   */
   create(input: CreatePaymentRepoInput): Promise<Payment>;
 
   /**

@@ -11,6 +11,10 @@ import {
 } from 'class-validator';
 import { CatalogKind } from '@prisma/client';
 import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
+import {
+  IsMoney,
+  MONEY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // NOTE: deliberately NO `tenantId` field — the tenant comes from the guarded
 // request context (JwtAuthGuard -> TenantContextInterceptor), never from the
@@ -55,10 +59,14 @@ export class CreateCatalogItemDto {
   })
   color!: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'At most 2 decimal places',
+    maximum: MONEY_MAX,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsMoney()
   defaultPrice?: number;
 
   @ApiPropertyOptional({ default: true })

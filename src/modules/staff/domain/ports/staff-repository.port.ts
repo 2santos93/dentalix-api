@@ -7,6 +7,18 @@ import {
 
 export const STAFF_REPOSITORY = Symbol('STAFF_REPOSITORY');
 
+/**
+ * Resultado de una escritura que puede retirar un ADMIN. `NOT_FOUND`: no hay
+ * membresía activa de ese usuario en la clínica. `LAST_ADMIN`: es el último
+ * ADMIN activo y no se ha escrito nada.
+ */
+export type UpdateStaffOutcome =
+  | { kind: 'UPDATED'; member: StaffMember }
+  | { kind: 'NOT_FOUND' }
+  | { kind: 'LAST_ADMIN' };
+
+export type DeactivateStaffOutcome = 'DEACTIVATED' | 'NOT_FOUND' | 'LAST_ADMIN';
+
 export interface StaffRepository {
   /**
    * Directorio paginado: miembros (activos y, si se piden, inactivos) más las
@@ -47,25 +59,24 @@ export interface StaffRepository {
 
   /**
    * Partially updates the staff member's `fullName` and/or `role` for the
-   * current tenant. Returns `null` if there is no matching active
-   * membership. Tenant-scoped (via RLS / `runWithTenant`).
+   * current tenant. Tenant-scoped (via RLS / `runWithTenant`).
+   *
+   * Regla "siempre queda al menos un ADMIN" (DX-042, DB-012): si el cambio
+   * degrada a un ADMIN, la comprobación y la escritura van en UNA transacción
+   * que bloquea las membresías ADMIN vivas antes de contar. Dos degradaciones
+   * concurrentes de los dos últimos ADMIN se serializan: la segunda ve un solo
+   * ADMIN y devuelve `LAST_ADMIN` sin escribir nada.
    */
   updateById(
     userId: string,
     patch: { fullName?: string; role?: ClinicRole },
-  ): Promise<StaffMember | null>;
+  ): Promise<UpdateStaffOutcome>;
 
   /**
    * Soft-deletes (sets `deletedAt`) the active `ClinicMembership` for
-   * `userId` in the current tenant. Returns whether a row was affected.
-   * Tenant-scoped (via RLS / `runWithTenant`).
+   * `userId` in the current tenant. Tenant-scoped (via RLS /
+   * `runWithTenant`). Misma garantía atómica que `updateById`: nunca deja la
+   * clínica sin ADMIN activo (`LAST_ADMIN`).
    */
-  deactivateById(userId: string): Promise<boolean>;
-
-  /**
-   * Count of active (non-deleted) `ADMIN` memberships for the current
-   * tenant, joined to non-deleted users. Tenant-scoped (via RLS /
-   * `runWithTenant`).
-   */
-  countActiveAdmins(): Promise<number>;
+  deactivateById(userId: string): Promise<DeactivateStaffOutcome>;
 }

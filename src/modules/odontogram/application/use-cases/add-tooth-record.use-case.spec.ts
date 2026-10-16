@@ -53,12 +53,6 @@ class InMemoryToothRecordRepository implements ToothRecordRepository {
       ),
     );
   }
-
-  findBySourcePlanItem(planItemId: string): Promise<ToothRecord | null> {
-    return Promise.resolve(
-      this.rows.find((r) => r.sourcePlanItemId === planItemId) ?? null,
-    );
-  }
 }
 
 describe('AddToothRecordUseCase', () => {

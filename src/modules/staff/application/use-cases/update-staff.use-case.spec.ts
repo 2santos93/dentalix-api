@@ -1,8 +1,7 @@
 import { UpdateStaffUseCase } from './update-staff.use-case';
 import { ClinicRole } from '@prisma/client';
 import { NotFoundException, ConflictException } from '@nestjs/common';
-import { StaffMember } from '../../domain/entities/staff-member.entity';
-import { StaffDirectoryPage } from '../../domain/entities/staff-directory-entry.entity';
+import type { StaffRepository } from '../../domain/ports/staff-repository.port';
 
 const member = (role: ClinicRole) => ({
   userId: 'u1',
@@ -10,24 +9,31 @@ const member = (role: ClinicRole) => ({
   email: 'a@a.com',
   role,
 });
-const makeRepo = (over = {}) => ({
-  findById: jest.fn().mockResolvedValue(member(ClinicRole.DENTIST)),
+
+// La regla "siempre queda al menos un ADMIN" la garantiza el repositorio de
+// forma ATÓMICA (DX-042, DB-012); el caso de uso solo traduce el resultado.
+const asRepo = (repo: ReturnType<typeof makeRepo>): StaffRepository =>
+  repo as unknown as StaffRepository;
+
+const makeRepo = (over: Partial<Record<'updateById', jest.Mock>> = {}) => ({
   updateById: jest
     .fn()
     .mockImplementation(
       (_id: string, p: { fullName?: string; role?: ClinicRole }) =>
         Promise.resolve({
-          ...member(p.role ?? ClinicRole.DENTIST),
-          fullName: p.fullName ?? 'Ana',
+          kind: 'UPDATED',
+          member: {
+            ...member(p.role ?? ClinicRole.DENTIST),
+            fullName: p.fullName ?? 'Ana',
+          },
         }),
     ),
-  countActiveAdmins: jest.fn().mockResolvedValue(2),
   ...over,
 });
 
 it('actualiza rol y nombre', async () => {
   const repo = makeRepo();
-  const uc = new UpdateStaffUseCase(repo as any);
+  const uc = new UpdateStaffUseCase(asRepo(repo));
   const r = await uc.execute({
     userId: 'u1',
     role: ClinicRole.ADMIN,
@@ -41,8 +47,10 @@ it('actualiza rol y nombre', async () => {
 });
 
 it('404 si no es miembro', async () => {
-  const repo = makeRepo({ findById: jest.fn().mockResolvedValue(null) });
-  const uc = new UpdateStaffUseCase(repo as any);
+  const repo = makeRepo({
+    updateById: jest.fn().mockResolvedValue({ kind: 'NOT_FOUND' }),
+  });
+  const uc = new UpdateStaffUseCase(asRepo(repo));
   await expect(
     uc.execute({ userId: 'x', role: ClinicRole.ADMIN }),
   ).rejects.toBeInstanceOf(NotFoundException);
@@ -50,17 +58,19 @@ it('404 si no es miembro', async () => {
 
 it('409 al degradar al último ADMIN', async () => {
   const repo = makeRepo({
-    findById: jest.fn().mockResolvedValue(member(ClinicRole.ADMIN)),
-    listDirectory: (): Promise<StaffDirectoryPage> =>
-      Promise.resolve({ items: [], total: 0, page: 1, pageSize: 20 }),
-    findDetailById: (): Promise<
-      (StaffMember & { status: 'ACTIVE' | 'INACTIVE' }) | null
-    > => Promise.resolve(null),
-    reactivateById: (): Promise<StaffMember | null> => Promise.resolve(null),
-    countActiveAdmins: jest.fn().mockResolvedValue(1),
+    updateById: jest.fn().mockResolvedValue({ kind: 'LAST_ADMIN' }),
   });
-  const uc = new UpdateStaffUseCase(repo as any);
+  const uc = new UpdateStaffUseCase(asRepo(repo));
   await expect(
     uc.execute({ userId: 'u1', role: ClinicRole.DENTIST }),
-  ).rejects.toBeInstanceOf(ConflictException);
+  ).rejects.toThrow(new ConflictException('Cannot demote the last admin'));
+});
+
+it('recorta el nombre antes de guardarlo', async () => {
+  const repo = makeRepo();
+  await new UpdateStaffUseCase(asRepo(repo)).execute({
+    userId: 'u1',
+    fullName: '  Ana R  ',
+  });
+  expect(repo.updateById).toHaveBeenCalledWith('u1', { fullName: 'Ana R' });
 });

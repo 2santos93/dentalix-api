@@ -6,6 +6,10 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import {
+  IsQuantity,
+  QUANTITY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // NOTE: deliberately NO `tenantId`/`createdById` field -- tenant comes from
 // the guarded request context (never the client), `createdById` is sourced
@@ -27,10 +31,17 @@ export class CreateInventoryItemDto {
   @MinLength(1)
   unit!: string;
 
-  @ApiPropertyOptional({ minimum: 0, default: 0, example: 5 })
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: QUANTITY_MAX,
+    default: 0,
+    example: 5,
+    description: 'At most 3 decimal places',
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsQuantity()
   minStock?: number;
 
   @ApiPropertyOptional()
