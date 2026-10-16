@@ -104,7 +104,12 @@ Postgres. La opción 3 cambia el producto (no encuentra "pérez" dentro de
 - La lectura sin filtro de tenant queda en **un único punto auditable**: un
   rol que no puede conectarse, sin miembros (la migración aborta si el rol ya
   existe con miembros o atributos inesperados), que solo ve cinco columnas de
-  una tabla y solo para SELECT.
+  una tabla y solo para SELECT. Ojo (DX-134): el rol es del clúster y
+  **ADMIN OPTION sobre él equivale a poder darse SET**; el owner que lo crea
+  la conserva (PG16), así que puede leer esas columnas en cualquier base del
+  clúster. De ahí la restricción de un owner por clúster, que comprueban
+  `docker/prod/create-app-role.sql` antes de migrar y `npm run
+  db:check-force` en cada despliegue (README, «Despliegue: roles de la BD»).
 - `search_path` fijo: un objeto con el mismo nombre en otro esquema (o en
   `pg_temp`) no puede secuestrar la función.
 - La RLS de `patients` (y de todo lo demás) queda intacta y FORCE.

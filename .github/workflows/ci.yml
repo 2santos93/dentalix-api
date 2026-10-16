@@ -111,6 +111,9 @@ jobs:
           done > .env.test
 
       - run: npm run db:test:setup
+      # DX-134: la comprobación del runbook tras desplegar (README).
+      - name: Comprobar FORCE tras migrar (db:check-force)
+        run: npm run db:check-force
       - run: npm run test:int
       - run: npm run test:e2e
 
@@ -189,11 +192,16 @@ jobs:
         run: npx prisma migrate deploy
       - run: npx prisma db seed
       - run: npm run seed:demo
+      # DX-134: la comprobación del runbook tras desplegar (README), como el owner.
+      - name: Comprobar FORCE tras migrar (db:check-force)
+        run: npm run db:check-force
 
       # FORCE en toda tabla con tenantId (y en toda tabla con RLS), leído de
       # pg_class con el owner real.
       - name: Comprobar RLS FORCE tras migrar
         run: npx jest --config ./test/jest-int.json --runInBand test/rls-catalog.int-spec.ts
 
-      # Migraciones de datos con filas previas y despachador de email.
+      # Migraciones de datos con filas previas, despachador de email, FK con
+      # filas huérfanas ocultas, create-app-role.sql sin contraseña y dos
+      # owners en el mismo clúster (DX-134).
       - run: npm run test:owner-nosu
