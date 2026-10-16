@@ -61,6 +61,15 @@ CREATE POLICY "tenant_isolation" ON "payments_paidat_backfill_dx097"
 REVOKE ALL ON "payments_paidat_backfill_dx097" FROM PUBLIC;
 REVOKE ALL ON "payments_paidat_backfill_dx097" FROM "dentalix_app";
 
+-- DX-113: con un owner sin superusuario ni BYPASSRLS, FORCE lo sujeta a la RLS
+-- y, con row_security = off, esta sentencia falla. Se quita FORCE solo
+-- durante el backfill, en esta misma transacción, y se restaura justo
+-- después: el resultado es el mismo.
+ALTER TABLE "payments" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "locations" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "location_schedules" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "payments_paidat_backfill_dx097" NO FORCE ROW LEVEL SECURITY;
+
 WITH zones AS (
   SELECT l."id" AS "locationId",
          l."tenantId",
@@ -96,3 +105,8 @@ moved AS (
 )
 INSERT INTO "payments_paidat_backfill_dx097" ("payment_id", "tenantId", "old_paid_at", "new_paid_at", "time_zone")
 SELECT "id", "tenantId", "old_paid_at", "new_paid_at", "zone" FROM moved;
+
+ALTER TABLE "payments_paidat_backfill_dx097" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "location_schedules" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "locations" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "payments" FORCE ROW LEVEL SECURITY;

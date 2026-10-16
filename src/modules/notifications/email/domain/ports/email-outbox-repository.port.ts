@@ -67,11 +67,12 @@ export interface EmailOutboxRepository {
 
   /**
    * ¿Puede el despachador trabajar? Las funciones existen, este rol puede
-   * ejecutarlas y su owner se salta la RLS (superusuario o BYPASSRLS).
+   * ejecutarlas y su owner ve todas las filas de email_outbox (su rol NOLOGIN
+   * con política propia, DX-113; o un owner superusuario o con BYPASSRLS).
    */
   dispatcherAccess(): Promise<{
     executable: boolean;
-    ownerBypassesRls: boolean;
+    ownerSeesAllRows: boolean;
   }>;
 
   /**

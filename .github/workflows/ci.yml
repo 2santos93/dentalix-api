@@ -113,3 +113,87 @@ jobs:
       - run: npm run db:test:setup
       - run: npm run test:int
       - run: npm run test:e2e
+
+  # DX-113: en un Postgres gestionado (RDS, Cloud SQL…) el owner de las tablas
+  # NO es superusuario ni tiene BYPASSRLS, y con RLS FORCE queda sujeto a la
+  # RLS. Este job reproduce ese despliegue desde cero: el superusuario de la
+  # imagen solo hace de admin del proveedor (crea el owner y la base); todo lo
+  # demás corre como el owner o como la app. Ver README, «Despliegue: roles de
+  # la BD».
+  owner-nosu:
+    name: Migraciones con owner sin superusuario (Postgres 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Valores SOLO de test, ficticios (como en el job de integración).
+      DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_nosu?schema=public
+      DIRECT_URL: postgresql://dentalix_owner:dentalix_owner@localhost:5432/dentalix_nosu?schema=public
+      # Admin del clúster: solo lo usan los specs owner-nosu para crear bases
+      # desechables y cargar filas saltando la RLS.
+      OWNER_NOSU_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      JWT_ACCESS_SECRET: solo-test-ci-access-4f1d9b2e7a6c3058e1b4d7a0c9f2e6b3
+      JWT_REFRESH_SECRET: solo-test-ci-refresh-8c2a5e9f1b7d4063a2e5c8f1b4d7a0e9
+      JWT_ACCESS_TTL: 900s
+      JWT_REFRESH_TTL: 30d
+      EXCHANGE_APP_ID: ''
+      EXCHANGE_BASE_URL: https://openexchangerates.org/api
+      TENANT_BASE_DOMAINS: dentalix.app,localhost
+      TRUST_PROXY: 'false'
+      STORAGE_DIR: ./storage-test
+      FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      # Privilegios mínimos del owner (README): LOGIN, CREATEROLE (crea
+      # dentalix_app y los roles NOLOGIN de las migraciones) y dueño de la base.
+      - name: Crear el owner sin SUPERUSER ni BYPASSRLS
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres <<'SQL'
+          CREATE ROLE dentalix_owner LOGIN PASSWORD 'dentalix_owner'
+            NOSUPERUSER NOBYPASSRLS CREATEROLE NOCREATEDB NOREPLICATION;
+          CREATE DATABASE dentalix_nosu OWNER dentalix_owner;
+          SQL
+          test "$(psql -h localhost -U postgres -d postgres -tAc \
+            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'dentalix_owner'")" = f
+
+      - name: Crear el rol de la app como el owner (docker/prod/create-app-role.sql)
+        env:
+          PGPASSWORD: dentalix_owner
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix_owner -d dentalix_nosu -v app_password=dentalix_app -f docker/prod/create-app-role.sql
+
+      - name: Aplicar todas las migraciones desde cero con el owner
+        run: npx prisma migrate deploy
+      - run: npx prisma db seed
+      - run: npm run seed:demo
+
+      # FORCE en toda tabla con tenantId (y en toda tabla con RLS), leído de
+      # pg_class con el owner real.
+      - name: Comprobar RLS FORCE tras migrar
+        run: npx jest --config ./test/jest-int.json --runInBand test/rls-catalog.int-spec.ts
+
+      # Migraciones de datos con filas previas y despachador de email.
+      - run: npm run test:owner-nosu

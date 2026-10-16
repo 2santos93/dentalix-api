@@ -62,6 +62,15 @@ const POLICY_EXEMPT: Record<
     roles: ['dentalix_patient_search'],
     reason: 'búsqueda indexable de pacientes (DX-043)',
   },
+  // DX-113: el rol NOLOGIN dueño de las funciones SECURITY DEFINER del
+  // despachador de email (reclamar, cerrar, encolar de plataforma), que
+  // trabaja para todas las clínicas sin que el owner salte la RLS. Ningún rol
+  // que pueda conectarse la recibe (email-outbox.int-spec.ts).
+  'email_outbox.email_outbox_dispatcher': {
+    cmd: 'ALL',
+    roles: ['dentalix_email_dispatcher'],
+    reason: 'despachador de email de todas las clínicas (DX-088, DX-113)',
+  },
 };
 
 /** La forma exacta que generan las migraciones (ver p. ej. la de patients). */
@@ -193,6 +202,18 @@ describe('Catálogo de RLS (DX-068)', () => {
       .map((table) => rls.find((t) => t.table === table) as TableRls)
       .filter((t) => !t.rls || !t.forced)
       .map((t) => `${t.table} (rls=${t.rls}, force=${t.forced})`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ninguna tabla de public con RLS activada queda sin FORZAR, sea o no de clínica (DX-113)', () => {
+    // Las migraciones 2026…_dx113_unforce_* quitan FORCE durante una
+    // migración de datos y su pareja _reforce_* lo devuelve. Si una pareja se
+    // descuadra (o una migración falla a medias y el deploy no se repite), el
+    // owner de las migraciones se saltaría la RLS: aquí se ve.
+    const offenders = rls
+      .filter((t) => t.rls && !t.forced)
+      .map((t) => t.table)
+      .sort();
     expect(offenders).toEqual([]);
   });
 

@@ -450,11 +450,71 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('el despachador puede trabajar: funciones ejecutables por la app y owner que salta la RLS (revisión D4)', async () => {
+  it('el despachador puede trabajar: funciones ejecutables por la app y owner que ve todas las filas (revisión D4)', async () => {
     expect(await repo.dispatcherAccess()).toEqual({
       executable: true,
-      ownerBypassesRls: true,
+      ownerSeesAllRows: true,
     });
+  });
+
+  it('las funciones son SECURITY DEFINER de un rol NOLOGIN sin BYPASSRLS ni superusuario, sin row_security = off (DX-113)', async () => {
+    // Así no dependen de que el owner de las migraciones salte la RLS, que
+    // en un Postgres gestionado no lo hace.
+    const rows = await owner.$queryRaw<
+      {
+        fn: string;
+        secdef: boolean;
+        config: string[] | null;
+        owner: string;
+        login: boolean;
+        bypass: boolean;
+        super: boolean;
+      }[]
+    >`
+      SELECT p.proname AS fn, p.prosecdef AS secdef, p.proconfig AS config,
+             r.rolname AS owner, r.rolcanlogin AS login,
+             r.rolbypassrls AS bypass, r.rolsuper AS super
+        FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
+       WHERE p.proname LIKE 'email_outbox_%'
+       ORDER BY 1`;
+    expect(rows.map((r) => r.fn)).toEqual([
+      'email_outbox_claim',
+      'email_outbox_enqueue_platform',
+      'email_outbox_settle',
+    ]);
+    for (const r of rows) {
+      expect(r).toMatchObject({
+        secdef: true,
+        config: ['search_path=public, pg_temp'],
+        owner: 'dentalix_email_dispatcher',
+        login: false,
+        bypass: false,
+        super: false,
+      });
+    }
+  });
+
+  it('la política del despachador es solo para su rol, y nadie más es miembro de él (DX-113)', async () => {
+    const policies = await owner.$queryRaw<
+      { policy: string; roles: string[] }[]
+    >`
+      SELECT policyname AS policy, roles::text[] AS roles
+        FROM pg_policies WHERE tablename = 'email_outbox' ORDER BY 1`;
+    expect(policies).toEqual([
+      {
+        policy: 'email_outbox_dispatcher',
+        roles: ['dentalix_email_dispatcher'],
+      },
+      { policy: 'tenant_isolation', roles: ['public'] },
+    ]);
+    // Nadie puede actuar como él (SET) ni heredar sus permisos (INHERIT): un
+    // owner sin superusuario conserva solo el ADMIN de haberlo creado.
+    const [members] = await owner.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_auth_members m
+       JOIN pg_roles r ON r.oid = m.roleid
+      WHERE r.rolname = 'dentalix_email_dispatcher'
+        AND (m.set_option OR m.inherit_option)`;
+    expect(members.n).toBe(0);
   });
 
   it('las funciones del despachador no están abiertas a PUBLIC', async () => {
