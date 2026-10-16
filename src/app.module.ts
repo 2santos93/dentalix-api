@@ -30,6 +30,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ConsentsModule } from './modules/consents/consents.module';
 import { SecurityModule } from './shared/security/security.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
@@ -64,6 +65,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     LocationScheduleModule,
     PlatformModule,
     DashboardModule,
+    ConsentsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

@@ -23,6 +23,7 @@ model Tenant {
   appointmentConfirmations AppointmentConfirmation[]
   privacyPolicyVersions    PrivacyPolicyVersion[]
   dataProcessingConsents   DataProcessingConsent[]
+  consentTemplates         ConsentTemplate[]
 
   @@map("tenants")
 }
@@ -195,6 +196,7 @@ model Patient {
   appointments           Appointment[]
   treatmentPlans         TreatmentPlan[]
   dataProcessingConsents DataProcessingConsent[]
+  consents               PatientConsent[]
   country                Country?                @relation(fields: [countryCode], references: [code])
   city                   City?                   @relation(fields: [cityId], references: [id])
 
@@ -450,8 +452,8 @@ enum DataConsentChannel {
 // trigger de BD rechaza todo UPDATE (ver 20261016170000_data_processing_consents).
 // Una versión nueva es una fila nueva con `version` + 1.
 model PrivacyPolicyVersion {
-  id                  String    @id @default(uuid()) @db.Uuid
-  tenantId            String    @db.Uuid
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
   version             Int
   // Texto completo de la política (aviso de privacidad).
   policyText          String
@@ -461,8 +463,8 @@ model PrivacyPolicyVersion {
   marketingText       String
   // sha256 de los cuatro textos: identifica el contenido exacto aceptado.
   contentHash         String
-  publishedAt         DateTime  @default(now())
-  publishedById       String    @db.Uuid
+  publishedAt         DateTime @default(now())
+  publishedById       String   @db.Uuid
 
   tenant      Tenant                  @relation(fields: [tenantId], references: [id])
   publishedBy User                    @relation(fields: [publishedById], references: [id])
@@ -543,6 +545,7 @@ model TreatmentPlan {
   items        TreatmentPlanItem[]
   payments     Payment[]
   paymentPlans PaymentPlan[]
+  consents     PatientConsent[]
 
   // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
   // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
@@ -930,4 +933,82 @@ model LocationScheduleRange {
 
   @@index([tenantId, scheduleId, weekday])
   @@map("location_schedule_ranges")
+}
+
+// DX-006: consentimientos informados.
+//
+// La PLANTILLA es de la clínica y se edita (cada cambio de título o texto sube
+// `version`); el CONSENTIMIENTO firmado es una foto congelada: guarda el texto
+// ya renderizado, las firmas y su hash, así que editar o desactivar la
+// plantilla después no lo altera. Ver 20261016150000_patient_consents.
+model ConsentTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  title       String
+  // Texto con variables {{paciente}}, {{documento}}, {{profesional}},
+  // {{clinica}}, {{fecha}} y {{tratamiento}} (ver render-consent.ts).
+  body        String
+  active      Boolean  @default(true)
+  version     Int      @default(1)
+  createdById String?  @db.Uuid
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  consents PatientConsent[]
+
+  // Destino de la FK compuesta de PatientConsent (SEC-004).
+  @@unique([tenantId, id], map: "consent_templates_tenant_id_key")
+  @@unique([tenantId, title], map: "consent_templates_tenant_title_key")
+  @@index([tenantId, active])
+  @@map("consent_templates")
+}
+
+enum ConsentSignerType {
+  PATIENT
+  GUARDIAN
+}
+
+// Append-only e inmutable: sin columnas de edición ni `deletedAt`. Un trigger
+// de la migración rechaza cualquier UPDATE, y el DELETE dentro de un contexto
+// de tenant (la app); el puerto del repositorio no tiene ni update ni delete.
+model PatientConsent {
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @db.Uuid
+  patientId             String            @db.Uuid
+  templateId            String            @db.Uuid
+  templateVersion       Int
+  treatmentPlanId       String?           @db.Uuid
+  // Foto del documento tal como se firmó.
+  title                 String
+  body                  String
+  signerType            ConsentSignerType
+  // Quien firma: el paciente o su tutor (nombre y documento en el momento de
+  // la firma).
+  signerName            String
+  signerDocument        String?
+  professionalName      String
+  // PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
+  patientSignature      String
+  professionalSignature String
+  // SHA-256 (hex) de texto + firmante + firmas + signedAt (consent-hash.ts).
+  contentHash           String
+  // Hora del servidor, nunca del cliente.
+  signedAt              DateTime
+  recordedById          String            @db.Uuid
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime          @default(now())
+
+  // FK COMPUESTAS (SEC-004): paciente, plantilla y plan del MISMO tenant; el
+  // plan, además, del MISMO paciente (mismo criterio que Payment).
+  patient       Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  template      ConsentTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id])
+  treatmentPlan TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
+
+  @@index([tenantId, patientId, signedAt])
+  @@index([tenantId, templateId])
+  @@index([tenantId, treatmentPlanId, patientId])
+  @@map("patient_consents")
 }

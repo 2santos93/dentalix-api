@@ -41,6 +41,8 @@ import { VoidPaymentUseCase } from '../src/modules/payments/application/use-case
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
+import { CreateConsentTemplateUseCase } from '../src/modules/consents/application/use-cases/consent-templates.use-cases';
+import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import {
   DemoLocationKey,
   DEMO_TIMEZONE,
@@ -50,6 +52,7 @@ import {
 import {
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
+  DEMO_CONSENT_TEMPLATES,
   DEMO_CURRENCY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
@@ -60,11 +63,16 @@ import {
   DEMO_PRICES,
   DEMO_PRIMARY_COLOR,
   DEMO_PRIVACY_POLICY,
+  DEMO_SIGNED_CONSENT,
   DEMO_SUBDOMAIN,
   DEMO_TOOTH_RECORDS,
   DEMO_USERS,
   NORTE_SCHEDULE,
 } from './demo/data';
+import {
+  DEMO_PATIENT_SIGNATURE_PNG,
+  DEMO_PROFESSIONAL_SIGNATURE_PNG,
+} from './demo/signatures';
 
 export {
   DEMO_EMAIL_DOMAIN,
@@ -453,6 +461,10 @@ class DemoSeeder {
 
     await this.createInventory(tenantId, locations, userIds[4]);
 
+    await this.inTenant(tenantId, undefined, () =>
+      this.createConsents(ownerId, patientIds, dentists),
+    );
+
     return this.requestConfirmations(tenantId, receptionId);
   }
 
@@ -817,6 +829,49 @@ class DemoSeeder {
         });
       }
     }
+  }
+
+  /**
+   * DX-006: las 3 plantillas (las crea el ADMIN) y un consentimiento firmado
+   * por los mismos casos de uso que la API, ligado al plan del paciente.
+   */
+  private async createConsents(
+    ownerId: string,
+    patientIds: string[],
+    dentists: string[],
+  ): Promise<void> {
+    const templates: { id: string; version: number }[] = [];
+    for (const spec of DEMO_CONSENT_TEMPLATES) {
+      templates.push(
+        await this.use(CreateConsentTemplateUseCase).execute(spec, ownerId),
+      );
+    }
+    const { patientIndex, dentistIndex, templateIndex } = DEMO_SIGNED_CONSENT;
+    const patientId = patientIds[patientIndex];
+    const plan = await this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlan.findFirstOrThrow({
+        where: { patientId, deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      }),
+    );
+    const template = templates[templateIndex];
+    await this.use(SignPatientConsentUseCase).execute(
+      patientId,
+      {
+        templateId: template.id,
+        templateVersion: template.version,
+        treatmentPlanId: plan.id,
+        signerType: 'PATIENT',
+        patientSignature: DEMO_PATIENT_SIGNATURE_PNG,
+        professionalSignature: DEMO_PROFESSIONAL_SIGNATURE_PNG,
+      },
+      {
+        recordedById: dentists[dentistIndex],
+        ipAddress: null,
+        userAgent: 'seed:demo',
+      },
+    );
   }
 
   private async createInventory(

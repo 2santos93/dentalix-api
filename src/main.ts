@@ -4,11 +4,14 @@ import { AppModule } from './app.module';
 import { PrismaExceptionFilter } from './shared/prisma/prisma-exception.filter';
 import { applySecurity } from './shared/security/apply-security';
 import { setupSwagger } from './config/swagger';
+import { applyBodyLimits } from './config/body-limits';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   // Proxy de confianza, helmet y CORS. Antes de Swagger para cubrir /docs.
   applySecurity(app);
+  // Tope de cuerpo ampliado solo para la firma de consentimientos (DX-006).
+  applyBodyLimits(app);
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   // Turn Prisma unique-constraint violations (P2002) into clean 409s app-wide
