@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPerioExamRepository } from '../src/modules/periodontal/infrastructure/repositories/prisma-perio-exam.repository';
 
 // DX-007, capa DB de perio_exams / perio_site_measures / perio_tooth_measures.
 // Cada caso escribe POR LA MISMA RUTA que la app (runWithTenant, rol
@@ -56,6 +57,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
 async function cleanup(seeds: Seeded[]): Promise<void> {
   const tenantIds = seeds.map((s) => s.tenantId);
   // Sin `app.current_tenant` (conexión owner): los triggers dejan borrar.
+  await raw.locationSchedule.deleteMany({
+    where: { tenantId: { in: tenantIds } },
+  });
+  await raw.location.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await raw.perioExam.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await raw.patient.deleteMany({ where: { tenantId: { in: tenantIds } } });
   await raw.user.deleteMany({
@@ -176,6 +181,72 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
         }),
       ),
     ).rejects.toThrow(/finalizado/);
+  });
+
+  it('no deja sacar una medida de un examen FINAL moviéndola a otro examen', async () => {
+    const draft2 = await raw.perioExam.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: a.patientId,
+        providerId: a.userId,
+        examDate: new Date('2026-10-02T00:00:00.000Z'),
+      },
+    });
+    // Sembrada como owner (sin contexto de tenant: el trigger no aplica).
+    const measure = await raw.perioSiteMeasure.create({
+      data: {
+        tenantId: a.tenantId,
+        examId: a.finalId,
+        toothFdi: 21,
+        site: 'MB',
+        probingMm: 5,
+      },
+    });
+    await expect(
+      asA((tx) =>
+        tx.perioSiteMeasure.update({
+          where: { id: measure.id },
+          data: { examId: draft2.id },
+        }),
+      ),
+    ).rejects.toThrow(/finalizado/);
+    const tooth = await raw.perioToothMeasure.create({
+      data: {
+        tenantId: a.tenantId,
+        examId: a.finalId,
+        toothFdi: 21,
+        mobility: 1,
+      },
+    });
+    await expect(
+      asA((tx) =>
+        tx.perioToothMeasure.update({
+          where: { id: tooth.id },
+          data: { examId: draft2.id },
+        }),
+      ),
+    ).rejects.toThrow(/finalizado/);
+  });
+
+  it('el repositorio toma la zona horaria de la sede activa', async () => {
+    const location = await raw.location.create({
+      data: { tenantId: a.tenantId, name: 'Sede Madrid' },
+    });
+    await raw.locationSchedule.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: location.id,
+        timezone: 'Europe/Madrid',
+      },
+    });
+    const repo = new PrismaPerioExamRepository(prisma, tenantContext);
+    await expect(
+      tenantContext.run(a.tenantId, location.id, () => repo.clinicTimeZone()),
+    ).resolves.toBe('Europe/Madrid');
+    // Sin sede activa: la zona por defecto.
+    await expect(
+      tenantContext.run(a.tenantId, undefined, () => repo.clinicTimeZone()),
+    ).resolves.toBe('America/Bogota');
   });
 
   it('un DRAFT sí admite medidas y se puede finalizar', async () => {

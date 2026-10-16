@@ -156,20 +156,21 @@ CREATE TRIGGER "perio_exams_final_immutable"
 
 CREATE FUNCTION "perio_measures_final_immutable"() RETURNS trigger
   LANGUAGE plpgsql AS $$
-DECLARE
-  target_exam UUID;
 BEGIN
   IF coalesce(current_setting('app.current_tenant', true), '') = '' THEN
     IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
   END IF;
-  IF TG_OP = 'DELETE' THEN
-    target_exam := OLD."examId";
-  ELSE
-    target_exam := NEW."examId";
-  END IF;
+  -- Se mira el examen de ORIGEN (OLD, en UPDATE/DELETE) y el de DESTINO
+  -- (NEW, en INSERT/UPDATE): un UPDATE que cambie `examId` no puede sacar una
+  -- medida de un examen FINAL ni meterla en uno.
   IF EXISTS (
-    SELECT 1 FROM "perio_exams" e WHERE e."id" = target_exam AND e."status" = 'FINAL'
+    SELECT 1 FROM "perio_exams" e
+    WHERE e."status" = 'FINAL'
+      AND (
+        (TG_OP IN ('UPDATE', 'DELETE') AND e."id" = OLD."examId")
+        OR (TG_OP IN ('INSERT', 'UPDATE') AND e."id" = NEW."examId")
+      )
   ) THEN
     RAISE EXCEPTION 'perio: las medidas de un examen finalizado no se modifican'
       USING ERRCODE = 'restrict_violation';

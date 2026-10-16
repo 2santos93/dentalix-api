@@ -196,3 +196,16 @@ export function isEmptySite(site: PerioSiteMeasure): boolean {
 export function isEmptyTooth(tooth: PerioToothMeasure): boolean {
   return tooth.mobility === null && !tooth.skipped;
 }
+
+/** `YYYY-MM-DD` que existe en el calendario (rechaza 2026-02-31). */
+export function isValidCivilDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}

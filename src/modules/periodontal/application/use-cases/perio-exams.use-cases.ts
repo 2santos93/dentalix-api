@@ -17,6 +17,7 @@ import {
   computePerioIndices,
   isEmptySite,
   isEmptyTooth,
+  isValidCivilDate,
   validatePerioMeasures,
 } from '../../domain/perio-measures';
 import {
@@ -29,7 +30,6 @@ import {
   type PatientRepository,
 } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 
 export type PerioClock = () => Date;
 export const PERIO_CLOCK = Symbol('PERIO_CLOCK');
@@ -38,10 +38,10 @@ export const PERIO_EXAM_NOT_FOUND_MESSAGE = 'Examen periodontal no encontrado';
 export const PERIO_EXAM_FINAL_MESSAGE =
   'El examen está finalizado: no se puede modificar ni borrar. Para corregirlo crea un examen nuevo.';
 
-/** Fecha de calendario (`YYYY-MM-DD`) de `at` en la zona de la clínica. */
-function clinicDate(at: Date): string {
+/** Fecha de calendario (`YYYY-MM-DD`) de `at` en la zona `timeZone`. */
+function clinicDate(at: Date, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: DEFAULT_BUSINESS_HOURS_TIMEZONE,
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -109,7 +109,7 @@ export class ListPerioExamsUseCase {
 }
 
 export interface CreatePerioExamInput {
-  /** `YYYY-MM-DD`; por defecto, hoy en la zona de la clínica. */
+  /** `YYYY-MM-DD`; por defecto, hoy en la zona de la sede activa. */
   examDate?: string;
   notes?: string;
   /** Copia los dientes omitidos del examen más reciente. */
@@ -129,7 +129,13 @@ export class CreatePerioExamUseCase {
     input: CreatePerioExamInput,
     providerId: string,
   ): Promise<PerioExamDetail> {
-    const today = clinicDate(this.now());
+    if (input.examDate !== undefined && !isValidCivilDate(input.examDate)) {
+      throw new BadRequestException(
+        'La fecha del examen no existe en el calendario',
+      );
+    }
+    // «Hoy» en la zona de la sede activa (su horario), no la del servidor.
+    const today = clinicDate(this.now(), await this.exams.clinicTimeZone());
     const examDate = input.examDate ?? today;
     // Comparación de cadenas YYYY-MM-DD = comparación de fechas.
     if (examDate > today) {

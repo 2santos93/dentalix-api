@@ -68,6 +68,35 @@ describe('CreatePerioExamUseCase', () => {
     });
   });
 
+  it('«hoy» es el de la zona horaria de la sede activa (Europe/Madrid)', async () => {
+    const { create, repo } = setup();
+    // 03:00 UTC del 16 = 05:00 del 16 en Madrid (en Bogotá aún sería el 15).
+    repo.timeZone = 'Europe/Madrid';
+    const exam = await create.execute('p1', {}, 'd');
+    expect(exam.examDate).toBe('2026-10-16');
+    // Y la fecha futura también se mide en Madrid.
+    await expect(
+      create.execute('p1', { examDate: '2026-10-17' }, 'd'),
+    ).rejects.toThrow('La fecha del examen no puede ser futura');
+  });
+
+  it.each(['2026-02-31', '2026-02-29', '2025-04-31'])(
+    '400 con la fecha imposible %s',
+    async (examDate) => {
+      const { create, repo } = setup();
+      await expect(create.execute('p1', { examDate }, 'd')).rejects.toThrow(
+        'La fecha del examen no existe en el calendario',
+      );
+      expect(repo.exams).toHaveLength(0);
+    },
+  );
+
+  it('acepta el 29 de febrero de un año bisiesto', async () => {
+    const { create } = setup();
+    const exam = await create.execute('p1', { examDate: '2024-02-29' }, 'd');
+    expect(exam.examDate).toBe('2024-02-29');
+  });
+
   it('404 si el paciente no es de esta clínica', async () => {
     const { create } = setup();
     await expect(create.execute('otro', {}, 'd')).rejects.toBeInstanceOf(

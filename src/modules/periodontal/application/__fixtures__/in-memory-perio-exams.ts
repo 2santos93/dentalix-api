@@ -9,7 +9,13 @@ import type {
 /** Repositorio en memoria para los tests de casos de uso. */
 export class InMemoryPerioExamRepository implements PerioExamRepository {
   readonly exams: PerioExamRecord[] = [];
+  /** Zona de la sede activa (por defecto, la de una sede sin horario). */
+  timeZone = 'America/Bogota';
   private seq = 0;
+
+  clinicTimeZone(): Promise<string> {
+    return Promise.resolve(this.timeZone);
+  }
 
   private find(patientId: string, id: string): PerioExamRecord | undefined {
     return this.exams.find((e) => e.id === id && e.patientId === patientId);

@@ -311,6 +311,12 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
     await as(clinicA)
       .post(path(patientA), { examDate: '2999-01-01' })
       .expect(400);
+    const impossible = await as(clinicA)
+      .post(path(patientA), { examDate: '2026-02-31' })
+      .expect(400);
+    expect((impossible.body as { message: string }).message).toBe(
+      'La fecha del examen no existe en el calendario',
+    );
   });
 
   it('lista el histórico por fecha desc con índices', async () => {

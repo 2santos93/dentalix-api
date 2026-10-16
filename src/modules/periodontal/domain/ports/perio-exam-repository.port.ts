@@ -33,6 +33,11 @@ export interface SavePerioMeasuresRepoInput {
 export type PerioWriteResult = 'ok' | 'not_found' | 'final';
 
 export interface PerioExamRepository {
+  /**
+   * Zona IANA de la sede activa (su horario); sin sede o sin horario, la zona
+   * por defecto. Fija qué día es «hoy» para la fecha del examen.
+   */
+  clinicTimeZone(): Promise<string>;
   /** Del paciente, por fecha de examen descendente, con sus medidas. */
   listByPatient(patientId: string): Promise<PerioExamRecord[]>;
   findById(patientId: string, id: string): Promise<PerioExamRecord | null>;
