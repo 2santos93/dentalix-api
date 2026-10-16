@@ -16,6 +16,7 @@ function setup(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
   const config: MailConfig = {
     transport: 'console',
     smtpUrl: null,
+    fileDir: null,
     from: 'no-reply@x.co',
     dispatchIntervalMs: 0,
     retryBaseMs: 60_000,

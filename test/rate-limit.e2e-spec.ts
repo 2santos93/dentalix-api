@@ -27,6 +27,7 @@ const LOW_LIMITS: RateLimitConfig = {
   confirmation: { limit: 2, ttlMs: 60_000 },
   refresh: { limit: 4, ttlMs: 60_000 },
   'invitation-email': { limit: 2, ttlMs: 60_000 },
+  'password-reset': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -194,6 +195,25 @@ describe('Rate limiting (e2e)', () => {
         expect((await respond(`guess-${i}`)).status).not.toBe(429);
       }
       expectTooMany(await respond('guess-next'));
+    });
+
+    it('recuperar la contraseña (DX-010): 429 por IP en pedir, comprobar y restablecer (balde por ruta)', async () => {
+      const post = (path: string, body: object) => () =>
+        request(app.getHttpServer()).post(`/api/v1/auth/${path}`).send(body);
+      const routes = [
+        post('forgot-password', { email: 'nadie@example.com' }),
+        post('reset-password/check', { token: 'x'.repeat(43) }),
+        post('reset-password', {
+          token: 'x'.repeat(43),
+          password: 'Clave-2026!',
+        }),
+      ];
+      for (const call of routes) {
+        for (let i = 0; i < LOW_LIMITS['password-reset'].limit; i++) {
+          expect((await call()).status).not.toBe(429);
+        }
+        expectTooMany(await call());
+      }
     });
 
     it('POST me/password: 429 por IP+usuario (se aplica antes del JWT)', async () => {

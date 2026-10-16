@@ -57,6 +57,7 @@ model User {
   prescriptionsIssued      Prescription[]            @relation("PrescriptionProfessional")
   prescriptionsVoided      Prescription[]            @relation("PrescriptionVoidedBy")
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
+  tokens                   UserToken[]
 
   @@map("users")
 }
@@ -1363,6 +1364,8 @@ enum AuditAction {
   VOID
   LOGIN
   LOGIN_FAILED
+  // DX-010: restablecimiento de contraseña con un enlace por email.
+  PASSWORD_RESET
   EXPORT
   PRINT
 }
@@ -1479,4 +1482,35 @@ model EmailOutbox {
   @@index([tenantId, toHash, createdAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("email_outbox")
+}
+
+/// DX-010: para qué sirve un token de un solo uso enviado por email.
+enum UserTokenPurpose {
+  PASSWORD_RESET
+}
+
+/// Tokens de un solo uso del USUARIO global (restablecer la contraseña; la
+/// verificación de email de DX-029 añadirá su propósito). Tabla global sin
+/// tenantId ni RLS, como `users` y `revoked_tokens`: el token es del usuario,
+/// no de una clínica; el aislamiento por clínica lo hace el caso de uso, que
+/// solo lo acepta en el host de una clínica donde el usuario tiene membresía
+/// activa. NUNCA guarda el token en claro: `tokenHash` = SHA-256 (hex) de los
+/// 32 bytes aleatorios. Ver la migración 20261017130000_user_tokens.
+model UserToken {
+  id            String           @id @default(uuid()) @db.Uuid
+  userId        String           @db.Uuid
+  purpose       UserTokenPurpose
+  tokenHash     String           @unique
+  expiresAt     DateTime
+  /// Se usó (un solo uso).
+  usedAt        DateTime?
+  /// Lo dejó sin efecto otro posterior del mismo propósito o el propio uso.
+  invalidatedAt DateTime?
+  createdAt     DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("user_tokens")
 }

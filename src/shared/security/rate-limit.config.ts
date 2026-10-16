@@ -24,6 +24,10 @@
  *                  usuario (no por IP): cada una manda un email. Primera
  *                  barrera, en memoria de cada réplica; los topes que valen
  *                  entre réplicas están en la BD (EmailOutbox.assertWithinQuota).
+ * - password-reset: pedir el enlace, comprobarlo y restablecer la contraseña
+ *                  (DX-010); por IP (enumeración de tokens y bombardeo de
+ *                  emails). Los topes por destinatario del email están en la
+ *                  BD y no se notan en la respuesta (siempre 202).
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -33,7 +37,8 @@ export type RateLimitPolicy =
   | 'password'
   | 'confirmation'
   | 'refresh'
-  | 'invitation-email';
+  | 'invitation-email'
+  | 'password-reset';
 
 export interface RateLimitRule {
   limit: number;
@@ -56,6 +61,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   confirmation: { limit: 20, ttlMs: MINUTE },
   refresh: { limit: 120, ttlMs: MINUTE },
   'invitation-email': { limit: 10, ttlMs: MINUTE },
+  'password-reset': { limit: 10, ttlMs: 15 * MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -90,5 +96,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     confirmation: rule('confirmation'),
     refresh: rule('refresh'),
     'invitation-email': rule('invitation-email'),
+    'password-reset': rule('password-reset'),
   };
 }

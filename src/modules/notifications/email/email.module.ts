@@ -10,6 +10,7 @@ import { loadMailConfig, MAIL_CONFIG } from './infrastructure/mail-config';
 import type { MailConfig } from './infrastructure/mail-config';
 import { ConsoleMailer } from './infrastructure/mailers/console.mailer';
 import { SmtpMailer } from './infrastructure/mailers/smtp.mailer';
+import { FileMailer } from './infrastructure/mailers/file.mailer';
 import { PrismaEmailOutboxRepository } from './infrastructure/repositories/prisma-email-outbox.repository';
 
 /**
@@ -37,10 +38,15 @@ import { PrismaEmailOutboxRepository } from './infrastructure/repositories/prism
     {
       provide: MAILER,
       inject: [MAIL_CONFIG],
-      useFactory: (config: MailConfig): Mailer =>
-        config.transport === 'smtp' && config.smtpUrl
-          ? SmtpMailer.fromUrl(config.smtpUrl, config.from)
-          : new ConsoleMailer(),
+      useFactory: (config: MailConfig): Mailer => {
+        if (config.transport === 'smtp' && config.smtpUrl) {
+          return SmtpMailer.fromUrl(config.smtpUrl, config.from);
+        }
+        if (config.transport === 'file' && config.fileDir) {
+          return new FileMailer(config.fileDir);
+        }
+        return new ConsoleMailer();
+      },
     },
     {
       provide: EmailPayloadCipher,

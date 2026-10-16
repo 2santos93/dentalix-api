@@ -55,6 +55,8 @@ lerna-debug.log*
 # storage directories
 /storage
 /storage-test
+# emails de desarrollo (MAIL_TRANSPORT=file, DX-010)
+/.mail
 
 # Runtime data
 pids

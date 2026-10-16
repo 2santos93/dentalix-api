@@ -100,6 +100,7 @@ function throttlers(
           request(context).headers.authorization,
         ),
     },
+    strict('password-reset'),
   ];
 }
 
