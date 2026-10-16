@@ -27,6 +27,7 @@ model Tenant {
   prescriptionTemplates    PrescriptionTemplate[]
   emailOutbox              EmailOutbox[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
+  dentitionEvents          PatientDentitionEvent[]
 
   @@map("tenants")
 }
@@ -60,6 +61,7 @@ model User {
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
   tokens                   UserToken[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
+  dentitionEventsRecorded  PatientDentitionEvent[]
   retentionActions         PatientRetentionAction[]
 
   @@map("users")
@@ -234,6 +236,7 @@ model Patient {
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
   clinicalEntryAddenda   ClinicalEntryAddendum[]
+  dentitionEvents        PatientDentitionEvent[]
   toothRecords           ToothRecord[]
   appointments           Appointment[]
   treatmentPlans         TreatmentPlan[]
@@ -387,6 +390,29 @@ enum ToothRecordStatus {
   COMPLETED
 }
 
+// DX-120: quién hizo lo que registra el diente. Lo hecho en esta clínica, lo
+// que el paciente ya traía o lo que hizo otro profesional se pintan distinto.
+enum ToothRecordOrigin {
+  THIS_CLINIC
+  PRE_EXISTING
+  OTHER_PROVIDER
+}
+
+// DX-120: dentición de una POSICIÓN de la boca (nombrada por su código FDI
+// permanente). MIXED = conviven el temporal y el permanente en esa posición.
+enum DentitionType {
+  PERMANENT
+  PRIMARY
+  MIXED
+}
+
+// DX-120: por qué cambió la dentición de una posición.
+enum DentitionEventReason {
+  MANUAL
+  ERUPTION
+  EXFOLIATION
+}
+
 model ToothRecord {
   id               String            @id @default(uuid()) @db.Uuid
   tenantId         String            @db.Uuid
@@ -407,6 +433,15 @@ model ToothRecord {
   recordedAt       DateTime          @default(now())
   createdAt        DateTime          @default(now())
   deletedAt        DateTime?
+  // DX-120: origen de lo registrado (hecho aquí, ya presente, otro profesional).
+  origin           ToothRecordOrigin @default(THIS_CLINIC)
+  // DX-120: una ANULACIÓN es otro registro (append-only) que apunta al anulado
+  // y guarda el motivo. FK compuesta (tenantId, patientId, voidsRecordId) ->
+  // tooth_records(tenantId, patientId, id) solo en SQL
+  // (20261017180300_tooth_records_voids_record_fk): Prisma no la modela sin
+  // una relación 1:1 que exigiría otro índice único.
+  voidsRecordId    String?           @db.Uuid
+  voidReason       String?
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
@@ -417,11 +452,39 @@ model ToothRecord {
   // ítem de plan se espeja como mucho una vez (DX-042). El WHERE vive en
   // 20261016130000_domain_checks; aquí mismo nombre y columnas.
   @@unique([tenantId, sourcePlanItemId], map: "tooth_records_source_plan_item_key")
+  // DX-120: destino de la FK de anulación (mismo paciente y misma clínica).
+  @@unique([tenantId, patientId, id], map: "tooth_records_tenantId_patientId_id_key")
+  // DX-120, PARCIAL (WHERE "voidsRecordId" IS NOT NULL): un registro se anula
+  // una sola vez. El WHERE vive en 20261017180200_tooth_records_void_once_key.
+  @@unique([tenantId, voidsRecordId], map: "tooth_records_void_once_key")
   // DX-043 (DB-017): sin @@index([tenantId, patientId]); era prefijo exacto
   // de este y se retiró en 20261017114000_patient_search_and_list_indexes.
   @@index([tenantId, patientId, toothNumber])
   @@index([tenantId, sourcePlanItemId])
   @@map("tooth_records")
+}
+
+/// DX-120: cambios de dentición por posición (erupción, exfoliación o cambio
+/// manual). APPEND-ONLY en la BD (trigger) y con RLS forzada; el estado actual
+/// de una posición es su último evento o, sin eventos, el que toca por la edad.
+model PatientDentitionEvent {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @db.Uuid
+  patientId     String               @db.Uuid
+  /// Código FDI PERMANENTE de la posición (11-18, 21-28, 31-38, 41-48).
+  position      String
+  dentition     DentitionType
+  reason        DentitionEventReason
+  recordedAt    DateTime             @default(now())
+  performedById String               @db.Uuid
+  createdAt     DateTime             @default(now())
+
+  tenant      Tenant  @relation(fields: [tenantId], references: [id])
+  patient     Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  performedBy User    @relation(fields: [performedById], references: [id])
+
+  @@index([tenantId, patientId, recordedAt, id], map: "patient_dentition_events_patient_recorded_idx")
+  @@map("patient_dentition_events")
 }
 
 enum AppointmentStatus {
