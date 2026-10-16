@@ -142,8 +142,10 @@ function makePlan(
 }
 
 describe('GetPlanBalanceUseCase', () => {
-  function makeUseCase() {
-    const repo = new InMemoryPaymentRepository();
+  // Sede en UTC salvo que el caso pida otra: los casos antiguos fijan
+  // instantes y esperan ese día UTC como fecha de la tasa.
+  function makeUseCase(timeZone = 'UTC') {
+    const repo = new InMemoryPaymentRepository(timeZone);
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
     const fakeConvert = new FakeConvertAmountUseCase();
     const uc = new GetPlanBalanceUseCase(
@@ -208,6 +210,25 @@ describe('GetPlanBalanceUseCase', () => {
 
     expect(result.billable).toBe(179.5);
     expect(result.balance).toBe(179.5);
+  });
+
+  it('DX-097 (H2): la tasa es la del día civil del abono en su sede, igual que el dashboard', async () => {
+    const { repo, fakeGetPlan, fakeConvert, uc } =
+      makeUseCase('America/Bogota');
+    fakeGetPlan.plan = makePlan({
+      items: [makeItem({ price: 1000, status: TreatmentPlanItemStatus.DONE })],
+    });
+    // 05/03 a las 20:00 en Bogotá = 06/03 01:00 UTC.
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 400000,
+      currency: 'COP',
+      paidAt: new Date('2026-03-06T01:00:00.000Z'),
+    });
+
+    await uc.execute('plan-1');
+
+    expect(fakeConvert.calls.map((c) => c.date)).toEqual(['2026-03-05']);
   });
 
   it("paid = Σ payments converted to plan currency by each payment's own paidAt date", async () => {

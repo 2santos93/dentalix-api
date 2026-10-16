@@ -359,15 +359,17 @@ describe('Caja — GET /payments (e2e)', () => {
 
   const OCTOBER = { from: '2026-10-01', to: '2026-10-31' };
 
-  it('lista los abonos activos del período, ambos extremos inclusive, en orden paidAt DESC, id DESC', async () => {
+  it('lista los abonos activos del período, ambos extremos inclusive, en orden paidAt DESC, createdAt DESC, id DESC', async () => {
     const res = await getA(OCTOBER).expect(200);
     const body = res.body as CashBody;
 
     expect(body.total).toBe(5);
     expect(body.items.map((r) => r.id)).toEqual([
       ids.oct31Transfer,
-      // Mismo día: desempata por id DESC.
-      ...[ids.oct15Cash, ids.oct15NoMethod].sort().reverse(),
+      // Mismo instante: desempata por alta DESC (oct15NoMethod se sembró
+      // después que oct15Cash).
+      ids.oct15NoMethod,
+      ids.oct15Cash,
       ids.oct10Card,
       ids.oct01Cash,
     ]);
@@ -661,6 +663,42 @@ describe('Caja — GET /payments (e2e)', () => {
       expect(items).toEqual([
         expect.objectContaining({ id: payment.id, paidOn: '2026-12-22' }),
       ]);
+    });
+
+    it('B1: una web anterior que manda la medianoche UTC del día guarda el abono en ESE día de la sede; el plan lista su paidOn', async () => {
+      const created = await authA(
+        request(app.getHttpServer())
+          .post(`/api/v1/treatment-plans/${planAna}/payments`)
+          .send({
+            amount: 6,
+            currency: 'COP',
+            paidAt: '2026-12-23T00:00:00.000Z',
+          }),
+      ).expect(201);
+      const payment = created.body as {
+        id: string;
+        paidAt: string;
+        paidOn: string;
+      };
+      expect(payment.paidAt).toBe('2026-12-23T17:00:00.000Z');
+      expect(payment.paidOn).toBe('2026-12-23');
+
+      const list = await authA(
+        request(app.getHttpServer()).get(
+          `/api/v1/treatment-plans/${planAna}/payments`,
+        ),
+      ).expect(200);
+      const row = (list.body as { id: string; paidOn: string }[]).find(
+        (p) => p.id === payment.id,
+      );
+      expect(row?.paidOn).toBe('2026-12-23');
+
+      // Una hora sin Z ni desfase se rechaza (se leería en la zona del servidor).
+      await authA(
+        request(app.getHttpServer())
+          .post(`/api/v1/treatment-plans/${planAna}/payments`)
+          .send({ amount: 6, currency: 'COP', paidAt: '2026-12-23T20:00:00' }),
+      ).expect(400);
     });
 
     it('vista consolidada: cada sede corta el día en su zona', async () => {

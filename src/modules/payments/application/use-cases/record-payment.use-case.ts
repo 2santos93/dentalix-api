@@ -29,11 +29,28 @@ export interface RecordPaymentInput {
 }
 
 const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+// Una hora sin `Z` ni desfase la leería `new Date` en la zona del SERVIDOR.
+const EXPLICIT_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
- * DX-097: `YYYY-MM-DD` es un día civil (el formulario de abono); cualquier
- * otra fecha ISO con hora es un instante. Sin esta distinción, `new Date`
- * leería el día como medianoche UTC, que en Bogotá es la tarde del día ANTERIOR.
+ * ¿Es el instante exactamente la medianoche UTC? Es lo que mandaba la web
+ * anterior a DX-097 (`new Date('YYYY-MM-DD').toISOString()`) para el día
+ * elegido, y la misma regla con la que la migración
+ * 20261017113000_payments_civil_day_noon reinterpretó los abonos guardados.
+ * Compatibilidad de escritura con pestañas abiertas con el bundle viejo:
+ * retirar cuando ningún cliente anterior a DX-097 siga en uso (p. ej. un mes
+ * después del despliegue, revisando el log de acceso).
+ */
+function isUtcMidnight(instant: Date): boolean {
+  return instant.getTime() % (24 * 60 * 60 * 1000) === 0;
+}
+
+/**
+ * DX-097: `YYYY-MM-DD` es un día civil (el formulario de abono), y también una
+ * medianoche UTC exacta (clientes antiguos, ver `isUtcMidnight`); cualquier
+ * otra fecha ISO con hora es un instante y debe traer `Z` o desfase. Sin esta
+ * distinción, `new Date` leería el día como medianoche UTC, que en Bogotá es
+ * la tarde del día ANTERIOR.
  */
 function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {
@@ -43,9 +60,17 @@ function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
     }
     return { civilDate };
   }
+  if (typeof value === 'string' && !EXPLICIT_OFFSET.test(value.trim())) {
+    throw new BadRequestException(
+      'paidAt with a time must include Z or a UTC offset',
+    );
+  }
   const instant = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(instant.getTime())) {
     throw new BadRequestException('paidAt must be a valid date');
+  }
+  if (isUtcMidnight(instant)) {
+    return { civilDate: instant.toISOString().slice(0, 10) };
   }
   return instant;
 }

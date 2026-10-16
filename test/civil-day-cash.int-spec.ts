@@ -43,6 +43,10 @@ async function purge(): Promise<void> {
   });
   const ids = tenants.map((t) => t.id);
   const where = { tenantId: { in: ids } };
+  await owner.$executeRawUnsafe(
+    'DELETE FROM payments_paidat_backfill_dx097 WHERE "tenantId" = ANY($1::uuid[])',
+    ids,
+  );
   await owner.payment.deleteMany({ where });
   await owner.treatmentPlan.deleteMany({ where });
   await owner.patient.deleteMany({ where });
@@ -278,11 +282,11 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     expect(text).toContain('payments_tenantId_locationId_paidAt_active_idx');
   });
 
-  describe('migración 20261017110000_payments_civil_day_noon', () => {
+  describe('migración 20261017113000_payments_civil_day_noon', () => {
     const sql = readFileSync(
       join(
         __dirname,
-        '../prisma/migrations/20261017110000_payments_civil_day_noon/migration.sql',
+        '../prisma/migrations/20261017113000_payments_civil_day_noon/migration.sql',
       ),
       'utf8',
     );
@@ -294,15 +298,45 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    it('mueve las medianoches UTC (días del formulario) al mediodía de la sede y no toca los instantes reales', async () => {
-      await pay2('legacyBog', bogota, '2026-10-16T00:00:00.000Z');
-      await pay2('legacyMad', madrid, '2026-10-16T00:00:00.000Z');
-
-      await owner.$transaction(async (tx) => {
+    const runMigration = () =>
+      owner.$transaction(async (tx) => {
         for (const statement of statements) {
           await tx.$executeRawUnsafe(statement);
         }
       });
+
+    it('mueve las medianoches UTC (días del formulario) al mediodía de la sede, deja rastro y no toca los instantes reales', async () => {
+      await pay2('legacyBog', bogota, '2026-10-16T00:00:00.000Z');
+      await pay2('legacyMad', madrid, '2026-10-16T00:00:00.000Z');
+      // Anulado: se mueve igual (su día de caja también era ese).
+      await pay2(
+        'legacyVoided',
+        bogota,
+        '2026-10-18T00:00:00.000Z',
+        new Date(),
+      );
+      // Sede retirada con horario en una zona que Postgres no conoce: cae a
+      // la zona de su país (ES), sin abortar el despliegue.
+      const retired = (
+        await owner.location.create({
+          data: {
+            tenantId: tenantA,
+            name: 'Retirada',
+            country: 'ES',
+            deletedAt: new Date(),
+          },
+        })
+      ).id;
+      await owner.locationSchedule.create({
+        data: {
+          tenantId: tenantA,
+          locationId: retired,
+          timezone: 'Mars/Olympus',
+        },
+      });
+      await pay2('legacyRetired', retired, '2026-10-19T00:00:00.000Z');
+
+      await runMigration();
 
       const rows = await owner.payment.findMany({
         where: { tenantId: tenantA },
@@ -312,6 +346,8 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         rows.find((r) => r.id === ids[key])!.paidAt.toISOString();
       expect(at('legacyBog')).toBe('2026-10-16T17:00:00.000Z');
       expect(at('legacyMad')).toBe('2026-10-16T10:00:00.000Z');
+      expect(at('legacyVoided')).toBe('2026-10-18T17:00:00.000Z');
+      expect(at('legacyRetired')).toBe('2026-10-19T10:00:00.000Z');
       expect(at('bogEvening')).toBe('2026-10-17T01:00:00.000Z');
       // El día de caja es el que se eligió en el formulario.
       expect(await cashIds(bogota, '2026-10-16')).toEqual(
@@ -320,9 +356,61 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       expect(await cashIds(madrid, '2026-10-16')).toEqual(
         idsOf('madEarly', 'legacyMad'),
       );
+
+      // Rastro: valor viejo, nuevo y zona de cada fila movida.
+      const trail = await owner.$queryRawUnsafe<
+        {
+          payment_id: string;
+          old_paid_at: Date;
+          new_paid_at: Date;
+          time_zone: string;
+        }[]
+      >(
+        'SELECT payment_id, old_paid_at, new_paid_at, time_zone FROM payments_paidat_backfill_dx097 WHERE "tenantId" = $1::uuid',
+        tenantA,
+      );
+      const byId = new Map(trail.map((t) => [t.payment_id, t]));
+      expect(byId.get(ids.legacyBog)).toMatchObject({
+        old_paid_at: new Date('2026-10-16T00:00:00.000Z'),
+        new_paid_at: new Date('2026-10-16T17:00:00.000Z'),
+        time_zone: 'America/Bogota',
+      });
+      expect(byId.get(ids.legacyRetired)?.time_zone).toBe('Europe/Madrid');
+      expect(byId.has(ids.bogEvening)).toBe(false);
+      expect(trail).toHaveLength(4);
+
+      // Segunda ejecución: no cambia nada ni duplica el rastro.
+      await runMigration();
+      const again = await owner.payment.findMany({
+        where: { tenantId: tenantA },
+        select: { id: true, paidAt: true },
+      });
+      expect(again.map((r) => [r.id, r.paidAt.toISOString()]).sort()).toEqual(
+        rows.map((r) => [r.id, r.paidAt.toISOString()]).sort(),
+      );
+      const [{ count }] = await owner.$queryRawUnsafe<{ count: bigint }[]>(
+        'SELECT count(*) AS count FROM payments_paidat_backfill_dx097 WHERE "tenantId" = $1::uuid',
+        tenantA,
+      );
+      expect(Number(count)).toBe(4);
     });
 
-    async function pay2(key: string, locationId: string, paidAt: string) {
+    it('la tabla de rastro no es visible para el rol de la app (RLS forzada, sin GRANT)', async () => {
+      await expect(
+        inA(undefined, () =>
+          prisma.runWithTenant((tx) =>
+            tx.$queryRawUnsafe('SELECT 1 FROM payments_paidat_backfill_dx097'),
+          ),
+        ),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    async function pay2(
+      key: string,
+      locationId: string,
+      paidAt: string,
+      deletedAt?: Date,
+    ) {
       ids[key] = (
         await owner.payment.create({
           data: {
@@ -333,6 +421,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
             amount: 50,
             currency: 'COP',
             paidAt: new Date(paidAt),
+            deletedAt: deletedAt ?? null,
           },
         })
       ).id;
