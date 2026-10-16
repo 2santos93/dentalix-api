@@ -62,6 +62,15 @@ export class InMemoryTreatmentPlanRepository
   lastFollowUpQuery: PendingFollowUpQuery | null = null;
   /** Planes con abonos vivos (los abonos son de otro módulo). */
   readonly livePaymentPlanIds = new Set<string>();
+  /** Planes con un plan de cuotas ACTIVO (DX-109). */
+  readonly activePaymentPlanIds = new Set<string>();
+  /** Cancelaciones de planes de cuotas hechas junto a su plan (DX-109). */
+  readonly paymentPlanCancellations: {
+    planId: string;
+    at: Date;
+    byId: string | null;
+    reason: string;
+  }[] = [];
 
   /** Test helper: seed a plan row directly, bypassing use-case validation. */
   seedPlan(overrides: Partial<StoredPlan> = {}): TreatmentPlan {
@@ -229,6 +238,7 @@ export class InMemoryTreatmentPlanRepository
     }
     const change = decide(current, {
       hasLivePayments: this.livePaymentPlanIds.has(id),
+      hasActivePaymentPlan: this.activePaymentPlanIds.has(id),
     });
     const siblings = this.liveSiblings(row);
     if (change.acceptedAt) {
@@ -258,6 +268,27 @@ export class InMemoryTreatmentPlanRepository
           rejectionNote: null,
         });
       }
+    }
+    if (change.acceptedAt) {
+      for (const item of this.items) {
+        if (
+          item.planId === id &&
+          item.deletedAt === null &&
+          item.status === TreatmentPlanItemStatus.PROPOSED
+        ) {
+          item.status = TreatmentPlanItemStatus.ACCEPTED;
+        }
+      }
+    }
+    if (change.cancellation && this.activePaymentPlanIds.has(id)) {
+      // Un Set en memoria, no una tabla: el real deja el plan de cuotas
+      // CANCELLED (soft), aquí solo deja de estar activo.
+      // eslint-disable-next-line no-restricted-syntax
+      this.activePaymentPlanIds.delete(id);
+      this.paymentPlanCancellations.push({
+        planId: id,
+        ...change.cancellation,
+      });
     }
     if (change.status !== undefined) row.status = change.status;
     if (change.currency !== undefined) row.currency = change.currency;

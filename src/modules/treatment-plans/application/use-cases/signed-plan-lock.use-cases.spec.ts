@@ -52,13 +52,13 @@ const SIGNED = {
   acceptedAt: new Date('2026-10-16T15:00:00.000Z'),
 };
 
-function setup(acceptance: typeof SIGNED | null) {
+function setup(acceptance: typeof SIGNED | null, status?: TreatmentPlanStatus) {
   const repo = new InMemoryTreatmentPlanRepository();
   const plan = repo.seedPlan({
     id: 'plan1',
-    status: acceptance
-      ? TreatmentPlanStatus.ACCEPTED
-      : TreatmentPlanStatus.DRAFT,
+    status:
+      status ??
+      (acceptance ? TreatmentPlanStatus.ACCEPTED : TreatmentPlanStatus.DRAFT),
     acceptance,
   });
   const item = repo.seedItem({
@@ -207,5 +207,93 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
   it('el detalle del plan dice quién firmó y cuándo', async () => {
     const { get } = setup(SIGNED);
     expect((await get.execute('plan1')).acceptance).toEqual(SIGNED);
+  });
+});
+
+describe('Plan cerrado: ítems congelados y moneda fija (DX-109)', () => {
+  it.each([
+    TreatmentPlanStatus.CANCELLED,
+    TreatmentPlanStatus.REJECTED,
+    TreatmentPlanStatus.COMPLETED,
+  ])(
+    'un plan %s no admite añadir, editar ni quitar ítems (409)',
+    async (status) => {
+      const { add, update, remove } = setup(null, status);
+      await expect(
+        add.execute('plan1', { toothNumber: '21', catalogItemId: 'cat1' }),
+      ).rejects.toThrow(/sus ítems ya no se pueden/);
+      await expect(
+        update.execute('item1', { price: 300 }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(
+        update.execute('item1', { status: TreatmentPlanItemStatus.DONE }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(remove.execute('item1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    },
+  );
+
+  it.each([
+    TreatmentPlanStatus.CANCELLED,
+    TreatmentPlanStatus.REJECTED,
+    TreatmentPlanStatus.COMPLETED,
+  ])(
+    'un plan %s no cambia de moneda (409); repetir la misma no falla',
+    async (status) => {
+      const { updatePlan } = setup(null, status);
+      await expect(
+        updatePlan.execute('plan1', { currency: 'EUR' }, DENTIST),
+      ).rejects.toThrow(/su moneda ya no cambia/);
+      await expect(
+        updatePlan.execute('plan1', { currency: 'usd' }, DENTIST),
+      ).resolves.toMatchObject({ currency: 'USD' });
+    },
+  );
+
+  it('con abonos vivos o plan de cuotas activo la moneda no cambia (409)', async () => {
+    const { repo, updatePlan } = setup(null);
+    repo.livePaymentPlanIds.add('plan1');
+    await expect(
+      updatePlan.execute('plan1', { currency: 'EUR' }, DENTIST),
+    ).rejects.toThrow(/tiene abonos registrados/);
+    repo.livePaymentPlanIds.delete('plan1');
+    repo.activePaymentPlanIds.add('plan1');
+    await expect(
+      updatePlan.execute('plan1', { currency: 'EUR' }, DENTIST),
+    ).rejects.toThrow(/plan de cuotas activo/);
+    expect(repo.stored('plan1').currency).toBe('USD');
+  });
+
+  it('PATCH ACCEPTED pasa los ítems PROPOSED a ACCEPTED (lo mismo que la firma)', async () => {
+    const { updatePlan, get } = setup(null);
+    await updatePlan.execute(
+      'plan1',
+      { status: TreatmentPlanStatus.ACCEPTED },
+      DENTIST,
+    );
+    const detail = await get.execute('plan1');
+    expect(detail.items.map((i) => i.status)).toEqual([
+      TreatmentPlanItemStatus.ACCEPTED,
+    ]);
+  });
+
+  it('cancelar el plan cancela su plan de cuotas activo con autor y motivo', async () => {
+    const { repo, updatePlan } = setup(null);
+    repo.activePaymentPlanIds.add('plan1');
+    await updatePlan.execute(
+      'plan1',
+      { status: TreatmentPlanStatus.CANCELLED },
+      { role: ClinicRole.DENTIST, userId: 'user-1' },
+    );
+    expect(repo.paymentPlanCancellations).toEqual([
+      {
+        planId: 'plan1',
+        at: new Date('2026-10-16T15:00:00.000Z'),
+        byId: 'user-1',
+        reason: 'Se canceló el plan de tratamiento.',
+      },
+    ]);
+    expect(repo.activePaymentPlanIds.has('plan1')).toBe(false);
   });
 });

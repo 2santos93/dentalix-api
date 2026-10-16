@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
@@ -8,6 +14,15 @@ import type {
 } from '../../domain/ports/payment-repository.port';
 import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { Payment } from '../../domain/entities/payment.entity';
+import {
+  IDEMPOTENCY_KEY_REUSED_MESSAGE,
+  isSameRequest,
+  paymentRequestFingerprint,
+} from '../../domain/idempotency';
+import {
+  isPlanBillable,
+  notBillableMessage,
+} from '../../../treatment-plans/domain/plan-status-machine';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
@@ -116,13 +131,24 @@ export class RecordPaymentUseCase {
     // plan voided AFTER the original payment would otherwise make an honest
     // retry 404). Blank/whitespace header == no key (today's behavior).
     const key = idempotencyKey?.trim() ? idempotencyKey.trim() : undefined;
+    const requestFingerprint = paymentRequestFingerprint(
+      treatmentPlanId,
+      input,
+    );
     if (key !== undefined) {
       if (!UUID_RE.test(key)) {
         throw new BadRequestException('Idempotency-Key must be a UUID');
       }
       const existing = await this.repo.findByIdempotencyKey(key);
       if (existing) {
-        return existing;
+        // DX-109 (BE-017): solo la MISMA petición recibe el abono original;
+        // otro plan u otro cuerpo con la misma clave es un error del cliente.
+        if (!isSameRequest(existing, treatmentPlanId, requestFingerprint)) {
+          throw new UnprocessableEntityException(
+            IDEMPOTENCY_KEY_REUSED_MESSAGE,
+          );
+        }
+        return existing.payment;
       }
     }
 
@@ -143,6 +169,11 @@ export class RecordPaymentUseCase {
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant — never re-derived here.
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
+    // Atajo con 409 limpio (DX-109); la comprobación que cuenta la repite el
+    // repositorio con el plan bloqueado, en la transacción del INSERT.
+    if (!isPlanBillable(plan.status)) {
+      throw new ConflictException(notBillableMessage(plan.status));
+    }
 
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
@@ -154,6 +185,7 @@ export class RecordPaymentUseCase {
       notes: input.notes,
       createdById,
       idempotencyKey: key,
+      requestFingerprint: key === undefined ? undefined : requestFingerprint,
     };
 
     return this.repo.create(repoInput);

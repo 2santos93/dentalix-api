@@ -8,11 +8,13 @@ import { TreatmentPlanItemStatus } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 
 export interface GetPlanBalanceResult {
   planCurrency: string;
-  /** Σ (item.price − item.discount) for active items with status ACCEPTED|DONE (PROPOSED
+  /** 0 if the plan is not billable (REJECTED/CANCELLED, DX-109); otherwise
+   * Σ (item.price − item.discount) for active items with status ACCEPTED|DONE (PROPOSED
    * items are not yet billable — see docs/plans/2026-07-24-payments-pivot.md
    * "Modelo"). Rounded to 2 decimals. */
   billable: number;
@@ -72,11 +74,16 @@ export class GetPlanBalanceUseCase {
     // belongs to another tenant.
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
 
-    const billable = round2(
-      plan.items
-        .filter((item) => BILLABLE_STATUSES.has(item.status))
-        .reduce((sum, item) => sum + item.price - item.discount, 0),
-    );
+    // DX-109 (BE-001): un plan no cobrable (rechazado o cancelado) no debe
+    // nada, la misma regla que el estado de cuenta; sus abonos siguen en
+    // `paid`.
+    const billable = !isPlanBillable(plan.status)
+      ? 0
+      : round2(
+          plan.items
+            .filter((item) => BILLABLE_STATUSES.has(item.status))
+            .reduce((sum, item) => sum + item.price - item.discount, 0),
+        );
 
     const payments = await this.repo.listByPlan(treatmentPlanId);
 

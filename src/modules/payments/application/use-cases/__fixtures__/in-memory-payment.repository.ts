@@ -1,4 +1,5 @@
 import { Payment } from '../../../domain/entities/payment.entity';
+import type { IdempotentPayment } from '../../../domain/idempotency';
 import {
   CashRegisterPage,
   CreatePaymentRepoInput,
@@ -19,6 +20,7 @@ import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 type StoredPayment = Omit<Payment, 'paidOn'> & {
   deletedAt: Date | null;
   idempotencyKey: string | null;
+  requestFingerprint: string | null;
   voidAudit: PaymentVoidAudit | null;
 };
 
@@ -61,6 +63,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
       idempotencyKey: overrides.idempotencyKey ?? null,
+      requestFingerprint: overrides.requestFingerprint ?? null,
       deletedAt: overrides.deletedAt ?? null,
       voidAudit: overrides.voidAudit ?? null,
     };
@@ -107,6 +110,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       createdAt: NOW,
       updatedAt: NOW,
       idempotencyKey: input.idempotencyKey ?? null,
+      requestFingerprint: input.requestFingerprint ?? null,
       deletedAt: null,
       voidAudit: null,
     };
@@ -119,12 +123,21 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve(row ? this.toEntity(row) : null);
   }
 
-  findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null> {
+  findByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<IdempotentPayment | null> {
     // Mirrors PrismaPaymentRepository.findByIdempotencyKey: match by key only
     // (RLS scopes tenant in the real repo). Deliberately NOT filtered by
     // deletedAt, so a replay resolves to the same row even if voided.
     const row = this.payments.find((p) => p.idempotencyKey === idempotencyKey);
-    return Promise.resolve(row ? this.toEntity(row) : null);
+    return Promise.resolve(
+      row
+        ? {
+            payment: this.toEntity(row),
+            requestFingerprint: row.requestFingerprint,
+          }
+        : null,
+    );
   }
 
   listByPlan(treatmentPlanId: string): Promise<Payment[]> {

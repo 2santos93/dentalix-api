@@ -13,7 +13,7 @@ import {
   parseQuoteContent,
   type QuoteContent,
 } from '../../domain/plan-quote';
-import { planTransitionError } from '../../domain/plan-status-machine';
+import { acceptPlanError } from '../../domain/plan-status-machine';
 import {
   PLAN_QUOTE_REPOSITORY,
   type NewPlanAcceptance,
@@ -239,13 +239,9 @@ export class AcceptTreatmentPlanUseCase {
         // Máquina de estados (DX-040): se firma un borrador o un plan
         // presentado, y también uno ya aceptado sin firma (DX-012). Rechazado,
         // completado o cancelado: 409.
-        const transitionError =
-          source.plan.status === TreatmentPlanStatus.ACCEPTED
-            ? null
-            : planTransitionError(
-                source.plan.status,
-                TreatmentPlanStatus.ACCEPTED,
-              );
+        const transitionError = acceptPlanError(source.plan.status, {
+          allowAlreadyAccepted: true,
+        });
         if (transitionError) throw new ConflictException(transitionError);
         if (source.items.length === 0) {
           throw new BadRequestException(

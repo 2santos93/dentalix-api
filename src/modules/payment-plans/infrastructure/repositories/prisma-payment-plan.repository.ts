@@ -1,5 +1,13 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, TreatmentPlanStatus } from '@prisma/client';
+import {
+  isPlanBillable,
+  notBillableMessage,
+} from '../../../treatment-plans/domain/plan-status-machine';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -63,6 +71,22 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
   ): Promise<PaymentPlanWithInstallments> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant(async (tx) => {
+      // DX-109 (BE-013): el plan se relee bloqueado (FOR SHARE) en la
+      // transacción del alta: ni retirado ni rechazado/cancelado mientras
+      // tanto. Cancelarlo (FOR UPDATE) espera a este COMMIT y cancela también
+      // el plan de cuotas recién creado.
+      const [plan] = await tx.$queryRaw<{ status: TreatmentPlanStatus }[]>`
+        SELECT "status" FROM "treatment_plans"
+         WHERE "id" = ${input.treatmentPlanId}::uuid
+           AND "patientId" = ${input.patientId}::uuid
+           AND "deletedAt" IS NULL
+         FOR SHARE`;
+      if (!plan) {
+        throw new NotFoundException('Plan de tratamiento no encontrado');
+      }
+      if (!isPlanBillable(plan.status)) {
+        throw new ConflictException(notBillableMessage(plan.status));
+      }
       return tx.paymentPlan.create({
         data: {
           tenantId,

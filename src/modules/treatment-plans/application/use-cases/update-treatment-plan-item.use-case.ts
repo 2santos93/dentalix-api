@@ -14,7 +14,10 @@ import type {
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import { DENTAL_CATALOG_REPOSITORY } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
-import { SIGNED_PLAN_LOCKED_MESSAGE } from './signed-plan-lock';
+import {
+  SIGNED_PLAN_LOCKED_MESSAGE,
+  assertPlanOpenForItems,
+} from './signed-plan-lock';
 import { assertDiscountWithinPrice } from './item-discount';
 
 export type UpdateTreatmentPlanItemInput = UpdateTreatmentPlanItemRepoInput;
@@ -42,6 +45,7 @@ export class UpdateTreatmentPlanItemUseCase {
     // notas) no cambia y el ítem no vuelve a propuesto; avanzar el tratamiento
     // (aceptado <-> realizado) sí.
     const plan = await this.repo.findPlanById(existing.planId);
+    if (plan) assertPlanOpenForItems(plan);
     if (
       plan?.acceptance &&
       (patch.price !== undefined ||

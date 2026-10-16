@@ -1,9 +1,20 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, TreatmentPlanStatus } from '@prisma/client';
+import {
+  isPlanBillable,
+  notBillableMessage,
+} from '../../../treatment-plans/domain/plan-status-machine';
+import {
+  IDEMPOTENCY_KEY_REUSED_MESSAGE,
+  isSameRequest,
+  type IdempotentPayment,
+} from '../../domain/idempotency';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import {
@@ -268,7 +279,20 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (input.idempotencyKey && isUniqueViolation(error)) {
         const original = await this.findByIdempotencyKey(input.idempotencyKey);
         if (original) {
-          return original;
+          // DX-109: solo si es la MISMA petición (plan + cuerpo).
+          if (
+            input.requestFingerprint !== undefined &&
+            !isSameRequest(
+              original,
+              input.treatmentPlanId,
+              input.requestFingerprint,
+            )
+          ) {
+            throw new UnprocessableEntityException(
+              IDEMPOTENCY_KEY_REUSED_MESSAGE,
+            );
+          }
+          return original.payment;
         }
       }
       throw error;
@@ -282,14 +306,23 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
       // compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
       // comprobación y el alta. La FK compuesta no mira `deletedAt`.
-      const [plan] = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "treatment_plans"
+      //
+      // DX-109 (BE-013): en el MISMO SELECT bloqueante se lee el estado: un
+      // plan rechazado o cancelado no admite abonos (409), y nadie puede
+      // rechazarlo o cancelarlo entre esta lectura y el INSERT. COMPLETED sí.
+      const [plan] = await tx.$queryRaw<
+        { id: string; status: TreatmentPlanStatus }[]
+      >`
+        SELECT "id", "status" FROM "treatment_plans"
          WHERE "id" = ${input.treatmentPlanId}::uuid
            AND "patientId" = ${input.patientId}::uuid
            AND "deletedAt" IS NULL
          FOR SHARE`;
       if (!plan) {
         throw new NotFoundException('Treatment plan not found');
+      }
+      if (!isPlanBillable(plan.status)) {
+        throw new ConflictException(notBillableMessage(plan.status));
       }
       // Sede del request si el cliente la fijó (X-Location-Id, ya validada
       // contra esta clínica); si no, la sede por defecto — que es lo que
@@ -319,6 +352,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           method: input.method,
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
+          idempotencyFingerprint: input.requestFingerprint,
           createdById: input.createdById,
         },
       });
@@ -336,17 +370,19 @@ export class PrismaPaymentRepository implements PaymentRepository {
     );
   }
 
-  async findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null> {
+  async findByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<IdempotentPayment | null> {
     // RLS (runWithTenant) scopes this to the current tenant, matching the
     // (tenantId, idempotencyKey) unique index. NOT filtered by `deletedAt`: a
     // replay must resolve to the SAME row even if it was later voided, so we
     // never insert a duplicate for a key that already exists.
-    return this.prisma.runWithTenant(async (tx) =>
-      this.toEntity(
-        tx,
-        await tx.payment.findFirst({ where: { idempotencyKey } }),
-      ),
-    );
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.payment.findFirst({ where: { idempotencyKey } });
+      const payment = await this.toEntity(tx, row);
+      if (!row || !payment) return null;
+      return { payment, requestFingerprint: row.idempotencyFingerprint };
+    });
   }
 
   // OJO: listByPlan/listByPatient NO filtran por sede a propósito. El plan y

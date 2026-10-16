@@ -1,9 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  Prisma,
-  TreatmentPlanItemStatus,
-  TreatmentPlanStatus,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
@@ -14,7 +10,7 @@ import type {
   PlanQuoteRepository,
   PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
-import { lockPlanGroup, rejectOpenSiblings } from './plan-option-group';
+import { acceptPlanInTx, lockPlanGroup } from './plan-option-group';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
 const UNKNOWN_PROFESSIONAL = 'Profesional';
@@ -107,21 +103,9 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           }
           throw error;
         }
-        // Las demás opciones abiertas del grupo, rechazadas en esta misma
-        // transacción (DX-040).
-        await rejectOpenSiblings(tx, locked, row.acceptedAt);
-        await tx.treatmentPlan.update({
-          where: { id: planId },
-          data: { status: TreatmentPlanStatus.ACCEPTED },
-        });
-        await tx.treatmentPlanItem.updateMany({
-          where: {
-            planId,
-            deletedAt: null,
-            status: TreatmentPlanItemStatus.PROPOSED,
-          },
-          data: { status: TreatmentPlanItemStatus.ACCEPTED },
-        });
+        // Misma aceptación que el PATCH (DX-109): hermanas rechazadas, plan
+        // ACCEPTED e ítems PROPOSED → ACCEPTED, en esta transacción.
+        await acceptPlanInTx(tx, locked, row.acceptedAt);
 
         const accepted = await this.readSource(tx, tenantId, patientId, planId);
         if (!accepted) return { kind: 'NOT_FOUND' } as const;

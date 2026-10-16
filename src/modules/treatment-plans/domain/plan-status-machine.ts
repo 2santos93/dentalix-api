@@ -87,3 +87,45 @@ export const NON_BILLABLE_PLAN_STATUSES: readonly TreatmentPlanStatus[] = [
 export function isPlanBillable(status: TreatmentPlanStatus): boolean {
   return !NON_BILLABLE_PLAN_STATUSES.includes(status);
 }
+
+/**
+ * Planes CERRADOS (DX-109): cancelado, rechazado o completado. Sus ítems no se
+ * añaden, editan ni retiran, y su moneda no cambia. COMPLETED sigue siendo
+ * cobrable (cobros posteriores al tratamiento), pero lo que se hizo ya no se
+ * reescribe. Respaldo en BD: trigger `treatment_plan_items_locked_when_closed`.
+ */
+export const CLOSED_PLAN_STATUSES: readonly TreatmentPlanStatus[] = [
+  CANCELLED,
+  REJECTED,
+  COMPLETED,
+];
+
+export function isPlanClosed(status: TreatmentPlanStatus): boolean {
+  return CLOSED_PLAN_STATUSES.includes(status);
+}
+
+/** 409 al registrar un abono o un plan de cuotas sobre un plan no cobrable. */
+export function notBillableMessage(status: TreatmentPlanStatus): string {
+  return `El plan está «${PLAN_STATUS_LABELS[status]}»: no admite abonos ni planes de cuotas.`;
+}
+
+/** 409 al tocar los ítems de un plan cerrado. */
+export function closedPlanItemsMessage(status: TreatmentPlanStatus): string {
+  return `El plan está «${PLAN_STATUS_LABELS[status]}»: sus ítems ya no se pueden añadir, cambiar ni quitar.`;
+}
+
+/**
+ * Aceptar un plan (DX-109, BE-014): ÚNICA regla para el `PATCH status=ACCEPTED`
+ * y para la aceptación firmada. `null` si se puede aceptar; si no, el motivo
+ * (409). Un plan ya ACCEPTED solo se vuelve a «aceptar» al firmarlo
+ * (`allowAlreadyAccepted`). Lo que hace aceptar, en una transacción, es
+ * `acceptPlanInTx` (infraestructura): transición, ítems PROPOSED → ACCEPTED y
+ * hermanas abiertas → REJECTED.
+ */
+export function acceptPlanError(
+  from: TreatmentPlanStatus,
+  { allowAlreadyAccepted }: { allowAlreadyAccepted: boolean },
+): string | null {
+  if (from === ACCEPTED && allowAlreadyAccepted) return null;
+  return planTransitionError(from, ACCEPTED);
+}

@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { RecordPaymentUseCase } from './record-payment.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
@@ -262,7 +267,7 @@ describe('RecordPaymentUseCase', () => {
       );
 
       const found = await repo.findByIdempotencyKey(key);
-      expect(found?.id).toBe(created.id);
+      expect(found?.payment.id).toBe(created.id);
     });
 
     it('returns the EXISTING payment on replay of the same key (no second row, no plan re-check)', async () => {
@@ -337,6 +342,87 @@ describe('RecordPaymentUseCase', () => {
       );
 
       expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+    });
+  });
+
+  describe('DX-109: planes no cobrables', () => {
+    it.each([TreatmentPlanStatus.REJECTED, TreatmentPlanStatus.CANCELLED])(
+      'un abono sobre un plan %s es 409 en español y no se guarda',
+      async (status) => {
+        const { repo, fakeGetPlan, uc } = makeUseCase();
+        fakeGetPlan.plan = makePlan({ status });
+        const attempt = uc.execute('plan-1', {
+          amount: 10,
+          currency: 'USD',
+          paidAt: '2026-03-05',
+        });
+        await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+        await expect(attempt).rejects.toThrow(/no admite abonos/);
+        expect(await repo.listByPlan('plan-1')).toHaveLength(0);
+      },
+    );
+
+    it('COMPLETED sigue admitiendo abonos', async () => {
+      const { fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ status: TreatmentPlanStatus.COMPLETED });
+      const payment = await uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-03-05',
+      });
+      expect(payment.amount).toBe(10);
+    });
+  });
+
+  describe('DX-109: huella de la Idempotency-Key', () => {
+    const key = '22222222-2222-2222-2222-222222222222';
+    const body = { amount: 100, currency: 'usd', paidAt: '2026-03-05' };
+
+    it('la repetición idéntica (misma petición normalizada) devuelve el original', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan();
+      const first = await uc.execute('plan-1', body, 'u1', key);
+      const again = await uc.execute(
+        'plan-1',
+        { ...body, currency: ' USD ', amount: 100.0 },
+        'u1',
+        key,
+      );
+      expect(again.id).toBe(first.id);
+      expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+    });
+
+    it.each([
+      ['otro importe', 'plan-1', { ...body, amount: 101 }],
+      ['otra fecha', 'plan-1', { ...body, paidAt: '2026-03-06' }],
+      ['otras notas', 'plan-1', { ...body, notes: 'corrección' }],
+      ['otro plan', 'plan-2', body],
+    ])('con %s es 422 y no crea nada', async (_label, planId, other) => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan();
+      await uc.execute('plan-1', body, 'u1', key);
+      fakeGetPlan.plan = makePlan({ id: planId });
+      const attempt = uc.execute(planId, other, 'u1', key);
+      await expect(attempt).rejects.toBeInstanceOf(
+        UnprocessableEntityException,
+      );
+      await expect(attempt).rejects.toThrow(/clave de idempotencia/);
+      expect(await repo.listByPlan('plan-2')).toHaveLength(0);
+      expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+    });
+
+    it('un abono anterior a DX-109 (sin huella) se sigue devolviendo si el plan coincide', async () => {
+      const { repo, uc } = makeUseCase();
+      const legacy = repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        idempotencyKey: key,
+        requestFingerprint: null,
+      });
+      const replay = await uc.execute('plan-1', body, 'u1', key);
+      expect(replay.id).toBe(legacy.id);
+      await expect(
+        uc.execute('plan-2', body, 'u1', key),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
   });
 });

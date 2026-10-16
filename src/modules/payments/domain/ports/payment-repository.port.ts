@@ -1,3 +1,4 @@
+import type { IdempotentPayment } from '../idempotency';
 import { PaymentMethod } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
@@ -35,6 +36,12 @@ export interface CreatePaymentRepoInput {
    * it reaches here (never taken raw from the client).
    */
   idempotencyKey?: string;
+  /**
+   * Huella de la petición (`paymentRequestFingerprint`, DX-109). Se guarda con
+   * la clave; si dos peticiones con la misma clave se cruzan, el repositorio
+   * solo devuelve el original cuando la huella coincide (si no, 422).
+   */
+  requestFingerprint?: string;
 }
 
 /**
@@ -129,7 +136,9 @@ export interface PaymentRepository {
    * idempotency means "same request → same row" regardless of whether that row
    * was later voided, so a replay never creates a duplicate.
    */
-  findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null>;
+  findByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<IdempotentPayment | null>;
 
   /**
    * Active payments (`deletedAt: null`) for a plan, ordered by `paidAt` DESC.

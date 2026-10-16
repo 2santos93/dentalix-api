@@ -14,6 +14,7 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiHeader,
@@ -21,6 +22,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { VoidPaymentDto } from './dto/void-payment.dto';
@@ -125,7 +127,19 @@ export class PaymentsController {
     patient: { lookup: 'treatmentPlan', param: 'id' },
   })
   @Post('treatment-plans/:id/payments')
-  @ApiCreatedResponse({ type: PaymentDto })
+  @ApiCreatedResponse({
+    type: PaymentDto,
+    description:
+      'Abono registrado. Repetir la MISMA petición (mismo plan y cuerpo) con la misma Idempotency-Key devuelve el abono original.',
+  })
+  @ApiConflictResponse({
+    description:
+      'El plan está rechazado o cancelado: no admite abonos (DX-109). Un plan completado sí.',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La Idempotency-Key ya se usó con otro plan u otro cuerpo (DX-109): genera una clave nueva.',
+  })
   create(
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
@@ -170,7 +184,11 @@ export class PaymentsController {
     patient: { lookup: 'treatmentPlan', param: 'id' },
   })
   @Get('treatment-plans/:id/balance')
-  @ApiOkResponse({ type: PlanBalanceDto })
+  @ApiOkResponse({
+    type: PlanBalanceDto,
+    description:
+      'Saldo del plan. Un plan rechazado o cancelado tiene `billable` 0 (misma regla que el estado de cuenta, DX-109); sus abonos siguen en `paid`.',
+  })
   balance(@Param('id') id: string): Promise<GetPlanBalanceResult> {
     return this.getPlanBalance.execute(id);
   }

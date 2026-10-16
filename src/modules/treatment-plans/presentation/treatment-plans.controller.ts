@@ -65,6 +65,8 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 
 const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
+/** DX-109: además de la firma, un plan cerrado congela sus ítems. */
+const ITEMS_LOCKED_CONFLICT = `${SIGNED_PLAN_CONFLICT}; o el plan está cancelado, rechazado o completado (DX-109)`;
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -78,7 +80,7 @@ function actorRole(req: AuthenticatedRequest) {
   if (!isTenantPayload(req.user)) {
     throw new ForbiddenException('Insufficient role');
   }
-  return { role: req.user.role };
+  return { role: req.user.role, userId: req.user.sub };
 }
 
 // Plan de tratamiento es dato CLÍNICO -> @Roles(...CLINICAL_ROLES) (DENTIST/
@@ -182,7 +184,7 @@ export class TreatmentPlansController {
       'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor)',
   })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada`,
+    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada; cancelar cancela también el plan de cuotas activo`,
   })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -305,7 +307,7 @@ export class TreatmentPlansController {
   })
   @Post('treatment-plans/:id/items')
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
-  @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
+  @ApiConflictResponse({ description: ITEMS_LOCKED_CONFLICT })
   addItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddTreatmentPlanItemDto,
@@ -329,7 +331,7 @@ export class TreatmentPlansController {
   @Patch('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ type: TreatmentPlanItemDto })
   @ApiConflictResponse({
-    description: `${SIGNED_PLAN_CONFLICT}; solo admite avanzar el estado (no volver a PROPOSED)`,
+    description: `${ITEMS_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED)`,
   })
   updateItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -359,7 +361,7 @@ export class TreatmentPlansController {
   })
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
-  @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
+  @ApiConflictResponse({ description: ITEMS_LOCKED_CONFLICT })
   removeItem(@Param('itemId', ParseUUIDPipe) itemId: string): Promise<void> {
     return this.removeTreatmentPlanItem.execute(itemId);
   }
