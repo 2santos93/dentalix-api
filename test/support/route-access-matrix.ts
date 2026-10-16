@@ -221,6 +221,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /inventory/items/:id/movements': STOCK,
   'GET /inventory/items/:id/movements': STOCK,
 
+  // --- Auditoría (DX-009) --------------------------------------------------
+  // loop/informes/DX-009.md: solo ADMIN (lleva IP y user agent de cada acceso).
+  'GET /audit-events': ADMIN_ONLY,
+
   // --- Dashboard -----------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-dashboard.md (DASHBOARD_ROLES).
   'GET /dashboard': ADMIN_ONLY,

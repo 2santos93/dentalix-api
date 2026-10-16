@@ -113,3 +113,7 @@ export const TREATMENT_PLAN_QUOTE_READ_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+
+// Registro de auditoría (DX-009) — LEER: solo gestión. Lleva IP y user agent
+// de cada acceso, que solo ve ADMIN.
+export const AUDIT_READ_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
