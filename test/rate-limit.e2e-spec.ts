@@ -25,6 +25,7 @@ const LOW_LIMITS: RateLimitConfig = {
   invitation: { limit: 2, ttlMs: 60_000 },
   password: { limit: 2, ttlMs: 60_000 },
   confirmation: { limit: 2, ttlMs: 60_000 },
+  refresh: { limit: 4, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -134,10 +135,10 @@ describe('Rate limiting (e2e)', () => {
       );
     });
 
-    it('POST auth/refresh: balde propio (register ya agotado) y 429 tras el límite', async () => {
-      // auth/register agotó su balde `auth` en el test anterior; refresh comparte
-      // política pero cuenta en su propio balde, así que empieza de cero.
-      for (let i = 0; i < LOW_LIMITS.auth.limit; i++) {
+    it('POST auth/refresh: política propia `refresh` y 429 tras su límite', async () => {
+      // DX-062: el refresh no usa la política `auth` sino la suya (holgada en
+      // producción, porque la web renueva en cada carga de página).
+      for (let i = 0; i < LOW_LIMITS.refresh.limit; i++) {
         const res = await request(app.getHttpServer())
           .post('/api/v1/auth/refresh')
           .send({ refreshToken: 'nope' });

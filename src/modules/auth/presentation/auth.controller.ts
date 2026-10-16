@@ -95,7 +95,7 @@ export class AuthController {
   // Un 401 significa que el refresh no vale y el cliente vuelve a /login; en
   // modo cookie, además, se borra la cookie muerta.
   @Post('refresh')
-  @RateLimit('auth')
+  @RateLimit('refresh')
   @ApiCreatedResponse({ type: AuthTokensDto })
   async refreshHandler(
     @Req() req: TenantHostRequest,

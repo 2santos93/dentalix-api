@@ -18,6 +18,10 @@ describe('loadRateLimitConfig', () => {
     expect(cfg.confirmation).toEqual({ limit: 20, ttlMs: 60_000 });
     // Holgado: solo frena la fuerza bruta distribuida contra una cuenta.
     expect(cfg['login-account']).toEqual({ limit: 50, ttlMs: 60 * 60_000 });
+    // DX-062: la web renueva en cada carga de página y una clínica entera sale
+    // por UNA IP; el refresh es un JWT firmado (no se adivina), así que su
+    // límite es holgado y va aparte del de login/register.
+    expect(cfg.refresh).toEqual({ limit: 120, ttlMs: 60_000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {
@@ -33,6 +37,7 @@ describe('loadRateLimitConfig', () => {
         RATE_LIMIT_LOGIN_ACCOUNT_LIMIT: '9',
         RATE_LIMIT_LOGIN_ACCOUNT_TTL_MS: '5000',
         RATE_LIMIT_CONFIRMATION_LIMIT: '4',
+        RATE_LIMIT_REFRESH_LIMIT: '30',
       }),
     );
     expect(cfg.global).toEqual({ limit: 50, ttlMs: 1000 });
@@ -48,6 +53,7 @@ describe('loadRateLimitConfig', () => {
       ...DEFAULT_RATE_LIMITS.confirmation,
       limit: 4,
     });
+    expect(cfg.refresh).toEqual({ ...DEFAULT_RATE_LIMITS.refresh, limit: 30 });
   });
 
   it('trata la cadena vacía como "no definida"', () => {
