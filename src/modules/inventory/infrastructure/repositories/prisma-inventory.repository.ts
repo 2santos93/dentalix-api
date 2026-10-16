@@ -6,6 +6,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   CreateInventoryItemRepoInput,
   CreateInventoryMovementRepoInput,
+  INVENTORY_MOVEMENTS_LIMIT,
   InventoryRepository,
   ListInventoryItemsRepoParams,
   UpdateInventoryItemRepoInput,
@@ -231,7 +232,8 @@ export class PrismaInventoryRepository implements InventoryRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const movements = await tx.inventoryMovement.findMany({
         where: { itemId },
-        orderBy: { occurredAt: 'desc' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        take: INVENTORY_MOVEMENTS_LIMIT,
       });
       return movements.map(mapMovementToEntity);
     });

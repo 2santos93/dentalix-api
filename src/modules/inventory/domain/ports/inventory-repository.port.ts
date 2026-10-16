@@ -36,6 +36,9 @@ export interface CreateInventoryMovementRepoInput {
   createdById?: string;
 }
 
+/** Tope de `listMovements` (DX-043, DB-018). */
+export const INVENTORY_MOVEMENTS_LIMIT = 200;
+
 export const INVENTORY_REPOSITORY = Symbol('INVENTORY_REPOSITORY');
 
 export interface ListInventoryItemsRepoParams {
@@ -73,7 +76,12 @@ export interface InventoryRepository {
     input: CreateInventoryMovementRepoInput,
   ): Promise<InventoryMovement>;
 
-  /** All movements for one item, ordered by `occurredAt` DESC. */
+  /**
+   * The most recent `INVENTORY_MOVEMENTS_LIMIT` movements of one item,
+   * ordered by `occurredAt` DESC (DX-043, DB-018: a list per parent never
+   * grows without bound). The stock is NOT derived from this list
+   * (`sumSignedQuantity` aggregates every movement in the DB).
+   */
   listMovements(itemId: string): Promise<InventoryMovement[]>;
 
   /**

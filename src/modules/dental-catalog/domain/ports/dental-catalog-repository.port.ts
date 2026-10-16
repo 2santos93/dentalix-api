@@ -1,6 +1,9 @@
 import { CatalogKind } from '@prisma/client';
 import { DentalCatalogItem } from '../entities/dental-catalog-item.entity';
 
+/** Tope de seguridad de `list` (DX-043, DB-018). */
+export const CATALOG_SELECTOR_LIMIT = 2000;
+
 export interface CreateDentalCatalogItemRepoInput {
   code: string;
   category?: string;
@@ -52,9 +55,12 @@ export const DENTAL_CATALOG_REPOSITORY = Symbol('DENTAL_CATALOG_REPOSITORY');
 export interface DentalCatalogRepository {
   create(input: CreateDentalCatalogItemRepoInput): Promise<DentalCatalogItem>;
 
-  /** El catálogo ENTERO que casa con los filtros, sin paginar. Es lo que
+  /** El catálogo que casa con los filtros, sin paginar. Es lo que
    * consumen los selectores (odontograma, panel de diente, plan de
-   * tratamiento): necesitan todas las opciones de golpe, no una página. */
+   * tratamiento): necesitan todas las opciones de golpe, no una página. Con
+   * un tope de seguridad, `CATALOG_SELECTOR_LIMIT` ítems por código (DX-043,
+   * DB-018), muy por encima de cualquier catálogo de clínica; el directorio
+   * paginado (`listDirectory`) no tiene ese límite. */
   list(params: ListDentalCatalogItemsParams): Promise<DentalCatalogItem[]>;
 
   /** Una PÁGINA del catálogo, con búsqueda libre — para la pantalla de

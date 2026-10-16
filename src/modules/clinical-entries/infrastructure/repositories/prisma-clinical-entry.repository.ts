@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  CLINICAL_ENTRIES_LIMIT,
   ClinicalEntryRepository,
   CreateClinicalEntryRepoInput,
   ListClinicalEntriesParams,
@@ -91,7 +92,8 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.clinicalEntry.findMany({
         where,
-        orderBy: { entryDate: 'desc' },
+        orderBy: [{ entryDate: 'desc' }, { id: 'desc' }],
+        take: CLINICAL_ENTRIES_LIMIT,
       });
       return rows.map(mapToEntity);
     });

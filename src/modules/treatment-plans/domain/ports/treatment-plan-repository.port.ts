@@ -110,6 +110,9 @@ export interface DoneMirrorInput {
   performedById?: string;
 }
 
+/** Tope de `listPlansByPatient` (DX-043, DB-018). */
+export const PATIENT_PLANS_LIMIT = 200;
+
 export const TREATMENT_PLAN_REPOSITORY = Symbol('TREATMENT_PLAN_REPOSITORY');
 
 export interface TreatmentPlanRepository {
@@ -122,7 +125,10 @@ export interface TreatmentPlanRepository {
    */
   findPlanById(id: string): Promise<TreatmentPlanWithItems | null>;
 
-  /** Active plans for the patient, ordered by `createdAt` DESC. */
+  /**
+   * The most recent `PATIENT_PLANS_LIMIT` active plans for the patient,
+   * ordered by `createdAt` DESC (DX-043, DB-018).
+   */
   listPlansByPatient(patientId: string): Promise<TreatmentPlan[]>;
 
   /**

@@ -113,7 +113,11 @@ export interface PaymentRepository {
    */
   findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null>;
 
-  /** Active payments (`deletedAt: null`) for a plan, ordered by `paidAt` DESC. */
+  /**
+   * Active payments (`deletedAt: null`) for a plan, ordered by `paidAt` DESC.
+   * NO limit on purpose (DX-043, DB-018): GetPlanBalanceUseCase sums this
+   * list, and a truncated list would report a wrong balance.
+   */
   listByPlan(treatmentPlanId: string): Promise<Payment[]>;
 
   /** Active payments (`deletedAt: null`) for a patient, ordered by `paidAt` DESC. */

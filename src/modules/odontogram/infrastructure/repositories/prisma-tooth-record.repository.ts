@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CreateToothRecordRepoInput,
+  TOOTH_TIMELINE_LIMIT,
   ToothRecordRepository,
 } from '../../domain/ports/tooth-record-repository.port';
 import { ToothRecord } from '../../domain/entities/tooth-record.entity';
@@ -101,7 +102,8 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.toothRecord.findMany({
         where: { patientId, toothNumber, deletedAt: null },
-        orderBy: { recordedAt: 'desc' },
+        orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        take: TOOTH_TIMELINE_LIMIT,
       });
       return rows.map(mapToEntity);
     });

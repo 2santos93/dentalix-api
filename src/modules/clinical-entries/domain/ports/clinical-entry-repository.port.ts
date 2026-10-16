@@ -17,6 +17,9 @@ export interface ListClinicalEntriesParams {
   to?: Date;
 }
 
+/** Tope de `listByPatient` (DX-043, DB-018). */
+export const CLINICAL_ENTRIES_LIMIT = 500;
+
 export const CLINICAL_ENTRY_REPOSITORY = Symbol('CLINICAL_ENTRY_REPOSITORY');
 
 export interface ClinicalEntryRepository {
@@ -31,7 +34,8 @@ export interface ClinicalEntryRepository {
   /**
    * Non-deleted entries for the patient, ordered by `entryDate` DESC
    * (most recent first). `from`/`to` narrow the range when provided
-   * (inclusive).
+   * (inclusive). At most `CLINICAL_ENTRIES_LIMIT` (the most recent ones;
+   * DX-043, DB-018): older ones are reached by narrowing with `to`.
    */
   listByPatient(
     patientId: string,
