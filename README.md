@@ -282,9 +282,11 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
 - **RLS**: la tabla lleva la política estándar por clínica. El despachador, que
   trabaja para todas a la vez, y los emails de plataforma (`tenantId` NULL)
   pasan por tres funciones `SECURITY DEFINER` de la migración
-  `20261017120000_email_outbox`, propiedad del owner de las migraciones (que
-  debe saltarse la RLS, como ya exige DX-025) y concedidas explícitamente a
-  `dentalix_app`. El arriendo de un reclamo se acota a 900 s y el cierre de
+  `20261017120000_email_outbox`, concedidas explícitamente a `dentalix_app`.
+  Desde DX-113 son del rol NOLOGIN `dentalix_email_dispatcher` (sin
+  BYPASSRLS, con una política permisiva en `email_outbox` solo para él), no
+  del owner de las migraciones, que en un Postgres gestionado no se salta la
+  RLS (ver «Despliegue: roles de la BD»). El arriendo de un reclamo se acota a 900 s y el cierre de
   un intento solo vale para ESE intento (fencing por `attempts`). Si el rol de la app se crea después de migrar, concédele
   `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle` y
   `email_outbox_enqueue_platform`.
@@ -293,7 +295,7 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
   `MAIL_ENCRYPTION_KEY` (`openssl rand -hex 32`), ni con
   `MAIL_DISPATCH_INTERVAL_MS` < 5000. Tampoco arranca si el despachador no
   tiene acceso (el rol de la app no puede ejecutar las funciones o su owner no
-  se salta la RLS): es un fallo de despliegue permanente, no un corte de la BD,
+  ve todas las filas de `email_outbox`): es un fallo de despliegue permanente, no un corte de la BD,
   así que se trata como la configuración inválida y no como la readiness
   (DX-023). Fuera de producción solo deja un `error`
   `email.dispatcher_misconfigured`. Ver `.env.example`.
@@ -418,6 +420,91 @@ cuenta en su día.
 - Las filas de caja y los movimientos del estado de cuenta traen `paidOn`: el
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
+
+## Despliegue: roles de la BD (DX-113)
+
+En un Postgres gestionado (RDS, Cloud SQL…) nadie de la aplicación es
+superusuario ni tiene BYPASSRLS. Hay dos roles con login y dos NOLOGIN que
+crean las migraciones; el job `owner-nosu` de la CI despliega así desde cero
+en cada PR (migraciones, seed de referencia, `seed:demo`, comprobación de
+FORCE y `npm run test:owner-nosu`).
+
+| Rol | Conexión | Privilegios mínimos | Nunca |
+|-----|----------|---------------------|-------|
+| owner (p. ej. `dentalix_owner`) | `DIRECT_URL`: solo `prisma migrate deploy`, `prisma db seed` y `audit:purge` | `LOGIN`, `CREATEROLE` (crea `dentalix_app` y los roles NOLOGIN de abajo), dueño de la base (`CREATE` para las extensiones *trusted* `unaccent`, `btree_gist`, `pg_trgm`, `btree_gin`) y del esquema `public` (en PG15+ lo es por `pg_database_owner`; en PG ≤ 14, `ALTER SCHEMA public OWNER TO …`) | `SUPERUSER`, `BYPASSRLS`, `CREATEDB`, `REPLICATION`; ni lo usa la API |
+| `dentalix_app` (nombre fijo: lo citan las migraciones) | `DATABASE_URL`: la API y `seed:demo` | `LOGIN`, `CONNECT`, `USAGE` en `public`, `SELECT/INSERT/UPDATE/DELETE` en tablas y `USAGE/SELECT` en secuencias (privilegios por defecto del owner) y `EXECUTE` en las funciones que le conceden las migraciones (búsqueda de pacientes, despachador de email, particiones de auditoría) | dueño de tablas, `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` |
+| `dentalix_patient_search` (DX-043) | NOLOGIN | dueño de `dx_patient_search_*`; `SELECT` de 5 columnas de `patients` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
+| `dentalix_email_dispatcher` (DX-113) | NOLOGIN | dueño de `email_outbox_claim/_settle/_enqueue_platform`; `SELECT/INSERT/UPDATE` de `email_outbox` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
+
+Pasos (el `psql` no acepta el `?schema=public` de las URL de Prisma:
+`"${DIRECT_URL%%\?*}"` lo quita):
+
+```bash
+# 1. Como admin del proveedor: el owner y la base.
+psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
+CREATE ROLE dentalix_owner LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS CREATEROLE NOCREATEDB NOREPLICATION;
+CREATE DATABASE dentalix OWNER dentalix_owner;
+SQL
+# 2. Como el owner: dentalix_app y sus privilegios por defecto (idempotente;
+#    comprueba que la app no salte la RLS).
+psql "${DIRECT_URL%%\?*}" -v ON_ERROR_STOP=1 -v app_password="$(openssl rand -hex 24)" \
+  -f docker/prod/create-app-role.sql
+# 3. Como el owner, en un job previo al despliegue (no en el arranque de cada réplica):
+npx prisma migrate deploy && npx prisma db seed
+```
+
+- **FORCE y el owner**: todas las tablas con `tenantId` tienen RLS ENABLE +
+  FORCE, así que el owner también está sujeto a la RLS y, sin
+  `app.current_tenant`, no ve filas de clínica. Lo comprueba
+  `test/rls-catalog.int-spec.ts` (también en el job `owner-nosu`, leyendo
+  `pg_class.relforcerowsecurity` con el owner real). El owner puede quitar
+  FORCE (es el dueño): no es una frontera de seguridad, pero así nada en
+  producción necesita superusuario ni BYPASSRLS.
+- **Migraciones con datos** (regla para las nuevas): si una migración lee o
+  escribe filas de tablas con FORCE, quita FORCE a esas tablas **en la misma
+  transacción** y lo restaura al final (`ALTER TABLE … NO FORCE ROW LEVEL
+  SECURITY` / `FORCE …`). `SET LOCAL row_security = off` solo no basta: con
+  este owner hace fallar la migración; y sin él, un UPDATE o un INSERT …
+  SELECT actúa sobre 0 filas en silencio. Añade un tramo con filas previas a
+  `test/owner-nosu/migrations-data.owner-spec.ts`.
+- **Migraciones antiguas**: las de datos van entre una pareja
+  `…_dx113_unforce_<x>` / `…_dx113_reforce_<x>` que quita y devuelve FORCE
+  solo a las tablas que tocan. En una base ya migrada las parejas se aplican
+  seguidas y no cambian nada (Prisma aplica migraciones intercaladas sin pedir
+  reset). Tres migraciones solo podían arreglarse por dentro (mismo `NO
+  FORCE`/`FORCE` en su transacción; el esquema resultante es idéntico):
+  `20261016170000_data_processing_consents`,
+  `20261017113000_payments_civil_day_noon` y `20261017120000_email_outbox`.
+  `migrate deploy` no mira el checksum, pero en una base de desarrollo ya
+  migrada `prisma migrate dev` dirá *«was modified after it was applied»* y
+  propondrá un reset. **No lo aceptes**: actualiza el checksum (no toca datos)
+  y sigue con `migrate deploy`:
+
+  ```bash
+  for m in 20261016170000_data_processing_consents 20261017113000_payments_civil_day_noon 20261017120000_email_outbox; do
+    sum=$(sha256sum prisma/migrations/$m/migration.sql | cut -d' ' -f1)
+    psql "${DIRECT_URL%%\?*}" -v ON_ERROR_STOP=1 \
+      -c "UPDATE _prisma_migrations SET checksum = '$sum' WHERE migration_name = '$m'"
+  done
+  npx prisma migrate deploy
+  ```
+- **Una base con datos migrada en su día con superusuario** que tuviera que
+  repetir `20260801150000_add_locations` con este owner: falla de forma ruidosa
+  (inserta la sede por defecto en una tabla nueva con FORCE) y no toca nada.
+  Repítela una vez con `BYPASSRLS` temporal (`prisma migrate resolve
+  --rolled-back …` y `ALTER ROLE … BYPASSRLS` / `NOBYPASSRLS`). Un despliegue
+  nuevo la aplica vacía y no lo necesita.
+- **Roles NOLOGIN del clúster**: `dentalix_patient_search` y
+  `dentalix_email_dispatcher` son del clúster, no de la base. Las migraciones
+  los reutilizan solo si nadie más que el migrador es miembro: usa **un mismo
+  owner para todas las bases del clúster**. Si los creó un superusuario (p. ej.
+  el `dentalix` del docker local) y migra un owner sin superusuario, el admin
+  le da antes `GRANT dentalix_patient_search, dentalix_email_dispatcher TO
+  <owner> WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`.
+- **En local**, con un Postgres aparte (los roles son del clúster): crea el
+  owner y la base como en el paso 1, aplica los pasos 2 y 3, y
+  `DIRECT_URL=<owner> DATABASE_URL=<app> OWNER_NOSU_ADMIN_URL=<admin>/postgres
+  npm run test:owner-nosu`.
 
 ## Run tests
 
