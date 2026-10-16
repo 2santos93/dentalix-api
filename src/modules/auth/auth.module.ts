@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './presentation/auth.controller';
+import { SessionCookieService } from './presentation/session-cookie.service';
 import { RegisterClinicUseCase } from './application/use-cases/register-clinic.use-case';
 import { LoginUseCase } from './application/use-cases/login.use-case';
 import { RefreshUseCase } from './application/use-cases/refresh.use-case';
@@ -20,12 +21,14 @@ import { TokenService } from '../../shared/crypto/token.service';
     RefreshUseCase,
     LogoutUseCase,
     SessionClaimsService,
+    SessionCookieService,
     PasswordService,
     TokenService,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
   ],
   // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
-  // con los claims ACTUALES, igual que /auth/refresh.
-  exports: [SessionClaimsService],
+  // con los claims ACTUALES, igual que /auth/refresh. Él y aceptar invitación
+  // (InvitationsModule) entregan el par con la cookie de sesión (DX-062).
+  exports: [SessionClaimsService, SessionCookieService],
 })
 export class AuthModule {}

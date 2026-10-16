@@ -38,3 +38,24 @@ export function loadSecuritySettings(env: EnvReader): SecuritySettings {
     corsRootDomain: env('CORS_ROOT_DOMAIN') ?? 'dentalix.local',
   };
 }
+
+/**
+ * ¿Es `origin` un origen de la web de Dentalix? Los de `CORS_ORIGINS` (exactos)
+ * y el dominio raíz con cualquiera de sus subdominios (clínicas de marca
+ * blanca). Es la MISMA regla para CORS (solo estos orígenes reciben
+ * `Access-Control-Allow-Credentials`) y para la comprobación de `Origin` del
+ * refresh por cookie (CSRF).
+ */
+export function isAllowedOrigin(
+  origin: string,
+  { corsOrigins, corsRootDomain }: SecuritySettings,
+): boolean {
+  if (corsOrigins.includes(origin)) return true;
+  let host: string;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  return host === corsRootDomain || host.endsWith(`.${corsRootDomain}`);
+}

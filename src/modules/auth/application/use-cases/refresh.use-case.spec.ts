@@ -240,6 +240,60 @@ describe('RefreshUseCase', () => {
     expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
   });
 
+  describe('tenant of the session (DX-062)', () => {
+    it('rejects (401) a clinic token presented on ANOTHER clinic host, without consuming it', async () => {
+      const { uc, tokens, repo } = setup({
+        state: activeMember(ClinicRole.ADMIN),
+      });
+
+      await expect(
+        uc.execute({ refreshToken: 'old-ref', expectedTenantId: 't2' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(tokens.issue).not.toHaveBeenCalled();
+      expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('rejects (401) a clinic token presented on the apex (no clinic host)', async () => {
+      const { uc, tokens } = setup({ state: activeMember(ClinicRole.ADMIN) });
+
+      await expect(
+        uc.execute({ refreshToken: 'old-ref', expectedTenantId: null }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(tokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('rejects (401) a platform token presented on a clinic host', async () => {
+      const { uc, tokens } = setup({
+        payload: platformPayload,
+        state: { tokenVersion: 0, isPlatformAdmin: true, tenant: null },
+      });
+
+      await expect(
+        uc.execute({ refreshToken: 'old-ref', expectedTenantId: 't1' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(tokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('renews when the host is the clinic of the token', async () => {
+      const { uc, tokens } = setup({ state: activeMember(ClinicRole.ADMIN) });
+
+      await uc.execute({ refreshToken: 'old-ref', expectedTenantId: 't1' });
+
+      expect(tokens.issue).toHaveBeenCalled();
+    });
+
+    it('renews a platform token on the apex', async () => {
+      const { uc, tokens } = setup({
+        payload: platformPayload,
+        state: { tokenVersion: 0, isPlatformAdmin: true, tenant: null },
+      });
+
+      await uc.execute({ refreshToken: 'old-ref', expectedTenantId: null });
+
+      expect(tokens.issue).toHaveBeenCalled();
+    });
+  });
+
   it('rejects when the refresh token is invalid/expired', async () => {
     const { uc, tokens, repo } = setup({ verifyError: true, state: null });
 

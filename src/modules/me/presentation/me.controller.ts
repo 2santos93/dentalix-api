@@ -8,12 +8,14 @@ import {
   Patch,
   Post,
   Req,
+  Res,
   UploadedFile,
   UnauthorizedException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import {
@@ -33,6 +35,10 @@ import { AvatarResponseDto } from './dto/avatar-response.dto';
 import { AuthTokensDto } from '../../auth/presentation/dto/auth-tokens.dto';
 import { MyProfile } from '../domain/entities/my-profile.entity';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
+import {
+  DeliveredSession,
+  SessionCookieService,
+} from '../../auth/presentation/session-cookie.service';
 
 /**
  * `/me` describe el perfil DENTRO de una clínica (tenant + rol), y este
@@ -50,6 +56,7 @@ function tenantUserOrThrow(user: JwtPayload): TenantJwtPayload {
 
 interface AuthenticatedRequest {
   user: JwtPayload;
+  headers: Record<string, string | string[] | undefined>;
 }
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
@@ -65,6 +72,7 @@ export class MeController {
     private readonly changeMyPassword: ChangeMyPasswordUseCase,
     private readonly setMyAvatar: SetMyAvatarUseCase,
     private readonly removeMyAvatar: RemoveMyAvatarUseCase,
+    private readonly cookie: SessionCookieService,
   ) {}
 
   @Get()
@@ -98,20 +106,23 @@ export class MeController {
 
   // Cambiar la contraseña cierra TODAS las sesiones previas (los refresh
   // tokens anteriores dejan de renovar) y devuelve un par nuevo para el
-  // cliente que la cambió, que debe sustituir el que tenía.
+  // cliente que la cambió, que debe sustituir el que tenía (en modo cookie, el
+  // refresh nuevo llega en la cookie de sesión — DX-062).
   @Post('password')
   @RateLimit('password')
   @HttpCode(200)
   @ApiOkResponse({ type: AuthTokensDto })
-  changePassword(
+  async changePassword(
     @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
     @Body() dto: ChangePasswordDto,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    return this.changeMyPassword.execute({
+  ): Promise<DeliveredSession> {
+    const pair = await this.changeMyPassword.execute({
       session: req.user,
       currentPassword: dto.currentPassword,
       newPassword: dto.newPassword,
     });
+    return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
   }
 
   @Post('avatar')
