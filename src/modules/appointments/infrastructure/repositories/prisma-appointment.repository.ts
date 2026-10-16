@@ -7,6 +7,7 @@ import {
   AppointmentRepository,
   CreateAppointmentRepoInput,
   ListAppointmentsByRangeParams,
+  ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
 import { Appointment } from '../../domain/entities/appointment.entity';
@@ -136,6 +137,27 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       const appointments = await tx.appointment.findMany({
         where,
         orderBy: { start: 'asc' },
+        include: INCLUDE_PATIENT_NAME,
+      });
+      return appointments.map(mapToEntity);
+    });
+  }
+
+  async listUpcoming(
+    params: ListUpcomingAppointmentsParams,
+  ): Promise<Appointment[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const appointments = await tx.appointment.findMany({
+        where: {
+          deletedAt: null,
+          start: { gte: params.from, lt: params.to },
+          // Mismo criterio de sede que la agenda (`listByRange`).
+          ...this.locationFilter(),
+        },
+        // Desempate por id: dos citas a la misma hora (distinto profesional)
+        // salen siempre en el mismo orden.
+        orderBy: [{ start: 'asc' }, { id: 'asc' }],
+        take: params.limit,
         include: INCLUDE_PATIENT_NAME,
       });
       return appointments.map(mapToEntity);

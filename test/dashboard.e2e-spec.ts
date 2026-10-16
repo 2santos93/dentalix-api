@@ -422,4 +422,74 @@ describe('Dashboard (e2e)', () => {
         .expect(200);
     },
   );
+
+  // DX-043 (DB-008): las próximas citas salen de la BD ya cortadas en
+  // `upcomingLimit` (en orden de inicio) y `patientCount` es un COUNT exacto;
+  // `upcomingLimit` tiene tope, con 400 en español por encima.
+  it('limits upcoming appointments to upcomingLimit in start order, counts patients exactly and caps upcomingLimit', async () => {
+    const subdomain = 'clinica-dash-limit';
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Dashboard Limit',
+      subdomain,
+      email: 'owner@clinica-dash-limit.com',
+    });
+    const patientIds: string[] = [];
+    for (const n of [1, 2, 3]) {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/patients')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({
+          firstName: `Paciente ${n}`,
+          lastName: 'Límite',
+          docType: 'CC',
+          docNumber: `DASH-L-00${n}`,
+          sex: 'F',
+        })
+        .expect(201);
+      patientIds.push((res.body as PatientResponseBody).id);
+    }
+    // Tres citas futuras creadas en orden inverso a su inicio.
+    const created: AppointmentResponseBody[] = [];
+    for (const days of [9, 7, 3]) {
+      const start = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/appointments')
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({
+          patientId: patientIds[created.length],
+          providerId: clinic.userId,
+          start: start.toISOString(),
+          end: new Date(start.getTime() + 30 * 60 * 1000).toISOString(),
+        })
+        .expect(201);
+      created.push(res.body as AppointmentResponseBody);
+    }
+
+    const dashRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/dashboard?from=${FROM}&to=${TO}&currency=USD&upcomingLimit=2`,
+      )
+      .set('X-Tenant-Host', hostFor(subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    const dash = dashRes.body as DashboardResponseBody;
+    expect(dash.upcomingAppointments.map((a) => a.id)).toEqual([
+      created[2].id,
+      created[1].id,
+    ]);
+    expect(dash.patientCount).toBe(3);
+
+    const tooMany = await request(app.getHttpServer())
+      .get(
+        `/api/v1/dashboard?from=${FROM}&to=${TO}&currency=USD&upcomingLimit=51`,
+      )
+      .set('X-Tenant-Host', hostFor(subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(400);
+    expect(JSON.stringify(tooMany.body)).toContain(
+      'upcomingLimit admite hasta 50.',
+    );
+  });
 });

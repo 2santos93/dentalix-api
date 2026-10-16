@@ -33,6 +33,12 @@ export interface ListAppointmentsByRangeParams {
   providerId?: string;
 }
 
+export interface ListUpcomingAppointmentsParams {
+  from: Date;
+  to: Date;
+  limit: number;
+}
+
 export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
 
 export interface AppointmentRepository {
@@ -44,6 +50,14 @@ export interface AppointmentRepository {
    * optionally narrowed to a single provider, ordered by `start` ASC.
    */
   listByRange(params: ListAppointmentsByRangeParams): Promise<Appointment[]>;
+
+  /**
+   * Como `listByRange` sin profesional, pero cortado EN LA BD a las primeras
+   * `limit` citas por `start` ASC (DX-043): lo sirven
+   * `appointments_tenant_start_live_idx` (consolidado) y
+   * `appointments_tenant_location_start_idx` (con sede).
+   */
+  listUpcoming(params: ListUpcomingAppointmentsParams): Promise<Appointment[]>;
 
   /**
    * Non-deleted, non-CANCELLED appointments for `providerId` whose
