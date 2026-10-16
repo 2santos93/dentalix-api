@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { currentRequestId } from '../observability/request-context';
 
 /**
  * Global filter that turns a Prisma **P2002 unique-constraint violation** into
@@ -118,6 +119,8 @@ interface ErrorBody {
   statusCode: number;
   error: string;
   message: string;
+  /** Solo en los 500 (DX-023): para encontrar la petición en el log. */
+  requestId?: string;
 }
 
 // Respuestas GENÉRICAS para violaciones de reglas de la base (DX-042). Nunca
@@ -207,6 +210,21 @@ export function redactedPrismaMessage(message: string): string {
     .slice(0, 1000);
 }
 
+/**
+ * Stack de un error de Prisma apto para el log (DX-023): la cabecera con el
+ * mensaje ya redactado y solo los marcos `at ...`. El `stack` original repite
+ * el mensaje crudo, con el DETAIL de Postgres, así que no se usa tal cual.
+ */
+export function redactedPrismaStack(error: Error): string {
+  const frames = (error.stack ?? '')
+    .split('\n')
+    .filter((line) => /^\s+at /.test(line));
+  return [
+    `${error.name}: ${redactedPrismaMessage(error.message)}`,
+    ...frames,
+  ].join('\n');
+}
+
 @Catch(
   Prisma.PrismaClientKnownRequestError,
   Prisma.PrismaClientUnknownRequestError,
@@ -261,7 +279,9 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     // mensaje para poder diagnosticarlo, pero sin el DETAIL (lleva datos).
     this.logger.error(
       `Prisma error ${prismaCode ?? sqlState ?? 'desconocido'}: ${redactedPrismaMessage(exception.message)}`,
+      redactedPrismaStack(exception),
     );
-    send(INTERNAL_ERROR);
+    const requestId = currentRequestId();
+    send(requestId ? { ...INTERNAL_ERROR, requestId } : INTERNAL_ERROR);
   }
 }
