@@ -51,6 +51,7 @@ model User {
 
   privacyPoliciesPublished PrivacyPolicyVersion[]
   dataConsentsRecorded     DataProcessingConsent[]
+  perioExamsPerformed      PerioExam[]
 
   @@map("users")
 }
@@ -197,6 +198,7 @@ model Patient {
   treatmentPlans         TreatmentPlan[]
   dataProcessingConsents DataProcessingConsent[]
   consents               PatientConsent[]
+  perioExams             PerioExam[]
   country                Country?                @relation(fields: [countryCode], references: [code])
   city                   City?                   @relation(fields: [cityId], references: [id])
 
@@ -1011,4 +1013,93 @@ model PatientConsent {
   @@index([tenantId, templateId])
   @@index([tenantId, treatmentPlanId, patientId])
   @@map("patient_consents")
+}
+
+// ---------------------------------------------------------------------------
+// Periodontograma (DX-007). Un examen por fecha; las medidas cuelgan de él por
+// (diente FDI, sitio). Convención de recesión: `recessionMm` POSITIVO = el
+// margen gingival está APICAL a la unión amelocementaria (recesión visible);
+// NEGATIVO = margen coronal a la UAC (agrandamiento / pseudobolsa). Así el
+// nivel de inserción clínica es NIC (CAL) = sondaje + recesión, que se CALCULA
+// (no se persiste). Un examen FINAL es inmutable (app: 409; base: trigger).
+// ---------------------------------------------------------------------------
+enum PerioExamStatus {
+  DRAFT
+  FINAL
+}
+
+/// Sitios de sondaje: vestibulares MB, B, DB y linguales/palatinos ML, L, DL.
+enum PerioSite {
+  MB
+  B
+  DB
+  ML
+  L
+  DL
+}
+
+model PerioExam {
+  id          String          @id @default(uuid()) @db.Uuid
+  tenantId    String          @db.Uuid
+  patientId   String          @db.Uuid
+  // Usuario que realiza el examen (sale del token, nunca del cuerpo).
+  providerId  String          @db.Uuid
+  examDate    DateTime        @db.Date
+  notes       String?
+  status      PerioExamStatus @default(DRAFT)
+  finalizedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  // Solo un DRAFT se retira (borrado blando, convención de Dentalix).
+  deletedAt   DateTime?
+
+  // FK COMPUESTA (SEC-004): el paciente es del MISMO tenant.
+  patient       Patient             @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  provider      User                @relation(fields: [providerId], references: [id])
+  siteMeasures  PerioSiteMeasure[]
+  toothMeasures PerioToothMeasure[]
+
+  // Destino de las FK compuestas de las medidas.
+  @@unique([tenantId, id], map: "perio_exams_tenant_id_key")
+  // Histórico del paciente, más reciente primero.
+  @@index([tenantId, patientId, examDate(sort: Desc)])
+  @@index([providerId])
+  @@map("perio_exams")
+}
+
+model PerioSiteMeasure {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  examId      String    @db.Uuid
+  toothFdi    Int       @db.SmallInt
+  site        PerioSite
+  // 0..19 mm
+  probingMm   Int?      @db.SmallInt
+  // -5..19 mm, positivo = recesión (ver convención arriba).
+  recessionMm Int?      @db.SmallInt
+  // Grado de furca 0..3.
+  furcation   Int?      @db.SmallInt
+  // Bitmask: BOP=1 | SUP=2 | PLAQ=4 | CALC=8.
+  flags       Int       @default(0) @db.SmallInt
+
+  exam PerioExam @relation(fields: [tenantId, examId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, examId, toothFdi, site], map: "perio_site_measures_exam_tooth_site_key")
+  @@map("perio_site_measures")
+}
+
+model PerioToothMeasure {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @db.Uuid
+  examId   String  @db.Uuid
+  toothFdi Int     @db.SmallInt
+  // Movilidad 0..3 (Miller).
+  mobility Int?    @db.SmallInt
+  // Diente omitido (ausente / no sondable): fuera de los índices.
+  skipped  Boolean @default(false)
+
+  exam PerioExam @relation(fields: [tenantId, examId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, examId, toothFdi], map: "perio_tooth_measures_exam_tooth_key")
+  @@map("perio_tooth_measures")
 }

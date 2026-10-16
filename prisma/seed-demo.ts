@@ -44,6 +44,11 @@ import { RecordInventoryMovementUseCase } from '../src/modules/inventory/applica
 import { CreateConsentTemplateUseCase } from '../src/modules/consents/application/use-cases/consent-templates.use-cases';
 import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import {
+  CreatePerioExamUseCase,
+  FinalizePerioExamUseCase,
+  SavePerioMeasuresUseCase,
+} from '../src/modules/periodontal/application/use-cases/perio-exams.use-cases';
+import {
   DemoLocationKey,
   DEMO_TIMEZONE,
   daysAgoAt,
@@ -53,6 +58,8 @@ import {
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
   DEMO_CONSENT_TEMPLATES,
+  DEMO_PERIO,
+  demoPerioMeasures,
   DEMO_CURRENCY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
@@ -465,6 +472,10 @@ class DemoSeeder {
       this.createConsents(ownerId, patientIds, dentists),
     );
 
+    await this.inTenant(tenantId, undefined, () =>
+      this.createPerioExams(patientIds, dentists),
+    );
+
     return this.requestConfirmations(tenantId, receptionId);
   }
 
@@ -872,6 +883,43 @@ class DemoSeeder {
         userAgent: 'seed:demo',
       },
     );
+  }
+
+  /**
+   * DX-007: dos exámenes periodontales FINAL del mismo paciente (inicial hace
+   * ~6 meses y control reciente, mejor), por los mismos casos de uso que la
+   * API, para enseñar el histórico y la comparación.
+   */
+  private async createPerioExams(
+    patientIds: string[],
+    dentists: string[],
+  ): Promise<void> {
+    const patientId = patientIds[DEMO_PERIO.patientIndex];
+    const providerId = dentists[DEMO_PERIO.dentistIndex];
+    const dayFormat = new Intl.DateTimeFormat('en-CA', {
+      timeZone: DEMO_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    for (const spec of DEMO_PERIO.exams) {
+      const exam = await this.use(CreatePerioExamUseCase).execute(
+        patientId,
+        {
+          examDate: dayFormat.format(
+            daysAgoAt(this.now, spec.daysAgo, 12 * 60),
+          ),
+          notes: spec.notes,
+        },
+        providerId,
+      );
+      await this.use(SavePerioMeasuresUseCase).execute(
+        patientId,
+        exam.id,
+        demoPerioMeasures(spec.phase),
+      );
+      await this.use(FinalizePerioExamUseCase).execute(patientId, exam.id);
+    }
   }
 
   private async createInventory(
