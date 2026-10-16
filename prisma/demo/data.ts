@@ -1272,3 +1272,51 @@ export const DEMO_PRIVACY_POLICY = {
   marketingText:
     'Autorizo recibir comunicaciones comerciales (promociones, campañas y recordatorios no clínicos) por teléfono, WhatsApp o correo. Puedo revocarlo en cualquier momento.',
 };
+
+// DX-006: plantillas de consentimiento informado de la demo. Textos de
+// ejemplo, redactados para probar el flujo; cada clínica debe revisarlos con su
+// asesor legal antes de usarlos de verdad.
+export interface DemoConsentTemplate {
+  title: string;
+  body: string;
+}
+
+export const DEMO_CONSENT_TEMPLATES: readonly DemoConsentTemplate[] = [
+  {
+    title: 'Consentimiento informado — Exodoncia',
+    body: [
+      'Yo, {{paciente}}, identificado(a) con {{documento}}, autorizo a {{profesional}}, de {{clinica}}, a realizar el siguiente procedimiento: {{tratamiento}}.',
+      'Se me ha explicado que la exodoncia consiste en la extracción del diente y que puede presentar dolor, inflamación, sangrado, infección, alveolitis, lesión de dientes vecinos o adormecimiento temporal o permanente del labio o la lengua.',
+      'He podido hacer preguntas, se me han explicado las alternativas (incluida la de no tratarme) y entiendo que puedo revocar este consentimiento antes del procedimiento.',
+      'Fecha: {{fecha}}.',
+    ].join('\n\n'),
+  },
+  {
+    title: 'Consentimiento informado — Endodoncia',
+    body: [
+      'Yo, {{paciente}}, identificado(a) con {{documento}}, autorizo a {{profesional}}, de {{clinica}}, a realizar el tratamiento de conductos: {{tratamiento}}.',
+      'Se me ha explicado que el tratamiento busca conservar el diente, que puede requerir varias citas y que existen riesgos como dolor posoperatorio, fractura de instrumentos, perforaciones o la necesidad de retratamiento o extracción si no hay éxito.',
+      'Entiendo que el diente tratado debe restaurarse después (resina o corona) para evitar fracturas.',
+      'Fecha: {{fecha}}.',
+    ].join('\n\n'),
+  },
+  {
+    title: 'Consentimiento informado — Blanqueamiento dental',
+    body: [
+      'Yo, {{paciente}}, identificado(a) con {{documento}}, autorizo a {{profesional}}, de {{clinica}}, a realizar un blanqueamiento dental: {{tratamiento}}.',
+      'Se me ha explicado que el resultado varía en cada persona, que no aclara restauraciones ni coronas, y que puede producir sensibilidad dental o irritación de las encías de forma temporal.',
+      'Me comprometo a seguir las indicaciones de cuidado posteriores al tratamiento.',
+      'Fecha: {{fecha}}.',
+    ].join('\n\n'),
+  },
+];
+
+/**
+ * El consentimiento firmado de la demo: el paciente del plan de implante (que
+ * incluye una exodoncia del 36) firma la plantilla de exodoncia con su plan.
+ */
+export const DEMO_SIGNED_CONSENT = {
+  patientIndex: 1,
+  dentistIndex: 0,
+  templateIndex: 0,
+} as const;

@@ -32,6 +32,10 @@ export const CATALOG_READ_ROLES: ClinicRole[] = [
 // Catálogo dental — crear/editar (POST/PATCH).
 export const CATALOG_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Plantillas de consentimiento (DX-006) — crear/editar/desactivar: solo
+// gestión. Leerlas y firmar consentimientos: CLINICAL_ROLES (recepción no).
+export const CONSENT_TEMPLATE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Agenda de citas (Fase 3): todas las rutas, los 4 roles — recepción SÍ
 // gestiona la agenda (es su trabajo), a diferencia de la historia clínica.
 // Mismo array que PATIENT_ROLES (ver docs/plans/2026-07-23-fase3-appointments.md).

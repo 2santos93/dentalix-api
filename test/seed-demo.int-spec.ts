@@ -34,6 +34,8 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  'patient_consents',
+  'consent_templates',
   'installments',
   'payment_plans',
   'payments',
@@ -290,6 +292,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-037: política v1 y la autorización de cada alta (≥ 2 filas por paciente).
     expect(firstCounts.privacy_policy_versions).toBe(1);
     expect(firstCounts.data_processing_consents).toBeGreaterThanOrEqual(50);
+    // DX-006: 3 plantillas y 1 consentimiento firmado.
+    expect(firstCounts.consent_templates).toBe(3);
+    expect(firstCounts.patient_consents).toBe(1);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );
