@@ -66,6 +66,11 @@ export interface AppointmentUpdate {
   appointment: Appointment;
   /** Id de la entrada OPEN creada ahora; `null` si no se creó (o ya existía). */
   waitlistEntryId: string | null;
+  /**
+   * Id de la entrada que se reabrió: la cita se reactivó (cerrando su entrada)
+   * y ahora vuelve a cancelarse o no-show; `null` si no hubo que reabrir.
+   */
+  reopenedWaitlistEntryId: string | null;
   /** Id de la entrada que se cerró al reactivar la cita; `null` si no había. */
   resolvedWaitlistEntryId: string | null;
 }

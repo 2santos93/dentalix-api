@@ -219,11 +219,13 @@ export class UpdateAppointmentUseCase {
 
     let updated: Appointment;
     let waitlistEntryId: string | null;
+    let reopenedWaitlistEntryId: string | null;
     let resolvedWaitlistEntryId: string | null;
     try {
       ({
         appointment: updated,
         waitlistEntryId,
+        reopenedWaitlistEntryId,
         resolvedWaitlistEntryId,
       } = await this.repo.update(id, effectivePatch));
     } catch (error) {
@@ -240,6 +242,15 @@ export class UpdateAppointmentUseCase {
     if (waitlistEntryId !== null && auditContext) {
       await this.recordWaitlistEntry(updated, waitlistEntryId, auditContext);
     }
+    if (reopenedWaitlistEntryId !== null && auditContext) {
+      await this.recordWaitlistEntry(
+        updated,
+        reopenedWaitlistEntryId,
+        auditContext,
+        'UPDATE',
+        'WAITLIST_REOPENED',
+      );
+    }
     if (resolvedWaitlistEntryId !== null && auditContext) {
       await this.recordWaitlistEntry(
         updated,
@@ -253,8 +264,9 @@ export class UpdateAppointmentUseCase {
   }
 
   /**
-   * `audit_event` del alta automática en «Pendientes por agendar» (DX-122) o
-   * de su cierre al reactivar la cita (revisión H1).
+   * `audit_event` del alta automática en «Pendientes por agendar» (DX-122),
+   * de su cierre al reactivar la cita (revisión H1) o de su reapertura si la
+   * cita vuelve a cancelarse.
    */
   private recordWaitlistEntry(
     appointment: Appointment,

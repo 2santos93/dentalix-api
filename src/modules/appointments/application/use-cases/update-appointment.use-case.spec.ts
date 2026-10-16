@@ -87,6 +87,7 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
         ? update(id, patch).then((appointment) => ({
             appointment,
             waitlistEntryId: null,
+            reopenedWaitlistEntryId: null,
             resolvedWaitlistEntryId: null,
           }))
         : Promise.reject(new Error('not implemented in this fake')),
@@ -1099,6 +1100,74 @@ describe('UpdateAppointmentUseCase', () => {
         ]);
       },
     );
+
+    it('cancelarla otra vez tras reactivarla reabre la misma entrada y lo audita', async () => {
+      const waitlist = new InMemoryWaitlistRepository();
+      const repo = new InMemoryAppointmentRepository(waitlist);
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const drafts: AuditEventDraft[] = [];
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(drafts),
+        makeBlocks(),
+      );
+
+      await uc.execute(
+        existing.id,
+        { status: AppointmentStatus.CANCELLED },
+        ctx,
+      );
+      await uc.execute(
+        existing.id,
+        { status: AppointmentStatus.SCHEDULED },
+        ctx,
+      );
+      await uc.execute(existing.id, { status: AppointmentStatus.NO_SHOW }, ctx);
+
+      expect(waitlist.rows).toEqual([
+        expect.objectContaining({
+          status: 'OPEN',
+          resolvedAppointmentId: null,
+          resolvedById: null,
+          resolvedAt: null,
+        }),
+      ]);
+      expect(
+        drafts
+          .filter((d) => d.resourceType === 'WAITLIST_ENTRY')
+          .map((d) => [d.action, d.metadata]),
+      ).toEqual([
+        ['CREATE', { reason: 'WAITLIST_FROM_APPOINTMENT' }],
+        ['UPDATE', { reason: 'APPOINTMENT_REACTIVATED' }],
+        ['UPDATE', { reason: 'WAITLIST_REOPENED' }],
+      ]);
+    });
+
+    it('una entrada descartada o agendada con otra cita no se reabre', async () => {
+      const waitlist = new InMemoryWaitlistRepository();
+      const repo = new InMemoryAppointmentRepository(waitlist);
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(),
+      );
+
+      await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
+      waitlist.markScheduled(waitlist.rows[0].id, 'otra-cita', null);
+      await uc.execute(existing.id, { status: AppointmentStatus.SCHEDULED });
+      await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
+      expect(waitlist.rows).toEqual([
+        expect.objectContaining({
+          status: 'SCHEDULED',
+          resolvedAppointmentId: 'otra-cita',
+        }),
+      ]);
+    });
 
     it('pasar de cancelada a no-show no la cierra; editar notas tampoco', async () => {
       const waitlist = new InMemoryWaitlistRepository();

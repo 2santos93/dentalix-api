@@ -6,23 +6,33 @@ import { Prisma, WaitlistStatus } from '@prisma/client';
  * cita y el de la lista se confirman o se deshacen juntos.
  */
 
+/** Resultado del alta automática: la entrada y si se reabrió en vez de crearse. */
+export interface EnqueuedWaitlistEntry {
+  id: string;
+  reopened: boolean;
+}
+
 /**
  * Alta automática de la cita `appointmentId` (recién CANCELLED o NO_SHOW) en
  * la lista, con su sede, paciente, profesional, tipo y duración. Idempotente:
  * el único parcial `("tenantId", "sourceAppointmentId")` hace que una segunda
  * llamada (el estado cambia otra vez, o dos peticiones compiten) no inserte
- * nada. Devuelve el id nuevo, o `null` si la cita ya tenía su entrada.
+ * nada. Si la entrada existente se cerró porque la propia cita se reactivó
+ * (SCHEDULED resuelta por su cita de origen), vuelve a OPEN: el paciente
+ * vuelve a estar pendiente. Una entrada descartada o agendada con otra cita
+ * no se toca. Devuelve la entrada creada o reabierta, o `null`.
  *
- * SQL a mano porque Prisma no expresa `INSERT … SELECT … ON CONFLICT DO
- * NOTHING` contra un índice parcial. Corre bajo la RLS del tenant: la cita y
- * la fila nueva son de `app.current_tenant`.
+ * SQL a mano porque Prisma no expresa `INSERT … SELECT … ON CONFLICT`
+ * contra un índice parcial; `xmax = 0` distingue la fila insertada de la
+ * actualizada. Corre bajo la RLS del tenant: la cita y la fila son de
+ * `app.current_tenant`.
  */
 export async function enqueueWaitlistFromAppointment(
   tx: Prisma.TransactionClient,
   appointmentId: string,
   createdById: string | null,
-): Promise<string | null> {
-  const rows = await tx.$queryRaw<{ id: string }[]>`
+): Promise<EnqueuedWaitlistEntry | null> {
+  const rows = await tx.$queryRaw<{ id: string; inserted: boolean }[]>`
     INSERT INTO "appointment_waitlist" (
       "id", "tenantId", "locationId", "patientId", "sourceAppointmentId",
       "providerId", "appointmentTypeId", "durationMinutes", "createdById",
@@ -38,9 +48,16 @@ export async function enqueueWaitlistFromAppointment(
        AND a."deletedAt" IS NULL
     ON CONFLICT ("tenantId", "sourceAppointmentId")
       WHERE "sourceAppointmentId" IS NOT NULL
-      DO NOTHING
-    RETURNING "id"`;
-  return rows[0]?.id ?? null;
+      DO UPDATE SET "status" = 'OPEN',
+                    "resolvedAt" = NULL,
+                    "resolvedAppointmentId" = NULL,
+                    "resolvedById" = NULL,
+                    "updatedAt" = CURRENT_TIMESTAMP
+       WHERE "appointment_waitlist"."status" = 'SCHEDULED'
+         AND "appointment_waitlist"."resolvedAppointmentId" = "appointment_waitlist"."sourceAppointmentId"
+    RETURNING "id", (xmax = 0) AS "inserted"`;
+  const row = rows[0];
+  return row ? { id: row.id, reopened: !row.inserted } : null;
 }
 
 /**

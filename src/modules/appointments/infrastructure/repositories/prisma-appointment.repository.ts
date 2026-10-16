@@ -297,7 +297,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       }
       // DX-122: cancelada o no-show → «Pendientes por agendar», en esta misma
       // transacción (si algo falla, ni la cita cambia ni aparece la entrada).
-      const waitlistEntryId = enqueueWaitlist
+      const enqueued = enqueueWaitlist
         ? await enqueueWaitlistFromAppointment(
             tx,
             id,
@@ -314,7 +314,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         : null;
       return {
         appointment: mapToEntity(appointment),
-        waitlistEntryId,
+        waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
+        reopenedWaitlistEntryId:
+          enqueued && enqueued.reopened ? enqueued.id : null,
         resolvedWaitlistEntryId,
       };
     });

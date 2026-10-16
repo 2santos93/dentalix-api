@@ -141,14 +141,32 @@ export class InMemoryWaitlistRepository implements WaitlistRepository {
     return Promise.resolve(row);
   }
 
-  /** Alta automática idempotente: el id nuevo, o `null` si la cita ya tenía. */
+  /**
+   * Alta automática idempotente (como el SQL): la entrada nueva, la reabierta
+   * si la cerró la reactivación de su propia cita, o `null`.
+   */
   enqueueFromAppointment(
     appointment: WaitlistSourceAppointment,
     createdById: string | null,
-  ): string | null {
-    if (this.rows.some((r) => r.sourceAppointmentId === appointment.id))
-      return null;
-    return this.seed({
+  ): { id: string; reopened: boolean } | null {
+    const existing = this.rows.find(
+      (r) => r.sourceAppointmentId === appointment.id,
+    );
+    if (existing) {
+      if (
+        existing.status !== WaitlistStatus.SCHEDULED ||
+        existing.resolvedAppointmentId !== appointment.id
+      )
+        return null;
+      Object.assign(existing, {
+        status: WaitlistStatus.OPEN,
+        resolvedAppointmentId: null,
+        resolvedById: null,
+        resolvedAt: null,
+      });
+      return { id: existing.id, reopened: true };
+    }
+    const created = this.seed({
       locationId: appointment.locationId,
       patientId: appointment.patientId,
       sourceAppointmentId: appointment.id,
@@ -164,7 +182,8 @@ export class InMemoryWaitlistRepository implements WaitlistRepository {
         appointment.end,
       ),
       createdById,
-    }).id;
+    });
+    return { id: created.id, reopened: false };
   }
 
   /** La cita de origen se reactivó: su entrada OPEN se cierra con ella. */

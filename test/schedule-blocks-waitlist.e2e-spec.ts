@@ -639,6 +639,14 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       await expect(
         auditCount('WAITLIST_ENTRY', 'UPDATE'),
       ).resolves.toBeGreaterThanOrEqual(2);
+
+      // Y si vuelve a cancelarse, el paciente vuelve a la lista (misma entrada).
+      await patch('CANCELLED');
+      const again = (await waitlist()).items.filter(
+        (e) => e.sourceAppointmentId === id,
+      );
+      expect(again).toHaveLength(1);
+      expect(again[0]).toMatchObject({ status: 'OPEN' });
     });
 
     it('el alta manual no duplica a un paciente que ya está en pendientes (409)', async () => {
@@ -669,10 +677,11 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     });
 
     it('endurecer un bloqueo con citas dentro pide confirmación', async () => {
+      await book(dentist2.userId, THU, '18:00', 0).expect(201);
       const lunch = await block(reception.token, {
         providerId: dentist2.userId,
-        start: local(THU, '17:00'),
-        end: local(THU, '18:00'),
+        start: local(THU, '18:00'),
+        end: local(THU, '19:00'),
         kind: 'LUNCH',
         allowsBooking: true,
         confirmAffected: true,

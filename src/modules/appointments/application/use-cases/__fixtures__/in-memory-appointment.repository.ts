@@ -228,7 +228,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     Object.assign(row, definedPatch, {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
-    const waitlistEntryId =
+    const enqueued =
       patch.enqueueWaitlist && this.waitlist
         ? this.waitlist.enqueueFromAppointment(
             row,
@@ -244,7 +244,9 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         : null;
     return Promise.resolve({
       appointment: this.toEntity(row),
-      waitlistEntryId,
+      waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
+      reopenedWaitlistEntryId:
+        enqueued && enqueued.reopened ? enqueued.id : null,
       resolvedWaitlistEntryId,
     });
   }
