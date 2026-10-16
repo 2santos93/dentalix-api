@@ -33,6 +33,8 @@ model Tenant {
   outboundMessages         OutboundMessage[]
   scheduleBlocks           ScheduleBlock[]
   waitlistEntries          AppointmentWaitlistEntry[]
+  reminderSettings         LocationReminderSettings[]
+  appointmentReminders     AppointmentReminder[]
 
   @@map("tenants")
 }
@@ -113,6 +115,7 @@ model Location {
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
   scheduleBlocks     ScheduleBlock[]
   waitlistEntries    AppointmentWaitlistEntry[]
+  reminderSettings   LocationReminderSettings[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -536,6 +539,7 @@ model Appointment {
   // no-show, y la que se resolvió agendando esta cita.
   waitlistSourced  AppointmentWaitlistEntry[] @relation("WaitlistSource")
   waitlistResolved AppointmentWaitlistEntry[] @relation("WaitlistResolved")
+  reminders        AppointmentReminder[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -1953,7 +1957,78 @@ model OutboundMessage {
   // FK COMPUESTA (SEC-004): la cita tiene que ser del MISMO tenant.
   appointment Appointment? @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Cascade)
 
+  reminders AppointmentReminder[]
+
+  // Destino de la FK compuesta de appointment_reminders (DX-026).
+  @@unique([tenantId, id], map: "outbound_messages_tenant_id_key")
   @@index([tenantId, appointmentId, createdAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("outbound_messages")
+}
+
+/// DX-026: ajustes de recordatorio automático por email de una sede. Sin fila
+/// = desactivado. `leadHours`: hasta 3 antelaciones en horas (1..168), de
+/// mayor a menor; activo exige al menos una (CHECK).
+model LocationReminderSettings {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  locationId  String   @db.Uuid
+  enabled     Boolean  @default(false)
+  leadHours   Int[]    @default([])
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // FK COMPUESTA (SEC-004): la sede tiene que ser del MISMO tenant.
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, locationId], map: "location_reminder_settings_tenant_location_key")
+  @@map("location_reminder_settings")
+}
+
+enum AppointmentReminderStatus {
+  SENDING
+  SENT
+  SKIPPED
+}
+
+enum AppointmentReminderSkipReason {
+  NO_EMAIL
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+  RESCHEDULED
+  DELETED
+  DISABLED
+  TOO_LATE
+}
+
+/// DX-026: un recordatorio de una cita por (antelación, hora de inicio). Guarda
+/// el id del mensaje en outbound_messages, nunca su cuerpo. SENDING solo dura
+/// mientras el handler lo entrega a email_outbox.
+model AppointmentReminder {
+  id                String                         @id @default(uuid()) @db.Uuid
+  tenantId          String                         @db.Uuid
+  appointmentId     String                         @db.Uuid
+  leadHours         Int
+  appointmentStart  DateTime
+  status            AppointmentReminderStatus      @default(SENDING)
+  skipReason        AppointmentReminderSkipReason?
+  outboundMessageId String?                        @db.Uuid
+  sentAt            DateTime?
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // FK COMPUESTA (SEC-004): la cita tiene que ser del MISMO tenant.
+  appointment     Appointment      @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Cascade)
+  // FK COMPUESTA al mensaje del registro de salientes, del MISMO tenant.
+  outboundMessage OutboundMessage? @relation(fields: [tenantId, outboundMessageId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, appointmentId, leadHours, appointmentStart], map: "appointment_reminders_tenant_appointment_lead_start_key")
+  // PARCIAL (WHERE "outboundMessageId" IS NOT NULL), no declarable en Prisma:
+  //   appointment_reminders_tenant_outbound_idx ("tenantId", "outboundMessageId")
+  //     -> lado hijo de la FK compuesta a outbound_messages.
+  @@map("appointment_reminders")
 }
