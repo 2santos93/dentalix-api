@@ -497,6 +497,32 @@ describe('Reglas de dominio en la BD (DX-042, int)', () => {
       );
     });
 
+    it('bloquea en ACCESS EXCLUSIVE, desde el principio, cada tabla que recibe un CHECK (sin escalar el lock)', () => {
+      // ADD CONSTRAINT CHECK pide ACCESS EXCLUSIVE. Si antes solo se tomó
+      // SHARE ROW EXCLUSIVE, la migración ESCALA el lock: una transacción de la
+      // app que ya leyó la tabla (ACCESS SHARE) y luego quiere escribir
+      // (ROW EXCLUSIVE) espera a la migración, y la migración espera a que esa
+      // transacción suelte su ACCESS SHARE → interbloqueo.
+      const preflightAt = CHECKS_MIGRATION.indexOf(PREFLIGHT);
+      const head = CHECKS_MIGRATION.slice(0, preflightAt);
+      const exclusive = [
+        ...head.matchAll(/^LOCK TABLE ([^;]+?)\s+IN ACCESS EXCLUSIVE MODE;/gm),
+      ]
+        .flatMap((m) => m[1].split(','))
+        .map((t) => t.trim().replace(/"/g, ''));
+      const checked = [
+        ...CHECKS_MIGRATION.matchAll(
+          /^ALTER TABLE "([a-z_]+)"\s+ADD CONSTRAINT "[a-z_]+" CHECK/gm,
+        ),
+      ].map((m) => m[1]);
+      expect(checked.length).toBeGreaterThanOrEqual(8);
+      for (const table of checked) {
+        expect(exclusive).toContain(table);
+      }
+      // Y sin esperar indefinidamente con todo el tráfico encolado detrás.
+      expect(head).toMatch(/^SET LOCAL lock_timeout = '\d+s';$/m);
+    });
+
     it('con datos válidos, la comprobación pasa', async () => {
       await raw.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(ROW_SECURITY_OFF);
@@ -571,6 +597,13 @@ describe('Reglas de dominio en la BD (DX-042, int)', () => {
 
   describe('comprobación previa de 20261016131000_currency_fks', () => {
     const PREFLIGHT = preflightOf(FK_MIGRATION);
+
+    it('pone lock_timeout antes de bloquear las tablas', () => {
+      const firstLockAt = FK_MIGRATION.search(/^LOCK TABLE /m);
+      expect(FK_MIGRATION.slice(0, firstLockAt)).toMatch(
+        /^SET LOCAL lock_timeout = '\d+s';$/m,
+      );
+    });
 
     it('con datos válidos, la comprobación pasa', async () => {
       expect(PREFLIGHT).toContain('RAISE EXCEPTION');

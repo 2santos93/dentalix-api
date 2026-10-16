@@ -23,6 +23,9 @@
 
 SET LOCAL row_security = off;
 
+-- ADD FOREIGN KEY toma SHARE ROW EXCLUSIVE en las dos tablas: el lock de abajo
+-- es el mismo, asi que no escala. lock_timeout: ver 20261016130000_domain_checks.
+SET LOCAL lock_timeout = '10s';
 LOCK TABLE "currencies", "treatment_plans", "payments", "payment_plans"
   IN SHARE ROW EXCLUSIVE MODE;
 

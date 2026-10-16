@@ -44,14 +44,22 @@
 -- anade constraints/indices. Grants/RLS sin cambios (corre con el owner
 -- "dentalix", DIRECT_URL).
 --
--- Transaccion y locks: Prisma ejecuta el script como UNA transaccion. Primero
--- se toman locks SHARE ROW EXCLUSIVE (dejan leer, bloquean escrituras hasta el
--- COMMIT) sobre todas las tablas, en orden fijo, para que nadie cuele una fila
--- invalida entre la comprobacion previa y el ADD CONSTRAINT. ADD CONSTRAINT
--- CHECK escala a ACCESS EXCLUSIVE mientras recorre la tabla; hoy son tablas
--- pequenas y dura milisegundos. Con volumen: ADD CONSTRAINT ... NOT VALID +
--- VALIDATE CONSTRAINT en otra migracion, y CREATE UNIQUE INDEX CONCURRENTLY
--- fuera de transaccion (ver 20261015130000_tenant_composite_fks).
+-- Transaccion y locks: Prisma ejecuta el script como UNA transaccion. Antes de
+-- la comprobacion previa se bloquean todas las tablas, en orden fijo, para que
+-- nadie cuele una fila invalida entre la comprobacion y el ADD CONSTRAINT:
+--  * las que reciben un CHECK, directamente en ACCESS EXCLUSIVE, que es lo que
+--    pide ADD CONSTRAINT ... CHECK. Si se tomara antes un lock menor (SHARE ROW
+--    EXCLUSIVE) habria que ESCALARLO, y una transaccion de la app que ya leyo
+--    la tabla y luego quiere escribir en ella interbloquearia con la migracion.
+--    Durante esos milisegundos tampoco se lee de esas tablas;
+--  * tooth_records solo recibe un CREATE UNIQUE INDEX (lock SHARE): basta
+--    SHARE ROW EXCLUSIVE (deja leer, bloquea escrituras) y no escala.
+-- lock_timeout: si una transaccion larga retiene alguna tabla, la migracion
+-- falla limpia (sin cambios) en vez de esperar con TODO el trafico de la app
+-- encolado detras de su peticion de lock; basta con reintentar el deploy.
+-- Con volumen: ADD CONSTRAINT ... NOT VALID + VALIDATE CONSTRAINT en otra
+-- migracion, y CREATE UNIQUE INDEX CONCURRENTLY fuera de transaccion (ver
+-- 20261015130000_tenant_composite_fks).
 
 -- ---------------------------------------------------------------------------
 -- 0. row_security = off: con RLS FORCE la comprobacion contaria 0 filas en
@@ -64,10 +72,12 @@ SET LOCAL row_security = off;
 -- ---------------------------------------------------------------------------
 -- 0b. Locks (ver arriba).
 -- ---------------------------------------------------------------------------
+SET LOCAL lock_timeout = '10s';
 LOCK TABLE "dental_catalog_items", "treatment_plans", "treatment_plan_items",
   "payments", "payment_plans", "installments", "appointments",
-  "inventory_items", "inventory_movements", "tooth_records"
-  IN SHARE ROW EXCLUSIVE MODE;
+  "inventory_items", "inventory_movements"
+  IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE "tooth_records" IN SHARE ROW EXCLUSIVE MODE;
 
 -- ---------------------------------------------------------------------------
 -- 1. Pre-flight. Si alguna fila incumple una regla nueva, se aborta con el
