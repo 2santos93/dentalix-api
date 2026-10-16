@@ -33,6 +33,9 @@ export const DEFAULT_BUSINESS_HOURS: {
  * Siembra el horario por defecto de una sede recién creada, DENTRO de la
  * transacción que la creó (así una sede no puede quedar a medio configurar).
  *
+ * `timezone`: la del país de la sede (`timeZoneForCountry`, DX-097); sin
+ * ella, la zona por defecto.
+ *
  * Idempotente por el unique `(tenantId, locationId)`: si la sede ya tuviera
  * horario, no se toca.
  */
@@ -40,6 +43,7 @@ export async function seedDefaultBusinessHours(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationId: string,
+  timezone: string = DEFAULT_BUSINESS_HOURS_TIMEZONE,
 ): Promise<void> {
   const existing = await tx.locationSchedule.findFirst({
     where: { tenantId, locationId, deletedAt: null },
@@ -48,7 +52,7 @@ export async function seedDefaultBusinessHours(
   if (existing) return;
 
   const schedule = await tx.locationSchedule.create({
-    data: { tenantId, locationId, timezone: DEFAULT_BUSINESS_HOURS_TIMEZONE },
+    data: { tenantId, locationId, timezone },
     select: { id: true },
   });
   await tx.locationScheduleRange.createMany({
