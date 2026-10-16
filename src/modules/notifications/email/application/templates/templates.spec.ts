@@ -152,28 +152,60 @@ describe('plantillas reservadas para otras tareas', () => {
 
   it('appointment-reminder con y sin enlace de confirmación', () => {
     const base = {
-      patientName: 'Carolina Duque',
-      startsAtLabel: 'lunes 20 de octubre, 9:30 a. m.',
+      patientName: 'Carolina',
+      startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
       locationName: 'Sede Norte',
       locationAddress: 'Cra 15 # 93-60',
+      providerName: 'Dra. Laura Gómez',
       confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
     };
     const withLink = renderEmail('appointment-reminder', base, brand);
     expect(withLink.subject).toBe(
       'Recordatorio de tu cita en Sonrisas del Norte',
     );
+    expect(withLink.text).toContain('Hola, Carolina');
     expect(withLink.text).toContain(
-      'Te recordamos tu cita el lunes 20 de octubre, 9:30 a. m. en Sede Norte (Cra 15 # 93-60).',
+      'Te recordamos tu cita en Sonrisas del Norte.',
     );
+    expect(withLink.text).toContain(
+      'Fecha y hora: martes 20 de octubre de 2026 a las 9:30 a. m. (hora de la sede)',
+    );
+    expect(withLink.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');
+    expect(withLink.text).toContain('Profesional: Dra. Laura Gómez');
     expect(withLink.html).toContain('Confirmar o cancelar');
+    expect(withLink.html).toContain(
+      'href="https://demo.dentalix.app/confirmar/abc"',
+    );
 
     const noLink = renderEmail(
       'appointment-reminder',
-      { ...base, confirmUrl: null, locationAddress: null },
+      { ...base, confirmUrl: null, locationAddress: null, providerName: null },
       brand,
     );
     expect(noLink.html).not.toContain('<a href');
-    expect(noLink.text).toContain('en Sede Norte.');
+    expect(noLink.text).toContain('Sede: Sede Norte');
+    expect(noLink.text).not.toContain('Profesional');
+  });
+
+  it('appointment-reminder escapa lo variable y no lleva nada clínico', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      {
+        patientName: '<b>Ana</b>',
+        startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+        locationName: 'Sede <script>',
+        locationAddress: null,
+        providerName: 'Dr. "X"',
+        confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
+      },
+      brand,
+    );
+    expect(email.html).not.toContain('<b>Ana</b>');
+    expect(email.html).not.toContain('<script>');
+    expect(email.html).toContain('&lt;b&gt;Ana&lt;/b&gt;');
+    // Las variables de la plantilla no admiten motivo, notas ni tratamiento:
+    // el texto solo nombra fecha, sede, profesional y el enlace.
+    expect(email.text).not.toMatch(/motivo|tratamiento|diagn/i);
   });
 
   it('rechaza un idioma sin plantilla', () => {

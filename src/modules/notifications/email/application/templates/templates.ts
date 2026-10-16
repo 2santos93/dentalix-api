@@ -10,7 +10,7 @@ import {
   RegistrationNoticeEmailVars,
   RenderedEmail,
 } from '../../domain/email-message';
-import { renderLayout } from './layout';
+import { EmailBlock, renderLayout } from './layout';
 
 const PRODUCT_NAME = 'Dentalix';
 
@@ -118,22 +118,31 @@ function appointmentReminder(
   const where = vars.locationAddress
     ? `${vars.locationName} (${vars.locationAddress})`
     : vars.locationName;
+  const blocks: EmailBlock[] = [
+    { kind: 'paragraph', text: `Te recordamos tu cita en ${clinic}.` },
+    {
+      kind: 'paragraph',
+      text: `Fecha y hora: ${vars.startsAtLabel} (hora de la sede)`,
+    },
+    { kind: 'paragraph', text: `Sede: ${where}` },
+  ];
+  if (vars.providerName) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `Profesional: ${vars.providerName}`,
+    });
+  }
+  blocks.push({
+    kind: 'note',
+    text: vars.confirmUrl
+      ? 'Usa el botón para confirmarla o avisarnos si no puedes asistir.'
+      : 'Si no puedes asistir, avísanos con tiempo para darle el espacio a otro paciente.',
+  });
   return renderLayout({
     brand,
     subject: `Recordatorio de tu cita en ${clinic}`,
     heading: `Hola, ${vars.patientName}`,
-    blocks: [
-      {
-        kind: 'paragraph',
-        text: `Te recordamos tu cita el ${vars.startsAtLabel} en ${where}.`,
-      },
-      {
-        kind: 'note',
-        text: vars.confirmUrl
-          ? 'Usa el botón para confirmarla o avisarnos si no puedes asistir.'
-          : 'Si no puedes asistir, avísanos con tiempo para darle el espacio a otro paciente.',
-      },
-    ],
+    blocks,
     action: vars.confirmUrl
       ? { label: 'Confirmar o cancelar', url: vars.confirmUrl }
       : null,

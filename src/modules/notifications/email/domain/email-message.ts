@@ -60,12 +60,19 @@ export interface RegistrationNoticeEmailVars {
   loginUrl: string;
 }
 
+/**
+ * DX-026: recordatorio de cita. Solo lo logístico (cuándo, dónde, con quién y
+ * el enlace): ni motivo de consulta ni tratamiento, que son datos clínicos.
+ */
 export interface AppointmentReminderEmailVars {
+  /** Nombre de pila del paciente. */
   patientName: string;
-  /** Fecha y hora ya formateadas en la zona de la sede ("lunes 20 de octubre, 9:30 a. m."). */
+  /** Fecha y hora ya formateadas en la zona de la sede ("martes 20 de octubre de 2026 a las 9:30 a. m."). */
   startsAtLabel: string;
   locationName: string;
   locationAddress: string | null;
+  /** Profesional de la cita, o null si ya no se puede nombrar. */
+  providerName: string | null;
   /** Enlace de confirmación (DX-005), si se emitió uno. */
   confirmUrl: string | null;
 }
