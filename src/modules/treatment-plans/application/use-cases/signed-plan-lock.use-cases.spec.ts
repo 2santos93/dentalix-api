@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   CatalogKind,
+  ClinicRole,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
@@ -76,10 +77,16 @@ function setup(acceptance: typeof SIGNED | null) {
     add: new AddTreatmentPlanItemUseCase(repo, catalog()),
     update: new UpdateTreatmentPlanItemUseCase(repo, catalog()),
     remove: new RemoveTreatmentPlanItemUseCase(repo),
-    updatePlan: new UpdateTreatmentPlanUseCase(repo, whitelist),
+    updatePlan: new UpdateTreatmentPlanUseCase(
+      repo,
+      whitelist,
+      () => new Date('2026-10-16T15:00:00.000Z'),
+    ),
     get: new GetTreatmentPlanUseCase(repo),
   };
 }
+
+const DENTIST = { role: ClinicRole.DENTIST };
 
 describe('Descuento por ítem (DX-012)', () => {
   it('el total del plan es Σ(precio − descuento)', async () => {
@@ -127,10 +134,11 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
     await add.execute('plan1', { toothNumber: '21', catalogItemId: 'cat1' });
     await update.execute('item1', { price: 300, surfaces: ['MESIAL'] });
     await remove.execute('item1');
-    await updatePlan.execute('plan1', {
-      currency: 'EUR',
-      status: TreatmentPlanStatus.DRAFT,
-    });
+    await updatePlan.execute(
+      'plan1',
+      { currency: 'EUR', status: TreatmentPlanStatus.DRAFT },
+      DENTIST,
+    );
   });
 
   it('no admite ítems nuevos (409)', async () => {
@@ -173,19 +181,26 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
   it('el plan no cambia de moneda ni vuelve a borrador (409); sí se cierra y se anotan notas', async () => {
     const { updatePlan } = setup(SIGNED);
     await expect(
-      updatePlan.execute('plan1', { currency: 'EUR' }),
+      updatePlan.execute('plan1', { currency: 'EUR' }, DENTIST),
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
-      updatePlan.execute('plan1', { status: TreatmentPlanStatus.DRAFT }),
+      updatePlan.execute(
+        'plan1',
+        { status: TreatmentPlanStatus.DRAFT },
+        DENTIST,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
     // Repetir la moneda que ya tiene no es un cambio.
-    await updatePlan.execute('plan1', {
-      currency: 'usd',
-      notes: 'Seguimiento',
-    });
-    const closed = await updatePlan.execute('plan1', {
-      status: TreatmentPlanStatus.COMPLETED,
-    });
+    await updatePlan.execute(
+      'plan1',
+      { currency: 'usd', notes: 'Seguimiento' },
+      DENTIST,
+    );
+    const closed = await updatePlan.execute(
+      'plan1',
+      { status: TreatmentPlanStatus.COMPLETED },
+      DENTIST,
+    );
     expect(closed.status).toBe(TreatmentPlanStatus.COMPLETED);
   });
 

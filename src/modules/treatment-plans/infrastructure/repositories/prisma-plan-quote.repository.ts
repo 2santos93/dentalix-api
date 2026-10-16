@@ -14,6 +14,7 @@ import type {
   PlanQuoteRepository,
   PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
+import { lockPlanGroup, rejectOpenSiblings } from './plan-option-group';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
 const UNKNOWN_PROFESSIONAL = 'Profesional';
@@ -62,15 +63,19 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     const tenantId = this.requireTenantId();
     try {
       return await this.prisma.runWithTenant(async (tx) => {
-        // FOR UPDATE: una segunda firma concurrente espera aquí y luego ve la
-        // aceptación; un cambio de ítems concurrente espera en su trigger
+        // El plan tiene que ser de ESTE paciente; si no, 404 sin bloquear.
+        const owned = await tx.treatmentPlan.findFirst({
+          where: { id: planId, patientId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!owned) return { kind: 'NOT_FOUND' } as const;
+        // FOR UPDATE del plan y de las demás opciones de su grupo, en orden de
+        // id (DX-040): una segunda firma concurrente espera aquí y luego ve la
+        // aceptación; la aceptación de una hermana espera y luego ve este plan
+        // ya rechazado; un cambio de ítems concurrente espera en su trigger
         // (FOR SHARE del plan) y luego choca con ella.
-        const locked = await tx.$queryRaw<{ id: string }[]>`
-          SELECT "id" FROM "treatment_plans"
-           WHERE "id" = ${planId}::uuid AND "patientId" = ${patientId}::uuid
-             AND "deletedAt" IS NULL
-           FOR UPDATE`;
-        if (locked.length === 0) return { kind: 'NOT_FOUND' } as const;
+        const locked = await lockPlanGroup(tx, planId);
+        if (!locked) return { kind: 'NOT_FOUND' } as const;
         const source = await this.readSource(tx, tenantId, patientId, planId);
         if (!source) return { kind: 'NOT_FOUND' } as const;
 
@@ -102,6 +107,9 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           }
           throw error;
         }
+        // Las demás opciones abiertas del grupo, rechazadas en esta misma
+        // transacción (DX-040).
+        await rejectOpenSiblings(tx, locked, row.acceptedAt);
         await tx.treatmentPlan.update({
           where: { id: planId },
           data: { status: TreatmentPlanStatus.ACCEPTED },

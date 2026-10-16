@@ -292,6 +292,10 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
     await pay(usdPlan, 50000, 'COP');
 
     copPlan = await createPlan('COP', 500000);
+    // Máquina de estados (DX-040): un plan se completa después de aceptarse.
+    await as(clinicA)
+      .patch(`/treatment-plans/${copPlan}`, { status: 'ACCEPTED' })
+      .expect(200);
     await as(clinicA)
       .patch(`/treatment-plans/${copPlan}`, { status: 'COMPLETED' })
       .expect(200);

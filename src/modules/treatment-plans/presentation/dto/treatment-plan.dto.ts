@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TreatmentPlanStatus } from '@prisma/client';
+import {
+  TreatmentPlanRejectionReason,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { TreatmentPlanItemDto } from './treatment-plan-item.dto';
 
 /** Quién aceptó con firma el presupuesto y cuándo (DX-012). */
@@ -39,6 +42,46 @@ export class TreatmentPlanDto {
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Grupo de opciones A/B (DX-040): id del plan que abrió el grupo; null = plan suelto',
+  })
+  optionGroupId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Opción A: implante',
+  })
+  optionLabel!: string | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  presentedAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Sede donde se presentó (la del request o la principal)',
+  })
+  presentedLocationId!: string | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  rejectedAt!: Date | null;
+
+  @ApiProperty({
+    enum: TreatmentPlanRejectionReason,
+    enumName: 'TreatmentPlanRejectionReason',
+    nullable: true,
+  })
+  rejectionReason!: TreatmentPlanRejectionReason | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  rejectionNote!: string | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

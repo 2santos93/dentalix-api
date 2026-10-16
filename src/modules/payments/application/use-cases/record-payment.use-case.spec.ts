@@ -5,6 +5,7 @@ import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repo
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
 
 /**
  * Fake for `GetTreatmentPlanUseCase` -- concrete class (not an interface
@@ -37,6 +38,7 @@ function makePlan(
     currency: 'USD',
     notes: null,
     createdById: null,
+    ...PLAN_WITHOUT_OPTIONS,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     acceptance: null,

@@ -330,10 +330,28 @@ describe('AcceptTreatmentPlanUseCase (DX-012)', () => {
     ).rejects.toThrow('El plan no tiene ítems');
   });
 
-  it('409 si el plan está cancelado o completado', async () => {
+  it('acepta un plan presentado (DX-040: PRESENTED → ACCEPTED)', async () => {
+    const { repo, get, accept } = setup();
+    repo.add(
+      quoteSource({
+        plan: { ...quoteSource().plan, status: TreatmentPlanStatus.PRESENTED },
+      }),
+    );
+    const contentHash = await shownHash(get);
+    const doc = await accept.execute(
+      'patient-1',
+      'plan-1',
+      { signerName: 'Ana', signature: PNG, contentHash },
+      META,
+    );
+    expect(doc.planStatus).toBe(TreatmentPlanStatus.ACCEPTED);
+  });
+
+  it('409 si el plan está cancelado, completado o rechazado (máquina de estados)', async () => {
     for (const status of [
       TreatmentPlanStatus.CANCELLED,
       TreatmentPlanStatus.COMPLETED,
+      TreatmentPlanStatus.REJECTED,
     ]) {
       const { repo, get, accept } = setup();
       repo.add(quoteSource({ plan: { ...quoteSource().plan, status } }));

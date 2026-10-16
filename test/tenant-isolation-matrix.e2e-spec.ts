@@ -531,6 +531,27 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/treatment-plans/${a.planId}/items/${a.planItemId}`,
       status: 404,
     },
+    // DX-040: presentar, rechazar y crear una alternativa de un plan de A.
+    {
+      name: 'POST /treatment-plans/:id/present',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.bareplanId}/present`,
+      status: 404,
+    },
+    {
+      name: 'POST /treatment-plans/:id/reject',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.planId}/reject`,
+      body: () => ({ reason: 'PRICE', note: 'Hackeado' }),
+      status: 404,
+    },
+    {
+      name: 'POST /treatment-plans/:id/alternatives',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.planId}/alternatives`,
+      body: () => ({ optionLabel: 'Hackeado' }),
+      status: 404,
+    },
     // --- payment-plans ---
     {
       name: 'POST /treatment-plans/:id/payment-plan',

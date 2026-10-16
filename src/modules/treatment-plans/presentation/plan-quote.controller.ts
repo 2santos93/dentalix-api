@@ -26,7 +26,7 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import {
-  CLINICAL_ROLES,
+  TREATMENT_PLAN_DECISION_ROLES,
   TREATMENT_PLAN_QUOTE_READ_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import type { JwtPayload } from '../../../shared/crypto/token.service';
@@ -110,11 +110,11 @@ export class PlanQuoteController {
     patient: { param: 'patientId' },
   })
   @Post('acceptance')
-  @Roles(...CLINICAL_ROLES)
+  @Roles(...TREATMENT_PLAN_DECISION_ROLES)
   @ApiCreatedResponse({
     type: PlanQuoteDocumentDto,
     description:
-      'Plan aceptado: ACCEPTED, sus ítems propuestos pasan a aceptados y quedan congelados',
+      'Plan aceptado: ACCEPTED, sus ítems propuestos pasan a aceptados y quedan congelados; las demás opciones abiertas de su grupo pasan a REJECTED (otra opción aceptada) en la misma transacción',
   })
   @ApiBadRequestResponse({
     description:
@@ -125,10 +125,11 @@ export class PlanQuoteController {
   })
   @ApiConflictResponse({
     description:
-      'Ya estaba aceptado y firmado, el plan está cancelado o completado, o el presupuesto cambió desde que se mostró (contentHash)',
+      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash)',
   })
   @ApiForbiddenResponse({
-    description: 'Recepción imprime el presupuesto pero no lo acepta',
+    description:
+      'Solo odontólogo y ADMIN aceptan (DX-040): la asistente lo ve pero no lo acepta; recepción imprime el presupuesto pero no lo acepta',
   })
   async accept(
     @Param('patientId', ParseUUIDPipe) patientId: string,

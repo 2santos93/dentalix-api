@@ -1,4 +1,9 @@
-import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
+import {
+  TreatmentPlanItemStatus,
+  TreatmentPlanRejectionReason,
+  TreatmentPlanStatus,
+} from '@prisma/client';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   TreatmentPlan,
   TreatmentPlanAcceptanceSummary,
@@ -8,10 +13,18 @@ import { TreatmentPlanItem } from '../../../domain/entities/treatment-plan-item.
 import {
   AddTreatmentPlanItemRepoInput,
   CreateTreatmentPlanRepoInput,
+  DecidePlanChange,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
-  UpdateTreatmentPlanRepoInput,
 } from '../../../domain/ports/treatment-plan-repository.port';
+import {
+  AlternativeSource,
+  NewAlternative,
+  PendingFollowUpQuery,
+  PendingFollowUpRow,
+  PlanOptionsRepository,
+} from '../../../domain/ports/plan-options-repository.port';
+import { optionSiblingsToReject } from '../../../domain/plan-options';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
 // have no `deletedAt` field — same convention as Appointment. The fake still
@@ -34,9 +47,16 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
  * scoping by `planId`, and DESC ordering. Mirrors
  * `PrismaTreatmentPlanRepository`'s semantics exactly.
  */
-export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository {
+export class InMemoryTreatmentPlanRepository
+  implements TreatmentPlanRepository, PlanOptionsRepository
+{
   private readonly plans: StoredPlan[] = [];
   private readonly items: StoredItem[] = [];
+  /** Sede que el repositorio real tomaría del request (o la principal). */
+  locationId = 'loc-1';
+  /** Filas que devuelve `listPendingFollowUp` (el filtro SQL se prueba en integración). */
+  pendingFollowUp: PendingFollowUpRow[] = [];
+  lastFollowUpQuery: PendingFollowUpQuery | null = null;
 
   /** Test helper: seed a plan row directly, bypassing use-case validation. */
   seedPlan(overrides: Partial<StoredPlan> = {}): TreatmentPlan {
@@ -48,6 +68,13 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       currency: overrides.currency ?? 'USD',
       notes: overrides.notes ?? null,
       createdById: overrides.createdById ?? null,
+      optionGroupId: overrides.optionGroupId ?? null,
+      optionLabel: overrides.optionLabel ?? null,
+      presentedAt: overrides.presentedAt ?? null,
+      presentedLocationId: overrides.presentedLocationId ?? null,
+      rejectedAt: overrides.rejectedAt ?? null,
+      rejectionReason: overrides.rejectionReason ?? null,
+      rejectionNote: overrides.rejectionNote ?? null,
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
       deletedAt: overrides.deletedAt ?? null,
@@ -90,6 +117,13 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       currency: row.currency,
       notes: row.notes,
       createdById: row.createdById,
+      optionGroupId: row.optionGroupId,
+      optionLabel: row.optionLabel,
+      presentedAt: row.presentedAt,
+      presentedLocationId: row.presentedLocationId,
+      rejectedAt: row.rejectedAt,
+      rejectionReason: row.rejectionReason,
+      rejectionNote: row.rejectionNote,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -121,6 +155,13 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
       currency: input.currency,
       notes: input.notes ?? null,
       createdById: input.createdById ?? null,
+      optionGroupId: null,
+      optionLabel: null,
+      presentedAt: null,
+      presentedLocationId: null,
+      rejectedAt: null,
+      rejectionReason: null,
+      rejectionNote: null,
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,
@@ -128,6 +169,23 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
     };
     this.plans.push(row);
     return Promise.resolve(this.toPlanEntity(row));
+  }
+
+  /** Test helper: el plan tal como está guardado (estado, rechazo…). */
+  stored(id: string): TreatmentPlan {
+    const row = this.plans.find((p) => p.id === id);
+    if (!row) throw new Error(`InMemoryTreatmentPlanRepository: no ${id}`);
+    return this.toPlanEntity(row);
+  }
+
+  private liveSiblings(row: StoredPlan): StoredPlan[] {
+    if (!row.optionGroupId) return [];
+    return this.plans.filter(
+      (p) =>
+        p.id !== row.id &&
+        p.deletedAt === null &&
+        p.optionGroupId === row.optionGroupId,
+    );
   }
 
   findPlanById(id: string): Promise<TreatmentPlanWithItems | null> {
@@ -153,23 +211,98 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
     return Promise.resolve(rows);
   }
 
-  updatePlan(
+  // Mismo contrato que el repositorio real: `decide` ve el plan actual y, si
+  // lanza, no se escribe nada; con `acceptedAt` rechaza a las hermanas.
+  async updatePlan(
     id: string,
-    patch: UpdateTreatmentPlanRepoInput,
+    decide: DecidePlanChange,
   ): Promise<TreatmentPlan> {
+    const current = await this.findPlanById(id);
     const row = this.plans.find((p) => p.id === id && p.deletedAt === null);
-    if (!row) {
-      return Promise.reject(
-        new Error(
-          `InMemoryTreatmentPlanRepository.updatePlan: not found ${id}`,
-        ),
-      );
+    if (!current || !row) {
+      throw new NotFoundException('Plan de tratamiento no encontrado');
     }
-    const definedPatch = Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => value !== undefined),
+    const change = decide(current);
+    const siblings = this.liveSiblings(row);
+    if (change.acceptedAt) {
+      const { reject, conflict } = optionSiblingsToReject(siblings);
+      if (conflict) throw new ConflictException('Otra opción ya aceptada');
+      for (const sibling of siblings.filter((s) => reject.includes(s.id))) {
+        Object.assign(sibling, {
+          status: TreatmentPlanStatus.REJECTED,
+          rejectedAt: change.acceptedAt,
+          rejectionReason: TreatmentPlanRejectionReason.OTHER_OPTION_ACCEPTED,
+          rejectionNote: null,
+        });
+      }
+    }
+    if (change.status !== undefined) row.status = change.status;
+    if (change.currency !== undefined) row.currency = change.currency;
+    if (change.notes !== undefined) row.notes = change.notes;
+    if (change.optionLabel !== undefined) row.optionLabel = change.optionLabel;
+    if (change.presentation) {
+      row.presentedAt = change.presentation.at;
+      row.presentedLocationId = this.locationId;
+    }
+    if (change.rejection) {
+      row.rejectedAt = change.rejection.at;
+      row.rejectionReason = change.rejection.reason;
+      row.rejectionNote = change.rejection.note;
+    }
+    row.updatedAt = NOW;
+    return this.toPlanEntity(row);
+  }
+
+  async createAlternative(
+    sourcePlanId: string,
+    decide: (source: AlternativeSource) => NewAlternative,
+  ): Promise<TreatmentPlan | null> {
+    const plan = await this.findPlanById(sourcePlanId);
+    const row = this.plans.find(
+      (p) => p.id === sourcePlanId && p.deletedAt === null,
     );
-    Object.assign(row, definedPatch, { updatedAt: NOW });
-    return Promise.resolve(this.toPlanEntity(row));
+    if (!plan || !row) return null;
+    const decision = decide({
+      plan,
+      siblings: this.liveSiblings(row).map((p) => this.toPlanEntity(p)),
+    });
+    row.optionGroupId = row.optionGroupId ?? row.id;
+    row.optionLabel = decision.sourceLabel;
+    const created: StoredPlan = {
+      ...row,
+      id: `plan-${++seq}`,
+      status: TreatmentPlanStatus.DRAFT,
+      optionLabel: decision.label,
+      createdById: decision.createdById ?? null,
+      presentedAt: null,
+      presentedLocationId: null,
+      rejectedAt: null,
+      rejectionReason: null,
+      rejectionNote: null,
+      acceptance: null,
+    };
+    this.plans.push(created);
+    for (const item of plan.items) {
+      this.items.push({
+        ...item,
+        id: `item-${++seq}`,
+        planId: created.id,
+        status: TreatmentPlanItemStatus.PROPOSED,
+        deletedAt: null,
+      });
+    }
+    return this.toPlanEntity(created);
+  }
+
+  listPendingFollowUp(
+    query: PendingFollowUpQuery,
+  ): Promise<{ rows: PendingFollowUpRow[]; total: number }> {
+    this.lastFollowUpQuery = query;
+    const start = (query.page - 1) * query.pageSize;
+    return Promise.resolve({
+      rows: this.pendingFollowUp.slice(start, start + query.pageSize),
+      total: this.pendingFollowUp.length,
+    });
   }
 
   addItem(input: AddTreatmentPlanItemRepoInput): Promise<TreatmentPlanItem> {
@@ -229,3 +362,14 @@ export class InMemoryTreatmentPlanRepository implements TreatmentPlanRepository 
     return Promise.resolve();
   }
 }
+
+/** Campos de opción/presentación/rechazo (DX-040) de un plan suelto, para fakes. */
+export const PLAN_WITHOUT_OPTIONS = {
+  optionGroupId: null,
+  optionLabel: null,
+  presentedAt: null,
+  presentedLocationId: null,
+  rejectedAt: null,
+  rejectionReason: null,
+  rejectionNote: null,
+} as const;

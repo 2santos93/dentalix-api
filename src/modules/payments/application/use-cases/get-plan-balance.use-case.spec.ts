@@ -6,6 +6,7 @@ import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/us
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
+import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
 
 class FakeGetTreatmentPlanUseCase {
   public plan: TreatmentPlanDetail | null = null;
@@ -130,6 +131,7 @@ function makePlan(
     currency: 'USD',
     notes: null,
     createdById: null,
+    ...PLAN_WITHOUT_OPTIONS,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     acceptance: null,

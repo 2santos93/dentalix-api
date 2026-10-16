@@ -1,4 +1,7 @@
-import { TreatmentPlanStatus } from '@prisma/client';
+import {
+  TreatmentPlanRejectionReason,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { TreatmentPlanItem } from './treatment-plan-item.entity';
 
 /**
@@ -18,6 +21,20 @@ export interface TreatmentPlan {
   currency: string;
   notes: string | null;
   createdById: string | null;
+  /**
+   * Grupo de opciones A/B (DX-040): el id del plan que abrió el grupo (ese
+   * plan se apunta a sí mismo); `null` = plan suelto, sin alternativas.
+   */
+  optionGroupId: string | null;
+  /** "Opción A: implante"; `null` en un plan suelto sin etiqueta. */
+  optionLabel: string | null;
+  /** Presentado al paciente: cuándo y en qué sede. */
+  presentedAt: Date | null;
+  presentedLocationId: string | null;
+  /** Rechazado: cuándo, por qué y la nota del personal. */
+  rejectedAt: Date | null;
+  rejectionReason: TreatmentPlanRejectionReason | null;
+  rejectionNote: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

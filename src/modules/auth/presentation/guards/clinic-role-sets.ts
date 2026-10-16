@@ -117,3 +117,28 @@ export const TREATMENT_PLAN_QUOTE_READ_ROLES: ClinicRole[] = [
 // Registro de auditoría (DX-009) — LEER: solo gestión. Lleva IP y user agent
 // de cada acceso, que solo ve ADMIN.
 export const AUDIT_READ_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Decidir el plan (DX-040) — PRESENTARLO al paciente y ACEPTARLO (también con
+// firma, DX-012): odontólogo y ADMIN. La asistente lo ve y lo prepara
+// (CLINICAL_ROLES), pero no lo acepta en nombre del doctor; recepción, nada.
+// Mismo conjunto que `PLAN_DECISION_ROLES` del dominio, que lo aplica al PATCH
+// de estado (abierto a CLINICAL_ROLES).
+export const TREATMENT_PLAN_DECISION_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+
+// Marcar un plan presentado como RECHAZADO con su motivo (DX-040): quien decide
+// el plan y, además, recepción, que llama al paciente desde «Presupuestos por
+// seguir» y anota por qué no siguió. La asistente, no.
+export const TREATMENT_PLAN_REJECT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+
+// Presupuestos por seguir (DX-040): la lista de llamadas de recepción y de la
+// administración, con montos y teléfonos. Mismo criterio que PAYMENT_ROLES.
+export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];

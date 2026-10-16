@@ -4,6 +4,7 @@ import { ListPaymentsUseCase } from './list-payments.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
+import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
 
 /**
  * Fake for `GetTreatmentPlanUseCase` -- same pattern as
@@ -33,6 +34,7 @@ function makePlan(
     currency: 'USD',
     notes: null,
     createdById: null,
+    ...PLAN_WITHOUT_OPTIONS,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     acceptance: null,

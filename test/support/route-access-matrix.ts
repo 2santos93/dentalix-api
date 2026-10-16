@@ -61,6 +61,8 @@ const CLINICAL = roles('ADMIN', 'DENTIST', 'ASSISTANT');
 const BILLING = roles('ADMIN', 'RECEPTION');
 const STOCK = roles('ADMIN', 'ASSISTANT');
 const PRESCRIBERS = roles('ADMIN', 'DENTIST');
+const PLAN_DECIDERS = roles('ADMIN', 'DENTIST');
+const PLAN_REJECTERS = roles('ADMIN', 'DENTIST', 'RECEPTION');
 const ADMIN_ONLY = roles('ADMIN');
 
 export const ROUTE_ACCESS: Record<string, RouteAccess> = {
@@ -177,15 +179,26 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // que NO ven los pagos (BILLING), cambian la moneda del plan y los precios
   // de sus ítems aunque haya abonos o cuotas. La tabla fija el comportamiento
   // ACTUAL; si se decide restringirlo a ADMIN, cambia aquí y en el controlador.
+  // El estado sigue la máquina de DX-040 y pasar a ACCEPTED es solo de ADMIN y
+  // DENTIST: eso lo comprueba el caso de uso (403), no la ruta.
   'PATCH /treatment-plans/:id': CLINICAL,
   'POST /treatment-plans/:id/items': CLINICAL,
   'PATCH /treatment-plans/:id/items/:itemId': CLINICAL,
   'DELETE /treatment-plans/:id/items/:itemId': CLINICAL,
   // Presupuesto imprimible y aceptación firmada: loop/informes/DX-012.md.
-  // Imprimirlo, los cuatro roles (recepción lo imprime y lo archiva);
-  // aceptarlo con firma sigue las reglas del plan (CLINICAL).
+  // Imprimirlo, los cuatro roles (recepción lo imprime y lo archiva).
+  // Aceptarlo con firma: desde DX-040 solo quien decide el plan (ADMIN y
+  // DENTIST); la asistente lo ve pero no lo acepta en nombre del doctor.
   'GET /patients/:patientId/treatment-plans/:planId/quote': EVERY_ROLE,
-  'POST /patients/:patientId/treatment-plans/:planId/acceptance': CLINICAL,
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance': PLAN_DECIDERS,
+  // Alternativas A/B, presentar, rechazar y presupuestos por seguir:
+  // loop/informes/DX-040.md. Crear una alternativa es preparar el plan
+  // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,
+  // que llama al paciente desde la lista de seguimiento (ADMIN y recepción).
+  'GET /treatment-plans/pending-follow-up': BILLING,
+  'POST /treatment-plans/:id/present': PLAN_DECIDERS,
+  'POST /treatment-plans/:id/reject': PLAN_REJECTERS,
+  'POST /treatment-plans/:id/alternatives': CLINICAL,
 
   // --- Agenda --------------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase3-appointments.md; enlace de

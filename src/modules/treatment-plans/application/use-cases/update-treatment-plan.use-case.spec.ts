@@ -1,58 +1,22 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { TreatmentPlanStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  ClinicRole,
+  TreatmentPlanRejectionReason,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { UpdateTreatmentPlanUseCase } from './update-treatment-plan.use-case';
-import {
-  TreatmentPlan,
-  TreatmentPlanWithItems,
-} from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
-import {
-  TreatmentPlanRepository,
-  UpdateTreatmentPlanRepoInput,
-} from '../../domain/ports/treatment-plan-repository.port';
+import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
 import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 
-function fakePlanWithItems(
-  overrides: Partial<TreatmentPlanWithItems> = {},
-): TreatmentPlanWithItems {
-  return {
-    id: 'plan1',
-    tenantId: 't1',
-    patientId: 'p1',
-    status: TreatmentPlanStatus.DRAFT,
-    currency: 'USD',
-    notes: null,
-    createdById: null,
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    acceptance: null,
-    items: [],
-    ...overrides,
-  };
-}
-
-function makeRepo(
-  overrides: Partial<TreatmentPlanRepository> = {},
-): TreatmentPlanRepository {
-  return {
-    createPlan: (): Promise<TreatmentPlan> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
-      Promise.resolve(null),
-    listPlansByPatient: (): Promise<TreatmentPlan[]> => Promise.resolve([]),
-    updatePlan: (): Promise<TreatmentPlan> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    addItem: (): Promise<TreatmentPlanItem> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    findItemById: (): Promise<TreatmentPlanItem | null> =>
-      Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    softDeleteItem: (): Promise<void> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    ...overrides,
-  };
-}
+const NOW = new Date('2026-10-16T15:00:00.000Z');
+const { DRAFT, PRESENTED, ACCEPTED, REJECTED, COMPLETED, CANCELLED } =
+  TreatmentPlanStatus;
+const DENTIST = { role: ClinicRole.DENTIST };
 
 // Fake whitelist: allows the codes actually exercised by this suite. `has`
 // is case-sensitive here on purpose, to catch a regression where the use
@@ -64,129 +28,170 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
   };
 }
 
+function setup(whitelist: CurrencyWhitelist = makeWhitelist()) {
+  const repo = new InMemoryTreatmentPlanRepository();
+  const uc = new UpdateTreatmentPlanUseCase(repo, whitelist, () => NOW);
+  return { repo, uc };
+}
+
 describe('UpdateTreatmentPlanUseCase', () => {
   it('throws NotFoundException when the plan does not exist (or belongs to another tenant)', async () => {
-    const repo = makeRepo({
-      findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
-        Promise.resolve(null),
-      updatePlan: (): Promise<TreatmentPlan> =>
-        Promise.reject(new Error('updatePlan should not be called')),
-    });
-    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
-
+    const { uc } = setup();
     await expect(
-      uc.execute('missing-id', { status: TreatmentPlanStatus.ACCEPTED }),
+      uc.execute('missing-id', { status: ACCEPTED }, DENTIST),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it.each([
-    TreatmentPlanStatus.DRAFT,
-    TreatmentPlanStatus.ACCEPTED,
-    TreatmentPlanStatus.COMPLETED,
-    TreatmentPlanStatus.CANCELLED,
-  ])('allows changing status to %s', async (status) => {
-    const existing = fakePlanWithItems();
-    const updated = { ...existing, status };
-    let receivedPatch: UpdateTreatmentPlanRepoInput | undefined;
-    const repo = makeRepo({
-      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
-        Promise.resolve(id === existing.id ? existing : null),
-      updatePlan: (
-        _id: string,
-        patch: UpdateTreatmentPlanRepoInput,
-      ): Promise<TreatmentPlan> => {
-        receivedPatch = patch;
-        return Promise.resolve(updated);
-      },
-    });
-    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
-
-    const result = await uc.execute(existing.id, { status });
-
-    expect(result.status).toBe(status);
-    expect(receivedPatch).toEqual({ status });
+    [DRAFT, ACCEPTED],
+    [DRAFT, CANCELLED],
+    [PRESENTED, ACCEPTED],
+    [PRESENTED, CANCELLED],
+    [ACCEPTED, COMPLETED],
+    [ACCEPTED, CANCELLED],
+    [REJECTED, CANCELLED],
+  ])('permite %s → %s', async (from, to) => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: from });
+    const result = await uc.execute(plan.id, { status: to }, DENTIST);
+    expect(result.status).toBe(to);
   });
 
-  it('allows changing notes', async () => {
-    const existing = fakePlanWithItems();
-    let receivedPatch: UpdateTreatmentPlanRepoInput | undefined;
-    const repo = makeRepo({
-      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
-        Promise.resolve(id === existing.id ? existing : null),
-      updatePlan: (
-        _id: string,
-        patch: UpdateTreatmentPlanRepoInput,
-      ): Promise<TreatmentPlan> => {
-        receivedPatch = patch;
-        return Promise.resolve({ ...existing, notes: patch.notes ?? null });
-      },
+  it.each([
+    [COMPLETED, ACCEPTED],
+    [COMPLETED, CANCELLED],
+    [COMPLETED, DRAFT],
+    [CANCELLED, ACCEPTED],
+    [CANCELLED, DRAFT],
+    [REJECTED, ACCEPTED],
+    [ACCEPTED, DRAFT],
+    [DRAFT, COMPLETED],
+  ])(
+    'una transición inválida %s → %s es 409 y no escribe',
+    async (from, to) => {
+      const { repo, uc } = setup();
+      const plan = repo.seedPlan({ status: from, notes: 'antes' });
+      await expect(
+        uc.execute(plan.id, { status: to, notes: 'después' }, DENTIST),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(repo.stored(plan.id)).toMatchObject({
+        status: from,
+        notes: 'antes',
+      });
+    },
+  );
+
+  it('el mismo estado no es una transición: se guardan las notas sin 409', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: COMPLETED });
+    const result = await uc.execute(
+      plan.id,
+      { status: COMPLETED, notes: 'Cierre revisado' },
+      DENTIST,
+    );
+    expect(result).toMatchObject({
+      status: COMPLETED,
+      notes: 'Cierre revisado',
     });
-    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
+  });
 
-    const result = await uc.execute(existing.id, { notes: 'Nueva nota' });
+  it.each([PRESENTED, REJECTED])(
+    'el PATCH no presenta ni rechaza (%s): eso tiene su propia acción (400)',
+    async (status) => {
+      const { repo, uc } = setup();
+      const plan = repo.seedPlan({ status: DRAFT });
+      await expect(uc.execute(plan.id, { status }, DENTIST)).rejects.toThrow(
+        'Para presentar o rechazar un plan usa sus acciones «Presentar» y «Rechazar».',
+      );
+    },
+  );
 
-    expect(result.notes).toBe('Nueva nota');
-    expect(receivedPatch).toEqual({ notes: 'Nueva nota' });
+  it('la asistente no acepta un plan en nombre del odontólogo (403)', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: DRAFT });
+    await expect(
+      uc.execute(plan.id, { status: ACCEPTED }, { role: ClinicRole.ASSISTANT }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.stored(plan.id).status).toBe(DRAFT);
+  });
+
+  it('la asistente sí cancela o completa', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: ACCEPTED });
+    const result = await uc.execute(
+      plan.id,
+      { status: COMPLETED },
+      { role: ClinicRole.ASSISTANT },
+    );
+    expect(result.status).toBe(COMPLETED);
+  });
+
+  it('aceptar una opción rechaza a sus hermanas abiertas con «otra opción aceptada»', async () => {
+    const { repo, uc } = setup();
+    const a = repo.seedPlan({ id: 'a', status: PRESENTED, optionGroupId: 'a' });
+    repo.seedPlan({ id: 'b', status: PRESENTED, optionGroupId: 'a' });
+    repo.seedPlan({ id: 'c', status: DRAFT, optionGroupId: 'a' });
+    repo.seedPlan({ id: 'd', status: CANCELLED, optionGroupId: 'a' });
+    repo.seedPlan({ id: 'loose', status: DRAFT });
+
+    await uc.execute(a.id, { status: ACCEPTED }, DENTIST);
+
+    for (const id of ['b', 'c']) {
+      expect(repo.stored(id)).toMatchObject({
+        status: REJECTED,
+        rejectedAt: NOW,
+        rejectionReason: TreatmentPlanRejectionReason.OTHER_OPTION_ACCEPTED,
+      });
+    }
+    expect(repo.stored('d').status).toBe(CANCELLED);
+    expect(repo.stored('loose').status).toBe(DRAFT);
+  });
+
+  it('cancelar o completar no toca a las hermanas', async () => {
+    const { repo, uc } = setup();
+    const a = repo.seedPlan({ id: 'a', status: DRAFT, optionGroupId: 'a' });
+    repo.seedPlan({ id: 'b', status: PRESENTED, optionGroupId: 'a' });
+    await uc.execute(a.id, { status: CANCELLED }, DENTIST);
+    expect(repo.stored('b').status).toBe(PRESENTED);
+  });
+
+  it('cambia la etiqueta de la opción (recortada; vacía = sin etiqueta)', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ optionGroupId: 'x', optionLabel: 'Opción A' });
+    const renamed = await uc.execute(
+      plan.id,
+      { optionLabel: '  Opción A: implante ' },
+      DENTIST,
+    );
+    expect(renamed.optionLabel).toBe('Opción A: implante');
+    const cleared = await uc.execute(plan.id, { optionLabel: '  ' }, DENTIST);
+    expect(cleared.optionLabel).toBeNull();
   });
 
   it('validates and uppercases currency only when provided, forwarding it to the repo', async () => {
-    const existing = fakePlanWithItems();
-    let receivedPatch: UpdateTreatmentPlanRepoInput | undefined;
-    const repo = makeRepo({
-      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
-        Promise.resolve(id === existing.id ? existing : null),
-      updatePlan: (
-        _id: string,
-        patch: UpdateTreatmentPlanRepoInput,
-      ): Promise<TreatmentPlan> => {
-        receivedPatch = patch;
-        return Promise.resolve({
-          ...existing,
-          currency: patch.currency ?? existing.currency,
-        });
-      },
-    });
-    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
-
-    const result = await uc.execute(existing.id, { currency: 'cop' });
-
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan();
+    const result = await uc.execute(plan.id, { currency: 'cop' }, DENTIST);
     expect(result.currency).toBe('COP');
-    expect(receivedPatch).toEqual({ currency: 'COP' });
   });
 
-  it('rejects an unknown currency with BadRequestException, without calling the repo', async () => {
-    const existing = fakePlanWithItems();
-    const repo = makeRepo({
-      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
-        Promise.resolve(id === existing.id ? existing : null),
-      updatePlan: (): Promise<TreatmentPlan> =>
-        Promise.reject(new Error('updatePlan should not be called')),
-    });
-    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist());
-
+  it('rejects an unknown currency with BadRequestException, without writing', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan();
     await expect(
-      uc.execute(existing.id, { currency: 'XXX' }),
+      uc.execute(plan.id, { currency: 'XXX' }, DENTIST),
     ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.stored(plan.id).currency).toBe('USD');
   });
 
   it('leaves currency untouched (no whitelist call needed) when omitted', async () => {
-    const existing = fakePlanWithItems();
-    let receivedPatch: UpdateTreatmentPlanRepoInput | undefined;
-    const repo = makeRepo({
-      findPlanById: (id: string): Promise<TreatmentPlanWithItems | null> =>
-        Promise.resolve(id === existing.id ? existing : null),
-      updatePlan: (
-        _id: string,
-        patch: UpdateTreatmentPlanRepoInput,
-      ): Promise<TreatmentPlan> => {
-        receivedPatch = patch;
-        return Promise.resolve(existing);
-      },
-    });
-    const uc = new UpdateTreatmentPlanUseCase(repo, makeWhitelist([]));
-
-    await uc.execute(existing.id, { notes: 'sin cambio de moneda' });
-
-    expect(receivedPatch && 'currency' in receivedPatch).toBe(false);
+    const { repo, uc } = setup(makeWhitelist([]));
+    const plan = repo.seedPlan({ currency: 'COP' });
+    const result = await uc.execute(
+      plan.id,
+      { notes: 'sin cambio de moneda' },
+      DENTIST,
+    );
+    expect(result.currency).toBe('COP');
   });
 });
