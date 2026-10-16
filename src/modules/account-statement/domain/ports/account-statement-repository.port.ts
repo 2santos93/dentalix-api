@@ -3,6 +3,7 @@ import {
   StatementPatient,
   StatementSnapshot,
 } from '../entities/account-statement.entity';
+import { BillablePlanRow } from '../entities/billable-plan.entity';
 
 export const ACCOUNT_STATEMENT_REPOSITORY = Symbol(
   'ACCOUNT_STATEMENT_REPOSITORY',
@@ -23,4 +24,11 @@ export interface AccountStatementRepository {
    * en otro tenant).
    */
   load(patientId: string): Promise<AccountStatementData | null>;
+
+  /**
+   * Los planes vivos del paciente con su facturable, sus abonos vivos por
+   * moneda y si tienen un plan de pagos activo (DX-067), o `null` con el mismo
+   * criterio que `load`. Sin ítems, notas ni nada clínico.
+   */
+  loadBillablePlans(patientId: string): Promise<BillablePlanRow[] | null>;
 }

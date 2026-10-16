@@ -37,6 +37,15 @@ export interface CashPayment {
  */
 export interface CashPaymentView extends CashPayment {
   canVoid: boolean;
+  /**
+   * Día civil (YYYY-MM-DD) en que se REGISTRÓ el abono, en la zona de su sede
+   * (DX-067). Puede no coincidir con `paidAt`: un abono con fecha de pago
+   * antigua registrado hoy es anulable hoy, porque la ventana de recepción
+   * mira el registro.
+   */
+  registeredOn: string;
+  /** Si `registeredOn` es hoy en la sede del abono. */
+  registeredToday: boolean;
 }
 
 /** Total del período en UNA moneda, sin convertir. */

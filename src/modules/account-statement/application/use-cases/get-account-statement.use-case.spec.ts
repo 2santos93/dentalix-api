@@ -78,7 +78,10 @@ function makeUseCase(result: AccountStatementData | null = data()) {
   const load = jest.fn<Promise<AccountStatementData | null>, [string]>(() =>
     Promise.resolve(result),
   );
-  const repo: AccountStatementRepository = { load };
+  const repo: AccountStatementRepository = {
+    load,
+    loadBillablePlans: jest.fn(),
+  };
   const uc = new GetAccountStatementUseCase(repo, () => NOW);
   return {
     load,

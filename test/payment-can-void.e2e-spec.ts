@@ -197,6 +197,9 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
     id: string;
     createdById: string | null;
     canVoid: boolean;
+    /** Solo en la caja (DX-067). */
+    registeredOn?: string;
+    registeredToday?: boolean;
   }
 
   /** Caja de -3 a +1 días UTC (cubre el "hoy" de cualquier zona). */
@@ -250,6 +253,13 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
       expect(asAdmin.get(byAdmin)?.canVoid).toBe(true);
       expect(asAdmin.get(ownOld)?.canVoid).toBe(true);
     }
+
+    // DX-067: la caja dice si el abono se REGISTRÓ hoy en la sede (lo que
+    // mira la ventana de anulación), aunque su fecha de pago sea otra.
+    const cashRows = await cash(reception);
+    expect(cashRows.get(ownToday)?.registeredToday).toBe(true);
+    expect(cashRows.get(ownOld)?.registeredToday).toBe(false);
+    expect(cashRows.get(ownOld)?.registeredOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     // canVoid dice lo mismo que la anulación real.
     await as(reception).void(byAdmin, { reason: REASON }).expect(403);
