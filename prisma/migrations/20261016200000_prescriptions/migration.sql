@@ -197,8 +197,10 @@ ALTER TABLE "prescription_items" ADD CONSTRAINT "prescription_items_tenantId_pre
 -- prescription_items:
 --   - UPDATE: siempre rechazado.
 --   - INSERT: solo en la MISMA transacción que creó la receta (xmin de la fila
---     padre = transacción actual): no se añaden medicamentos a una receta ya
---     emitida.
+--     padre = transacción actual) y con la receta aún ISSUED: no se añaden
+--     medicamentos a una receta ya emitida. La anulación también renueva el
+--     xmin, de ahí exigir ISSUED (si no, anular y añadir en la misma
+--     transacción colaría un medicamento en una receta anulada).
 --   - DELETE: como la receta.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION "prescriptions_immutable"() RETURNS trigger
@@ -244,6 +246,7 @@ BEGIN
     SELECT 1 FROM "prescriptions" p
      WHERE p."id" = NEW."prescriptionId"
        AND p."tenantId" = NEW."tenantId"
+       AND p."status" = 'ISSUED'
        AND p."xmin" = pg_current_xact_id()::xid
   ) THEN
     RAISE EXCEPTION 'prescription_items es inmutable: no se añaden medicamentos a una receta ya emitida'

@@ -228,6 +228,35 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
       ).rejects.toThrow(/no se borran/);
     });
 
+    it('no cuela medicamentos anulando en la misma transacción (la anulación renueva el xmin)', async () => {
+      const other = await asA((tx) =>
+        tx.prescription.create({
+          data: { ...rxData(a), items: { create: [ITEM] } },
+        }),
+      );
+      await expect(
+        asA(async (tx) => {
+          await tx.prescription.update({
+            where: { id: other.id },
+            data: {
+              status: 'VOIDED',
+              voidedAt: new Date(),
+              voidedById: a.userId,
+              voidReason: 'Prueba',
+            },
+          });
+          return tx.prescriptionItem.create({
+            data: {
+              ...ITEM,
+              position: 2,
+              tenantId: a.tenantId,
+              prescriptionId: other.id,
+            },
+          });
+        }),
+      ).rejects.toThrow(/ya emitida/);
+    });
+
     it('rechaza el DELETE de la receta dentro de un contexto de tenant', async () => {
       await expect(
         asA(
