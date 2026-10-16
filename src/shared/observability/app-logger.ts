@@ -20,6 +20,14 @@ const processSink: LogSink = (stream, line) => {
   process[stream].write(line);
 };
 
+/**
+ * En formato pretty el mensaje va tal cual en la línea: sus saltos se
+ * escapan para que un evento sea siempre UNA línea y nadie pueda fabricar
+ * otra (en JSON ya los escapa JSON.stringify). El stack sí va debajo.
+ */
+const escapeLineBreaks = (text: string): string =>
+  text.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+
 /** Un stack de V8: "Nombre: mensaje\n    at ...". */
 const looksLikeStack = (value: string): boolean => /\n\s+at /.test(value);
 
@@ -69,7 +77,7 @@ export class AppLogger implements LoggerService {
           : `${key}=${JSON.stringify(value)}`,
       );
       const head = [time, level.toUpperCase().padEnd(5), `[${context}]`]
-        .concat(msg ? [msg] : [], pairs)
+        .concat(msg ? [escapeLineBreaks(msg)] : [], pairs)
         .join(' ');
       this.sink(stream, stack ? `${head}\n${stack}\n` : `${head}\n`);
       return;

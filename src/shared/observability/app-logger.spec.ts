@@ -144,6 +144,14 @@ describe('AppLogger', () => {
     );
   });
 
+  it('pretty: los saltos de línea del mensaje se escapan (una línea por evento)', () => {
+    const { logger, lines } = capture({ level: 'info', format: 'pretty' });
+    logger.log('primera\nINFO  [Falso] inyectada\r\nfin', 'Ctx');
+    expect(lines[0].line).toBe(
+      '2026-10-16T12:00:00.000Z INFO  [Ctx] primera\\nINFO  [Falso] inyectada\\r\\nfin\n',
+    );
+  });
+
   it('pretty: el stack va en las líneas siguientes', () => {
     const { logger, lines } = capture({ level: 'info', format: 'pretty' });
     logger.error('Falló', 'Error: x\n    at y', 'Ctx');
