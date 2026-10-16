@@ -1,4 +1,9 @@
-import { CatalogKind, ToothRecordStatus, ToothSurface } from '@prisma/client';
+import {
+  CatalogKind,
+  ToothRecordOrigin,
+  ToothRecordStatus,
+  ToothSurface,
+} from '@prisma/client';
 
 /**
  * API-facing shape of a ToothRecord (one immutable clinical event on a
@@ -32,6 +37,14 @@ export interface ToothRecord {
    * created directly in the odontogram.
    */
   sourcePlanItemId: string | null;
+  /** DX-120: hecho en esta clínica, ya presente o de otro profesional. */
+  origin: ToothRecordOrigin;
+  /**
+   * DX-120: si no es nulo, ESTE registro es la anulación del registro con ese
+   * id (no se pinta y deja de pintar al anulado). Lleva el motivo.
+   */
+  voidsRecordId: string | null;
+  voidReason: string | null;
   recordedAt: Date;
   createdAt: Date;
 }

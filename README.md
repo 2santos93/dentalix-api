@@ -105,7 +105,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
-   evoluciones (una corregida con una adenda — DX-038) y odontograma, ~90 citas desde el lunes de la semana pasada hasta
+   evoluciones (una corregida con una adenda — DX-038) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos, listo para
    presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, un plan de
@@ -392,6 +392,34 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
 - En local, para abrir el enlace sin SMTP: `MAIL_TRANSPORT=file
   MAIL_FILE_DIR=./.mail` deja cada email como JSON en esa carpeta (prohibido en
   producción; lo usa el Playwright de la web).
+
+## Odontograma: dentición, origen y anulación (DX-120)
+
+- **Dentición por posición**: cada una de las 32 posiciones (código FDI
+  permanente; el 55 ocupa la 15) está en `PERMANENT`, `PRIMARY` o `MIXED`.
+  `GET /patients/:id/dentition` devuelve el último evento de cada posición o,
+  sin eventos, la de su edad (< 6 años temporal, 6–12 según la tabla de
+  erupción de `domain/dentition.ts`, > 12 permanente; sin fecha de
+  nacimiento, permanente). No escribe nada. `POST
+  /patients/:id/dentition-events` cambia una o varias posiciones
+  (`MANUAL`/`ERUPTION`/`EXFOLIATION`); los molares no tienen mixta y exfoliar
+  deja la posición en permanente (422, también CHECK en la BD).
+- **Registro y dentición**: `POST tooth-records` rechaza con 422 un temporal
+  en una posición en permanente y un permanente en una en temporal. `origin`:
+  `THIS_CLINIC` (por defecto), `PRE_EXISTING` u `OTHER_PROVIDER`.
+- **Anulación**: `POST tooth-records/:recordId/void` con `reason` inserta OTRO
+  registro (`voidsRecordId`, `voidReason`); el original no cambia. Solo el
+  autor o un ADMIN (403); sin motivo, 400; una segunda vez, 409 (índice único
+  parcial `tooth_records_void_once_key`). La carta deja de pintarlo y
+  `teeth/:fdi/history` lo devuelve con su `void` (motivo, autor y fecha).
+- **Carta a una fecha**: `?asOf=YYYY-MM-DD` en `odontogram` y `dentition`
+  corta al final de ese día en la zona de la sede: lo anulado después sigue,
+  lo posterior no aparece. Futuro o inválido, 400.
+- **Inalterable en la BD**: `tooth_records` y `patient_dentition_events`
+  rechazan UPDATE siempre y DELETE/TRUNCATE salvo a un superusuario (trigger
+  `dx_forbid_odontogram_mutation`, `search_path` fijo — SEC-032). RLS forzada
+  y FK compuestas por tenant y paciente. Cada cambio de dentición (`UPDATE`,
+  `DENTITION_CHANGED`) y cada anulación (`VOID`) dejan su `audit_event`.
 
 ## Días civiles y zona de la sede (DX-097)
 

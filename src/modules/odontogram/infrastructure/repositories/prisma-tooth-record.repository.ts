@@ -4,8 +4,12 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CreateToothRecordRepoInput,
+  CreateToothRecordVoidOutcome,
+  CreateToothRecordVoidRepoInput,
   ToothRecordRepository,
 } from '../../domain/ports/tooth-record-repository.port';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { ToothRecord } from '../../domain/entities/tooth-record.entity';
 
 type PrismaToothRecord = Prisma.ToothRecordGetPayload<Record<string, never>>;
@@ -28,6 +32,9 @@ function mapToEntity(row: PrismaToothRecord): ToothRecord {
     clinicalEntryId: row.clinicalEntryId,
     performedById: row.performedById,
     sourcePlanItemId: row.sourcePlanItemId,
+    origin: row.origin,
+    voidsRecordId: row.voidsRecordId,
+    voidReason: row.voidReason,
     recordedAt: row.recordedAt,
     createdAt: row.createdAt,
   };
@@ -77,6 +84,7 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
           clinicalEntryId: input.clinicalEntryId,
           performedById: input.performedById,
           sourcePlanItemId: input.sourcePlanItemId,
+          origin: input.origin,
           recordedAt: input.recordedAt ?? new Date(),
         },
       });
@@ -105,5 +113,77 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
       });
       return rows.map(mapToEntity);
     });
+  }
+
+  async findById(patientId: string, id: string): Promise<ToothRecord | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.toothRecord.findFirst({ where: { id, patientId, deletedAt: null } }),
+    );
+    return row ? mapToEntity(row) : null;
+  }
+
+  /**
+   * DX-120: la anulación es un INSERT más. El índice único parcial
+   * `tooth_records_void_once_key` decide la carrera de dos anulaciones a la
+   * vez: la segunda recibe P2002 y se traduce a ALREADY_VOIDED (409).
+   */
+  async createVoid(
+    input: CreateToothRecordVoidRepoInput,
+  ): Promise<CreateToothRecordVoidOutcome> {
+    const tenantId = this.requireTenantId();
+    const { target } = input;
+    try {
+      const row = await this.prisma.runWithTenant((tx) =>
+        tx.toothRecord.create({
+          data: {
+            tenantId,
+            patientId: input.patientId,
+            toothNumber: target.toothNumber,
+            surfaces: target.surfaces,
+            kind: target.kind,
+            catalogItemId: target.catalogItemId,
+            status: target.status,
+            origin: target.origin,
+            performedById: input.performedById,
+            voidsRecordId: target.id,
+            voidReason: input.reason,
+          },
+        }),
+      );
+      return { kind: 'CREATED', record: mapToEntity(row) };
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        return { kind: 'ALREADY_VOIDED' };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Nombres por id SOLO de quien tiene (o tuvo) membresía en esta clínica:
+   * la membresía va bajo RLS, así que un id de otra clínica no resuelve.
+   */
+  async memberNames(userIds: readonly string[]): Promise<Map<string, string>> {
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.clinicMembership.findMany({
+        where: { userId: { in: [...userIds] } },
+        select: { userId: true, user: { select: { fullName: true } } },
+      }),
+    );
+    return new Map(rows.map((r) => [r.userId, r.user.fullName]));
+  }
+
+  /** Sede activa (cabecera validada por el guard) → su zona; sin sede, la por defecto. */
+  async clinicTimeZone(): Promise<string> {
+    const locationId = this.tenantContext.getLocationId();
+    if (!locationId) return DEFAULT_BUSINESS_HOURS_TIMEZONE;
+    const tenantId = this.requireTenantId();
+    const zoneOf = await this.prisma.runWithTenant((tx) =>
+      resolveLocationTimeZones(tx, tenantId, [locationId]),
+    );
+    return zoneOf(locationId);
   }
 }
