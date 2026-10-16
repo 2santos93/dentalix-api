@@ -282,9 +282,12 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await branding());
     });
 
-    it('health queda fuera incluso del límite global', async () => {
+    it('health y health/ready quedan fuera incluso del límite global (DX-023)', async () => {
       for (let i = 0; i < 5; i++) {
         await request(app.getHttpServer()).get('/api/v1/health').expect(200);
+        await request(app.getHttpServer())
+          .get('/api/v1/health/ready')
+          .expect(200);
       }
     });
   });
