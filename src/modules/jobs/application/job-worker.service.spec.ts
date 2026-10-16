@@ -45,7 +45,6 @@ function fakeRepo(queue: ClaimedJob[]) {
     syncSchedules: jest.fn(() => Promise.resolve()),
     fireDueSchedules: jest.fn(() => Promise.resolve(0)),
     listFailed: jest.fn(),
-    retryFailed: jest.fn(),
     purgeFinished: jest.fn(),
   };
   return { repo, calls };

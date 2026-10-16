@@ -222,15 +222,6 @@ export class PrismaJobRepository implements JobRepository {
     return rows.map((row) => ({ ...row, payload: row.payload as JobPayload }));
   }
 
-  async retryFailed(id: string): Promise<boolean> {
-    const n = await this.prisma.$executeRaw`
-      UPDATE "jobs"
-         SET "state" = 'PENDING', "attempts" = 0, "runAt" = ${NOW},
-             "finishedAt" = NULL, "lockedBy" = NULL, "updatedAt" = ${NOW}
-       WHERE "id" = ${id}::uuid AND "state" = 'FAILED'`;
-    return n > 0;
-  }
-
   async purgeFinished(before: Date): Promise<number> {
     // Borrado duro legítimo (housekeeping con TTL): un trabajo terminado no
     // es dato de negocio. Por tandas para no bloquear la tabla.

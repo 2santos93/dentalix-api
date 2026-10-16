@@ -459,7 +459,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       await Promise.all([a.worker.runOnce(), b.worker.runOnce()]);
       expect(runs).toBe(3);
 
-      // Visible en la cola de fallidos, y se puede reencolar a mano.
+      // Visible en la cola de fallidos.
       const admin = new JobsAdmin(a.repo);
       const list = await admin.listFailed(100);
       expect(list.find((j) => j.id === id)).toMatchObject({
@@ -468,16 +468,6 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         maxAttempts: 3,
         lastError: 'Error ETIMEDOUT',
         payload: { patientId: tenantA },
-      });
-      expect(await admin.retry(id)).toBe(true);
-      expect(await admin.retry(id)).toBe(false);
-      expect(
-        await owner.job.findUniqueOrThrow({ where: { id } }),
-      ).toMatchObject({
-        state: 'PENDING',
-        attempts: 0,
-        finishedAt: null,
-        lastError: 'Error ETIMEDOUT',
       });
     });
 

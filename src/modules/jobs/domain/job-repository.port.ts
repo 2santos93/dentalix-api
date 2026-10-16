@@ -64,8 +64,6 @@ export interface JobRepository {
    */
   fireDueSchedules(schedules: ScheduleToFire[]): Promise<number>;
   listFailed(limit: number): Promise<FailedJob[]>;
-  /** FAILED -> PENDING con los intentos a 0. false si no estaba FAILED. */
-  retryFailed(id: string): Promise<boolean>;
   /** Borra COMPLETED y FAILED terminados antes de `before`. */
   purgeFinished(before: Date): Promise<number>;
 }
