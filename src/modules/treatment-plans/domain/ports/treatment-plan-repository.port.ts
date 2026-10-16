@@ -110,9 +110,6 @@ export interface DoneMirrorInput {
   performedById?: string;
 }
 
-/** Tope de `listPlansByPatient` (DX-043, DB-018). */
-export const PATIENT_PLANS_LIMIT = 200;
-
 export const TREATMENT_PLAN_REPOSITORY = Symbol('TREATMENT_PLAN_REPOSITORY');
 
 export interface TreatmentPlanRepository {
@@ -126,8 +123,9 @@ export interface TreatmentPlanRepository {
   findPlanById(id: string): Promise<TreatmentPlanWithItems | null>;
 
   /**
-   * The most recent `PATIENT_PLANS_LIMIT` active plans for the patient,
-   * ordered by `createdAt` DESC (DX-043, DB-018).
+   * Active plans for the patient, ordered by `createdAt` DESC (ties by id).
+   * Sin tope a propósito (revisión DX-043): es dato clínico y financiero y la
+   * respuesta no tiene forma de avisar de un corte.
    */
   listPlansByPatient(patientId: string): Promise<TreatmentPlan[]>;
 

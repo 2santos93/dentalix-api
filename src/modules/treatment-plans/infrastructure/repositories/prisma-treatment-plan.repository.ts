@@ -11,7 +11,6 @@ import {
   DecidePlanChange,
   DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
-  PATIENT_PLANS_LIMIT,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
@@ -154,7 +153,6 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       const plans = await tx.treatmentPlan.findMany({
         where: { patientId, deletedAt: null },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: PATIENT_PLANS_LIMIT,
       });
       return plans.map(mapToEntity);
     });

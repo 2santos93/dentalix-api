@@ -3,7 +3,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
-  CATALOG_SELECTOR_LIMIT,
   CatalogDirectoryPage,
   CreateDentalCatalogItemRepoInput,
   DentalCatalogRepository,
@@ -104,7 +103,6 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
       const items = await tx.dentalCatalogItem.findMany({
         where,
         orderBy: { code: 'asc' },
-        take: CATALOG_SELECTOR_LIMIT,
       });
       return items.map(mapToEntity);
     });

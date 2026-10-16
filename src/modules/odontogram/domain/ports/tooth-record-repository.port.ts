@@ -21,9 +21,6 @@ export interface CreateToothRecordRepoInput {
   recordedAt?: Date;
 }
 
-/** Tope de `listByTooth` (DX-043, DB-018). */
-export const TOOTH_TIMELINE_LIMIT = 200;
-
 export const TOOTH_RECORD_REPOSITORY = Symbol('TOOTH_RECORD_REPOSITORY');
 
 export interface ToothRecordRepository {
@@ -47,8 +44,8 @@ export interface ToothRecordRepository {
 
   /**
    * Non-deleted records for a single tooth, ordered by `recordedAt` DESC
-   * (most recent first) — this is the per-tooth timeline. At most
-   * `TOOTH_TIMELINE_LIMIT` (the most recent ones; DX-043, DB-018).
+   * (most recent first) — this is the per-tooth timeline. Sin tope a
+   * propósito (revisión DX-043): es dato clínico.
    */
   listByTooth(patientId: string, toothNumber: string): Promise<ToothRecord[]>;
 }
