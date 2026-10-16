@@ -1,0 +1,86 @@
+import { Injectable, Logger } from '@nestjs/common';
+import type { OutboundChannel } from '@prisma/client';
+import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { describeJobError } from '../../../jobs/domain/backoff';
+import { maskRecipient } from '../domain/mask-recipient';
+
+export interface RecordOutboundMessage {
+  channel: OutboundChannel;
+  /** Código de plantilla (`appointment-reminder`…), no su texto. */
+  template: string;
+  /** Dirección o número REAL: solo se usa para enmascararlo; no se guarda. */
+  recipient: string;
+  appointmentId?: string;
+}
+
+export type OutboundOutcome =
+  | { status: 'QUEUED' | 'SENT' | 'CANCELLED' }
+  | { status: 'FAILED'; error: unknown };
+
+/**
+ * Registro de mensajes salientes al paciente (DX-085), por clínica y bajo
+ * RLS: siempre con el tenant del contexto (`runWithTenant(fn)`), que en un
+ * trabajo de la cola fija el worker. Guarda y registra en el log SOLO el
+ * destinatario enmascarado y, de un fallo, el tipo y el código del error.
+ *
+ * Para EMAIL el transporte es email_outbox (DX-088): quien envía encola allí
+ * con `referenceId` = id de este registro y lo marca QUEUED.
+ */
+@Injectable()
+export class OutboundMessages {
+  private readonly logger = new Logger('Outbound');
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async record(input: RecordOutboundMessage): Promise<{ id: string }> {
+    const recipientMasked = maskRecipient(input.channel, input.recipient);
+    const { id, tenantId } = await this.prisma.runWithTenant((tx) =>
+      tx.$queryRaw<{ id: string; tenantId: string }[]>`
+        INSERT INTO "outbound_messages"
+          ("id", "tenantId", "channel", "template", "recipientMasked",
+           "appointmentId", "updatedAt")
+        VALUES
+          (gen_random_uuid(), current_setting('app.current_tenant', true)::uuid,
+           ${input.channel}::"OutboundChannel", ${input.template},
+           ${recipientMasked}, ${input.appointmentId ?? null}::uuid,
+           CURRENT_TIMESTAMP)
+        RETURNING "id", "tenantId"`.then((rows) => rows[0]),
+    );
+    this.logger.log({
+      event: 'outbound.recorded',
+      outboundId: id,
+      tenantId,
+      channel: input.channel,
+      template: input.template,
+      to: recipientMasked,
+      appointmentId: input.appointmentId ?? null,
+    });
+    return { id };
+  }
+
+  /** Cambia el estado; false si el mensaje no existe en esta clínica. */
+  async settle(id: string, outcome: OutboundOutcome): Promise<boolean> {
+    const finished = outcome.status === 'SENT' || outcome.status === 'FAILED';
+    const lastError =
+      outcome.status === 'FAILED' ? describeJobError(outcome.error) : null;
+    const { count } = await this.prisma.runWithTenant((tx) =>
+      tx.outboundMessage.updateMany({
+        where: { id },
+        data: {
+          status: outcome.status,
+          ...(finished ? { attempts: { increment: 1 } } : {}),
+          ...(outcome.status === 'SENT' ? { sentAt: new Date() } : {}),
+          ...(lastError ? { lastError } : {}),
+        },
+      }),
+    );
+    if (count > 0) {
+      this.logger.log({
+        event: `outbound.${outcome.status.toLowerCase()}`,
+        outboundId: id,
+        ...(lastError ? { error: lastError } : {}),
+      });
+    }
+    return count > 0;
+  }
+}
