@@ -34,6 +34,9 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  'perio_site_measures',
+  'perio_tooth_measures',
+  'perio_exams',
   'patient_consents',
   'consent_templates',
   'installments',
@@ -295,6 +298,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-006: 3 plantillas y 1 consentimiento firmado.
     expect(firstCounts.consent_templates).toBe(3);
     expect(firstCounts.patient_consents).toBe(1);
+    // DX-007: dos exámenes periodontales FINAL del mismo paciente.
+    expect(firstCounts.perio_exams).toBe(2);
+    expect(firstCounts.perio_site_measures).toBe(2 * 28 * 6);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );

@@ -1320,3 +1320,123 @@ export const DEMO_SIGNED_CONSENT = {
   dentistIndex: 0,
   templateIndex: 0,
 } as const;
+
+// ---------------------------------------------------------------------------
+// DX-007: periodontograma. Un paciente con dos exámenes FINAL: el inicial
+// (hace ~6 meses, periodontitis en molares, mucho sangrado) y el control
+// reciente tras raspado y alisado (bolsas más bajas, menos sangrado), para ver
+// la comparación. Los cordales (18, 28, 38, 48) van omitidos (ausentes).
+// ---------------------------------------------------------------------------
+
+export type DemoPerioSite = 'MB' | 'B' | 'DB' | 'ML' | 'L' | 'DL';
+
+export interface DemoPerioSiteMeasure {
+  toothFdi: number;
+  site: DemoPerioSite;
+  probingMm: number;
+  recessionMm: number;
+  furcation: number | null;
+  bleeding: boolean;
+  suppuration: boolean;
+  plaque: boolean;
+  calculus: boolean;
+}
+
+export interface DemoPerioExam {
+  daysAgo: number;
+  notes: string;
+  phase: 'baseline' | 'control';
+}
+
+export const DEMO_PERIO = {
+  patientIndex: 2,
+  dentistIndex: 0,
+  skippedTeeth: [18, 28, 38, 48],
+  exams: [
+    {
+      daysAgo: 182,
+      notes:
+        'Examen inicial. Periodontitis estadio III localizada en molares. Se indica raspado y alisado radicular.',
+      phase: 'baseline',
+    },
+    {
+      daysAgo: 12,
+      notes:
+        'Control a los 6 meses del raspado. Mejoría clara del sangrado y de las bolsas en molares.',
+      phase: 'control',
+    },
+  ] as const satisfies readonly DemoPerioExam[],
+} as const;
+
+const DEMO_PERIO_SITES: readonly DemoPerioSite[] = [
+  'MB',
+  'B',
+  'DB',
+  'ML',
+  'L',
+  'DL',
+];
+
+/** Dientes presentes (sin cordales) en orden FDI. */
+function demoPerioTeeth(): number[] {
+  const teeth: number[] = [];
+  for (const quadrant of [1, 2, 3, 4]) {
+    for (let tooth = 1; tooth <= 7; tooth += 1)
+      teeth.push(quadrant * 10 + tooth);
+  }
+  return teeth;
+}
+
+/**
+ * Medidas deterministas: molares (6, 7) con bolsas profundas en el inicial y
+ * ~2 mm menos en el control; el resto, surco sano. Interproximales (M/D) más
+ * profundos que los centrales, como en la clínica real.
+ */
+export function demoPerioMeasures(phase: DemoPerioExam['phase']): {
+  sites: DemoPerioSiteMeasure[];
+  teeth: { toothFdi: number; mobility: number | null; skipped: boolean }[];
+} {
+  const sites: DemoPerioSiteMeasure[] = [];
+  const teeth: {
+    toothFdi: number;
+    mobility: number | null;
+    skipped: boolean;
+  }[] = DEMO_PERIO.skippedTeeth.map((toothFdi) => ({
+    toothFdi,
+    mobility: null,
+    skipped: true,
+  }));
+  for (const toothFdi of demoPerioTeeth()) {
+    const position = toothFdi % 10;
+    const molar = position >= 6;
+    DEMO_PERIO_SITES.forEach((site, i) => {
+      const interproximal = site !== 'B' && site !== 'L';
+      let probing = interproximal ? 3 : 2;
+      if (molar) probing = interproximal ? 6 + (i % 2) : 4;
+      if (phase === 'control') probing = Math.max(2, probing - (molar ? 2 : 0));
+      const recession = molar ? (phase === 'baseline' ? 1 : 2) : 0;
+      const seed = (toothFdi + i) % 5;
+      sites.push({
+        toothFdi,
+        site,
+        probingMm: probing,
+        recessionMm: recession,
+        furcation:
+          molar && site === 'B' ? (phase === 'baseline' ? 2 : 1) : null,
+        bleeding:
+          phase === 'baseline' ? molar || seed === 0 : molar && seed === 0,
+        suppuration: phase === 'baseline' && molar && seed === 1,
+        plaque: phase === 'baseline' ? seed <= 2 : seed === 0,
+        calculus: phase === 'baseline' && molar && interproximal,
+      });
+    });
+    if (molar) {
+      teeth.push({
+        toothFdi,
+        mobility: phase === 'baseline' ? 1 : 0,
+        skipped: false,
+      });
+    }
+  }
+  return { sites, teeth };
+}
