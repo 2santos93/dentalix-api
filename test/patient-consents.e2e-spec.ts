@@ -19,7 +19,7 @@ import { hostFor } from './support/tenant-host';
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
 // patient_consents está permitido aquí porque esta conexión no fija
-// `app.current_tenant` (ver el trigger de 20261016150000_patient_consents).
+// `app.current_tenant` (ver el trigger de 20261016180000_patient_consents).
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });

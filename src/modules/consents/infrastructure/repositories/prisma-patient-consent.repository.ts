@@ -162,7 +162,7 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
   async create(input: CreatePatientConsentRepoInput): Promise<PatientConsent> {
     const tenantId = this.requireTenantId();
     // Append-only: un INSERT. Este repositorio no tiene update ni delete, y un
-    // trigger de la base rechaza ambos (20261016150000_patient_consents).
+    // trigger de la base rechaza ambos (20261016180000_patient_consents).
     const row = await this.prisma.runWithTenant((tx) =>
       tx.patientConsent.create({ data: { tenantId, ...input } }),
     );

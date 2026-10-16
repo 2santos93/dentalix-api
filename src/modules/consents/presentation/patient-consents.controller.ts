@@ -73,7 +73,7 @@ function toConsentDto(consent: PatientConsent): PatientConsentDto {
 // Sin @Patch ni @Delete A PROPÓSITO: un consentimiento firmado es documento
 // médico-legal inmutable. Ni el puerto del repositorio tiene esos métodos, y
 // un trigger de la base rechaza UPDATE y DELETE
-// (20261016150000_patient_consents). Recepción no entra (CLINICAL_ROLES).
+// (20261016180000_patient_consents). Recepción no entra (CLINICAL_ROLES).
 @ApiTags('patient-consents')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
