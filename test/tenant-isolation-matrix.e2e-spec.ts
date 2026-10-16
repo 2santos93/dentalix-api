@@ -143,6 +143,7 @@ interface SeedA {
   invitationId: string;
   domainId: string;
   prescriptionTemplateId: string;
+  appointmentTypeId: string;
 }
 
 interface SeedB {
@@ -303,6 +304,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     ],
   });
 
+  const appointmentType = await create(app, a, '/appointment-types', {
+    name: 'Endodoncia de A',
+    durationMinutes: 90,
+    color: '#7C3AED',
+  });
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -320,6 +327,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     invitationId: invitation.id,
     domainId: (domainRes.body as { domain: IdBody }).domain.id,
     prescriptionTemplateId: prescriptionTemplate.id,
+    appointmentTypeId: appointmentType.id,
   };
 }
 
@@ -658,6 +666,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /prescription-templates/:id',
       verb: 'delete',
       path: () => `/prescription-templates/${a.prescriptionTemplateId}`,
+      status: 404,
+    },
+    // --- appointment-types (DX-121) ---
+    {
+      name: 'PATCH /appointment-types/:id',
+      verb: 'patch',
+      path: () => `/appointment-types/${a.appointmentTypeId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /appointment-types/:id',
+      verb: 'delete',
+      path: () => `/appointment-types/${a.appointmentTypeId}`,
       status: 404,
     },
     // --- data-consents (sobre un paciente de A) ---
