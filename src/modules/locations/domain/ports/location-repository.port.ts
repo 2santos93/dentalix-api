@@ -8,6 +8,11 @@ export interface Location {
   /** País de la sede (DX-013): decide los campos legales de la receta. */
   country: ClinicCountry;
   isActive: boolean;
+  /**
+   * Zona IANA de la sede (DX-097): la de su horario, o la de su país si no
+   * tiene. Con ella la web decide qué es «hoy» en la caja y el dashboard.
+   */
+  timeZone: string;
   createdAt: Date;
   updatedAt: Date;
 }
