@@ -49,6 +49,7 @@ const TENANT_TABLES = [
   'treatment_plan_items',
   'treatment_plans',
   'tooth_records',
+  'patient_dentition_events',
   'clinical_entry_addenda',
   'clinical_entries',
   'medical_history_versions',
@@ -287,6 +288,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
     expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);
+    // DX-120: dentición mixta de la paciente infantil (3 posiciones).
+    expect(firstCounts.patient_dentition_events).toBe(3);
     expect(firstCounts.appointments).toBeGreaterThanOrEqual(40);
     expect(firstCounts.treatment_plans).toBeGreaterThanOrEqual(6);
     expect(firstCounts.payments).toBeGreaterThanOrEqual(10);

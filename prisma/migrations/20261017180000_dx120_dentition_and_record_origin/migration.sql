@@ -44,8 +44,10 @@ ALTER TABLE "tooth_records"
 -- NOT VALID + VALIDATE: el ALTER no recorre la tabla con el bloqueo fuerte;
 -- la validación (todas las filas tienen las columnas nuevas a NULL) va con un
 -- bloqueo que no frena las lecturas ni las escrituras.
+-- IS NOT NULL explícito: con NULL, char_length(...) > 0 da NULL y un CHECK
+-- con NULL PASA.
 ALTER TABLE "tooth_records" ADD CONSTRAINT "tooth_records_void_reason_required"
-  CHECK ("voidsRecordId" IS NULL OR char_length(btrim("voidReason")) > 0) NOT VALID;
+  CHECK ("voidsRecordId" IS NULL OR ("voidReason" IS NOT NULL AND char_length(btrim("voidReason")) > 0)) NOT VALID;
 ALTER TABLE "tooth_records" ADD CONSTRAINT "tooth_records_void_reason_only_on_void"
   CHECK ("voidReason" IS NULL OR "voidsRecordId" IS NOT NULL) NOT VALID;
 ALTER TABLE "tooth_records" ADD CONSTRAINT "tooth_records_void_reason_len"

@@ -35,6 +35,8 @@ import type { ConsentDecision } from '../src/modules/data-consents/domain/entiti
 import { CreateClinicalEntryUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry.use-case';
 import { CreateClinicalEntryAddendumUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry-addendum.use-case';
 import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/add-tooth-record.use-case';
+import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/application/use-cases/dentition.use-cases';
+import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/void-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
 import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
@@ -99,6 +101,8 @@ import {
   DEMO_SIGNED_CONSENT,
   DEMO_SUBDOMAIN,
   DEMO_TOOTH_RECORDS,
+  DEMO_TOOTH_RECORD_VOIDS,
+  DEMO_PEDIATRIC,
   DEMO_USERS,
   NORTE_SCHEDULE,
 } from './demo/data';
@@ -732,9 +736,10 @@ class DemoSeeder {
         dentists[ad.dentistIndex],
       );
     }
+    const toothRecords: { id: string; patientId: string }[] = [];
     for (const r of DEMO_TOOTH_RECORDS) {
       const catalogItemId = catalogId(catalog, r.catalogCode);
-      await this.use(AddToothRecordUseCase).execute(
+      const record = await this.use(AddToothRecordUseCase).execute(
         patientIds[r.patientIndex],
         {
           toothNumber: r.toothNumber,
@@ -746,6 +751,48 @@ class DemoSeeder {
           recordedAt: daysAgoAt(this.now, r.daysAgo, 10 * 60 + 30),
         },
         dentists[r.dentistIndex],
+      );
+      toothRecords.push(record);
+    }
+    // DX-120: una anulación con motivo, hecha por el autor del registro.
+    for (const v of DEMO_TOOTH_RECORD_VOIDS) {
+      const record = toothRecords[v.recordIndex];
+      await this.use(VoidToothRecordUseCase).execute(
+        record.patientId,
+        record.id,
+        v.reason,
+        { userId: dentists[v.dentistIndex], role: ClinicRole.DENTIST },
+      );
+    }
+    // DX-120: dentición mixta de una paciente infantil, con registros
+    // temporales y de otro origen.
+    const kid = patientIds[DEMO_PEDIATRIC.patientIndex];
+    const kidDentist = dentists[DEMO_PEDIATRIC.dentistIndex];
+    for (const e of DEMO_PEDIATRIC.events) {
+      await this.use(RecordDentitionEventsUseCase).execute(
+        kid,
+        {
+          positions: [...e.positions],
+          dentition: e.dentition,
+          reason: e.reason,
+        },
+        kidDentist,
+      );
+    }
+    for (const r of DEMO_PEDIATRIC.records) {
+      await this.use(AddToothRecordUseCase).execute(
+        kid,
+        {
+          toothNumber: r.toothNumber,
+          surfaces: [...r.surfaces],
+          kind: r.catalogCode.startsWith('DX-') ? 'DIAGNOSIS' : 'PROCEDURE',
+          catalogItemId: catalogId(catalog, r.catalogCode),
+          status: r.status,
+          origin: r.origin,
+          notes: 'notes' in r ? r.notes : undefined,
+          recordedAt: daysAgoAt(this.now, r.daysAgo, 11 * 60),
+        },
+        kidDentist,
       );
     }
   }
