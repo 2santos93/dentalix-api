@@ -1,64 +1,32 @@
-import { NotFoundException } from '@nestjs/common';
-import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
-import { CatalogKind, ToothRecordStatus, ToothSurface } from '@prisma/client';
-import { AddToothRecordUseCase } from './add-tooth-record.use-case';
-import { ToothRecord } from '../../domain/entities/tooth-record.entity';
 import {
-  CreateToothRecordRepoInput,
-  ToothRecordRepository,
-} from '../../domain/ports/tooth-record-repository.port';
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
+import { CatalogKind, ToothRecordOrigin, ToothSurface } from '@prisma/client';
+import { AddToothRecordUseCase } from './add-tooth-record.use-case';
+import { CreateToothRecordRepoInput } from '../../domain/ports/tooth-record-repository.port';
+import {
+  InMemoryDentitionEventRepository,
+  InMemoryToothRecordRepository,
+} from '../__fixtures__/in-memory-odontogram';
+import { patientsWithBirthDate } from '../__fixtures__/patients-with-birth-date.fake';
 
-/**
- * A REAL (stateful) in-memory fake — not just a jest-mock object — because
- * part of the behavior under test IS the append-only storage contract
- * itself. `rows` is exposed so tests can assert directly on what got
- * persisted, the same way an e2e test would assert against the real table.
- * Deliberately has NO update/delete method — immutability enforced at the
- * interface level.
- */
-class InMemoryToothRecordRepository implements ToothRecordRepository {
-  readonly rows: ToothRecord[] = [];
-  private nextId = 1;
+const NOW = new Date('2026-10-16T15:00:00.000Z');
 
-  create(input: CreateToothRecordRepoInput): Promise<ToothRecord> {
-    const row: ToothRecord = {
-      id: `tr-${this.nextId++}`,
-      tenantId: 't1',
-      patientId: input.patientId,
-      toothNumber: input.toothNumber,
-      surfaces: input.surfaces,
-      kind: input.kind,
-      catalogItemId: input.catalogItemId ?? null,
-      status: input.status ?? ToothRecordStatus.COMPLETED,
-      notes: input.notes ?? null,
-      clinicalEntryId: input.clinicalEntryId ?? null,
-      performedById: input.performedById ?? null,
-      sourcePlanItemId: input.sourcePlanItemId ?? null,
-      recordedAt: input.recordedAt ?? new Date('2026-07-23T00:00:00.000Z'),
-      createdAt: new Date('2026-07-23T00:00:00.000Z'),
-    };
-    // Append-only: push a NEW row, never mutate/replace an existing one.
-    this.rows.push(row);
-    return Promise.resolve(row);
-  }
-
-  listByPatient(patientId: string): Promise<ToothRecord[]> {
-    return Promise.resolve(this.rows.filter((r) => r.patientId === patientId));
-  }
-
-  listByTooth(patientId: string, toothNumber: string): Promise<ToothRecord[]> {
-    return Promise.resolve(
-      this.rows.filter(
-        (r) => r.patientId === patientId && r.toothNumber === toothNumber,
-      ),
-    );
-  }
+/** Paciente adulto sin eventos: todas las posiciones en permanente. */
+function makeUseCase(
+  repo: InMemoryToothRecordRepository,
+  patients = patientsInClinic('p1'),
+  events = new InMemoryDentitionEventRepository(),
+): AddToothRecordUseCase {
+  return new AddToothRecordUseCase(repo, patients, events, () => NOW);
 }
 
 describe('AddToothRecordUseCase', () => {
   it('appends a new record and returns it', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     const result = await uc.execute(
       'p1',
@@ -79,7 +47,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('accepts an empty surfaces array (means whole tooth)', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     const result = await uc.execute('p1', {
       toothNumber: '48',
@@ -92,7 +60,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('defaults surfaces to empty when omitted entirely', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     const result = await uc.execute('p1', {
       toothNumber: '21',
@@ -106,7 +74,7 @@ describe('AddToothRecordUseCase', () => {
     'accepts a valid permanent FDI tooth number (%s)',
     async (toothNumber) => {
       const repo = new InMemoryToothRecordRepository();
-      const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+      const uc = makeUseCase(repo);
 
       const result = await uc.execute('p1', {
         toothNumber,
@@ -119,10 +87,10 @@ describe('AddToothRecordUseCase', () => {
   );
 
   it.each(['51', '55', '61', '65', '71', '75', '81', '85'])(
-    'accepts a valid primary (deciduous) FDI tooth number (%s)',
+    'accepts a valid primary (deciduous) FDI tooth number (%s) for a 4-year-old',
     async (toothNumber) => {
       const repo = new InMemoryToothRecordRepository();
-      const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+      const uc = makeUseCase(repo, patientsWithBirthDate({ p1: '2022-05-01' }));
 
       const result = await uc.execute('p1', {
         toothNumber,
@@ -138,7 +106,7 @@ describe('AddToothRecordUseCase', () => {
     'rejects an invalid FDI tooth number (%s)',
     async (toothNumber) => {
       const repo = new InMemoryToothRecordRepository();
-      const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+      const uc = makeUseCase(repo);
 
       await expect(
         uc.execute('p1', {
@@ -153,7 +121,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('rejects an invalid surface value', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     await expect(
       uc.execute('p1', {
@@ -167,7 +135,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('rejects an invalid kind', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     await expect(
       uc.execute('p1', {
@@ -187,7 +155,7 @@ describe('AddToothRecordUseCase', () => {
       captured = input;
       return originalCreate(input);
     };
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     const maliciousInput = {
       toothNumber: '11',
@@ -203,7 +171,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('forwards performedById from the explicit argument, not from the input payload', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     const result = await uc.execute(
       'p1',
@@ -216,7 +184,7 @@ describe('AddToothRecordUseCase', () => {
 
   it('does NOT existence-check catalogItemId/clinicalEntryId — forwards them as given (RLS renders a bad/cross-tenant ref harmless; follow-up)', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     const result = await uc.execute('p1', {
       toothNumber: '11',
@@ -234,7 +202,7 @@ describe('AddToothRecordUseCase', () => {
 describe('AddToothRecordUseCase — pertenencia del paciente (SEC-004)', () => {
   it('rechaza con 404 "Paciente no encontrado" un paciente que no es de la clínica, sin insertar', async () => {
     const repo = new InMemoryToothRecordRepository();
-    const uc = new AddToothRecordUseCase(repo, patientsInClinic('p1'));
+    const uc = makeUseCase(repo);
 
     await expect(
       uc.execute('p-otra-clinica', {
@@ -243,5 +211,86 @@ describe('AddToothRecordUseCase — pertenencia del paciente (SEC-004)', () => {
       }),
     ).rejects.toThrow(new NotFoundException('Paciente no encontrado'));
     expect(repo.rows).toHaveLength(0);
+  });
+});
+
+describe('AddToothRecordUseCase — origen y dentición (DX-120)', () => {
+  it('guarda el origen indicado y THIS_CLINIC por defecto', async () => {
+    const repo = new InMemoryToothRecordRepository();
+    const uc = makeUseCase(repo);
+
+    const own = await uc.execute('p1', {
+      toothNumber: '16',
+      kind: CatalogKind.PROCEDURE,
+    });
+    const brought = await uc.execute('p1', {
+      toothNumber: '26',
+      kind: CatalogKind.PROCEDURE,
+      origin: ToothRecordOrigin.PRE_EXISTING,
+    });
+
+    expect(own.origin).toBe(ToothRecordOrigin.THIS_CLINIC);
+    expect(brought.origin).toBe(ToothRecordOrigin.PRE_EXISTING);
+  });
+
+  it('rechaza con 422 un temporal en una posición en permanente (adulto)', async () => {
+    const repo = new InMemoryToothRecordRepository();
+    const uc = makeUseCase(repo, patientsWithBirthDate({ p1: '1990-01-01' }));
+
+    await expect(
+      uc.execute('p1', { toothNumber: '55', kind: CatalogKind.DIAGNOSIS }),
+    ).rejects.toThrow(UnprocessableEntityException);
+    await expect(
+      uc.execute('p1', { toothNumber: '55', kind: CatalogKind.DIAGNOSIS }),
+    ).rejects.toThrow(/temporal.*permanente/);
+    expect(repo.rows).toHaveLength(0);
+  });
+
+  it('rechaza con 422 un permanente en una posición en temporal (niño de 4 años)', async () => {
+    const repo = new InMemoryToothRecordRepository();
+    const uc = makeUseCase(repo, patientsWithBirthDate({ p1: '2022-05-01' }));
+
+    await expect(
+      uc.execute('p1', { toothNumber: '15', kind: CatalogKind.DIAGNOSIS }),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(repo.rows).toHaveLength(0);
+  });
+
+  it('un evento de dentición manda sobre la edad: tras exfoliar el 55, el 55 ya no admite registros', async () => {
+    const repo = new InMemoryToothRecordRepository();
+    const events = new InMemoryDentitionEventRepository();
+    const uc = makeUseCase(
+      repo,
+      patientsWithBirthDate({ p1: '2019-10-16' }),
+      events,
+    );
+    // 7 años: la posición 15 sigue en temporal por la edad.
+    await uc.execute('p1', { toothNumber: '55', kind: CatalogKind.DIAGNOSIS });
+
+    await events.createMany(
+      'p1',
+      [{ position: '15', dentition: 'PERMANENT', reason: 'EXFOLIATION' }],
+      'u1',
+    );
+
+    await expect(
+      uc.execute('p1', { toothNumber: '55', kind: CatalogKind.DIAGNOSIS }),
+    ).rejects.toThrow(UnprocessableEntityException);
+    const ok = await uc.execute('p1', {
+      toothNumber: '15',
+      kind: CatalogKind.DIAGNOSIS,
+    });
+    expect(ok.toothNumber).toBe('15');
+  });
+
+  it('en una posición mixta admite los dos dientes', async () => {
+    const repo = new InMemoryToothRecordRepository();
+    // 7 años: la posición 11 está mudando (mixta) por la edad.
+    const uc = makeUseCase(repo, patientsWithBirthDate({ p1: '2019-10-16' }));
+
+    await uc.execute('p1', { toothNumber: '51', kind: CatalogKind.DIAGNOSIS });
+    await uc.execute('p1', { toothNumber: '11', kind: CatalogKind.DIAGNOSIS });
+
+    expect(repo.rows.map((r) => r.toothNumber)).toEqual(['51', '11']);
   });
 });
