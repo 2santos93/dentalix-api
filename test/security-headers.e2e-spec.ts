@@ -99,6 +99,23 @@ describe('Cabeceras de seguridad (e2e)', () => {
     );
   });
 
+  it('deja pasar Idempotency-Key en el preflight (abonos desde el navegador, DX-067)', async () => {
+    const res = await request(app.getHttpServer())
+      .options(
+        '/api/v1/treatment-plans/00000000-0000-4000-8000-000000000000/payments',
+      )
+      .set('Origin', 'http://localhost:3001')
+      .set('Access-Control-Request-Method', 'POST')
+      .set(
+        'Access-Control-Request-Headers',
+        'authorization,content-type,idempotency-key,x-tenant-host',
+      );
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-headers']).toMatch(
+      /Idempotency-Key/,
+    );
+  });
+
   it('acepta subdominios del dominio raíz (marca blanca)', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/health')

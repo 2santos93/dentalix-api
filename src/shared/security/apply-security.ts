@@ -65,6 +65,10 @@ export function applySecurity(
       // curl y en los e2e (supertest no hace preflight) funcionaba igual, así
       // que solo se ve probándolo en un navegador de verdad.
       'X-Location-Id',
+      // Deduplicación de abonos (POST .../payments). Mismo caso que la sede:
+      // sin ella el navegador bloquea en el preflight todo abono registrado
+      // desde la web en otro origen (DX-067).
+      'Idempotency-Key',
     ],
     // El cliente necesita leer cuánto esperar tras un 429.
     exposedHeaders: ['Retry-After'],
