@@ -387,8 +387,12 @@ describe('Caja — GET /payments (e2e)', () => {
       (r) => r.id === ids.oct01Cash,
     );
 
+    // Sin `createdAt` interno ni zona de la sede: solo `createdById` y el
+    // `canVoid` de quien consulta (ADMIN: siempre; DX-057).
     expect(row).toEqual({
       id: ids.oct01Cash,
+      createdById: null,
+      canVoid: true,
       paidAt: '2026-10-01T00:00:00.000Z',
       amount: 100000,
       currency: 'COP',

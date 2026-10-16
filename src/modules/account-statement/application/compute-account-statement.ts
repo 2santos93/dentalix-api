@@ -14,10 +14,19 @@ import {
   StatementPlanLine,
   StatementSnapshot,
 } from '../domain/entities/account-statement.entity';
+import {
+  canVoidPayment,
+  type VoidActor,
+} from '../../payments/domain/void-window';
 
 export interface ComputeAccountStatementOptions {
   /** "Hoy" para decidir qué cuota está vencida (inyectado, nunca el reloj). */
   today: Date;
+  /**
+   * Quién consulta: decide `canVoid` de cada movimiento con la regla de
+   * anulación y `today` como "ahora". Sin él, ningún movimiento es anulable.
+   */
+  voidActor?: VoidActor;
   /** Filtro de `movements`, inclusive (medianoche UTC del primer día). */
   movementsFrom?: Date;
   /** Filtro de `movements`, EXCLUSIVO (medianoche UTC del día siguiente al último). */
@@ -258,6 +267,11 @@ export function computeAccountStatement(
       method: p.method,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
+      createdById: p.createdById,
+      canVoid:
+        p.voidedAt === null &&
+        options.voidActor !== undefined &&
+        canVoidPayment(p, options.voidActor, options.today),
       voided: p.voidedAt !== null,
       voidedAt: p.voidedAt,
       voidedBy: p.voidedBy,

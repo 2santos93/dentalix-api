@@ -4,13 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   PaymentRepository,
   PaymentVoidTarget,
 } from '../../domain/ports/payment-repository.port';
-import { isSameCivilDay } from '../../domain/void-window';
+import { voidDenial, type VoidActor } from '../../domain/void-window';
 
 export type PaymentClock = () => Date;
 export const PAYMENT_CLOCK = Symbol('PAYMENT_CLOCK');
@@ -20,7 +19,7 @@ export interface VoidPaymentInput {
   /** Motivo ya validado (3–300 caracteres, sin espacios en los extremos). */
   reason: string;
   /** Quién anula: del token, nunca del cuerpo. */
-  actor: { userId: string; role: ClinicRole };
+  actor: VoidActor;
 }
 
 @Injectable()
@@ -61,27 +60,19 @@ export class VoidPaymentUseCase {
     }
   }
 
-  /**
-   * SEC-013: ADMIN anula cualquier abono. Cualquier otro rol con acceso a
-   * pagos (hoy solo RECEPTION) únicamente los que registró ÉL MISMO y en el
-   * MISMO día de la sede — corregir un error de mostrador, no deshacer la caja
-   * de otro ni la de días ya cerrados. Un abono sin autor (legado) es solo de
-   * ADMIN.
-   */
+  /** La regla vive en `voidDenial` (dominio); aquí solo se traduce a 403. */
   private assertActorMayVoid(
     target: PaymentVoidTarget,
     actor: VoidPaymentInput['actor'],
     now: Date,
   ): void {
-    if (actor.role === ClinicRole.ADMIN) {
-      return;
-    }
-    if (target.createdById !== actor.userId) {
+    const denial = voidDenial(target, actor, now);
+    if (denial === 'NOT_AUTHOR') {
       throw new ForbiddenException(
         'Solo puedes anular abonos que registraste tú. Pide a un administrador que lo anule.',
       );
     }
-    if (!isSameCivilDay(target.createdAt, now, target.timeZone)) {
+    if (denial === 'NOT_SAME_DAY') {
       throw new ForbiddenException(
         'Solo puedes anular abonos registrados hoy. Pide a un administrador que lo anule.',
       );

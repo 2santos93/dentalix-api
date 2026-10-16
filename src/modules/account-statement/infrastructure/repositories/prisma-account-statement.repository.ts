@@ -6,6 +6,7 @@ import {
   AccountStatementData,
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 
 // Mismo "facturable" que GetPlanBalanceUseCase: un ítem PROPOSED aún no se debe.
 const BILLABLE_ITEM_STATUSES: TreatmentPlanItemStatus[] = [
@@ -102,6 +103,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 currency: true,
                 paidAt: true,
                 method: true,
+                createdById: true,
+                createdAt: true,
                 deletedAt: true,
                 voidedById: true,
                 voidReason: true,
@@ -154,6 +157,14 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           voiders.map((m) => [m.userId, m.user.fullName]),
         );
 
+        // Zona de cada sede de los abonos (UNA consulta): el `canVoid` de cada
+        // movimiento usa el mismo "hoy" que la anulación (DX-057).
+        const timeZoneOf = await resolveLocationTimeZones(
+          tx,
+          tenantId,
+          payments.map((p) => p.location.id),
+        );
+
         const billableByPlan = new Map(
           itemSums.map((row) => [row.planId, row._sum.price?.toNumber() ?? 0]),
         );
@@ -177,6 +188,9 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               paidAt: p.paidAt,
               method: p.method,
               location: p.location,
+              createdById: p.createdById,
+              createdAt: p.createdAt,
+              timeZone: timeZoneOf(p.location.id),
               voidedAt: p.deletedAt,
               voidedBy: p.voidedById
                 ? {

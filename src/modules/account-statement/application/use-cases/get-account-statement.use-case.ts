@@ -8,6 +8,7 @@ import { ACCOUNT_STATEMENT_REPOSITORY } from '../../domain/ports/account-stateme
 import type { AccountStatementRepository } from '../../domain/ports/account-statement-repository.port';
 import { AccountStatement } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
+import type { VoidActor } from '../../../payments/domain/void-window';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 
 export interface GetAccountStatementInput {
@@ -55,9 +56,11 @@ export class GetAccountStatementUseCase {
     private readonly now: AccountStatementClock,
   ) {}
 
+  /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
   async execute(
     patientId: string,
     input: GetAccountStatementInput,
+    actor: VoidActor,
   ): Promise<AccountStatement> {
     const from =
       input.from !== undefined ? parseCivilDate(input.from, 'from') : undefined;
@@ -75,6 +78,7 @@ export class GetAccountStatementUseCase {
     const issuedAt = this.now();
     const computed = computeAccountStatement(data.snapshot, {
       today: issuedAt,
+      voidActor: actor,
       movementsFrom: from,
       movementsToExclusive: to ? new Date(to.getTime() + DAY_MS) : undefined,
     });
