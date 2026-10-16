@@ -336,10 +336,12 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   `<protocolo>://<host>/register/verificar/<token>`. Email ya registrado → no
   se guarda nada y el titular recibe `registration-notice` («alguien intentó
   registrar una clínica con tu correo…»). 409 solo si el **subdominio** está
-  ocupado (es público). `POST /auth/register/verify { token }` crea la
-  clínica, su sede y su dueño con `emailVerifiedAt` puesto (201
-  `{ tenantId, userId, subdomain }`; 404 usado/inexistente, 410 caducado, 409
-  subdominio o email tomados entretanto). El enlace solo apunta a un host de
+  ocupado (es público). `POST /auth/register/verify { token, password }`
+  (la contraseña elegida al registrarse: quien no pidió el alta no puede
+  confirmarla con un clic) crea la clínica, su sede y su dueño con
+  `emailVerifiedAt` puesto (201 `{ tenantId, userId, subdomain }`; 404
+  genérico si el enlace no vale, ya se usó o la contraseña no coincide, sin
+  distinguirlos; 410 caducado; 409 subdominio o email tomados entretanto). El enlace solo apunta a un host de
   la plataforma (`TENANT_BASE_DOMAINS` o un subdominio suyo): un registro que
   llega con otro `Host`/`X-Forwarded-Host` (inyectado, o el dominio propio de
   una clínica) recibe 400 «Host inválido» y no se envía nada. Los pendientes
