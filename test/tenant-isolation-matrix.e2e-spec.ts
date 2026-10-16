@@ -15,6 +15,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { ROUTE_ACCESS } from './support/route-access-matrix';
+import { clinicTables, TenantTable } from './support/tenant-tables';
 
 /**
  * DX-068 (TST-002): matriz de aislamiento entre clínicas en las rutas por id.
@@ -23,10 +25,13 @@ import {
  * el rol con más permisos) ataca cada ruta de lectura y escritura por id con
  * los ids de A. Para cada caso se exige:
  *  - la respuesta esperada (404: el recurso de otra clínica "no existe"; la
- *    sede ajena en `X-Location-Id` se rechaza con 400), y
+ *    sede ajena en `X-Location-Id` se rechaza con 400; las lecturas clínicas
+ *    colgadas del paciente responden 200 VACÍO por contrato), y
  *  - que NADA de A cambió: se fotografían por `raw` (DIRECT_URL, sin RLS) todas
- *    las filas de A de todas las tablas con `tenantId` (más los usuarios de sus
- *    miembros) antes y después de la petición, y deben ser idénticas.
+ *    las filas de A de todas las tablas de clínica (support/tenant-tables.ts),
+ *    la fila de A en `tenants` y los usuarios de sus miembros, más el número
+ *    de filas de B por tabla (un POST no puede colgar nada de A en B), antes y
+ *    después de la petición, y deben ser idénticas.
  *
  * Lo que B manda en el cuerpo es suyo (su catálogo, su paciente...), para que
  * un 404 solo pueda venir de que el recurso de la RUTA es de A.
@@ -67,38 +72,35 @@ async function create(
   return res.body as IdBody;
 }
 
-/** Tablas con columna "tenantId" (las de clínica), leídas del catálogo. */
-async function tenantTables(): Promise<string[]> {
-  const rows = await raw.$queryRaw<{ table: string }[]>`
-    SELECT c.relname AS table
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_attribute a ON a.attrelid = c.oid
-    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
-      AND a.attname = 'tenantId' AND NOT a.attisdropped
-    ORDER BY c.relname`;
-  return rows.map((r) => r.table);
-}
-
-/** Todas las filas de la clínica, tabla a tabla, como JSON comparable. */
-async function snapshotTenant(
-  tables: string[],
-  tenantId: string,
+/**
+ * Fotografía comparable: filas de A en cada tabla de clínica, su fila de
+ * `tenants`, los usuarios de sus miembros y el recuento de filas de B.
+ */
+async function snapshot(
+  tables: TenantTable[],
+  tenantA: string,
+  tenantB: string,
 ): Promise<Record<string, unknown>> {
-  const snapshot: Record<string, unknown> = {};
-  for (const table of tables) {
-    const [{ rows }] = await raw.$queryRawUnsafe<{ rows: unknown }[]>(
-      `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text), '[]'::jsonb) AS rows
-       FROM "public"."${table}" t WHERE t."tenantId" = $1::uuid`,
-      tenantId,
+  const shot: Record<string, unknown> = {};
+  for (const { table, column } of tables) {
+    const [{ rows, countB }] = await raw.$queryRawUnsafe<
+      { rows: unknown; countB: number }[]
+    >(
+      `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)
+                FILTER (WHERE t."${column}" = $1::uuid), '[]'::jsonb) AS rows,
+              count(*) FILTER (WHERE t."${column}" = $2::uuid)::int AS "countB"
+       FROM "public"."${table}" t`,
+      tenantA,
+      tenantB,
     );
-    snapshot[table] = rows;
+    shot[`${table}.${column}`] = { rows, countB };
   }
-  snapshot.users = await raw.user.findMany({
-    where: { memberships: { some: { tenantId } } },
+  shot.tenant = await raw.tenant.findUnique({ where: { id: tenantA } });
+  shot.users = await raw.user.findMany({
+    where: { memberships: { some: { tenantId: tenantA } } },
     orderBy: { id: 'asc' },
   });
-  return snapshot;
+  return shot;
 }
 
 interface IsolationCase {
@@ -109,6 +111,8 @@ interface IsolationCase {
   /** Cabecera X-Location-Id que manda B (una sede de A). */
   locationId?: () => string;
   status: number;
+  /** Cuerpo exacto esperado (`null` = vacío) cuando no es un error. */
+  responseBody?: unknown;
 }
 
 interface SeedA {
@@ -284,7 +288,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   let clinicB: Clinic;
   let a: SeedA;
   let b: SeedB;
-  let tables: string[];
+  let tables: TenantTable[];
+  const shotOfA = (): Promise<Record<string, unknown>> =>
+    snapshot(tables, clinicA.tenantId, clinicB.tenantId);
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -293,7 +299,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     clinicB = await registerClinic(app, 'clinica-aislada-b');
     a = await seedA(app, clinicA);
     b = await seedClinicData(app, clinicB, '9101');
-    tables = await tenantTables();
+    tables = await clinicTables(raw);
   });
 
   afterAll(async () => {
@@ -303,8 +309,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   });
 
   it('la fotografía de A cubre las tablas de clínica y no está vacía', async () => {
-    expect(tables.length).toBeGreaterThanOrEqual(28);
-    const snapshot = await snapshotTenant(tables, clinicA.tenantId);
+    expect(tables.length).toBeGreaterThanOrEqual(30);
+    const shot = await shotOfA();
+    expect(shot.tenant).toMatchObject({ id: clinicA.tenantId });
     for (const table of [
       'patients',
       'appointments',
@@ -325,7 +332,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     ]) {
       expect({
         table,
-        rows: (snapshot[table] as unknown[]).length > 0,
+        rows:
+          (shot[`${table}.tenantId`] as { rows: unknown[] }).rows.length > 0,
       }).toEqual({ table, rows: true });
     }
   });
@@ -345,6 +353,26 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ firstName: 'Hackeado' }),
       status: 404,
     },
+    // --- rutas clínicas colgadas del paciente de A (lecturas) ---
+    // Contrato previo y deliberado (clinical-history, odontogram y
+    // treatment-plans e2e): la RLS deja ver 0 filas y se responde 200 vacío,
+    // como para un paciente sin datos. Se fija aquí que el cuerpo va VACÍO:
+    // ni una fila de A.
+    ...(
+      [
+        ['medical-history', null],
+        ['clinical-entries', []],
+        ['odontogram', []],
+        ['teeth/11/history', []],
+        ['treatment-plans', []],
+      ] as const
+    ).map(([sub, empty]): IsolationCase => ({
+      name: `GET /patients/:patientId/${sub.replace('11', ':fdi')}`,
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/${sub}`,
+      status: 200,
+      responseBody: empty,
+    })),
     // --- appointments ---
     {
       name: 'GET /appointments/:id',
@@ -611,15 +639,68 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     },
   ];
 
+  /**
+   * Rutas con roles y `:param` cuyo aislamiento entre clínicas ya prueba otro
+   * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
+   */
+  const COVERED_ELSEWHERE: Record<string, string> = {
+    'POST /patients/:patientId/treatment-plans':
+      'patient-tenant-fk.e2e-spec.ts',
+    'PUT /patients/:patientId/medical-history': 'patient-tenant-fk.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries':
+      'patient-tenant-fk.e2e-spec.ts',
+    'POST /patients/:patientId/tooth-records': 'patient-tenant-fk.e2e-spec.ts',
+    'GET /patients/:patientId/perio-exams': 'perio-exams.e2e-spec.ts',
+    'POST /patients/:patientId/perio-exams': 'perio-exams.e2e-spec.ts',
+    'GET /patients/:patientId/perio-exams/:id': 'perio-exams.e2e-spec.ts',
+    'PUT /patients/:patientId/perio-exams/:id/measures':
+      'perio-exams.e2e-spec.ts',
+    'POST /patients/:patientId/perio-exams/:id/finalize':
+      'perio-exams.e2e-spec.ts',
+    'DELETE /patients/:patientId/perio-exams/:id': 'perio-exams.e2e-spec.ts',
+    'GET /patients/:patientId/consents': 'patient-consents.e2e-spec.ts',
+    'GET /patients/:patientId/consents/preview': 'patient-consents.e2e-spec.ts',
+    'POST /patients/:patientId/consents': 'patient-consents.e2e-spec.ts',
+    'GET /patients/:patientId/consents/:id': 'patient-consents.e2e-spec.ts',
+    'POST /patients/:patientId/data-consents': 'data-consents.e2e-spec.ts',
+    'GET /patients/:patientId/prescriptions': 'prescriptions.e2e-spec.ts',
+    'POST /patients/:patientId/prescriptions': 'prescriptions.e2e-spec.ts',
+    'GET /prescriptions/:id': 'prescriptions.e2e-spec.ts',
+    'POST /prescriptions/:id/void': 'prescriptions.e2e-spec.ts',
+    'GET /patients/:patientId/account-statement':
+      'account-statement.e2e-spec.ts',
+    'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
+  };
+
+  it('cubre toda ruta de clínica con :param (aquí o en el spec citado)', () => {
+    const covered = new Set(
+      cases.map((c) => c.name.split(' ').slice(0, 2).join(' ')),
+    );
+    const byId = Object.entries(ROUTE_ACCESS)
+      .filter(([key, access]) => access.kind === 'roles' && key.includes('/:'))
+      .map(([key]) => key);
+    expect({
+      sinCubrir: byId.filter(
+        (k) => !covered.has(k) && !(k in COVERED_ELSEWHERE),
+      ),
+      exencionSobrante: Object.keys(COVERED_ELSEWHERE).filter(
+        (k) => covered.has(k) || !byId.includes(k),
+      ),
+    }).toEqual({ sinCubrir: [], exencionSobrante: [] });
+  });
+
   it.each(cases.map((c) => [c.name, c] as const))(
     'B → %s: responde lo esperado y no toca nada de A',
     async (_name, c) => {
-      const before = await snapshotTenant(tables, clinicA.tenantId);
+      const before = await shotOfA();
       const req = api(app, clinicB, c.verb, c.path(), c.body?.());
       if (c.locationId) req.set('X-Location-Id', c.locationId());
       const res = await req;
       expect({ status: res.status }).toEqual({ status: c.status });
-      expect(await snapshotTenant(tables, clinicA.tenantId)).toEqual(before);
+      if ('responseBody' in c) {
+        expect(res.text === '' ? null : res.body).toEqual(c.responseBody);
+      }
+      expect(await shotOfA()).toEqual(before);
     },
   );
 
@@ -646,11 +727,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   });
 
   it('control: la fotografía SÍ detecta un cambio real en A', async () => {
-    const before = await snapshotTenant(tables, clinicA.tenantId);
+    const before = await shotOfA();
     await api(app, clinicA, 'patch', `/patients/${a.patientId}`, {
       firstName: 'Cambiado por A',
     }).expect(200);
-    expect(await snapshotTenant(tables, clinicA.tenantId)).not.toEqual(before);
+    expect(await shotOfA()).not.toEqual(before);
+  });
+
+  it('control: la fotografía SÍ detecta una fila nueva de B', async () => {
+    const before = await shotOfA();
+    await api(app, clinicB, 'post', '/inventory/items', {
+      name: 'Guantes de B',
+      unit: 'caja',
+    }).expect(201);
+    expect(await shotOfA()).not.toEqual(before);
   });
 
   // BE-007 (abierto, T-BE-2): las rutas de ítems ignoran `:id` del plan. No es
@@ -660,29 +750,33 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   // arregle, Jest avisará de que estos tests ya pasan y hay que quitar el
   // `.failing`.
   describe('id de plan ajeno al ítem, dentro de la misma clínica (BE-007)', () => {
-    async function itemOfAnotherPlan(): Promise<{
-      otherPlanId: string;
-      itemId: string;
-    }> {
+    // La siembra va aquí y no dentro de cada `it.failing`: así un fallo de
+    // la siembra rompe la suite en vez de contar como "falla esperada".
+    // Un ítem por test (el DELETE retira el suyo).
+    let itemForPatch: string;
+    let itemForDelete: string;
+
+    beforeAll(async () => {
       const owner = await create(
         app,
         clinicA,
         `/patients/${a.patientId}/treatment-plans`,
         { currency: 'USD' },
       );
-      const item = await create(
-        app,
-        clinicA,
-        `/treatment-plans/${owner.id}/items`,
-        { toothNumber: '36', catalogItemId: a.catalogItemId, price: 80 },
-      );
-      return { otherPlanId: a.bareplanId, itemId: item.id };
-    }
+      const addItem = (toothNumber: string) =>
+        create(app, clinicA, `/treatment-plans/${owner.id}/items`, {
+          toothNumber,
+          catalogItemId: a.catalogItemId,
+          price: 80,
+        });
+      itemForPatch = (await addItem('36')).id;
+      itemForDelete = (await addItem('46')).id;
+    });
 
     it.failing(
       'PATCH con el plan equivocado → 404 y el ítem intacto',
       async () => {
-        const { otherPlanId, itemId } = await itemOfAnotherPlan();
+        const itemId = itemForPatch;
         const before = await raw.treatmentPlanItem.findUniqueOrThrow({
           where: { id: itemId },
         });
@@ -690,7 +784,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           app,
           clinicA,
           'patch',
-          `/treatment-plans/${otherPlanId}/items/${itemId}`,
+          `/treatment-plans/${a.bareplanId}/items/${itemId}`,
           { notes: 'Editado desde otro plan' },
         );
         expect(res.status).toBe(404);
@@ -705,12 +799,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     it.failing(
       'DELETE con el plan equivocado → 404 y el ítem intacto',
       async () => {
-        const { otherPlanId, itemId } = await itemOfAnotherPlan();
+        const itemId = itemForDelete;
         const res = await api(
           app,
           clinicA,
           'delete',
-          `/treatment-plans/${otherPlanId}/items/${itemId}`,
+          `/treatment-plans/${a.bareplanId}/items/${itemId}`,
         );
         expect(res.status).toBe(404);
         expect(
