@@ -290,16 +290,15 @@ describe('Clinical history (e2e)', () => {
       new Date(ourEntries[1].entryDate).getTime(),
     );
 
-    // --- Immutability is structural: there is no PATCH/DELETE route on the
-    // clinical-entries controller at all (see ClinicalEntriesController).
-    // A method Express/Nest doesn't recognize on that path 404s.
+    // --- Inmutabilidad (DX-038): PATCH/DELETE de una evolución responden 405
+    // con un mensaje que remite a la adenda; no hay caso de uso que edite.
     await request(app.getHttpServer())
       .delete(
         `/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`,
       )
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .expect(404);
+      .expect(405);
     await request(app.getHttpServer())
       .patch(
         `/api/v1/patients/${patientA.id}/clinical-entries/${olderEntryBody.id}`,
@@ -307,7 +306,7 @@ describe('Clinical history (e2e)', () => {
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({ notes: 'intento de edicion' })
-      .expect(404);
+      .expect(405);
 
     // --- 4. Catalog: POST a DIAGNOSIS item, GET includes it, kind=PROCEDURE
     // filter excludes it.

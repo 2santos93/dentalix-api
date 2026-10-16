@@ -127,6 +127,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /patients/:patientId/medical-history': CLINICAL,
   'POST /patients/:patientId/clinical-entries': CLINICAL,
   'GET /patients/:patientId/clinical-entries': CLINICAL,
+  // DX-038: adendas; PATCH/PUT/DELETE solo responden 405 (HC inalterable).
+  'POST /patients/:patientId/clinical-entries/:entryId/addenda': CLINICAL,
+  'GET /patients/:patientId/clinical-entries/:entryId/addenda': CLINICAL,
+  'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
+  'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
+  'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'POST /patients/:patientId/tooth-records': CLINICAL,
   'GET /patients/:patientId/odontogram': CLINICAL,
   'GET /patients/:patientId/teeth/:fdi/history': CLINICAL,

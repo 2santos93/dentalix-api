@@ -766,6 +766,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patients/:patientId/clinical-entries':
       'patient-tenant-fk.e2e-spec.ts',
     'POST /patients/:patientId/tooth-records': 'patient-tenant-fk.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/addenda':
+      'clinical-entry-addenda.e2e-spec.ts',
+    'GET /patients/:patientId/clinical-entries/:entryId/addenda':
+      'clinical-entry-addenda.e2e-spec.ts',
+    // Responden 405 a cualquiera sin leer ni tocar datos (HC inalterable).
+    'PATCH /patients/:patientId/clinical-entries/:entryId':
+      'clinical-entry-addenda.e2e-spec.ts',
+    'PUT /patients/:patientId/clinical-entries/:entryId':
+      'clinical-entry-addenda.e2e-spec.ts',
+    'DELETE /patients/:patientId/clinical-entries/:entryId':
+      'clinical-entry-addenda.e2e-spec.ts',
     'GET /patients/:patientId/perio-exams': 'perio-exams.e2e-spec.ts',
     'POST /patients/:patientId/perio-exams': 'perio-exams.e2e-spec.ts',
     'GET /patients/:patientId/perio-exams/:id': 'perio-exams.e2e-spec.ts',

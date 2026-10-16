@@ -97,6 +97,7 @@ describe('Listados por padre completos, sin topes silenciosos (DX-043, int)', ()
         patientId,
         entryDate: minutes(i),
         notes: `Evolución ${i}`,
+        performedById: patientId,
       })),
     });
     const repo = new PrismaClinicalEntryRepository(prisma, tenantContext);

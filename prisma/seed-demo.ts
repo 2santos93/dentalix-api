@@ -31,6 +31,7 @@ import { PublishPrivacyPolicyUseCase } from '../src/modules/data-consents/applic
 import { RecordDataConsentsUseCase } from '../src/modules/data-consents/application/use-cases/record-data-consents.use-case';
 import type { ConsentDecision } from '../src/modules/data-consents/domain/entities/data-consent.entity';
 import { CreateClinicalEntryUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry.use-case';
+import { CreateClinicalEntryAddendumUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry-addendum.use-case';
 import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/add-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
@@ -75,6 +76,7 @@ import {
 import {
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
+  DEMO_CLINICAL_ADDENDA,
   DEMO_CONSENT_TEMPLATES,
   DEMO_PERIO,
   DEMO_PRESCRIPTION,
@@ -701,8 +703,9 @@ class DemoSeeder {
     dentists: string[],
     catalog: Map<string, string>,
   ): Promise<void> {
+    const entries: { id: string; patientId: string }[] = [];
     for (const e of DEMO_CLINICAL_ENTRIES) {
-      await this.use(CreateClinicalEntryUseCase).execute(
+      const entry = await this.use(CreateClinicalEntryUseCase).execute(
         patientIds[e.patientIndex],
         {
           entryDate: daysAgoAt(this.now, e.daysAgo, 10 * 60),
@@ -710,6 +713,17 @@ class DemoSeeder {
           notes: e.notes,
         },
         dentists[e.dentistIndex],
+      );
+      entries.push(entry);
+    }
+    // DX-038: una corrección por adenda, como se haría en la clínica.
+    for (const ad of DEMO_CLINICAL_ADDENDA) {
+      const entry = entries[ad.entryIndex];
+      await this.use(CreateClinicalEntryAddendumUseCase).execute(
+        entry.patientId,
+        entry.id,
+        { reason: ad.reason, text: ad.text },
+        dentists[ad.dentistIndex],
       );
     }
     for (const r of DEMO_TOOTH_RECORDS) {

@@ -1,9 +1,14 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  MethodNotAllowedException,
   Param,
+  Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -11,10 +16,13 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiMethodNotAllowedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
@@ -24,6 +32,11 @@ import { CreateClinicalEntryUseCase } from '../application/use-cases/create-clin
 import { ListClinicalEntriesUseCase } from '../application/use-cases/list-clinical-entries.use-case';
 import { ClinicalEntry } from '../domain/entities/clinical-entry.entity';
 import { ClinicalEntryDto } from './dto/clinical-entry.dto';
+import { ClinicalEntryAddendumDto } from './dto/clinical-entry-addendum.dto';
+import { CreateClinicalEntryAddendumDto } from './dto/create-clinical-entry-addendum.dto';
+import { CreateClinicalEntryAddendumUseCase } from '../application/use-cases/create-clinical-entry-addendum.use-case';
+import { ListClinicalEntryAddendaUseCase } from '../application/use-cases/list-clinical-entry-addenda.use-case';
+import { ClinicalEntryAddendum } from '../domain/entities/clinical-entry-addendum.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -36,10 +49,14 @@ interface AuthenticatedRequest {
   user: JwtPayload;
 }
 
-// NOTE: deliberately NO @Patch/@Delete route on this controller — clinical
-// entries are immutable evolutions; a correction is always a brand-new
-// entry, never an edit of an existing one (see CreateClinicalEntryUseCase /
-// ClinicalEntryRepository, which has no update/delete method at all).
+/** Respuesta a cualquier intento de editar o borrar una evolución (DX-038). */
+export const CLINICAL_ENTRY_IMMUTABLE_MESSAGE =
+  'Una evolución de la historia clínica no se puede modificar ni borrar (Res. 1995 de 1999, art. 18). Para corregirla, añade una adenda: POST /patients/{patientId}/clinical-entries/{entryId}/addenda';
+
+// Las evoluciones son INALTERABLES (DX-038): no hay caso de uso ni método de
+// repositorio que las edite o borre, y la BD lo impide con un trigger. Las
+// rutas PATCH/PUT/DELETE existen solo para responder 405 con un mensaje que
+// remite a la adenda, en vez de un 404 genérico.
 @ApiTags('clinical-entries')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,6 +68,8 @@ export class ClinicalEntriesController {
   constructor(
     private readonly createClinicalEntry: CreateClinicalEntryUseCase,
     private readonly listClinicalEntries: ListClinicalEntriesUseCase,
+    private readonly createAddendum: CreateClinicalEntryAddendumUseCase,
+    private readonly listAddenda: ListClinicalEntryAddendaUseCase,
   ) {}
 
   @Audit({
@@ -96,5 +115,93 @@ export class ClinicalEntriesController {
       from: query.from ? new Date(query.from) : undefined,
       to: query.to ? new Date(query.to) : undefined,
     });
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'CLINICAL_ENTRY_ADDENDUM',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
+  @Post(':entryId/addenda')
+  @ApiOperation({
+    summary: 'Añade una adenda de corrección a una evolución (DX-038)',
+    description:
+      'La evolución original no cambia. Autor y fecha los pone el servidor.',
+  })
+  @ApiParam({ name: 'entryId', format: 'uuid' })
+  @ApiCreatedResponse({ type: ClinicalEntryAddendumDto })
+  @ApiBadRequestResponse({ description: 'Motivo o texto inválidos.' })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente o evolución no encontrados en esta clínica (o la evolución es de otro paciente).',
+  })
+  addAddendum(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('entryId', ParseUUIDPipe) entryId: string,
+    @Body() dto: CreateClinicalEntryAddendumDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ClinicalEntryAddendum> {
+    return this.createAddendum.execute(
+      patientId,
+      entryId,
+      { reason: dto.reason, text: dto.text },
+      req.user.sub,
+    );
+  }
+
+  @Audit({
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY_ADDENDUM',
+    resourceId: { param: 'entryId' },
+    patient: { param: 'patientId' },
+  })
+  @Get(':entryId/addenda')
+  @ApiOperation({
+    summary: 'Adendas de una evolución, en orden cronológico (DX-038)',
+  })
+  @ApiParam({ name: 'entryId', format: 'uuid' })
+  @ApiOkResponse({ type: [ClinicalEntryAddendumDto] })
+  @ApiNotFoundResponse({
+    description: 'Paciente o evolución no encontrados en esta clínica.',
+  })
+  addenda(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('entryId', ParseUUIDPipe) entryId: string,
+  ): Promise<ClinicalEntryAddendum[]> {
+    return this.listAddenda.execute(patientId, entryId);
+  }
+
+  @Patch(':entryId')
+  @HttpCode(405)
+  @ApiOperation({ summary: 'No permitido: una evolución no se edita (DX-038)' })
+  @ApiParam({ name: 'entryId', format: 'uuid' })
+  @ApiMethodNotAllowedResponse({
+    description: CLINICAL_ENTRY_IMMUTABLE_MESSAGE,
+  })
+  rejectPatch(): never {
+    throw new MethodNotAllowedException(CLINICAL_ENTRY_IMMUTABLE_MESSAGE);
+  }
+
+  @Put(':entryId')
+  @HttpCode(405)
+  @ApiOperation({ summary: 'No permitido: una evolución no se edita (DX-038)' })
+  @ApiParam({ name: 'entryId', format: 'uuid' })
+  @ApiMethodNotAllowedResponse({
+    description: CLINICAL_ENTRY_IMMUTABLE_MESSAGE,
+  })
+  rejectPut(): never {
+    throw new MethodNotAllowedException(CLINICAL_ENTRY_IMMUTABLE_MESSAGE);
+  }
+
+  @Delete(':entryId')
+  @HttpCode(405)
+  @ApiOperation({ summary: 'No permitido: una evolución no se borra (DX-038)' })
+  @ApiParam({ name: 'entryId', format: 'uuid' })
+  @ApiMethodNotAllowedResponse({
+    description: CLINICAL_ENTRY_IMMUTABLE_MESSAGE,
+  })
+  rejectDelete(): never {
+    throw new MethodNotAllowedException(CLINICAL_ENTRY_IMMUTABLE_MESSAGE);
   }
 }

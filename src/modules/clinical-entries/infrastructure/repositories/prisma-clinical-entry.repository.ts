@@ -8,10 +8,14 @@ import {
   ListClinicalEntriesParams,
 } from '../../domain/ports/clinical-entry-repository.port';
 import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ADDENDA_ORDER,
+  mapAddendum,
+} from './prisma-clinical-entry-addendum.repository';
 
-type PrismaClinicalEntry = Prisma.ClinicalEntryGetPayload<
-  Record<string, never>
->;
+type PrismaClinicalEntry = Prisma.ClinicalEntryGetPayload<{
+  include: { addenda: true };
+}>;
 
 function mapToEntity(row: PrismaClinicalEntry): ClinicalEntry {
   return {
@@ -23,6 +27,7 @@ function mapToEntity(row: PrismaClinicalEntry): ClinicalEntry {
     notes: row.notes,
     performedById: row.performedById,
     createdAt: row.createdAt,
+    addenda: row.addenda.map(mapAddendum),
   };
 }
 
@@ -66,6 +71,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           notes: input.notes,
           performedById: input.performedById,
         },
+        include: { addenda: true },
       });
     });
     return mapToEntity(row);
@@ -92,6 +98,8 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
       const rows = await tx.clinicalEntry.findMany({
         where,
         orderBy: [{ entryDate: 'desc' }, { id: 'desc' }],
+        // DX-038: las adendas viajan con su evolución, en orden cronológico.
+        include: { addenda: { orderBy: ADDENDA_ORDER } },
       });
       return rows.map(mapToEntity);
     });

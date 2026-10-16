@@ -95,6 +95,7 @@ describe('Comprobación previa de las FK compuestas (SEC-004, int)', () => {
           patientId: patientB,
           entryDate: new Date(),
           notes: 'cruzada',
+          performedById: patientB,
         },
       });
       await tx.$executeRawUnsafe(PREFLIGHT);

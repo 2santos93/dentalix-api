@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ClinicalEntryAddendumDto } from './clinical-entry-addendum.dto';
 
 // Response shape for ClinicalEntry endpoints — documents the ClinicalEntry
 // entity contract for Swagger (same convention as BrandingDto /
@@ -28,6 +29,15 @@ export class ClinicalEntryDto {
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   performedById!: string | null;
 
-  @ApiProperty({ format: 'date-time' })
+  @ApiProperty({
+    format: 'date-time',
+    description: 'Fecha de registro: la fija el servidor',
+  })
   createdAt!: Date;
+
+  @ApiProperty({
+    type: [ClinicalEntryAddendumDto],
+    description: 'Adendas de corrección, en orden cronológico (DX-038)',
+  })
+  addenda!: ClinicalEntryAddendumDto[];
 }

@@ -19,6 +19,7 @@ function fakeEntry(
     notes: 'Nota',
     performedById: null,
     createdAt: new Date(entryDate),
+    addenda: [],
     ...overrides,
   };
 }

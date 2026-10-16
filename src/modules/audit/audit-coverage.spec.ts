@@ -78,6 +78,18 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
   },
+  'POST /patients/:patientId/clinical-entries/:entryId/addenda': {
+    action: 'CREATE',
+    resource: 'CLINICAL_ENTRY_ADDENDUM',
+    resourceId: RES,
+    patient: P,
+  },
+  'GET /patients/:patientId/clinical-entries/:entryId/addenda': {
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY_ADDENDUM',
+    resourceId: { param: 'entryId' },
+    patient: P,
+  },
   'GET /patients/:patientId/clinical-entries': {
     action: 'VIEW',
     resource: 'CLINICAL_ENTRY',

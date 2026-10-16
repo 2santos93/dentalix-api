@@ -1,3 +1,5 @@
+import { ClinicalEntryAddendum } from './clinical-entry-addendum.entity';
+
 /**
  * API-facing shape of a ClinicalEntry (one clinical evolution note).
  * Deliberately NOT the raw Prisma model: repositories must `mapToEntity`
@@ -5,8 +7,8 @@
  * MedicalHistory / DentalCatalogItem).
  *
  * This is IMMUTABLE: once created, an entry is never updated or deleted
- * (content-wise). A correction = a brand-new entry, never an edit of an
- * existing one.
+ * (content-wise). DX-038: la BD también lo impide (trigger) y la corrección
+ * es una ADENDA (`addenda`, en orden cronológico) que deja el original intacto.
  */
 export interface ClinicalEntry {
   id: string;
@@ -17,4 +19,5 @@ export interface ClinicalEntry {
   notes: string;
   performedById: string | null;
   createdAt: Date;
+  addenda: ClinicalEntryAddendum[];
 }

@@ -688,6 +688,26 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
 ];
 
+/**
+ * DX-038: adenda de corrección sobre una evolución de DEMO_CLINICAL_ENTRIES
+ * (por índice). La evolución original queda intacta; la adenda va debajo.
+ */
+interface DemoClinicalAddendum {
+  entryIndex: number;
+  dentistIndex: number;
+  reason: string;
+  text: string;
+}
+
+export const DEMO_CLINICAL_ADDENDA: readonly DemoClinicalAddendum[] = [
+  {
+    entryIndex: 1,
+    dentistIndex: 0,
+    reason: 'Error de transcripción en la tensión arterial',
+    text: 'La TA al ingreso fue 125/85, no 135/85. El resto de la nota se mantiene.',
+  },
+];
+
 interface DemoClinicalEntry {
   patientIndex: number;
   dentistIndex: number;

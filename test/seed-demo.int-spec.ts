@@ -49,6 +49,7 @@ const TENANT_TABLES = [
   'treatment_plan_items',
   'treatment_plans',
   'tooth_records',
+  'clinical_entry_addenda',
   'clinical_entries',
   'medical_history_versions',
   'appointment_confirmations',
@@ -284,6 +285,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patients).toBe(25);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
+    expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
     expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);
     expect(firstCounts.appointments).toBeGreaterThanOrEqual(40);
     expect(firstCounts.treatment_plans).toBeGreaterThanOrEqual(6);

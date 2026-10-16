@@ -9,7 +9,7 @@ export interface CreateClinicalEntryRepoInput {
   entryDate?: Date;
   reason?: string;
   notes: string;
-  performedById?: string;
+  performedById: string;
 }
 
 export interface ListClinicalEntriesParams {

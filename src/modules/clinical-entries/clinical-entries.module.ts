@@ -5,6 +5,10 @@ import { CreateClinicalEntryUseCase } from './application/use-cases/create-clini
 import { ListClinicalEntriesUseCase } from './application/use-cases/list-clinical-entries.use-case';
 import { CLINICAL_ENTRY_REPOSITORY } from './domain/ports/clinical-entry-repository.port';
 import { PrismaClinicalEntryRepository } from './infrastructure/repositories/prisma-clinical-entry.repository';
+import { CreateClinicalEntryAddendumUseCase } from './application/use-cases/create-clinical-entry-addendum.use-case';
+import { ListClinicalEntryAddendaUseCase } from './application/use-cases/list-clinical-entry-addenda.use-case';
+import { CLINICAL_ENTRY_ADDENDUM_REPOSITORY } from './domain/ports/clinical-entry-addendum-repository.port';
+import { PrismaClinicalEntryAddendumRepository } from './infrastructure/repositories/prisma-clinical-entry-addendum.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
@@ -20,6 +24,8 @@ import { PatientsModule } from '../patients/patients.module';
   providers: [
     CreateClinicalEntryUseCase,
     ListClinicalEntriesUseCase,
+    CreateClinicalEntryAddendumUseCase,
+    ListClinicalEntryAddendaUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on ClinicalEntriesController.
@@ -27,6 +33,10 @@ import { PatientsModule } from '../patients/patients.module';
     {
       provide: CLINICAL_ENTRY_REPOSITORY,
       useClass: PrismaClinicalEntryRepository,
+    },
+    {
+      provide: CLINICAL_ENTRY_ADDENDUM_REPOSITORY,
+      useClass: PrismaClinicalEntryAddendumRepository,
     },
   ],
 })
