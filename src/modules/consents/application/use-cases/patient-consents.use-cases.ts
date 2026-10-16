@@ -218,16 +218,6 @@ export class SignPatientConsentUseCase {
     meta: SignPatientConsentMeta,
   ): Promise<PatientConsent> {
     // Las validaciones baratas, antes de tocar la base.
-    const patientSignature = parseSignature(
-      input.patientSignature,
-      input.signerType === ConsentSignerType.GUARDIAN
-        ? 'la firma del tutor'
-        : 'la firma del paciente',
-    );
-    const professionalSignature = parseSignature(
-      input.professionalSignature,
-      'la firma del profesional',
-    );
     let guardian: { name: string; document: string } | null = null;
     if (input.signerType === ConsentSignerType.GUARDIAN) {
       const name = requiredTrimmed(input.guardianName);
@@ -254,6 +244,19 @@ export class SignPatientConsentUseCase {
         'La plantilla cambió desde la vista previa: revisa el texto de nuevo antes de firmar',
       );
     }
+    // Las firmas se descomprimen para buscar tinta: aunque el coste está
+    // acotado (SEC-026), solo se paga con el paciente, el plan y la plantilla
+    // ya comprobados (lecturas, sin transacción ni bloqueos abiertos).
+    const patientSignature = parseSignature(
+      input.patientSignature,
+      input.signerType === ConsentSignerType.GUARDIAN
+        ? 'la firma del tutor'
+        : 'la firma del paciente',
+    );
+    const professionalSignature = parseSignature(
+      input.professionalSignature,
+      'la firma del profesional',
+    );
 
     const signerName =
       guardian?.name ??

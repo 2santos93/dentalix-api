@@ -15,6 +15,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { computeConsentHash } from '../src/modules/consents/domain/consent-hash';
 import { MAX_SIGNATURE_BYTES } from '../src/modules/consents/domain/signature-image';
 import { hostFor } from './support/tenant-host';
+import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
@@ -470,6 +471,40 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
       // La respuesta de error nunca repite la imagen.
       expect(JSON.stringify(tooBig.body)).not.toContain(big.slice(0, 64));
       expect(await raw.patientConsent.count()).toBe(count);
+    });
+
+    it('400 rápido con una bomba de descompresión en cualquiera de las dos firmas (SEC-026)', async () => {
+      const count = await raw.patientConsent.count();
+      const bomb = await as(clinicA, dentistA)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateA, {
+            patientSignature: `data:image/png;base64,${pngBombBase64()}`,
+          }),
+        )
+        .expect(400);
+      expect((bomb.body as { message: string }).message).toBe(
+        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles).',
+      );
+      const lying = await as(clinicA, dentistA)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateA, { professionalSignature: pngLyingBombBase64() }),
+        )
+        .expect(400);
+      expect((lying.body as { message: string }).message).toBe(
+        'La firma del profesional no es una imagen PNG válida.',
+      );
+      expect(await raw.patientConsent.count()).toBe(count);
+    });
+
+    it('la firma se valida después del paciente: una bomba sobre un paciente ajeno da 404 (SEC-026)', async () => {
+      await as(clinicB)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateB, { patientSignature: pngBombBase64() }),
+        )
+        .expect(404);
     });
 
     it('el tope ampliado de cuerpo es solo para la firma: el resto sigue en 100 KB', async () => {

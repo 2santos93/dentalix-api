@@ -236,6 +236,29 @@ describe('SignPatientConsentUseCase', () => {
     expect(consents.rows).toHaveLength(0);
   });
 
+  it('valida las firmas DESPUÉS de comprobar el paciente y el plan: ajeno con firma inválida da 404 (SEC-026)', async () => {
+    const { sign, consents, template } = setup();
+    const bad = Buffer.from('GIF89a-no-png').toString('base64');
+    await expect(
+      sign.execute(
+        'p-otra',
+        signInput(template.id, { patientSignature: bad }),
+        META,
+      ),
+    ).rejects.toThrow(NotFoundException);
+    await expect(
+      sign.execute(
+        'p1',
+        signInput(template.id, {
+          treatmentPlanId: 'plan-otro',
+          professionalSignature: bad,
+        }),
+        META,
+      ),
+    ).rejects.toThrow(NotFoundException);
+    expect(consents.rows).toHaveLength(0);
+  });
+
   it('409 si la plantilla cambió desde la vista previa', async () => {
     const { sign, templates, template } = setup();
     await new UpdateConsentTemplateUseCase(templates).execute(template.id, {

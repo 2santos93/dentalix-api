@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { MAX_SIGNATURE_BYTES } from '../src/modules/consents/domain/signature-image';
+import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
@@ -449,6 +450,34 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           contentHash: shownHash,
         })
         .expect(400);
+    });
+
+    it('una bomba de descompresión como firma: 400 y no se firma (SEC-026)', async () => {
+      const bomb = await as(clinicA, dentistA)
+        .post(acceptPath(patientA, planA), {
+          signerName: 'Ana',
+          signature: `data:image/png;base64,${pngBombBase64()}`,
+          contentHash: shownHash,
+        })
+        .expect(400);
+      expect((bomb.body as { message: string }).message).toBe(
+        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles).',
+      );
+      const lying = await as(clinicA, dentistA)
+        .post(acceptPath(patientA, planA), {
+          signerName: 'Ana',
+          signature: pngLyingBombBase64(),
+          contentHash: shownHash,
+        })
+        .expect(400);
+      expect((lying.body as { message: string }).message).toBe(
+        'La firma del paciente no es una imagen PNG válida.',
+      );
+      expect(
+        await raw.treatmentPlanAcceptance.count({
+          where: { planId: planA },
+        }),
+      ).toBe(0);
     });
 
     it('un plan sin ítems no se acepta (400)', async () => {
