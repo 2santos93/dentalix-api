@@ -13,6 +13,7 @@ import type {
 } from '../domain/audit-event';
 import type { AuditCursor } from '../domain/audit-cursor';
 import { sanitizeAuditMetadata } from '../domain/audit-metadata';
+import { auditListWhere } from './audit-list-where';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -127,22 +128,7 @@ export class PrismaAuditEventRepository implements AuditEventRepository {
   ): Promise<AuditEventView[]> {
     return this.prisma.runWithTenant(tenantId, async (tx) => {
       const rows = await tx.auditEvent.findMany({
-        where: {
-          tenantId,
-          occurredAt: { gte: filter.from, lt: filter.to },
-          ...(filter.patientId ? { patientId: filter.patientId } : {}),
-          ...(filter.actorUserId ? { actorUserId: filter.actorUserId } : {}),
-          ...(filter.action ? { action: filter.action } : {}),
-          ...(filter.resourceType ? { resourceType: filter.resourceType } : {}),
-          ...(cursor
-            ? {
-                OR: [
-                  { occurredAt: { lt: cursor.occurredAt } },
-                  { occurredAt: cursor.occurredAt, id: { lt: cursor.id } },
-                ],
-              }
-            : {}),
-        },
+        where: auditListWhere(tenantId, filter, cursor),
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         take,
       });

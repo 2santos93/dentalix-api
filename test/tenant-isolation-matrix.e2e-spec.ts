@@ -100,9 +100,11 @@ async function snapshot(
     );
     // `audit_events` (DX-009): cada petición correcta de B deja SU evento en
     // B (también la lectura que devuelve 200 vacío), así que su recuento de B
-    // cambia a propósito. Lo que no puede cambiar son las filas de A.
-    shot[`${table}.${column}`] =
-      table === 'audit_events' ? { rows } : { rows, countB };
+    // cambia a propósito. Lo que no puede cambiar son las filas de A. Igual en
+    // sus particiones mensuales (DX-102: audit_events_pYYYYMM y _default).
+    const isAudit =
+      table === 'audit_events' || table.startsWith('audit_events_');
+    shot[`${table}.${column}`] = isAudit ? { rows } : { rows, countB };
   }
   shot.tenant = await raw.tenant.findUnique({ where: { id: tenantA } });
   shot.users = await raw.user.findMany({

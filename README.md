@@ -220,11 +220,30 @@ Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
 - **Sin contenido clínico**: la metadata solo admite nombres de campo, ids de la
   ruta y códigos (`sanitizeAuditMetadata`); ni texto de la historia, ni
   alergias, ni diagnósticos, ni firmas, ni importes.
-- **Append-only**: un trigger rechaza UPDATE siempre y DELETE/TRUNCATE salvo a
-  un superusuario (purga administrativa y limpieza de las bases de test). RLS
-  forzada por tenant. Sin claves foráneas, a propósito: es evidencia y no
-  bloquea ni sigue en cascada el borrado de lo que referencia.
-- **Retención**: no se borra; va con la historia clínica.
+- **Append-only**: el rol de la app no tiene UPDATE, DELETE, TRUNCATE ni
+  TRIGGER en la tabla ni en sus particiones (42501, DX-102); además un trigger
+  rechaza UPDATE siempre y DELETE/TRUNCATE salvo a un superusuario (limpieza
+  de las bases de test). RLS forzada por tenant en el padre y en cada
+  partición. Sin claves foráneas, a propósito: es evidencia y no bloquea ni
+  sigue en cascada el borrado de lo que referencia.
+- **Particionada por mes** (`occurredAt`, UTC; DX-102): `audit_events_pYYYYMM`
+  más `audit_events_default` de seguridad (un evento de un mes sin partición
+  no rompe la petición). La migración crea 24 meses por delante y la API
+  reasegura `AUDIT_PARTITIONS_MONTHS_AHEAD` (default 12) al arrancar y cada
+  día con `audit_events_ensure_partitions`, idempotente. Prisma 6 no modela
+  particiones: viven solo en SQL y `prisma migrate diff` las ignora. En una BD
+  cuyo rol de la app no se llame `dentalix_app`, concédele a mano `SELECT,
+  INSERT` en `audit_events` y `EXECUTE` en `audit_events_ensure_partitions`.
+  Si `audit_events_default` llega a tener filas (horizonte sin asegurar),
+  la función avisa con un WARNING y no crea ese mes: muévelas como owner
+  (DETACH de DEFAULT, crear el mes, copiar, volver a adjuntar) en una ventana.
+- **Retención**: `AUDIT_RETENTION_MONTHS` (default y mínimo 180 meses, 15
+  años, como la historia clínica). `npm run audit:purge -- --dry-run` lista y
+  `npm run audit:purge` hace DETACH + DROP de las particiones COMPLETAS más
+  antiguas que la retención, con DIRECT_URL (owner): la app no puede ejecutar
+  `audit_events_purge`. Archiva antes en frío lo que se vaya a borrar.
+- **Benchmark**: `docs/perf/audit-events-bench.sql` (1,5 M eventos, EXPLAIN
+  como `dentalix_app` con RLS).
 - **Consulta**: `GET /api/v1/audit-events` (solo ADMIN), filtros `patientId`,
   `actorUserId`, `action`, `resourceType`, `from`/`to` (instantes ISO; por
   defecto los últimos 30 días, como mucho 366), paginado por cursor

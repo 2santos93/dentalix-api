@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -64,6 +65,7 @@ interface AuditRow {
 interface AuditPage {
   items: {
     id: string;
+    occurredAt: string;
     action: string;
     resourceType: string;
     actor: { id: string; fullName: string | null; role: string | null } | null;
@@ -538,6 +540,57 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
       } while (cursor);
       expect(seen).toEqual(all.items.map((e) => e.id));
       expect(new Set(seen).size).toBe(seen.length);
+    });
+
+    it('DX-102: pagina hondo por cursor a través de particiones (cambio de mes) con filtros de acción y recurso, sin duplicados', async () => {
+      // 120 anulaciones de abono en grupos de 4 en el MISMO milisegundo, a
+      // ambos lados del inicio de un mes de hace dos meses (dos particiones).
+      const now = new Date();
+      const boundary = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1);
+      const rows = Array.from({ length: 120 }, (_, i) => ({
+        id: randomUUID(),
+        tenantId: clinicA.tenantId,
+        actorUserId: clinicA.adminUserId,
+        actorRole: 'ADMIN' as const,
+        action: 'VOID' as const,
+        resourceType: 'PAYMENT' as const,
+        occurredAt: new Date(boundary + (Math.floor(i / 4) - 15) * 60_000),
+      }));
+      await raw.auditEvent.createMany({ data: rows });
+      const from = new Date(boundary - 86_400_000).toISOString();
+      const to = new Date(boundary + 86_400_000).toISOString();
+      const seen: AuditPage['items'] = [];
+      let cursor: string | null = null;
+      do {
+        const query: string = cursor ? `&cursor=${cursor}` : '';
+        const page = (
+          await api(
+            clinicA,
+            'get',
+            `/audit-events?limit=25&action=VOID&resourceType=PAYMENT&from=${from}&to=${to}${query}`,
+            clinicA.adminToken,
+          ).expect(200)
+        ).body as AuditPage;
+        seen.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(seen).toHaveLength(120);
+      expect(new Set(seen.map((e) => e.id)).size).toBe(120);
+      expect(seen.map((e) => e.id).sort()).toEqual(
+        rows.map((r) => r.id).sort(),
+      );
+      const keys = seen.map((e) => `${e.occurredAt}|${e.id}`);
+      expect(keys).toEqual([...keys].sort().reverse());
+      // B no ve ninguno, ni con los mismos filtros.
+      const b = (
+        await api(
+          clinicB,
+          'get',
+          `/audit-events?action=VOID&resourceType=PAYMENT&from=${from}&to=${to}`,
+          clinicB.adminToken,
+        ).expect(200)
+      ).body as AuditPage;
+      expect(b.items).toEqual([]);
     });
 
     it('topes: limit > 100, rango de más de 366 días o cursor manipulado dan 400', async () => {
