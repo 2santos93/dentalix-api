@@ -88,6 +88,10 @@ export interface UpdatePatientRepoInput {
 }
 
 export interface ListPatientsParams {
+  /**
+   * Búsqueda libre por nombre, apellido o documento: sin distinguir tildes ni
+   * mayúsculas ("jose" encuentra "José") y por subcadena.
+   */
   query?: string;
   skip?: number;
   take?: number;
@@ -103,6 +107,9 @@ export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
 export interface PatientRepository {
   create(input: CreatePatientRepoInput): Promise<Patient>;
   findById(id: string): Promise<Patient | null>;
+  /** Orden: (createdAt DESC, id DESC), estable entre páginas. */
   list(params: ListPatientsParams): Promise<ListPatientsResult>;
+  /** Pacientes vivos del tenant del contexto, con un COUNT (sin listar). */
+  count(): Promise<number>;
   update(id: string, patch: UpdatePatientRepoInput): Promise<Patient>;
 }

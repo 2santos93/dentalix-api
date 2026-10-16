@@ -58,6 +58,7 @@ function makeRepo(
     findById: (): Promise<Patient | null> => Promise.resolve(null),
     list: (): Promise<ListPatientsResult> =>
       Promise.resolve({ items: [], total: 0 }),
+    count: (): Promise<number> => Promise.resolve(0),
     update: (): Promise<Patient> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,

@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PatientsController } from './presentation/patients.controller';
 import { CreatePatientUseCase } from './application/use-cases/create-patient.use-case';
 import { ListPatientsUseCase } from './application/use-cases/list-patients.use-case';
+import { CountPatientsUseCase } from './application/use-cases/count-patients.use-case';
 import { GetPatientUseCase } from './application/use-cases/get-patient.use-case';
 import { UpdatePatientUseCase } from './application/use-cases/update-patient.use-case';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
@@ -21,6 +22,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   providers: [
     CreatePatientUseCase,
     ListPatientsUseCase,
+    CountPatientsUseCase,
     GetPatientUseCase,
     UpdatePatientUseCase,
     TokenService,
@@ -30,11 +32,11 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     { provide: PATIENT_REPOSITORY, useClass: PrismaPatientRepository },
     { provide: REFERENCE_LOOKUP, useClass: PrismaReferenceLookup },
   ],
-  // Exported (additive) so DashboardModule can inject ListPatientsUseCase by
-  // class for the patientCount aggregation.
+  // CountPatientsUseCase exportado para el `patientCount` del dashboard: un
+  // COUNT, no una página de pacientes (DX-043, DB-008).
   // PATIENT_REPOSITORY exportado (aditivo) para que CreateAppointmentUseCase
   // valide que el paciente sea de ESTA clínica — mismo patrón cross-module que
   // DentalCatalogModule exportando su repo.
-  exports: [ListPatientsUseCase, PATIENT_REPOSITORY],
+  exports: [CountPatientsUseCase, PATIENT_REPOSITORY],
 })
 export class PatientsModule {}
