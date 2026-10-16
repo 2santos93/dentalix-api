@@ -266,7 +266,7 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
 - **Plantillas** en español, HTML sencillo + texto, con todas las variables
   escapadas: `invitation` (en uso), `password-reset`, `email-verify` y
   `appointment-reminder` (listas para DX-010, DX-029 y DX-026).
-- **Despachador en proceso** (`EmailDispatcher`, hasta la cola de DX-085): se
+- **Despachador en proceso** (`EmailDispatcher`; sigue en cada réplica tras la cola de DX-085, ver «Trabajos en segundo plano»): se
   despierta tras cada encolado y barre cada `MAIL_DISPATCH_INTERVAL_MS`
   (default 30 s; 0 lo apaga, y es 0 con `NODE_ENV=test`). Reclama filas con
   `FOR UPDATE SKIP LOCKED` y un arriendo de 5 min, así que con varias réplicas
@@ -448,6 +448,82 @@ cuenta en su día.
 - Las filas de caja y los movimientos del estado de cuenta traen `paidOn`: el
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
+
+## Trabajos en segundo plano (DX-085)
+
+Cola y tareas programadas sobre la Postgres que ya existe (módulo
+`src/modules/jobs`), sin Redis ni pg-boss: una tabla propia `jobs` reclamada
+con `FOR UPDATE SKIP LOCKED`, para poder encolar **dentro de la transacción de
+negocio** de Prisma y con el mismo rol `dentalix_app` (nada de superusuario ni
+de esquemas propios de una librería).
+
+- **Arrancar el worker** (misma imagen y mismo `dist/main.js`; `APP_ROLE`
+  decide el papel):
+
+  | `APP_ROLE` | Qué hace | Cómo |
+  |------------|----------|------|
+  | `api` (default) | Servidor HTTP; encola pero no ejecuta | `npm run start:prod` |
+  | `worker` | Sin HTTP: ejecuta la cola y las tareas programadas | `npm run build && npm run start:worker` |
+  | `all` | Las dos cosas en un proceso (desarrollo, despliegues pequeños) | `npm run start:dev:all` |
+
+  En producción: N réplicas `api` + 1 o más `worker` (pueden ser varias: cada
+  trabajo y cada tick los ejecuta uno solo). Con `SIGTERM` el worker deja de
+  reclamar y espera a los trabajos en curso (`JOBS_SHUTDOWN_GRACE_MS`, 20 s,
+  siempre menor que el arriendo); lo que no termine vuelve a la cola al
+  momento (su handler recibe `signal` abortada). El periodo de gracia del
+  orquestador (`terminationGracePeriodSeconds` en Kubernetes, 30 s por
+  defecto) tiene que ser mayor que `JOBS_SHUTDOWN_GRACE_MS` más unos segundos
+  de cierre. Sin worker
+  nada se ejecuta (los trabajos esperan en `jobs`). Ajustes `JOBS_*`: ver
+  `.env.example`.
+- **Encolar** (outbox): `JobQueue.enqueue(name, payload, { tx, runAt,
+  idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
+  solo existe si el negocio hace commit. Su clínica es la del contexto de la
+  petición o la de la transacción; un `tenantId` explícito que no coincida es
+  un error. **Dentro de una petición de clínica `tx` es obligatoria** (o
+  `outsideTransaction: true` a propósito). `idempotencyKey` única **por
+  clínica** (o de plataforma): un segundo enqueue con la misma clave en la
+  misma clínica no crea otro (mientras la fila exista; los terminados se
+  purgan a los `JOBS_RETENTION_DAYS`, 14). Exige READ COMMITTED (el default). **Payload solo con ids** (CHECK de 4 KB), nunca
+  datos del paciente.
+- **Handlers** por módulo: en `onModuleInit`, `JobRegistry.register({ name:
+  'modulo.trabajo', handle, maxAttempts?, retryBaseMs? })`. Si el trabajo
+  tiene clínica, el handler corre con ese tenant en el contexto
+  (`runWithTenant(fn)` lo usa). Mientras el handler trabaja, un latido
+  renueva el arriendo cada tercio de `JOBS_LEASE_SECONDS` (con fencing por
+  intento); si otro worker retomó el intento, `ctx.signal` se aborta y su
+  resultado no cuenta. Entrega «al menos una vez»: handlers idempotentes. En
+  los tests (`NODE_ENV=test`) el worker nunca arranca solo, aunque `.env`
+  traiga `APP_ROLE`.
+- **Reintentos**: backoff exponencial `base · 2^(intento-1)` (tope 1 h); al
+  agotar `maxAttempts` queda `FAILED` y aparece en `GET
+  /api/v1/platform/jobs/failed` (solo superadmin con token de plataforma;
+  `limit` 1..100). `lastError` guarda tipo y código, nunca el mensaje.
+- **Tareas programadas**: `JobRegistry.schedule({ name, cron, job })` (cron de
+  5 campos en UTC). Cada tarea tiene su fila en `job_schedules`; el worker que
+  la bloquea (SKIP LOCKED) encola el trabajo del tick con
+  `idempotencyKey = schedule:<nombre>:<tick>` y la mueve al siguiente: una
+  ejecución por tick con N workers. Un worker caído varios ticks no los
+  recupera todos: corre una vez y sigue. Durante un despliegue que cambia un
+  cron, solo dispara la tarea la réplica cuyo cron coincide con el de la
+  fila. Las iniciales:
+
+  | Tarea | Cron (UTC) | Qué hace |
+  |-------|------------|----------|
+  | `auth.purge-expired-tokens.hourly` | `17 * * * *` | Borra `revoked_tokens` y `pending_registrations` vencidos y `user_tokens` caducados/usados hace > 7 días. Sustituye a la limpieza lazy de cada logout/refresh |
+  | `email.purge-outbox.daily` | `23 4 * * *` | Borra de `email_outbox` los SENT/FAILED de más de `MAIL_OUTBOX_RETENTION_DAYS` (90), clínica a clínica bajo su RLS |
+  | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`); la petición conserva el `fetch` como respaldo |
+  | `jobs.purge-finished.daily` | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS` |
+- **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
+  documentada en `test/rls-catalog.int-spec.ts`): un worker reclama trabajos de
+  todas las clínicas. `outbound_messages` es por clínica con RLS forzada: el
+  registro de mensajes al paciente (EMAIL, WHATSAPP_LINK, SMS) con el
+  destinatario **enmascarado**, plantilla, estado, intentos, error y la cita
+  (FK compuesta por tenant). Para EMAIL el transporte sigue siendo
+  `email_outbox` (DX-088) con `referenceId` = id del mensaje.
+- **Límite conocido**: las filas de plataforma de `email_outbox` (`tenantId`
+  NULL) no las purga nadie: `dentalix_app` no las ve por RLS y el rol del
+  despachador no tiene DELETE. No guardan mensaje al terminar.
 
 ## Despliegue: roles de la BD (DX-113)
 

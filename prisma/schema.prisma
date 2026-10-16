@@ -29,6 +29,8 @@ model Tenant {
   clinicalEntryAddenda     ClinicalEntryAddendum[]
   dentitionEvents          PatientDentitionEvent[]
   appointmentTypes         AppointmentType[]
+  jobs                     Job[]
+  outboundMessages         OutboundMessage[]
 
   @@map("tenants")
 }
@@ -521,7 +523,8 @@ model Appointment {
   updatedAt           DateTime          @updatedAt
   deletedAt           DateTime?
 
-  confirmations AppointmentConfirmation[]
+  confirmations    AppointmentConfirmation[]
+  outboundMessages OutboundMessage[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -1729,4 +1732,107 @@ model PendingRegistration {
 
   @@index([expiresAt])
   @@map("pending_registrations")
+}
+
+/// DX-085: estado de un trabajo de la cola en segundo plano.
+enum JobState {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// DX-085: cola de trabajos sobre Postgres (tabla de PLATAFORMA, sin RLS a
+/// propósito: un worker reclama trabajos de todas las clínicas). Se reclama
+/// con SQL crudo y `FOR UPDATE SKIP LOCKED` (PrismaJobRepository); se encola
+/// dentro de la transacción de negocio (outbox). `payload` lleva SOLO ids.
+/// Ver la migración 20261017200000_dx085_jobs.
+model Job {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// `modulo.trabajo`: el handler registrado en JobRegistry.
+  name           String
+  /// Clínica bajo la que corre el handler (runWithTenant); NULL = plataforma.
+  tenantId       String?   @db.Uuid
+  payload        Json      @default("{}")
+  state          JobState  @default(PENDING)
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  /// PENDING: cuándo puede empezar. RUNNING: cuándo vence el arriendo.
+  runAt          DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
+  /// Única por (tenantId, idempotencyKey): ver el índice parcial abajo.
+  idempotencyKey String?
+  lockedBy       String?
+  /// Tipo y código del error; nunca su mensaje.
+  lastError      String?
+  createdAt      DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
+  updatedAt      DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
+  finishedAt     DateTime?
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([state, runAt])
+  @@index([state, finishedAt])
+  // PARCIALES, no declarables en Prisma:
+  //   jobs_tenantId_idempotencyKey_key UNIQUE ("tenantId", "idempotencyKey")
+  //     NULLS NOT DISTINCT WHERE "idempotencyKey" IS NOT NULL -> idempotencia
+  //     por clínica (ON CONFLICT en PrismaJobRepository.insert).
+  //   jobs_tenantId_idx ("tenantId") WHERE "tenantId" IS NOT NULL -> lado
+  //     hijo de la FK a tenants.
+  @@map("jobs")
+}
+
+/// DX-085: próximo tick de cada tarea programada (cron, UTC). Un solo worker
+/// la bloquea por tick (SKIP LOCKED) y encola su trabajo.
+model JobSchedule {
+  name      String    @id
+  cron      String
+  nextRunAt DateTime
+  lastRunAt DateTime?
+  updatedAt DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
+
+  @@map("job_schedules")
+}
+
+/// DX-085: canal de un mensaje saliente al paciente.
+enum OutboundChannel {
+  EMAIL
+  WHATSAPP_LINK
+  SMS
+}
+
+/// DX-085: PENDING (registrado), QUEUED (entregado al transporte, p. ej.
+/// email_outbox), SENT, FAILED o CANCELLED.
+enum OutboundMessageStatus {
+  PENDING
+  QUEUED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+/// DX-085: registro de mensajes salientes por clínica (RLS forzada). Solo el
+/// destinatario ENMASCARADO; nunca el cuerpo. Un EMAIL se entrega por
+/// email_outbox con `referenceId` = este id. Ver la migración
+/// 20261017200100_dx085_outbound_messages.
+model OutboundMessage {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @db.Uuid
+  channel         OutboundChannel
+  template        String
+  recipientMasked String
+  status          OutboundMessageStatus @default(PENDING)
+  attempts        Int                   @default(0)
+  lastError       String?
+  appointmentId   String?               @db.Uuid
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  sentAt          DateTime?
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // FK COMPUESTA (SEC-004): la cita tiene que ser del MISMO tenant.
+  appointment Appointment? @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, appointmentId, createdAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("outbound_messages")
 }

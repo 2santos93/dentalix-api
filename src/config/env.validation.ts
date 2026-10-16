@@ -14,10 +14,17 @@
  * DX-088: en producción hace falta un proveedor de email (SMTP) y la clave
  * que cifra los mensajes pendientes; fuera de producción, por defecto, los
  * emails van al ConsoleMailer.
+ * DX-085: `APP_ROLE` (api | worker | all) y los ajustes `JOBS_*` de la cola
+ * de trabajos en segundo plano.
  */
 
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
+import {
+  DEFAULT_LEASE_SECONDS,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  parseAppRole,
+} from '../modules/jobs/infrastructure/jobs-config';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -340,6 +347,49 @@ function auditProblems(env: Env): string[] {
   return problems;
 }
 
+/** DX-085: papel del proceso y ajustes de la cola de trabajos. */
+function jobsProblems(env: Env): string[] {
+  const problems: string[] = [];
+  const role = str(env, 'APP_ROLE');
+  if (role != null && parseAppRole(role) == null) {
+    problems.push(
+      'APP_ROLE debe ser api, worker o all (api: solo HTTP; worker: solo trabajos; all: los dos en un proceso).',
+    );
+  }
+  const checks: [string, number, number][] = [
+    ['JOBS_POLL_INTERVAL_MS', 100, 60_000],
+    ['JOBS_CONCURRENCY', 1, 32],
+    ['JOBS_LEASE_SECONDS', 10, 3600],
+    ['JOBS_MAX_ATTEMPTS', 1, 25],
+    ['JOBS_RETRY_BASE_MS', 1, 3_600_000],
+    ['JOBS_SHUTDOWN_GRACE_MS', 0, 600_000],
+    ['JOBS_RETENTION_DAYS', 1, 365],
+    ['MAIL_OUTBOX_RETENTION_DAYS', 7, 3650],
+  ];
+  for (const [key, min, max] of checks) {
+    const raw = str(env, key);
+    if (raw == null) continue;
+    const value = Number(raw.trim());
+    if (!/^\d{1,9}$/.test(raw.trim()) || value < min || value > max) {
+      problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
+    }
+  }
+  // Revisión H1: si el apagado espera más que el arriendo, otro worker
+  // retoma trabajos que siguen en curso en el que se apaga.
+  const intOf = (key: string, fallback: number): number => {
+    const raw = str(env, key)?.trim();
+    return raw && /^\d{1,9}$/.test(raw) ? Number(raw) : fallback;
+  };
+  const leaseMs = intOf('JOBS_LEASE_SECONDS', DEFAULT_LEASE_SECONDS) * 1000;
+  const graceMs = intOf('JOBS_SHUTDOWN_GRACE_MS', DEFAULT_SHUTDOWN_GRACE_MS);
+  if (graceMs >= leaseMs) {
+    problems.push(
+      `JOBS_SHUTDOWN_GRACE_MS debe ser menor que JOBS_LEASE_SECONDS (en ms): ${graceMs} ≥ ${leaseMs}; si no, otro worker retoma trabajos aún en curso durante el apagado.`,
+    );
+  }
+  return problems;
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -357,6 +407,7 @@ export function validateEnv(env: Env): Env {
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
+  problems.push(...jobsProblems(env));
 
   if (problems.length > 0) {
     throw new Error(

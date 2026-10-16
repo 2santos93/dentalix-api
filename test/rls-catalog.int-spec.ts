@@ -32,6 +32,18 @@ const RLS_EXEMPT: Record<string, string> = {
   // (POST /domains/:id/verify desde otra clínica → 404). Ver la migración
   // 20260723170000_add_tenant_domains.
   tenant_domains: 'ruteo host -> tenant, previo a conocer el tenant',
+  // DX-085: cola de trabajos de PLATAFORMA. Un worker reclama trabajos de
+  // todas las clínicas en una sentencia (FOR UPDATE SKIP LOCKED); "tenantId"
+  // solo dice bajo qué clínica corre el handler, que fija app.current_tenant
+  // (runWithTenant) antes de tocar datos de clínica. El payload lleva solo ids
+  // (CHECK de 4 KB) y lastError solo tipo y código. Ver la migración
+  // 20261017200000_dx085_jobs y jobs-queue.int-spec.ts.
+  // RIESGO ACEPTADO (revisión DX-085, H3): dentalix_app lee y modifica filas
+  // de jobs de cualquier clínica (una inyección SQL podría reprogramarlas).
+  // La clínica de un trabajo la fija JobQueue (contexto y transacción deben
+  // coincidir) y la fila no lleva datos del paciente; una RLS permisiva para
+  // el worker sin tenant queda como seguimiento.
+  jobs: 'cola de trabajos de plataforma; el handler corre bajo el tenant',
 };
 
 /**
@@ -140,7 +152,13 @@ describe('Catálogo de RLS (DX-068)', () => {
   it('encuentra las tablas de clínica (la consulta no está vacía)', () => {
     expect(clinicTableNames().length).toBeGreaterThanOrEqual(30);
     expect(clinicTableNames()).toEqual(
-      expect.arrayContaining(['patients', 'payments', 'clinic_memberships']),
+      expect.arrayContaining([
+        'patients',
+        'payments',
+        'clinic_memberships',
+        // DX-085: nueva tabla de clínica, con RLS forzada.
+        'outbound_messages',
+      ]),
     );
   });
 

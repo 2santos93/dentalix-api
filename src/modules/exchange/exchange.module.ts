@@ -8,6 +8,8 @@ import { GetRatesForDateUseCase } from './application/use-cases/get-rates-for-da
 import { ConvertAmountUseCase } from './application/use-cases/convert-amount.use-case';
 import { ExchangeController } from './presentation/exchange.controller';
 import { TokenService } from '../../shared/crypto/token.service';
+import { JobsModule } from '../jobs/jobs.module';
+import { ExchangePrefetchJobs } from './application/jobs/exchange-prefetch.jobs';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -17,7 +19,8 @@ import { TokenService } from '../../shared/crypto/token.service';
   // JwtModule.register({}) mirrors PatientsModule/StaffModule: JwtAuthGuard
   // depends on TokenService, which depends on JwtService — must be available
   // here since the guard is applied on this module's controller.
-  imports: [JwtModule.register({})],
+  // JobsModule: precarga diaria de los tipos de cambio (DX-085).
+  imports: [JwtModule.register({}), JobsModule],
   controllers: [ExchangeController],
   providers: [
     // GetRatesForDateUseCase must be registered explicitly as a provider (not
@@ -26,6 +29,7 @@ import { TokenService } from '../../shared/crypto/token.service';
     GetRatesForDateUseCase,
     ConvertAmountUseCase,
     TokenService,
+    ExchangePrefetchJobs,
     {
       provide: EXCHANGE_RATE_PROVIDER,
       useClass: OpenExchangeRatesProvider,

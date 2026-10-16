@@ -397,4 +397,57 @@ describe('validateEnv', () => {
       ).toContain('AUDIT_PARTITIONS_MONTHS_AHEAD');
     });
   });
+
+  describe('trabajos en segundo plano (DX-085)', () => {
+    it('acepta APP_ROLE api, worker y all (y sin definir)', () => {
+      for (const role of [undefined, 'api', 'worker', 'all', 'WORKER']) {
+        expect(() => validateEnv(baseEnv({ APP_ROLE: role }))).not.toThrow();
+      }
+    });
+
+    it('rechaza un APP_ROLE desconocido', () => {
+      expect(errorOf(baseEnv({ APP_ROLE: 'cron' }))).toContain(
+        'APP_ROLE debe ser api, worker o all',
+      );
+    });
+
+    it('rechaza ajustes de la cola fuera de rango', () => {
+      for (const [key, value] of [
+        ['JOBS_POLL_INTERVAL_MS', '50'],
+        ['JOBS_CONCURRENCY', '0'],
+        ['JOBS_LEASE_SECONDS', '5'],
+        ['JOBS_MAX_ATTEMPTS', '26'],
+        ['JOBS_RETRY_BASE_MS', 'x'],
+        ['JOBS_SHUTDOWN_GRACE_MS', '900000'],
+        ['JOBS_RETENTION_DAYS', '0'],
+        ['MAIL_OUTBOX_RETENTION_DAYS', '3'],
+      ]) {
+        expect(errorOf(baseEnv({ [key]: value }))).toContain(key);
+      }
+      expect(() =>
+        validateEnv(
+          baseEnv({ JOBS_CONCURRENCY: '8', JOBS_SHUTDOWN_GRACE_MS: '0' }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('la gracia del apagado tiene que ser menor que el arriendo (si no, otro worker retoma trabajos aún en curso)', () => {
+      expect(
+        errorOf(
+          baseEnv({
+            JOBS_LEASE_SECONDS: '60',
+            JOBS_SHUTDOWN_GRACE_MS: '60000',
+          }),
+        ),
+      ).toContain(
+        'JOBS_SHUTDOWN_GRACE_MS debe ser menor que JOBS_LEASE_SECONDS',
+      );
+      // Con los defaults (20 s < 300 s) y con solo uno definido, se compara
+      // contra el default del otro.
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(errorOf(baseEnv({ JOBS_LEASE_SECONDS: '15' }))).toContain(
+        'JOBS_SHUTDOWN_GRACE_MS debe ser menor',
+      );
+    });
+  });
 });

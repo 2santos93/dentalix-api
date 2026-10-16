@@ -113,6 +113,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // --- Plataforma (superadmin, host apex) ----------------------------------
   // dentalix-docs/docs/plans/2026-07-31-platform-superadmin.md.
   'GET /platform/tenants': PLATFORM,
+  // Cola de fallidos de los trabajos en segundo plano: loop/informes/DX-085.md.
+  'GET /platform/jobs/failed': PLATFORM,
 
   // --- Pacientes (demográficos) --------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (PATIENT_ROLES).

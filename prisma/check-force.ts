@@ -25,7 +25,11 @@
 import { PrismaClient } from '@prisma/client';
 
 /** Tablas de clínica sin RLS a propósito (mismo motivo que rls-catalog). */
-const RLS_EXEMPT = ['tenant_domains'];
+const RLS_EXEMPT = [
+  'tenant_domains',
+  // DX-085: cola de trabajos de plataforma (justificación en rls-catalog).
+  'jobs',
+];
 
 const CLUSTER_ROLES = ['dentalix_patient_search', 'dentalix_email_dispatcher'];
 
