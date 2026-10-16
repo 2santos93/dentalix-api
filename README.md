@@ -49,7 +49,8 @@ Requiere Node 22 o superior (`.nvmrc` y `engines` en `package.json`; con nvm:
 entrada queda en `dist/main.js`; `prisma/seed*.ts` no se compilan: se ejecutan
 con ts-node (`npx prisma db seed`, `npm run seed:demo`), así que en el entorno
 de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
-`PORT` (default 3000) y el health check es `GET /api/v1/health`.
+`PORT` (default 3000). Sondas de salud (ver «Observabilidad»):
+`GET /api/v1/health` (liveness) y `GET /api/v1/health/ready` (readiness).
 
 ## Local setup
 
@@ -133,6 +134,49 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
      (sin excepción) o si el host de `DATABASE_URL` no es
      `localhost`/`127.0.0.1`/`::1`; esto último se puede levantar con
      `ALLOW_DEMO_SEED=1` para una base de pruebas desechable.
+
+## Observabilidad
+
+- **Request id**: cada respuesta lleva `X-Request-Id`. Si el cliente (o el
+  balanceador) manda uno válido —8 a 128 caracteres `A-Z a-z 0-9 . _ : -`— se
+  respeta; si no, o si es inválido (espacios, comillas, saltos de línea: así
+  no puede inyectar líneas en el log), la API genera un UUID. Va en cada línea
+  de log de la petición y en el cuerpo de los errores 5xx (`requestId`), para
+  que soporte encuentre el error en el log a partir de lo que ve el usuario.
+- **Log estructurado** (sin dependencias, `src/shared/observability`): una
+  línea por evento a stdout (errores a stderr). Variables:
+
+  | Variable     | Valores                                   | Default                         |
+  |--------------|-------------------------------------------|---------------------------------|
+  | `LOG_LEVEL`  | `silent`, `error`, `warn`, `info`, `debug` | `info` (`silent` con `NODE_ENV=test`) |
+  | `LOG_FORMAT` | `json`, `pretty`                           | `json`                          |
+
+  En producción se deja `json` (lo que leen los recolectores); en desarrollo
+  `LOG_FORMAT=pretty` da líneas legibles. Un valor desconocido aborta el
+  arranque. Los e2e no escriben log (nivel `silent` en jest); para verlo,
+  `LOG_LEVEL=debug npm run test:e2e`.
+- **Log de acceso**: una línea por petición, al cerrarse la respuesta:
+
+  ```json
+  {"method":"GET","route":"/api/v1/patients/:id","status":200,"durationMs":12.873,"tenantId":"6f0c…","userId":"a41b…","time":"2026-10-16T14:03:11.412Z","level":"info","context":"Access","requestId":"3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60","msg":"GET /api/v1/patients/:id 200"}
+  ```
+
+  Los campos son una lista cerrada: la ruta es la **plantilla** (nunca la URL
+  con ids ni la query de búsqueda) y no se registran cuerpos, cabeceras,
+  nombres ni datos clínicos (Ley 1581 / RGPD). Además, cualquier campo
+  estructurado pasa por una redacción que oculta `Authorization`, `Cookie`,
+  `Set-Cookie` y claves con `password`, `token`, `secret` o `apiKey`.
+- **Errores 5xx**: se registran con stack, request id, método y ruta
+  plantilla; al cliente solo le llega un mensaje genérico con el `requestId`,
+  nunca el stack ni el mensaje interno. Los de Prisma se registran sin el
+  `DETAIL` de Postgres (lleva la fila con datos del paciente).
+- **Sondas** (públicas, fuera del rate limit y sin resolver tenant):
+  - `GET /api/v1/health` → `200 {"status":"ok"}` siempre que el proceso viva;
+    no toca la base, para que una caída de Postgres no reinicie la API.
+  - `GET /api/v1/health/ready` → `200 {"status":"ok","database":"up"}` si
+    `SELECT 1` responde en menos de 2 s; si no, `503
+    {"statusCode":503,"status":"unavailable","database":"down","requestId":…}`
+    para que el balanceador saque la instancia de rotación.
 
 ## Run tests
 
