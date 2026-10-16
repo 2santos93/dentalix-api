@@ -155,6 +155,16 @@ SQL
     "SELECT $PATIENT_COLS FROM patients WHERE id IN (SELECT id FROM dx_patient_search_ids('arismendi', 20, 0)) AND \"deletedAt\" IS NULL"
   explain 'A1 · Búsqueda por documento parcial ("770001234")' \
     "SELECT id FROM dx_patient_search_ids('770001234', 20, 0)"
+  explain 'A1 · Término corto ("ma", 2 caracteres), tenant grande' \
+    "SELECT id FROM dx_patient_search_ids('ma', 20, 0)"
+  explain 'A1 · Conteo de "ma", tenant grande' \
+    "SELECT dx_patient_search_count('ma')"
+  explain 'A1 · Término común ("maria"), tenant grande' \
+    "SELECT id FROM dx_patient_search_ids('maria', 20, 0)"
+  explain 'A1 · Conteo de "maria", tenant grande' \
+    "SELECT dx_patient_search_count('maria')"
+  explain 'A1 · Término de 1 carácter ("a"): camino normal bajo RLS (Prisma), página' \
+    "SELECT $PATIENT_COLS FROM patients WHERE \"deletedAt\" IS NULL AND (\"firstName\" ILIKE '%a%' OR \"lastName\" ILIKE '%a%' OR \"docNumber\" ILIKE '%a%') ORDER BY \"createdAt\" DESC, id DESC LIMIT 20 OFFSET 0"
   check '"jose" encuentra' \
     "SELECT dx_patient_search_count('jose') || ' pacientes (José y Jose)'"
   check 'de ellos, con tilde ("José")' \
@@ -176,6 +186,10 @@ SQL
   explain 'A5 · Dashboard: conteo de pacientes (ya sin la página de B2)' \
     "SELECT count(*) FROM patients WHERE \"deletedAt\" IS NULL"
   set_tenant "$TENANT_B"
+  explain 'A1 · Término común ("maria"), tenant pequeño (B, 10k)' \
+    "SELECT id FROM dx_patient_search_ids('maria', 20, 0)"
+  explain 'A1 · Conteo de "maria", tenant pequeño (B, 10k)' \
+    "SELECT dx_patient_search_count('maria')"
   check 'aislamiento: "arismendi" en el tenant B encuentra' \
     "SELECT dx_patient_search_count('arismendi') || ' paciente(s), todos del tenant B: ' || bool_and(p.\"tenantId\" = '$TENANT_B') FROM dx_patient_search_ids('arismendi', 100, 0) s JOIN patients p USING (id)"
 } | psql_app >>"$TMP"
@@ -184,7 +198,7 @@ SQL
   echo
   echo "### Plan interno de la función SECURITY DEFINER"
   echo
-  echo "\`auto_explain\` con \`log_nested_statements\` (lo carga el owner; después \`SET ROLE dentalix_app\` y \`app.current_tenant\` = tenant A). Dentro de la función la consulta corre como \`dentalix_patient_search\` (BYPASSRLS) con el filtro de tenant explícito: por eso puede usar el índice trigram."
+  echo "\`auto_explain\` con \`log_nested_statements\` (lo carga el owner; después \`SET ROLE dentalix_app\` y \`app.current_tenant\` = tenant A). Dentro de la función la consulta corre como \`dentalix_patient_search\` (sin BYPASSRLS; su política \`USING (true)\` no añade security qual) con el filtro de tenant explícito: por eso puede usar el índice trigram."
   echo
   echo '```text'
 } >>"$TMP"
