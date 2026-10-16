@@ -468,22 +468,33 @@ de esquemas propios de una librería).
 
   En producción: N réplicas `api` + 1 o más `worker` (pueden ser varias: cada
   trabajo y cada tick los ejecuta uno solo). Con `SIGTERM` el worker deja de
-  reclamar y espera a los trabajos en curso (`JOBS_SHUTDOWN_GRACE_MS`, 30 s);
-  lo que no termine lo retoma otro worker al vencer su arriendo. Sin worker
+  reclamar y espera a los trabajos en curso (`JOBS_SHUTDOWN_GRACE_MS`, 20 s,
+  siempre menor que el arriendo); lo que no termine vuelve a la cola al
+  momento (su handler recibe `signal` abortada). El periodo de gracia del
+  orquestador (`terminationGracePeriodSeconds` en Kubernetes, 30 s por
+  defecto) tiene que ser mayor que `JOBS_SHUTDOWN_GRACE_MS` más unos segundos
+  de cierre. Sin worker
   nada se ejecuta (los trabajos esperan en `jobs`). Ajustes `JOBS_*`: ver
   `.env.example`.
 - **Encolar** (outbox): `JobQueue.enqueue(name, payload, { tx, runAt,
   idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
-  solo existe si el negocio hace commit; su clínica es la de la transacción.
-  `idempotencyKey` única: un segundo enqueue con la misma clave no crea otro
-  (mientras la fila exista; los terminados se purgan a los
-  `JOBS_RETENTION_DAYS`, 14). **Payload solo con ids** (CHECK de 4 KB), nunca
+  solo existe si el negocio hace commit. Su clínica es la del contexto de la
+  petición o la de la transacción; un `tenantId` explícito que no coincida es
+  un error. **Dentro de una petición de clínica `tx` es obligatoria** (o
+  `outsideTransaction: true` a propósito). `idempotencyKey` única **por
+  clínica** (o de plataforma): un segundo enqueue con la misma clave en la
+  misma clínica no crea otro (mientras la fila exista; los terminados se
+  purgan a los `JOBS_RETENTION_DAYS`, 14). Exige READ COMMITTED (el default). **Payload solo con ids** (CHECK de 4 KB), nunca
   datos del paciente.
 - **Handlers** por módulo: en `onModuleInit`, `JobRegistry.register({ name:
   'modulo.trabajo', handle, maxAttempts?, retryBaseMs? })`. Si el trabajo
   tiene clínica, el handler corre con ese tenant en el contexto
-  (`runWithTenant(fn)` lo usa). Entrega «al menos una vez»: handlers
-  idempotentes.
+  (`runWithTenant(fn)` lo usa). Mientras el handler trabaja, un latido
+  renueva el arriendo cada tercio de `JOBS_LEASE_SECONDS` (con fencing por
+  intento); si otro worker retomó el intento, `ctx.signal` se aborta y su
+  resultado no cuenta. Entrega «al menos una vez»: handlers idempotentes. En
+  los tests (`NODE_ENV=test`) el worker nunca arranca solo, aunque `.env`
+  traiga `APP_ROLE`.
 - **Reintentos**: backoff exponencial `base · 2^(intento-1)` (tope 1 h); al
   agotar `maxAttempts` queda `FAILED` y aparece en `GET
   /api/v1/platform/jobs/failed` (solo superadmin con token de plataforma;
@@ -493,7 +504,9 @@ de esquemas propios de una librería).
   la bloquea (SKIP LOCKED) encola el trabajo del tick con
   `idempotencyKey = schedule:<nombre>:<tick>` y la mueve al siguiente: una
   ejecución por tick con N workers. Un worker caído varios ticks no los
-  recupera todos: corre una vez y sigue. Las iniciales:
+  recupera todos: corre una vez y sigue. Durante un despliegue que cambia un
+  cron, solo dispara la tarea la réplica cuyo cron coincide con el de la
+  fila. Las iniciales:
 
   | Tarea | Cron (UTC) | Qué hace |
   |-------|------------|----------|
