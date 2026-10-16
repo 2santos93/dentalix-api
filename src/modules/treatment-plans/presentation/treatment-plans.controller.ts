@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -12,9 +14,12 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiParam,
@@ -24,6 +29,8 @@ import { CreateTreatmentPlanDto } from './dto/create-treatment-plan.dto';
 import { UpdateTreatmentPlanDto } from './dto/update-treatment-plan.dto';
 import { AddTreatmentPlanItemDto } from './dto/add-treatment-plan-item.dto';
 import { UpdateTreatmentPlanItemDto } from './dto/update-treatment-plan-item.dto';
+import { RejectTreatmentPlanDto } from './dto/reject-treatment-plan.dto';
+import { CreatePlanAlternativeDto } from './dto/create-plan-alternative.dto';
 import { TreatmentPlanDto } from './dto/treatment-plan.dto';
 import { TreatmentPlanItemDto } from './dto/treatment-plan-item.dto';
 import { CreateTreatmentPlanUseCase } from '../application/use-cases/create-treatment-plan.use-case';
@@ -33,6 +40,9 @@ import { UpdateTreatmentPlanUseCase } from '../application/use-cases/update-trea
 import { AddTreatmentPlanItemUseCase } from '../application/use-cases/add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from '../application/use-cases/update-treatment-plan-item.use-case';
 import { RemoveTreatmentPlanItemUseCase } from '../application/use-cases/remove-treatment-plan-item.use-case';
+import { PresentTreatmentPlanUseCase } from '../application/use-cases/present-treatment-plan.use-case';
+import { RejectTreatmentPlanUseCase } from '../application/use-cases/reject-treatment-plan.use-case';
+import { CreatePlanAlternativeUseCase } from '../application/use-cases/create-plan-alternative.use-case';
 import {
   TreatmentPlan,
   TreatmentPlanDetail,
@@ -41,8 +51,15 @@ import { TreatmentPlanItem } from '../domain/entities/treatment-plan-item.entity
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
-import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
+import {
+  CLINICAL_ROLES,
+  TREATMENT_PLAN_DECISION_ROLES,
+  TREATMENT_PLAN_REJECT_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  isTenantPayload,
+  JwtPayload,
+} from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 
@@ -51,6 +68,17 @@ const SIGNED_PLAN_CONFLICT =
 
 interface AuthenticatedRequest {
   user: JwtPayload;
+}
+
+const TRANSITION_CONFLICT =
+  'Transición de estado no permitida por la máquina de estados (DX-040: DRAFT → PRESENTED → ACCEPTED | REJECTED; DRAFT → ACCEPTED; ACCEPTED → COMPLETED; cualquiera salvo COMPLETED → CANCELLED)';
+
+/** El rol de quien llama, del token (TenantContextInterceptor ya exige uno de clínica). */
+function actorRole(req: AuthenticatedRequest) {
+  if (!isTenantPayload(req.user)) {
+    throw new ForbiddenException('Insufficient role');
+  }
+  return { role: req.user.role };
 }
 
 // Plan de tratamiento es dato CLÍNICO -> @Roles(...CLINICAL_ROLES) (DENTIST/
@@ -77,6 +105,9 @@ export class TreatmentPlansController {
     private readonly addTreatmentPlanItem: AddTreatmentPlanItemUseCase,
     private readonly updateTreatmentPlanItem: UpdateTreatmentPlanItemUseCase,
     private readonly removeTreatmentPlanItem: RemoveTreatmentPlanItemUseCase,
+    private readonly presentTreatmentPlan: PresentTreatmentPlanUseCase,
+    private readonly rejectTreatmentPlan: RejectTreatmentPlanUseCase,
+    private readonly createPlanAlternative: CreatePlanAlternativeUseCase,
   ) {}
 
   @Audit({
@@ -130,7 +161,7 @@ export class TreatmentPlansController {
   })
   @Get('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
-  get(@Param('id') id: string): Promise<TreatmentPlanDetail> {
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<TreatmentPlanDetail> {
     return this.getTreatmentPlan.execute(id);
   }
 
@@ -142,18 +173,127 @@ export class TreatmentPlansController {
   })
   @Patch('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
-  @ApiConflictResponse({
+  @ApiBadRequestResponse({
     description:
-      'Plan aceptado con firma: no cambia de moneda ni vuelve a DRAFT (DX-012)',
+      'Moneda desconocida, o status PRESENTED/REJECTED (tienen su propia acción)',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor)',
+  })
+  @ApiConflictResponse({
+    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada`,
   })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTreatmentPlanDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlan> {
-    return this.updateTreatmentPlan.execute(id, {
-      status: dto.status,
-      currency: dto.currency,
-      notes: dto.notes,
+    return this.updateTreatmentPlan.execute(
+      id,
+      {
+        status: dto.status,
+        currency: dto.currency,
+        notes: dto.notes,
+        optionLabel: dto.optionLabel,
+      },
+      actorRole(req),
+    );
+  }
+
+  // --- Alternativas, presentación y rechazo (DX-040) -----------------------
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
+  @Post('treatment-plans/:id/present')
+  @HttpCode(200)
+  @Roles(...TREATMENT_PLAN_DECISION_ROLES)
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description:
+      'Sede donde se presenta; sin ella, la principal. La lista de presupuestos por seguir filtra por esta sede',
+  })
+  @ApiOkResponse({
+    type: TreatmentPlanDto,
+    description: 'Plan PRESENTED, con presentedAt (servidor) y la sede',
+  })
+  @ApiBadRequestResponse({ description: 'El plan no tiene ítems' })
+  @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN presentan' })
+  @ApiNotFoundResponse({ description: 'Plan no encontrado en esta clínica' })
+  @ApiConflictResponse({
+    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador`,
+  })
+  present(@Param('id', ParseUUIDPipe) id: string): Promise<TreatmentPlan> {
+    return this.presentTreatmentPlan.execute(id);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
+  @Post('treatment-plans/:id/reject')
+  @HttpCode(200)
+  @Roles(...TREATMENT_PLAN_REJECT_ROLES)
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({
+    type: TreatmentPlanDto,
+    description:
+      'Plan REJECTED con motivo, nota y rejectedAt (servidor); las demás opciones del grupo no cambian',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Sin motivo, motivo fuera del catálogo, OTHER_OPTION_ACCEPTED (lo pone el sistema) u OTHER sin nota',
+  })
+  @ApiForbiddenResponse({
+    description: 'DENTIST, ADMIN y RECEPTION rechazan; la asistente no',
+  })
+  @ApiNotFoundResponse({ description: 'Plan no encontrado en esta clínica' })
+  @ApiConflictResponse({
+    description: `${TRANSITION_CONFLICT}: solo se rechaza un plan presentado`,
+  })
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectTreatmentPlanDto,
+  ): Promise<TreatmentPlan> {
+    return this.rejectTreatmentPlan.execute(id, {
+      reason: dto.reason,
+      note: dto.note,
+    });
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
+  @Post('treatment-plans/:id/alternatives')
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiCreatedResponse({
+    type: TreatmentPlanDto,
+    description:
+      'Alternativa nueva en DRAFT: mismo paciente y moneda, copia de los ítems vivos, en el grupo del plan de origen (que, si era suelto, pasa a «Opción A»)',
+  })
+  @ApiNotFoundResponse({ description: 'Plan no encontrado en esta clínica' })
+  @ApiConflictResponse({
+    description: 'Una opción del grupo ya está aceptada o completada',
+  })
+  createAlternative(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreatePlanAlternativeDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<TreatmentPlan> {
+    return this.createPlanAlternative.execute(id, {
+      optionLabel: dto.optionLabel,
+      createdById: req.user.sub,
     });
   }
 
@@ -167,7 +307,7 @@ export class TreatmentPlansController {
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
   @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
   addItem(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddTreatmentPlanItemDto,
   ): Promise<TreatmentPlanItem> {
     return this.addTreatmentPlanItem.execute(id, {
@@ -192,7 +332,7 @@ export class TreatmentPlansController {
     description: `${SIGNED_PLAN_CONFLICT}; solo admite avanzar el estado (no volver a PROPOSED)`,
   })
   updateItem(
-    @Param('itemId') itemId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlanItem> {
@@ -220,7 +360,7 @@ export class TreatmentPlansController {
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
   @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
-  removeItem(@Param('itemId') itemId: string): Promise<void> {
+  removeItem(@Param('itemId', ParseUUIDPipe) itemId: string): Promise<void> {
     return this.removeTreatmentPlanItem.execute(itemId);
   }
 }

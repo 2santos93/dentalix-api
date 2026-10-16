@@ -97,6 +97,7 @@ model Location {
   inventoryMovements InventoryMovement[]
   prescriptions      Prescription[]
   planAcceptances    TreatmentPlanAcceptance[]
+  presentedPlans     TreatmentPlan[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -531,11 +532,27 @@ model DataProcessingConsent {
   @@map("data_processing_consents")
 }
 
+// Máquina de estados en el dominio (DX-040, `domain/plan-status-machine.ts`):
+// DRAFT → PRESENTED → ACCEPTED | REJECTED; DRAFT → ACCEPTED; ACCEPTED →
+// COMPLETED; cualquiera salvo COMPLETED → CANCELLED.
 enum TreatmentPlanStatus {
   DRAFT
+  PRESENTED
   ACCEPTED
+  REJECTED
   COMPLETED
   CANCELLED
+}
+
+// Por qué el paciente no aceptó un plan presentado (DX-040). El personal elige
+// cualquiera salvo OTHER_OPTION_ACCEPTED, que lo pone el sistema al aceptar
+// otra opción del mismo grupo. OTHER exige una nota.
+enum TreatmentPlanRejectionReason {
+  PRICE
+  FEAR
+  SECOND_OPINION
+  OTHER_OPTION_ACCEPTED
+  OTHER
 }
 
 enum TreatmentPlanItemStatus {
@@ -558,18 +575,39 @@ model TreatmentPlan {
   updatedAt   DateTime            @updatedAt
   deletedAt   DateTime?
 
+  // Alternativas A/B (DX-040). `optionGroupId` es el id del plan que abrió el
+  // grupo (ese plan apunta a sí mismo); null = plan suelto. `optionLabel`
+  // ("Opción A: implante") distingue las opciones ante el paciente.
+  optionGroupId       String?                       @db.Uuid
+  optionLabel         String?
+  // Presentado al paciente: cuándo y en qué sede (la del request o la
+  // principal). La lista de presupuestos por seguir filtra por esa sede.
+  presentedAt         DateTime?
+  presentedLocationId String?                       @db.Uuid
+  // Rechazado: cuándo, por qué (catálogo) y la nota (obligatoria con OTHER).
+  rejectedAt          DateTime?
+  rejectionReason     TreatmentPlanRejectionReason?
+  rejectionNote       String?
+
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
-  patient      Patient                  @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  patient            Patient                  @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  // FK COMPUESTA al plan raíz del grupo (DX-040): las opciones de un grupo
+  // son del MISMO tenant y del MISMO paciente. NO ACTION (no RESTRICT): un
+  // DELETE que se lleva el grupo entero de una vez (limpieza de tests) pasa.
+  optionGroupRoot    TreatmentPlan?           @relation("TreatmentPlanOptionGroup", fields: [tenantId, optionGroupId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, onUpdate: NoAction, map: "treatment_plans_option_group_fkey")
+  optionGroupMembers TreatmentPlan[]          @relation("TreatmentPlanOptionGroup")
+  // Sede donde se presentó, del MISMO tenant.
+  presentedLocation  Location?                @relation(fields: [tenantId, presentedLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plans_presented_location_fkey")
   // La moneda existe en el catálogo `currencies` (DX-042).
-  currencyRef  Currency                 @relation(fields: [currency], references: [code])
-  items        TreatmentPlanItem[]
-  payments     Payment[]
-  paymentPlans PaymentPlan[]
-  consents     PatientConsent[]
+  currencyRef        Currency                 @relation(fields: [currency], references: [code])
+  items              TreatmentPlanItem[]
+  payments           Payment[]
+  paymentPlans       PaymentPlan[]
+  consents           PatientConsent[]
   // Aceptación firmada del presupuesto (DX-012): como mucho una por plan.
-  acceptance   TreatmentPlanAcceptance?
+  acceptance         TreatmentPlanAcceptance?
 
   // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
   // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
@@ -577,6 +615,12 @@ model TreatmentPlan {
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
+  // Opciones de un grupo (lado hijo de la FK al plan raíz).
+  @@index([tenantId, optionGroupId, patientId])
+  // Presupuestos por seguir: PRESENTED por antigüedad de la presentación.
+  @@index([tenantId, status, presentedAt])
+  // Lado hijo de la FK a la sede de presentación (filtro por sede).
+  @@index([tenantId, presentedLocationId])
   @@map("treatment_plans")
 }
 

@@ -12,6 +12,7 @@ import {
 } from '../../domain/ports/treatment-plan-repository.port';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
+import { PLAN_WITHOUT_OPTIONS } from './__fixtures__/in-memory-treatment-plan.repository';
 
 function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
   return {
@@ -22,6 +23,7 @@ function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
     currency: 'USD',
     notes: null,
     createdById: null,
+    ...PLAN_WITHOUT_OPTIONS,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -38,6 +40,7 @@ function makeRepo(
           patientId: input.patientId,
           notes: input.notes ?? null,
           createdById: input.createdById ?? null,
+          ...PLAN_WITHOUT_OPTIONS,
         }),
       ),
     findPlanById: (): Promise<TreatmentPlanWithItems | null> =>

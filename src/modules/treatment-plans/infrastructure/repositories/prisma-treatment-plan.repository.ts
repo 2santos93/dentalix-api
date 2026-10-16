@@ -8,12 +8,14 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   AddTreatmentPlanItemRepoInput,
+  DecidePlanChange,
   DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
-  UpdateTreatmentPlanRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
+import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
+import { lockPlanGroup, rejectOpenSiblings } from './plan-option-group';
 import {
   TreatmentPlan,
   TreatmentPlanWithItems,
@@ -26,7 +28,7 @@ type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
 type PrismaTreatmentPlanItem = Prisma.TreatmentPlanItemGetPayload<
   Record<string, never>
 >;
-const ACCEPTANCE_SUMMARY = {
+export const ACCEPTANCE_SUMMARY = {
   select: { signerName: true, acceptedAt: true },
 } satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
 
@@ -34,7 +36,7 @@ type PrismaTreatmentPlanWithItems = Prisma.TreatmentPlanGetPayload<{
   include: { items: true; acceptance: typeof ACCEPTANCE_SUMMARY };
 }>;
 
-function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
+export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
   return {
     id: plan.id,
     tenantId: plan.tenantId,
@@ -43,6 +45,13 @@ function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
     currency: plan.currency,
     notes: plan.notes,
     createdById: plan.createdById,
+    optionGroupId: plan.optionGroupId,
+    optionLabel: plan.optionLabel,
+    presentedAt: plan.presentedAt,
+    presentedLocationId: plan.presentedLocationId,
+    rejectedAt: plan.rejectedAt,
+    rejectionReason: plan.rejectionReason,
+    rejectionNote: plan.rejectionNote,
     createdAt: plan.createdAt,
     updatedAt: plan.updatedAt,
   };
@@ -68,7 +77,7 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
   };
 }
 
-function mapToEntityWithItems(
+export function mapToEntityWithItems(
   plan: PrismaTreatmentPlanWithItems,
 ): TreatmentPlanWithItems {
   return {
@@ -151,21 +160,54 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
 
   async updatePlan(
     id: string,
-    patch: UpdateTreatmentPlanRepoInput,
+    decide: DecidePlanChange,
   ): Promise<TreatmentPlan> {
     return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.treatmentPlan.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!existing) {
-        throw new NotFoundException('Treatment plan not found');
+      const locked = await lockPlanGroup(tx, id);
+      const current = locked
+        ? await tx.treatmentPlan.findFirst({
+            where: { id, deletedAt: null },
+            include: {
+              items: { where: { deletedAt: null } },
+              acceptance: ACCEPTANCE_SUMMARY,
+            },
+          })
+        : null;
+      if (!locked || !current) {
+        throw new NotFoundException('Plan de tratamiento no encontrado');
       }
 
-      const plan = await tx.treatmentPlan.update({
-        where: { id },
-        data: patch,
+      const livePayment = await tx.payment.findFirst({
+        where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
+        select: { id: true },
       });
+      const change = decide(mapToEntityWithItems(current), {
+        hasLivePayments: livePayment !== null,
+      });
+      const data: Prisma.TreatmentPlanUncheckedUpdateInput = {
+        status: change.status,
+        currency: change.currency,
+        notes: change.notes,
+        optionLabel: change.optionLabel,
+      };
+      if (change.presentation) {
+        // La sede del request, o la principal en la vista consolidada: la
+        // lista de presupuestos por seguir filtra por ella.
+        data.presentedAt = change.presentation.at;
+        data.presentedLocationId =
+          this.tenantContext.getLocationId() ??
+          (await resolveDefaultLocationId(tx));
+      }
+      if (change.rejection) {
+        data.rejectedAt = change.rejection.at;
+        data.rejectionReason = change.rejection.reason;
+        data.rejectionNote = change.rejection.note;
+      }
+      if (change.acceptedAt) {
+        await rejectOpenSiblings(tx, locked, change.acceptedAt);
+      }
+
+      const plan = await tx.treatmentPlan.update({ where: { id }, data });
       return mapToEntity(plan);
     });
   }

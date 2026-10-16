@@ -120,7 +120,8 @@ export class AccountStatementPlanDto {
   budgeted!: number;
 
   @ApiProperty({
-    description: '`false` si el plan está CANCELLED: no suma al saldo.',
+    description:
+      '`false` si el plan está CANCELLED o REJECTED: no suma al saldo.',
   })
   countsTowardsBalance!: boolean;
 

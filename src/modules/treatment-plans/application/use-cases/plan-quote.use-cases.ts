@@ -13,6 +13,7 @@ import {
   parseQuoteContent,
   type QuoteContent,
 } from '../../domain/plan-quote';
+import { planTransitionError } from '../../domain/plan-status-machine';
 import {
   PLAN_QUOTE_REPOSITORY,
   type NewPlanAcceptance,
@@ -200,7 +201,9 @@ export class AcceptTreatmentPlanUseCase {
    * el plan bloqueado y su hash tiene que ser el que se mostró: si algo cambió
    * entre medias (un ítem, un precio, el día), 409 y no se firma. Firma, hora
    * (del servidor) y autor (del token) quedan sellados con un segundo hash. El
-   * plan pasa a ACCEPTED y sus ítems propuestos, a aceptados.
+   * plan pasa a ACCEPTED y sus ítems propuestos, a aceptados; las demás
+   * opciones abiertas de su grupo, a REJECTED (DX-040), todo en la misma
+   * transacción.
    */
   async execute(
     patientId: string,
@@ -233,14 +236,17 @@ export class AcceptTreatmentPlanUseCase {
         if (source.acceptance) {
           throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
         }
-        if (
-          source.plan.status === TreatmentPlanStatus.CANCELLED ||
-          source.plan.status === TreatmentPlanStatus.COMPLETED
-        ) {
-          throw new ConflictException(
-            'Un plan cancelado o completado no se puede aceptar.',
-          );
-        }
+        // Máquina de estados (DX-040): se firma un borrador o un plan
+        // presentado, y también uno ya aceptado sin firma (DX-012). Rechazado,
+        // completado o cancelado: 409.
+        const transitionError =
+          source.plan.status === TreatmentPlanStatus.ACCEPTED
+            ? null
+            : planTransitionError(
+                source.plan.status,
+                TreatmentPlanStatus.ACCEPTED,
+              );
+        if (transitionError) throw new ConflictException(transitionError);
         if (source.items.length === 0) {
           throw new BadRequestException(
             'El plan no tiene ítems: agrega al menos un procedimiento antes de aceptarlo.',

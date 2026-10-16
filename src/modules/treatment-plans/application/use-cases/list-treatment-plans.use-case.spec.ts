@@ -7,6 +7,7 @@ import {
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
+import { PLAN_WITHOUT_OPTIONS } from './__fixtures__/in-memory-treatment-plan.repository';
 
 function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
   return {
@@ -17,6 +18,7 @@ function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
     currency: 'USD',
     notes: null,
     createdById: null,
+    ...PLAN_WITHOUT_OPTIONS,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,

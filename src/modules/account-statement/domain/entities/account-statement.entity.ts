@@ -108,7 +108,7 @@ export interface StatementPlanLine {
   createdAt: Date;
   /** Facturable del plan (ítems ACCEPTED|DONE), aunque esté cancelado. */
   budgeted: number;
-  /** `false` para un plan CANCELLED: su facturable no suma al saldo. */
+  /** `false` para un plan CANCELLED o REJECTED: su facturable no suma al saldo. */
   countsTowardsBalance: boolean;
   /** Abonos vivos del plan en SU moneda. */
   paid: number;

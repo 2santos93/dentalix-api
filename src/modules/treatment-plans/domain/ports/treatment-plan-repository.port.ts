@@ -2,6 +2,7 @@ import {
   CatalogKind,
   ToothSurface,
   TreatmentPlanItemStatus,
+  TreatmentPlanRejectionReason,
   TreatmentPlanStatus,
 } from '@prisma/client';
 import {
@@ -26,11 +27,51 @@ export interface CreateTreatmentPlanRepoInput {
 
 // `currency`, like `status`/`notes`, is only present here when the caller
 // wants to change it — UpdateTreatmentPlanUseCase whitelist-validates it
-// BEFORE it reaches the repo, only when provided.
+// BEFORE it reaches the repo, only when provided. The status fields arrive
+// already validated against the state machine (DX-040,
+// `domain/plan-status-machine.ts`).
 export interface UpdateTreatmentPlanRepoInput {
   status?: TreatmentPlanStatus;
   currency?: string;
   notes?: string | null;
+  optionLabel?: string | null;
+  /**
+   * Presentar (DX-040): fija `presentedAt` y `presentedLocationId`, que el
+   * repositorio toma de la sede del request (`X-Location-Id`) o, en la vista
+   * consolidada, de la principal.
+   */
+  presentation?: { at: Date };
+  /** Rechazar (DX-040): cuándo, por qué y la nota. */
+  rejection?: {
+    at: Date;
+    reason: TreatmentPlanRejectionReason;
+    note: string | null;
+  };
+  /**
+   * Aceptar (DX-040): con este campo la escritura ACEPTA la opción, y el
+   * repositorio rechaza en la MISMA transacción a sus hermanas abiertas del
+   * grupo (motivo OTHER_OPTION_ACCEPTED, a esta hora). 409 si otra opción del
+   * grupo ya estaba aceptada, o si una hermana que habría que rechazar tiene
+   * abonos vivos o procedimientos realizados.
+   */
+  acceptedAt?: Date;
+}
+
+/**
+ * Decide el cambio a partir del plan LEÍDO CON SU GRUPO BLOQUEADO (FOR UPDATE):
+ * así la validación (transición, ítems, firma) y la escritura ven el mismo
+ * estado aunque haya otra petición sobre el plan o sus hermanas. Si lanza, no
+ * se escribe nada.
+ */
+export type DecidePlanChange = (
+  current: TreatmentPlanWithItems,
+  facts: PlanFacts,
+) => UpdateTreatmentPlanRepoInput;
+
+/** Lo que el plan no lleva en su detalle y algunas decisiones necesitan. */
+export interface PlanFacts {
+  /** ¿Tiene abonos vivos (ni retirados ni anulados)? */
+  hasLivePayments: boolean;
 }
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — a newly added item
@@ -84,10 +125,14 @@ export interface TreatmentPlanRepository {
   /** Active plans for the patient, ordered by `createdAt` DESC. */
   listPlansByPatient(patientId: string): Promise<TreatmentPlan[]>;
 
-  updatePlan(
-    id: string,
-    patch: UpdateTreatmentPlanRepoInput,
-  ): Promise<TreatmentPlan>;
+  /**
+   * Cambia el plan en UNA transacción: bloquea el plan y su grupo de opciones
+   * (en orden de id, para que dos aceptaciones del mismo grupo no se bloqueen
+   * en cruz), relee el plan, deja que `decide` valide y calcule el cambio, y
+   * lo aplica (con `acceptedAt`, rechazando también a las hermanas). 404 si el
+   * plan no existe o es de otra clínica.
+   */
+  updatePlan(id: string, decide: DecidePlanChange): Promise<TreatmentPlan>;
 
   addItem(input: AddTreatmentPlanItemRepoInput): Promise<TreatmentPlanItem>;
 

@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TreatmentPlansController } from './presentation/treatment-plans.controller';
+import { PlanFollowUpController } from './presentation/plan-follow-up.controller';
+import { PresentTreatmentPlanUseCase } from './application/use-cases/present-treatment-plan.use-case';
+import { RejectTreatmentPlanUseCase } from './application/use-cases/reject-treatment-plan.use-case';
+import { CreatePlanAlternativeUseCase } from './application/use-cases/create-plan-alternative.use-case';
+import { ListPendingFollowUpUseCase } from './application/use-cases/list-pending-follow-up.use-case';
+import { TREATMENT_PLAN_CLOCK } from './application/plan-clock';
+import { PLAN_OPTIONS_REPOSITORY } from './domain/ports/plan-options-repository.port';
+import { PrismaPlanOptionsRepository } from './infrastructure/repositories/prisma-plan-options.repository';
 import { PlanQuoteController } from './presentation/plan-quote.controller';
 import {
   AcceptTreatmentPlanUseCase,
@@ -38,7 +46,13 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
   // PatientsModule exporta PATIENT_REPOSITORY: el use-case de alta valida que el
   // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
   imports: [JwtModule.register({}), DentalCatalogModule, PatientsModule],
-  controllers: [TreatmentPlansController, PlanQuoteController],
+  // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
+  // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
+  controllers: [
+    PlanFollowUpController,
+    TreatmentPlansController,
+    PlanQuoteController,
+  ],
   providers: [
     CreateTreatmentPlanUseCase,
     ListTreatmentPlansUseCase,
@@ -47,6 +61,13 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
     AddTreatmentPlanItemUseCase,
     UpdateTreatmentPlanItemUseCase,
     RemoveTreatmentPlanItemUseCase,
+    // Alternativas, presentación, rechazo y seguimiento (DX-040).
+    PresentTreatmentPlanUseCase,
+    RejectTreatmentPlanUseCase,
+    CreatePlanAlternativeUseCase,
+    ListPendingFollowUpUseCase,
+    { provide: TREATMENT_PLAN_CLOCK, useValue: () => new Date() },
+    { provide: PLAN_OPTIONS_REPOSITORY, useClass: PrismaPlanOptionsRepository },
     // Presupuesto imprimible y aceptación firmada (DX-012).
     GetPlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,

@@ -103,6 +103,8 @@ export const DEMO_PRICES: Record<string, number> = {
   'CX-CORDAL-INCL': 450000,
   'PROT-CORONA-PROV': 250000,
   'PROT-CORONA-LM': 1200000,
+  // DX-040: la opción B (puente fijo de 3 unidades) del grupo A/B de la demo.
+  'PROT-PUENTE': 1150000,
   'IMPL-IMPLANTE': 3500000,
   'IMPL-CORONA': 1800000,
   'ORTO-VALORACION': 100000,
@@ -1160,6 +1162,37 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [],
   },
 ];
+
+/**
+ * DX-040: un paciente con DOS OPCIONES del mismo tratamiento (reponer el 46
+ * ausente), presentadas hace 9 días en la sede principal y sin cita futura:
+ * aparece en «Presupuestos por seguir» y en la ficha se comparan lado a lado.
+ * El seed le quita a este paciente las citas futuras del calendario.
+ */
+export const DEMO_PLAN_OPTIONS = {
+  patientIndex: 9,
+  dentistIndex: 0,
+  presentedDaysAgo: 9,
+  location: 'principal' as DemoLocationKey,
+  notes: 'Reposición del 46 ausente: el paciente compara implante y puente.',
+  options: [
+    {
+      label: 'Opción A: implante',
+      items: [
+        { code: 'IMPL-IMPLANTE', tooth: '46' },
+        { code: 'IMPL-CORONA', tooth: '46' },
+      ],
+    },
+    {
+      label: 'Opción B: puente fijo',
+      items: [
+        { code: 'PROT-PUENTE', tooth: '45' },
+        { code: 'PROT-PUENTE', tooth: '46' },
+        { code: 'PROT-PUENTE', tooth: '47' },
+      ],
+    },
+  ],
+} as const;
 
 interface DemoInventoryItem {
   location: DemoLocationKey;

@@ -8,6 +8,7 @@ import {
 } from '../../domain/ports/account-statement-repository.port';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { BillablePlanRow } from '../../domain/entities/billable-plan.entity';
+import { NON_BILLABLE_PLAN_STATUSES } from '../../../treatment-plans/domain/plan-status-machine';
 
 // Mismo "facturable" que GetPlanBalanceUseCase: un ítem PROPOSED aún no se debe.
 const BILLABLE_ITEM_STATUSES: TreatmentPlanItemStatus[] = [
@@ -266,7 +267,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
         const billablePlan: Prisma.TreatmentPlanWhereInput = {
           patientId,
           deletedAt: null,
-          status: { not: 'CANCELLED' },
+          // Cancelado o rechazado (DX-040): no se cobra.
+          status: { notIn: [...NON_BILLABLE_PLAN_STATUSES] },
         };
 
         const [plans, itemSums, paidSums, activePaymentPlans] =

@@ -17,6 +17,7 @@ import {
 } from '../../domain/ports/treatment-plan-repository.port';
 import { DentalCatalogItem } from '../../../dental-catalog/domain/entities/dental-catalog-item.entity';
 import { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
+import { PLAN_WITHOUT_OPTIONS } from './__fixtures__/in-memory-treatment-plan.repository';
 
 function fakePlanWithItems(
   overrides: Partial<TreatmentPlanWithItems> = {},
@@ -29,6 +30,7 @@ function fakePlanWithItems(
     currency: 'USD',
     notes: null,
     createdById: null,
+    ...PLAN_WITHOUT_OPTIONS,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     acceptance: null,

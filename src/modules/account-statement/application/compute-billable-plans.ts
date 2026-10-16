@@ -1,8 +1,8 @@
-import { TreatmentPlanStatus } from '@prisma/client';
 import {
   BillablePlan,
   BillablePlanRow,
 } from '../domain/entities/billable-plan.entity';
+import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
 
 // Montos Decimal(14,2): sumar en centavos enteros es exacto (mismo criterio que
 // computeAccountStatement).
@@ -19,7 +19,7 @@ function fromCents(cents: number): number {
  * criterios que el estado de cuenta (`computeAccountStatement`), para que el
  * saldo del modal sea el que se ve en la tabla «Planes»:
  *
- * - Un plan CANCELLED no se cobra: fuera.
+ * - Un plan CANCELLED o REJECTED (DX-040) no se cobra: fuera.
  * - Un plan sin nada facturable (solo ítems PROPOSED, o sin ítems) todavía no
  *   se debe: fuera.
  * - Abonado = abonos vivos en la moneda del plan; los de otra moneda van aparte
@@ -27,11 +27,7 @@ function fromCents(cents: number): number {
  */
 export function computeBillablePlans(rows: BillablePlanRow[]): BillablePlan[] {
   return rows
-    .filter(
-      (row) =>
-        row.status !== TreatmentPlanStatus.CANCELLED &&
-        toCents(row.billable) > 0,
-    )
+    .filter((row) => isPlanBillable(row.status) && toCents(row.billable) > 0)
     .map((row) => {
       const totalCents = toCents(row.billable);
       const paidCents = row.paidByCurrency
