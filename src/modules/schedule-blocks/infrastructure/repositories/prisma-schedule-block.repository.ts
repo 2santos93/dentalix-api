@@ -5,10 +5,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
-import type {
-  AffectedAppointment,
-  ScheduleBlock,
-} from '../../domain/entities/schedule-block.entity';
+import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
 import type {
   AffectingBlocks,
   AffectingBlocksQuery,
