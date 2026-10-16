@@ -29,6 +29,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -50,6 +51,11 @@ export class MedicalHistoryController {
   // Returns the latest version, or `null` when the patient has none yet —
   // NEVER a 404: an absent anamnesis is a normal state (first visit), not an
   // error (see GetMedicalHistoryUseCase).
+  @Audit({
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY',
+    patient: { param: 'patientId' },
+  })
   @Get()
   @ApiExtraModels(MedicalHistoryDto)
   @ApiOkResponse({
@@ -69,6 +75,12 @@ export class MedicalHistoryController {
   }
 
   // Always APPENDS a new version; never updates the previous one.
+  @Audit({
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Put()
   @ApiOkResponse({ type: MedicalHistoryDto })
   @ApiNotFoundResponse({

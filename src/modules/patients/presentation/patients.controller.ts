@@ -41,6 +41,7 @@ import {
   consentEvidenceFrom,
   EvidenceRequest,
 } from '../../data-consents/presentation/consent-evidence';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
@@ -60,6 +61,12 @@ export class PatientsController {
     private readonly updatePatient: UpdatePatientUseCase,
   ) {}
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'PATIENT',
+    resourceId: { response: 'id' },
+    patient: { response: 'id' },
+  })
   @Post()
   @ApiOperation({
     summary: 'Crear paciente (con anamnesis v1 opcional)',
@@ -97,12 +104,24 @@ export class PatientsController {
     });
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+  })
   @Get(':id')
   @ApiOkResponse({ type: PatientDto })
   get(@Param('id') id: string): Promise<Patient> {
     return this.getPatient.execute(id);
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+  })
   @Patch(':id')
   @ApiOkResponse({ type: PatientDto })
   update(

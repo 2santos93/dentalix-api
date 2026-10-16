@@ -30,6 +30,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -50,6 +51,12 @@ export class PaymentPlansController {
     private readonly cancelPaymentPlan: CancelPaymentPlanUseCase,
   ) {}
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'PAYMENT_PLAN',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Post('treatment-plans/:id/payment-plan')
   @ApiCreatedResponse({ type: PaymentPlanDto })
   async create(
@@ -75,12 +82,22 @@ export class PaymentPlansController {
     return this.getPaymentPlan.execute(id);
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PAYMENT_PLAN',
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Get('treatment-plans/:id/payment-plan')
   @ApiOkResponse({ type: PaymentPlanDto })
   get(@Param('id') id: string): Promise<GetPaymentPlanResult> {
     return this.getPaymentPlan.execute(id);
   }
 
+  @Audit({
+    action: 'DELETE',
+    resource: 'PAYMENT_PLAN',
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Delete('treatment-plans/:id/payment-plan')
   @HttpCode(204)
   @ApiOkResponse({ description: 'Payment plan cancelled' })

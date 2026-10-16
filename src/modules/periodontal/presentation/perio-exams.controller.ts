@@ -46,6 +46,7 @@ import type {
 import { CreatePerioExamDto } from './dto/create-perio-exam.dto';
 import { PerioExamDetailDto, PerioExamSummaryDto } from './dto/perio-exam.dto';
 import { SavePerioMeasuresDto } from './dto/save-perio-measures.dto';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -75,6 +76,11 @@ export class PerioExamsController {
     private readonly deleteExam: DeletePerioExamUseCase,
   ) {}
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PERIO_EXAM',
+    patient: { param: 'patientId' },
+  })
   @Get()
   @ApiOkResponse({ type: [PerioExamSummaryDto] })
   @ApiNotFoundResponse({
@@ -86,6 +92,12 @@ export class PerioExamsController {
     return this.listExams.execute(patientId);
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'PERIO_EXAM',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post()
   @ApiCreatedResponse({ type: PerioExamDetailDto })
   @ApiBadRequestResponse({ description: 'Fecha inválida o futura' })
@@ -108,6 +120,12 @@ export class PerioExamsController {
     );
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PERIO_EXAM',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Get(':id')
   @ApiOkResponse({ type: PerioExamDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND })
@@ -118,6 +136,12 @@ export class PerioExamsController {
     return this.getExam.execute(patientId, id);
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PERIO_EXAM',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Put(':id/measures')
   @ApiOkResponse({ type: PerioExamDetailDto })
   @ApiBadRequestResponse({
@@ -151,6 +175,12 @@ export class PerioExamsController {
     });
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PERIO_EXAM',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post(':id/finalize')
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: PerioExamDetailDto })
@@ -163,6 +193,12 @@ export class PerioExamsController {
     return this.finalizeExam.execute(patientId, id);
   }
 
+  @Audit({
+    action: 'DELETE',
+    resource: 'PERIO_EXAM',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse({ description: 'Borrador eliminado' })

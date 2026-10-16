@@ -48,6 +48,7 @@ import {
 } from './dto/patient-consent.dto';
 import { PreviewPatientConsentQueryDto } from './dto/preview-patient-consent-query.dto';
 import { SignPatientConsentDto } from './dto/sign-patient-consent.dto';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 type AuthenticatedRequest = Request & { user: JwtPayload };
 
@@ -90,6 +91,11 @@ export class PatientConsentsController {
     private readonly getConsent: GetPatientConsentUseCase,
   ) {}
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'CONSENT',
+    patient: { param: 'patientId' },
+  })
   @Get()
   @ApiOkResponse({ type: [PatientConsentSummaryDto] })
   @ApiNotFoundResponse({
@@ -102,6 +108,11 @@ export class PatientConsentsController {
   }
 
   // Declarada ANTES de `:id`: Express casa las rutas en orden.
+  @Audit({
+    action: 'VIEW',
+    resource: 'CONSENT',
+    patient: { param: 'patientId' },
+  })
   @Get('preview')
   @ApiOkResponse({ type: ConsentPreviewDto })
   @ApiNotFoundResponse({
@@ -120,6 +131,12 @@ export class PatientConsentsController {
     );
   }
 
+  @Audit({
+    action: 'SIGN',
+    resource: 'CONSENT',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post()
   @ApiCreatedResponse({ type: PatientConsentDto })
   @ApiBadRequestResponse({
@@ -159,6 +176,12 @@ export class PatientConsentsController {
     return toConsentDto(consent);
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Get(':id')
   @ApiOkResponse({ type: PatientConsentDocumentDto })
   @ApiNotFoundResponse({ description: 'Consentimiento no encontrado' })

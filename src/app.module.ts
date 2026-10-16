@@ -33,6 +33,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { SecurityModule } from './shared/security/security.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
@@ -42,6 +43,9 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     SecurityModule,
     PrismaModule,
     TenantContextModule,
+    // Global: el AuditInterceptor de `@Audit(...)` se instancia en los
+    // controladores de muchos módulos (DX-009).
+    AuditModule,
     AuthModule,
     // InvitationsModule ANTES que cualquier módulo que registre StaffModule
     // (AppointmentsModule lo importa): Express casa las rutas en orden de

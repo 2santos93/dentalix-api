@@ -33,6 +33,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -56,6 +57,12 @@ export class OdontogramController {
     private readonly getToothTimeline: GetToothTimelineUseCase,
   ) {}
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'ODONTOGRAM',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post('tooth-records')
   @ApiCreatedResponse({ type: ToothRecordDto })
   @ApiNotFoundResponse({
@@ -82,6 +89,11 @@ export class OdontogramController {
     );
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'ODONTOGRAM',
+    patient: { param: 'patientId' },
+  })
   @Get('odontogram')
   @ApiOkResponse({ type: [OdontogramGroupDto] })
   projection(
@@ -90,6 +102,11 @@ export class OdontogramController {
     return this.getOdontogram.execute(patientId);
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'ODONTOGRAM',
+    patient: { param: 'patientId' },
+  })
   @Get('teeth/:fdi/history')
   @ApiOkResponse({ type: [ToothRecordDto] })
   history(

@@ -30,6 +30,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -52,6 +53,12 @@ export class ClinicalEntriesController {
     private readonly listClinicalEntries: ListClinicalEntriesUseCase,
   ) {}
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'CLINICAL_ENTRY',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post()
   @ApiCreatedResponse({ type: ClinicalEntryDto })
   @ApiNotFoundResponse({
@@ -74,6 +81,11 @@ export class ClinicalEntriesController {
     );
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY',
+    patient: { param: 'patientId' },
+  })
   @Get()
   @ApiOkResponse({ type: [ClinicalEntryDto] })
   list(

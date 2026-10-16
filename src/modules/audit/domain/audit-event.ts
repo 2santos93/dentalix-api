@@ -1,0 +1,78 @@
+import type {
+  AuditAction,
+  AuditResourceType,
+  ClinicRole,
+} from '@prisma/client';
+import type { AuditMetadata } from './audit-metadata';
+
+/**
+ * De dónde sale el paciente de un evento. Se resuelve bajo RLS al escribir:
+ * un id de otra clínica (o inexistente) queda como `null`, nunca se guarda.
+ */
+export type AuditPatientRef = {
+  kind:
+    | 'patient'
+    | 'treatmentPlan'
+    | 'treatmentPlanItem'
+    | 'payment'
+    | 'prescription';
+  id: string;
+};
+
+/**
+ * Quién. `email` solo en un login fallido: se resuelve a un MIEMBRO de esta
+ * clínica (nunca a un usuario de otra, que filtraría quién usa Dentalix) y el
+ * email en sí no se guarda.
+ */
+export type AuditActorRef =
+  | { kind: 'user'; userId: string; role: ClinicRole | null }
+  | { kind: 'email'; email: string };
+
+/** Lo que el interceptor sabe de una petición auditada. */
+export interface AuditEventDraft {
+  tenantId: string;
+  locationId: string | null;
+  actor: AuditActorRef;
+  action: AuditAction;
+  resourceType: AuditResourceType;
+  resourceId: string | null;
+  patient: AuditPatientRef | null;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  metadata: AuditMetadata;
+}
+
+/** Un evento tal como lo ve la pantalla de auditoría (solo ADMIN). */
+export interface AuditEventView {
+  id: string;
+  occurredAt: Date;
+  action: AuditAction;
+  resourceType: AuditResourceType;
+  resourceId: string | null;
+  locationId: string | null;
+  /** Zona IANA de la sede del evento (o de la sede principal). */
+  timeZone: string;
+  actor: {
+    id: string;
+    /** `null` si ya no es resoluble (usuario fuera de la clínica). */
+    fullName: string | null;
+    role: ClinicRole | null;
+  } | null;
+  patient: { id: string; fullName: string } | null;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  metadata: AuditMetadata;
+}
+
+export interface AuditEventFilter {
+  patientId?: string;
+  actorUserId?: string;
+  action?: AuditAction;
+  resourceType?: AuditResourceType;
+  /** Desde (incluido). */
+  from: Date;
+  /** Hasta (excluido). */
+  to: Date;
+}

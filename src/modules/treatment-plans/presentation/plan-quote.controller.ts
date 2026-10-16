@@ -40,6 +40,7 @@ import {
   AcceptTreatmentPlanDto,
   PlanQuoteDocumentDto,
 } from './dto/plan-quote.dto';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 type AuthenticatedRequest = Request & { user: JwtPayload };
 
@@ -82,6 +83,12 @@ export class PlanQuoteController {
     private readonly acceptPlan: AcceptTreatmentPlanUseCase,
   ) {}
 
+  @Audit({
+    action: 'PRINT',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: { param: 'patientId' },
+  })
   @Get('quote')
   @Roles(...TREATMENT_PLAN_QUOTE_READ_ROLES)
   @ApiOkResponse({ type: PlanQuoteDocumentDto })
@@ -96,6 +103,12 @@ export class PlanQuoteController {
     return toDto(await this.getQuote.execute(patientId, planId));
   }
 
+  @Audit({
+    action: 'SIGN',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: { param: 'patientId' },
+  })
   @Post('acceptance')
   @Roles(...CLINICAL_ROLES)
   @ApiCreatedResponse({

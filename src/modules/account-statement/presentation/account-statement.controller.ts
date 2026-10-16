@@ -31,6 +31,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 // Estado de cuenta = el mismo dato FINANCIERO que pagos y planes de pago, visto
 // por paciente -> exactamente PAYMENT_ROLES (ADMIN + RECEPTION), como
@@ -47,6 +48,11 @@ export class AccountStatementController {
     private readonly listBillablePlans: ListBillablePlansUseCase,
   ) {}
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    patient: { param: 'patientId' },
+  })
   @Get('patients/:patientId/account-statement')
   @ApiOperation({
     summary:
@@ -81,6 +87,11 @@ export class AccountStatementController {
   // DX-067: recepción registra abonos y planes de cuotas desde el estado de
   // cuenta, sin poder listar planes de tratamiento (CLINICAL_ROLES). Mismos
   // roles que el estado de cuenta y que POST .../payments y .../payment-plan.
+  @Audit({
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    patient: { param: 'patientId' },
+  })
   @Get('patients/:patientId/billable-plans')
   @ApiOperation({
     summary:

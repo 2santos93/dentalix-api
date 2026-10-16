@@ -44,6 +44,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
@@ -78,6 +79,12 @@ export class TreatmentPlansController {
     private readonly removeTreatmentPlanItem: RemoveTreatmentPlanItemUseCase,
   ) {}
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post('patients/:patientId/treatment-plans')
   @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiCreatedResponse({ type: TreatmentPlanDto })
@@ -101,6 +108,11 @@ export class TreatmentPlansController {
     });
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    patient: { param: 'patientId' },
+  })
   @Get('patients/:patientId/treatment-plans')
   @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiOkResponse({ type: [TreatmentPlanDto] })
@@ -110,12 +122,24 @@ export class TreatmentPlansController {
     return this.listTreatmentPlans.execute(patientId);
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Get('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
   get(@Param('id') id: string): Promise<TreatmentPlanDetail> {
     return this.getTreatmentPlan.execute(id);
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Patch('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
   @ApiConflictResponse({
@@ -133,6 +157,12 @@ export class TreatmentPlansController {
     });
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'TREATMENT_PLAN_ITEM',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Post('treatment-plans/:id/items')
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
   @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
@@ -150,6 +180,12 @@ export class TreatmentPlansController {
     });
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN_ITEM',
+    resourceId: { param: 'itemId' },
+    patient: { lookup: 'treatmentPlanItem', param: 'itemId' },
+  })
   @Patch('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ type: TreatmentPlanItemDto })
   @ApiConflictResponse({
@@ -175,6 +211,12 @@ export class TreatmentPlansController {
     );
   }
 
+  @Audit({
+    action: 'DELETE',
+    resource: 'TREATMENT_PLAN_ITEM',
+    resourceId: { param: 'itemId' },
+    patient: { lookup: 'treatmentPlanItem', param: 'itemId' },
+  })
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
   @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })

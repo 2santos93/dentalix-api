@@ -1,0 +1,127 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { AuditAction, AuditResourceType, ClinicRole } from '@prisma/client';
+
+// Forma de la respuesta de `GET /audit-events` (DX-009). Solo documenta el
+// contrato en Swagger (de ahí sale el tipo del cliente web), no valida entrada.
+
+export class AuditActorDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '`null` si el usuario ya no es resoluble en esta clínica.',
+  })
+  fullName!: string | null;
+
+  @ApiProperty({
+    enum: ClinicRole,
+    enumName: 'ClinicRole',
+    nullable: true,
+    description:
+      'Rol con el que actuó (del token). `null` en un login fallido.',
+  })
+  role!: ClinicRole | null;
+}
+
+export class AuditPatientDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Ana Gómez', description: 'Nombre y apellido' })
+  fullName!: string;
+}
+
+export class AuditMetadataDto {
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'UPDATE: nombres de los campos enviados (nunca sus valores).',
+  })
+  changedFields?: string[];
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    description: 'Parámetros de la ruta (ids).',
+  })
+  params?: Record<string, string>;
+
+  @ApiPropertyOptional({ example: 'INVALID_CREDENTIALS' })
+  reason?: string;
+}
+
+export class AuditEventDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  occurredAt!: Date;
+
+  @ApiProperty({ enum: AuditAction, enumName: 'AuditAction' })
+  action!: AuditAction;
+
+  @ApiProperty({ enum: AuditResourceType, enumName: 'AuditResourceType' })
+  resourceType!: AuditResourceType;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  resourceId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Sede activa de la petición; `null` = vista consolidada.',
+  })
+  locationId!: string | null;
+
+  @ApiProperty({
+    example: 'America/Bogota',
+    description:
+      'Zona IANA de la sede del evento (o de la sede principal): la hora se ' +
+      'muestra en ella.',
+  })
+  timeZone!: string;
+
+  @ApiProperty({ type: AuditActorDto, nullable: true })
+  actor!: AuditActorDto | null;
+
+  @ApiProperty({ type: AuditPatientDto, nullable: true })
+  patient!: AuditPatientDto | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'X-Request-Id de la petición: la enlaza con su línea de log.',
+  })
+  requestId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  ip!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  userAgent!: string | null;
+
+  @ApiProperty({ type: AuditMetadataDto })
+  metadata!: AuditMetadataDto;
+}
+
+export class AuditEventsPageDto {
+  @ApiProperty({ type: [AuditEventDto] })
+  items!: AuditEventDto[];
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Cursor de la página siguiente; `null` en la última.',
+  })
+  nextCursor!: string | null;
+
+  @ApiProperty({
+    example: 'America/Bogota',
+    description:
+      'Zona de la sede activa (o de la principal), para interpretar los ' +
+      'días de los filtros.',
+  })
+  timeZone!: string;
+}

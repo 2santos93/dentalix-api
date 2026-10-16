@@ -25,6 +25,7 @@ import {
   DeliveredSession,
   SessionCookieService,
 } from './session-cookie.service';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -61,6 +62,7 @@ export class AuthController {
     return this.registerClinic.execute(dto);
   }
 
+  @Audit({ action: 'LOGIN', resource: 'SESSION' })
   @Post('login')
   @RateLimit('auth', 'login', 'login-account')
   @ApiCreatedResponse({ type: AuthTokensDto })
