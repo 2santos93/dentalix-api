@@ -15,7 +15,11 @@ import {
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
-import { acceptPlanInTx, lockPlanGroup } from './plan-option-group';
+import {
+  acceptPlanInTx,
+  cancelActivePaymentPlans,
+  lockPlanGroup,
+} from './plan-option-group';
 import {
   TreatmentPlan,
   TreatmentPlanWithItems,
@@ -213,21 +217,18 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       if (change.acceptedAt) {
         // La misma aceptación que la firmada (DX-109): hermanas, estado e
         // ítems PROPOSED → ACCEPTED.
-        await acceptPlanInTx(tx, locked, change.acceptedAt);
+        await acceptPlanInTx(
+          tx,
+          locked,
+          change.acceptedAt,
+          change.acceptedById ?? null,
+        );
       }
       if (change.cancellation) {
-        // Un plan cancelado no se cobra: su plan de cuotas ACTIVO se cancela
-        // con él, en esta transacción (DX-109), con hora, autor y motivo.
-        await tx.paymentPlan.updateMany({
-          where: { treatmentPlanId: id, status: 'ACTIVE', deletedAt: null },
-          data: {
-            status: 'CANCELLED',
-            deletedAt: change.cancellation.at,
-            cancelledAt: change.cancellation.at,
-            cancelledById: change.cancellation.byId,
-            cancelReason: change.cancellation.reason,
-          },
-        });
+        // Un plan cancelado o rechazado no se cobra: su plan de cuotas ACTIVO
+        // se cancela con él, en esta transacción (DX-109), con hora, autor y
+        // motivo.
+        await cancelActivePaymentPlans(tx, [id], change.cancellation);
       }
 
       const plan = await tx.treatmentPlan.update({ where: { id }, data });

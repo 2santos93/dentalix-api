@@ -124,7 +124,10 @@ export class UpdateTreatmentPlanUseCase {
           throw new ForbiddenException(ACCEPT_ROLE_MESSAGE);
         }
         patch.status = status;
-        if (status === TreatmentPlanStatus.ACCEPTED) patch.acceptedAt = at;
+        if (status === TreatmentPlanStatus.ACCEPTED) {
+          patch.acceptedAt = at;
+          patch.acceptedById = actor.userId ?? null;
+        }
         if (status === TreatmentPlanStatus.CANCELLED) {
           patch.cancellation = {
             at,

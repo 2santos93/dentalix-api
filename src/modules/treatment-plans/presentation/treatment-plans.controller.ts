@@ -184,7 +184,7 @@ export class TreatmentPlansController {
       'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor)',
   })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada; cancelar cancela también el plan de cuotas activo`,
+    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
   })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -248,7 +248,7 @@ export class TreatmentPlansController {
   @ApiOkResponse({
     type: TreatmentPlanDto,
     description:
-      'Plan REJECTED con motivo, nota y rejectedAt (servidor); las demás opciones del grupo no cambian',
+      'Plan REJECTED con motivo, nota y rejectedAt (servidor); las demás opciones del grupo no cambian. Su plan de cuotas activo, si lo tiene, se cancela en la misma transacción con autor y motivo (DX-109)',
   })
   @ApiBadRequestResponse({
     description:
@@ -264,11 +264,13 @@ export class TreatmentPlansController {
   reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectTreatmentPlanDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlan> {
-    return this.rejectTreatmentPlan.execute(id, {
-      reason: dto.reason,
-      note: dto.note,
-    });
+    return this.rejectTreatmentPlan.execute(
+      id,
+      { reason: dto.reason, note: dto.note },
+      actorRole(req).userId,
+    );
   }
 
   @Audit({

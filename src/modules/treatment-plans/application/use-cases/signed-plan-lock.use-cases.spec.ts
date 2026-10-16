@@ -296,4 +296,91 @@ describe('Plan cerrado: ítems congelados y moneda fija (DX-109)', () => {
     ]);
     expect(repo.activePaymentPlanIds.has('plan1')).toBe(false);
   });
+
+  it('un plan COMPLETED sí admite marcar como realizado un ítem que quedó aceptado (y lo lleva al odontograma)', async () => {
+    const { repo, update } = setup(null, TreatmentPlanStatus.COMPLETED);
+    repo.seedItem({
+      id: 'item2',
+      planId: 'plan1',
+      price: 100,
+      status: TreatmentPlanItemStatus.ACCEPTED,
+    });
+    const done = await update.execute('item2', {
+      status: TreatmentPlanItemStatus.DONE,
+    });
+    expect(done.status).toBe(TreatmentPlanItemStatus.DONE);
+  });
+
+  it('en un plan COMPLETED, marcar realizado junto a otro cambio, o desde propuesto, o volver atrás es 409', async () => {
+    const { repo, update } = setup(null, TreatmentPlanStatus.COMPLETED);
+    repo.seedItem({
+      id: 'item2',
+      planId: 'plan1',
+      price: 100,
+      status: TreatmentPlanItemStatus.ACCEPTED,
+    });
+    repo.seedItem({
+      id: 'item3',
+      planId: 'plan1',
+      price: 100,
+      status: TreatmentPlanItemStatus.DONE,
+    });
+    await expect(
+      update.execute('item2', {
+        status: TreatmentPlanItemStatus.DONE,
+        price: 50,
+      }),
+    ).rejects.toThrow(/Solo se puede marcar como realizado/);
+    await expect(
+      update.execute('item1', { status: TreatmentPlanItemStatus.DONE }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      update.execute('item3', { status: TreatmentPlanItemStatus.ACCEPTED }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it.each([TreatmentPlanStatus.CANCELLED, TreatmentPlanStatus.REJECTED])(
+    'un plan %s no admite ni marcar realizado un ítem aceptado (409)',
+    async (status) => {
+      const { repo, update } = setup(null, status);
+      repo.seedItem({
+        id: 'item2',
+        planId: 'plan1',
+        price: 100,
+        status: TreatmentPlanItemStatus.ACCEPTED,
+      });
+      await expect(
+        update.execute('item2', { status: TreatmentPlanItemStatus.DONE }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    },
+  );
+
+  it('aceptar una opción cancela el plan de cuotas activo de las hermanas que rechaza, con autor y motivo', async () => {
+    const { repo, updatePlan } = setup(null);
+    repo.seedPlan({
+      id: 'plan0',
+      optionGroupId: 'g1',
+      status: TreatmentPlanStatus.DRAFT,
+    });
+    repo.seedPlan({
+      id: 'plan2',
+      optionGroupId: 'g1',
+      status: TreatmentPlanStatus.PRESENTED,
+    });
+    repo.activePaymentPlanIds.add('plan2');
+    await updatePlan.execute(
+      'plan0',
+      { status: TreatmentPlanStatus.ACCEPTED },
+      { role: ClinicRole.DENTIST, userId: 'user-1' },
+    );
+    expect(repo.stored('plan2').status).toBe(TreatmentPlanStatus.REJECTED);
+    expect(repo.paymentPlanCancellations).toEqual([
+      {
+        planId: 'plan2',
+        at: new Date('2026-10-16T15:00:00.000Z'),
+        byId: 'user-1',
+        reason: 'Se aceptó otra opción del grupo de tratamiento.',
+      },
+    ]);
+  });
 });

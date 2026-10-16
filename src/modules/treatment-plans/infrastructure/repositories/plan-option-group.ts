@@ -6,9 +6,11 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import {
+  PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON,
   optionSiblingsToReject,
   siblingRejectionBlockedMessage,
 } from '../../domain/plan-options';
+import type { PaymentPlanCancellation } from '../../domain/ports/treatment-plan-repository.port';
 
 export const OTHER_OPTION_ALREADY_ACCEPTED_MESSAGE =
   'Otra opción de este grupo ya está aceptada: un grupo admite una sola opción elegida.';
@@ -61,12 +63,15 @@ export async function lockPlanGroup(
  * aceptada», a la misma hora y en la MISMA transacción que la aceptación. Se
  * llama con el grupo ya bloqueado por `lockPlanGroup`. 409 si otra opción del
  * grupo ya estaba aceptada o completada, o si una hermana a rechazar tiene
- * abonos vivos o procedimientos realizados.
+ * abonos vivos o procedimientos realizados. El plan de cuotas ACTIVO de una
+ * hermana rechazada se cancela con ella (DX-109): un plan rechazado no se
+ * financia.
  */
 export async function rejectOpenSiblings(
   tx: Prisma.TransactionClient,
   plan: LockedPlanRow,
   at: Date,
+  byId: string | null,
 ): Promise<void> {
   if (!plan.optionGroupId) return;
   const siblings = await tx.treatmentPlan.findMany({
@@ -118,6 +123,40 @@ export async function rejectOpenSiblings(
       rejectionNote: null,
     },
   });
+  await cancelActivePaymentPlans(tx, reject, {
+    at,
+    byId,
+    reason: PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON,
+  });
+}
+
+/**
+ * Cancela (DX-109) el plan de cuotas ACTIVO de los planes `planIds`, con hora,
+ * autor y motivo, en la transacción del llamador: un plan cancelado o
+ * rechazado no se financia. Se llama con esos planes ya bloqueados FOR UPDATE
+ * (`lockPlanGroup`), así que un alta de plan de cuotas concurrente (FOR SHARE
+ * del plan) espera y luego ve el plan cerrado (409).
+ */
+export async function cancelActivePaymentPlans(
+  tx: Prisma.TransactionClient,
+  planIds: readonly string[],
+  cancellation: PaymentPlanCancellation,
+): Promise<void> {
+  if (planIds.length === 0) return;
+  await tx.paymentPlan.updateMany({
+    where: {
+      treatmentPlanId: { in: [...planIds] },
+      status: 'ACTIVE',
+      deletedAt: null,
+    },
+    data: {
+      status: 'CANCELLED',
+      deletedAt: cancellation.at,
+      cancelledAt: cancellation.at,
+      cancelledById: cancellation.byId,
+      cancelReason: cancellation.reason,
+    },
+  });
 }
 
 /**
@@ -132,8 +171,9 @@ export async function acceptPlanInTx(
   tx: Prisma.TransactionClient,
   plan: LockedPlanRow,
   at: Date,
+  byId: string | null,
 ): Promise<void> {
-  await rejectOpenSiblings(tx, plan, at);
+  await rejectOpenSiblings(tx, plan, at, byId);
   await tx.treatmentPlan.update({
     where: { id: plan.id },
     data: { status: TreatmentPlanStatus.ACCEPTED },

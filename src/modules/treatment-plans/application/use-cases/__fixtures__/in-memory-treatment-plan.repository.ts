@@ -14,6 +14,7 @@ import {
   AddTreatmentPlanItemRepoInput,
   CreateTreatmentPlanRepoInput,
   DecidePlanChange,
+  PaymentPlanCancellation,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../../domain/ports/treatment-plan-repository.port';
@@ -25,6 +26,7 @@ import {
   PlanOptionsRepository,
 } from '../../../domain/ports/plan-options-repository.port';
 import {
+  PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON,
   optionSiblingsToReject,
   siblingRejectionBlockedMessage,
 } from '../../../domain/plan-options';
@@ -225,6 +227,18 @@ export class InMemoryTreatmentPlanRepository
     return Promise.resolve(rows);
   }
 
+  private cancelPaymentPlanOf(
+    planId: string,
+    cancellation: PaymentPlanCancellation,
+  ): void {
+    if (!this.activePaymentPlanIds.has(planId)) return;
+    // Un Set en memoria, no una tabla: el real deja el plan de cuotas
+    // CANCELLED (soft), aquí solo deja de estar activo.
+    // eslint-disable-next-line no-restricted-syntax
+    this.activePaymentPlanIds.delete(planId);
+    this.paymentPlanCancellations.push({ planId, ...cancellation });
+  }
+
   // Mismo contrato que el repositorio real: `decide` ve el plan actual y, si
   // lanza, no se escribe nada; con `acceptedAt` rechaza a las hermanas.
   async updatePlan(
@@ -267,6 +281,11 @@ export class InMemoryTreatmentPlanRepository
           rejectionReason: TreatmentPlanRejectionReason.OTHER_OPTION_ACCEPTED,
           rejectionNote: null,
         });
+        this.cancelPaymentPlanOf(sibling.id, {
+          at: change.acceptedAt,
+          byId: change.acceptedById ?? null,
+          reason: PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON,
+        });
       }
     }
     if (change.acceptedAt) {
@@ -280,15 +299,8 @@ export class InMemoryTreatmentPlanRepository
         }
       }
     }
-    if (change.cancellation && this.activePaymentPlanIds.has(id)) {
-      // Un Set en memoria, no una tabla: el real deja el plan de cuotas
-      // CANCELLED (soft), aquí solo deja de estar activo.
-      // eslint-disable-next-line no-restricted-syntax
-      this.activePaymentPlanIds.delete(id);
-      this.paymentPlanCancellations.push({
-        planId: id,
-        ...change.cancellation,
-      });
+    if (change.cancellation) {
+      this.cancelPaymentPlanOf(id, change.cancellation);
     }
     if (change.status !== undefined) row.status = change.status;
     if (change.currency !== undefined) row.currency = change.currency;

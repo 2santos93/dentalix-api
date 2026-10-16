@@ -113,4 +113,31 @@ describe('RejectTreatmentPlanUseCase (DX-040)', () => {
       NotFoundException,
     );
   });
+
+  it('DX-109: rechazar cancela su plan de cuotas activo en la misma operación, con autor y motivo', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: PRESENTED });
+    repo.activePaymentPlanIds.add(plan.id);
+    await uc.execute(plan.id, { reason: PRICE }, 'user-1');
+    expect(repo.paymentPlanCancellations).toEqual([
+      {
+        planId: plan.id,
+        at: NOW,
+        byId: 'user-1',
+        reason: 'Se rechazó el plan de tratamiento.',
+      },
+    ]);
+    expect(repo.activePaymentPlanIds.has(plan.id)).toBe(false);
+  });
+
+  it('DX-109: si el rechazo no procede (409), el plan de cuotas sigue activo', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: DRAFT });
+    repo.activePaymentPlanIds.add(plan.id);
+    await expect(
+      uc.execute(plan.id, { reason: PRICE }, 'user-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(repo.activePaymentPlanIds.has(plan.id)).toBe(true);
+    expect(repo.paymentPlanCancellations).toEqual([]);
+  });
 });

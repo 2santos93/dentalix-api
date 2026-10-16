@@ -10,6 +10,9 @@ import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/in
 import { PrismaPlanQuoteRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
+import { RejectTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/reject-treatment-plan.use-case';
+import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
+import type { DentalCatalogRepository } from '../src/modules/dental-catalog/domain/ports/dental-catalog-repository.port';
 import { GetTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import {
   AcceptTreatmentPlanUseCase,
@@ -43,6 +46,11 @@ const updatePlan = new UpdateTreatmentPlanUseCase(
   whitelist,
   () => NOW,
 );
+const rejectPlan = new RejectTreatmentPlanUseCase(planRepo, () => NOW);
+const noCatalog = {
+  findById: () => Promise.resolve(null),
+} as unknown as DentalCatalogRepository;
+const updateItem = new UpdateTreatmentPlanItemUseCase(planRepo, noCatalog);
 const getPlan = new GetTreatmentPlanUseCase(planRepo);
 const getQuote = new GetPlanQuoteUseCase(quoteRepo, () => NOW);
 const acceptSigned = new AcceptTreatmentPlanUseCase(quoteRepo, () => NOW);
@@ -67,6 +75,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
   let userId: string;
   let patientId: string;
   let catalogItemId: string;
+  let locationId: string;
 
   const inTenant = <T>(fn: () => Promise<T>) =>
     tenantContext.run(tenantId, undefined, fn);
@@ -78,6 +87,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
     });
     const where = { tenantId: { in: tenants.map((t) => t.id) } };
     await owner.payment.deleteMany({ where });
+    await owner.toothRecord.deleteMany({ where });
     await owner.installment.deleteMany({ where });
     await owner.paymentPlan.deleteMany({ where });
     await owner.treatmentPlanAcceptance.deleteMany({ where });
@@ -117,13 +127,32 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
                 rejectedAt: NOW,
                 rejectionReason: 'OTHER_OPTION_ACCEPTED',
               }
-            : { status },
+            : status === TreatmentPlanStatus.PRESENTED
+              ? { status, presentedAt: NOW, presentedLocationId: locationId }
+              : { status },
       });
     }
     return plan.id;
   }
 
   const body = { amount: 40, currency: 'USD', paidAt: '2026-10-16' };
+
+  /** Plan de cuotas ACTIVO sembrado por detrás (owner). */
+  async function seedPaymentPlan(treatmentPlanId: string): Promise<string> {
+    const pp = await owner.paymentPlan.create({
+      data: {
+        tenantId,
+        treatmentPlanId,
+        patientId,
+        currency: 'USD',
+        totalToFinance: 140,
+        installmentsCount: 2,
+        periodicity: 'MONTHLY',
+        startDate: NOW,
+      },
+    });
+    return pp.id;
+  }
 
   beforeAll(async () => {
     await prisma.onModuleInit();
@@ -142,7 +171,9 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
         },
       })
     ).id;
-    await owner.location.create({ data: { tenantId, name: 'Sede' } });
+    locationId = (
+      await owner.location.create({ data: { tenantId, name: 'Sede' } })
+    ).id;
     patientId = (
       await owner.patient.create({
         data: { tenantId, firstName: 'Ana', lastName: 'Cobro' },
@@ -431,5 +462,160 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
         ).rejects.toThrow(/restrict_violation|23001|cerrado/);
       },
     );
+  });
+
+  describe('revisión DX-109: rechazar también cancela el plan de cuotas', () => {
+    it('«Rechazar» deja el plan de cuotas ACTIVO en CANCELLED con autor y motivo, en la misma transacción', async () => {
+      const planId = await seedPlan(TreatmentPlanStatus.PRESENTED);
+      const ppId = await seedPaymentPlan(planId);
+      await inTenant(() =>
+        rejectPlan.execute(planId, { reason: 'PRICE' }, userId),
+      );
+      expect(
+        await owner.paymentPlan.findUniqueOrThrow({ where: { id: ppId } }),
+      ).toMatchObject({
+        status: 'CANCELLED',
+        cancelledAt: NOW,
+        cancelledById: userId,
+        cancelReason: 'Se rechazó el plan de tratamiento.',
+      });
+    });
+
+    it('aceptar una opción cancela el plan de cuotas de la hermana que rechaza', async () => {
+      const a = await seedPlan();
+      const b = await seedPlan(TreatmentPlanStatus.PRESENTED);
+      await owner.treatmentPlan.updateMany({
+        where: { id: { in: [a, b] } },
+        data: { optionGroupId: a },
+      });
+      const ppId = await seedPaymentPlan(b);
+      await inTenant(() =>
+        updatePlan.execute(
+          a,
+          { status: TreatmentPlanStatus.ACCEPTED },
+          { role: ClinicRole.DENTIST, userId },
+        ),
+      );
+      expect(
+        await owner.treatmentPlan.findUniqueOrThrow({ where: { id: b } }),
+      ).toMatchObject({ status: TreatmentPlanStatus.REJECTED });
+      expect(
+        await owner.paymentPlan.findUniqueOrThrow({ where: { id: ppId } }),
+      ).toMatchObject({
+        status: 'CANCELLED',
+        cancelledById: userId,
+        cancelReason: 'Se aceptó otra opción del grupo de tratamiento.',
+      });
+    });
+  });
+
+  describe('revisión DX-109: plan completado con un procedimiento pendiente', () => {
+    it('con el rol de la app, ACCEPTED → DONE pasa (y llega al odontograma); cualquier otro cambio sigue bloqueado', async () => {
+      const planId = await seedPlan(TreatmentPlanStatus.ACCEPTED);
+      await owner.treatmentPlanItem.updateMany({
+        where: { planId },
+        data: { status: TreatmentPlanItemStatus.ACCEPTED },
+      });
+      await owner.treatmentPlan.update({
+        where: { id: planId },
+        data: { status: TreatmentPlanStatus.COMPLETED },
+      });
+      const [first, second] = await owner.treatmentPlanItem.findMany({
+        where: { planId },
+        orderBy: { toothNumber: 'asc' },
+      });
+
+      const done = await inTenant(() =>
+        updateItem.execute(
+          first.id,
+          { status: TreatmentPlanItemStatus.DONE },
+          userId,
+        ),
+      );
+      expect(done.status).toBe(TreatmentPlanItemStatus.DONE);
+      expect(
+        await owner.toothRecord.count({
+          where: { sourcePlanItemId: first.id },
+        }),
+      ).toBe(1);
+
+      // Por detrás de la aplicación: el trigger solo deja pasar el DONE limpio.
+      await expect(
+        inTenant(() =>
+          prisma.runWithTenant((tx) =>
+            tx.treatmentPlanItem.update({
+              where: { id: second.id },
+              data: { status: TreatmentPlanItemStatus.DONE, price: 1 },
+            }),
+          ),
+        ),
+      ).rejects.toThrow(/restrict_violation|23001|cerrado/);
+      await expect(
+        inTenant(() =>
+          prisma.runWithTenant((tx) =>
+            tx.treatmentPlanItem.update({
+              where: { id: first.id },
+              data: { status: TreatmentPlanItemStatus.ACCEPTED },
+            }),
+          ),
+        ),
+      ).rejects.toThrow(/restrict_violation|23001|cerrado/);
+    });
+
+    it.each([TreatmentPlanStatus.CANCELLED, TreatmentPlanStatus.REJECTED])(
+      'en un plan %s el trigger bloquea también ACCEPTED → DONE',
+      async (status) => {
+        const planId = await seedPlan(status);
+        const item = await owner.treatmentPlanItem.findFirstOrThrow({
+          where: { planId },
+        });
+        await owner.treatmentPlanItem.update({
+          where: { id: item.id },
+          data: { status: TreatmentPlanItemStatus.ACCEPTED },
+        });
+        await expect(
+          inTenant(() =>
+            prisma.runWithTenant((tx) =>
+              tx.treatmentPlanItem.update({
+                where: { id: item.id },
+                data: { status: TreatmentPlanItemStatus.DONE },
+              }),
+            ),
+          ),
+        ).rejects.toThrow(/restrict_violation|23001|cerrado/);
+      },
+    );
+  });
+
+  describe('revisión DX-109: forma canónica de paidAt en la huella', () => {
+    it('`2026-10-16` y `2026-10-16T00:00:00Z` son la misma petición; otra hora del día no', async () => {
+      const planId = await seedPlan(TreatmentPlanStatus.ACCEPTED);
+      const key = '3e4f5a60-7b8c-4d9e-8f0a-1b2c3d4e5f60';
+      const first = await inTenant(() =>
+        recordPayment.execute(planId, body, userId, key),
+      );
+      const replay = await inTenant(() =>
+        recordPayment.execute(
+          planId,
+          { ...body, paidAt: '2026-10-16T00:00:00.000Z' },
+          userId,
+          key,
+        ),
+      );
+      expect(replay.id).toBe(first.id);
+      await expect(
+        inTenant(() =>
+          recordPayment.execute(
+            planId,
+            { ...body, paidAt: '2026-10-16T15:00:00Z' },
+            userId,
+            key,
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(
+        await owner.payment.count({ where: { idempotencyKey: key } }),
+      ).toBe(1);
+    });
   });
 });

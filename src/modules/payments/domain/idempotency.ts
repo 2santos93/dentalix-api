@@ -28,14 +28,29 @@ function normalizeCurrency(currency: unknown): unknown {
     : (currency ?? null);
 }
 
-/** El mismo instante escrito de dos formas ISO es la misma petición. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Forma canónica de `paidAt`, la misma que aplica `RecordPaymentUseCase`: el
+ * mismo instante escrito de dos formas ISO es la misma petición, y una
+ * medianoche UTC exacta (`2026-10-16T00:00:00Z`, clientes anteriores a DX-097)
+ * es el día civil `2026-10-16`, porque así se guarda.
+ */
 function normalizePaidAt(paidAt: unknown): unknown {
-  if (paidAt instanceof Date) return paidAt.toISOString();
-  if (typeof paidAt !== 'string') return paidAt ?? null;
-  const trimmed = paidAt.trim();
-  if (CIVIL_DATE_SHAPE.test(trimmed)) return trimmed;
-  const instant = new Date(trimmed);
-  return Number.isNaN(instant.getTime()) ? trimmed : instant.toISOString();
+  if (typeof paidAt === 'string' && CIVIL_DATE_SHAPE.test(paidAt.trim())) {
+    return paidAt.trim();
+  }
+  const instant =
+    paidAt instanceof Date
+      ? paidAt
+      : typeof paidAt === 'string'
+        ? new Date(paidAt.trim())
+        : null;
+  if (instant === null) return paidAt ?? null;
+  if (Number.isNaN(instant.getTime())) return (paidAt as string).trim();
+  return instant.getTime() % DAY_MS === 0
+    ? instant.toISOString().slice(0, 10)
+    : instant.toISOString();
 }
 
 /**

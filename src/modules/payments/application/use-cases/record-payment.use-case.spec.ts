@@ -392,6 +392,28 @@ describe('RecordPaymentUseCase', () => {
       expect(await repo.listByPlan('plan-1')).toHaveLength(1);
     });
 
+    it('el mismo día como medianoche UTC (forma pre-DX-097) es la misma petición', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan();
+      const first = await uc.execute('plan-1', body, 'u1', key);
+      const again = await uc.execute(
+        'plan-1',
+        { ...body, paidAt: '2026-03-05T00:00:00Z' },
+        'u1',
+        key,
+      );
+      expect(again.id).toBe(first.id);
+      await expect(
+        uc.execute(
+          'plan-1',
+          { ...body, paidAt: '2026-03-05T15:00:00Z' },
+          'u1',
+          key,
+        ),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+    });
+
     it.each([
       ['otro importe', 'plan-1', { ...body, amount: 101 }],
       ['otra fecha', 'plan-1', { ...body, paidAt: '2026-03-06' }],

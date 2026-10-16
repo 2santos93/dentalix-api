@@ -1,4 +1,8 @@
-import { ClinicRole, TreatmentPlanStatus } from '@prisma/client';
+import {
+  ClinicRole,
+  TreatmentPlanItemStatus,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 
 const { PRESENTED, ACCEPTED, REJECTED, COMPLETED, CANCELLED } =
   TreatmentPlanStatus;
@@ -111,7 +115,40 @@ export function notBillableMessage(status: TreatmentPlanStatus): string {
 
 /** 409 al tocar los ítems de un plan cerrado. */
 export function closedPlanItemsMessage(status: TreatmentPlanStatus): string {
-  return `El plan está «${PLAN_STATUS_LABELS[status]}»: sus ítems ya no se pueden añadir, cambiar ni quitar.`;
+  const base = `El plan está «${PLAN_STATUS_LABELS[status]}»: sus ítems ya no se pueden añadir, cambiar ni quitar.`;
+  return status === COMPLETED
+    ? `${base} Solo se puede marcar como realizado un procedimiento que quedó aceptado.`
+    : base;
+}
+
+/**
+ * La única escritura de ítems que admite un plan cerrado (DX-109): en un plan
+ * COMPLETED, marcar como REALIZADO un ítem que quedó ACEPTADO, sin tocar nada
+ * más. COMPLETED es final y no exige que todo esté hecho, así que sin esto un
+ * procedimiento hecho no llegaría nunca a «Realizado» ni al odontograma. No
+ * cambia el cobro: ACEPTADO y REALIZADO facturan igual. El trigger
+ * `treatment_plan_items_locked_when_closed` aplica la misma excepción.
+ */
+export function isClosedPlanItemChangeAllowed(
+  planStatus: TreatmentPlanStatus,
+  itemStatus: TreatmentPlanItemStatus,
+  patch: {
+    status?: TreatmentPlanItemStatus;
+    price?: unknown;
+    discount?: unknown;
+    surfaces?: unknown;
+    notes?: unknown;
+  },
+): boolean {
+  return (
+    planStatus === COMPLETED &&
+    itemStatus === TreatmentPlanItemStatus.ACCEPTED &&
+    patch.status === TreatmentPlanItemStatus.DONE &&
+    patch.price === undefined &&
+    patch.discount === undefined &&
+    patch.surfaces === undefined &&
+    patch.notes === undefined
+  );
 }
 
 /**

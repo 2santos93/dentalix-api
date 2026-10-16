@@ -19,6 +19,7 @@ import {
   assertPlanOpenForItems,
 } from './signed-plan-lock';
 import { assertDiscountWithinPrice } from './item-discount';
+import { isClosedPlanItemChangeAllowed } from '../../domain/plan-status-machine';
 
 export type UpdateTreatmentPlanItemInput = UpdateTreatmentPlanItemRepoInput;
 
@@ -45,7 +46,14 @@ export class UpdateTreatmentPlanItemUseCase {
     // notas) no cambia y el ítem no vuelve a propuesto; avanzar el tratamiento
     // (aceptado <-> realizado) sí.
     const plan = await this.repo.findPlanById(existing.planId);
-    if (plan) assertPlanOpenForItems(plan);
+    // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
+    // aceptado en un plan completado.
+    if (
+      plan &&
+      !isClosedPlanItemChangeAllowed(plan.status, existing.status, patch)
+    ) {
+      assertPlanOpenForItems(plan);
+    }
     if (
       plan?.acceptance &&
       (patch.price !== undefined ||

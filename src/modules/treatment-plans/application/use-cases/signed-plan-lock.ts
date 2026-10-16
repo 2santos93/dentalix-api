@@ -24,7 +24,8 @@ export function assertItemsEditable(plan: TreatmentPlanWithItems): void {
 
 /**
  * Un plan cerrado (cancelado, rechazado o completado, DX-109) no admite
- * cambios en sus ítems, ni siquiera de estado. La capa DB es el trigger
+ * cambios en sus ítems, ni siquiera de estado (la única excepción es
+ * `isClosedPlanItemChangeAllowed`). La capa DB es el trigger
  * `treatment_plan_items_locked_when_closed`.
  */
 export function assertPlanOpenForItems(

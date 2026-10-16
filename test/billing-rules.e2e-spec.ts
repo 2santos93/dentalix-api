@@ -352,6 +352,63 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
     await as(clinic)
       .delete(`/treatment-plans/${completed}/items/${itemId}`)
       .expect(409);
+
+    // Revisión DX-109: lo único que admite un plan completado es marcar como
+    // realizado lo que quedó aceptado (llega al odontograma); volver atrás no.
+    const done = await as(clinic)
+      .patch(`/treatment-plans/${completed}/items/${itemId}`, {
+        status: 'DONE',
+      })
+      .expect(200);
+    expect((done.body as { status: string }).status).toBe('DONE');
+    expect(
+      await raw.toothRecord.count({ where: { sourcePlanItemId: itemId } }),
+    ).toBe(1);
+    const back = await as(clinic)
+      .patch(`/treatment-plans/${completed}/items/${itemId}`, {
+        status: 'ACCEPTED',
+      })
+      .expect(409);
+    expect((back.body as ErrorBody).message).toMatch(
+      /Solo se puede marcar como realizado/,
+    );
+    const rejectedItem = await raw.treatmentPlanItem.findFirstOrThrow({
+      where: { planId: rejected },
+    });
+    await as(clinic)
+      .patch(`/treatment-plans/${rejected}/items/${rejectedItem.id}`, {
+        status: 'DONE',
+      })
+      .expect(409);
+  });
+
+  it('revisión DX-109: rechazar un plan con plan de cuotas activo (sin abonos) lo cancela con autor y motivo', async () => {
+    const { planId, itemId } = await createPlan();
+    await as(clinic)
+      .patch(`/treatment-plans/${planId}/items/${itemId}`, {
+        status: 'ACCEPTED',
+      })
+      .expect(200);
+    await as(clinic).post(`/treatment-plans/${planId}/present`, {}).expect(200);
+    await as(clinic)
+      .post(`/treatment-plans/${planId}/payment-plan`, {
+        installmentsCount: 2,
+        periodicity: 'MONTHLY',
+        startDate: '2099-01-10',
+      })
+      .expect(201);
+    await as(clinic)
+      .post(`/treatment-plans/${planId}/reject`, { reason: 'PRICE' })
+      .expect(200);
+    await as(clinic).get(`/treatment-plans/${planId}/payment-plan`).expect(404);
+    const stored = await raw.paymentPlan.findFirstOrThrow({
+      where: { treatmentPlanId: planId },
+    });
+    expect(stored).toMatchObject({
+      status: 'CANCELLED',
+      cancelReason: 'Se rechazó el plan de tratamiento.',
+    });
+    expect(stored.cancelledById).not.toBeNull();
   });
 
   it('criterio 6: balance de un plan no cobrable = 0 facturable con sus abonos en paid, y cuadra con el estado de cuenta (USD)', async () => {

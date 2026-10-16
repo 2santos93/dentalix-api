@@ -105,7 +105,7 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         }
         // Misma aceptación que el PATCH (DX-109): hermanas rechazadas, plan
         // ACCEPTED e ítems PROPOSED → ACCEPTED, en esta transacción.
-        await acceptPlanInTx(tx, locked, row.acceptedAt);
+        await acceptPlanInTx(tx, locked, row.acceptedAt, row.acceptedById);
 
         const accepted = await this.readSource(tx, tenantId, patientId, planId);
         if (!accepted) return { kind: 'NOT_FOUND' } as const;
