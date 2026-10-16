@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiAcceptedResponse,
+  ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiGoneResponse,
@@ -35,12 +36,9 @@ import {
 } from './dto/register-response.dto';
 import {
   PublicWebProtocol,
+  platformLinkHost,
   resolvePublicWebProtocol,
-  safeLinkHost,
 } from '../../../shared/tenancy/public-link';
-
-export const REGISTER_ACCEPTED_MESSAGE =
-  'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import {
@@ -48,6 +46,9 @@ import {
   SessionCookieService,
 } from './session-cookie.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
+
+export const REGISTER_ACCEPTED_MESSAGE =
+  'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -61,9 +62,17 @@ export class AuthController {
     config: ConfigService,
   ) {
     this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
+    this.baseDomains = (
+      config.get<string>('TENANT_BASE_DOMAINS') ?? 'localhost'
+    )
+      .split(',')
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
   }
 
   private readonly protocol: PublicWebProtocol;
+  /** Dominios de la plataforma: el enlace del registro solo apunta a ellos. */
+  private readonly baseDomains: string[];
 
   /**
    * Refresh de la petición: el del body si viene (clientes antiguos y la
@@ -95,11 +104,16 @@ export class AuthController {
   })
   @ApiAcceptedResponse({ type: RegisterAcceptedDto })
   @ApiConflictResponse({ description: 'El subdominio ya está en uso' })
+  @ApiBadRequestResponse({
+    description:
+      'Datos inválidos, o la petición no llegó por un host de Dentalix (el enlace del email solo apunta a la plataforma)',
+  })
   async register(
     @Req() req: TenantHostRequest,
     @Body() dto: RegisterDto,
   ): Promise<RegisterAcceptedDto> {
-    const host = safeLinkHost(req.tenantHost?.host);
+    // Solo un host de Dentalix: el enlace lleva el token (ver platformLinkHost).
+    const host = platformLinkHost(req.tenantHost?.host, this.baseDomains);
     if (!host) {
       throw new BadRequestException('Host inválido');
     }

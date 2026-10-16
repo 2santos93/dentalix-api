@@ -339,7 +339,15 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   ocupado (es público). `POST /auth/register/verify { token }` crea la
   clínica, su sede y su dueño con `emailVerifiedAt` puesto (201
   `{ tenantId, userId, subdomain }`; 404 usado/inexistente, 410 caducado, 409
-  subdominio o email tomados entretanto).
+  subdominio o email tomados entretanto). El enlace solo apunta a un host de
+  la plataforma (`TENANT_BASE_DOMAINS` o un subdominio suyo): un registro que
+  llega con otro `Host`/`X-Forwarded-Host` (inyectado, o el dominio propio de
+  una clínica) recibe 400 «Host inválido» y no se envía nada. Los pendientes
+  caducados se purgan al guardar uno nuevo.
+- **En local sin SMTP**: arranca la API con `MAIL_TRANSPORT=file
+  MAIL_FILE_DIR=./.mail`; cada email (verificación del registro, invitación,
+  aviso) queda como JSON en esa carpeta y de ahí se copia el enlace. Con
+  `console` (el default) el enlace NO se ve: el log no lleva el cuerpo.
 - **Invitaciones**: el token solo va por email; `GET /public/invitations/:token`
   ya no trae `userExists` sino `requiresCurrentPassword` (true solo para una
   cuenta **verificada**), que solo ve quien recibió el correo. Aceptar:

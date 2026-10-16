@@ -105,9 +105,11 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
     it('email existente y email nuevo reciben EXACTAMENTE la misma respuesta', async () => {
       const existing = await http()
         .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
         .send(payload(`OWNER-A${DOMAIN}`, 'dx029-existente'));
       const fresh = await http()
         .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
         .send(payload(`nueva${DOMAIN}`, 'dx029-nueva'));
 
       expect(existing.status).toBe(202);
@@ -175,6 +177,23 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       expect((again.body as { message: string }).message).toMatch(
         /no es válido/,
       );
+    });
+
+    it('un host ajeno (Host/X-Forwarded-Host inyectado) no recibe el enlace: 400 y nada guardado', async () => {
+      for (const host of ['evil.example', 'clinica-propia.example:8443']) {
+        const res = await http()
+          .post('/api/v1/auth/register')
+          .set('X-Tenant-Host', host)
+          .send(payload(`victima${DOMAIN}`, 'dx029-squat'))
+          .expect(400);
+        expect((res.body as { message: string }).message).toBe('Host inválido');
+      }
+      expect(
+        await raw.pendingRegistration.count({
+          where: { email: `victima${DOMAIN}` },
+        }),
+      ).toBe(0);
+      expect(mailer.sent.some((m) => m.to === `victima${DOMAIN}`)).toBe(false);
     });
   });
 

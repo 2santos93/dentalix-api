@@ -41,6 +41,8 @@ export async function registerVerified(
 
   await request(app.getHttpServer())
     .post('/api/v1/auth/register')
+    // Host de la plataforma: el enlace del email solo apunta a Dentalix.
+    .set('X-Tenant-Host', 'localhost')
     .send(payload)
     .expect(202);
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import type {
   PendingRegistrationRecord,
@@ -21,6 +21,8 @@ const SELECT = {
  */
 @Injectable()
 export class PrismaRegistrationRepository implements RegistrationRepository {
+  private readonly logger = new Logger('Auth');
+
   constructor(private readonly prisma: PrismaService) {}
 
   async savePending(
@@ -40,6 +42,7 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
       create: { email: input.email, ...data },
       update: data,
     });
+    await this.purgeExpired();
   }
 
   findPendingByTokenHash(
@@ -59,5 +62,22 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
       where: { id },
     });
     return count === 1;
+  }
+
+  // Limpieza lazy (como `revoked_tokens`): un pendiente caducado ya no sirve
+  // y guarda un email y un hash de contraseña, así que no se conserva. Es
+  // mantenimiento oportunista: si falla, el registro ya quedó guardado.
+  private async purgeExpired(): Promise<void> {
+    try {
+      // eslint-disable-next-line no-restricted-syntax
+      await this.prisma.pendingRegistration.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+      });
+    } catch (err) {
+      this.logger.warn({
+        event: 'registration.purge_failed',
+        error: err instanceof Error ? err.constructor.name : typeof err,
+      });
+    }
   }
 }

@@ -18,6 +18,7 @@ const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const EMAIL = 'registro.int@dx029.test';
+const EXPIRED_EMAIL = 'caducado.int@dx029.test';
 
 describe('PrismaRegistrationRepository (int, DX-029)', () => {
   let prisma: PrismaService;
@@ -40,11 +41,15 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
   });
 
   beforeEach(() =>
-    raw.pendingRegistration.deleteMany({ where: { email: EMAIL } }),
+    raw.pendingRegistration.deleteMany({
+      where: { email: { in: [EMAIL, EXPIRED_EMAIL] } },
+    }),
   );
 
   afterAll(async () => {
-    await raw.pendingRegistration.deleteMany({ where: { email: EMAIL } });
+    await raw.pendingRegistration.deleteMany({
+      where: { email: { in: [EMAIL, EXPIRED_EMAIL] } },
+    });
     await prisma.$disconnect();
     await raw.$disconnect();
   });
@@ -96,5 +101,30 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     expect(
       await repo.findPendingByTokenHash(hashRegistrationToken(token)),
     ).toBeNull();
+  });
+
+  it('guardar uno nuevo purga los caducados (guardan email y hash de contraseña)', async () => {
+    const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await raw.pendingRegistration.create({
+      data: {
+        email: EXPIRED_EMAIL,
+        clinicName: 'Vieja',
+        subdomain: 'reg-int-vieja',
+        fullName: 'Vieja',
+        passwordHash: '$argon2id$v=19$fake',
+        tokenHash: hashRegistrationToken(generateRegistrationToken()),
+        createdAt: new Date(dayAgo.getTime() - 60_000),
+        expiresAt: dayAgo,
+      },
+    });
+
+    await save(generateRegistrationToken());
+
+    expect(
+      await raw.pendingRegistration.count({ where: { email: EXPIRED_EMAIL } }),
+    ).toBe(0);
+    expect(
+      await raw.pendingRegistration.count({ where: { email: EMAIL } }),
+    ).toBe(1);
   });
 });
