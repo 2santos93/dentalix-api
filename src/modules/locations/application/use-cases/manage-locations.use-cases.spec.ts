@@ -16,6 +16,7 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     address: null,
     country: 'CO',
     isActive: true,
+    timeZone: 'America/Bogota',
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     ...overrides,
