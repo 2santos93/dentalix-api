@@ -354,6 +354,41 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
       );
     });
 
+    it('la IP sale de req.ip: X-Forwarded-For solo cuenta con TRUST_PROXY', async () => {
+      const policy = (await currentPolicy(clinicA)) as PolicyBody;
+      const SPOOFED = '203.0.113.77';
+      const express = app.getHttpAdapter().getInstance() as {
+        set: (key: string, value: unknown) => void;
+      };
+      const record = async (docNumber: string) => {
+        const patient = await createPatient(clinicA, docNumber);
+        await as(clinicA)
+          .post(`/patients/${patient.id}/data-consents`, {
+            policyVersionId: policy.id,
+            decisions: [{ scope: 'GENERAL', granted: true }],
+          })
+          .set('X-Forwarded-For', SPOOFED)
+          .expect(201);
+        return raw.dataProcessingConsent.findFirstOrThrow({
+          where: { patientId: patient.id },
+        });
+      };
+
+      // TRUST_PROXY=false (.env.test): la cabecera del cliente no se cree.
+      const untrusted = await record('IP-SIN-PROXY');
+      expect(untrusted.ipAddress).toBeTruthy();
+      expect(untrusted.ipAddress).not.toBe(SPOOFED);
+
+      // TRUST_PROXY=true (1 salto, como applySecurity): la pone el proxy.
+      express.set('trust proxy', 1);
+      try {
+        const trusted = await record('IP-CON-PROXY');
+        expect(trusted.ipAddress).toBe(SPOOFED);
+      } finally {
+        express.set('trust proxy', false);
+      }
+    });
+
     it('si la autorización falla, el paciente tampoco se crea', async () => {
       await as(clinicA)
         .post('/patients', {

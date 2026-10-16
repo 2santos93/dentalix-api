@@ -48,8 +48,11 @@ export class PrismaPrivacyPolicyRepository implements PrivacyPolicyRepository {
   }
 
   async list(): Promise<PrivacyPolicyVersion[]> {
+    const tenantId = this.requireTenantId();
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.privacyPolicyVersion.findMany({
+        // Tenant explícito además de la RLS (defensa en profundidad).
+        where: { tenantId },
         orderBy: { version: 'desc' },
         include: WITH_PUBLISHER,
       }),
@@ -63,6 +66,7 @@ export class PrismaPrivacyPolicyRepository implements PrivacyPolicyRepository {
       // Dos publicaciones a la vez calculan el mismo número: el UNIQUE
       // (tenantId, version) rechaza la segunda (409 vía PrismaExceptionFilter).
       const latest = await tx.privacyPolicyVersion.findFirst({
+        where: { tenantId },
         orderBy: { version: 'desc' },
         select: { version: true },
       });

@@ -52,7 +52,9 @@ export async function recordConsentsInTx(
   tx: Prisma.TransactionClient,
   input: VersionedConsentInTx,
 ): Promise<DerivedPatientConsent | null> {
+  // Filtro explícito por tenant además de la RLS (defensa en profundidad).
   const current = await tx.privacyPolicyVersion.findFirst({
+    where: { tenantId: input.tenantId },
     orderBy: { version: 'desc' },
     select: { id: true, version: true },
   });
@@ -89,8 +91,21 @@ export async function recordConsentsInTx(
     policyVersion: current,
     legacyPolicyVersion: null,
   });
-  await tx.patient.update({ where: { id: input.patientId }, data: derived });
+  await updatePatientSummary(tx, input.tenantId, input.patientId, derived);
   return derived;
+}
+
+/** Reescribe el resumen deprecado, acotado al paciente DE la clínica. */
+async function updatePatientSummary(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  patientId: string,
+  derived: DerivedPatientConsent,
+): Promise<void> {
+  await tx.patient.update({
+    where: { tenantId_id: { tenantId, id: patientId } },
+    data: derived,
+  });
 }
 
 export interface LegacyConsentInTx {
@@ -131,6 +146,6 @@ export async function recordLegacyConsentInTx(
     dataConsentAt: recordedAt,
     dataConsentPolicyVersion: input.legacyPolicyVersion ?? null,
   };
-  await tx.patient.update({ where: { id: input.patientId }, data: derived });
+  await updatePatientSummary(tx, input.tenantId, input.patientId, derived);
   return derived;
 }

@@ -50,9 +50,11 @@ export class PrismaDataConsentRepository implements DataConsentRepository {
   }
 
   async listForPatient(patientId: string): Promise<DataConsentRecord[]> {
+    const tenantId = this.requireTenantId();
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.dataProcessingConsent.findMany({
-        where: { patientId },
+        // Tenant explícito además de la RLS (defensa en profundidad).
+        where: { tenantId, patientId },
         orderBy: { recordedAt: 'desc' },
         include: WITH_REFS,
       }),
