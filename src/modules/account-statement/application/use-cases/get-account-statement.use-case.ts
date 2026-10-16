@@ -9,6 +9,7 @@ import type { AccountStatementRepository } from '../../domain/ports/account-stat
 import { AccountStatement } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
 import type { VoidActor } from '../../../payments/domain/void-window';
+import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 
 export interface GetAccountStatementInput {
@@ -23,28 +24,19 @@ export interface GetAccountStatementInput {
 export type AccountStatementClock = () => Date;
 export const ACCOUNT_STATEMENT_CLOCK = Symbol('ACCOUNT_STATEMENT_CLOCK');
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
- * Día civil (YYYY-MM-DD) a medianoche UTC, validando que exista — mismo
- * criterio que la caja (ListCashPaymentsUseCase): `paidAt` es un día civil
- * guardado como medianoche UTC, y `new Date('2026-02-30')` no falla, se va al
- * 2 de marzo.
+ * Día civil (YYYY-MM-DD) que exista — `new Date('2026-02-30')` no falla, se va
+ * al 2 de marzo. Se compara con el día de cada abono EN LA ZONA DE SU SEDE
+ * (DX-097), igual que la caja.
  */
-function parseCivilDate(value: string, field: 'from' | 'to'): Date {
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(`${value}T00:00:00.000Z`)
-    : null;
-  if (
-    !date ||
-    Number.isNaN(date.getTime()) ||
-    date.toISOString().slice(0, 10) !== value
-  ) {
+function requireCivilDate(value: string, field: 'from' | 'to'): string {
+  const day = parseCivilDate(value);
+  if (day === null) {
     throw new BadRequestException(
       `${field} must be a valid calendar date (YYYY-MM-DD)`,
     );
   }
-  return date;
+  return day;
 }
 
 @Injectable()
@@ -63,10 +55,12 @@ export class GetAccountStatementUseCase {
     actor: VoidActor,
   ): Promise<AccountStatement> {
     const from =
-      input.from !== undefined ? parseCivilDate(input.from, 'from') : undefined;
+      input.from !== undefined
+        ? requireCivilDate(input.from, 'from')
+        : undefined;
     const to =
-      input.to !== undefined ? parseCivilDate(input.to, 'to') : undefined;
-    if (from && to && from.getTime() > to.getTime()) {
+      input.to !== undefined ? requireCivilDate(input.to, 'to') : undefined;
+    if (from && to && from > to) {
       throw new BadRequestException('from must be on or before to');
     }
 
@@ -80,7 +74,7 @@ export class GetAccountStatementUseCase {
       today: issuedAt,
       voidActor: actor,
       movementsFrom: from,
-      movementsToExclusive: to ? new Date(to.getTime() + DAY_MS) : undefined,
+      movementsTo: to,
     });
 
     return {

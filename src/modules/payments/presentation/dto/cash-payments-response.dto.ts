@@ -61,15 +61,26 @@ export class CashPaymentDto {
 
   @ApiProperty({
     format: 'date-time',
-    description: 'Día civil del abono (medianoche UTC del día registrado).',
+    description:
+      'Instante del pago. Un abono registrado solo con fecha (YYYY-MM-DD) se ' +
+      'guarda al mediodía de la zona de su sede. Para mostrar el día, usar `paidOn`.',
   })
   paidAt!: Date;
 
   @ApiProperty({
     example: '2026-10-16',
     description:
+      'Día civil (YYYY-MM-DD) de `paidAt` en la zona IANA de la sede del ' +
+      'abono (DX-097): el día de caja en que cuenta. Un abono a las 20:00 en ' +
+      'Bogotá es de ese día aunque en UTC ya sea el siguiente.',
+  })
+  paidOn!: string;
+
+  @ApiProperty({
+    example: '2026-10-16',
+    description:
       'Día civil (YYYY-MM-DD) en que se registró el abono, en la zona de su ' +
-      'sede. Puede diferir de `paidAt` (fecha de pago antigua registrada ' +
+      'sede. Puede diferir de `paidOn` (fecha de pago antigua registrada ' +
       'después); la ventana de anulación de recepción mira este día.',
   })
   registeredOn!: string;

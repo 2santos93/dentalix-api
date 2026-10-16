@@ -35,8 +35,8 @@ export class DashboardController {
   @ApiOkResponse({ type: DashboardDto })
   get(@Query() query: DashboardQueryDto): Promise<GetDoctorDashboardResult> {
     return this.getDoctorDashboard.execute({
-      from: new Date(query.from),
-      to: new Date(query.to),
+      from: query.from,
+      to: query.to,
       currency: query.currency,
       upcomingLimit: query.upcomingLimit,
     });

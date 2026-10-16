@@ -7,15 +7,19 @@ import { MAX_RANGE_DAYS } from '../../application/use-cases/list-cash-payments.u
 /**
  * Query de `GET /payments` — la caja.
  *
- * `from`/`to` son días civiles, AMBOS inclusive (`from=to` es "un día"), porque
- * `paidAt` también lo es (ver ListCashPaymentsUseCase.parseCivilDate). El DTO
- * solo comprueba la forma; que el día exista, que `from <= to` y el tope de
+ * `from`/`to` son días civiles, AMBOS inclusive (`from=to` es "un día"), en el
+ * calendario de la sede de cada abono (DX-097): cada sede corta el día a
+ * medianoche de SU zona IANA (la de su horario en BD; nunca la manda el
+ * cliente). El DTO solo comprueba la forma; que el día exista, que `from <= to` y el tope de
  * rango los valida el caso de uso, que es donde se prueban.
  */
 export class ListCashPaymentsQueryDto {
   @ApiProperty({
     example: '2026-10-01',
-    description: 'Primer día del período (YYYY-MM-DD), inclusive.',
+    description:
+      'Primer día del período (YYYY-MM-DD), inclusive, en la zona horaria de ' +
+      'la sede de cada abono (la de su horario; con varias sedes en zonas ' +
+      'distintas, cada una corta el día a su medianoche).',
   })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must match YYYY-MM-DD' })
   from!: string;
@@ -23,7 +27,8 @@ export class ListCashPaymentsQueryDto {
   @ApiProperty({
     example: '2026-10-31',
     description:
-      `Último día del período (YYYY-MM-DD), inclusive. Debe ser >= from; ` +
+      `Último día del período (YYYY-MM-DD), inclusive (hasta la medianoche ` +
+      `del día siguiente en la zona de la sede). Debe ser >= from; ` +
       `el período no puede superar ${MAX_RANGE_DAYS} días.`,
   })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must match YYYY-MM-DD' })

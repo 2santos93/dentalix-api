@@ -425,32 +425,40 @@ describe('computeAccountStatement', () => {
     expect(out.summary[0].overdueCount).toBe(0);
   });
 
-  it('filters movements by the civil-date range without touching the totals', () => {
+  it('filters movements by the civil-date range IN THE SEDE ZONE without touching the totals (DX-097)', () => {
     const out = computeAccountStatement(
       snapshot({
         plans: [plan('tp-1', { billable: 1000 })],
         payments: [
+          // 31/01 23:00 en Bogotá (01/02 04:00 UTC): fuera.
           payment('tp-1', 100, {
-            paidAt: new Date('2026-01-31T00:00:00.000Z'),
+            paidAt: new Date('2026-02-01T04:00:00.000Z'),
           }),
+          // 01/02 00:30 en Bogotá: dentro.
           payment('tp-1', 200, {
-            paidAt: new Date('2026-02-01T00:00:00.000Z'),
+            paidAt: new Date('2026-02-01T05:30:00.000Z'),
           }),
+          // 28/02 22:00 en Bogotá (01/03 03:00 UTC): dentro.
           payment('tp-1', 300, {
-            paidAt: new Date('2026-02-28T00:00:00.000Z'),
+            paidAt: new Date('2026-03-01T03:00:00.000Z'),
           }),
+          // 01/03 00:30 en Bogotá: fuera.
           payment('tp-1', 400, {
-            paidAt: new Date('2026-03-01T00:00:00.000Z'),
+            paidAt: new Date('2026-03-01T05:30:00.000Z'),
           }),
         ],
       }),
       {
         today: TODAY,
-        movementsFrom: new Date('2026-02-01T00:00:00.000Z'),
-        movementsToExclusive: new Date('2026-03-01T00:00:00.000Z'),
+        movementsFrom: '2026-02-01',
+        movementsTo: '2026-02-28',
       },
     );
     expect(out.movements.map((m) => m.amount)).toEqual([300, 200]);
+    expect(out.movements.map((m) => m.paidOn)).toEqual([
+      '2026-02-28',
+      '2026-02-01',
+    ]);
     expect(out.summary[0]).toMatchObject({ paid: 1000, balance: 0 });
   });
 

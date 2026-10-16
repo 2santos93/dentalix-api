@@ -8,18 +8,23 @@ import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 
+/**
+ * Período en días CIVILES (YYYY-MM-DD, ambos inclusive, ya validados por quien
+ * llama): cada sede lo corta en su zona (DX-097).
+ */
 export interface GetPaymentsTotalsInput {
-  from: Date;
-  to: Date;
+  from: string;
+  to: string;
   currency: string;
 }
 
 export interface GetPaymentsTotalsResult {
-  from: Date;
-  to: Date;
+  from: string;
+  to: string;
   currency: string;
   /** Σ of each active payment's `amount`, converted to `currency` at ITS
-   * OWN paidAt date (never today's rate), rounded to 2 decimals. */
+   * OWN civil paid date in its location's zone (never today's rate), rounded
+   * to 2 decimals. */
   totalConverted: number;
   /** Number of active payments in the range (regardless of currency). */
   count: number;
@@ -32,15 +37,6 @@ export interface GetPaymentsTotalsResult {
 // sums are rounded to 2 decimals to avoid floating point drift.
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-// `paidAt` is stored as a full timestamp; `ConvertAmountUseCase` looks up an
-// exchange snapshot keyed by calendar date (YYYY-MM-DD), always fetched/
-// stored in UTC — so each payment must be converted using ITS OWN UTC date,
-// not the server's local timezone (see GetSalesTotalsUseCase.toUtcDateString
-// for the identical rationale this use case mirrors).
-function toUtcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 // `ConvertAmountUseCase` throws exactly this kind of error (see
@@ -117,7 +113,10 @@ export class GetPaymentsTotalsUseCase {
       // rate-repository layer (NOT the amount-dependent rateUsed) to
       // remove the per-payment lookup without drift.
       try {
-        const date = toUtcDateString(payment.paidAt);
+        // El día de la tasa es el día civil del abono en SU sede (DX-097):
+        // un abono de las 20:00 en Bogotá se convierte con la tasa de ese
+        // día, no con la del día UTC siguiente.
+        const date = payment.paidOn;
         const { rateUsed } = await this.convertAmount.execute({
           amount: payment.amount,
           from: payment.currency,

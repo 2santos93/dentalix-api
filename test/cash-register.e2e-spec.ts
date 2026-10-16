@@ -235,7 +235,11 @@ describe('Caja — GET /payments (e2e)', () => {
       },
     ) => {
       const row = await raw.payment.create({
-        data: { ...data, paidAt: new Date(`${data.paidAt}T00:00:00.000Z`) },
+        // Mediodía de Bogotá (17:00 UTC): como guarda la API un abono
+        // registrado solo con fecha (DX-097). El día de caja se corta en la
+        // zona de la sede; los cortes de medianoche se prueban en
+        // civil-day-cash.int-spec.ts y en el caso nocturno de abajo.
+        data: { ...data, paidAt: new Date(`${data.paidAt}T17:00:00.000Z`) },
       });
       ids[key] = row.id;
     };
@@ -355,15 +359,17 @@ describe('Caja — GET /payments (e2e)', () => {
 
   const OCTOBER = { from: '2026-10-01', to: '2026-10-31' };
 
-  it('lista los abonos activos del período, ambos extremos inclusive, en orden paidAt DESC, id DESC', async () => {
+  it('lista los abonos activos del período, ambos extremos inclusive, en orden paidAt DESC, createdAt DESC, id DESC', async () => {
     const res = await getA(OCTOBER).expect(200);
     const body = res.body as CashBody;
 
     expect(body.total).toBe(5);
     expect(body.items.map((r) => r.id)).toEqual([
       ids.oct31Transfer,
-      // Mismo día: desempata por id DESC.
-      ...[ids.oct15Cash, ids.oct15NoMethod].sort().reverse(),
+      // Mismo instante: desempata por alta DESC (oct15NoMethod se sembró
+      // después que oct15Cash).
+      ids.oct15NoMethod,
+      ids.oct15Cash,
       ids.oct10Card,
       ids.oct01Cash,
     ]);
@@ -396,7 +402,8 @@ describe('Caja — GET /payments (e2e)', () => {
       canVoid: true,
       registeredOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as string,
       registeredToday: true,
-      paidAt: '2026-10-01T00:00:00.000Z',
+      paidAt: '2026-10-01T17:00:00.000Z',
+      paidOn: '2026-10-01',
       amount: 100000,
       currency: 'COP',
       method: 'CASH',
@@ -557,5 +564,156 @@ describe('Caja — GET /payments (e2e)', () => {
       .query(OCTOBER)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .expect(401);
+  });
+
+  describe('DX-097: días civiles en la zona de la sede', () => {
+    const authA = (r: request.Test) =>
+      r
+        .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`);
+    let sedeMadrid: string;
+
+    beforeAll(async () => {
+      // Sede en España: nace con el horario en la zona de su país.
+      const madrid = await authA(
+        request(app.getHttpServer())
+          .post('/api/v1/locations')
+          .send({ name: 'Sede Madrid', country: 'ES' }),
+      ).expect(201);
+      sedeMadrid = (madrid.body as { id: string }).id;
+
+      const ana = { treatmentPlanId: planAna, patientId: patientAna };
+      const seedAt = async (
+        key: string,
+        locationId: string,
+        paidAt: string,
+      ) => {
+        const row = await raw.payment.create({
+          data: {
+            tenantId: clinicA.tenantId,
+            locationId,
+            ...ana,
+            amount: 1000,
+            currency: 'COP',
+            paidAt: new Date(paidAt),
+            method: PaymentMethod.CASH,
+          },
+        });
+        ids[key] = row.id;
+      };
+      // 20/12 a las 20:00 en Bogotá = 21/12 01:00 UTC.
+      await seedAt('decNightBogota', sedePrincipal, '2026-12-21T01:00:00.000Z');
+      // 21/12 a las 00:30 en Madrid = 20/12 23:30 UTC = 20/12 18:30 en Bogotá.
+      await seedAt(
+        'decMadridAfterMidnight',
+        sedeMadrid,
+        '2026-12-20T23:30:00.000Z',
+      );
+    });
+
+    it('GET /locations publica la zona de cada sede', async () => {
+      const res = await authA(
+        request(app.getHttpServer()).get('/api/v1/locations'),
+      ).expect(200);
+      const zones = Object.fromEntries(
+        (res.body as { id: string; timeZone: string }[]).map((l) => [
+          l.id,
+          l.timeZone,
+        ]),
+      );
+      expect(zones[sedePrincipal]).toBe('America/Bogota');
+      expect(zones[sedeMadrid]).toBe('Europe/Madrid');
+    });
+
+    it('un abono a las 20:00 de Bogotá sale en la caja de ese día (con su paidOn) y no en la del siguiente', async () => {
+      const day = await getA(
+        { from: '2026-12-20', to: '2026-12-20' },
+        sedePrincipal,
+      ).expect(200);
+      const body = day.body as CashBody & {
+        items: (CashRow & { paidOn: string })[];
+      };
+      expect(body.items.map((r) => r.id)).toEqual([ids.decNightBogota]);
+      expect(body.items[0].paidOn).toBe('2026-12-20');
+
+      const next = await getA(
+        { from: '2026-12-21', to: '2026-12-21' },
+        sedePrincipal,
+      ).expect(200);
+      expect((next.body as CashBody).items).toEqual([]);
+    });
+
+    it('POST de un abono solo con fecha lo guarda al mediodía de la sede y sale en la caja de ese día', async () => {
+      const created = await authA(
+        request(app.getHttpServer())
+          .post(`/api/v1/treatment-plans/${planAna}/payments`)
+          .set('X-Location-Id', sedeMadrid)
+          .send({ amount: 5, currency: 'COP', paidAt: '2026-12-22' }),
+      ).expect(201);
+      const payment = created.body as { id: string; paidAt: string };
+      // 12:00 en Madrid (CET, UTC+1) = 11:00 UTC.
+      expect(payment.paidAt).toBe('2026-12-22T11:00:00.000Z');
+
+      const day = await getA(
+        { from: '2026-12-22', to: '2026-12-22' },
+        sedeMadrid,
+      ).expect(200);
+      const items = (day.body as { items: { id: string; paidOn: string }[] })
+        .items;
+      expect(items).toEqual([
+        expect.objectContaining({ id: payment.id, paidOn: '2026-12-22' }),
+      ]);
+    });
+
+    it('B1: una web anterior que manda la medianoche UTC del día guarda el abono en ESE día de la sede; el plan lista su paidOn', async () => {
+      const created = await authA(
+        request(app.getHttpServer())
+          .post(`/api/v1/treatment-plans/${planAna}/payments`)
+          .send({
+            amount: 6,
+            currency: 'COP',
+            paidAt: '2026-12-23T00:00:00.000Z',
+          }),
+      ).expect(201);
+      const payment = created.body as {
+        id: string;
+        paidAt: string;
+        paidOn: string;
+      };
+      expect(payment.paidAt).toBe('2026-12-23T17:00:00.000Z');
+      expect(payment.paidOn).toBe('2026-12-23');
+
+      const list = await authA(
+        request(app.getHttpServer()).get(
+          `/api/v1/treatment-plans/${planAna}/payments`,
+        ),
+      ).expect(200);
+      const row = (list.body as { id: string; paidOn: string }[]).find(
+        (p) => p.id === payment.id,
+      );
+      expect(row?.paidOn).toBe('2026-12-23');
+
+      // Una hora sin Z ni desfase se rechaza (se leería en la zona del servidor).
+      await authA(
+        request(app.getHttpServer())
+          .post(`/api/v1/treatment-plans/${planAna}/payments`)
+          .send({ amount: 6, currency: 'COP', paidAt: '2026-12-23T20:00:00' }),
+      ).expect(400);
+    });
+
+    it('vista consolidada: cada sede corta el día en su zona', async () => {
+      const dec20 = await getA({ from: '2026-12-20', to: '2026-12-20' }).expect(
+        200,
+      );
+      expect((dec20.body as CashBody).items.map((r) => r.id)).toEqual([
+        ids.decNightBogota,
+      ]);
+      const dec21 = await getA({ from: '2026-12-21', to: '2026-12-21' }).expect(
+        200,
+      );
+      expect((dec21.body as CashBody).items.map((r) => r.id)).toEqual([
+        ids.decMadridAfterMidnight,
+      ]);
+    });
   });
 });

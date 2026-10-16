@@ -9,12 +9,22 @@ import type { VoidSubject } from '../void-window';
 // here (unlike CreateSaleRepoInput's optional one): it is ALWAYS derived
 // from the treatment plan by `RecordPaymentUseCase` before the repo is
 // called, never accepted from the caller directly.
+/**
+ * Un pago del que solo se conoce el DÍA civil (YYYY-MM-DD): el repositorio lo
+ * guarda al mediodía de la zona de la sede del abono (DX-097), que solo él
+ * conoce (la sede sale del request o es la principal).
+ */
+export interface CivilPaidDay {
+  civilDate: string;
+}
+
 export interface CreatePaymentRepoInput {
   treatmentPlanId: string;
   patientId: string;
   amount: number;
   currency: string;
-  paidAt: Date;
+  /** Instante del pago, o solo su día civil. */
+  paidAt: Date | CivilPaidDay;
   method?: PaymentMethod;
   notes?: string;
   createdById?: string;
@@ -27,16 +37,24 @@ export interface CreatePaymentRepoInput {
   idempotencyKey?: string;
 }
 
-export interface ListPaymentsReceivedInRangeParams {
-  from: Date;
-  to: Date;
+/**
+ * Un período de días CIVILES (YYYY-MM-DD, ambos inclusive, ya validados). El
+ * repositorio lo traduce a instantes con la zona de CADA sede (DX-097): con
+ * varias sedes en zonas distintas, cada una corta su día a su medianoche.
+ */
+export interface CivilPeriod {
+  /** Primer día, inclusive. */
+  from: string;
+  /** Último día, inclusive. */
+  to: string;
 }
 
-export interface ListCashRegisterParams {
-  /** Inicio del rango, inclusive (medianoche UTC del primer día). */
-  from: Date;
-  /** Fin del rango, EXCLUSIVO (medianoche UTC del día siguiente al último). */
-  toExclusive: Date;
+export type ListPaymentsReceivedInRangeParams = CivilPeriod;
+
+/** Abono del período (ya trae `paidOn`, su día civil en la zona de su sede). */
+export type ReceivedPayment = Payment;
+
+export interface ListCashRegisterParams extends CivilPeriod {
   method?: PaymentMethod;
   /** Ya normalizado por el caso de uso. */
   skip: number;
@@ -141,14 +159,14 @@ export interface PaymentRepository {
   softDelete(id: string, audit: PaymentVoidAudit): Promise<boolean>;
 
   /**
-   * Active payments (any plan/patient) whose `paidAt` falls within
-   * `[from, to)` — the projection `GetPaymentsTotalsUseCase` needs for the
-   * dashboard "incomes of the period" metric (mirrors
-   * `SaleRepository.listForTotals`).
+   * Abonos activos (de la sede activa, o de todas) cuyo `paidAt` cae en los
+   * días civiles `from`..`to` (ambos inclusive) EN LA ZONA DE SU SEDE, con ese
+   * día civil (`paidOn`) — lo que `GetPaymentsTotalsUseCase` necesita para la
+   * métrica de ingresos del dashboard.
    */
   listReceivedInRange(
     params: ListPaymentsReceivedInRangeParams,
-  ): Promise<Payment[]>;
+  ): Promise<ReceivedPayment[]>;
 
   /**
    * La CAJA: una página de abonos activos del período (de la sede activa, o

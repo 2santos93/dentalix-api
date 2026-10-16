@@ -170,9 +170,19 @@ export class AccountStatementMovementDto {
 
   @ApiProperty({
     format: 'date-time',
-    description: 'Día civil del abono (medianoche UTC del día registrado).',
+    description:
+      'Instante del pago (un abono registrado solo con fecha cae al mediodía ' +
+      'de su sede). Para mostrar el día, usar `paidOn`.',
   })
   paidAt!: Date;
+
+  @ApiProperty({
+    example: '2026-10-16',
+    description:
+      'Día civil (YYYY-MM-DD) del pago en la zona IANA de la sede del abono ' +
+      '(DX-097). Es el día por el que filtran `from`/`to`.',
+  })
+  paidOn!: string;
 
   @ApiProperty({ example: 150000 })
   amount!: number;

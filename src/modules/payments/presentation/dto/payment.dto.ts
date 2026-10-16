@@ -28,6 +28,14 @@ export class PaymentDto {
   @ApiProperty({ format: 'date-time' })
   paidAt!: Date;
 
+  @ApiProperty({
+    example: '2026-10-16',
+    description:
+      'Día civil (YYYY-MM-DD) del pago en la zona IANA de la sede del abono ' +
+      '(DX-097). Es el día que se muestra y el de la tasa de cambio.',
+  })
+  paidOn!: string;
+
   @ApiProperty({ enum: PaymentMethod, nullable: true })
   method!: PaymentMethod | null;
 

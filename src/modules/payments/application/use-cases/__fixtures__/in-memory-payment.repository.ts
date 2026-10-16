@@ -7,14 +7,16 @@ import {
   PaymentRepository,
   PaymentVoidAudit,
   PaymentVoidTarget,
+  ReceivedPayment,
 } from '../../../domain/ports/payment-repository.port';
+import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 
 // `Payment` (the API-facing entity) deliberately has no `deletedAt` field —
 // same convention as Sale/TreatmentPlan. The fake still has to honour
 // "non-deleted only" like the real Prisma repo, so it tracks `deletedAt` on
 // the stored row and strips it via `toEntity` (mirrors `mapToEntity` in
 // prisma-payment.repository.ts).
-type StoredPayment = Payment & {
+type StoredPayment = Omit<Payment, 'paidOn'> & {
   deletedAt: Date | null;
   idempotencyKey: string | null;
   voidAudit: PaymentVoidAudit | null;
@@ -78,6 +80,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       amount: row.amount,
       currency: row.currency,
       paidAt: row.paidAt,
+      paidOn: civilDateIn(row.paidAt, this.timeZone),
       method: row.method,
       notes: row.notes,
       createdById: row.createdById,
@@ -94,7 +97,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       patientId: input.patientId,
       amount: input.amount,
       currency: input.currency,
-      paidAt: input.paidAt,
+      paidAt:
+        input.paidAt instanceof Date
+          ? input.paidAt
+          : civilNoonIn(input.paidAt.civilDate, this.timeZone),
       method: input.method ?? null,
       notes: input.notes ?? null,
       createdById: input.createdById ?? null,
@@ -167,13 +173,15 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve(true);
   }
 
+  // Mismo criterio que el repo real: el día civil de `paidAt` en la zona de
+  // la sede (aquí, la única del fake), comparado como texto YYYY-MM-DD.
   listReceivedInRange(
     params: ListPaymentsReceivedInRangeParams,
-  ): Promise<Payment[]> {
+  ): Promise<ReceivedPayment[]> {
     const rows = this.payments
       .filter((p) => p.deletedAt === null)
-      .filter((p) => p.paidAt >= params.from && p.paidAt < params.to)
-      .map((p) => this.toEntity(p));
+      .map((p) => this.toEntity(p))
+      .filter((p) => p.paidOn >= params.from && p.paidOn <= params.to);
     return Promise.resolve(rows);
   }
 
@@ -186,7 +194,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   ): Promise<CashRegisterPage> {
     return Promise.reject(
       new Error(
-        `listForCashRegister(${params.from.toISOString()}) not implemented in this fake`,
+        `listForCashRegister(${params.from}) not implemented in this fake`,
       ),
     );
   }

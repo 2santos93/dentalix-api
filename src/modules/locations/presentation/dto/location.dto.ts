@@ -65,5 +65,12 @@ export class LocationDto {
   @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
   country!: ClinicCountry;
   @ApiProperty() isActive!: boolean;
+  @ApiProperty({
+    example: 'America/Bogota',
+    description:
+      'Zona horaria IANA de la sede (la de su horario; sin horario, la de su ' +
+      'país). Define sus días civiles: «hoy» en la caja y el dashboard (DX-097).',
+  })
+  timeZone!: string;
   @ApiProperty({ type: String, format: 'date-time' }) createdAt!: Date;
 }
