@@ -84,15 +84,6 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
     return mapToEntity(row);
   }
 
-  async findBySourcePlanItem(planItemId: string): Promise<ToothRecord | null> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const row = await tx.toothRecord.findFirst({
-        where: { sourcePlanItemId: planItemId, deletedAt: null },
-      });
-      return row ? mapToEntity(row) : null;
-    });
-  }
-
   async listByPatient(patientId: string): Promise<ToothRecord[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.toothRecord.findMany({

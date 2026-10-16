@@ -36,8 +36,6 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ToothRecord[]> => Promise.resolve([]),
     listByTooth: (): Promise<ToothRecord[]> => Promise.resolve([]),
-    findBySourcePlanItem: (): Promise<ToothRecord | null> =>
-      Promise.resolve(null),
     ...overrides,
   };
 }
@@ -72,12 +70,6 @@ class InMemoryToothRecordRepository implements ToothRecordRepository {
       (a, b) => b.recordedAt.getTime() - a.recordedAt.getTime(),
     );
     return Promise.resolve(sorted);
-  }
-
-  findBySourcePlanItem(planItemId: string): Promise<ToothRecord | null> {
-    return Promise.resolve(
-      this.store.find((r) => r.sourcePlanItemId === planItemId) ?? null,
-    );
   }
 }
 

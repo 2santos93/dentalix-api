@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
@@ -14,6 +14,19 @@ import { Payment } from '../../domain/entities/payment.entity';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 
 type PrismaPayment = Prisma.PaymentGetPayload<Record<string, never>>;
+
+/**
+ * ¿Es un P2002 (violación de único)? Para el único PARCIAL (tenantId,
+ * idempotencyKey) Prisma no informa `meta.target` ("(not available)"), así que
+ * no se puede distinguir por nombre; quien lo usa relee por la clave y, si no
+ * encuentra el abono original, relanza el error tal cual.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
+}
 
 function mapToEntity(payment: PrismaPayment): Payment {
   return {
@@ -117,8 +130,39 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   async create(input: CreatePaymentRepoInput): Promise<Payment> {
+    try {
+      return await this.insert(input);
+    } catch (error) {
+      // DB-014: dos reintentos SIMULTÁNEOS con la misma Idempotency-Key pasan
+      // los dos el atajo del caso de uso; el segundo INSERT espera al COMMIT
+      // del primero y choca con el único parcial. El contrato de idempotencia
+      // promete devolver el abono original, no un 409: se relee y se devuelve.
+      if (input.idempotencyKey && isUniqueViolation(error)) {
+        const original = await this.findByIdempotencyKey(input.idempotencyKey);
+        if (original) {
+          return original;
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async insert(input: CreatePaymentRepoInput): Promise<Payment> {
     const tenantId = this.requireTenantId();
     const payment = await this.prisma.runWithTenant(async (tx) => {
+      // DB-014: el plan se vuelve a validar DENTRO de la transacción del
+      // INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
+      // compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
+      // comprobación y el alta. La FK compuesta no mira `deletedAt`.
+      const [plan] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "treatment_plans"
+         WHERE "id" = ${input.treatmentPlanId}::uuid
+           AND "patientId" = ${input.patientId}::uuid
+           AND "deletedAt" IS NULL
+         FOR SHARE`;
+      if (!plan) {
+        throw new NotFoundException('Treatment plan not found');
+      }
       return tx.payment.create({
         data: {
           // Sede del request si el cliente la fijó (X-Location-Id, ya validada

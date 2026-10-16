@@ -1,9 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  ToothRecordStatus,
+  TreatmentPlanItemStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   AddTreatmentPlanItemRepoInput,
+  DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
@@ -183,13 +188,19 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   async updateItem(
     id: string,
     patch: UpdateTreatmentPlanItemRepoInput,
+    mirror?: DoneMirrorInput,
   ): Promise<TreatmentPlanItem> {
+    const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.treatmentPlanItem.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!existing) {
+      // FOR UPDATE: un segundo PATCH concurrente sobre el mismo ítem espera
+      // aquí al COMMIT del primero y lee el estado ya cambiado (DB-013).
+      const [previous] = await tx.$queryRaw<
+        { status: TreatmentPlanItemStatus }[]
+      >`
+        SELECT "status" FROM "treatment_plan_items"
+         WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
+      if (!previous) {
         throw new NotFoundException('Treatment plan item not found');
       }
 
@@ -197,6 +208,13 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         where: { id },
         data: patch,
       });
+
+      const becameDone =
+        previous.status !== TreatmentPlanItemStatus.DONE &&
+        item.status === TreatmentPlanItemStatus.DONE;
+      if (mirror && becameDone) {
+        await mirrorIntoOdontogram(tx, tenantId, item, mirror);
+      }
       return mapItemToEntity(item);
     });
   }
@@ -217,4 +235,39 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       });
     });
   }
+}
+
+/**
+ * Registro COMPLETED del odontograma para un ítem que acaba de pasar a DONE,
+ * dentro de la transacción del cambio de estado. Solo INSERTA (el odontograma
+ * es append-only). Comprueba antes que el ítem no se haya espejado ya (un ítem
+ * que vuelve a DONE tras revertirse no se duplica); el índice único parcial
+ * `tooth_records_source_plan_item_key` es el respaldo de la base.
+ */
+async function mirrorIntoOdontogram(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  item: PrismaTreatmentPlanItem,
+  mirror: DoneMirrorInput,
+): Promise<void> {
+  const already = await tx.toothRecord.findFirst({
+    where: { sourcePlanItemId: item.id, deletedAt: null },
+    select: { id: true },
+  });
+  if (already) return;
+
+  await tx.toothRecord.create({
+    data: {
+      tenantId,
+      patientId: mirror.patientId,
+      toothNumber: item.toothNumber,
+      surfaces: item.surfaces,
+      kind: mirror.kind,
+      catalogItemId: item.catalogItemId,
+      status: ToothRecordStatus.COMPLETED,
+      performedById: mirror.performedById,
+      sourcePlanItemId: item.id,
+      recordedAt: new Date(),
+    },
+  });
 }

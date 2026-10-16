@@ -3,7 +3,11 @@ import { NotFoundException } from '@nestjs/common';
 import { ReactivateStaffUseCase } from './reactivate-staff.use-case';
 import { GetStaffDetailUseCase } from './get-staff-detail.use-case';
 import { StaffMember } from '../../domain/entities/staff-member.entity';
-import { StaffRepository } from '../../domain/ports/staff-repository.port';
+import type {
+  StaffRepository,
+  DeactivateStaffOutcome,
+  UpdateStaffOutcome,
+} from '../../domain/ports/staff-repository.port';
 import { StaffDirectoryPage } from '../../domain/entities/staff-directory-entry.entity';
 
 function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
@@ -15,10 +19,11 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     findDetailById: (): Promise<
       (StaffMember & { status: 'ACTIVE' | 'INACTIVE' }) | null
     > => Promise.resolve(null),
-    updateById: (): Promise<StaffMember | null> => Promise.resolve(null),
-    deactivateById: (): Promise<boolean> => Promise.resolve(false),
+    updateById: (): Promise<UpdateStaffOutcome> =>
+      Promise.resolve({ kind: 'NOT_FOUND' }),
+    deactivateById: (): Promise<DeactivateStaffOutcome> =>
+      Promise.resolve('NOT_FOUND'),
     reactivateById: (): Promise<StaffMember | null> => Promise.resolve(null),
-    countActiveAdmins: (): Promise<number> => Promise.resolve(0),
     ...overrides,
   };
 }
@@ -45,17 +50,21 @@ describe('ReactivateStaffUseCase', () => {
     ).rejects.toThrow(NotFoundException);
   });
 
-  it('no consulta el número de admins: reactivar suma acceso, nunca lo quita', async () => {
-    let consultado = false;
+  it('no pasa por la regla del último ADMIN: reactivar suma acceso, nunca lo quita', async () => {
+    let escritoConRegla = false;
     const repo = makeRepo({
       reactivateById: () => Promise.resolve(miembro),
-      countActiveAdmins: () => {
-        consultado = true;
-        return Promise.resolve(0);
+      updateById: () => {
+        escritoConRegla = true;
+        return Promise.resolve({ kind: 'NOT_FOUND' });
+      },
+      deactivateById: () => {
+        escritoConRegla = true;
+        return Promise.resolve('NOT_FOUND');
       },
     });
     await new ReactivateStaffUseCase(repo).execute('u1');
-    expect(consultado).toBe(false);
+    expect(escritoConRegla).toBe(false);
   });
 });
 

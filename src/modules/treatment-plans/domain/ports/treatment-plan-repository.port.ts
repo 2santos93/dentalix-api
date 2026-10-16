@@ -1,4 +1,5 @@
 import {
+  CatalogKind,
   ToothSurface,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
@@ -53,6 +54,18 @@ export interface UpdateTreatmentPlanItemRepoInput {
   notes?: string | null;
 }
 
+/**
+ * Lo que el espejo DONE → odontograma (Pieza B) necesita y el ítem no guarda:
+ * el paciente (vía el plan), el `kind` (vía el catálogo) y quién lo hizo. El
+ * diente, las superficies y el ítem de catálogo salen del propio ítem ya
+ * actualizado.
+ */
+export interface DoneMirrorInput {
+  patientId: string;
+  kind: CatalogKind;
+  performedById?: string;
+}
+
 export const TREATMENT_PLAN_REPOSITORY = Symbol('TREATMENT_PLAN_REPOSITORY');
 
 export interface TreatmentPlanRepository {
@@ -78,9 +91,19 @@ export interface TreatmentPlanRepository {
   /** A single active (non-deleted) item, or `null` if absent/soft-deleted. */
   findItemById(id: string): Promise<TreatmentPlanItem | null>;
 
+  /**
+   * Actualiza el ítem (404 si no existe o está retirado). Con `mirror`, si
+   * ESTE cambio lo lleva a DONE, inserta en la MISMA transacción su registro
+   * COMPLETED en el odontograma, enlazado por `sourcePlanItemId` (DX-042,
+   * DB-013). El estado previo se lee con la fila bloqueada (FOR UPDATE): dos
+   * PATCH DONE concurrentes se serializan y solo el primero espeja. Si el
+   * espejo falla, falla todo: nunca queda un ítem DONE sin su registro
+   * clínico. El odontograma es append-only: solo se inserta, nunca se cambia.
+   */
   updateItem(
     id: string,
     patch: UpdateTreatmentPlanItemRepoInput,
+    mirror?: DoneMirrorInput,
   ): Promise<TreatmentPlanItem>;
 
   /** Soft-delete: sets `deletedAt`. Never a hard delete. */

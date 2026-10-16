@@ -35,8 +35,6 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ToothRecord[]> => Promise.resolve([]),
     listByTooth: (): Promise<ToothRecord[]> => Promise.resolve([]),
-    findBySourcePlanItem: (): Promise<ToothRecord | null> =>
-      Promise.resolve(null),
     ...overrides,
   };
 }
