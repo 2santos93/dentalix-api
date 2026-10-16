@@ -8,6 +8,10 @@ import { Prisma } from '@prisma/client';
 import { PAYMENT_PLAN_REPOSITORY } from '../../domain/ports/payment-plan-repository.port';
 import type { PaymentPlanRepository } from '../../domain/ports/payment-plan-repository.port';
 import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
+import {
+  isPlanBillable,
+  notBillableMessage,
+} from '../../../treatment-plans/domain/plan-status-machine';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
@@ -88,6 +92,11 @@ export class CreatePaymentPlanUseCase {
 
     // Throws NotFound if absent/soft-deleted/cross-tenant — never re-derived.
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
+    // DX-109 (BE-013): un plan rechazado o cancelado no se financia. El
+    // repositorio lo vuelve a comprobar con el plan bloqueado.
+    if (!isPlanBillable(plan.status)) {
+      throw new ConflictException(notBillableMessage(plan.status));
+    }
 
     const existing = await this.repo.findActiveByPlan(treatmentPlanId);
     if (existing) {

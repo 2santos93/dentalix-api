@@ -15,7 +15,11 @@ import {
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
-import { lockPlanGroup, rejectOpenSiblings } from './plan-option-group';
+import {
+  acceptPlanInTx,
+  cancelActivePaymentPlans,
+  lockPlanGroup,
+} from './plan-option-group';
 import {
   TreatmentPlan,
   TreatmentPlanWithItems,
@@ -177,12 +181,19 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Plan de tratamiento no encontrado');
       }
 
-      const livePayment = await tx.payment.findFirst({
-        where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
-        select: { id: true },
-      });
+      const [livePayment, activePaymentPlan] = await Promise.all([
+        tx.payment.findFirst({
+          where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
+          select: { id: true },
+        }),
+        tx.paymentPlan.findFirst({
+          where: { treatmentPlanId: id, status: 'ACTIVE', deletedAt: null },
+          select: { id: true },
+        }),
+      ]);
       const change = decide(mapToEntityWithItems(current), {
         hasLivePayments: livePayment !== null,
+        hasActivePaymentPlan: activePaymentPlan !== null,
       });
       const data: Prisma.TreatmentPlanUncheckedUpdateInput = {
         status: change.status,
@@ -204,7 +215,20 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         data.rejectionNote = change.rejection.note;
       }
       if (change.acceptedAt) {
-        await rejectOpenSiblings(tx, locked, change.acceptedAt);
+        // La misma aceptación que la firmada (DX-109): hermanas, estado e
+        // ítems PROPOSED → ACCEPTED.
+        await acceptPlanInTx(
+          tx,
+          locked,
+          change.acceptedAt,
+          change.acceptedById ?? null,
+        );
+      }
+      if (change.cancellation) {
+        // Un plan cancelado o rechazado no se cobra: su plan de cuotas ACTIVO
+        // se cancela con él, en esta transacción (DX-109), con hora, autor y
+        // motivo.
+        await cancelActivePaymentPlans(tx, [id], change.cancellation);
       }
 
       const plan = await tx.treatmentPlan.update({ where: { id }, data });

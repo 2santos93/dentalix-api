@@ -448,4 +448,36 @@ describe('GetPlanBalanceUseCase', () => {
       'simulated infra failure converting COP',
     );
   });
+
+  it.each([TreatmentPlanStatus.REJECTED, TreatmentPlanStatus.CANCELLED])(
+    'DX-109: un plan %s tiene billable 0 y sus abonos siguen en paid',
+    async (status) => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({
+        status,
+        items: [
+          makeItem({ price: 1000, status: TreatmentPlanItemStatus.ACCEPTED }),
+        ],
+      });
+      repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 300 });
+
+      const result = await uc.execute('plan-1');
+
+      expect(result).toMatchObject({
+        billable: 0,
+        paid: 300,
+        balance: -300,
+        paymentsCount: 1,
+      });
+    },
+  );
+
+  it('DX-109: un plan COMPLETED sigue siendo cobrable', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan({
+      status: TreatmentPlanStatus.COMPLETED,
+      items: [makeItem({ price: 1000, status: TreatmentPlanItemStatus.DONE })],
+    });
+    expect((await uc.execute('plan-1')).billable).toBe(1000);
+  });
 });

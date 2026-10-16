@@ -55,6 +55,23 @@ export interface UpdateTreatmentPlanRepoInput {
    * abonos vivos o procedimientos realizados.
    */
   acceptedAt?: Date;
+  /**
+   * Quién acepta (usuario del token, DX-109): autor de la cancelación del plan
+   * de cuotas de las hermanas que se rechazan al aceptar.
+   */
+  acceptedById?: string | null;
+  /**
+   * Cancelar o rechazar (DX-109): el plan de cuotas ACTIVO del plan, si lo
+   * tiene, se cancela en la MISMA transacción con esta hora, autor y motivo.
+   */
+  cancellation?: PaymentPlanCancellation;
+}
+
+/** Cancelación de un plan de cuotas junto a su plan de tratamiento (DX-109). */
+export interface PaymentPlanCancellation {
+  at: Date;
+  byId: string | null;
+  reason: string;
 }
 
 /**
@@ -72,6 +89,8 @@ export type DecidePlanChange = (
 export interface PlanFacts {
   /** ¿Tiene abonos vivos (ni retirados ni anulados)? */
   hasLivePayments: boolean;
+  /** ¿Tiene un plan de cuotas ACTIVO? (DX-109) */
+  hasActivePaymentPlan: boolean;
 }
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — a newly added item

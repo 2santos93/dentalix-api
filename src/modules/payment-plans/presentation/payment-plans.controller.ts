@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiTags,
@@ -59,6 +60,10 @@ export class PaymentPlansController {
   })
   @Post('treatment-plans/:id/payment-plan')
   @ApiCreatedResponse({ type: PaymentPlanDto })
+  @ApiConflictResponse({
+    description:
+      'El plan ya tiene un plan de cuotas activo, o está rechazado o cancelado y no se financia (DX-109).',
+  })
   async create(
     @Param('id') id: string,
     @Body() dto: CreatePaymentPlanDto,

@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, TreatmentPlanStatus } from '@prisma/client';
 import { CreatePaymentPlanUseCase } from './create-payment-plan.use-case';
 import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-plan.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
@@ -14,6 +14,7 @@ function makeDeps(
     planCurrency?: string;
     balance?: number;
     planThrows?: boolean;
+    planStatus?: TreatmentPlanStatus;
   } = {},
 ) {
   const repo = new InMemoryPaymentPlanRepository();
@@ -27,6 +28,7 @@ function makeDeps(
       return Promise.resolve({
         id,
         patientId: 'p1',
+        status: overrides.planStatus ?? TreatmentPlanStatus.ACCEPTED,
         currency: overrides.planCurrency ?? 'USD',
         items: [],
         total: 0,
@@ -212,4 +214,17 @@ describe('CreatePaymentPlanUseCase', () => {
       useCase.execute('tp-1', baseInput, 'u1'),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it.each([TreatmentPlanStatus.REJECTED, TreatmentPlanStatus.CANCELLED])(
+    'DX-109: un plan %s no se financia (409 en español, sin escribir)',
+    async (planStatus) => {
+      const { repo, useCase } = makeDeps({ planStatus });
+      const attempt = useCase.execute('tp-1', baseInput, 'u1');
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      await expect(attempt).rejects.toThrow(
+        /no admite abonos ni planes de cuotas/,
+      );
+      expect(await repo.findActiveByPlan('tp-1')).toBeNull();
+    },
+  );
 });

@@ -845,26 +845,30 @@ enum PaymentMethod {
 // ConvertAmountUseCase). `patientId` está denormalizado del plan para poder
 // listar abonos por paciente sin join. Anular abono = soft-delete (`deletedAt`).
 model Payment {
-  id              String         @id @default(uuid()) @db.Uuid
-  tenantId        String         @db.Uuid
-  locationId      String         @db.Uuid
-  treatmentPlanId String         @db.Uuid
-  patientId       String         @db.Uuid
-  amount          Decimal        @db.Decimal(14, 2)
-  currency        String
-  paidAt          DateTime
-  method          PaymentMethod?
-  notes           String?
-  idempotencyKey  String?
-  createdById     String?        @db.Uuid
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  deletedAt       DateTime?
+  id                     String         @id @default(uuid()) @db.Uuid
+  tenantId               String         @db.Uuid
+  locationId             String         @db.Uuid
+  treatmentPlanId        String         @db.Uuid
+  patientId              String         @db.Uuid
+  amount                 Decimal        @db.Decimal(14, 2)
+  currency               String
+  paidAt                 DateTime
+  method                 PaymentMethod?
+  notes                  String?
+  idempotencyKey         String?
+  // Huella de la petición que usó la Idempotency-Key (DX-109, BE-017):
+  // SHA-256 (hex) del plan + cuerpo normalizado. Una repetición con otra
+  // huella es 422. NULL en abonos anteriores a DX-109 o sin clave.
+  idempotencyFingerprint String?
+  createdById            String?        @db.Uuid
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  deletedAt              DateTime?
   // Anulación (SEC-013, migración 20261016160000_payment_void_audit): quién,
   // cuándo y por qué. Puntero suave a User como createdById (sin relación).
-  voidedById      String?        @db.Uuid
-  voidedAt        DateTime?
-  voidReason      String?
+  voidedById             String?        @db.Uuid
+  voidedAt               DateTime?
+  voidReason             String?
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -934,6 +938,11 @@ model PaymentPlan {
   startDate         DateTime
   status            PaymentPlanStatus      @default(ACTIVE)
   notes             String?
+  // Cancelación (DX-109): cuándo, quién y por qué. Puntero suave a User como
+  // createdById. NULL en planes activos o cancelados antes de DX-109.
+  cancelledAt       DateTime?
+  cancelledById     String?                @db.Uuid
+  cancelReason      String?
   createdById       String?                @db.Uuid
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt

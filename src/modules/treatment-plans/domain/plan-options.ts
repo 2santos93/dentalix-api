@@ -129,6 +129,13 @@ export function rejectionBlocker(facts: {
   return null;
 }
 
+/**
+ * Motivo que queda en el plan de cuotas de una opción rechazada porque se
+ * aceptó otra del grupo (DX-109).
+ */
+export const PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON =
+  'Se aceptó otra opción del grupo de tratamiento.';
+
 /** 409 al aceptar una opción cuya hermana abierta ya tiene abonos o trabajo hecho. */
 export function siblingRejectionBlockedMessage(label: string | null): string {
   const name = label ? `«${label}»` : 'otra opción del grupo';

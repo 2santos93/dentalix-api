@@ -14,6 +14,7 @@ import {
   AddTreatmentPlanItemRepoInput,
   CreateTreatmentPlanRepoInput,
   DecidePlanChange,
+  PaymentPlanCancellation,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../../domain/ports/treatment-plan-repository.port';
@@ -25,6 +26,7 @@ import {
   PlanOptionsRepository,
 } from '../../../domain/ports/plan-options-repository.port';
 import {
+  PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON,
   optionSiblingsToReject,
   siblingRejectionBlockedMessage,
 } from '../../../domain/plan-options';
@@ -62,6 +64,15 @@ export class InMemoryTreatmentPlanRepository
   lastFollowUpQuery: PendingFollowUpQuery | null = null;
   /** Planes con abonos vivos (los abonos son de otro módulo). */
   readonly livePaymentPlanIds = new Set<string>();
+  /** Planes con un plan de cuotas ACTIVO (DX-109). */
+  readonly activePaymentPlanIds = new Set<string>();
+  /** Cancelaciones de planes de cuotas hechas junto a su plan (DX-109). */
+  readonly paymentPlanCancellations: {
+    planId: string;
+    at: Date;
+    byId: string | null;
+    reason: string;
+  }[] = [];
 
   /** Test helper: seed a plan row directly, bypassing use-case validation. */
   seedPlan(overrides: Partial<StoredPlan> = {}): TreatmentPlan {
@@ -216,6 +227,18 @@ export class InMemoryTreatmentPlanRepository
     return Promise.resolve(rows);
   }
 
+  private cancelPaymentPlanOf(
+    planId: string,
+    cancellation: PaymentPlanCancellation,
+  ): void {
+    if (!this.activePaymentPlanIds.has(planId)) return;
+    // Un Set en memoria, no una tabla: el real deja el plan de cuotas
+    // CANCELLED (soft), aquí solo deja de estar activo.
+    // eslint-disable-next-line no-restricted-syntax
+    this.activePaymentPlanIds.delete(planId);
+    this.paymentPlanCancellations.push({ planId, ...cancellation });
+  }
+
   // Mismo contrato que el repositorio real: `decide` ve el plan actual y, si
   // lanza, no se escribe nada; con `acceptedAt` rechaza a las hermanas.
   async updatePlan(
@@ -229,6 +252,7 @@ export class InMemoryTreatmentPlanRepository
     }
     const change = decide(current, {
       hasLivePayments: this.livePaymentPlanIds.has(id),
+      hasActivePaymentPlan: this.activePaymentPlanIds.has(id),
     });
     const siblings = this.liveSiblings(row);
     if (change.acceptedAt) {
@@ -257,7 +281,26 @@ export class InMemoryTreatmentPlanRepository
           rejectionReason: TreatmentPlanRejectionReason.OTHER_OPTION_ACCEPTED,
           rejectionNote: null,
         });
+        this.cancelPaymentPlanOf(sibling.id, {
+          at: change.acceptedAt,
+          byId: change.acceptedById ?? null,
+          reason: PAYMENT_PLAN_CANCELLED_BY_OTHER_OPTION_REASON,
+        });
       }
+    }
+    if (change.acceptedAt) {
+      for (const item of this.items) {
+        if (
+          item.planId === id &&
+          item.deletedAt === null &&
+          item.status === TreatmentPlanItemStatus.PROPOSED
+        ) {
+          item.status = TreatmentPlanItemStatus.ACCEPTED;
+        }
+      }
+    }
+    if (change.cancellation) {
+      this.cancelPaymentPlanOf(id, change.cancellation);
     }
     if (change.status !== undefined) row.status = change.status;
     if (change.currency !== undefined) row.currency = change.currency;
