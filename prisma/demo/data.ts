@@ -1746,3 +1746,33 @@ export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
     reasons: ['Control de ortodoncia'],
   },
 ];
+
+// DX-122: bloqueos de agenda y «Pendientes por agendar» de la demo.
+// - Vacaciones de la segunda dentista de lunes a viernes de la semana siguiente
+//   a la próxima (fuera del calendario: no pisan citas), en todas las sedes.
+// - Almuerzo del equipo en la sede principal el próximo día laborable, que
+//   deja agendar (con aviso): se crea confirmando las citas que caigan dentro.
+// - Pendientes: las cancelaciones y no-shows del calendario entran solas; se
+//   dejan abiertas las `keepOpen` más recientes, las demás se descartan con
+//   motivo (historial), y se añade un alta manual urgente.
+export const DEMO_VACATION = {
+  dentistIndex: 1,
+  note: 'Vacaciones de mitad de año',
+} as const;
+
+export const DEMO_LUNCH = {
+  startMinute: 12 * 60 + 30,
+  endMinute: 13 * 60,
+  note: 'Almuerzo del equipo',
+} as const;
+
+export const DEMO_WAITLIST = {
+  keepOpen: 2,
+  dismissReason: 'Ya reagendó por teléfono',
+  manual: {
+    patientIndex: 5,
+    dentistIndex: 0,
+    preferredWindow: 'Mañanas, antes de las 11',
+    note: 'Dolor en el 46: darle el primer hueco que haya.',
+  },
+} as const;
