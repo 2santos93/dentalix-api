@@ -9,7 +9,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 const MIGRATION = readFileSync(
   join(
     __dirname,
-    '../prisma/migrations/20261016140000_data_processing_consents/migration.sql',
+    '../prisma/migrations/20261016170000_data_processing_consents/migration.sql',
   ),
   'utf8',
 );

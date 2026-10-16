@@ -447,7 +447,7 @@ enum DataConsentChannel {
 
 // DX-037: versión publicada de la política de tratamiento de datos de UNA
 // clínica. Inmutable una vez publicada: no hay endpoint de edición y un
-// trigger de BD rechaza todo UPDATE (ver 20261016140000_data_processing_consents).
+// trigger de BD rechaza todo UPDATE (ver 20261016170000_data_processing_consents).
 // Una versión nueva es una fila nueva con `version` + 1.
 model PrivacyPolicyVersion {
   id                  String    @id @default(uuid()) @db.Uuid
