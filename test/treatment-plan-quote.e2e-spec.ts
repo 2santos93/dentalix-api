@@ -29,6 +29,9 @@ const PASSWORD = 'S3cret!!';
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const SIGNATURE = `data:image/png;base64,${PNG}`;
+// PNG real de 1x1 totalmente transparente: un lienzo sin trazo.
+const BLANK_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
 
 interface Session {
   tenantId: string;
@@ -421,6 +424,19 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           contentHash: shownHash,
         })
         .expect(400);
+    });
+
+    it('una firma en blanco (lienzo vacío, PNG transparente) no se acepta (400)', async () => {
+      const res = await as(clinicA, dentistA)
+        .post(acceptPath(patientA, planA), {
+          signerName: 'Ana',
+          signature: `data:image/png;base64,${BLANK_PNG}`,
+          contentHash: shownHash,
+        })
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        'La firma del paciente está en blanco: firma en el recuadro.',
+      );
     });
 
     it('una firma de más de 200 KB: 400', async () => {
