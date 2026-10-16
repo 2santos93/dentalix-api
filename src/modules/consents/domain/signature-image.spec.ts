@@ -8,6 +8,14 @@ import {
   parseSignaturePng,
   SignatureImageError,
 } from './signature-image';
+import {
+  noise,
+  pngAllFilters,
+  pngBombBase64,
+  pngFromRaw,
+  pngLyingBombBase64,
+  signaturePng,
+} from '../../../../test/support/png-fixtures';
 
 // PNG mínimo válido de 1x1 (firma y cabecera IHDR reales).
 const TINY_PNG =
@@ -125,6 +133,198 @@ describe('parseSignaturePng', () => {
       );
       const interlaced = png(8, 8, 6, () => [0, 0, 0, 255], 1);
       expect(() => parseSignaturePng(interlaced)).toThrow(/entrelazar/);
+    });
+  });
+
+  describe('bombas de descompresión y dimensiones (SEC-026)', () => {
+    const elapsedMs = (fn: () => void): number => {
+      const start = process.hrtime.bigint();
+      fn();
+      return Number(process.hrtime.bigint() - start) / 1e6;
+    };
+
+    it('rechaza rápido la bomba del auditor (IHDR 10000x5000, IDAT de 200 MB)', () => {
+      const bomb = pngBombBase64();
+      // Cabe bajo el tope de 200 KB: el tope de bytes no la paraba.
+      expect(Buffer.from(bomb, 'base64').length).toBeLessThan(
+        MAX_SIGNATURE_BYTES,
+      );
+      let error: unknown;
+      const ms = elapsedMs(() => {
+        try {
+          parseSignaturePng(bomb, 'la firma del paciente');
+        } catch (e) {
+          error = e;
+        }
+      });
+      expect(error).toBeInstanceOf(SignatureImageError);
+      expect((error as Error).message).toBe(
+        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles y 4 millones de píxeles en total).',
+      );
+      expect(ms).toBeLessThan(50);
+    });
+
+    it('rechaza rápido un PNG cuyo IDAT infla más de lo que dice su cabecera', () => {
+      const bomb = pngLyingBombBase64();
+      expect(Buffer.from(bomb, 'base64').length).toBeLessThan(
+        MAX_SIGNATURE_BYTES,
+      );
+      let error: unknown;
+      const ms = elapsedMs(() => {
+        try {
+          parseSignaturePng(bomb);
+        } catch (e) {
+          error = e;
+        }
+      });
+      expect(error).toBeInstanceOf(SignatureImageError);
+      expect((error as Error).message).toBe(
+        'La firma no es una imagen PNG válida.',
+      );
+      expect(ms).toBeLessThan(50);
+    });
+
+    it.each([
+      ['ancho de más', 4097, 10],
+      ['alto de más', 100, 1025],
+      ['área de más (4096 x 1000 > 4 000 000)', 4096, 1000],
+      ['ancho cero', 0, 10],
+      ['alto cero', 10, 0],
+    ])('rechaza dimensiones fuera de rango antes de inflar: %s', (_, w, h) => {
+      // El IDAT es de 1x1: si se llegara a inflar, el error sería otro.
+      const fake = pngFromRaw(w, h, Buffer.from([0, 0, 0, 0, 255]));
+      expect(() => parseSignaturePng(fake.toString('base64'))).toThrow(
+        'La firma tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles y 4 millones de píxeles en total).',
+      );
+    });
+
+    it('rechaza una profundidad de bits que no corresponde al tipo de color', () => {
+      const odd = pngFromRaw(1, 1, Buffer.from([0, 0, 0, 0, 255]), {
+        colorType: 6,
+        bitDepth: 4,
+      });
+      expect(() => parseSignaturePng(odd.toString('base64'))).toThrow(
+        'La firma no es una imagen PNG válida.',
+      );
+    });
+
+    it.each([
+      // Lienzo de la web: alto 160 px CSS a 2x (MAX_PIXEL_RATIO) = 320.
+      ['escritorio ancho (1200 px CSS a 2x)', 2400, 320],
+      ['móvil (430 px CSS a 2x)', 860, 320],
+      // Por si algún día se quita el tope de 2x: un móvil a 3x.
+      ['móvil a 3x sin tope (430 x 160 px CSS)', 1290, 480],
+      ['en el límite de área (4000 x 1000)', 4000, 1000],
+      ['en el límite de ancho y alto (4096 x 976)', 4096, 976],
+    ])('acepta una firma real: %s', (_, w, h) => {
+      const sig = signaturePng(w, h).toString('base64');
+      expect(Buffer.from(sig, 'base64').length).toBeLessThan(
+        MAX_SIGNATURE_BYTES,
+      );
+      expect(parseSignaturePng(sig)).toBe(sig);
+    });
+
+    it('encuentra la tinta aunque solo esté en la primera o en la última fila', () => {
+      for (const row of [0, 319]) {
+        const sig = signaturePng(2400, 320, row).toString('base64');
+        expect(parseSignaturePng(sig)).toBe(sig);
+      }
+    });
+
+    it('sigue rechazando un lienzo en blanco del tamaño real', () => {
+      const blank = pngFromRaw(2400, 320, Buffer.alloc(320 * (2400 * 4 + 1)));
+      expect(() => parseSignaturePng(blank.toString('base64'))).toThrow(
+        'La firma está en blanco: firma en el recuadro.',
+      );
+    });
+
+    it('deshace los cinco filtros: alfa con ruido por debajo del umbral sigue en blanco', () => {
+      // Alfa aleatorio entre 0 y 15 (bajo MIN_INK_ALPHA) y color con ruido:
+      // si un filtro se deshiciera mal, saldrían alfas ≥ 16 («tinta»).
+      // filterOffset rota el filtro de la primera fila (sin fila previa).
+      for (const filterOffset of [0, 1, 2, 3, 4]) {
+        for (const [colorType, bpp] of [
+          [6, 4],
+          [4, 2],
+        ]) {
+          const pixels = noise(60 * 40 * bpp);
+          for (let i = bpp - 1; i < pixels.length; i += bpp) pixels[i] &= 0x0f;
+          const blank = pngAllFilters(60, 40, pixels, {
+            colorType,
+            filterOffset,
+          });
+          expect(() => parseSignaturePng(blank.toString('base64'))).toThrow(
+            /en blanco/,
+          );
+          // Un solo píxel con tinta.
+          pixels[(34 * 60 + 33) * bpp + bpp - 1] = 200;
+          const inked = pngAllFilters(60, 40, pixels, {
+            colorType,
+            filterOffset,
+          });
+          expect(parseSignaturePng(inked.toString('base64'))).toBe(
+            inked.toString('base64'),
+          );
+          // Tinta solo en la primera fila.
+          pixels[(34 * 60 + 33) * bpp + bpp - 1] &= 0x0f;
+          pixels[5 * bpp + bpp - 1] = 200;
+          const firstRow = pngAllFilters(60, 40, pixels, {
+            colorType,
+            filterOffset,
+          });
+          expect(parseSignaturePng(firstRow.toString('base64'))).toBe(
+            firstRow.toString('base64'),
+          );
+        }
+      }
+    });
+
+    it('deshace los cinco filtros sin alfa: uniforme en blanco, un píxel distinto vale', () => {
+      const pixels = Buffer.alloc(60 * 40 * 3, 255);
+      const blank = pngAllFilters(60, 40, pixels, { colorType: 2 });
+      expect(() => parseSignaturePng(blank.toString('base64'))).toThrow(
+        /en blanco/,
+      );
+      pixels[(39 * 60 + 59) * 3 + 2] = 0; // último píxel, fila con Paeth
+      const drawn = pngAllFilters(60, 40, pixels, { colorType: 2 });
+      expect(parseSignaturePng(drawn.toString('base64'))).toBe(
+        drawn.toString('base64'),
+      );
+    });
+
+    it('rechaza sin inflar un PNG pesado para su área (16 bits o sin alfa muy grande)', () => {
+      const tiny = Buffer.from([0, 0, 0, 0, 255]);
+      for (const [w, h, colorType, bitDepth] of [
+        [4096, 976, 2, 8], // RGB: 12 MB a deshacer entero
+        [4096, 976, 6, 16], // RGBA de 16 bits: 32 MB inflados
+        [2600, 1000, 0, 16], // gris de 16 bits: 5,2 MB a deshacer
+      ]) {
+        const heavy = pngFromRaw(w, h, tiny, { colorType, bitDepth });
+        expect(() => parseSignaturePng(heavy.toString('base64'))).toThrow(
+          'La firma es una imagen demasiado pesada: usa un PNG de 8 bits con transparencia.',
+        );
+      }
+      // Pequeños, esos mismos formatos siguen valiendo.
+      const rgba16 = pngAllFilters(20, 10, noise(20 * 10 * 8), {
+        colorType: 6,
+        bitDepth: 16,
+      });
+      expect(parseSignaturePng(rgba16.toString('base64'))).toBe(
+        rgba16.toString('base64'),
+      );
+    });
+
+    it('rechaza un IDAT que se queda corto o un filtro desconocido tras la tinta', () => {
+      const short = pngFromRaw(10, 10, Buffer.from([0, 0, 0, 0, 255]));
+      expect(() => parseSignaturePng(short.toString('base64'))).toThrow(
+        'La firma no es una imagen PNG válida.',
+      );
+      const raw = Buffer.alloc(2 * (4 + 1));
+      raw[4] = 255; // tinta en la fila 0
+      raw[5] = 9; // filtro inexistente en la fila 1
+      expect(() =>
+        parseSignaturePng(pngFromRaw(1, 2, raw).toString('base64')),
+      ).toThrow('La firma no es una imagen PNG válida.');
     });
   });
 

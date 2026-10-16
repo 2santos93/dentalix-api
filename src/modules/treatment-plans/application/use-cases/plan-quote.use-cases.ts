@@ -208,7 +208,12 @@ export class AcceptTreatmentPlanUseCase {
     input: AcceptTreatmentPlanInput,
     meta: AcceptTreatmentPlanMeta,
   ): Promise<PlanQuoteDocument> {
-    // Las validaciones baratas, antes de tocar la base.
+    // Las validaciones baratas, antes de tocar la base. La firma va aquí y
+    // no tras comprobar el plan (como en los consentimientos, SEC-026): esa
+    // comprobación ocurre dentro de la transacción de `accept`, con la fila
+    // del plan bloqueada, y descomprimir la firma ahí alargaría el bloqueo;
+    // adelantarla costaría releer el presupuesto entero. El coste de la firma
+    // ya está acotado por sus dimensiones y el tope de inflate.
     const signature = parseSignature(input.signature);
     const signerName = input.signerName.trim();
     if (signerName === '') {
