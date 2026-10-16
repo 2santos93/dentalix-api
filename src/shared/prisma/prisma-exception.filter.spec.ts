@@ -229,6 +229,42 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  const CONCURRENCY_BODY = {
+    statusCode: 409,
+    error: 'Conflict',
+    message:
+      'Otra operación sobre los mismos datos se cruzó con esta. Vuelve a intentarlo.',
+  };
+
+  it.each(['40P01', '40001'])(
+    'turns a deadlock / serialization failure (%s) into a Spanish 409 to retry (DX-012)',
+    (code) => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json } = mockHost();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      filter.catch(unknownPg(code, 'deadlock detected', SECRET_DETAIL), host);
+      expect(status).toHaveBeenCalledWith(409);
+      expect(bodyOf(json)).toEqual(CONCURRENCY_BODY);
+      jest.restoreAllMocks();
+    },
+  );
+
+  it('turns P2034 (write conflict or deadlock in a transaction) into the same 409', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError(
+        'Transaction failed due to a write conflict or a deadlock. Please retry your transaction',
+        { code: 'P2034', clientVersion: '6.19.3' },
+      ),
+      host,
+    );
+    expect(status).toHaveBeenCalledWith(409);
+    expect(bodyOf(json)).toEqual(CONCURRENCY_BODY);
+    jest.restoreAllMocks();
+  });
+
   it.each([
     ['23514', 400],
     ['23503', 409],

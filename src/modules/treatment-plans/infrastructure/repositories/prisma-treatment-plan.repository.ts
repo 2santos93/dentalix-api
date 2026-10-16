@@ -175,6 +175,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   ): Promise<TreatmentPlanItem> {
     const tenantId = this.requireTenantId();
     const item = await this.prisma.runWithTenant(async (tx) => {
+      await lockPlan(tx, input.planId);
       return tx.treatmentPlanItem.create({
         data: {
           tenantId,
@@ -207,6 +208,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   ): Promise<TreatmentPlanItem> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      await lockPlanOfItem(tx, id);
       // FOR UPDATE: un segundo PATCH concurrente sobre el mismo ítem espera
       // aquí al COMMIT del primero y lee el estado ya cambiado (DB-013).
       const [previous] = await tx.$queryRaw<
@@ -236,6 +238,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
 
   async softDeleteItem(id: string): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
+      await lockPlanOfItem(tx, id);
       const existing = await tx.treatmentPlanItem.findFirst({
         where: { id, deletedAt: null },
         select: { id: true },
@@ -250,6 +253,34 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       });
     });
   }
+}
+
+/**
+ * Orden de bloqueos plan → ítem (DX-012). La aceptación firmada bloquea el plan
+ * FOR UPDATE y después sus ítems; toda escritura de ítems bloquea antes el plan
+ * (FOR SHARE: varias ediciones a la vez no se estorban) y solo después el ítem.
+ * Con el orden contrario (el ítem y luego, en el trigger
+ * `treatment_plan_items_locked_when_accepted`, el plan) una edición y una firma
+ * simultáneas se esperaban en cruz: deadlock (40P01).
+ */
+async function lockPlan(
+  tx: Prisma.TransactionClient,
+  planId: string,
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT "id" FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR SHARE`;
+}
+
+/** Igual que `lockPlan`, para el plan del ítem `itemId` (si existe). */
+async function lockPlanOfItem(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT p."id" FROM "treatment_plans" p
+      JOIN "treatment_plan_items" i ON i."planId" = p."id"
+     WHERE i."id" = ${itemId}::uuid
+       FOR SHARE OF p`;
 }
 
 /**

@@ -151,6 +151,14 @@ const RESTRICT_VIOLATION: ErrorBody = {
   error: 'Conflict',
   message: 'El registro está cerrado o firmado y ya no admite ese cambio.',
 };
+// Dos transacciones se cruzaron (deadlock o fallo de serialización): Postgres
+// abortó esta. Reintentar la operación la resuelve (DX-012).
+const CONCURRENCY_CONFLICT: ErrorBody = {
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  message:
+    'Otra operación sobre los mismos datos se cruzó con esta. Vuelve a intentarlo.',
+};
 const INTERNAL_ERROR: ErrorBody = {
   statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
   error: 'Internal Server Error',
@@ -163,6 +171,8 @@ const BY_SQLSTATE: Record<string, ErrorBody> = {
   '22003': NUMERIC_OVERFLOW, // numeric_value_out_of_range
   '23503': FK_VIOLATION, // foreign_key_violation
   '23001': RESTRICT_VIOLATION, // restrict_violation (triggers de inmutabilidad)
+  '40P01': CONCURRENCY_CONFLICT, // deadlock_detected
+  '40001': CONCURRENCY_CONFLICT, // serialization_failure
 };
 
 /**
@@ -269,9 +279,11 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     const generic =
       prismaCode === 'P2003'
         ? FK_VIOLATION
-        : sqlState
-          ? BY_SQLSTATE[sqlState]
-          : undefined;
+        : prismaCode === 'P2034'
+          ? CONCURRENCY_CONFLICT
+          : sqlState
+            ? BY_SQLSTATE[sqlState]
+            : undefined;
     if (generic) {
       // Una regla de la base que la validación de la app no cubrió: se
       // registra para poder cerrarla también en la DTO o el caso de uso.
