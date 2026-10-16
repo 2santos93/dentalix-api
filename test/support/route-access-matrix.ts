@@ -17,6 +17,9 @@ import { ClinicRole } from '@prisma/client';
  * `clinic-role-sets.ts`, a propósito: cambiar un conjunto compartido cambia
  * la autorización de muchas rutas a la vez, y eso también debe obligar a
  * tocar (y revisar) esta tabla.
+ *
+ * Cada sección cita el documento de decisión del que sale. `dentalix-docs/…`
+ * y `loop/informes/…` están en el repo dentalix-docs.
  */
 export type RouteAccess =
   /** Sin JwtAuthGuard: cualquiera, sin sesión. */
@@ -62,17 +65,22 @@ const ADMIN_ONLY = roles('ADMIN');
 
 export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // --- Raíz, salud y ficheros estáticos -----------------------------------
+  // Avatares: dentalix-docs/docs/specs/2026-07-27-user-profile-design.md.
   'GET /': PUBLIC,
   'GET /health': PUBLIC,
   'GET /files/avatars/:name': PUBLIC,
 
   // --- Auth (sesión) -------------------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-24-login-drop-subdomain-host-tenant.md,
+  // 2026-07-28-logout.md; cookie de refresh: loop/informes/DX-062.md.
   'POST /auth/register': PUBLIC,
   'POST /auth/login': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
 
   // --- Públicas por host de clínica ---------------------------------------
+  // Invitaciones: dentalix-docs/docs/plans/2026-08-01-invitaciones-backend.md;
+  // confirmación de cita: loop/informes/DX-005.md.
   'GET /public/tenant/branding': PUBLIC_TENANT,
   'GET /public/invitations/:token': PUBLIC_TENANT,
   'POST /public/invitations/:token/accept': PUBLIC_TENANT,
@@ -80,6 +88,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/appointment-confirmations/:token': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
+  // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
+  // 2026-07-24-exchange-service.md (/exchange y referencia).
   'GET /me': AUTHENTICATED,
   'PATCH /me': AUTHENTICATED,
   'POST /me/password': AUTHENTICATED,
@@ -92,15 +102,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /cities': AUTHENTICATED,
 
   // --- Plataforma (superadmin, host apex) ----------------------------------
+  // dentalix-docs/docs/plans/2026-07-31-platform-superadmin.md.
   'GET /platform/tenants': PLATFORM,
 
   // --- Pacientes (demográficos) --------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (PATIENT_ROLES).
   'POST /patients': EVERY_ROLE,
   'GET /patients': EVERY_ROLE,
   'GET /patients/:id': EVERY_ROLE,
   'PATCH /patients/:id': EVERY_ROLE,
 
   // --- Clínico: historia, evoluciones, odontograma, periodontograma --------
+  // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (CLINICAL_ROLES);
+  // periodontograma: loop/informes/DX-007.md.
   'GET /patients/:patientId/medical-history': CLINICAL,
   'PUT /patients/:patientId/medical-history': CLINICAL,
   'POST /patients/:patientId/clinical-entries': CLINICAL,
@@ -116,6 +130,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /patients/:patientId/perio-exams/:id': CLINICAL,
 
   // --- Consentimientos informados (DX-006) ---------------------------------
+  // loop/informes/DX-006.md.
   'GET /consent-templates': CLINICAL,
   'POST /consent-templates': ADMIN_ONLY,
   'PATCH /consent-templates/:id': ADMIN_ONLY,
@@ -125,12 +140,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/consents/:id': CLINICAL,
 
   // --- Autorización de datos, Ley 1581 (DX-037) ----------------------------
+  // loop/informes/DX-037.md.
   'GET /patients/:patientId/data-consents': EVERY_ROLE,
   'POST /patients/:patientId/data-consents': EVERY_ROLE,
   'GET /privacy-policies': EVERY_ROLE,
   'POST /privacy-policies': ADMIN_ONLY,
 
   // --- Recetas (DX-013) ----------------------------------------------------
+  // loop/informes/DX-013.md.
   'GET /prescription-templates': CLINICAL,
   'POST /prescription-templates': ADMIN_ONLY,
   'PATCH /prescription-templates/:id': ADMIN_ONLY,
@@ -142,21 +159,30 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /prescriptions/:id/void': PRESCRIBERS,
 
   // --- Catálogo dental -----------------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,
+  // escritura solo ADMIN).
   'POST /catalog/items': ADMIN_ONLY,
   'GET /catalog/items': CLINICAL,
   'GET /catalog/items/directory': CLINICAL,
   'PATCH /catalog/items/:id': ADMIN_ONLY,
 
   // --- Planes de tratamiento -----------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-24-treatment-plans.md (CLINICAL_ROLES).
   'POST /patients/:patientId/treatment-plans': CLINICAL,
   'GET /patients/:patientId/treatment-plans': CLINICAL,
   'GET /treatment-plans/:id': CLINICAL,
+  // BE-002 (decisión de producto pendiente): con CLINICAL los roles clínicos,
+  // que NO ven los pagos (BILLING), cambian la moneda del plan y los precios
+  // de sus ítems aunque haya abonos o cuotas. La tabla fija el comportamiento
+  // ACTUAL; si se decide restringirlo a ADMIN, cambia aquí y en el controlador.
   'PATCH /treatment-plans/:id': CLINICAL,
   'POST /treatment-plans/:id/items': CLINICAL,
   'PATCH /treatment-plans/:id/items/:itemId': CLINICAL,
   'DELETE /treatment-plans/:id/items/:itemId': CLINICAL,
 
   // --- Agenda --------------------------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-23-fase3-appointments.md; enlace de
+  // confirmación: loop/informes/DX-005.md.
   'POST /appointments': EVERY_ROLE,
   'GET /appointments': EVERY_ROLE,
   'GET /appointments/:id': EVERY_ROLE,
@@ -164,6 +190,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
 
   // --- Facturación: abonos, planes de pago, estado de cuenta ---------------
+  // dentalix-docs/docs/plans/2026-07-24-payments-pivot.md (PAYMENT_ROLES),
+  // 2026-07-30-payment-plans-cuotas.md; estado de cuenta: loop/informes/DX-011.md;
+  // planes cobrables: loop/informes/DX-067.md.
   'GET /payments': BILLING,
   'POST /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/payments': BILLING,
@@ -176,6 +205,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/billable-plans': BILLING,
 
   // --- Inventario ----------------------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-24-inventory.md (INVENTORY_ROLES).
   'POST /inventory/items': STOCK,
   'GET /inventory/items': STOCK,
   'GET /inventory/items/:id': STOCK,
@@ -185,9 +215,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /inventory/items/:id/movements': STOCK,
 
   // --- Dashboard -----------------------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-24-dashboard.md (DASHBOARD_ROLES).
   'GET /dashboard': ADMIN_ONLY,
 
   // --- Sedes y horario de atención -----------------------------------------
+  // dentalix-docs/docs/plans/2026-08-01-multi-sede.md y
+  // dentalix-docs/docs/specs/2026-07-31-clinic-business-hours-design.md.
   'GET /locations': EVERY_ROLE,
   'POST /locations': ADMIN_ONLY,
   'PATCH /locations/:id': ADMIN_ONLY,
@@ -195,6 +228,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /locations/schedule': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
+  // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)
+  // y 2026-08-01-invitaciones-backend.md.
   'GET /staff': EVERY_ROLE,
   'GET /staff/directory': ADMIN_ONLY,
   'GET /staff/:userId': ADMIN_ONLY,
@@ -206,6 +241,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /staff/invitations/:id': ADMIN_ONLY,
 
   // --- Dominios propios ----------------------------------------------------
+  // docs/superpowers/specs/2026-07-23-tenant-host-resolution-design.md (este repo).
   'POST /domains': ADMIN_ONLY,
   'GET /domains': ADMIN_ONLY,
   'POST /domains/:id/verify': ADMIN_ONLY,
