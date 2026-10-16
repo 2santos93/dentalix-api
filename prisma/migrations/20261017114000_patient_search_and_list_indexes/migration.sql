@@ -77,7 +77,8 @@ ALTER TABLE "patients"
 -- 4. Rol dueño de la búsqueda.
 --    Los roles son del CLÚSTER: si ya existe (otra base del mismo servidor), se
 --    reutiliza SOLO si tiene exactamente los atributos esperados y nadie más
---    que el propio migrador es miembro suyo; si no, se aborta (un miembro con
+--    que el propio migrador (o, desde DX-134, el owner de otra base del
+--    clúster sin SET ni INHERIT) es miembro suyo; si no, se aborta (un miembro con
 --    SET podría reemplazar las funciones o leer `patients` sin RLS).
 --    Sin BYPASSRLS: lo que le deja leer `patients` es la
 --    política de abajo, que solo existe para él y solo para SELECT. Privilegios
@@ -87,6 +88,7 @@ ALTER TABLE "patients"
 DO $$
 DECLARE
   r pg_roles%ROWTYPE;
+  extra text;
 BEGIN
   SELECT * INTO r FROM pg_roles WHERE rolname = 'dentalix_patient_search';
   IF NOT FOUND THEN
@@ -95,14 +97,32 @@ BEGIN
         OR r.rolcreatedb OR r.rolreplication THEN
     RAISE EXCEPTION 'El rol dentalix_patient_search ya existe con atributos inesperados (LOGIN, SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB o REPLICATION). Revísalo a mano antes de migrar.';
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_auth_members m
-              WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'dentalix_patient_search')
-                AND m.member <> (SELECT oid FROM pg_roles WHERE rolname = current_user)) THEN
-    RAISE EXCEPTION 'El rol dentalix_patient_search tiene miembros inesperados (pg_auth_members). Revísalo a mano antes de migrar.';
+  -- DX-134: se toleran, además del migrador, los owners de OTRAS bases del
+  -- clúster con membresía sin SET ni INHERIT (el owner sin superusuario que
+  -- crea el rol queda así, con ADMIN, en PG16). Comparten clúster y, con él,
+  -- `dentalix_app`: son un mismo dominio de confianza (README).
+  SELECT string_agg(DISTINCT u.rolname, ', ' ORDER BY u.rolname) INTO extra
+    FROM pg_auth_members m JOIN pg_roles u ON u.oid = m.member
+   WHERE m.roleid = 'dentalix_patient_search'::regrole
+     AND u.rolname <> current_user
+     AND (m.set_option OR m.inherit_option
+          OR NOT EXISTS (SELECT 1 FROM pg_database d WHERE d.datdba = m.member));
+  IF extra IS NOT NULL THEN
+    RAISE EXCEPTION 'El rol dentalix_patient_search tiene miembros inesperados: %. Solo se toleran el migrador y los owners de otras bases del clúster sin SET ni INHERIT. Revísalo a mano antes de migrar.', extra;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_auth_members m
               WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'dentalix_patient_search')) THEN
     RAISE EXCEPTION 'El rol dentalix_patient_search es miembro de otros roles. Revísalo a mano antes de migrar.';
+  END IF;
+  -- DX-134: sin ADMIN OPTION el traspaso de las funciones de abajo falla con
+  -- un «permission denied to grant role» poco claro (p. ej. un segundo owner
+  -- del clúster, o roles creados por un superusuario).
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)
+     AND NOT EXISTS (SELECT 1 FROM pg_auth_members m
+                      WHERE m.roleid = 'dentalix_patient_search'::regrole
+                        AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+                        AND m.admin_option) THEN
+    RAISE EXCEPTION '% no tiene ADMIN OPTION sobre el rol dentalix_patient_search. Un admin del clúster debe ejecutar antes: GRANT dentalix_patient_search, dentalix_email_dispatcher TO % WITH ADMIN OPTION, INHERIT FALSE, SET FALSE (README, «Despliegue: roles de la BD»).', current_user, quote_ident(current_user);
   END IF;
 END
 $$;
