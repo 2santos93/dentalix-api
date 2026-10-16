@@ -1495,7 +1495,7 @@ enum UserTokenPurpose {
 /// no de una clínica; el aislamiento por clínica lo hace el caso de uso, que
 /// solo lo acepta en el host de una clínica donde el usuario tiene membresía
 /// activa. NUNCA guarda el token en claro: `tokenHash` = SHA-256 (hex) de los
-/// 32 bytes aleatorios. Ver la migración 20261017130000_user_tokens.
+/// 32 bytes aleatorios. Ver la migración 20261017140000_user_tokens.
 model UserToken {
   id            String           @id @default(uuid()) @db.Uuid
   userId        String           @db.Uuid
