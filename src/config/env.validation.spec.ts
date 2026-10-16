@@ -420,6 +420,7 @@ describe('validateEnv', () => {
         ['JOBS_RETRY_BASE_MS', 'x'],
         ['JOBS_SHUTDOWN_GRACE_MS', '900000'],
         ['JOBS_RETENTION_DAYS', '0'],
+        ['MAIL_OUTBOX_RETENTION_DAYS', '3'],
       ]) {
         expect(errorOf(baseEnv({ [key]: value }))).toContain(key);
       }

@@ -360,6 +360,7 @@ function jobsProblems(env: Env): string[] {
     ['JOBS_RETRY_BASE_MS', 1, 3_600_000],
     ['JOBS_SHUTDOWN_GRACE_MS', 0, 600_000],
     ['JOBS_RETENTION_DAYS', 1, 365],
+    ['MAIL_OUTBOX_RETENTION_DAYS', 7, 3650],
   ];
   for (const [key, min, max] of checks) {
     const raw = str(env, key);

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
@@ -13,8 +13,6 @@ import {
 
 @Injectable()
 export class PrismaAuthRepository implements AuthRepository {
-  private readonly logger = new Logger(PrismaAuthRepository.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserByEmail(
@@ -164,16 +162,14 @@ export class PrismaAuthRepository implements AuthRepository {
       update: {},
       create: { jti, expiresAt },
     });
-    // Limpieza lazy: al revocar, purga los que ya expiraron.
-    await this.purgeExpiredRevocations();
   }
 
   // INSERT a secas (no upsert): la PK `jti` es la que hace atómica la
   // rotación. Si dos /auth/refresh llegan a la vez con el mismo token, Postgres
   // serializa los dos INSERT y el segundo choca con P2002 → `false` → 401. Así
   // un refresh token nunca puede producir dos pares válidos. La fila guarda el
-  // `exp` del token para que la limpieza lazy la pueda borrar cuando ya no
-  // aporta nada.
+  // `exp` del token para que la purga programada (auth.purge-expired-tokens,
+  // DX-085) la borre cuando ya no aporta nada.
   async consumeRefreshToken(jti: string, expiresAt: Date): Promise<boolean> {
     try {
       await this.prisma.revokedToken.create({ data: { jti, expiresAt } });
@@ -186,29 +182,6 @@ export class PrismaAuthRepository implements AuthRepository {
       }
       throw err;
     }
-    await this.purgeExpiredRevocations();
     return true;
-  }
-
-  // Excepción justificada al borrado blando: `revoked_tokens` no es un dato
-  // de negocio sino una denylist con TTL. Una fila cuyo `expiresAt` ya pasó
-  // no aporta nada (el token base es inválido por TTL), así que retenerla en
-  // blando sólo haría crecer la tabla sin que nadie pueda consultarla nunca.
-  //
-  // Es mantenimiento oportunista, no parte de la operación: si falla (timeout,
-  // lock, conexión), el jti ya quedó revocado/consumido, así que se registra y
-  // se sigue. Un fallo aquí nunca debe convertir un refresh válido en un 500
-  // (el cliente lo trataría como sesión rota) ni romper un logout.
-  private async purgeExpiredRevocations(): Promise<void> {
-    try {
-      // eslint-disable-next-line no-restricted-syntax
-      await this.prisma.revokedToken.deleteMany({
-        where: { expiresAt: { lt: new Date() } },
-      });
-    } catch (err) {
-      this.logger.warn(
-        `Purge of expired revoked tokens failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
   }
 }

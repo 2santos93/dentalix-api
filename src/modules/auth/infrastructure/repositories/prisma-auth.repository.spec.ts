@@ -1,9 +1,8 @@
-import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 
 describe('PrismaAuthRepository — refresh-token denylist', () => {
-  it('revokeToken upserts the jti and purges expired entries', async () => {
+  it('revokeToken upserts the jti and does NOT purge on the request path (DX-085: scheduled job)', async () => {
     const revokedToken = {
       upsert: jest.fn().mockResolvedValue(undefined),
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -20,11 +19,9 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       update: {},
       create: { jti: 'jti-1', expiresAt: exp },
     });
-    // Limpieza lazy de expirados en el mismo camino: debe filtrar por fecha,
-    // no borrar toda la tabla (deleteMany({}) barrería toda la denylist).
-    expect(revokedToken.deleteMany).toHaveBeenCalledWith({
-      where: { expiresAt: { lt: expect.any(Date) as Date } },
-    });
+    // DX-085: la purga de vencidos es una tarea programada
+    // (auth.purge-expired-tokens), no una escritura más en cada logout.
+    expect(revokedToken.deleteMany).not.toHaveBeenCalled();
   });
 
   it('consumeRefreshToken inserts the jti once and reports a reuse as false', async () => {
@@ -51,6 +48,7 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
     expect(revokedToken.create).toHaveBeenCalledWith({
       data: { jti: 'jti-1', expiresAt: exp },
     });
+    expect(revokedToken.deleteMany).not.toHaveBeenCalled();
   });
 
   it('consumeRefreshToken rethrows errors that are not a duplicate jti', async () => {
@@ -64,25 +62,5 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
     await expect(
       repo.consumeRefreshToken('jti-1', new Date('2030-01-01T00:00:00Z')),
     ).rejects.toBe(boom);
-  });
-
-  // La purga de expirados es mantenimiento oportunista: si falla (timeout,
-  // lock), el refresh/logout que la disparó NO debe fallar con ella.
-  it('a failing purge never breaks consumeRefreshToken nor revokeToken', async () => {
-    const revokedToken = {
-      create: jest.fn().mockResolvedValue({ jti: 'jti-1' }),
-      upsert: jest.fn().mockResolvedValue(undefined),
-      deleteMany: jest.fn().mockRejectedValue(new Error('lock timeout')),
-    };
-    const repo = new PrismaAuthRepository({ revokedToken } as never);
-    const warn = jest
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => undefined);
-    const exp = new Date('2030-01-01T00:00:00Z');
-
-    await expect(repo.consumeRefreshToken('jti-1', exp)).resolves.toBe(true);
-    await expect(repo.revokeToken('jti-2', exp)).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(2);
-    warn.mockRestore();
   });
 });

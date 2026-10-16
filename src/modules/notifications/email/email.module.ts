@@ -12,6 +12,9 @@ import { ConsoleMailer } from './infrastructure/mailers/console.mailer';
 import { SmtpMailer } from './infrastructure/mailers/smtp.mailer';
 import { FileMailer } from './infrastructure/mailers/file.mailer';
 import { PrismaEmailOutboxRepository } from './infrastructure/repositories/prisma-email-outbox.repository';
+import { PrismaEmailOutboxRetentionRepository } from './infrastructure/repositories/prisma-email-outbox-retention.repository';
+import { EmailOutboxMaintenance } from './application/email-outbox-maintenance';
+import { JobsModule } from '../../jobs/jobs.module';
 
 /**
  * Email transaccional (DX-088): puerto `Mailer` con adaptadores Console (dev y
@@ -20,6 +23,8 @@ import { PrismaEmailOutboxRepository } from './infrastructure/repositories/prism
  * `EmailOutbox.enqueue(...)`.
  */
 @Module({
+  // Purga programada de envíos terminados (DX-085).
+  imports: [JobsModule],
   providers: [
     {
       provide: MAIL_CONFIG,
@@ -57,6 +62,8 @@ import { PrismaEmailOutboxRepository } from './infrastructure/repositories/prism
     { provide: EMAIL_OUTBOX_REPOSITORY, useClass: PrismaEmailOutboxRepository },
     EmailDispatcher,
     EmailOutbox,
+    PrismaEmailOutboxRetentionRepository,
+    EmailOutboxMaintenance,
   ],
   exports: [EmailOutbox, EmailDispatcher],
 })

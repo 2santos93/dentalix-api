@@ -23,9 +23,13 @@ import { REGISTRATION_REPOSITORY } from './domain/ports/registration-repository.
 import { REGISTRATION_NOTIFIER } from './domain/ports/registration-notifier.port';
 import { PrismaRegistrationRepository } from './infrastructure/repositories/prisma-registration.repository';
 import { EmailRegistrationNotifier } from './infrastructure/email-registration.notifier';
+import { JobsModule } from '../jobs/jobs.module';
+import { TokenMaintenanceJobs } from './application/token-maintenance.jobs';
+import { TOKEN_MAINTENANCE_REPOSITORY } from './domain/ports/token-maintenance-repository.port';
+import { PrismaTokenMaintenanceRepository } from './infrastructure/repositories/prisma-token-maintenance.repository';
 
 @Module({
-  imports: [JwtModule.register({}), EmailModule],
+  imports: [JwtModule.register({}), EmailModule, JobsModule],
   controllers: [AuthController, PasswordResetController],
   providers: [
     RegisterClinicUseCase,
@@ -51,6 +55,12 @@ import { EmailRegistrationNotifier } from './infrastructure/email-registration.n
       useClass: PrismaPasswordResetRepository,
     },
     { provide: PASSWORD_RESET_NOTIFIER, useClass: EmailPasswordResetNotifier },
+    // Purga programada de tokens vencidos (DX-085).
+    {
+      provide: TOKEN_MAINTENANCE_REPOSITORY,
+      useClass: PrismaTokenMaintenanceRepository,
+    },
+    TokenMaintenanceJobs,
   ],
   // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
   // con los claims ACTUALES, igual que /auth/refresh. Él y aceptar invitación
