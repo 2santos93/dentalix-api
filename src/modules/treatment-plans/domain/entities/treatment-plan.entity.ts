@@ -22,19 +22,28 @@ export interface TreatmentPlan {
   updatedAt: Date;
 }
 
+/** Quién aceptó con firma el presupuesto del plan y cuándo (DX-012). */
+export interface TreatmentPlanAcceptanceSummary {
+  signerName: string;
+  acceptedAt: Date;
+}
+
 /**
  * Returned by `TreatmentPlanRepository.findPlanById` — the plan plus its
  * active (non-deleted) items. There is no `total` here: computing it is the
  * use case's job, not the repository's (see `TreatmentPlanDetail`).
+ * `acceptance` no es `null` cuando el plan se aceptó con firma: entonces sus
+ * ítems quedan congelados (DX-012).
  */
 export interface TreatmentPlanWithItems extends TreatmentPlan {
   items: TreatmentPlanItem[];
+  acceptance: TreatmentPlanAcceptanceSummary | null;
 }
 
 /**
  * Returned by `GetTreatmentPlanUseCase` — plan + active items + `total`
- * (the sum of `items[].price`, computed on the fly, NEVER stored on the
- * plan row).
+ * (the sum of `items[].price - items[].discount`, computed on the fly, NEVER
+ * stored on the plan row).
  */
 export interface TreatmentPlanDetail extends TreatmentPlanWithItems {
   total: number;

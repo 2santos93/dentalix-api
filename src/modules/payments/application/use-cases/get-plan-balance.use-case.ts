@@ -12,7 +12,7 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 
 export interface GetPlanBalanceResult {
   planCurrency: string;
-  /** Σ item.price for active items with status ACCEPTED|DONE (PROPOSED
+  /** Σ (item.price − item.discount) for active items with status ACCEPTED|DONE (PROPOSED
    * items are not yet billable — see docs/plans/2026-07-24-payments-pivot.md
    * "Modelo"). Rounded to 2 decimals. */
   billable: number;
@@ -84,7 +84,7 @@ export class GetPlanBalanceUseCase {
     const billable = round2(
       plan.items
         .filter((item) => BILLABLE_STATUSES.has(item.status))
-        .reduce((sum, item) => sum + item.price, 0),
+        .reduce((sum, item) => sum + item.price - item.discount, 0),
     );
 
     const payments = await this.repo.listByPlan(treatmentPlanId);

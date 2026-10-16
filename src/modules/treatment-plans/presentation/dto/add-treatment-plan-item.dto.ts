@@ -64,6 +64,17 @@ export class AddTreatmentPlanItemDto {
   @IsMoney()
   price?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Descuento en la moneda del plan (máx. 2 decimales, default 0); nunca mayor que el precio (400)',
+    maximum: MONEY_MAX,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @IsMoney()
+  discount?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

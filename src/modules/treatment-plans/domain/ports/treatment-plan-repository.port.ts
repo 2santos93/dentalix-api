@@ -44,11 +44,14 @@ export interface AddTreatmentPlanItemRepoInput {
   surfaces?: ToothSurface[];
   catalogItemId: string;
   price: number;
+  /** Ya validado (0 ≤ discount ≤ price) por el caso de uso; 0 si se omite. */
+  discount?: number;
   notes?: string;
 }
 
 export interface UpdateTreatmentPlanItemRepoInput {
   price?: number;
+  discount?: number;
   status?: TreatmentPlanItemStatus;
   surfaces?: ToothSurface[];
   notes?: string | null;

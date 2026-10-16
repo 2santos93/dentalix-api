@@ -1,0 +1,276 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DocType, TreatmentPlanStatus } from '@prisma/client';
+import {
+  buildQuoteContent,
+  computeAcceptanceHash,
+  computeQuoteHash,
+  parseQuoteContent,
+  type QuoteContent,
+} from '../../domain/plan-quote';
+import {
+  PLAN_QUOTE_REPOSITORY,
+  type NewPlanAcceptance,
+  type PlanQuoteRepository,
+  type PlanQuoteSource,
+} from '../../domain/ports/plan-quote-repository.port';
+import {
+  parseSignaturePng,
+  SignatureImageError,
+} from '../../../consents/domain/signature-image';
+
+export type PlanQuoteClock = () => Date;
+export const PLAN_QUOTE_CLOCK = Symbol('PLAN_QUOTE_CLOCK');
+
+export const PLAN_NOT_FOUND_MESSAGE = 'Plan de tratamiento no encontrado';
+export const PLAN_ACCEPTED_CONFLICT_MESSAGE =
+  'El plan ya fue aceptado y firmado: no se puede volver a firmar.';
+export const QUOTE_CHANGED_MESSAGE =
+  'El presupuesto cambió desde que se mostró: revísalo de nuevo con el paciente antes de firmar.';
+const SIGNER_NAME_MAX = 200;
+
+const DOC_TYPE_LABEL: Record<DocType, string> = {
+  CC: 'CC',
+  TI: 'TI',
+  CE: 'CE',
+  PASSPORT: 'Pasaporte',
+  OTHER: 'Doc.',
+};
+
+/** La aceptación como la ve la vista imprimible. */
+export interface PlanQuoteAcceptanceView {
+  signerName: string;
+  /** PNG en base64, sin prefijo `data:`. */
+  signature: string;
+  acceptedAt: Date;
+  acceptedByName: string;
+  acceptanceHash: string;
+  /** `true` si la foto y la firma guardadas coinciden con sus hashes. */
+  integrityOk: boolean;
+}
+
+/** El presupuesto para verlo o imprimirlo. */
+export interface PlanQuoteDocument extends QuoteContent {
+  planStatus: TreatmentPlanStatus;
+  clinicLogoUrl: string | null;
+  contentHash: string;
+  acceptance: PlanQuoteAcceptanceView | null;
+}
+
+export interface AcceptTreatmentPlanInput {
+  signerName: string;
+  /** `data:image/png;base64,…` o base64 pelado. */
+  signature: string;
+  /** El `contentHash` del presupuesto que se mostró al paciente. */
+  contentHash: string;
+}
+
+/** Lo que pone el servidor, nunca el cliente. */
+export interface AcceptTreatmentPlanMeta {
+  acceptedById: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+function todayIn(timeZone: string, now: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+/** El presupuesto VIVO del plan, emitido hoy en la zona de la sede. */
+function liveContent(source: PlanQuoteSource, now: Date): QuoteContent {
+  const { patient } = source;
+  return buildQuoteContent(
+    {
+      planId: source.plan.id,
+      patientId: source.plan.patientId,
+      currency: source.plan.currency,
+      clinicName: source.clinic.name,
+      location: {
+        id: source.location.id,
+        name: source.location.name,
+        address: source.location.address,
+      },
+      patient: {
+        name: `${patient.firstName} ${patient.lastName}`.trim(),
+        document: patient.docNumber
+          ? `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`
+          : null,
+      },
+      professionalName: source.professionalName,
+      items: source.items,
+    },
+    todayIn(source.location.timeZone, now),
+  );
+}
+
+/**
+ * Un plan aceptado se imprime con la FOTO firmada (lo que vio y firmó el
+ * paciente), nunca con el plan vivo; `integrityOk` recalcula los dos hashes.
+ */
+function toDocument(source: PlanQuoteSource, now: Date): PlanQuoteDocument {
+  const base = {
+    planStatus: source.plan.status,
+    clinicLogoUrl: source.clinic.logoUrl,
+  };
+  const stored = source.acceptance;
+  if (!stored) {
+    const content = liveContent(source, now);
+    return {
+      ...content,
+      ...base,
+      contentHash: computeQuoteHash(content),
+      acceptance: null,
+    };
+  }
+  const content = parseQuoteContent(stored.content);
+  const integrityOk =
+    computeQuoteHash(content) === stored.contentHash &&
+    computeAcceptanceHash({
+      contentHash: stored.contentHash,
+      signerName: stored.signerName,
+      signature: stored.signature,
+      acceptedAt: stored.acceptedAt,
+    }) === stored.acceptanceHash;
+  return {
+    ...content,
+    ...base,
+    contentHash: stored.contentHash,
+    acceptance: {
+      signerName: stored.signerName,
+      signature: stored.signature,
+      acceptedAt: stored.acceptedAt,
+      acceptedByName: stored.acceptedByName,
+      acceptanceHash: stored.acceptanceHash,
+      integrityOk,
+    },
+  };
+}
+
+@Injectable()
+export class GetPlanQuoteUseCase {
+  constructor(
+    @Inject(PLAN_QUOTE_REPOSITORY)
+    private readonly repo: PlanQuoteRepository,
+    @Inject(PLAN_QUOTE_CLOCK)
+    private readonly now: PlanQuoteClock,
+  ) {}
+
+  /** El presupuesto imprimible; 404 si el plan no es de este paciente/clínica. */
+  async execute(patientId: string, planId: string): Promise<PlanQuoteDocument> {
+    const source = await this.repo.loadSource(patientId, planId);
+    if (!source) {
+      throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+    }
+    return toDocument(source, this.now());
+  }
+}
+
+function parseSignature(value: string): string {
+  try {
+    return parseSignaturePng(value, 'la firma del paciente');
+  } catch (error) {
+    if (error instanceof SignatureImageError) {
+      throw new BadRequestException(error.message);
+    }
+    throw error;
+  }
+}
+
+@Injectable()
+export class AcceptTreatmentPlanUseCase {
+  constructor(
+    @Inject(PLAN_QUOTE_REPOSITORY)
+    private readonly repo: PlanQuoteRepository,
+    @Inject(PLAN_QUOTE_CLOCK)
+    private readonly now: PlanQuoteClock,
+  ) {}
+
+  /**
+   * Aceptar = firmar la foto del presupuesto. Se recompone el presupuesto con
+   * el plan bloqueado y su hash tiene que ser el que se mostró: si algo cambió
+   * entre medias (un ítem, un precio, el día), 409 y no se firma. Firma, hora
+   * (del servidor) y autor (del token) quedan sellados con un segundo hash. El
+   * plan pasa a ACCEPTED y sus ítems propuestos, a aceptados.
+   */
+  async execute(
+    patientId: string,
+    planId: string,
+    input: AcceptTreatmentPlanInput,
+    meta: AcceptTreatmentPlanMeta,
+  ): Promise<PlanQuoteDocument> {
+    // Las validaciones baratas, antes de tocar la base.
+    const signature = parseSignature(input.signature);
+    const signerName = input.signerName.trim();
+    if (signerName === '') {
+      throw new BadRequestException('El nombre de quien firma es obligatorio.');
+    }
+    if (signerName.length > SIGNER_NAME_MAX) {
+      throw new BadRequestException(
+        `El nombre de quien firma admite hasta ${SIGNER_NAME_MAX} caracteres.`,
+      );
+    }
+    const acceptedAt = this.now();
+
+    const outcome = await this.repo.accept(
+      patientId,
+      planId,
+      (source): NewPlanAcceptance => {
+        if (source.acceptance) {
+          throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
+        }
+        if (
+          source.plan.status === TreatmentPlanStatus.CANCELLED ||
+          source.plan.status === TreatmentPlanStatus.COMPLETED
+        ) {
+          throw new ConflictException(
+            'Un plan cancelado o completado no se puede aceptar.',
+          );
+        }
+        if (source.items.length === 0) {
+          throw new BadRequestException(
+            'El plan no tiene ítems: agrega al menos un procedimiento antes de aceptarlo.',
+          );
+        }
+        const content = liveContent(source, acceptedAt);
+        const contentHash = computeQuoteHash(content);
+        if (contentHash !== input.contentHash) {
+          throw new ConflictException(QUOTE_CHANGED_MESSAGE);
+        }
+        return {
+          locationId: source.location.id,
+          signerName,
+          signature,
+          content,
+          contentHash,
+          acceptanceHash: computeAcceptanceHash({
+            contentHash,
+            signerName,
+            signature,
+            acceptedAt,
+          }),
+          acceptedAt,
+          acceptedById: meta.acceptedById,
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        };
+      },
+    );
+    if (outcome.kind === 'NOT_FOUND') {
+      throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+    }
+    if (outcome.kind === 'ALREADY_ACCEPTED') {
+      throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
+    }
+    return toDocument(outcome.source, acceptedAt);
+  }
+}

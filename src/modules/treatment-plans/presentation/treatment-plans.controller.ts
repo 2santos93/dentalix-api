@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -43,6 +44,9 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+
+const SIGNED_PLAN_CONFLICT =
+  'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -114,6 +118,10 @@ export class TreatmentPlansController {
 
   @Patch('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
+  @ApiConflictResponse({
+    description:
+      'Plan aceptado con firma: no cambia de moneda ni vuelve a DRAFT (DX-012)',
+  })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateTreatmentPlanDto,
@@ -127,6 +135,7 @@ export class TreatmentPlansController {
 
   @Post('treatment-plans/:id/items')
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
+  @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
   addItem(
     @Param('id') id: string,
     @Body() dto: AddTreatmentPlanItemDto,
@@ -136,12 +145,16 @@ export class TreatmentPlansController {
       surfaces: dto.surfaces,
       catalogItemId: dto.catalogItemId,
       price: dto.price,
+      discount: dto.discount,
       notes: dto.notes,
     });
   }
 
   @Patch('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ type: TreatmentPlanItemDto })
+  @ApiConflictResponse({
+    description: `${SIGNED_PLAN_CONFLICT}; solo admite avanzar el estado (no volver a PROPOSED)`,
+  })
   updateItem(
     @Param('itemId') itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
@@ -153,6 +166,7 @@ export class TreatmentPlansController {
       itemId,
       {
         price: dto.price,
+        discount: dto.discount,
         status: dto.status,
         surfaces: dto.surfaces,
         notes: dto.notes,
@@ -163,6 +177,7 @@ export class TreatmentPlansController {
 
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
+  @ApiConflictResponse({ description: SIGNED_PLAN_CONFLICT })
   removeItem(@Param('itemId') itemId: string): Promise<void> {
     return this.removeTreatmentPlanItem.execute(itemId);
   }

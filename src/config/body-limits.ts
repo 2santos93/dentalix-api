@@ -3,14 +3,18 @@ import type { Application, NextFunction, Request, Response } from 'express';
 import { json } from 'express';
 
 /**
- * Tope del cuerpo JSON de la firma de un consentimiento (DX-006). El POST
- * lleva dos PNG en base64 de hasta 200 KB cada uno (~267 KB en base64) más el
- * resto: no cabe en los 100 KB por defecto de Express. Se sube SOLO en esa
- * ruta; el resto de la API sigue con el tope por defecto.
+ * Tope del cuerpo JSON de los POST que llevan firmas en PNG base64 (hasta
+ * 200 KB cada una, ~267 KB en base64): la firma de un consentimiento (DX-006,
+ * dos firmas) y la aceptación firmada de un plan (DX-012, una). No caben en
+ * los 100 KB por defecto de Express. Se sube SOLO en esas rutas; el resto de la
+ * API sigue con el tope por defecto.
  */
 export const CONSENT_SIGN_BODY_LIMIT = '700kb';
 
-const CONSENT_SIGN_PATH = /^\/api\/v1\/patients\/[^/]+\/consents\/?$/;
+const SIGNED_POST_PATHS = [
+  /^\/api\/v1\/patients\/[^/]+\/consents\/?$/,
+  /^\/api\/v1\/patients\/[^/]+\/treatment-plans\/[^/]+\/acceptance\/?$/,
+];
 
 /**
  * Registra el parser con tope ampliado ANTES de que Nest monte el suyo en
@@ -24,14 +28,17 @@ const CONSENT_SIGN_PATH = /^\/api\/v1\/patients\/[^/]+\/consents\/?$/;
  */
 export function applyBodyLimits(app: INestApplication): void {
   const express = app.getHttpAdapter().getInstance() as Application;
-  const consentParser = json({ limit: CONSENT_SIGN_BODY_LIMIT });
-  express.use(function consentSignBodyParser(
+  const signedBodyParser = json({ limit: CONSENT_SIGN_BODY_LIMIT });
+  express.use(function signedPostBodyParser(
     req: Request,
     res: Response,
     next: NextFunction,
   ) {
-    if (req.method === 'POST' && CONSENT_SIGN_PATH.test(req.path)) {
-      consentParser(req, res, next);
+    if (
+      req.method === 'POST' &&
+      SIGNED_POST_PATHS.some((path) => path.test(req.path))
+    ) {
+      signedBodyParser(req, res, next);
       return;
     }
     next();

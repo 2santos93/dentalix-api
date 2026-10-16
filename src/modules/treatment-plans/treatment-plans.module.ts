@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TreatmentPlansController } from './presentation/treatment-plans.controller';
+import { PlanQuoteController } from './presentation/plan-quote.controller';
+import {
+  AcceptTreatmentPlanUseCase,
+  GetPlanQuoteUseCase,
+  PLAN_QUOTE_CLOCK,
+} from './application/use-cases/plan-quote.use-cases';
+import { PLAN_QUOTE_REPOSITORY } from './domain/ports/plan-quote-repository.port';
+import { PrismaPlanQuoteRepository } from './infrastructure/repositories/prisma-plan-quote.repository';
 import { CreateTreatmentPlanUseCase } from './application/use-cases/create-treatment-plan.use-case';
 import { ListTreatmentPlansUseCase } from './application/use-cases/list-treatment-plans.use-case';
 import { GetTreatmentPlanUseCase } from './application/use-cases/get-treatment-plan.use-case';
@@ -30,7 +38,7 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
   // PatientsModule exporta PATIENT_REPOSITORY: el use-case de alta valida que el
   // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
   imports: [JwtModule.register({}), DentalCatalogModule, PatientsModule],
-  controllers: [TreatmentPlansController],
+  controllers: [TreatmentPlansController, PlanQuoteController],
   providers: [
     CreateTreatmentPlanUseCase,
     ListTreatmentPlansUseCase,
@@ -39,6 +47,11 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
     AddTreatmentPlanItemUseCase,
     UpdateTreatmentPlanItemUseCase,
     RemoveTreatmentPlanItemUseCase,
+    // Presupuesto imprimible y aceptación firmada (DX-012).
+    GetPlanQuoteUseCase,
+    AcceptTreatmentPlanUseCase,
+    { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
+    { provide: PLAN_QUOTE_REPOSITORY, useClass: PrismaPlanQuoteRepository },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on TreatmentPlansController.

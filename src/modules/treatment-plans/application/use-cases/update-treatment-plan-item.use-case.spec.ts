@@ -29,6 +29,7 @@ function fakeItem(
     surfaces: [],
     catalogItemId: 'cat1',
     price: 200,
+    discount: 0,
     status: TreatmentPlanItemStatus.PROPOSED,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
