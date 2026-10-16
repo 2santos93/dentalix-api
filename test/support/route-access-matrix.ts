@@ -68,6 +68,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Avatares: dentalix-docs/docs/specs/2026-07-27-user-profile-design.md.
   'GET /': PUBLIC,
   'GET /health': PUBLIC,
+  // Readiness con BD, sin tenant ni rate limit: loop/informes/DX-023.md.
+  'GET /health/ready': PUBLIC,
   'GET /files/avatars/:name': PUBLIC,
 
   // --- Auth (sesión) -------------------------------------------------------
