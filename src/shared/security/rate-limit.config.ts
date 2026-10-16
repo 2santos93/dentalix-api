@@ -6,7 +6,8 @@
  * El límite se cuenta POR RUTA: las rutas que comparten política tienen cada
  * una su propio balde (p. ej. 20/min en login y otros 20/min en register).
  *
- * - global:        cada ruta, por IP (salvo /health, con @SkipThrottle). Red
+ * - global:        cada ruta, por IP (salvo las sondas /health y
+ *                  /health/ready, con @SkipThrottle en HealthController). Red
  *                  de seguridad contra abuso/scraping, holgada porque una
  *                  clínica entera suele salir por UNA IP (NAT).
  * - auth:          login y register; por IP (frena el "spraying").

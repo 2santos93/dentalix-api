@@ -4,6 +4,7 @@ import {
   PrismaExceptionFilter,
   conflictMessageForTarget,
 } from './prisma-exception.filter';
+import { requestContext } from '../observability/request-context';
 
 function mockHost(): {
   host: ArgumentsHost;
@@ -292,6 +293,32 @@ describe('PrismaExceptionFilter', () => {
     expect(logged).toContain('Transaction already closed');
     expect(logged).toContain('duplicate key value');
     expect(logged).not.toMatch(/Ana Pérez|1234567|quoted|ana@paciente/);
+    errorSpy.mockRestore();
+  });
+
+  // DX-023: el 500 lleva el request id para cruzarlo con el log, y el log
+  // lleva el stack (para diagnosticar) sin el DETAIL ni el mensaje crudo.
+  it('a 500 inside a request carries the request id and logs a redacted stack', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, json } = mockHost();
+    const errorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+
+    requestContext.run({ requestId: 'req-prisma-0001' }, () =>
+      filter.catch(unknownPg('XX000', 'internal error', SECRET_DETAIL), host),
+    );
+
+    expect(bodyOf(json)).toEqual({
+      statusCode: 500,
+      error: 'Internal Server Error',
+      message: 'Ocurrió un error procesando la solicitud.',
+      requestId: 'req-prisma-0001',
+    });
+    const [[, stack]] = errorSpy.mock.calls as [[string, string]];
+    expect(stack).toMatch(/^PrismaClientUnknownRequestError: .*XX000/);
+    expect(stack).toMatch(/\n\s+at /);
+    expect(stack).not.toMatch(/Ana Pérez|1234567/);
     errorSpy.mockRestore();
   });
 

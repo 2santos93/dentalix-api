@@ -1,23 +1,14 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { PrismaExceptionFilter } from './shared/prisma/prisma-exception.filter';
-import { applySecurity } from './shared/security/apply-security';
+import { configureApp } from './config/configure-app';
 import { setupSwagger } from './config/swagger';
-import { applyBodyLimits } from './config/body-limits';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
-  // Proxy de confianza, helmet y CORS. Antes de Swagger para cubrir /docs.
-  applySecurity(app);
-  // Tope de cuerpo ampliado solo para la firma de consentimientos (DX-006).
-  applyBodyLimits(app);
-  app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  // Turn Prisma unique-constraint violations (P2002) into clean 409s app-wide
-  // instead of raw 500s — the safety net for duplicate-create attempts.
-  app.useGlobalFilters(new PrismaExceptionFilter());
-
+  // bufferLogs: lo que Nest registre al crear la app sale ya con AppLogger.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // Observabilidad, seguridad, límites de cuerpo, prefijo y validación: lo
+  // mismo que montan los e2e (ver configure-app.ts).
+  configureApp(app);
   setupSwagger(app);
 
   await app.listen(process.env.PORT ?? 3000);

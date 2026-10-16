@@ -24,3 +24,9 @@ for (const policy of [
 // carga) con otro CORS_ROOT_DOMAIN cambiaría qué orígenes se aceptan.
 process.env.CORS_ORIGINS ??= 'http://localhost:3001';
 process.env.CORS_ROOT_DOMAIN ??= 'dentalix.local';
+
+// Log (DX-023): las apps de e2e montadas con configureApp (createE2eApp) no
+// escriben nada. Se fija aquí, antes de que ConfigModule cargue `.env`, para
+// que un LOG_LEVEL de desarrollo no ensucie la salida; uno pasado por la
+// línea de comandos (LOG_LEVEL=debug npm run test:e2e) sigue ganando.
+process.env.LOG_LEVEL ??= 'silent';

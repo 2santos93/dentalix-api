@@ -76,6 +76,11 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(TenantHostMiddleware).forRoutes('*');
+    // Las sondas no resuelven tenant: la liveness no puede depender de la
+    // base y la readiness ya la consulta ella misma (DX-023).
+    consumer
+      .apply(TenantHostMiddleware)
+      .exclude('health', 'health/ready')
+      .forRoutes('*');
   }
 }
