@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
@@ -30,6 +30,7 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
       notes: input.notes,
       performedById: input.performedById ?? null,
       createdAt: new Date('2026-07-23T00:00:00.000Z'),
+      addenda: [],
     };
     // Append-only: push a NEW row, never mutate/replace an existing one.
     this.rows.push(row);
@@ -132,6 +133,16 @@ describe('CreateClinicalEntryUseCase', () => {
     const result = await uc.execute('p1', { notes: 'Nota' }, 'user-77');
 
     expect(result.performedById).toBe('user-77');
+  });
+
+  it('DX-038: sin profesional autenticado → 403, sin insertar (autoría obligatoria)', async () => {
+    const repo = new InMemoryClinicalEntryRepository();
+    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+
+    await expect(
+      uc.execute('p1', { notes: 'Nota' }, ''),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.rows).toHaveLength(0);
   });
 });
 

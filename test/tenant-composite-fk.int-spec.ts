@@ -145,6 +145,7 @@ describe('FK compuestas por tenant: rechazan referencias cruzadas (SEC-004, int)
               patientId: b.patientId,
               entryDate: new Date(),
               notes: 'x',
+              performedById: a.patientId,
             },
           }),
         ),
@@ -174,6 +175,7 @@ describe('FK compuestas por tenant: rechazan referencias cruzadas (SEC-004, int)
             patientId: a.patientId,
             entryDate: new Date(),
             notes: 'ok',
+            performedById: a.patientId,
           },
         }),
       );

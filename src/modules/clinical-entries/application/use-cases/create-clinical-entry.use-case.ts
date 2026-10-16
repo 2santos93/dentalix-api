@@ -5,6 +5,7 @@ import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
+import { assertAuthor } from '../clinical-record-errors';
 
 // NOTE: deliberately NO `tenantId`/`id`/`createdAt`/`performedById` field —
 // tenant comes from the guarded request context (never the client, same
@@ -37,8 +38,10 @@ export class CreateClinicalEntryUseCase {
   async execute(
     patientId: string,
     input: CreateClinicalEntryInput,
-    performedById?: string,
+    performedById: string,
   ): Promise<ClinicalEntry> {
+    // DX-038: autoría obligatoria (la BD además exige performedById NOT NULL).
+    const author = assertAuthor(performedById);
     if (input.notes.trim() === '') {
       throw new BadRequestException('notes must not be blank');
     }
@@ -56,7 +59,7 @@ export class CreateClinicalEntryUseCase {
       entryDate: input.entryDate ?? new Date(),
       reason: input.reason,
       notes: input.notes,
-      performedById,
+      performedById: author,
     });
   }
 }

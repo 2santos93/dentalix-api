@@ -26,6 +26,7 @@ model Tenant {
   consentTemplates         ConsentTemplate[]
   prescriptionTemplates    PrescriptionTemplate[]
   emailOutbox              EmailOutbox[]
+  clinicalEntryAddenda     ClinicalEntryAddendum[]
 
   @@map("tenants")
 }
@@ -58,6 +59,7 @@ model User {
   prescriptionsVoided      Prescription[]            @relation("PrescriptionVoidedBy")
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
   tokens                   UserToken[]
+  clinicalEntryAddenda     ClinicalEntryAddendum[]
 
   @@map("users")
 }
@@ -222,6 +224,7 @@ model Patient {
 
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
+  clinicalEntryAddenda   ClinicalEntryAddendum[]
   toothRecords           ToothRecord[]
   appointments           Appointment[]
   treatmentPlans         TreatmentPlan[]
@@ -297,10 +300,40 @@ model ClinicalEntry {
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
-  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  patient Patient                 @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  addenda ClinicalEntryAddendum[]
 
+  // DX-038: INALTERABLE en la BD (trigger: ni UPDATE ni DELETE para el rol de
+  // la app), `createdAt` lo fija el servidor de BD en el INSERT y
+  // `performedById` es obligatorio en lo nuevo (CHECK NOT VALID). Corregir =
+  // añadir una ClinicalEntryAddendum.
+  // Destino de la FK compuesta de las adendas (misma clínica y paciente).
+  @@unique([tenantId, patientId, id], map: "clinical_entries_tenantId_patientId_id_key")
   @@index([tenantId, patientId, entryDate])
   @@map("clinical_entries")
+}
+
+/// Adenda (nota aclaratoria) de una evolución — DX-038, Res. 1995/1999 art. 18.
+/// Corrige sin tocar el original: texto + motivo, autor (del JWT) y fecha del
+/// servidor de BD. APPEND-ONLY en la BD (trigger) y RLS forzada por tenant.
+/// FK compuestas: la evolución debe ser de la misma clínica y del mismo paciente.
+model ClinicalEntryAddendum {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  patientId       String   @db.Uuid
+  clinicalEntryId String   @db.Uuid
+  reason          String
+  text            String
+  authorId        String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id])
+  patient Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  entry   ClinicalEntry @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id])
+  author  User          @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, patientId, clinicalEntryId, createdAt], map: "clinical_entry_addenda_entry_created_idx")
+  @@map("clinical_entry_addenda")
 }
 
 enum CatalogKind {
@@ -1386,6 +1419,7 @@ enum AuditResourceType {
   PAYMENT
   PAYMENT_PLAN
   ACCOUNT_STATEMENT
+  CLINICAL_ENTRY_ADDENDUM
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
