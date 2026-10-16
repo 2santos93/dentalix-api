@@ -20,6 +20,11 @@ type PrismaAppointment = Prisma.AppointmentGetPayload<Record<string, never>>;
  */
 const INCLUDE_PATIENT_NAME = {
   patient: { select: { firstName: true, lastName: true } },
+  // DX-121: el tipo embebido, aunque esté desactivado o retirado (la cita no
+  // cambia por eso). La FK compuesta garantiza que es de la misma clínica.
+  appointmentType: {
+    select: { id: true, name: true, durationMinutes: true, color: true },
+  },
 } as const;
 
 /**
@@ -29,12 +34,19 @@ const INCLUDE_PATIENT_NAME = {
  */
 type PrismaAppointmentWithPatient = PrismaAppointment & {
   patient?: { firstName: string; lastName: string };
+  appointmentType?: {
+    id: string;
+    name: string;
+    durationMinutes: number;
+    color: string;
+  } | null;
 };
 
 function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
   return {
     id: appointment.id,
     tenantId: appointment.tenantId,
+    locationId: appointment.locationId,
     patientId: appointment.patientId,
     patientFirstName: appointment.patient?.firstName ?? null,
     patientLastName: appointment.patient?.lastName ?? null,
@@ -45,6 +57,8 @@ function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
     reason: appointment.reason,
     notes: appointment.notes,
     createdById: appointment.createdById,
+    appointmentTypeId: appointment.appointmentTypeId,
+    appointmentType: appointment.appointmentType ?? null,
     confirmationSentAt: appointment.confirmationSentAt,
     callbackRequestedAt: appointment.callbackRequestedAt,
     createdAt: appointment.createdAt,
@@ -105,6 +119,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           reason: input.reason,
           notes: input.notes,
           createdById: input.createdById,
+          appointmentTypeId: input.appointmentTypeId,
         },
         include: INCLUDE_PATIENT_NAME,
       });
@@ -129,8 +144,15 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       deletedAt: null,
       start: { gte: params.from, lt: params.to },
       ...(params.providerId ? { providerId: params.providerId } : {}),
-      // La agenda SÍ es por sede: una cita ocurre en un sitio físico.
-      ...this.locationFilter(),
+      // DX-121: columnas de la vista Día. `providerId IN (...)` lo sirve
+      // `appointments_tenantId_providerId_start_idx` (DX-043).
+      ...(params.providerIds ? { providerId: { in: params.providerIds } } : {}),
+      // La agenda SÍ es por sede: una cita ocurre en un sitio físico. Una sede
+      // explícita (DX-121) manda sobre la del request; una de otra clínica no
+      // devuelve nada (RLS).
+      ...(params.locationId
+        ? { locationId: params.locationId }
+        : this.locationFilter()),
     };
 
     return this.prisma.runWithTenant(async (tx) => {
@@ -234,11 +256,18 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         throw new NotFoundException('Appointment not found');
       }
 
+      const { revokeConfirmations, ...data } = patch;
       const appointment = await tx.appointment.update({
         where: { id },
-        data: patch,
+        data,
         include: INCLUDE_PATIENT_NAME,
       });
+      if (revokeConfirmations) {
+        await tx.appointmentConfirmation.updateMany({
+          where: { appointmentId: id, revokedAt: null, respondedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
       return mapToEntity(appointment);
     });
   }

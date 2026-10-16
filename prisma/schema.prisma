@@ -28,6 +28,7 @@ model Tenant {
   emailOutbox              EmailOutbox[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
   dentitionEvents          PatientDentitionEvent[]
+  appointmentTypes         AppointmentType[]
 
   @@map("tenants")
 }
@@ -507,6 +508,9 @@ model Appointment {
   reason              String?
   notes               String?
   createdById         String?           @db.Uuid
+  // DX-121: tipo de cita (duración y color). Opcional: las citas anteriores no
+  // tienen tipo y siguen siendo válidas.
+  appointmentTypeId   String?           @db.Uuid
   // DX-005: cuándo recepción generó el último enlace de confirmación vigente
   // (null = nunca, o se invalidó al reagendar/cambiar el estado a mano).
   confirmationSentAt  DateTime?
@@ -523,14 +527,18 @@ model Appointment {
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
   // en algún tenant" (las FK saltan la RLS), así que se podía agendar contra
   // un paciente de otra clínica.
-  patient  Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  patient         Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  location        Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  // FK COMPUESTA (DX-121): el tipo tiene que ser del MISMO tenant.
+  appointmentType AppointmentType? @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
 
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
   @@unique([tenantId, id], map: "appointments_tenant_id_key")
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
+  // DX-121: lado hijo de la FK compuesta al tipo de cita.
+  @@index([tenantId, appointmentTypeId])
   // DX-043 (DB-006): agenda por sede y semana. NO es parcial a propósito:
   // también es el lado hijo de la FK compuesta (tenantId, locationId), que
   // tiene que ver las citas retiradas; sustituye a (tenantId, locationId),
@@ -543,6 +551,36 @@ model Appointment {
 }
 
 // DX-005: respuesta del paciente en el enlace público de confirmación.
+// DX-121: tipo de cita de la clínica (p. ej. «Endodoncia», 90 min, morado).
+// Fija la duración por defecto al agendar y colorea la tarjeta en la agenda.
+// Nunca se borra físicamente: `active = false` lo quita del selector y
+// `deletedAt` lo retira de la gestión; las citas existentes no cambian.
+model AppointmentType {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @db.Uuid
+  name            String
+  // Múltiplo de 5 entre 5 y 480 (CHECK en la migración).
+  durationMinutes Int
+  // `#RRGGBB` (CHECK en la migración): nunca CSS libre.
+  color           String
+  active          Boolean   @default(true)
+  createdById     String?   @db.Uuid
+  updatedById     String?   @db.Uuid
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  appointments Appointment[]
+
+  // Destino de la FK compuesta de appointments.appointmentTypeId.
+  @@unique([tenantId, id], map: "appointment_types_tenant_id_key")
+  // Único PARCIAL (solo vivos): el WHERE vive en la migración; Prisma no lo
+  // expresa. NO aceptar un diff de migrate dev que lo recree sin el WHERE.
+  @@unique([tenantId, name], map: "appointment_types_tenant_name_key")
+  @@map("appointment_types")
+}
+
 enum AppointmentConfirmationResponse {
   CONFIRM
   CANCEL
@@ -1504,6 +1542,8 @@ enum AuditResourceType {
   PAYMENT_PLAN
   ACCOUNT_STATEMENT
   CLINICAL_ENTRY_ADDENDUM
+  // DX-121: mover una cita (hora y profesional antes/después).
+  APPOINTMENT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

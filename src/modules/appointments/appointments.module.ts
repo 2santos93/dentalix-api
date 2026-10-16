@@ -12,6 +12,7 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { PatientsModule } from '../patients/patients.module';
 import { StaffModule } from '../staff/staff.module';
 import { LocationScheduleModule } from '../location-schedule/location-schedule.module';
+import { AppointmentTypesModule } from '../appointment-types/appointment-types.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
 @Module({
@@ -26,6 +27,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     PatientsModule,
     StaffModule,
     LocationScheduleModule,
+    // DX-121: valida el tipo de cita y toma su duración al agendar.
+    AppointmentTypesModule,
   ],
   controllers: [AppointmentsController],
   providers: [

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AppointmentStatus } from '@prisma/client';
+import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
 
 // Response shape for Appointment endpoints — documents the Appointment
 // entity contract for Swagger (same convention as BrandingDto /
@@ -13,6 +14,9 @@ export class AppointmentDto {
 
   @ApiProperty({ format: 'uuid' })
   tenantId!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'Sede donde ocurre la cita.' })
+  locationId!: string;
 
   @ApiProperty({ format: 'uuid' })
   patientId!: string;
@@ -48,6 +52,17 @@ export class AppointmentDto {
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  appointmentTypeId!: string | null;
+
+  @ApiProperty({
+    type: AppointmentTypeSummaryDto,
+    nullable: true,
+    description:
+      'DX-121: tipo embebido (nombre, duración, color #RRGGBB). Se mantiene aunque el tipo se desactive o retire después.',
+  })
+  appointmentType!: AppointmentTypeSummaryDto | null;
 
   @ApiProperty({
     type: String,

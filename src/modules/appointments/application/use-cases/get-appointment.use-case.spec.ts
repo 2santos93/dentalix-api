@@ -11,6 +11,7 @@ function fakeAppointment(id: string): Appointment {
   return {
     id,
     tenantId: 't1',
+    locationId: 'loc-1',
     patientId: 'p1',
     patientFirstName: null,
     patientLastName: null,
@@ -21,6 +22,8 @@ function fakeAppointment(id: string): Appointment {
     reason: null,
     notes: null,
     createdById: null,
+    appointmentTypeId: null,
+    appointmentType: null,
     confirmationSentAt: null,
     callbackRequestedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

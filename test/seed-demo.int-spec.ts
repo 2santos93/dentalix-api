@@ -55,6 +55,7 @@ const TENANT_TABLES = [
   'medical_history_versions',
   'appointment_confirmations',
   'appointments',
+  'appointment_types',
   'inventory_movements',
   'inventory_items',
   'location_schedule_ranges',
@@ -316,10 +317,22 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.prescription_templates).toBe(3);
     expect(firstCounts.prescriptions).toBe(1);
     expect(firstCounts.prescription_items).toBe(2);
+    // DX-121: 5 tipos de cita con color.
+    expect(firstCounts.appointment_types).toBe(5);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );
   }, 120000);
+
+  it('deja tipos de cita con color y citas demo con tipo (DX-121)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const types = await raw.appointmentType.findMany({ where: { tenantId } });
+    expect(types.every((t) => /^#[0-9A-F]{6}$/.test(t.color))).toBe(true);
+    const typed = await raw.appointment.count({
+      where: { tenantId, appointmentTypeId: { not: null } },
+    });
+    expect(typed).toBeGreaterThanOrEqual(10);
+  });
 
   it('deja una cita futura con confirmación pendiente y otra que pide llamada (DX-005)', async () => {
     const tenantId = await liveDemoTenantId();

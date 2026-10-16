@@ -127,6 +127,7 @@ function makeAppointment(overrides: Partial<Appointment>): Appointment {
   return {
     id: 'appt-1',
     tenantId: 'tenant-1',
+    locationId: 'loc-1',
     patientId: 'patient-1',
     patientFirstName: null,
     patientLastName: null,
@@ -137,6 +138,8 @@ function makeAppointment(overrides: Partial<Appointment>): Appointment {
     reason: null,
     notes: null,
     createdById: null,
+    appointmentTypeId: null,
+    appointmentType: null,
     confirmationSentAt: null,
     callbackRequestedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

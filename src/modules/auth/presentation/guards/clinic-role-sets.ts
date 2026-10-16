@@ -46,6 +46,10 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+// Tipos de cita (DX-121) — crear/editar/desactivar/retirar: solo gestión.
+// Leerlos (selector del formulario de cita): APPOINTMENT_ROLES.
+export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Pagos / abonos (facturación): ADMIN (gestión) + RECEPTION (mostrador
 // -- registra el abono del paciente), pero NO DENTIST/ASSISTANT (dato
 // financiero, no clínico -- ver docs/plans/2026-07-24-payments-pivot.md

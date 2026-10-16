@@ -33,6 +33,25 @@ export class AuditPatientDto {
   fullName!: string;
 }
 
+export class AuditAppointmentSlotDto {
+  @ApiProperty({ format: 'date-time' })
+  start!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  end!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  providerId!: string;
+}
+
+export class AuditAppointmentMoveDto {
+  @ApiProperty({ type: AuditAppointmentSlotDto })
+  from!: AuditAppointmentSlotDto;
+
+  @ApiProperty({ type: AuditAppointmentSlotDto })
+  to!: AuditAppointmentSlotDto;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -49,6 +68,13 @@ export class AuditMetadataDto {
 
   @ApiPropertyOptional({ example: 'INVALID_CREDENTIALS' })
   reason?: string;
+
+  @ApiPropertyOptional({
+    type: AuditAppointmentMoveDto,
+    description:
+      'DX-121: cita movida — hora y profesional antes y después (nunca datos del paciente).',
+  })
+  move?: AuditAppointmentMoveDto;
 }
 
 export class AuditEventDto {

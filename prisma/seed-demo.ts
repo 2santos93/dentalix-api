@@ -39,6 +39,7 @@ import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/applicat
 import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/void-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
 import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
 import { CreateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/create-treatment-plan.use-case';
@@ -82,6 +83,7 @@ import {
   DEMO_CLINICAL_ENTRIES,
   DEMO_CLINICAL_ADDENDA,
   DEMO_CONSENT_TEMPLATES,
+  DEMO_APPOINTMENT_TYPES,
   DEMO_PERIO,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
@@ -481,6 +483,10 @@ class DemoSeeder {
       this.createClinicalRecords(patientIds, dentists, catalog),
     );
 
+    const typeByReason = await this.inTenant(tenantId, undefined, () =>
+      this.createAppointmentTypes(ownerId),
+    );
+
     await this.createAppointments(
       tenantId,
       locations,
@@ -488,6 +494,7 @@ class DemoSeeder {
       patientIds,
       dentists,
       receptionId,
+      typeByReason,
     );
 
     await this.createPlansAndPayments(
@@ -797,6 +804,28 @@ class DemoSeeder {
     }
   }
 
+  /**
+   * DX-121: los tipos de cita de la demo (los crea el ADMIN, como en
+   * /settings/tipos-de-cita). Devuelve motivo del calendario -> id del tipo.
+   */
+  private async createAppointmentTypes(
+    ownerId: string,
+  ): Promise<Map<string, string>> {
+    const typeByReason = new Map<string, string>();
+    for (const spec of DEMO_APPOINTMENT_TYPES) {
+      const type = await this.use(CreateAppointmentTypeUseCase).execute(
+        {
+          name: spec.name,
+          durationMinutes: spec.durationMinutes,
+          color: spec.color,
+        },
+        ownerId,
+      );
+      for (const reason of spec.reasons) typeByReason.set(reason, type.id);
+    }
+    return typeByReason;
+  }
+
   private async createAppointments(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
@@ -804,6 +833,7 @@ class DemoSeeder {
     patientIds: string[],
     dentists: string[],
     createdById: string,
+    typeByReason: Map<string, string>,
   ): Promise<void> {
     // DX-040: el paciente de las opciones A/B no tiene cita futura (por eso
     // sale en «Presupuestos por seguir»); sus citas pasadas se quedan.
@@ -827,6 +857,9 @@ class DemoSeeder {
           end: a.end,
           reason: a.reason,
           createdById,
+          // DX-121: el hueco del calendario manda (end explícito); el tipo
+          // solo colorea la tarjeta.
+          appointmentTypeId: typeByReason.get(a.reason),
         };
         // Pasado/futuro se decide con el reloj VIVO (el mismo que usa el caso
         // de uso), no con `this.now`. Las pasadas van por la ruta histórica,
