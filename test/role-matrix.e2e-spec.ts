@@ -24,8 +24,11 @@ import {
  * `src/auth-matrix.spec.ts` ata a los metadatos de los controladores) con un
  * token de cada uno de los 4 roles de una misma clínica:
  *  - rol no permitido → 403 (lo corta RolesGuard antes de validar nada);
- *  - rol permitido → ni 403 ni 401 (puede ser 200, 400 o 404: los ids son
- *    inventados y los cuerpos van vacíos, así que no se escribe nada).
+ *  - rol permitido → ni 401 ni 403 ni 5xx (puede ser 2xx, 400 o 404).
+ *    Los ids son inventados y los cuerpos van vacíos, así que las rutas por id
+ *    no encuentran nada y los POST/PUT/PATCH sin campos obligatorios dan 400.
+ *    La excepción es `DELETE /me/avatar`, que sí escribe: retira el avatar
+ *    del propio usuario (aquí no tiene ninguno) y no afecta a otros casos.
  * Además: sin token → 401 en toda ruta con sesión, y `/platform/*` solo con
  * token de plataforma.
  */
@@ -133,7 +136,12 @@ describe('Role matrix (e2e, DX-068)', () => {
       expect({
         key,
         forbiddenOrUnauthenticated: [401, 403].includes(res.status),
-      }).toEqual({ key, forbiddenOrUnauthenticated: false });
+        serverError: res.status >= 500,
+      }).toEqual({
+        key,
+        forbiddenOrUnauthenticated: false,
+        serverError: false,
+      });
     });
 
     it.each(platformRoutes)('403 en %s (token de clínica)', async (key) => {

@@ -46,7 +46,7 @@ const KEEP_TABLES = new Set([
 export async function resetDatabase(raw: PrismaClient): Promise<void> {
   const [{ db }] = await raw.$queryRaw<{ db: string }[]>`
     SELECT current_database() AS db`;
-  if (!db.includes('_test')) {
+  if (!/_test(_\w+)?$/.test(db)) {
     throw new Error(`resetDatabase: "${db}" no es una base de test`);
   }
   const tables = await raw.$queryRaw<{ tablename: string }[]>`
