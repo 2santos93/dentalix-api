@@ -24,6 +24,7 @@ model Tenant {
   privacyPolicyVersions    PrivacyPolicyVersion[]
   dataProcessingConsents   DataProcessingConsent[]
   consentTemplates         ConsentTemplate[]
+  prescriptionTemplates    PrescriptionTemplate[]
 
   @@map("tenants")
 }
@@ -52,6 +53,8 @@ model User {
   privacyPoliciesPublished PrivacyPolicyVersion[]
   dataConsentsRecorded     DataProcessingConsent[]
   perioExamsPerformed      PerioExam[]
+  prescriptionsIssued      Prescription[]          @relation("PrescriptionProfessional")
+  prescriptionsVoided      Prescription[]          @relation("PrescriptionVoidedBy")
 
   @@map("users")
 }
@@ -67,20 +70,31 @@ enum ClinicRole {
 /// DENTRO del tenant, no un nivel de aislamiento: el RLS por tenant sigue
 /// siendo la frontera dura. Pacientes, historia y catálogo NO llevan sede —
 /// la ficha del paciente es de la clínica (ver docs/plans/2026-08-01-multi-sede.md).
+/// País donde opera una sede (DX-013). Decide los campos legales obligatorios
+/// de la receta: CO (Dec. 780/2016 art. 2.5.3.10.16) o ES (RD 1718/2010 art. 3).
+enum ClinicCountry {
+  CO
+  ES
+}
+
 model Location {
-  id        String    @id @default(uuid()) @db.Uuid
-  tenantId  String    @db.Uuid
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @db.Uuid
   name      String
   address   String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  // País de la sede (DX-013): la receta se emite con las reglas del país donde
+  // se atiende. Por defecto CO, que es lo que eran todas las sedes hasta hoy.
+  country   ClinicCountry @default(CO)
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
   deletedAt DateTime?
 
   appointments       Appointment[]
   payments           Payment[]
   inventoryItems     InventoryItem[]
   inventoryMovements InventoryMovement[]
+  prescriptions      Prescription[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -90,15 +104,18 @@ model Location {
 }
 
 model ClinicMembership {
-  id        String     @id @default(uuid()) @db.Uuid
-  tenantId  String     @db.Uuid
-  userId    String     @db.Uuid
-  role      ClinicRole
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  deletedAt DateTime?
-  tenant    Tenant     @relation(fields: [tenantId], references: [id])
-  user      User       @relation(fields: [userId], references: [id])
+  id                  String     @id @default(uuid()) @db.Uuid
+  tenantId            String     @db.Uuid
+  userId              String     @db.Uuid
+  role                ClinicRole
+  // Registro profesional (CO: RETHUS / tarjeta profesional) o nº de colegiado
+  // (ES) del miembro EN ESTA CLÍNICA (DX-013). Lo exige la receta.
+  professionalLicense String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  deletedAt           DateTime?
+  tenant              Tenant     @relation(fields: [tenantId], references: [id])
+  user                User       @relation(fields: [userId], references: [id])
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -199,6 +216,7 @@ model Patient {
   dataProcessingConsents DataProcessingConsent[]
   consents               PatientConsent[]
   perioExams             PerioExam[]
+  prescriptions          Prescription[]
   country                Country?                @relation(fields: [countryCode], references: [code])
   city                   City?                   @relation(fields: [cityId], references: [id])
 
@@ -1102,4 +1120,120 @@ model PerioToothMeasure {
 
   @@unique([tenantId, examId, toothFdi], map: "perio_tooth_measures_exam_tooth_key")
   @@map("perio_tooth_measures")
+}
+
+// ---------------------------------------------------------------------------
+// Recetas (DX-013). La receta EMITIDA es inmutable: guarda la foto de paciente,
+// profesional, sede y medicamentos, y su SHA-256. Solo puede ANULARSE (motivo,
+// autor y fecha); un trigger de la base rechaza cualquier otra modificación.
+// Ver 20261016200000_prescriptions.
+// ---------------------------------------------------------------------------
+enum PrescriptionStatus {
+  ISSUED
+  VOIDED
+}
+
+// Plantilla de receta de la clínica (p. ej. «Post-exodoncia»). Editable y con
+// borrado blando; la receta emitida copia los medicamentos, no la referencia.
+model PrescriptionTemplate {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  name        String
+  notes       String?
+  // Lista de medicamentos (misma forma que PrescriptionItem, sin cantidades en
+  // letras): ver prescription-template.entity.ts.
+  items       Json
+  createdById String?   @db.Uuid
+  updatedById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  // Único PARCIAL (solo vivas): el WHERE vive en la migración; Prisma no lo
+  // expresa. NO aceptar un diff de migrate dev que lo recree sin el WHERE.
+  @@unique([tenantId, name], map: "prescription_templates_tenant_name_key")
+  @@index([tenantId, deletedAt])
+  @@map("prescription_templates")
+}
+
+model Prescription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  tenantId             String             @db.Uuid
+  locationId           String             @db.Uuid
+  patientId            String             @db.Uuid
+  // Quien prescribe: sale del token, nunca del cuerpo.
+  professionalId       String             @db.Uuid
+  country              ClinicCountry
+  status               PrescriptionStatus @default(ISSUED)
+  // Hora del servidor.
+  issuedAt             DateTime
+  // Fecha prevista de dispensación (ES) / fecha de la receta (CO).
+  dispensationDate     DateTime           @db.Date
+  validUntil           DateTime           @db.Date
+  // Foto de los datos legales en el momento de emitir.
+  patientName          String
+  patientDocument      String?
+  patientBirthYear     Int?
+  clinicalRecordNumber String?
+  professionalName     String
+  professionalLicense  String
+  professionalEmail    String?
+  clinicName           String
+  locationName         String
+  locationAddress      String?
+  notes                String?
+  // Alerta de alergia confirmada por el profesional (y contra qué alergias).
+  allergyOverride      Boolean            @default(false)
+  allergyMatches       Json?
+  // SHA-256 (hex) del contenido emitido (prescription-hash.ts).
+  contentHash          String
+  voidedAt             DateTime?
+  voidedById           String?            @db.Uuid
+  voidReason           String?
+  createdAt            DateTime           @default(now())
+
+  // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
+  patient      Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  location     Location           @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  professional User               @relation("PrescriptionProfessional", fields: [professionalId], references: [id])
+  voidedBy     User?              @relation("PrescriptionVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  items        PrescriptionItem[]
+
+  @@unique([tenantId, id], map: "prescriptions_tenant_id_key")
+  // Lista del paciente, más reciente primero.
+  @@index([tenantId, patientId, issuedAt(sort: Desc)])
+  @@index([tenantId, locationId])
+  @@index([professionalId])
+  @@index([voidedById])
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @db.Uuid
+  prescriptionId     String  @db.Uuid
+  position           Int     @db.SmallInt
+  // Principio activo (DCI/DOE).
+  activeIngredient   String
+  brandName          String?
+  concentration      String
+  pharmaceuticalForm String
+  route              String
+  dose               String
+  frequency          String
+  durationDays       Int
+  totalQuantity      Int
+  quantityUnit       String
+  // Cantidad total en letras (CO), generada por el servidor.
+  quantityInWords    String
+  // Nº de envases (obligatorio en ES).
+  packages           Int?
+  instructions       String?
+
+  prescription Prescription @relation(fields: [tenantId, prescriptionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, prescriptionId, position], map: "prescription_items_rx_position_key")
+  @@map("prescription_items")
 }

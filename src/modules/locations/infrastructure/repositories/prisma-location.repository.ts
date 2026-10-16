@@ -28,7 +28,12 @@ export class PrismaLocationRepository implements LocationRepository {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const location = await tx.location.create({
-        data: { tenantId, name: input.name, address: input.address },
+        data: {
+          tenantId,
+          name: input.name,
+          address: input.address,
+          country: input.country,
+        },
       });
       // Una sede nueva nace con horario por defecto, igual que la que se crea al
       // registrar la clínica — si no, unas sedes tendrían horario y otras no

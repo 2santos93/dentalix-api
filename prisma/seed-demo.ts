@@ -43,6 +43,9 @@ import { CreateInventoryItemUseCase } from '../src/modules/inventory/application
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
 import { CreateConsentTemplateUseCase } from '../src/modules/consents/application/use-cases/consent-templates.use-cases';
 import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
+import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-templates.use-cases';
+import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
+import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/update-staff.use-case';
 import {
   CreatePerioExamUseCase,
   FinalizePerioExamUseCase,
@@ -59,6 +62,9 @@ import {
   DEMO_CLINICAL_ENTRIES,
   DEMO_CONSENT_TEMPLATES,
   DEMO_PERIO,
+  DEMO_PRESCRIPTION,
+  DEMO_PRESCRIPTION_TEMPLATES,
+  DEMO_PROFESSIONAL_LICENSES,
   demoPerioMeasures,
   DEMO_CURRENCY,
   DEMO_EMAIL_DOMAIN,
@@ -474,6 +480,10 @@ class DemoSeeder {
 
     await this.inTenant(tenantId, undefined, () =>
       this.createPerioExams(patientIds, dentists),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createPrescriptions(ownerId, patientIds, dentists),
     );
 
     return this.requestConfirmations(tenantId, receptionId);
@@ -920,6 +930,35 @@ class DemoSeeder {
       );
       await this.use(FinalizePerioExamUseCase).execute(patientId, exam.id);
     }
+  }
+
+  /**
+   * DX-013: registro profesional de los odontólogos, las plantillas típicas
+   * (las crea el ADMIN) y una receta post-exodoncia emitida, todo por los
+   * mismos casos de uso que la API. Sin X-Location-Id: la sede principal (CO).
+   */
+  private async createPrescriptions(
+    ownerId: string,
+    patientIds: string[],
+    dentists: string[],
+  ): Promise<void> {
+    for (const [index, license] of DEMO_PROFESSIONAL_LICENSES.entries()) {
+      await this.use(UpdateStaffUseCase).execute({
+        userId: dentists[index],
+        professionalLicense: license,
+      });
+    }
+    for (const template of DEMO_PRESCRIPTION_TEMPLATES) {
+      await this.use(CreatePrescriptionTemplateUseCase).execute(
+        { name: template.name, notes: template.notes, items: template.items },
+        ownerId,
+      );
+    }
+    await this.use(IssuePrescriptionUseCase).execute(
+      patientIds[DEMO_PRESCRIPTION.patientIndex],
+      { items: [...DEMO_PRESCRIPTION.items], notes: DEMO_PRESCRIPTION.notes },
+      dentists[DEMO_PRESCRIPTION.dentistIndex],
+    );
   }
 
   private async createInventory(

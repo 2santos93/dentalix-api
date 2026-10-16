@@ -1,8 +1,12 @@
+import type { ClinicCountry } from '@prisma/client';
+
 export interface Location {
   id: string;
   tenantId: string;
   name: string;
   address: string | null;
+  /** País de la sede (DX-013): decide los campos legales de la receta. */
+  country: ClinicCountry;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -13,11 +17,13 @@ export interface Location {
 export interface CreateLocationRepoInput {
   name: string;
   address?: string;
+  country?: ClinicCountry;
 }
 
 export interface UpdateLocationRepoInput {
   name?: string;
   address?: string;
+  country?: ClinicCountry;
   isActive?: boolean;
 }
 

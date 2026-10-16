@@ -1,5 +1,19 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
+import { ClinicCountry } from '@prisma/client';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
+
+const COUNTRY_DOC = {
+  enum: ClinicCountry,
+  enumName: 'ClinicCountry',
+  description:
+    'País de la sede: decide los campos legales obligatorios de la receta (CO o ES). Por defecto CO.',
+};
 
 export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
@@ -11,6 +25,11 @@ export class CreateLocationDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @ApiPropertyOptional(COUNTRY_DOC)
+  @IsOptional()
+  @IsEnum(ClinicCountry)
+  country?: ClinicCountry;
 }
 
 export class UpdateLocationDto {
@@ -25,6 +44,11 @@ export class UpdateLocationDto {
   @IsString()
   address?: string;
 
+  @ApiPropertyOptional(COUNTRY_DOC)
+  @IsOptional()
+  @IsEnum(ClinicCountry)
+  country?: ClinicCountry;
+
   @ApiPropertyOptional({
     description:
       'Desactivar una sede la oculta para operar; no se puede desactivar la última activa.',
@@ -38,6 +62,8 @@ export class LocationDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ nullable: true, type: String }) address!: string | null;
+  @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
+  country!: ClinicCountry;
   @ApiProperty() isActive!: boolean;
   @ApiProperty({ type: String, format: 'date-time' }) createdAt!: Date;
 }

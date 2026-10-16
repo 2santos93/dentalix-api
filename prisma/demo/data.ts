@@ -1440,3 +1440,104 @@ export function demoPerioMeasures(phase: DemoPerioExam['phase']): {
   }
   return { sites, teeth };
 }
+
+// ---------------------------------------------------------------------------
+// DX-013: recetas. Tres plantillas típicas (las crea el ADMIN), el registro
+// profesional de los odontólogos y una receta emitida post-exodoncia para el
+// paciente del plan de implante (sin alergias a esos fármacos). Las sedes de
+// la demo son de Colombia: rigen los campos del Dec. 780/2016.
+// ---------------------------------------------------------------------------
+
+export interface DemoPrescriptionItem {
+  activeIngredient: string;
+  concentration: string;
+  pharmaceuticalForm: string;
+  route: string;
+  dose: string;
+  frequency: string;
+  durationDays: number;
+  totalQuantity: number;
+  quantityUnit: string;
+  packages?: number;
+  instructions?: string;
+}
+
+export interface DemoPrescriptionTemplate {
+  name: string;
+  notes?: string;
+  items: DemoPrescriptionItem[];
+}
+
+const AMOXICILINA_500: DemoPrescriptionItem = {
+  activeIngredient: 'Amoxicilina',
+  concentration: '500 mg',
+  pharmaceuticalForm: 'Cápsula',
+  route: 'Oral',
+  dose: '1 cápsula',
+  frequency: 'Cada 8 horas',
+  durationDays: 7,
+  totalQuantity: 21,
+  quantityUnit: 'cápsulas',
+  packages: 1,
+  instructions: 'Completar el tratamiento aunque desaparezcan las molestias.',
+};
+
+const IBUPROFENO_600: DemoPrescriptionItem = {
+  activeIngredient: 'Ibuprofeno',
+  concentration: '600 mg',
+  pharmaceuticalForm: 'Tableta recubierta',
+  route: 'Oral',
+  dose: '1 tableta',
+  frequency: 'Cada 8 horas',
+  durationDays: 3,
+  totalQuantity: 9,
+  quantityUnit: 'tabletas',
+  packages: 1,
+  instructions: 'Tomar después de las comidas.',
+};
+
+const CLORHEXIDINA_012: DemoPrescriptionItem = {
+  activeIngredient: 'Clorhexidina gluconato',
+  concentration: '0,12 %',
+  pharmaceuticalForm: 'Solución para enjuague bucal',
+  route: 'Bucal (enjuague)',
+  dose: '15 ml',
+  frequency: 'Cada 12 horas',
+  durationDays: 10,
+  totalQuantity: 1,
+  quantityUnit: 'frasco de 300 ml',
+  packages: 1,
+  instructions:
+    'Enjuagar 30 segundos sin diluir, después del cepillado. No comer ni beber en los 30 minutos siguientes.',
+};
+
+export const DEMO_PRESCRIPTION_TEMPLATES: readonly DemoPrescriptionTemplate[] =
+  [
+    {
+      name: 'Antibiótico — Amoxicilina 500 mg',
+      notes: 'Profilaxis o infección odontogénica.',
+      items: [AMOXICILINA_500],
+    },
+    {
+      name: 'Analgésico — Ibuprofeno 600 mg',
+      items: [IBUPROFENO_600],
+    },
+    {
+      name: 'Enjuague — Clorhexidina 0,12 %',
+      items: [CLORHEXIDINA_012],
+    },
+  ];
+
+/** Registro profesional (RETHUS / tarjeta profesional) de los odontólogos demo. */
+export const DEMO_PROFESSIONAL_LICENSES: readonly string[] = [
+  'RM 52-1234-19',
+  'RM 25-7788-21',
+];
+
+export const DEMO_PRESCRIPTION = {
+  patientIndex: 1,
+  dentistIndex: 0,
+  notes:
+    'Post-exodoncia del 36: dieta blanda y frío local las primeras 24 horas.',
+  items: [AMOXICILINA_500, IBUPROFENO_600],
+} as const;

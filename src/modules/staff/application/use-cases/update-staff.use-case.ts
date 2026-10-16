@@ -6,13 +6,18 @@ import {
 } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { STAFF_REPOSITORY } from '../../domain/ports/staff-repository.port';
-import type { StaffRepository } from '../../domain/ports/staff-repository.port';
+import type {
+  StaffPatch,
+  StaffRepository,
+} from '../../domain/ports/staff-repository.port';
 import { StaffMember } from '../../domain/entities/staff-member.entity';
 
 export interface UpdateStaffInput {
   userId: string;
   fullName?: string;
   role?: ClinicRole;
+  /** `''` o solo espacios lo borran. */
+  professionalLicense?: string;
 }
 
 @Injectable()
@@ -21,9 +26,12 @@ export class UpdateStaffUseCase {
     @Inject(STAFF_REPOSITORY) private readonly repo: StaffRepository,
   ) {}
   async execute(input: UpdateStaffInput): Promise<StaffMember> {
-    const patch: { fullName?: string; role?: ClinicRole } = {};
+    const patch: StaffPatch = {};
     if (input.role) patch.role = input.role;
     if (input.fullName) patch.fullName = input.fullName.trim();
+    if (input.professionalLicense !== undefined) {
+      patch.professionalLicense = input.professionalLicense.trim() || null;
+    }
     // "No dejar la clínica sin ADMIN" se comprueba y se escribe en la misma
     // transacción (ver StaffRepository.updateById, DB-012).
     const outcome = await this.repo.updateById(input.userId, patch);

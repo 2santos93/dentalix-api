@@ -74,3 +74,18 @@ it('recorta el nombre antes de guardarlo', async () => {
   });
   expect(repo.updateById).toHaveBeenCalledWith('u1', { fullName: 'Ana R' });
 });
+
+describe('registro profesional (DX-013)', () => {
+  it('lo recorta y lo guarda; vacío lo borra (null)', async () => {
+    const repo = makeRepo();
+    const uc = new UpdateStaffUseCase(asRepo(repo));
+    await uc.execute({ userId: 'u1', professionalLicense: '  RM-123  ' });
+    expect(repo.updateById).toHaveBeenLastCalledWith('u1', {
+      professionalLicense: 'RM-123',
+    });
+    await uc.execute({ userId: 'u1', professionalLicense: '   ' });
+    expect(repo.updateById).toHaveBeenLastCalledWith('u1', {
+      professionalLicense: null,
+    });
+  });
+});
