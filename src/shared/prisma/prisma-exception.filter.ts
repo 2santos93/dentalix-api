@@ -62,6 +62,13 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
     match: 'sourcePlanItemId',
     message: 'Ese procedimiento ya está registrado en el odontograma.',
   },
+  // DX-120: dos anulaciones del mismo registro (la carrera la decide el
+  // índice único parcial).
+  {
+    match: 'tooth_records_void_once_key',
+    message: 'Este registro ya está anulado.',
+  },
+  { match: 'voidsRecordId', message: 'Este registro ya está anulado.' },
   {
     match: 'payments_tenant_idempotency_key',
     message: 'Este pago ya fue registrado.',

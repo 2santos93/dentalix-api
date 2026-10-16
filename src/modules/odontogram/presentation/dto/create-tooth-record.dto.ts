@@ -7,7 +7,12 @@ import {
   IsUUID,
   Matches,
 } from 'class-validator';
-import { CatalogKind, ToothRecordStatus, ToothSurface } from '@prisma/client';
+import {
+  CatalogKind,
+  ToothRecordOrigin,
+  ToothRecordStatus,
+  ToothSurface,
+} from '@prisma/client';
 import { FDI_TOOTH_NUMBER_PATTERN } from '../../application/use-cases/add-tooth-record.use-case';
 
 // NOTE: deliberately NO `tenantId`/`patientId`/`performedById` field — tenant
@@ -66,4 +71,16 @@ export class CreateToothRecordDto {
   @IsOptional()
   @IsUUID()
   clinicalEntryId?: string;
+
+  @ApiPropertyOptional({
+    enum: ToothRecordOrigin,
+    default: ToothRecordOrigin.THIS_CLINIC,
+    description:
+      'DX-120: hecho en esta clínica, ya presente al llegar el paciente u obra de otro profesional',
+  })
+  @IsOptional()
+  @IsEnum(ToothRecordOrigin, {
+    message: 'El origen debe ser THIS_CLINIC, PRE_EXISTING u OTHER_PROVIDER',
+  })
+  origin?: ToothRecordOrigin;
 }
