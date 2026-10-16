@@ -13,12 +13,14 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   // JwtModule.register({}) mirrors StaffModule: JwtAuthGuard (applied on
   // StaffInvitationsController) depends on TokenService, which depends on
-  // JwtService — must be available here.
-  imports: [JwtModule.register({})],
+  // JwtService — must be available here. AuthModule aporta
+  // SessionCookieService: aceptar una invitación abre sesión (DX-062).
+  imports: [JwtModule.register({}), AuthModule],
   controllers: [StaffInvitationsController, PublicInvitationsController],
   providers: [
     CreateInvitationUseCase,

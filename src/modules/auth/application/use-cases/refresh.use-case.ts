@@ -1,5 +1,6 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { TokenService } from '../../../../shared/crypto/token.service';
+import { isTenantPayload } from '../../../../shared/crypto/token.service';
 import type { VerifiedRefreshPayload } from '../../../../shared/crypto/token.service';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
@@ -7,13 +8,22 @@ import { SessionClaimsService } from '../session-claims.service';
 
 export interface RefreshInput {
   refreshToken: string;
+  /**
+   * Clínica del host que pide el refresh (`null` = apex, sesión de
+   * plataforma). Si se indica, el token tiene que ser de esa misma clínica:
+   * una sesión no se renueva desde el host de otra. `undefined` = no se
+   * comprueba (clientes antiguos que mandan el refresh en el body sin host
+   * de clínica).
+   */
+  expectedTenantId?: string | null;
 }
 
 /**
  * Cambia un refresh token válido por un par nuevo. NO es stateless: antes de
  * emitir revalida la sesión contra la BD y consume el token.
  *
- * 1. Firma y TTL (secreto de refresh).
+ * 1. Firma y TTL (secreto de refresh), y que la sesión sea de la clínica del
+ *    host cuando se indica `expectedTenantId` (DX-062).
  * 2. Estado ACTUAL (SEC-001): el usuario existe; en sesión de clínica, sigue
  *    con membresía activa y el par nuevo lleva su rol VIGENTE (no el del token
  *    anterior); en sesión de plataforma, sigue siendo superadmin.
@@ -44,6 +54,12 @@ export class RefreshUseCase {
       payload = await this.tokens.verifyRefresh(input.refreshToken);
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
+    }
+    if (input.expectedTenantId !== undefined) {
+      const tokenTenantId = isTenantPayload(payload) ? payload.tenantId : null;
+      if (tokenTenantId !== input.expectedTenantId) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
     }
 
     const { claims, tokenVersion } = await this.sessions.current(payload);

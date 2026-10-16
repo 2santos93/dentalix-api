@@ -9,7 +9,10 @@
  * - global:        cada ruta, por IP (salvo /health, con @SkipThrottle). Red
  *                  de seguridad contra abuso/scraping, holgada porque una
  *                  clínica entera suele salir por UNA IP (NAT).
- * - auth:          login, register y refresh; por IP (frena el "spraying").
+ * - auth:          login y register; por IP (frena el "spraying").
+ * - refresh:       renovar sesión; por IP. Holgado: la web renueva en cada
+ *                  carga de página (DX-062) y una clínica sale por UNA IP; el
+ *                  refresh es un JWT firmado, no hay nada que adivinar.
  * - login:         login, por IP+email (fuerza bruta contra una cuenta).
  * - login-account: login, solo por email (fuerza bruta distribuida).
  * - invitation:    ver y aceptar invitación por token; por IP (enumeración).
@@ -23,7 +26,8 @@ export type RateLimitPolicy =
   | 'login-account'
   | 'invitation'
   | 'password'
-  | 'confirmation';
+  | 'confirmation'
+  | 'refresh';
 
 export interface RateLimitRule {
   limit: number;
@@ -44,6 +48,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   invitation: { limit: 10, ttlMs: MINUTE },
   password: { limit: 5, ttlMs: 15 * MINUTE },
   confirmation: { limit: 20, ttlMs: MINUTE },
+  refresh: { limit: 120, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -76,5 +81,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     invitation: rule('invitation'),
     password: rule('password'),
     confirmation: rule('confirmation'),
+    refresh: rule('refresh'),
   };
 }

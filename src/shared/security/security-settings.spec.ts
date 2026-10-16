@@ -1,4 +1,4 @@
-import { loadSecuritySettings } from './security-settings';
+import { isAllowedOrigin, loadSecuritySettings } from './security-settings';
 
 const envOf =
   (vars: Record<string, string>) =>
@@ -50,5 +50,36 @@ describe('loadSecuritySettings', () => {
     );
     expect(s.corsOrigins).toEqual(['https://a.com', 'https://b.com']);
     expect(s.corsRootDomain).toBe('dentalix.app');
+  });
+});
+
+describe('isAllowedOrigin', () => {
+  const settings = loadSecuritySettings(
+    envOf({
+      CORS_ORIGINS: 'http://localhost:3001',
+      CORS_ROOT_DOMAIN: 'dentalix.app',
+    }),
+  );
+
+  it.each([
+    'http://localhost:3001',
+    'https://dentalix.app',
+    'https://demo.dentalix.app',
+  ])(
+    'acepta %s (lista explícita, dominio raíz y sus subdominios)',
+    (origin) => {
+      expect(isAllowedOrigin(origin, settings)).toBe(true);
+    },
+  );
+
+  it.each([
+    'https://evil.example',
+    'https://dentalix.app.evil.example',
+    'https://evildentalix.app',
+    'http://localhost:3002',
+    'null',
+    'no es una url',
+  ])('rechaza %s', (origin) => {
+    expect(isAllowedOrigin(origin, settings)).toBe(false);
   });
 });

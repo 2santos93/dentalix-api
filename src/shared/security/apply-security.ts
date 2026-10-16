@@ -1,8 +1,12 @@
-import { INestApplication } from '@nestjs/common';
+import { ForbiddenException, INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Application } from 'express';
 import helmet from 'helmet';
-import { SecuritySettings, loadSecuritySettings } from './security-settings';
+import {
+  SecuritySettings,
+  isAllowedOrigin,
+  loadSecuritySettings,
+} from './security-settings';
 
 /**
  * Seguridad HTTP de la app: IP real tras el proxy, cabeceras (helmet) y CORS.
@@ -37,22 +41,17 @@ export function applySecurity(
     }),
   );
 
-  const { corsOrigins, corsRootDomain } = settings;
   app.enableCors({
     origin: (
       origin: string | undefined,
       cb: (err: Error | null, allow?: boolean) => void,
     ) => {
       if (!origin) return cb(null, true); // non-browser / same-origin / curl
-      if (corsOrigins.includes(origin)) return cb(null, true);
-      try {
-        const host = new URL(origin).hostname;
-        if (host === corsRootDomain || host.endsWith(`.${corsRootDomain}`))
-          return cb(null, true);
-      } catch {
-        /* fall through to deny */
-      }
-      return cb(new Error(`Origin not allowed by CORS: ${origin}`), false);
+      if (isAllowedOrigin(origin, settings)) return cb(null, true);
+      // Un origen ajeno no llega al handler (ni recibe cabeceras CORS): la
+      // petición se corta aquí con 403. Es también la primera barrera CSRF
+      // del refresh por cookie (DX-062).
+      return cb(new ForbiddenException('Origin not allowed'), false);
     },
     credentials: true,
     allowedHeaders: [
@@ -69,6 +68,9 @@ export function applySecurity(
       // sin ella el navegador bloquea en el preflight todo abono registrado
       // desde la web en otro origen (DX-067).
       'Idempotency-Key',
+      // Modo de transporte del refresh (DX-062): `cookie` = la web guarda el
+      // refresh en la cookie HttpOnly y no lo recibe en el body.
+      'X-Refresh-Transport',
     ],
     // El cliente necesita leer cuánto esperar tras un 429.
     exposedHeaders: ['Retry-After'],
