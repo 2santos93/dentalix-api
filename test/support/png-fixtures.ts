@@ -144,13 +144,14 @@ export function pngAllFilters(
   {
     colorType = 6,
     bitDepth = 8,
-  }: { colorType?: number; bitDepth?: number } = {},
+    filterOffset = 0,
+  }: { colorType?: number; bitDepth?: number; filterOffset?: number } = {},
 ): Buffer {
   const bpp = Math.max(1, (pixels.length / (width * height)) | 0);
   const stride = width * bpp;
   const raw = Buffer.alloc(height * (stride + 1));
   for (let y = 0; y < height; y++) {
-    const filter = y % 5;
+    const filter = (y + filterOffset) % 5;
     raw[y * (stride + 1)] = filter;
     for (let i = 0; i < stride; i++) {
       const x = pixels[y * stride + i];

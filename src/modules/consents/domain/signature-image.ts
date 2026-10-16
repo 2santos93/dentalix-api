@@ -310,7 +310,7 @@ function assertHasInk(bytes: Buffer, Noun: string): void {
       width * height > MAX_SIGNATURE_PIXELS
     ) {
       throw new SignatureImageError(
-        `${Noun} tiene unas dimensiones no válidas (máximo ${MAX_SIGNATURE_WIDTH} x ${MAX_SIGNATURE_HEIGHT} píxeles).`,
+        `${Noun} tiene unas dimensiones no válidas (máximo ${MAX_SIGNATURE_WIDTH} x ${MAX_SIGNATURE_HEIGHT} píxeles y 4 millones de píxeles en total).`,
       );
     }
     if (!BIT_DEPTHS[colorType]?.includes(bitDepth)) {

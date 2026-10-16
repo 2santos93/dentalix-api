@@ -159,7 +159,7 @@ describe('parseSignaturePng', () => {
       });
       expect(error).toBeInstanceOf(SignatureImageError);
       expect((error as Error).message).toBe(
-        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles).',
+        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles y 4 millones de píxeles en total).',
       );
       expect(ms).toBeLessThan(50);
     });
@@ -194,7 +194,7 @@ describe('parseSignaturePng', () => {
       // El IDAT es de 1x1: si se llegara a inflar, el error sería otro.
       const fake = pngFromRaw(w, h, Buffer.from([0, 0, 0, 0, 255]));
       expect(() => parseSignaturePng(fake.toString('base64'))).toThrow(
-        'La firma tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles).',
+        'La firma tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles y 4 millones de píxeles en total).',
       );
     });
 
@@ -241,22 +241,41 @@ describe('parseSignaturePng', () => {
     it('deshace los cinco filtros: alfa con ruido por debajo del umbral sigue en blanco', () => {
       // Alfa aleatorio entre 0 y 15 (bajo MIN_INK_ALPHA) y color con ruido:
       // si un filtro se deshiciera mal, saldrían alfas ≥ 16 («tinta»).
-      for (const [colorType, bpp] of [
-        [6, 4],
-        [4, 2],
-      ]) {
-        const pixels = noise(60 * 40 * bpp);
-        for (let i = bpp - 1; i < pixels.length; i += bpp) pixels[i] &= 0x0f;
-        const blank = pngAllFilters(60, 40, pixels, { colorType });
-        expect(() => parseSignaturePng(blank.toString('base64'))).toThrow(
-          /en blanco/,
-        );
-        // Un solo píxel con tinta en una fila con Paeth (y % 5 === 4).
-        pixels[(34 * 60 + 33) * bpp + bpp - 1] = 200;
-        const inked = pngAllFilters(60, 40, pixels, { colorType });
-        expect(parseSignaturePng(inked.toString('base64'))).toBe(
-          inked.toString('base64'),
-        );
+      // filterOffset rota el filtro de la primera fila (sin fila previa).
+      for (const filterOffset of [0, 1, 2, 3, 4]) {
+        for (const [colorType, bpp] of [
+          [6, 4],
+          [4, 2],
+        ]) {
+          const pixels = noise(60 * 40 * bpp);
+          for (let i = bpp - 1; i < pixels.length; i += bpp) pixels[i] &= 0x0f;
+          const blank = pngAllFilters(60, 40, pixels, {
+            colorType,
+            filterOffset,
+          });
+          expect(() => parseSignaturePng(blank.toString('base64'))).toThrow(
+            /en blanco/,
+          );
+          // Un solo píxel con tinta.
+          pixels[(34 * 60 + 33) * bpp + bpp - 1] = 200;
+          const inked = pngAllFilters(60, 40, pixels, {
+            colorType,
+            filterOffset,
+          });
+          expect(parseSignaturePng(inked.toString('base64'))).toBe(
+            inked.toString('base64'),
+          );
+          // Tinta solo en la primera fila.
+          pixels[(34 * 60 + 33) * bpp + bpp - 1] &= 0x0f;
+          pixels[5 * bpp + bpp - 1] = 200;
+          const firstRow = pngAllFilters(60, 40, pixels, {
+            colorType,
+            filterOffset,
+          });
+          expect(parseSignaturePng(firstRow.toString('base64'))).toBe(
+            firstRow.toString('base64'),
+          );
+        }
       }
     });
 

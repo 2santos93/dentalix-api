@@ -461,7 +461,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         })
         .expect(400);
       expect((bomb.body as { message: string }).message).toBe(
-        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles).',
+        'La firma del paciente tiene unas dimensiones no válidas (máximo 4096 x 1024 píxeles y 4 millones de píxeles en total).',
       );
       const lying = await as(clinicA, dentistA)
         .post(acceptPath(patientA, planA), {
