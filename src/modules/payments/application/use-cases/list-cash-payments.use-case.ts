@@ -15,6 +15,10 @@ import {
   civilDateIn,
   type VoidActor,
 } from '../../domain/void-window';
+import {
+  civilDaysInclusive,
+  parseCivilDate,
+} from '../../../../shared/time/civil-day';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 
 const DEFAULT_PAGE = 1;
@@ -25,8 +29,6 @@ const MAX_PAGE_SIZE = 100;
 // día, semana o mes; un rango mayor ya no es "caja" sino un informe, y sin tope
 // cualquiera podría pedir el agregado de toda la historia de la clínica.
 export const MAX_RANGE_DAYS = 366;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Orden de presentación del desglose por método: el del enum (efectivo
 // primero, que es lo que se arquea), y los abonos sin método al final.
@@ -81,27 +83,18 @@ function normalizePageSize(pageSize?: number): number {
 }
 
 /**
- * `paidAt` es un día CIVIL guardado como medianoche UTC (el `type="date"` del
- * formulario de abono, ver `formatCivilDate` en la web), así que el período se
- * expresa también en días civiles y se compara en UTC: un `Date` local aquí
- * correría el día para cualquier clínica al oeste de Greenwich. Además de la
- * forma, se comprueba que el día exista: `new Date('2026-02-30')` no falla,
- * se va al 2 de marzo.
+ * Valida un día civil (YYYY-MM-DD) que exista: `new Date('2026-02-30')` no
+ * falla, se va al 2 de marzo. El período se queda en días civiles: cada sede lo
+ * traduce a instantes en SU zona (DX-097), en el repositorio.
  */
-function parseCivilDate(value: string, field: 'from' | 'to'): Date {
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(`${value}T00:00:00.000Z`)
-    : null;
-  if (
-    !date ||
-    Number.isNaN(date.getTime()) ||
-    date.toISOString().slice(0, 10) !== value
-  ) {
+function requireCivilDate(value: string, field: 'from' | 'to'): string {
+  const day = parseCivilDate(value);
+  if (day === null) {
     throw new BadRequestException(
       `${field} must be a valid calendar date (YYYY-MM-DD)`,
     );
   }
-  return date;
+  return day;
 }
 
 // Los montos son Decimal(14,2): sumar en centavos enteros es exacto (14 dígitos
@@ -152,7 +145,8 @@ function summarize(groups: CashRegisterGroup[]): CashPaymentsSummary {
 }
 
 /**
- * La CAJA de la clínica: todos los abonos de un período, de la sede activa (o
+ * La CAJA de la clínica: todos los abonos de un período de días civiles —cada
+ * sede corta el día a medianoche de SU zona (DX-097)—, de la sede activa (o
  * de todas sin `X-Location-Id`), con el resumen de lo cobrado por moneda y por
  * método.
  *
@@ -180,12 +174,12 @@ export class ListCashPaymentsUseCase {
     input: ListCashPaymentsInput,
     actor: VoidActor,
   ): Promise<ListCashPaymentsOutput> {
-    const from = parseCivilDate(input.from, 'from');
-    const to = parseCivilDate(input.to, 'to');
-    if (from.getTime() > to.getTime()) {
+    const from = requireCivilDate(input.from, 'from');
+    const to = requireCivilDate(input.to, 'to');
+    const days = civilDaysInclusive(from, to);
+    if (days < 1) {
       throw new BadRequestException('from must be on or before to');
     }
-    const days = Math.round((to.getTime() - from.getTime()) / DAY_MS) + 1;
     if (days > MAX_RANGE_DAYS) {
       throw new BadRequestException(
         `the period cannot exceed ${MAX_RANGE_DAYS} days`,
@@ -197,7 +191,7 @@ export class ListCashPaymentsUseCase {
 
     const result = await this.repo.listForCashRegister({
       from,
-      toExclusive: new Date(to.getTime() + DAY_MS),
+      to,
       method: input.method,
       skip: (page - 1) * pageSize,
       take: pageSize,

@@ -16,17 +16,17 @@ function toUpperCase({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.toUpperCase() : value;
 }
 
-// `from`/`to` are plain calendar dates (YYYY-MM-DD, no time component) --
-// the dashboard is queried by day-granularity period. The controller turns
-// each into a UTC-midnight `Date` via `new Date(...)` before calling
-// GetDoctorDashboardUseCase (a date-only ISO string always parses as UTC
-// midnight, matching the convention documented on
-// GetPaymentsTotalsUseCase.toUtcDateString: exchange snapshots are always
-// keyed/compared in UTC).
+// `from`/`to` son días CIVILES (YYYY-MM-DD). El período de ingresos es
+// semiabierto `[from, to)`: `to` es el día SIGUIENTE al último incluido (la web
+// manda «Hasta» + 1). Cada sede corta los días a medianoche de SU zona IANA
+// (la de su horario en BD, nunca la del cliente; DX-097), así un abono de las
+// 20:00 en Bogotá cuenta en su día aunque en UTC ya sea el siguiente.
 export class DashboardQueryDto {
   @ApiProperty({
     example: '2026-07-01',
-    description: 'Inclusive period start (YYYY-MM-DD).',
+    description:
+      'Primer día civil del período (YYYY-MM-DD), inclusive, desde la ' +
+      'medianoche de la zona horaria de cada sede.',
   })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must match YYYY-MM-DD' })
   from!: string;
@@ -34,8 +34,9 @@ export class DashboardQueryDto {
   @ApiProperty({
     example: '2026-07-31',
     description:
-      'Period end (YYYY-MM-DD). Passed through to GetPaymentsTotalsUseCase, ' +
-      'which treats the incomes/payments range as half-open [from, to).',
+      'Día civil (YYYY-MM-DD) SIGUIENTE al último del período: exclusivo ' +
+      '([from, to)). El corte es la medianoche de ese día en la zona horaria ' +
+      'de cada sede. from = to da un período vacío.',
   })
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must match YYYY-MM-DD' })
   to!: string;

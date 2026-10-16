@@ -2,9 +2,11 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
+  CivilPaidDay,
   CreatePaymentRepoInput,
   PaymentRepository,
 } from '../../domain/ports/payment-repository.port';
+import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { Payment } from '../../domain/entities/payment.entity';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
@@ -17,10 +19,35 @@ import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/cu
 export interface RecordPaymentInput {
   amount: number;
   currency: string;
-  /** ISO string or `Date` — normalized to `Date` before reaching the repo. */
+  /**
+   * Instante (ISO con hora, o `Date`) o solo el día civil `YYYY-MM-DD`, que
+   * se guarda al mediodía de la sede del abono (DX-097).
+   */
   paidAt: string | Date;
   method?: PaymentMethod;
   notes?: string;
+}
+
+const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * DX-097: `YYYY-MM-DD` es un día civil (el formulario de abono); cualquier
+ * otra fecha ISO con hora es un instante. Sin esta distinción, `new Date`
+ * leería el día como medianoche UTC, que en Bogotá es la tarde del día ANTERIOR.
+ */
+function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
+  if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {
+    const civilDate = parseCivilDate(value);
+    if (civilDate === null) {
+      throw new BadRequestException('paidAt must be a valid date');
+    }
+    return { civilDate };
+  }
+  const instant = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(instant.getTime())) {
+    throw new BadRequestException('paidAt must be a valid date');
+  }
+  return instant;
 }
 
 function isFinitePositive(value: unknown): value is number {
@@ -86,11 +113,7 @@ export class RecordPaymentUseCase {
       throw new BadRequestException(`Unknown currency: ${currency}`);
     }
 
-    const paidAt =
-      input.paidAt instanceof Date ? input.paidAt : new Date(input.paidAt);
-    if (Number.isNaN(paidAt.getTime())) {
-      throw new BadRequestException('paidAt must be a valid date');
-    }
+    const paidAt = normalizePaidAt(input.paidAt);
 
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant — never re-derived here.

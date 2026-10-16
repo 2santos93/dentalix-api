@@ -121,6 +121,8 @@ export interface StatementPlanLine {
 export interface StatementMovement {
   id: string;
   paidAt: Date;
+  /** Día civil (YYYY-MM-DD) del pago en la zona de su sede (DX-097). */
+  paidOn: string;
   amount: number;
   currency: string;
   method: PaymentMethod | null;

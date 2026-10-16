@@ -31,7 +31,8 @@ function fakeRow(
   const payment: CashPayment = {
     id,
     createdById: voidSubject.createdById,
-    paidAt: new Date('2026-10-15T00:00:00.000Z'),
+    paidAt: new Date('2026-10-15T17:00:00.000Z'),
+    paidOn: '2026-10-15',
     amount: 100,
     currency: 'COP',
     method: PaymentMethod.CASH,
@@ -90,29 +91,17 @@ const RANGE = { from: '2026-10-01', to: '2026-10-31' };
 const OTHER_AUTHOR: VoidSubject = { ...OWN_TODAY, createdById: 'u-otra' };
 
 describe('ListCashPaymentsUseCase', () => {
-  it('convierte from/to (días civiles, ambos inclusive) en [from 00:00Z, to+1 00:00Z)', async () => {
+  it('pasa from/to como días CIVILES (ambos inclusive): la zona la pone el repositorio por sede (DX-097)', async () => {
     const repo = new SpyPaymentRepository();
     await useCaseFor(repo).execute({
       from: '2026-10-15',
       to: '2026-10-15',
     });
 
-    expect(repo.calls[0].from.toISOString()).toBe('2026-10-15T00:00:00.000Z');
-    expect(repo.calls[0].toExclusive.toISOString()).toBe(
-      '2026-10-16T00:00:00.000Z',
-    );
-  });
-
-  it('cruza fin de mes y de año sin desbordar el día siguiente', async () => {
-    const repo = new SpyPaymentRepository();
-    await useCaseFor(repo).execute({
-      from: '2026-12-01',
-      to: '2026-12-31',
+    expect(repo.calls[0]).toMatchObject({
+      from: '2026-10-15',
+      to: '2026-10-15',
     });
-
-    expect(repo.calls[0].toExclusive.toISOString()).toBe(
-      '2027-01-01T00:00:00.000Z',
-    );
   });
 
   it('rechaza from posterior a to', async () => {

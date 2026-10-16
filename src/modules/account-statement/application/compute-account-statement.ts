@@ -16,6 +16,7 @@ import {
 } from '../domain/entities/account-statement.entity';
 import {
   canVoidPayment,
+  civilDateIn,
   type VoidActor,
 } from '../../payments/domain/void-window';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
@@ -28,10 +29,10 @@ export interface ComputeAccountStatementOptions {
    * anulación y `today` como "ahora". Sin él, ningún movimiento es anulable.
    */
   voidActor?: VoidActor;
-  /** Filtro de `movements`, inclusive (medianoche UTC del primer día). */
-  movementsFrom?: Date;
-  /** Filtro de `movements`, EXCLUSIVO (medianoche UTC del día siguiente al último). */
-  movementsToExclusive?: Date;
+  /** Filtro de `movements`: primer día civil (YYYY-MM-DD), inclusive. */
+  movementsFrom?: string;
+  /** Filtro de `movements`: último día civil (YYYY-MM-DD), inclusive. */
+  movementsTo?: string;
 }
 
 /*
@@ -135,15 +136,14 @@ function paidByPlanAndCurrency(
   return out;
 }
 
+// Días civiles YYYY-MM-DD: el orden de texto es el del calendario.
 function inRange(
-  paidAt: Date,
-  from: Date | undefined,
-  toExclusive: Date | undefined,
+  paidOn: string,
+  from: string | undefined,
+  to: string | undefined,
 ): boolean {
-  const t = paidAt.getTime();
   return (
-    (from === undefined || t >= from.getTime()) &&
-    (toExclusive === undefined || t < toExclusive.getTime())
+    (from === undefined || paidOn >= from) && (to === undefined || paidOn <= to)
   );
 }
 
@@ -256,13 +256,16 @@ export function computeAccountStatement(
   );
 
   // --- Movimientos ----------------------------------------------------------
+  // DX-097: el día de cada abono es el de SU sede, no el día UTC.
   const movements: StatementMovement[] = snapshot.payments
-    .filter((p) =>
-      inRange(p.paidAt, options.movementsFrom, options.movementsToExclusive),
+    .map((p) => ({ p, paidOn: civilDateIn(p.paidAt, p.timeZone) }))
+    .filter(({ paidOn }) =>
+      inRange(paidOn, options.movementsFrom, options.movementsTo),
     )
-    .map((p) => ({
+    .map(({ p, paidOn }) => ({
       id: p.id,
       paidAt: p.paidAt,
+      paidOn,
       amount: p.amount,
       currency: p.currency,
       method: p.method,

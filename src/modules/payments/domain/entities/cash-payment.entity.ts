@@ -15,8 +15,13 @@ export interface CashPayment {
   id: string;
   /** Quién registró el abono; `null` en abonos antiguos sin autor. */
   createdById: string | null;
-  /** Día civil del abono (medianoche UTC del día elegido al registrarlo). */
+  /** Instante del pago (un abono registrado solo con fecha cae al mediodía de su sede). */
   paidAt: Date;
+  /**
+   * Día civil (YYYY-MM-DD) del pago en la zona de su sede (DX-097): el día de
+   * caja en que cuenta. Es lo que se muestra; `paidAt` en UTC puede ser otro.
+   */
+  paidOn: string;
   amount: number;
   currency: string;
   method: PaymentMethod | null;
