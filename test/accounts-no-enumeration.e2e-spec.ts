@@ -156,9 +156,28 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       expect(row.tokenHash).not.toContain(token);
       expect(row.passwordHash).toMatch(/^\$argon2id\$/);
 
-      const verified = await http()
+      // Sin la contraseña del registro no se confirma (DX-029, R2), y la
+      // respuesta es la MISMA que con un enlace inventado.
+      await http()
         .post('/api/v1/auth/register/verify')
         .send({ token })
+        .expect(400);
+      const wrong = await http()
+        .post('/api/v1/auth/register/verify')
+        .send({ token, password: 'No-Es-La-Mia-2026!' })
+        .expect(404);
+      const unknown = await http()
+        .post('/api/v1/auth/register/verify')
+        .send({ token: 'A'.repeat(43), password: 'Otra-Clave-2026!' })
+        .expect(404);
+      expect(wrong.body).toEqual(unknown.body);
+      expect(
+        await raw.tenant.count({ where: { subdomain: 'dx029-nueva' } }),
+      ).toBe(0);
+
+      const verified = await http()
+        .post('/api/v1/auth/register/verify')
+        .send({ token, password: 'Otra-Clave-2026!' })
         .expect(201);
       expect(verified.body).toMatchObject({ subdomain: 'dx029-nueva' });
       const user = await raw.user.findFirstOrThrow({
@@ -172,7 +191,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       // Un solo uso.
       const again = await http()
         .post('/api/v1/auth/register/verify')
-        .send({ token })
+        .send({ token, password: 'Otra-Clave-2026!' })
         .expect(404);
       expect((again.body as { message: string }).message).toMatch(
         /no es válido/,

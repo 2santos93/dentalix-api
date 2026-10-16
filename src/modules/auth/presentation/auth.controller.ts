@@ -124,7 +124,10 @@ export class AuthController {
     return { message: REGISTER_ACCEPTED_MESSAGE };
   }
 
-  /** Abre el enlace del email: crea la clínica y su dueño (email verificado). */
+  /**
+   * Abre el enlace del email con la contraseña del registro: crea la clínica y
+   * su dueño (email verificado). Mismo rate limit `auth` que el registro.
+   */
   @Post('register/verify')
   @RateLimit('auth')
   @ApiOperation({
@@ -132,13 +135,16 @@ export class AuthController {
       'Confirma el registro con el token del email y crea la clínica y su dueño',
   })
   @ApiCreatedResponse({ type: RegisterVerifiedDto })
-  @ApiNotFoundResponse({ description: 'Enlace inexistente o ya usado' })
+  @ApiNotFoundResponse({
+    description:
+      'Genérico: enlace inexistente o ya usado, o contraseña distinta de la del registro',
+  })
   @ApiGoneResponse({ description: 'Enlace caducado' })
   @ApiConflictResponse({ description: 'Subdominio o email ya en uso' })
   verifyRegistration(
     @Body() dto: VerifyRegistrationDto,
   ): Promise<RegisterVerifiedDto> {
-    return this.registerClinic.verify(dto.token);
+    return this.registerClinic.verify(dto.token, dto.password);
   }
 
   @Audit({ action: 'LOGIN', resource: 'SESSION' })

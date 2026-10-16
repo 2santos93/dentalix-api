@@ -13,7 +13,10 @@ import { REGISTRATION_REPOSITORY } from '../../domain/ports/registration-reposit
 import type { RegistrationRepository } from '../../domain/ports/registration-repository.port';
 import { REGISTRATION_NOTIFIER } from '../../domain/ports/registration-notifier.port';
 import type { RegistrationNotifier } from '../../domain/ports/registration-notifier.port';
-import { PasswordService } from '../../../../shared/crypto/password.service';
+import {
+  DUMMY_PASSWORD_HASH,
+  PasswordService,
+} from '../../../../shared/crypto/password.service';
 import {
   REGISTRATION_NOTICE_PATH,
   REGISTRATION_TTL_HOURS,
@@ -39,8 +42,10 @@ export type RegisterOutcome = 'VERIFICATION_SENT' | 'EXISTING_ACCOUNT_NOTIFIED';
 
 export const SUBDOMAIN_TAKEN = 'Ese subdominio ya está en uso. Elige otro.';
 
+// Genérico a propósito (DX-029, R2): no distingue un enlace inválido o usado
+// de una contraseña que no es la del registro.
 export const REGISTRATION_LINK_INVALID =
-  'El enlace para confirmar el registro no es válido o ya se usó. Si no puedes entrar, vuelve a registrarte.';
+  'No pudimos confirmar el registro: el enlace no es válido o ya se usó, o la contraseña no es la que elegiste al registrarte. Revísala o vuelve a registrarte.';
 export const REGISTRATION_LINK_EXPIRED = `El enlace para confirmar el registro caducó (vale ${REGISTRATION_TTL_HOURS} horas). Vuelve a registrarte para recibir uno nuevo.`;
 export const REGISTRATION_EMAIL_TAKEN =
   'Este correo ya tiene una cuenta en Dentalix. Inicia sesión en tu clínica o recupera tu contraseña.';
@@ -144,19 +149,26 @@ export class RegisterClinicUseCase {
 
   /**
    * Abre el enlace del email: crea la clínica, su sede y su dueño (ADMIN) con
-   * el email ya verificado. Quien llega aquí controla el buzón, así que los
-   * errores pueden ser concretos.
+   * el email ya verificado. Exige ADEMÁS la contraseña elegida al registrarse:
+   * quien abre el enlace controla el buzón y quien la conoce es quien pidió
+   * el alta, así nadie convierte en suya una cuenta con un email ajeno porque
+   * la víctima pulse «Confirmar» en un correo que no pidió (pre-secuestro por
+   * clic engañado). Enlace inválido/usado y contraseña errónea dan el MISMO
+   * 404 genérico, y en los dos casos se ejecuta un argon2 (hash ficticio si no
+   * hay pendiente). Superado eso, los errores pueden ser concretos.
    */
   async verify(
     token: string,
+    password: string,
   ): Promise<{ tenantId: string; userId: string; subdomain: string }> {
-    if (!isWellFormedRegistrationToken(token)) {
-      throw new NotFoundException(REGISTRATION_LINK_INVALID);
-    }
-    const record = await this.pending.findPendingByTokenHash(
-      hashRegistrationToken(token),
+    const record = isWellFormedRegistrationToken(token)
+      ? await this.pending.findPendingByTokenHash(hashRegistrationToken(token))
+      : null;
+    const passwordMatches = await this.password.verify(
+      password,
+      record?.passwordHash ?? DUMMY_PASSWORD_HASH,
     );
-    if (!record) {
+    if (!record || !passwordMatches) {
       throw new NotFoundException(REGISTRATION_LINK_INVALID);
     }
     if (record.expiresAt.getTime() <= Date.now()) {

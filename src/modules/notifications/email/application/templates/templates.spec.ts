@@ -143,6 +143,11 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(email.subject).toBe('Confirma tu correo electrónico');
     expect(email.html).toContain('Hola, Luis &lt;b&gt;');
     expect(email.text).toContain('caduca en 1 hora.');
+    // DX-029 (R2): quien no pidió el alta sabe que no debe confirmarla.
+    expect(email.text).toContain(
+      'Si no has pedido crear una clínica en Dentalix, ignora este correo',
+    );
+    expect(email.text).toContain('la contraseña que elegiste');
   });
 
   it('appointment-reminder con y sin enlace de confirmación', () => {

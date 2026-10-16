@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   REGISTRATION_EMAIL_TAKEN,
+  REGISTRATION_LINK_INVALID,
   RegisterClinicUseCase,
 } from './register-clinic.use-case';
 import { PasswordService } from '../../../../shared/crypto/password.service';
@@ -201,7 +202,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('crea la clínica con el email VERIFICADO y consume el enlace (un solo uso)', async () => {
       const { pending, uc, token } = await pendingWithToken();
 
-      const result = await uc.verify(token);
+      const result = await uc.verify(token, INPUT.password);
 
       expect(result).toEqual({
         tenantId: 't1',
@@ -216,27 +217,81 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         }),
       );
       expect(pending.rows).toHaveLength(0);
-      await expect(uc.verify(token)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
 
     it('enlace con forma inválida o desconocido -> 404', async () => {
       const { uc } = await pendingWithToken();
-      await expect(uc.verify('nope')).rejects.toBeInstanceOf(NotFoundException);
-      await expect(uc.verify('A'.repeat(43))).rejects.toBeInstanceOf(
+      await expect(uc.verify('nope', INPUT.password)).rejects.toBeInstanceOf(
         NotFoundException,
+      );
+      await expect(
+        uc.verify('A'.repeat(43), INPUT.password),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('contraseña distinta de la del registro -> el MISMO 404 genérico que un enlace desconocido, y el enlace sigue sirviendo', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+
+      const wrong = uc.verify(token, 'otra-clave-cualquiera');
+      await expect(wrong).rejects.toBeInstanceOf(NotFoundException);
+      await expect(wrong).rejects.toThrow(REGISTRATION_LINK_INVALID);
+      await expect(uc.verify('A'.repeat(43), INPUT.password)).rejects.toThrow(
+        REGISTRATION_LINK_INVALID,
+      );
+      expect(createClinic).not.toHaveBeenCalled();
+      expect(pending.rows).toHaveLength(1);
+
+      // Quien eligió la contraseña sí puede confirmar.
+      await expect(uc.verify(token, INPUT.password)).resolves.toMatchObject({
+        subdomain: 'sonrisa',
+      });
+    });
+
+    it('enlace desconocido: verifica igualmente contra un hash ficticio (sin atajo por tiempo)', async () => {
+      const password = {
+        hash: jest.fn(),
+        verify: jest.fn().mockResolvedValue(false),
+      };
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        new InMemoryPending(),
+        makeNotifier(),
+        password,
+      );
+      await expect(uc.verify('nope', 'x')).rejects.toThrow(
+        REGISTRATION_LINK_INVALID,
+      );
+      await expect(uc.verify('A'.repeat(43), 'x')).rejects.toThrow(
+        REGISTRATION_LINK_INVALID,
+      );
+      expect(password.verify).toHaveBeenCalledTimes(2);
+    });
+
+    it('enlace caducado con contraseña errónea -> 404 genérico (no confirma que el enlace existió)', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+      pending.rows[0].expiresAt = new Date(Date.now() - 1000);
+      await expect(uc.verify(token, 'mala')).rejects.toThrow(
+        REGISTRATION_LINK_INVALID,
       );
     });
 
     it('enlace caducado -> 410', async () => {
       const { pending, uc, token } = await pendingWithToken();
       pending.rows[0].expiresAt = new Date(Date.now() - 1000);
-      await expect(uc.verify(token)).rejects.toBeInstanceOf(GoneException);
+      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
+        GoneException,
+      );
     });
 
     it('el email ya tiene cuenta al verificar -> 409 en español', async () => {
       const { repo, uc, token } = await pendingWithToken();
       repo.findUserByEmail = () => Promise.resolve({ id: 'u9', fullName: 'X' });
-      await expect(uc.verify(token)).rejects.toThrow(REGISTRATION_EMAIL_TAKEN);
+      await expect(uc.verify(token, INPUT.password)).rejects.toThrow(
+        REGISTRATION_EMAIL_TAKEN,
+      );
     });
 
     it('carrera de índices únicos (P2002) -> 409, no 500', async () => {
@@ -247,7 +302,9 @@ describe('RegisterClinicUseCase (DX-029)', () => {
           clientVersion: 'x',
         }),
       );
-      await expect(uc.verify(token)).rejects.toBeInstanceOf(ConflictException);
+      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
   });
 });

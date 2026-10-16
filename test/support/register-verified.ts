@@ -64,7 +64,7 @@ export async function registerVerified(
 
   const res = await request(app.getHttpServer())
     .post('/api/v1/auth/register/verify')
-    .send({ token })
+    .send({ token, password: payload.password })
     .expect(201);
   return { status: res.status, body: res.body as RegisterVerifiedBody };
 }

@@ -81,7 +81,7 @@ function emailVerify(
       },
       {
         kind: 'note',
-        text: `El enlace caduca en ${plural(vars.expiresInHours, 'hora', 'horas')}. Si no creaste una cuenta, ignora este correo.`,
+        text: `El enlace caduca en ${plural(vars.expiresInHours, 'hora', 'horas')}. Para confirmar te pediremos la contraseña que elegiste. Si no has pedido crear una clínica en Dentalix, ignora este correo.`,
       },
     ],
     action: { label: 'Confirmar correo', url: vars.verifyUrl },

@@ -18,6 +18,14 @@ export class VerifyRegistrationDto {
   @IsString()
   @MaxLength(128)
   token!: string;
+
+  @ApiProperty({
+    description:
+      'La contraseña elegida al registrarse: prueba que quien confirma es quien pidió el alta (DX-029)',
+  })
+  @IsString()
+  @MaxLength(256)
+  password!: string;
 }
 
 // Respuesta de POST /auth/register/verify: la clínica y su dueño ya existen
