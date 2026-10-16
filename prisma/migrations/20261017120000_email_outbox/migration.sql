@@ -110,6 +110,14 @@ CREATE POLICY tenant_isolation ON "email_outbox"
 -- SENDING cuyo arriendo venció (la réplica murió a mitad) vuelve a ser
 -- reclamable. FOR UPDATE SKIP LOCKED: dos réplicas nunca reclaman la misma
 -- fila ni se esperan entre sí.
+-- DX-113: con un owner sin superusuario ni BYPASSRLS, FORCE lo sujeta a la RLS
+-- y la validación del cuerpo de estas funciones (que corre con su
+-- `row_security = off`) falla al crearlas. Se quita FORCE solo mientras se
+-- crean, en esta misma transacción, y se restaura justo después: el
+-- resultado es el mismo. Cómo leen la tabla sin saltarse la RLS lo resuelve
+-- 20261017180000_dx113_email_outbox_dispatcher_role.
+ALTER TABLE "email_outbox" NO FORCE ROW LEVEL SECURITY;
+
 CREATE FUNCTION email_outbox_claim(p_limit integer, p_lease_seconds integer)
 RETURNS TABLE ("id" uuid, "tenantId" uuid, "payload" bytea, "attempts" integer)
 LANGUAGE sql
@@ -205,6 +213,8 @@ AS $$
      timezone('utc', now()))
   RETURNING "id";
 $$;
+
+ALTER TABLE "email_outbox" FORCE ROW LEVEL SECURITY;
 
 REVOKE ALL ON FUNCTION email_outbox_claim(integer, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION email_outbox_settle(uuid, integer, "EmailOutboxStatus", timestamp(3), text) FROM PUBLIC;

@@ -29,6 +29,11 @@
 --    perder datos sin avisar.
 -- ---------------------------------------------------------------------------
 SET LOCAL row_security = off;
+-- DX-113: con un owner sin superusuario ni BYPASSRLS, FORCE lo sujeta a la RLS
+-- y, con row_security = off, fallan la validación de la FK a `patients` y el
+-- backfill. Se quita FORCE en esta misma transacción y se restaura al final
+-- de la sección 7: el resultado es el mismo.
+ALTER TABLE "patients" NO FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- 1. Enums
@@ -185,6 +190,9 @@ CREATE POLICY tenant_isolation ON "data_processing_consents"
 --    * Sin `recordedById`: el booleano no guardaba quién registró la decisión
 --      y `createdById` (quién creó la ficha) no es lo mismo.
 -- ---------------------------------------------------------------------------
+-- DX-113: misma razón que con `patients` en la sección 0, para la tabla nueva.
+ALTER TABLE "data_processing_consents" NO FORCE ROW LEVEL SECURITY;
+
 INSERT INTO "data_processing_consents" (
     "id", "tenantId", "patientId", "policyVersionId", "legacyPolicyVersion",
     "scope", "granted", "channel", "recordedById", "recordedAt"
@@ -195,3 +203,6 @@ SELECT
     COALESCE(p."dataConsentAt", p."updatedAt")
 FROM "patients" p
 WHERE p."dataConsentAccepted" = true OR p."dataConsentAt" IS NOT NULL;
+
+ALTER TABLE "data_processing_consents" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "patients" FORCE ROW LEVEL SECURITY;
