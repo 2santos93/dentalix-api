@@ -103,9 +103,7 @@ Postgres. La opción 3 cambia el producto (no encuentra "pérez" dentro de
   ese mismo sitio.
 - La lectura sin filtro de tenant queda en **un único punto auditable**: un
   rol que no puede conectarse, sin miembros (la migración aborta si el rol ya
-  existe con miembros o atributos inesperados; desde DX-134 tolera a los
-  owners de otras bases del clúster con membresía solo ADMIN, sin SET ni
-  INHERIT: ver README, «Despliegue: roles de la BD»), que solo ve cinco columnas de
+  existe con miembros o atributos inesperados), que solo ve cinco columnas de
   una tabla y solo para SELECT.
 - `search_path` fijo: un objeto con el mismo nombre en otro esquema (o en
   `pg_temp`) no puede secuestrar la función.
