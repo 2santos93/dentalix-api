@@ -492,4 +492,83 @@ describe('Dashboard (e2e)', () => {
       'upcomingLimit admite hasta 50.',
     );
   });
+
+  // DX-097: el mes se corta a medianoche de la zona de la sede (Bogotá, la
+  // del horario con que nace la sede principal), no a medianoche UTC.
+  it('el resumen mensual incluye el último día a las 22:00 de la sede y excluye el primero del mes siguiente a las 00:30', async () => {
+    const subdomain = 'clinica-dash-tz';
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Dashboard TZ',
+      subdomain,
+      email: 'owner@clinica-dash-tz.com',
+    });
+    const patient = await raw.patient.create({
+      data: { tenantId: clinic.tenantId, firstName: 'Tz', lastName: 'Bog' },
+      select: { id: true },
+    });
+    const plan = await raw.treatmentPlan.create({
+      data: {
+        tenantId: clinic.tenantId,
+        patientId: patient.id,
+        currency: 'COP',
+      },
+      select: { id: true },
+    });
+    const location = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId },
+      select: { id: true },
+    });
+    const pay = (amount: number, paidAt: string) =>
+      raw.payment.create({
+        data: {
+          tenantId: clinic.tenantId,
+          locationId: location.id,
+          treatmentPlanId: plan.id,
+          patientId: patient.id,
+          amount,
+          currency: 'COP',
+          paidAt: new Date(paidAt),
+          method: 'CASH',
+        },
+      });
+    // 31/10 22:00 en Bogotá = 01/11 03:00 UTC -> octubre.
+    await pay(1000, '2026-11-01T03:00:00.000Z');
+    // 01/11 00:30 en Bogotá = 01/11 05:30 UTC -> noviembre.
+    await pay(7, '2026-11-01T05:30:00.000Z');
+    // 01/10 00:30 en Bogotá = 01/10 05:30 UTC -> octubre.
+    await pay(20, '2026-10-01T05:30:00.000Z');
+    // 30/09 23:00 en Bogotá = 01/10 04:00 UTC -> septiembre.
+    await pay(300, '2026-10-01T04:00:00.000Z');
+
+    const dashboard = async (from: string, to: string) =>
+      (
+        await request(app.getHttpServer())
+          .get(`/api/v1/dashboard?from=${from}&to=${to}&currency=COP`)
+          .set('X-Tenant-Host', hostFor(subdomain))
+          .set('Authorization', `Bearer ${clinic.accessToken}`)
+          .expect(200)
+      ).body as DashboardResponseBody;
+
+    // `to` es exclusivo: octubre = [2026-10-01, 2026-11-01).
+    const october = await dashboard('2026-10-01', '2026-11-01');
+    expect(october.incomes.count).toBe(2);
+    expect(october.incomes.byCurrency).toEqual({ COP: 1020 });
+    expect(october.incomes.totalConverted).toBe(1020);
+
+    const november = await dashboard('2026-11-01', '2026-12-01');
+    expect(november.incomes.byCurrency).toEqual({ COP: 7 });
+
+    // Un día: el 31/10 de la sede.
+    const oct31 = await dashboard('2026-10-31', '2026-11-01');
+    expect(oct31.incomes.byCurrency).toEqual({ COP: 1000 });
+
+    // from = to: período vacío. Día inexistente: 400.
+    const empty = await dashboard('2026-10-31', '2026-10-31');
+    expect(empty.incomes.count).toBe(0);
+    await request(app.getHttpServer())
+      .get('/api/v1/dashboard?from=2026-02-30&to=2026-03-01&currency=COP')
+      .set('X-Tenant-Host', hostFor(subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(400);
+  });
 });
