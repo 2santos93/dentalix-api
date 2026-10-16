@@ -17,6 +17,7 @@
  */
 
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
+import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -307,6 +308,32 @@ function mailProblems(env: Env, isProd: boolean): string[] {
   return problems;
 }
 
+/**
+ * DX-102: retención y particiones de audit_events. Una retención por debajo
+ * del mínimo legal no se recorta en silencio: se rechaza.
+ */
+function auditProblems(env: Env): string[] {
+  const problems: string[] = [];
+  const checks: [string, number, number][] = [
+    ['AUDIT_RETENTION_MONTHS', AUDIT_MIN_RETENTION_MONTHS, 1200],
+    ['AUDIT_PARTITIONS_MONTHS_AHEAD', 1, 36],
+    ['AUDIT_PARTITIONS_INTERVAL_MS', 0, 604_800_000],
+  ];
+  for (const [key, min, max] of checks) {
+    const raw = str(env, key);
+    if (raw == null) continue;
+    const value = Number(raw.trim());
+    if (!/^\d{1,9}$/.test(raw.trim()) || value < min || value > max) {
+      problems.push(
+        key === 'AUDIT_RETENTION_MONTHS'
+          ? `${key} debe ser un entero entre ${min} y ${max} (mínimo legal: 15 años de la historia clínica, Res. 1995/1999 y 839/2017).`
+          : `${key} debe ser un entero entre ${min} y ${max}.`,
+      );
+    }
+  }
+  return problems;
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -323,6 +350,7 @@ export function validateEnv(env: Env): Env {
   problems.push(...jwtSecretProblems(env, isProd));
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
+  problems.push(...auditProblems(env));
 
   if (problems.length > 0) {
     throw new Error(

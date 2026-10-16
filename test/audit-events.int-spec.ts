@@ -125,7 +125,7 @@ describe('DX-009 · audit_events en la BD (int)', () => {
   describe('append-only (triggers)', () => {
     it('un evento no se puede modificar, ni siquiera como owner', async () => {
       await expect(
-        owner.auditEvent.update({
+        owner.auditEvent.updateMany({
           where: { id: eventA },
           data: { action: 'UPDATE' },
         }),
@@ -134,21 +134,22 @@ describe('DX-009 · audit_events en la BD (int)', () => {
 
     it('el rol de la app no puede ni modificar ni borrar ni vaciar la tabla', async () => {
       // SQL crudo: `guardHardDeletes` ya frena `.delete()` dentro de
-      // runWithTenant; aquí se prueba la barrera de la propia BD.
+      // runWithTenant; aquí se prueba la barrera de la propia BD. Desde DX-102
+      // la frena el PRIVILEGIO (42501) antes que el trigger.
       await expect(
         prisma.runWithTenant(
           tenantA,
           (tx) =>
             tx.$executeRaw`UPDATE "audit_events" SET "ip" = '0.0.0.0' WHERE "id" = ${eventA}::uuid`,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/permission denied/);
       await expect(
         prisma.runWithTenant(
           tenantA,
           (tx) =>
             tx.$executeRaw`DELETE FROM "audit_events" WHERE "id" = ${eventA}::uuid`,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/permission denied/);
       await expect(
         prisma.runWithTenant(
           tenantA,

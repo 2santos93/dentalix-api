@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AuditEventsController } from './presentation/audit-events.controller';
 import { AuditInterceptor } from './presentation/audit.interceptor';
@@ -11,6 +12,11 @@ import { AUDIT_EVENT_REPOSITORY } from './domain/ports/audit-event-repository.po
 import { PrismaAuditEventRepository } from './infrastructure/prisma-audit-event.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { AuditPartitionMaintenance } from './infrastructure/audit-partition-maintenance';
+import {
+  AUDIT_PARTITION_CONFIG,
+  loadAuditPartitionConfig,
+} from './infrastructure/audit-retention-config';
 
 /**
  * Registro de auditoría (DX-009). GLOBAL: `@Audit(...)` pone el
@@ -30,6 +36,13 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     TenantContextInterceptor,
     { provide: AUDIT_EVENT_REPOSITORY, useClass: PrismaAuditEventRepository },
     { provide: AUDIT_CLOCK, useValue: () => new Date() },
+    {
+      provide: AUDIT_PARTITION_CONFIG,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadAuditPartitionConfig((key) => config.get<string>(key)),
+    },
+    AuditPartitionMaintenance,
   ],
   exports: [RecordAuditEventUseCase, AuditInterceptor],
 })

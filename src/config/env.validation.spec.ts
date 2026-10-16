@@ -362,4 +362,25 @@ describe('validateEnv', () => {
       );
     });
   });
+
+  describe('auditoría (DX-102)', () => {
+    it('acepta la retención por defecto y una mayor', () => {
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(() =>
+        validateEnv(baseEnv({ AUDIT_RETENTION_MONTHS: '240' })),
+      ).not.toThrow();
+    });
+
+    it('rechaza una retención por debajo del mínimo legal (180 meses)', () => {
+      expect(errorOf(baseEnv({ AUDIT_RETENTION_MONTHS: '120' }))).toContain(
+        'AUDIT_RETENTION_MONTHS debe ser un entero entre 180',
+      );
+    });
+
+    it('rechaza un horizonte de particiones fuera de 1..36', () => {
+      expect(
+        errorOf(baseEnv({ AUDIT_PARTITIONS_MONTHS_AHEAD: '48' })),
+      ).toContain('AUDIT_PARTITIONS_MONTHS_AHEAD');
+    });
+  });
 });

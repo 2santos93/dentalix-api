@@ -23,6 +23,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "dotenv -e .env.test -- jest --config ./test/jest-e2e.json --runInBand",
     "seed:demo": "ts-node --transpile-only prisma/seed-demo.ts",
+    "audit:purge": "ts-node --transpile-only prisma/audit-purge.ts",
     "db:test:setup": "dotenv -e .env.test -- npx prisma migrate deploy && dotenv -e .env.test -- npx prisma db seed",
     "test:int": "dotenv -e .env.test -- jest --config ./test/jest-int.json --runInBand"
   },
