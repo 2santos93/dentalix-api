@@ -153,8 +153,15 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
 
   En producción se deja `json` (lo que leen los recolectores); en desarrollo
   `LOG_FORMAT=pretty` da líneas legibles. Un valor desconocido aborta el
-  arranque. Los e2e no escriben log (nivel `silent` en jest); para verlo,
-  `LOG_LEVEL=debug npm run test:e2e`.
+  arranque. En los e2e, `test/setup-e2e.ts` fija `LOG_LEVEL=silent` si no
+  viene de la línea de comandos (así un `LOG_LEVEL` del `.env` de desarrollo
+  no ensucia la salida). Ese nivel solo afecta a las suites que montan la app
+  con `test/support/create-e2e-app.ts` (= `configureApp`, igual que
+  `main.ts`); para ver su log: `LOG_LEVEL=debug npx dotenv -e .env.test --
+  jest --config ./test/jest-e2e.json test/<suite>.e2e-spec.ts`. Las suites
+  que aún montan la app a mano usan el logger por defecto de Nest y no
+  escriben líneas de acceso. `test/observability.e2e-spec.ts` lee el log
+  desde un destino en memoria.
 - **Log de acceso**: una línea por petición, al cerrarse la respuesta:
 
   ```json
@@ -166,17 +173,28 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
   nombres ni datos clínicos (Ley 1581 / RGPD). Además, cualquier campo
   estructurado pasa por una redacción que oculta `Authorization`, `Cookie`,
   `Set-Cookie` y claves con `password`, `token`, `secret` o `apiKey`.
-- **Errores 5xx**: se registran con stack, request id, método y ruta
-  plantilla; al cliente solo le llega un mensaje genérico con el `requestId`,
-  nunca el stack ni el mensaje interno. Los de Prisma se registran sin el
-  `DETAIL` de Postgres (lleva la fila con datos del paciente).
+- **Errores 5xx**: al cliente solo le llega su cuerpo (genérico si el error
+  no estaba controlado) con el `requestId`; nunca el stack ni el mensaje
+  interno. En el log:
+  - **error no controlado** → una línea `error` con request id, método, ruta
+    plantilla, tipo del error y los marcos `at …` del stack, **sin el
+    mensaje**: el de Prisma (`PrismaClientValidationError`, `RustPanicError`,
+    `InitializationError`…) reproduce la query con sus argumentos, y uno
+    propio puede llevar lo que el código interpoló. El tipo, el marco que lo
+    lanzó y el request id bastan para localizarlo.
+  - **`HttpException` 5xx lanzada a propósito** (p. ej. el 503 de la
+    readiness) → una línea `warn` sin stack, con el tipo de su `cause`.
+  - **Prisma Known/Unknown** → `PrismaExceptionFilter`: su mensaje sin el
+    `DETAIL` de Postgres (lleva la fila con datos del paciente).
 - **Sondas** (públicas, fuera del rate limit y sin resolver tenant):
   - `GET /api/v1/health` → `200 {"status":"ok"}` siempre que el proceso viva;
     no toca la base, para que una caída de Postgres no reinicie la API.
   - `GET /api/v1/health/ready` → `200 {"status":"ok","database":"up"}` si
     `SELECT 1` responde en menos de 2 s; si no, `503
     {"statusCode":503,"status":"unavailable","database":"down","requestId":…}`
-    para que el balanceador saque la instancia de rotación.
+    para que el balanceador saque la instancia de rotación. Cada fallo deja
+    una sola línea `warn` con la causa (`DatabaseTimeoutError`,
+    `PrismaClientInitializationError`…).
 
 ## Run tests
 
