@@ -259,6 +259,77 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     await as(clinicA).void(paymentId, { reason: REASON }).expect(200);
   });
 
+  it('el "hoy" de recepción es el del horario de la SEDE del abono (LocationSchedule.timezone)', async () => {
+    // Registrado hace 2 h. Entre las zonas de offset entero (-12..+14) hay
+    // siempre alguna cuya medianoche cae en esa ventana (otro día) y otra en
+    // la que no (mismo día): se eligen con el reloj real del momento.
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const day = (d: Date, tz: string) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
+    const zones = Array.from({ length: 27 }, (_, i) => i - 12).map((h) =>
+      h === 0 ? 'Etc/GMT' : `Etc/GMT${h > 0 ? '-' : '+'}${Math.abs(h)}`,
+    );
+    const otherDayZone = zones.find(
+      (z) => day(createdAt, z) !== day(new Date(), z),
+    )!;
+    const sameDayZone = zones.find(
+      (z) => day(createdAt, z) === day(new Date(), z),
+    )!;
+    expect(otherDayZone).toBeDefined();
+    expect(sameDayZone).toBeDefined();
+    const original = await raw.locationSchedule.findFirst({
+      where: { tenantId: clinicA.tenantId },
+      select: { id: true, timezone: true, deletedAt: true },
+    });
+
+    async function payInZone(timezone: string): Promise<string> {
+      const paymentId = await pay(reception);
+      const row = await raw.payment.update({
+        where: { id: paymentId },
+        data: { createdAt },
+        select: { locationId: true },
+      });
+      await raw.locationSchedule.upsert({
+        where: {
+          tenantId_locationId: {
+            tenantId: clinicA.tenantId,
+            locationId: row.locationId,
+          },
+        },
+        create: {
+          tenantId: clinicA.tenantId,
+          locationId: row.locationId,
+          timezone,
+        },
+        update: { timezone, deletedAt: null },
+      });
+      return paymentId;
+    }
+
+    const otherDay = await payInZone(otherDayZone);
+    const denied = await as(reception)
+      .void(otherDay, { reason: REASON })
+      .expect(403);
+    expect((denied.body as { message: string }).message).toBe(
+      'Solo puedes anular abonos registrados hoy. Pide a un administrador que lo anule.',
+    );
+
+    const sameDay = await payInZone(sameDayZone);
+    await as(reception).void(sameDay, { reason: REASON }).expect(200);
+
+    // Deja la sede como estaba (el alta de la clínica ya le crea horario).
+    if (original) {
+      await raw.locationSchedule.update({
+        where: { id: original.id },
+        data: { timezone: original.timezone, deletedAt: original.deletedAt },
+      });
+    } else {
+      await raw.locationSchedule.deleteMany({
+        where: { tenantId: clinicA.tenantId },
+      });
+    }
+  });
+
   it('aísla por clínica: el ADMIN de otra clínica recibe 404 y el abono no cambia', async () => {
     const paymentId = await pay(clinicA);
 

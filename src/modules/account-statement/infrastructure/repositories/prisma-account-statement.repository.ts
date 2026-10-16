@@ -146,7 +146,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           voiderIds.length === 0
             ? []
             : await tx.clinicMembership.findMany({
-                where: { userId: { in: voiderIds } },
+                // `tenantId` además de RLS, como `patientId` en el resto.
+                where: { tenantId, userId: { in: voiderIds } },
                 select: { userId: true, user: { select: { fullName: true } } },
               });
         const voiderName = new Map(
