@@ -23,6 +23,9 @@ import {
 } from '../src/modules/location-schedule/application/business-hours';
 import { UpdateCatalogItemUseCase } from '../src/modules/dental-catalog/application/use-cases/update-catalog-item.use-case';
 import { CreatePatientUseCase } from '../src/modules/patients/application/use-cases/create-patient.use-case';
+import { PublishPrivacyPolicyUseCase } from '../src/modules/data-consents/application/use-cases/publish-privacy-policy.use-case';
+import { RecordDataConsentsUseCase } from '../src/modules/data-consents/application/use-cases/record-data-consents.use-case';
+import type { ConsentDecision } from '../src/modules/data-consents/domain/entities/data-consent.entity';
 import { CreateClinicalEntryUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry.use-case';
 import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/add-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
@@ -56,6 +59,7 @@ import {
   DEMO_PLANS,
   DEMO_PRICES,
   DEMO_PRIMARY_COLOR,
+  DEMO_PRIVACY_POLICY,
   DEMO_SUBDOMAIN,
   DEMO_TOOTH_RECORDS,
   DEMO_USERS,
@@ -411,8 +415,17 @@ class DemoSeeder {
       this.priceCatalog(tenantId),
     );
 
+    // DX-037: la política v1 la publica el ADMIN antes de dar de alta a nadie,
+    // para que cada alta registre la autorización contra ella.
+    const policy = await this.inTenant(tenantId, undefined, () =>
+      this.use(PublishPrivacyPolicyUseCase).execute(
+        DEMO_PRIVACY_POLICY,
+        ownerId,
+      ),
+    );
+
     const patientIds = await this.inTenant(tenantId, undefined, () =>
-      this.createPatients(receptionId, dentists[0]),
+      this.createPatients(receptionId, dentists[0], policy.id),
     );
 
     await this.inTenant(tenantId, undefined, () =>
@@ -570,9 +583,16 @@ class DemoSeeder {
     return byCode;
   }
 
+  /**
+   * Autorizaciones de la demo (DX-037), para ver los tres estados en la ficha:
+   * todos autorizan datos generales y de salud; los pares además aceptan
+   * comunicaciones comerciales, y el segundo paciente las acepta en el alta y
+   * las revoca después (historial con dos filas MARKETING).
+   */
   private async createPatients(
     receptionId: string,
     dentistId: string,
+    policyVersionId: string,
   ): Promise<string[]> {
     const ids: string[] = [];
     for (const [index, p] of DEMO_PATIENTS.entries()) {
@@ -582,15 +602,20 @@ class DemoSeeder {
         orderBy: { id: 'asc' },
         select: { id: true },
       });
-      const consentAt = daysAgoAt(this.now, 60 + index, 9 * 60);
+      const revokesMarketing = index === 1;
+      const decisions: ConsentDecision[] = [
+        { scope: 'GENERAL', granted: true },
+        { scope: 'SENSITIVE_HEALTH', granted: true },
+        ...(index % 2 === 0 || revokesMarketing
+          ? [{ scope: 'MARKETING' as const, granted: true }]
+          : []),
+      ];
       const patient = await this.use(CreatePatientUseCase).execute({
         ...rest,
         birthDate: new Date(`${birthDate}T00:00:00.000Z`),
         countryCode: city ? 'CO' : undefined,
         cityId: city?.id,
-        dataConsentAccepted: true,
-        dataConsentAt: consentAt,
-        dataConsentPolicyVersion: 'v1',
+        dataConsents: { policyVersionId, decisions },
         // SEC-005: la anamnesis inicial solo la escribe un rol clínico. El
         // paciente que llega con anamnesis lo da de alta el odontólogo; el
         // resto, recepción (mostrador), sin historia clínica.
@@ -598,6 +623,17 @@ class DemoSeeder {
           ? { createdById: dentistId, actorRole: ClinicRole.DENTIST }
           : { createdById: receptionId, actorRole: ClinicRole.RECEPTION }),
       });
+      if (revokesMarketing) {
+        await this.use(RecordDataConsentsUseCase).execute(
+          patient.id,
+          {
+            policyVersionId,
+            decisions: [{ scope: 'MARKETING', granted: false }],
+          },
+          receptionId,
+          {},
+        );
+      }
       ids.push(patient.id);
     }
     return ids;

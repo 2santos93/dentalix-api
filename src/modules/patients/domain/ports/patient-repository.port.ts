@@ -2,6 +2,33 @@ import { DocType, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
 import type { SafetyFlags } from '../../../medical-history/domain/entities/medical-history.entity';
+import type {
+  ConsentDecision,
+  ConsentEvidence,
+} from '../../../data-consents/domain/entities/data-consent.entity';
+
+/**
+ * Autorización de datos registrada JUNTO con el alta (misma transacción,
+ * DX-037). `versioned` es el camino normal (filas IN_PERSON contra la política
+ * vigente); `legacy` traduce el booleano deprecado de clientes antiguos a una
+ * fila GENERAL LEGACY. En ambos casos `Patient.dataConsent*` se deriva de la
+ * fila, nunca se escribe a mano.
+ */
+export type CreatePatientConsent =
+  | {
+      kind: 'versioned';
+      policyVersionId: string;
+      decisions: ConsentDecision[];
+      recordedById: string;
+      evidence: ConsentEvidence;
+    }
+  | {
+      kind: 'legacy';
+      granted: boolean;
+      legacyPolicyVersion?: string;
+      recordedById?: string;
+      evidence: ConsentEvidence;
+    };
 
 export interface CreatePatientRepoInput {
   firstName: string;
@@ -16,9 +43,7 @@ export interface CreatePatientRepoInput {
   countryCode?: string;
   cityId?: number;
   notes?: string;
-  dataConsentAccepted?: boolean;
-  dataConsentAt?: Date;
-  dataConsentPolicyVersion?: string;
+  consent?: CreatePatientConsent;
   maritalStatus?: string;
   occupation?: string;
   insurerEps?: string;

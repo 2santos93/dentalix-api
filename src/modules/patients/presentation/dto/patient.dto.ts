@@ -49,13 +49,30 @@ export class PatientDto {
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
-  @ApiProperty()
+  @ApiProperty({
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-037): resumen derivado de la última autorización GENERAL. La fuente de verdad es GET /patients/:id/data-consents.',
+  })
   dataConsentAccepted!: boolean;
 
-  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-037): hora (servidor) de la última autorización GENERAL.',
+  })
   dataConsentAt!: Date | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-037): versión («v1», «v2»…) de la política de la última autorización GENERAL.',
+  })
   dataConsentPolicyVersion!: string | null;
 
   @ApiProperty({ type: String, nullable: true })

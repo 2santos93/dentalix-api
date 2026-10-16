@@ -76,6 +76,18 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
     message:
       'La historia clínica cambió mientras editabas. Vuelve a cargarla y reintenta.',
   },
+  // Dos ADMIN publicando la política a la vez calculan la misma versión
+  // (DX-037). Por nombre de índice o por columnas (lo que traiga Prisma).
+  {
+    match: 'privacy_policy_versions_tenant_version_key',
+    message:
+      'Otra versión de la política se publicó a la vez. Recarga, revisa la vigente y reintenta.',
+  },
+  {
+    match: 'tenantId,version',
+    message:
+      'Otra versión de la política se publicó a la vez. Recarga, revisa la vigente y reintenta.',
+  },
   {
     match: 'clinic_memberships',
     message: 'Esa persona ya pertenece a la clínica.',

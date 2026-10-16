@@ -10,6 +10,10 @@ import {
   UpdatePatientRepoInput,
 } from '../../domain/ports/patient-repository.port';
 import { Patient } from '../../domain/entities/patient.entity';
+import {
+  recordConsentsInTx,
+  recordLegacyConsentInTx,
+} from '../../../data-consents/infrastructure/record-consents-in-tx';
 
 type PrismaPatient = Prisma.PatientGetPayload<Record<string, never>>;
 
@@ -90,9 +94,6 @@ export class PrismaPatientRepository implements PatientRepository {
           countryCode: input.countryCode,
           cityId: input.cityId,
           notes: input.notes,
-          dataConsentAccepted: input.dataConsentAccepted ?? false,
-          dataConsentAt: input.dataConsentAt,
-          dataConsentPolicyVersion: input.dataConsentPolicyVersion,
           maritalStatus: input.maritalStatus,
           occupation: input.occupation,
           insurerEps: input.insurerEps,
@@ -134,6 +135,32 @@ export class PrismaPatientRepository implements PatientRepository {
             createdById: input.createdById,
           },
         });
+      }
+
+      // DX-037: la prueba de la autorización se crea con el paciente o no se
+      // crea nada; el resumen deprecado `dataConsent*` sale de esa fila.
+      const consent = input.consent;
+      if (consent?.kind === 'versioned') {
+        const derived = await recordConsentsInTx(tx, {
+          tenantId,
+          patientId: created.id,
+          policyVersionId: consent.policyVersionId,
+          decisions: consent.decisions,
+          recordedById: consent.recordedById,
+          evidence: consent.evidence,
+        });
+        return derived ? { ...created, ...derived } : created;
+      }
+      if (consent?.kind === 'legacy') {
+        const derived = await recordLegacyConsentInTx(tx, {
+          tenantId,
+          patientId: created.id,
+          granted: consent.granted,
+          legacyPolicyVersion: consent.legacyPolicyVersion,
+          recordedById: consent.recordedById,
+          evidence: consent.evidence,
+        });
+        return { ...created, ...derived };
       }
 
       return created;

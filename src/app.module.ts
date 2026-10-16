@@ -24,6 +24,7 @@ import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
 import { AccountStatementModule } from './modules/account-statement/account-statement.module';
+import { DataConsentsModule } from './modules/data-consents/data-consents.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
@@ -57,6 +58,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PaymentsModule,
     PaymentPlansModule,
     AccountStatementModule,
+    DataConsentsModule,
     InventoryModule,
     LocationsModule,
     LocationScheduleModule,
