@@ -47,3 +47,11 @@ export interface Appointment {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * Respuesta de agendar o mover una cita (DX-122): la cita y los avisos que no
+ * impiden la operación (p. ej. cae en un bloqueo de almuerzo que deja agendar).
+ */
+export interface AppointmentWriteResult extends Appointment {
+  warnings: string[];
+}

@@ -88,3 +88,13 @@ export class AppointmentDto {
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
 }
+
+/**
+ * Respuesta de agendar o mover una cita (DX-122): la cita y los avisos que no
+ * impiden la operación, en español (p. ej. «La cita cae en un bloqueo que
+ * permite agendar: Almuerzo (13:00–14:00).»). Vacío si no hay ninguno.
+ */
+export class AppointmentWriteDto extends AppointmentDto {
+  @ApiProperty({ type: [String] })
+  warnings!: string[];
+}

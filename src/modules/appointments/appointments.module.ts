@@ -14,6 +14,9 @@ import { StaffModule } from '../staff/staff.module';
 import { LocationScheduleModule } from '../location-schedule/location-schedule.module';
 import { AppointmentTypesModule } from '../appointment-types/appointment-types.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { ScheduleBlocksModule } from '../schedule-blocks/schedule-blocks.module';
+import { LocationsModule } from '../locations/locations.module';
+import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-case';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
@@ -29,6 +32,9 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     LocationScheduleModule,
     // DX-121: valida el tipo de cita y toma su duración al agendar.
     AppointmentTypesModule,
+    // DX-122: bloqueos al agendar/mover y «Buscar hueco» (sede y su zona).
+    ScheduleBlocksModule,
+    LocationsModule,
   ],
   controllers: [AppointmentsController],
   providers: [
@@ -37,6 +43,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     ListUpcomingAppointmentsUseCase,
     GetAppointmentUseCase,
     UpdateAppointmentUseCase,
+    FindOpeningsUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on AppointmentsController.
@@ -45,6 +52,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   ],
   // ListUpcomingAppointmentsUseCase exportado para las «próximas citas» del
   // dashboard: la BD devuelve ya cortado en `limit` (DX-043, DB-008).
-  exports: [ListUpcomingAppointmentsUseCase],
+  // DX-122: «Agendar aquí» desde pendientes reutiliza CreateAppointmentUseCase.
+  exports: [ListUpcomingAppointmentsUseCase, CreateAppointmentUseCase],
 })
 export class AppointmentsModule {}

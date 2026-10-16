@@ -9,9 +9,13 @@ import { CreateAppointmentUseCase } from './create-appointment.use-case';
 import { Appointment } from '../../domain/entities/appointment.entity';
 import {
   AppointmentRepository,
+  AppointmentUpdate,
   CreateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
+import { InMemoryScheduleBlockRepository } from '../../../schedule-blocks/application/__fixtures__/in-memory-schedule-blocks';
+import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
+import { InMemoryWaitlistRepository } from '../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
@@ -78,7 +82,7 @@ function makeRepo(
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
-    update: (): Promise<Appointment> =>
+    update: (): Promise<AppointmentUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
@@ -114,6 +118,13 @@ function makeTypes(
   return repo;
 }
 
+// Bloqueos (DX-122): por defecto la agenda no tiene ninguno.
+function makeBlocks(
+  repo: InMemoryScheduleBlockRepository = new InMemoryScheduleBlockRepository(),
+): ScheduleBlockRepository {
+  return repo;
+}
+
 function makeStaff(found: unknown = { userId: 'prov1' }): StaffRepository {
   return {
     findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
@@ -136,6 +147,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -160,6 +172,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       // Una hora atrás: mismo día, instante pasado.
       const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -182,6 +195,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       const soon = new Date(Date.now() + 1000);
 
@@ -211,6 +225,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       const created = await uc.registerHistorical({
         patientId: 'p1',
@@ -228,6 +243,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       await expect(
         uc.registerHistorical({
@@ -246,6 +262,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       await expect(
         noPatient.registerHistorical({
@@ -262,6 +279,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(null),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       await expect(
         noProvider.registerHistorical({
@@ -282,6 +300,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       await expect(
         uc.registerHistorical({
@@ -312,6 +331,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(closedThatDay),
         makeTypes(),
+        makeBlocks(),
       );
       await expect(
         uc.registerHistorical({
@@ -352,6 +372,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(mondayHours()),
         makeTypes(),
+        makeBlocks(),
       );
       const start = nextMondayLocal(20); // 20:00 local, cierra 13:00
 
@@ -381,6 +402,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(mondayHours()),
         makeTypes(),
+        makeBlocks(),
       );
       const start = nextMondayLocal(10); // 10:00 local
 
@@ -401,6 +423,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(null),
         makeTypes(),
+        makeBlocks(),
       );
       const start = nextMondayLocal(3); // 03:00 local, madrugada
 
@@ -427,6 +450,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -450,6 +474,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(null),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -476,6 +501,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -493,6 +519,7 @@ describe('CreateAppointmentUseCase', () => {
       makeStaff(),
       makeSchedule(),
       makeTypes(),
+      makeBlocks(),
     );
 
     const result = await uc.execute({
@@ -517,6 +544,7 @@ describe('CreateAppointmentUseCase', () => {
       makeStaff(),
       makeSchedule(),
       makeTypes(),
+      makeBlocks(),
     );
 
     await expect(
@@ -537,6 +565,7 @@ describe('CreateAppointmentUseCase', () => {
       makeStaff(),
       makeSchedule(),
       makeTypes(),
+      makeBlocks(),
     );
 
     await expect(
@@ -563,6 +592,7 @@ describe('CreateAppointmentUseCase', () => {
       makeStaff(),
       makeSchedule(),
       makeTypes(),
+      makeBlocks(),
     );
 
     await expect(
@@ -588,6 +618,7 @@ describe('CreateAppointmentUseCase', () => {
       makeStaff(),
       makeSchedule(),
       makeTypes(),
+      makeBlocks(),
     );
 
     await uc.execute({ patientId: 'p1', providerId: 'prov1', start, end });
@@ -609,6 +640,7 @@ describe('CreateAppointmentUseCase', () => {
       makeStaff(),
       makeSchedule(),
       makeTypes(),
+      makeBlocks(),
     );
 
     const maliciousInput = {
@@ -643,6 +675,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       const result = await uc.execute({
@@ -670,6 +703,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       const result = await uc.execute({
@@ -695,6 +729,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -724,6 +759,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -750,6 +786,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       const result = await uc.execute({
@@ -777,6 +814,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       const result = await uc.execute({
@@ -802,6 +840,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       const result = await uc.execute({
@@ -853,6 +892,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -882,6 +922,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -902,6 +943,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -928,6 +970,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
 
       await expect(
@@ -948,6 +991,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(types),
+        makeBlocks(),
       );
 
       const created = await uc.execute({
@@ -970,6 +1014,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(types),
+        makeBlocks(),
       );
       const created = await uc.execute({
         patientId: 'p1',
@@ -990,6 +1035,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(types),
+        makeBlocks(),
       );
       for (const appointmentTypeId of [inactive.id, 'de-otra-clinica']) {
         await expect(
@@ -1010,6 +1056,7 @@ describe('CreateAppointmentUseCase', () => {
         makeStaff(),
         makeSchedule(),
         makeTypes(),
+        makeBlocks(),
       );
       await expect(
         uc.execute({
@@ -1020,4 +1067,163 @@ describe('CreateAppointmentUseCase', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+
+  describe('bloqueos de agenda y pendientes (DX-122)', () => {
+    const start = at('10:00');
+    const end = at('10:30');
+
+    it('un bloqueo de vacaciones del profesional impide agendar: 409 y no se crea', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const blocks = new InMemoryScheduleBlockRepository();
+      blocks.seed({
+        providerId: 'prov1',
+        start: at('08:00'),
+        end: at('20:00'),
+      });
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(),
+        makeBlocks(blocks),
+      );
+
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).rejects.toThrow(
+        new ConflictException(
+          'La agenda del profesional está bloqueada (Vacaciones) del ' +
+            blockRangeLabel(at('08:00'), at('20:00')) +
+            '. Elige otro horario.',
+        ),
+      );
+      await expect(
+        repo.listByRange({ from: at('00:00'), to: at('23:59') }),
+      ).resolves.toHaveLength(0);
+    });
+
+    it('el bloqueo de otro profesional o de otra sede no estorba', async () => {
+      const blocks = new InMemoryScheduleBlockRepository();
+      blocks.seed({ providerId: 'otro', start: at('08:00'), end: at('20:00') });
+      blocks.seed({
+        providerId: null,
+        locationId: 'loc2',
+        start: at('08:00'),
+        end: at('20:00'),
+      });
+      const uc = new CreateAppointmentUseCase(
+        new InMemoryAppointmentRepository(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(),
+        makeBlocks(blocks),
+      );
+
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).resolves.toMatchObject({ warnings: [] });
+    });
+
+    it('un bloqueo que deja agendar (almuerzo de la sede) crea la cita con un aviso', async () => {
+      const blocks = new InMemoryScheduleBlockRepository();
+      blocks.seed({
+        providerId: null,
+        locationId: 'loc1',
+        kind: 'LUNCH',
+        allowsBooking: true,
+        start: at('10:00'),
+        end: at('11:00'),
+      });
+      const uc = new CreateAppointmentUseCase(
+        new InMemoryAppointmentRepository(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(),
+        makeBlocks(blocks),
+      );
+
+      const created = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start,
+        end,
+      });
+      expect(created.id).toBeDefined();
+      expect(created.warnings).toHaveLength(1);
+      expect(created.warnings[0]).toMatch(
+        /^La cita cae en un bloqueo que permite agendar: Almuerzo/,
+      );
+    });
+
+    it('desde pendientes: usa la sede de la entrada (horario y bloqueos) y la marca SCHEDULED', async () => {
+      const waitlist = new InMemoryWaitlistRepository();
+      const entry = waitlist.seed({ locationId: 'loc2', patientId: 'p1' });
+      const repo = new InMemoryAppointmentRepository(waitlist);
+      const blocks = new InMemoryScheduleBlockRepository();
+      // Bloqueo de la sede del request (loc1): no aplica a una cita de loc2.
+      blocks.seed({
+        providerId: null,
+        locationId: 'loc1',
+        start: at('08:00'),
+        end: at('20:00'),
+      });
+      let scheduleLocation: string | undefined;
+      const schedule = {
+        ...makeSchedule(),
+        findByLocation: (locationId: string): Promise<never> => {
+          scheduleLocation = locationId;
+          return Promise.resolve(null) as Promise<never>;
+        },
+        findForCurrentLocation: (): Promise<never> =>
+          Promise.reject(new Error('no debe mirar la sede del request')),
+      };
+      const uc = new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+        schedule,
+        makeTypes(),
+        makeBlocks(blocks),
+      );
+
+      const created = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start,
+        end,
+        locationId: 'loc2',
+        waitlistEntryId: entry.id,
+        createdById: 'u-rec',
+      });
+      expect(created.locationId).toBe('loc2');
+      expect(scheduleLocation).toBe('loc2');
+      expect(waitlist.rows[0]).toMatchObject({
+        status: 'SCHEDULED',
+        resolvedAppointmentId: created.id,
+        resolvedById: 'u-rec',
+      });
+    });
+  });
 });
+
+/** «20/10 08:00 al 20/10 20:00» en la zona del fake de bloqueos (Bogotá). */
+function blockRangeLabel(from: Date, to: Date): string {
+  const f = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const label = (d: Date) => {
+    const p = Object.fromEntries(
+      f.formatToParts(d).map((x) => [x.type, x.value]),
+    );
+    return `${p.day}/${p.month} ${p.hour}:${p.minute}`;
+  };
+  return `${label(from)} al ${label(to)}`;
+}

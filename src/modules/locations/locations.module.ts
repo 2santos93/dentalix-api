@@ -22,5 +22,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     TenantContextInterceptor,
     { provide: LOCATION_REPOSITORY, useClass: PrismaLocationRepository },
   ],
+  // DX-122: bloqueos, pendientes y «Buscar hueco» validan que la sede del
+  // cliente es de esta clínica (y leen su zona horaria).
+  exports: [LOCATION_REPOSITORY],
 })
 export class LocationsModule {}

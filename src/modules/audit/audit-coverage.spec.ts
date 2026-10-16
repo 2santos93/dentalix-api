@@ -25,6 +25,7 @@ import { PlanFollowUpController } from '../treatment-plans/presentation/plan-fol
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
+import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -377,6 +378,24 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN',
     patient: P,
   },
+
+  // DX-122: bloqueos de agenda (sin paciente). Las altas y bajas de
+  // «Pendientes por agendar» las audita el caso de uso, con el paciente.
+  'POST /schedule-blocks': {
+    action: 'CREATE',
+    resource: 'SCHEDULE_BLOCK',
+    resourceId: RES,
+  },
+  'PATCH /schedule-blocks/:id': {
+    action: 'UPDATE',
+    resource: 'SCHEDULE_BLOCK',
+    resourceId: { param: 'id' },
+  },
+  'DELETE /schedule-blocks/:id': {
+    action: 'DELETE',
+    resource: 'SCHEDULE_BLOCK',
+    resourceId: { param: 'id' },
+  },
 };
 
 const CONTROLLERS: Type[] = [
@@ -396,6 +415,7 @@ const CONTROLLERS: Type[] = [
   PaymentsController,
   PaymentPlansController,
   AccountStatementController,
+  ScheduleBlocksController,
 ];
 
 function joinPath(...parts: string[]): string {

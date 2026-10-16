@@ -5,6 +5,8 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
+import { InMemoryScheduleBlockRepository } from '../../../schedule-blocks/application/__fixtures__/in-memory-schedule-blocks';
+import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { UpdateAppointmentUseCase } from './update-appointment.use-case';
 import { Appointment } from '../../domain/entities/appointment.entity';
 import {
@@ -13,6 +15,7 @@ import {
 } from '../../domain/ports/appointment-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
+import { InMemoryWaitlistRepository } from '../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { BusinessHours } from '../../../location-schedule/application/business-hours';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
@@ -56,9 +59,19 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   };
 }
 
-function makeRepo(
-  overrides: Partial<AppointmentRepository> = {},
-): AppointmentRepository {
+/**
+ * Los dobles de `update` de este spec devuelven la cita; el puerto devuelve
+ * además la entrada de pendientes creada (DX-122), que aquí no se crea.
+ */
+type RepoOverrides = Partial<Omit<AppointmentRepository, 'update'>> & {
+  update?: (
+    id: string,
+    patch: UpdateAppointmentRepoInput,
+  ) => Promise<Appointment>;
+};
+
+function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
+  const { update, ...rest } = overrides;
   return {
     create: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
@@ -68,10 +81,22 @@ function makeRepo(
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
-    update: (): Promise<Appointment> =>
-      Promise.reject(new Error('not implemented in this fake')),
-    ...overrides,
+    ...rest,
+    update: (id: string, patch: UpdateAppointmentRepoInput) =>
+      update
+        ? update(id, patch).then((appointment) => ({
+            appointment,
+            waitlistEntryId: null,
+          }))
+        : Promise.reject(new Error('not implemented in this fake')),
   };
+}
+
+// Bloqueos (DX-122): por defecto la agenda no tiene ninguno.
+function makeBlocks(
+  repo: InMemoryScheduleBlockRepository = new InMemoryScheduleBlockRepository(),
+): ScheduleBlockRepository {
+  return repo;
 }
 
 // Doble del horario de la sede: por defecto SIN horario configurado (null), que
@@ -121,6 +146,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeSchedule(),
       makeStaff(),
       makeAudit(),
+      makeBlocks(),
     );
 
     await expect(
@@ -153,13 +179,14 @@ describe('UpdateAppointmentUseCase', () => {
       makeSchedule(),
       makeStaff(),
       makeAudit(),
+      makeBlocks(),
     );
 
     const result = await uc.execute(existing.id, {
       status: AppointmentStatus.CONFIRMED,
     });
 
-    expect(result).toBe(updated);
+    expect(result).toEqual({ ...updated, warnings: [] });
     // DX-005: un cambio de estado limpia los indicadores del enlace de confirmación.
     expect(receivedPatch).toEqual({
       status: AppointmentStatus.CONFIRMED,
@@ -196,6 +223,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeSchedule(),
       makeStaff(),
       makeAudit(),
+      makeBlocks(),
     );
 
     const result = await uc.execute(existing.id, {
@@ -203,7 +231,7 @@ describe('UpdateAppointmentUseCase', () => {
       end: newEnd,
     });
 
-    expect(result).toBe(updated);
+    expect(result).toEqual({ ...updated, warnings: [] });
     expect(overlapArgs).toEqual({
       providerId: existing.providerId,
       start: newStart,
@@ -227,6 +255,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeSchedule(),
       makeStaff(),
       makeAudit(),
+      makeBlocks(),
     );
 
     await expect(
@@ -250,6 +279,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeSchedule(),
       makeStaff(),
       makeAudit(),
+      makeBlocks(),
     );
 
     await expect(
@@ -275,6 +305,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       // Shift by 15 minutes — the new window still overlaps the row's OWN
@@ -306,6 +337,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -335,6 +367,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -372,6 +405,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -397,6 +431,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -424,6 +459,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(uc.execute('a1', { notes: 'x' })).rejects.toBe(boom);
@@ -452,6 +488,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -475,6 +512,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -512,6 +550,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       const result = await uc.execute('a1', {
@@ -541,6 +580,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       const result = await uc.execute('a1', { notes: 'El paciente asistió' });
@@ -568,6 +608,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -591,6 +632,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -615,6 +657,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -653,6 +696,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -675,6 +719,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(['prov1']),
         makeAudit(),
+        makeBlocks(),
       );
       await expect(
         uc.execute(existing.id, { providerId: 'intruso' }),
@@ -701,6 +746,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await uc.execute(existing.id, { providerId: PROV2 });
@@ -739,6 +785,7 @@ describe('UpdateAppointmentUseCase', () => {
         schedule,
         makeStaff(),
         makeAudit(),
+        makeBlocks(),
       );
 
       await expect(
@@ -756,6 +803,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(drafts),
+        makeBlocks(),
       );
 
       await uc.execute(
@@ -800,6 +848,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeSchedule(),
         makeStaff(),
         makeAudit(drafts),
+        makeBlocks(),
       );
 
       await uc.execute(
@@ -812,6 +861,183 @@ describe('UpdateAppointmentUseCase', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(drafts).toHaveLength(0);
+    });
+  });
+
+  // DX-122: bloqueos de agenda al mover, y «Pendientes por agendar» al
+  // cancelar o marcar no-show.
+  describe('bloqueos y pendientes (DX-122)', () => {
+    const ctx: AppointmentAuditContext = {
+      tenantId: 't1',
+      locationId: null,
+      actor: { userId: 'u-rec', role: 'RECEPTION' },
+      requestId: 'req-1',
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+    };
+
+    function vacation(
+      blocks: InMemoryScheduleBlockRepository,
+      providerId = 'prov1',
+    ) {
+      return blocks.seed({
+        providerId,
+        locationId: null,
+        start: at('08:00'),
+        end: at('20:00'),
+        allowsBooking: false,
+      });
+    }
+
+    it('mover a un horario bloqueado del profesional: 409 en español y nada cambia', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('07:00'), end: at('07:30') });
+      const blocks = new InMemoryScheduleBlockRepository();
+      vacation(blocks);
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(blocks),
+      );
+
+      await expect(
+        uc.execute(existing.id, { start: at('10:00'), end: at('10:30') }),
+      ).rejects.toThrow(
+        /La agenda del profesional está bloqueada \(Vacaciones\)/,
+      );
+      await expect(repo.findById(existing.id)).resolves.toMatchObject({
+        start: at('07:00'),
+      });
+    });
+
+    it('mover a OTRO profesional que está de vacaciones también da 409', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const blocks = new InMemoryScheduleBlockRepository();
+      vacation(blocks, 'prov2');
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(blocks),
+      );
+
+      await expect(
+        uc.execute(existing.id, { providerId: 'prov2' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('un bloqueo que deja agendar (almuerzo): mueve y devuelve el aviso', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const blocks = new InMemoryScheduleBlockRepository();
+      blocks.seed({
+        providerId: null,
+        locationId: 'loc1',
+        kind: 'LUNCH',
+        allowsBooking: true,
+        start: at('18:00'),
+        end: at('19:00'),
+      });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(blocks),
+      );
+
+      const result = await uc.execute(existing.id, {
+        start: at('18:00'),
+        end: at('18:30'),
+      });
+      expect(result.start).toEqual(at('18:00'));
+      expect(result.warnings).toEqual([
+        'La cita cae en un bloqueo que permite agendar: Almuerzo (13:00–14:00).',
+      ]);
+    });
+
+    it('cambiar solo el estado dentro de un bloqueo no se rechaza', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const blocks = new InMemoryScheduleBlockRepository();
+      vacation(blocks);
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(blocks),
+      );
+
+      await expect(
+        uc.execute(existing.id, { status: AppointmentStatus.CONFIRMED }),
+      ).resolves.toMatchObject({ status: AppointmentStatus.CONFIRMED });
+    });
+
+    it('cancelar y luego marcar no-show deja UNA sola entrada OPEN, auditada una vez', async () => {
+      const waitlist = new InMemoryWaitlistRepository();
+      const repo = new InMemoryAppointmentRepository(waitlist);
+      const existing = repo.seed({
+        patientId: 'p9',
+        start: at('10:00'),
+        end: at('10:45'),
+      });
+      const drafts: AuditEventDraft[] = [];
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(drafts),
+        makeBlocks(),
+      );
+
+      await uc.execute(
+        existing.id,
+        { status: AppointmentStatus.CANCELLED },
+        ctx,
+      );
+      await uc.execute(existing.id, { status: AppointmentStatus.NO_SHOW }, ctx);
+
+      expect(waitlist.rows).toHaveLength(1);
+      expect(waitlist.rows[0]).toMatchObject({
+        status: 'OPEN',
+        patientId: 'p9',
+        sourceAppointmentId: existing.id,
+        providerId: 'prov1',
+        durationMinutes: 45,
+        createdById: 'u-rec',
+      });
+      const created = drafts.filter((d) => d.resourceType === 'WAITLIST_ENTRY');
+      expect(created).toEqual([
+        expect.objectContaining({
+          action: 'CREATE',
+          resourceId: waitlist.rows[0].id,
+          patient: { kind: 'patient', id: 'p9' },
+          metadata: { reason: 'WAITLIST_FROM_APPOINTMENT' },
+        }),
+      ]);
+    });
+
+    it('confirmar, completar o reagendar no crean pendientes', async () => {
+      const waitlist = new InMemoryWaitlistRepository();
+      const repo = new InMemoryAppointmentRepository(waitlist);
+      const existing = repo.seed({ start: at('10:00'), end: at('10:30') });
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(),
+      );
+
+      await uc.execute(existing.id, { status: AppointmentStatus.CONFIRMED });
+      await uc.execute(existing.id, { start: at('11:00'), end: at('11:30') });
+      await uc.execute(existing.id, { status: AppointmentStatus.COMPLETED });
+      expect(waitlist.rows).toHaveLength(0);
     });
   });
 });

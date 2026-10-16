@@ -16,6 +16,17 @@ export interface CreateAppointmentRepoInput {
   createdById?: string;
   /** DX-121: tipo ya validado (de esta clínica y activo) por el use-case. */
   appointmentTypeId?: string;
+  /**
+   * DX-122: sede de la cita cuando NO es la del request (agendar desde
+   * «Pendientes»: la de la entrada). Ya validada por quien la pasa.
+   */
+  locationId?: string;
+  /**
+   * DX-122: la entrada de pendientes que esta cita resuelve. En la MISMA
+   * transacción pasa a SCHEDULED, solo si sigue OPEN; si no, 409 y no se crea
+   * la cita.
+   */
+  waitlistEntryId?: string;
 }
 
 export interface UpdateAppointmentRepoInput {
@@ -36,6 +47,19 @@ export interface UpdateAppointmentRepoInput {
    * cita a otro profesional a la misma hora lo dejaría vigente.
    */
   revokeConfirmations?: boolean;
+  /**
+   * DX-122: la cita pasa a CANCELLED o NO_SHOW: en la MISMA transacción se crea
+   * su entrada OPEN en «Pendientes por agendar» (una sola por cita, aunque el
+   * estado cambie dos veces).
+   */
+  enqueueWaitlist?: { createdById: string | null };
+}
+
+/** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */
+export interface AppointmentUpdate {
+  appointment: Appointment;
+  /** Id de la entrada OPEN creada ahora; `null` si no se creó (o ya existía). */
+  waitlistEntryId: string | null;
 }
 
 export interface ListAppointmentsByRangeParams {
@@ -102,5 +126,8 @@ export interface AppointmentRepository {
     excludeId?: string,
   ): Promise<Appointment[]>;
 
-  update(id: string, patch: UpdateAppointmentRepoInput): Promise<Appointment>;
+  update(
+    id: string,
+    patch: UpdateAppointmentRepoInput,
+  ): Promise<AppointmentUpdate>;
 }

@@ -1,7 +1,11 @@
+import { ConflictException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
+import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../../waitlist/domain/waitlist-rules';
 import { Appointment } from '../../../domain/entities/appointment.entity';
+import type { InMemoryWaitlistRepository } from '../../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import {
   AppointmentRepository,
+  AppointmentUpdate,
   CreateAppointmentRepoInput,
   ListAppointmentsByRangeParams,
   ListUpcomingAppointmentsParams,
@@ -36,6 +40,13 @@ let seq = 0;
  */
 export class InMemoryAppointmentRepository implements AppointmentRepository {
   private readonly rows: StoredAppointment[] = [];
+
+  /**
+   * DX-122: con unos pendientes en memoria, `update` con `enqueueWaitlist` y
+   * `create` con `waitlistEntryId` hacen lo mismo que el repositorio de Prisma
+   * dentro de su transacción.
+   */
+  constructor(private readonly waitlist?: InMemoryWaitlistRepository) {}
 
   /** Test helper: seed a row directly, bypassing use-case validation. */
   seed(overrides: Partial<StoredAppointment> = {}): Appointment {
@@ -96,10 +107,21 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
 
   create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const now = new Date('2026-01-01T00:00:00.000Z');
+    const id = `a-${++seq}`;
+    if (
+      input.waitlistEntryId !== undefined &&
+      !this.waitlist?.markScheduled(
+        input.waitlistEntryId,
+        id,
+        input.createdById ?? null,
+      )
+    ) {
+      return Promise.reject(new ConflictException(WAITLIST_NOT_OPEN_MESSAGE));
+    }
     const row: StoredAppointment = {
-      id: `a-${++seq}`,
+      id,
       tenantId: 't1',
-      locationId: 'loc1',
+      locationId: input.locationId ?? 'loc1',
       patientId: input.patientId,
       patientFirstName: null,
       patientLastName: null,
@@ -183,7 +205,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return Promise.resolve(items);
   }
 
-  update(id: string, patch: UpdateAppointmentRepoInput): Promise<Appointment> {
+  update(
+    id: string,
+    patch: UpdateAppointmentRepoInput,
+  ): Promise<AppointmentUpdate> {
     const row = this.rows.find((r) => r.id === id && r.deletedAt === null);
     if (!row) {
       return Promise.reject(
@@ -193,12 +218,25 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     // `revokeConfirmations` es una orden al repo (revocar enlaces), no un campo.
     const definedPatch = Object.fromEntries(
       Object.entries(patch).filter(
-        ([key, value]) => value !== undefined && key !== 'revokeConfirmations',
+        ([key, value]) =>
+          value !== undefined &&
+          key !== 'revokeConfirmations' &&
+          key !== 'enqueueWaitlist',
       ),
     );
     Object.assign(row, definedPatch, {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
-    return Promise.resolve(this.toEntity(row));
+    const waitlistEntryId =
+      patch.enqueueWaitlist && this.waitlist
+        ? this.waitlist.enqueueFromAppointment(
+            row,
+            patch.enqueueWaitlist.createdById,
+          )
+        : null;
+    return Promise.resolve({
+      appointment: this.toEntity(row),
+      waitlistEntryId,
+    });
   }
 }
