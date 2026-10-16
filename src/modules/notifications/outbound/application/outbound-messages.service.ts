@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { OutboundChannel } from '@prisma/client';
+import type { OutboundChannel, OutboundMessageStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { describeJobError } from '../../../jobs/domain/backoff';
 import { maskRecipient } from '../domain/mask-recipient';
@@ -58,14 +58,20 @@ export class OutboundMessages {
     return { id };
   }
 
-  /** Cambia el estado; false si el mensaje no existe en esta clínica. */
+  /**
+   * Cambia el estado; false si el mensaje no existe en esta clínica o ya está
+   * en un estado final (SENT, FAILED, CANCELLED): solo se sale de PENDING y
+   * de QUEUED, y a QUEUED solo desde PENDING (revisión H9).
+   */
   async settle(id: string, outcome: OutboundOutcome): Promise<boolean> {
+    const from: OutboundMessageStatus[] =
+      outcome.status === 'QUEUED' ? ['PENDING'] : ['PENDING', 'QUEUED'];
     const finished = outcome.status === 'SENT' || outcome.status === 'FAILED';
     const lastError =
       outcome.status === 'FAILED' ? describeJobError(outcome.error) : null;
     const { count } = await this.prisma.runWithTenant((tx) =>
       tx.outboundMessage.updateMany({
-        where: { id },
+        where: { id, status: { in: from } },
         data: {
           status: outcome.status,
           ...(finished ? { attempts: { increment: 1 } } : {}),

@@ -15,13 +15,14 @@ export interface PurgedTokens {
  */
 export interface TokenMaintenanceRepository {
   /**
-   * - `revoked_tokens` vencidos (`expiresAt` < now): el refresh token ya es
-   *   inválido por su TTL; la entrada de la denylist no aporta nada.
+   * Con la hora de la BD, no la del worker (revisión H7):
+   * - `revoked_tokens` vencidos hace más de 5 min: el refresh token ya es
+   *   inválido por su TTL; el margen cubre un reloj de la API atrasado.
    * - `pending_registrations` caducadas: guardan un email y un hash de
    *   contraseña, no se conservan.
    * - `user_tokens` caducados, usados o invalidados hace más de
    *   `userTokenGraceMs`: durante ese margen el enlace aún responde
    *   EXPIRED/USED (y no INVALID) a quien lo abre tarde.
    */
-  purgeExpired(now: Date, userTokenGraceMs: number): Promise<PurgedTokens>;
+  purgeExpired(userTokenGraceMs: number): Promise<PurgedTokens>;
 }

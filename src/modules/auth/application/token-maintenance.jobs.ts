@@ -29,10 +29,7 @@ export class TokenMaintenanceJobs implements OnModuleInit {
       name: PURGE_EXPIRED_TOKENS_JOB,
       maxAttempts: 3,
       handle: async () => {
-        const purged = await this.repo.purgeExpired(
-          new Date(),
-          USER_TOKEN_GRACE_MS,
-        );
+        const purged = await this.repo.purgeExpired(USER_TOKEN_GRACE_MS);
         this.logger.log({ event: 'auth.tokens_purged', ...purged });
       },
     });

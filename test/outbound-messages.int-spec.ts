@@ -155,6 +155,26 @@ describe('DX-085 · outbound_messages (int)', () => {
     expect(row.sentAt).toBeInstanceOf(Date);
   });
 
+  it('un estado final no cambia (SENT no pasa a FAILED: el CHECK de sentAt no salta)', async () => {
+    const { id } = await tenantContext.run(a.tenantId, () =>
+      messages.record({
+        channel: 'SMS',
+        template: 'x',
+        recipient: '3001234567',
+      }),
+    );
+    await tenantContext.run(a.tenantId, async () => {
+      expect(await messages.settle(id, { status: 'SENT' })).toBe(true);
+      expect(
+        await messages.settle(id, { status: 'FAILED', error: new Error('x') }),
+      ).toBe(false);
+      expect(await messages.settle(id, { status: 'QUEUED' })).toBe(false);
+    });
+    expect(
+      await raw.outboundMessage.findUniqueOrThrow({ where: { id } }),
+    ).toMatchObject({ status: 'SENT', attempts: 1, lastError: null });
+  });
+
   it('RLS: otra clínica ni lo ve ni lo cambia', async () => {
     const { id } = await tenantContext.run(a.tenantId, () =>
       messages.record({
