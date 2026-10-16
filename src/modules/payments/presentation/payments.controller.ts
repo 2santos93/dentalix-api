@@ -101,14 +101,19 @@ export class PaymentsController {
   @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
   listCash(
     @Query() query: ListCashPaymentsQueryDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<ListCashPaymentsOutput> {
-    return this.listCashPayments.execute({
-      from: query.from,
-      to: query.to,
-      method: query.method,
-      page: query.page,
-      pageSize: query.pageSize,
-    });
+    return this.listCashPayments.execute(
+      {
+        from: query.from,
+        to: query.to,
+        method: query.method,
+        page: query.page,
+        pageSize: query.pageSize,
+      },
+      // `canVoid` de cada fila se calcula para quien consulta (del token).
+      { userId: req.user.sub, role: req.user.role },
+    );
   }
 
   @Post('treatment-plans/:id/payments')

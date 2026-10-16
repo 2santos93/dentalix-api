@@ -1,11 +1,21 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { GetAccountStatementUseCase } from './get-account-statement.use-case';
+import { ClinicRole } from '@prisma/client';
+import {
+  GetAccountStatementInput,
+  GetAccountStatementUseCase,
+} from './get-account-statement.use-case';
+import type { VoidActor } from '../../../payments/domain/void-window';
 import {
   AccountStatementData,
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
 
+// 2026-03-01 10:00 en Bogotá (UTC-5).
 const NOW = new Date('2026-03-01T15:00:00.000Z');
+const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
+const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
+// Alta de los abonos del fixture: hoy por la mañana en la sede.
+const CREATED_TODAY = new Date('2026-03-01T13:00:00.000Z');
 
 function data(): AccountStatementData {
   return {
@@ -36,6 +46,9 @@ function data(): AccountStatementData {
           paidAt: new Date('2026-01-10T00:00:00.000Z'),
           method: 'CASH',
           location: { id: 'l-1', name: 'Sede' },
+          createdById: 'u-recep',
+          createdAt: CREATED_TODAY,
+          timeZone: 'America/Bogota',
           voidedAt: null,
           voidedBy: null,
           voidReason: null,
@@ -48,6 +61,9 @@ function data(): AccountStatementData {
           paidAt: new Date('2026-02-10T00:00:00.000Z'),
           method: 'CARD',
           location: { id: 'l-1', name: 'Sede' },
+          createdById: 'u-recep',
+          createdAt: CREATED_TODAY,
+          timeZone: 'America/Bogota',
           voidedAt: null,
           voidedBy: null,
           voidReason: null,
@@ -63,7 +79,17 @@ function makeUseCase(result: AccountStatementData | null = data()) {
     Promise.resolve(result),
   );
   const repo: AccountStatementRepository = { load };
-  return { load, useCase: new GetAccountStatementUseCase(repo, () => NOW) };
+  const uc = new GetAccountStatementUseCase(repo, () => NOW);
+  return {
+    load,
+    useCase: {
+      execute: (
+        patientId: string,
+        input: GetAccountStatementInput,
+        actor: VoidActor = ADMIN,
+      ) => uc.execute(patientId, input, actor),
+    },
+  };
 }
 
 describe('GetAccountStatementUseCase', () => {
@@ -114,5 +140,78 @@ describe('GetAccountStatementUseCase', () => {
       BadRequestException,
     );
     expect(load).not.toHaveBeenCalled();
+  });
+
+  describe('canVoid por movimiento (DX-057)', () => {
+    function withPayments(
+      ...overrides: Partial<AccountStatementData['snapshot']['payments'][0]>[]
+    ): AccountStatementData {
+      const base = data();
+      const template = base.snapshot.payments[0];
+      base.snapshot.payments = overrides.map((o, i) => ({
+        ...template,
+        id: `pay-${i + 1}`,
+        ...o,
+      }));
+      return base;
+    }
+
+    it('recepción: true solo en sus abonos activos registrados hoy en la sede', async () => {
+      const { useCase } = makeUseCase(
+        withPayments(
+          {},
+          { createdById: 'u-otra' },
+          // 23:30 del 28/02 en Bogotá: ya es 1/03 en UTC, pero no "hoy".
+          { createdAt: new Date('2026-03-01T04:30:00.000Z') },
+          { createdById: null },
+          {
+            voidedAt: NOW,
+            voidedBy: { id: 'u-admin', fullName: 'Admin' },
+            voidReason: 'Duplicado',
+          },
+        ),
+      );
+
+      const out = await useCase.execute('p-1', {}, RECEPTION);
+
+      const byId = new Map(out.movements.map((m) => [m.id, m]));
+      expect(byId.get('pay-1')).toMatchObject({
+        canVoid: true,
+        createdById: 'u-recep',
+      });
+      expect(byId.get('pay-2')).toMatchObject({
+        canVoid: false,
+        createdById: 'u-otra',
+      });
+      expect(byId.get('pay-3')?.canVoid).toBe(false);
+      expect(byId.get('pay-4')).toMatchObject({
+        canVoid: false,
+        createdById: null,
+      });
+      // Ya anulado: nunca se ofrece anular otra vez.
+      expect(byId.get('pay-5')?.canVoid).toBe(false);
+    });
+
+    it('ADMIN: true en todo abono activo, false en los ya anulados', async () => {
+      const { useCase } = makeUseCase(
+        withPayments(
+          { createdById: 'u-otra', createdAt: new Date('2025-01-01') },
+          { voidedAt: NOW },
+        ),
+      );
+
+      const out = await useCase.execute('p-1', {}, ADMIN);
+
+      const byId = new Map(out.movements.map((m) => [m.id, m.canVoid]));
+      expect(byId.get('pay-1')).toBe(true);
+      expect(byId.get('pay-2')).toBe(false);
+    });
+
+    it('no expone la zona horaria ni el alta interna del abono', async () => {
+      const { useCase } = makeUseCase();
+      const out = await useCase.execute('p-1', {}, RECEPTION);
+      expect(out.movements[0]).not.toHaveProperty('timeZone');
+      expect(out.movements[0]).not.toHaveProperty('createdAt');
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { PaymentMethod } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
+import type { VoidSubject } from '../void-window';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
 // guarded request context (never the client), same convention as
@@ -54,8 +55,14 @@ export interface CashRegisterGroup {
   count: number;
 }
 
+/** Una fila de la caja con lo que decide si el actor puede anularla. */
+export interface CashRegisterRow {
+  payment: CashPayment;
+  voidSubject: VoidSubject;
+}
+
 export interface CashRegisterPage {
-  items: CashPayment[];
+  items: CashRegisterRow[];
   /** Filas que casan con los filtros (no solo las de esta página). */
   total: number;
   /** Agregado por (moneda, método) del período entero, sin paginar. */
@@ -67,14 +74,10 @@ export interface CashRegisterPage {
 /**
  * Lo que la regla de anulación necesita saber del abono ANTES de anularlo:
  * quién lo registró, cuándo, y la zona horaria de su sede (para decidir qué
- * es "hoy" — ver `isSameCivilDay`).
+ * es "hoy" — ver `voidDenial`).
  */
-export interface PaymentVoidTarget {
+export interface PaymentVoidTarget extends VoidSubject {
   id: string;
-  createdById: string | null;
-  createdAt: Date;
-  /** IANA de la sede del abono (su horario), o la zona por defecto. */
-  timeZone: string;
 }
 
 /** Rastro de la anulación (SEC-013). */

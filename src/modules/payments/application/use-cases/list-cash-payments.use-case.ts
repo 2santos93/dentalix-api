@@ -8,8 +8,10 @@ import type {
 import {
   CashCurrencyTotal,
   CashMethodTotal,
-  CashPayment,
+  CashPaymentView,
 } from '../../domain/entities/cash-payment.entity';
+import { canVoidPayment, type VoidActor } from '../../domain/void-window';
+import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -49,7 +51,7 @@ export interface CashPaymentsSummary {
 }
 
 export interface ListCashPaymentsOutput {
-  items: CashPayment[];
+  items: CashPaymentView[];
   total: number;
   page: number;
   pageSize: number;
@@ -162,9 +164,18 @@ export class ListCashPaymentsUseCase {
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly repo: PaymentRepository,
+    @Inject(PAYMENT_CLOCK)
+    private readonly now: PaymentClock,
   ) {}
 
-  async execute(input: ListCashPaymentsInput): Promise<ListCashPaymentsOutput> {
+  /**
+   * `actor` (del token) solo decide `canVoid` de cada fila: qué abonos puede
+   * anular quien consulta, con la misma regla que aplica la anulación.
+   */
+  async execute(
+    input: ListCashPaymentsInput,
+    actor: VoidActor,
+  ): Promise<ListCashPaymentsOutput> {
     const from = parseCivilDate(input.from, 'from');
     const to = parseCivilDate(input.to, 'to');
     if (from.getTime() > to.getTime()) {
@@ -188,8 +199,12 @@ export class ListCashPaymentsUseCase {
       take: pageSize,
     });
 
+    const now = this.now();
     return {
-      items: result.items,
+      items: result.items.map(({ payment, voidSubject }) => ({
+        ...payment,
+        canVoid: canVoidPayment(voidSubject, actor, now),
+      })),
       total: result.total,
       page,
       pageSize,

@@ -36,6 +36,12 @@ export interface StatementPaymentRow {
   paidAt: Date;
   method: PaymentMethod | null;
   location: { id: string; name: string };
+  /** Quién registró el abono (`null` en abonos antiguos sin autor). */
+  createdById: string | null;
+  /** Cuándo se registró: con `timeZone`, decide el "hoy" de la anulación. */
+  createdAt: Date;
+  /** IANA de la sede del abono (su horario), o la zona por defecto. */
+  timeZone: string;
   /** `deletedAt` del abono: no nulo = anulado. */
   voidedAt: Date | null;
   /** Quién lo anuló (SEC-013); `null` si está activo o se anuló sin rastro. */
@@ -120,6 +126,13 @@ export interface StatementMovement {
   method: PaymentMethod | null;
   location: { id: string; name: string };
   treatmentPlanId: string;
+  /** Quién registró el abono (`null` en abonos antiguos sin autor). */
+  createdById: string | null;
+  /**
+   * Si quien consulta puede anular el abono (DX-057): misma regla que
+   * `DELETE /payments/:id` (`voidDenial`); siempre `false` si ya está anulado.
+   */
+  canVoid: boolean;
   voided: boolean;
   voidedAt: Date | null;
   voidedBy: StatementVoidedBy | null;

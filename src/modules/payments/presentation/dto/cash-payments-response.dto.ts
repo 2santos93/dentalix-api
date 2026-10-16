@@ -42,6 +42,24 @@ export class CashPaymentDto {
   id!: string;
 
   @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Quién registró el abono; `null` en abonos antiguos sin autor.',
+  })
+  createdById!: string | null;
+
+  @ApiProperty({
+    description:
+      'Si quien consulta puede anular este abono: ADMIN siempre; RECEPTION ' +
+      'solo los que registró ella el mismo día (calendario de la sede del ' +
+      'abono). Solo orienta a la interfaz: `DELETE /payments/:id` vuelve a ' +
+      'aplicar la regla.',
+  })
+  canVoid!: boolean;
+
+  @ApiProperty({
     format: 'date-time',
     description: 'Día civil del abono (medianoche UTC del día registrado).',
   })

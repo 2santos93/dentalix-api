@@ -4,6 +4,7 @@ import {
   Param,
   ParseUUIDPipe,
   Query,
+  Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -25,6 +26,7 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 
 // Estado de cuenta = el mismo dato FINANCIERO que pagos y planes de pago, visto
@@ -62,10 +64,13 @@ export class AccountStatementController {
   get(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Query() query: AccountStatementQueryDto,
+    @Req() req: { user: TenantJwtPayload },
   ): Promise<AccountStatement> {
-    return this.getAccountStatement.execute(patientId, {
-      from: query.from,
-      to: query.to,
-    });
+    return this.getAccountStatement.execute(
+      patientId,
+      { from: query.from, to: query.to },
+      // `canVoid` de cada movimiento se calcula para quien consulta (token).
+      { userId: req.user.sub, role: req.user.role },
+    );
   }
 }

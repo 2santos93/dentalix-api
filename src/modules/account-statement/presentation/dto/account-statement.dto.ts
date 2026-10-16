@@ -188,6 +188,24 @@ export class AccountStatementMovementDto {
   @ApiProperty({ format: 'uuid' })
   treatmentPlanId!: string;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Quién registró el abono; `null` en abonos antiguos sin autor.',
+  })
+  createdById!: string | null;
+
+  @ApiProperty({
+    description:
+      'Si quien consulta puede anular este abono: ADMIN cualquiera activo; ' +
+      'RECEPTION solo los suyos registrados el mismo día (calendario de la ' +
+      'sede del abono). `false` si ya está anulado. Solo orienta a la ' +
+      'interfaz: `DELETE /payments/:id` vuelve a aplicar la regla.',
+  })
+  canVoid!: boolean;
+
   @ApiProperty({ description: 'Abono anulado: se lista pero no suma.' })
   voided!: boolean;
 

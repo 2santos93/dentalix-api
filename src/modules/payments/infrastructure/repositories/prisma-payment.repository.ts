@@ -2,10 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CashRegisterPage,
+  CashRegisterRow,
   CreatePaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
@@ -54,6 +55,9 @@ function mapToEntity(payment: PrismaPayment): Payment {
 // una por fila, así que el número de consultas no crece con la página.
 const CASH_PAYMENT_SELECT = {
   id: true,
+  createdById: true,
+  // `createdAt` no se expone: solo alimenta la regla de anulación (canVoid).
+  createdAt: true,
   paidAt: true,
   amount: true,
   currency: true,
@@ -74,9 +78,24 @@ type PrismaCashPayment = Prisma.PaymentGetPayload<{
   select: typeof CASH_PAYMENT_SELECT;
 }>;
 
+function mapToCashRow(
+  row: PrismaCashPayment,
+  timeZoneOf: (locationId: string) => string,
+): CashRegisterRow {
+  return {
+    payment: mapToCashPayment(row),
+    voidSubject: {
+      createdById: row.createdById,
+      createdAt: row.createdAt,
+      timeZone: timeZoneOf(row.location.id),
+    },
+  };
+}
+
 function mapToCashPayment(row: PrismaCashPayment): CashPayment {
   return {
     id: row.id,
+    createdById: row.createdById,
     paidAt: row.paidAt,
     amount: row.amount.toNumber(),
     currency: row.currency,
@@ -246,19 +265,18 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (!payment) {
         return null;
       }
-      // La zona de la sede vive en su horario (LocationSchedule). Una sede sin
-      // horario configurado usa la misma zona con la que nace uno nuevo
-      // (DEFAULT_BUSINESS_HOURS_TIMEZONE), así "hoy" nunca cae en el UTC del
-      // servidor.
-      const schedule = await tx.locationSchedule.findFirst({
-        where: { locationId: payment.locationId, deletedAt: null },
-        select: { timezone: true },
-      });
+      // "Hoy" es el día civil de la sede del abono (su horario), nunca el
+      // UTC del servidor; ver `resolveLocationTimeZones`.
+      const timeZoneOf = await resolveLocationTimeZones(
+        tx,
+        this.requireTenantId(),
+        [payment.locationId],
+      );
       return {
         id: payment.id,
         createdById: payment.createdById,
         createdAt: payment.createdAt,
-        timeZone: schedule?.timezone ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
+        timeZone: timeZoneOf(payment.locationId),
       };
     });
   }
@@ -354,8 +372,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
             : Promise.resolve(null),
         ]);
 
+        // Zona de cada sede de la página, en UNA consulta y en la misma foto:
+        // el `canVoid` de cada fila usa el mismo "hoy" que la anulación.
+        const timeZoneOf = await resolveLocationTimeZones(
+          tx,
+          this.requireTenantId(),
+          rows.map((row) => row.location.id),
+        );
+
         return {
-          items: rows.map(mapToCashPayment),
+          items: rows.map((row) => mapToCashRow(row, timeZoneOf)),
           total,
           groups: groups.map((group) => ({
             currency: group.currency,
