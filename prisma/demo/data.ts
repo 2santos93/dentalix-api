@@ -1,9 +1,12 @@
 import {
   ClinicRole,
+  DentitionEventReason,
+  DentitionType,
   DocType,
   InventoryMovementType,
   PaymentMethod,
   Sex,
+  ToothRecordOrigin,
   ToothRecordStatus,
   ToothSurface,
   TreatmentPlanItemStatus,
@@ -946,6 +949,73 @@ export const DEMO_TOOTH_RECORDS: readonly DemoToothRecord[] = [
     status: ToothRecordStatus.COMPLETED,
   },
 ];
+
+/**
+ * DX-120: anulación con motivo de un hallazgo mal registrado (índice en
+ * DEMO_TOOTH_RECORDS); la anula su autor. Se ve tachado en el historial.
+ */
+export const DEMO_TOOTH_RECORD_VOIDS: readonly {
+  recordIndex: number;
+  dentistIndex: number;
+  reason: string;
+}[] = [
+  {
+    recordIndex: 1,
+    dentistIndex: 0,
+    reason: 'Era el 24, no el 25: registrado en el diente equivocado.',
+  },
+];
+
+/**
+ * DX-120: odontopediatría. Sofía (índice 8, nacida en 2015) tiene dentición
+ * mixta. Los eventos fijan las posiciones de los registros temporales, así la
+ * demo no depende de su edad el día que se siembre: el 65 y el 84 caben
+ * porque las posiciones 25 y 44 quedan en mixta, y el 75 ya exfolió.
+ */
+export const DEMO_PEDIATRIC = {
+  patientIndex: 8,
+  dentistIndex: 1,
+  events: [
+    {
+      positions: ['25', '44'],
+      dentition: DentitionType.MIXED,
+      reason: DentitionEventReason.MANUAL,
+    },
+    {
+      positions: ['35'],
+      dentition: DentitionType.PERMANENT,
+      reason: DentitionEventReason.EXFOLIATION,
+    },
+  ],
+  records: [
+    {
+      daysAgo: 12,
+      toothNumber: '65',
+      surfaces: [OCCLUSAL],
+      catalogCode: 'DX-CARIES',
+      status: ToothRecordStatus.COMPLETED,
+      origin: ToothRecordOrigin.THIS_CLINIC,
+    },
+    {
+      daysAgo: 12,
+      toothNumber: '84',
+      surfaces: [OCCLUSAL],
+      catalogCode: 'OP-RESINA-1',
+      status: ToothRecordStatus.COMPLETED,
+      origin: ToothRecordOrigin.PRE_EXISTING,
+      notes: 'Resina que ya traía al llegar a la clínica.',
+    },
+    {
+      daysAgo: 12,
+      toothNumber: '46',
+      surfaces: [OCCLUSAL],
+      catalogCode: 'OP-RESINA-1',
+      status: ToothRecordStatus.COMPLETED,
+      origin: ToothRecordOrigin.OTHER_PROVIDER,
+      notes: 'Hecha por su odontólogo anterior.',
+    },
+  ],
+} as const;
 
 interface DemoPlanItem {
   code: string;
