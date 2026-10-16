@@ -115,7 +115,10 @@ export class AuthController {
       });
       return this.cookie.deliver(res, pair, cookieMode);
     } catch (err) {
-      if (viaCookie) this.cookie.clear(res);
+      // Solo un 401 dice que la cookie está muerta; un 5xx transitorio no.
+      if (viaCookie && err instanceof UnauthorizedException) {
+        this.cookie.clear(res);
+      }
       throw err;
     }
   }
