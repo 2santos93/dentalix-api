@@ -1702,3 +1702,47 @@ export const DEMO_PRESCRIPTION = {
     'Post-exodoncia del 36: dieta blanda y frío local las primeras 24 horas.',
   items: [AMOXICILINA_500, IBUPROFENO_600],
 } as const;
+
+// DX-121: tipos de cita de la demo, con color para la agenda en columnas. El
+// ámbar es claro a propósito: la tarjeta tiene que elegir texto oscuro sola.
+// `reasons`: motivos del calendario de la demo que se agendan con ese tipo
+// (el resto de las citas queda sin tipo, como las anteriores a DX-121).
+export interface DemoAppointmentType {
+  name: string;
+  durationMinutes: number;
+  color: string;
+  reasons: readonly string[];
+}
+
+export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
+  {
+    name: 'Valoración',
+    durationMinutes: 30,
+    color: '#0E7490',
+    reasons: ['Valoración inicial'],
+  },
+  {
+    name: 'Limpieza',
+    durationMinutes: 45,
+    color: '#16A34A',
+    reasons: ['Profilaxis y control', 'Raspaje y alisado radicular'],
+  },
+  {
+    name: 'Endodoncia',
+    durationMinutes: 90,
+    color: '#7C3AED',
+    reasons: ['Endodoncia (sesión de seguimiento)'],
+  },
+  {
+    name: 'Urgencia',
+    durationMinutes: 30,
+    color: '#DC2626',
+    reasons: ['Urgencia: dolor dental'],
+  },
+  {
+    name: 'Control de ortodoncia',
+    durationMinutes: 30,
+    color: '#FBBF24',
+    reasons: ['Control de ortodoncia'],
+  },
+];
