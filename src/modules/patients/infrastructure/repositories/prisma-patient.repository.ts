@@ -17,6 +17,12 @@ import {
 
 type PrismaPatient = Prisma.PatientGetPayload<Record<string, never>>;
 
+/**
+ * Desde cuántos caracteres (normalizados) se busca por la función indexada;
+ * `dx_patient_search_*` devuelve nada por debajo (misma regla en SQL).
+ */
+const MIN_INDEXED_QUERY_LENGTH = 2;
+
 /** Página por defecto de la búsqueda si el llamador no fija `take`. */
 const DEFAULT_SEARCH_TAKE = 20;
 
@@ -181,12 +187,26 @@ export class PrismaPatientRepository implements PatientRepository {
   }
 
   async list(params: ListPatientsParams): Promise<ListPatientsResult> {
-    const query = params.query?.trim();
-    if (query) {
+    const query = params.query?.replace(/\s+/g, ' ').trim();
+    if (query && query.length >= MIN_INDEXED_QUERY_LENGTH) {
       return this.search(query, params);
     }
 
-    const where: Prisma.PatientWhereInput = { deletedAt: null };
+    // Sin término, o de 1 carácter (sin trigramas útiles): camino normal bajo
+    // la RLS. Así la función SECURITY DEFINER nunca recorre el índice de
+    // todos los tenants por un término que no lo acota.
+    const where: Prisma.PatientWhereInput = {
+      deletedAt: null,
+      ...(query
+        ? {
+            OR: [
+              { firstName: { contains: query, mode: 'insensitive' } },
+              { lastName: { contains: query, mode: 'insensitive' } },
+              { docNumber: { contains: query, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
     return this.prisma.runWithTenant(async (tx) => {
       const [items, total] = await Promise.all([
         tx.patient.findMany({

@@ -18,8 +18,8 @@ export class ListPatientsQueryDto {
   @ApiPropertyOptional({
     maxLength: PATIENTS_MAX_QUERY_LENGTH,
     description:
-      'Búsqueda libre por nombre, apellido o documento (subcadena). No ' +
-      'distingue tildes ni mayúsculas: "jose" encuentra "José".',
+      'Búsqueda libre por nombre, apellido o documento (subcadena). Desde 2 ' +
+      'caracteres no distingue tildes ni mayúsculas: "jose" encuentra "José".',
   })
   @IsOptional()
   @IsString({ message: 'La búsqueda debe ser un texto.' })
@@ -45,6 +45,7 @@ export class ListPatientsQueryDto {
 
   @ApiPropertyOptional({
     minimum: 1,
+    maximum: PATIENTS_MAX_PAGE_SIZE,
     default: 20,
     description: `Tope: ${PATIENTS_MAX_PAGE_SIZE} (un valor mayor se recorta; la respuesta trae el pageSize aplicado)`,
   })

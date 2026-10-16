@@ -55,7 +55,7 @@ export class DashboardQueryDto {
     minimum: 1,
     maximum: MAX_UPCOMING_LIMIT,
     default: 5,
-    description: `Max number of upcoming appointments to return. Tope: ${MAX_UPCOMING_LIMIT} (un valor mayor responde 400).`,
+    description: `Cuántas próximas citas devolver. Tope: ${MAX_UPCOMING_LIMIT} (un valor mayor responde 400).`,
   })
   @IsOptional()
   @Type(() => Number)

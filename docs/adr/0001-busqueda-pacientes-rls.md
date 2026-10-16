@@ -2,7 +2,7 @@
 
 - **Estado:** aceptada (DX-043, 2026-10-16)
 - **Origen:** auditoría de BD 2026-10-15, hallazgo DB-004 (y DB-005).
-- **Migración:** `prisma/migrations/20261017110000_patient_search_and_list_indexes`.
+- **Migración:** `prisma/migrations/20261017114000_patient_search_and_list_indexes`.
 - **Medición:** [`docs/perf/DX-043.md`](../perf/DX-043.md).
 
 ## Contexto
@@ -25,8 +25,9 @@ BYPASSRLS) nunca lo usa.
 
 1. **Marcar `textlike`/`texticlike` como LEAKPROOF** (`ALTER FUNCTION
    pg_catalog.texticlike(text, text) LEAKPROOF`).
-2. **Función `SECURITY DEFINER`** propiedad de un rol con BYPASSRLS que aplica
-   ella misma el filtro de tenant del contexto.
+2. **Función `SECURITY DEFINER`** propiedad de un rol sin login para el que la
+   política de `patients` no restringe filas, que aplica ella misma el filtro
+   de tenant del contexto.
 3. **Solo búsqueda por prefijo** con `>=`/`<` (que sí son LEAKPROOF) sobre
    btree.
 
@@ -60,12 +61,22 @@ Postgres. La opción 3 cambia el producto (no encuentra "pérez" dentro de
   normalizar(`firstName` ‖ ' ' ‖ `lastName` ‖ ' ' ‖ `docNumber`). La calcula
   Postgres en cada INSERT/UPDATE; la app no la escribe ni la lee (en Prisma es
   `@ignore`).
-- **Índice** `patients_search_text_trgm_live_idx`: GIN `gin_trgm_ops`,
-  parcial `WHERE "deletedAt" IS NULL`.
-- **Rol** `dentalix_patient_search`: `NOLOGIN`, `BYPASSRLS`, sin superusuario.
-  Privilegios mínimos: `USAGE` del esquema y `SELECT` solo de `id`,
-  `tenantId`, `search_text`, `createdAt` y `deletedAt` de `patients` (ni
-  nombres en claro ni datos clínicos).
+- **Índice** `patients_search_text_trgm_live_idx`: GIN **compuesto**
+  (`btree_gin`) `("tenantId", search_text gin_trgm_ops)`, parcial
+  `WHERE "deletedAt" IS NULL`. El bitmap ya sale limitado al tenant, así que
+  un término común no recorre coincidencias de otros tenants.
+- **Mínimo de 2 caracteres** (normalizados) para usar la función; con 1
+  carácter el repositorio usa el camino normal bajo RLS (`ILIKE` de Prisma) y
+  la función devuelve nada.
+- **Rol** `dentalix_patient_search`: `NOLOGIN`, **sin** `BYPASSRLS`, sin
+  superusuario, sin miembros. Privilegios mínimos: `USAGE` del esquema y
+  `SELECT` solo de `id`, `tenantId`, `search_text`, `createdAt` y `deletedAt`
+  de `patients` (ni nombres en claro ni datos clínicos).
+- **Política** `patient_search_definer ON patients AS PERMISSIVE FOR SELECT TO
+  dentalix_patient_search USING (true)`. Las permisivas se combinan con OR:
+  para ese rol el predicado queda `tenant_isolation OR true` = `true`, sin
+  *security qual*, y el `LIKE` vuelve a poder ser condición de índice. Para
+  `dentalix_app` y cualquier otro rol no cambia nada.
 - **Funciones** `dx_patient_search_ids(query, limit, offset)` y
   `dx_patient_search_count(query)`, propiedad de ese rol, `SECURITY DEFINER`,
   `SET search_path = pg_catalog, pg_temp`, `EXECUTE` solo para `dentalix_app`
@@ -90,15 +101,19 @@ Postgres. La opción 3 cambia el producto (no encuentra "pérez" dentro de
   RLS del producto; la defensa está en que la API fija el tenant desde el host
   y la sesión validados, nunca desde el cliente). La función lee el tenant de
   ese mismo sitio.
-- El bypass de RLS queda en **un único punto auditable**, con un rol que no
-  puede conectarse y que solo ve cinco columnas de una tabla.
+- La lectura sin filtro de tenant queda en **un único punto auditable**: un
+  rol que no puede conectarse, sin miembros (la migración aborta si el rol ya
+  existe con miembros o atributos inesperados), que solo ve cinco columnas de
+  una tabla y solo para SELECT.
 - `search_path` fijo: un objeto con el mismo nombre en otro esquema (o en
   `pg_temp`) no puede secuestrar la función.
 - La RLS de `patients` (y de todo lo demás) queda intacta y FORCE.
 - Cubierto por `test/patient-search.int-spec.ts`: aislamiento entre dos
   tenants por el repositorio y llamando a las funciones directamente, sin
-  tenant en contexto, firma sin tenant, `SECURITY DEFINER` + `search_path` +
-  dueño `NOLOGIN`/`BYPASSRLS`/no superusuario.
+  tenant en contexto, tenant no UUID (error), firma sin tenant,
+  `SECURITY DEFINER` + `search_path`, dueño `NOLOGIN` sin `BYPASSRLS` ni
+  miembros, política solo `FOR SELECT TO dentalix_patient_search`, `EXECUTE`
+  sin PUBLIC y uso del índice trigram compuesto.
 
 ## Consecuencias
 
@@ -106,15 +121,22 @@ Postgres. La opción 3 cambia el producto (no encuentra "pérez" dentro de
   conteo + filas), con Bitmap Index Scan trigram. "jose" encuentra "José";
   "nunez" encuentra "Núñez"; también busca por nombre completo y por documento
   parcial.
-- Términos de 1-2 caracteres no tienen trigramas: el planner recorre el índice
-  por fecha. Es correcto, solo menos selectivo.
-- El rol de migración tiene que poder crear un rol con `BYPASSRLS`
-  (superusuario en PG16, o `CREATEROLE` + `BYPASSRLS` propio). Es el owner
-  `dentalix`, el mismo que ya exigen las migraciones con `row_security = off`.
-  Los roles son del clúster: la migración lo crea si no existe y fija siempre
-  sus atributos.
-- `ADD COLUMN ... GENERATED STORED` reescribe `patients` una vez (bloqueo
-  exclusivo durante la reescritura; < 1 s con 50k filas).
+- El rol que migra necesita ser owner de las tablas y `CREATEROLE`; **no**
+  hace falta superusuario ni `BYPASSRLS` (vale para Postgres gestionado). Para
+  traspasar las funciones se concede a sí mismo la membresía con SET y al rol
+  de búsqueda CREATE en `public`, solo durante el traspaso; ambas se revocan
+  en la misma migración. En PG16, quien crea un rol con CREATEROLE conserva la
+  opción ADMIN sobre él (sin SET ni INHERIT): es el mismo migrador de
+  confianza.
+- `ADD COLUMN ... GENERATED STORED` **reescribe `patients`** una vez, con
+  ACCESS EXCLUSIVE hasta el COMMIT (< 1 s con 60k filas; ventana de poco
+  tráfico en producción). La migración fija `lock_timeout = 5s` para fallar
+  en vez de encolar a la API. Los índices se crean y retiran con
+  `CONCURRENTLY`, uno por migración.
+- Falsos positivos en la frontera entre campos: la columna concatena
+  `nombre apellido documento`, así que «ez 10» encuentra «Pérez 1020…». Es
+  aceptable para un buscador de recepción; a cambio, «jose perez» encuentra
+  por nombre completo.
 - Otros buscadores con el mismo patrón (`ILIKE` en catálogo, inventario y
   personal) siguen igual: volúmenes mucho menores. Si crecieran, se aplica el
   mismo patrón.

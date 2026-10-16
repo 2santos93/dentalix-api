@@ -162,32 +162,45 @@ describe('Búsqueda de pacientes con RLS (DX-043, int)', () => {
   });
 
   it('trata % y _ del término como literales (no comodines)', async () => {
-    expect((await search(a.tenantId, '%')).items.map((p) => p.id)).toEqual([
+    // Como comodines, "o%" casaría con José y Gómez y "r_" con María.
+    expect((await search(a.tenantId, 'o%')).items.map((p) => p.id)).toEqual([
       a.ids.pct,
     ]);
-    expect((await search(a.tenantId, '_')).items.map((p) => p.id)).toEqual([
+    expect((await search(a.tenantId, 'r_')).items.map((p) => p.id)).toEqual([
       a.ids.pct,
     ]);
-    expect((await search(a.tenantId, '\\')).total).toBe(0);
+    expect((await search(a.tenantId, '\\\\')).total).toBe(0);
   });
 
   it('pagina en BD con orden (createdAt DESC, id DESC) y total completo', async () => {
-    // "o" está en José Pérez, Ana Gómez y Cien Por_Ciento; no en María Núñez.
-    const all = await search(a.tenantId, 'o');
+    // "ez" está en Pérez, Gómez y Núñez; no en Cien Por_Ciento.
+    const all = await search(a.tenantId, 'ez');
     expect(all.total).toBe(3);
     expect(all.items.map((p) => p.id)).toEqual([
-      a.ids.pct,
+      a.ids.nunez,
       a.ids.ana,
       a.ids.jose,
     ]);
 
-    const page2 = await search(a.tenantId, 'o', 1, 1);
+    const page2 = await search(a.tenantId, 'ez', 1, 1);
     expect(page2.items.map((p) => p.id)).toEqual([a.ids.ana]);
     expect(page2.total).toBe(3);
 
-    const beyond = await search(a.tenantId, 'o', 50, 20);
+    const beyond = await search(a.tenantId, 'ez', 50, 20);
     expect(beyond.items).toEqual([]);
     expect(beyond.total).toBe(3);
+  });
+
+  it('un término de 1 carácter busca por el camino normal bajo RLS', async () => {
+    const res = await search(a.tenantId, 'z');
+    expect(res.items.map((p) => p.id)).toEqual([
+      a.ids.nunez,
+      a.ids.ana,
+      a.ids.jose,
+    ]);
+    expect(res.total).toBe(3);
+    const inB = await search(b.tenantId, 'é');
+    expect(inB.items.every((p) => p.tenantId === b.tenantId)).toBe(true);
   });
 
   it('sin término lista por (createdAt DESC, id DESC) los vivos del tenant', async () => {
@@ -254,7 +267,7 @@ describe('Búsqueda de pacientes con RLS (DX-043, int)', () => {
       ]);
     });
 
-    it('fijan search_path y son SECURITY DEFINER de un rol NOLOGIN con BYPASSRLS', async () => {
+    it('fijan search_path y son SECURITY DEFINER de un rol NOLOGIN sin BYPASSRLS ni superusuario', async () => {
       const rows = await raw.$queryRaw<
         {
           proname: string;
@@ -274,9 +287,131 @@ describe('Búsqueda de pacientes con RLS (DX-043, int)', () => {
         expect(r.prosecdef).toBe(true);
         expect(r.proconfig).toEqual(['search_path=pg_catalog, pg_temp']);
         expect(r.rolcanlogin).toBe(false);
-        expect(r.rolbypassrls).toBe(true);
+        expect(r.rolbypassrls).toBe(false);
         expect(r.rolsuper).toBe(false);
       }
+    });
+
+    it('la política que le deja leer es solo FOR SELECT y solo para el rol de búsqueda', async () => {
+      const policies = await raw.$queryRaw<
+        { policyname: string; cmd: string; roles: string[]; qual: string }[]
+      >`
+        SELECT policyname, cmd, roles::text[] AS roles, qual
+          FROM pg_policies WHERE tablename = 'patients' ORDER BY policyname`;
+      expect(policies).toEqual([
+        {
+          policyname: 'patient_search_definer',
+          cmd: 'SELECT',
+          roles: ['dentalix_patient_search'],
+          qual: 'true',
+        },
+        expect.objectContaining({
+          policyname: 'tenant_isolation',
+          cmd: 'ALL',
+          roles: ['public'],
+        }),
+      ]);
+    });
+
+    it('el rol de búsqueda no tiene miembros ni pertenece a otros roles', async () => {
+      const [{ n }] = await raw.$queryRaw<{ n: bigint }[]>`
+        SELECT count(*) AS n FROM pg_auth_members m JOIN pg_roles r
+            ON r.oid IN (m.roleid, m.member)
+         WHERE r.rolname = 'dentalix_patient_search'`;
+      expect(Number(n)).toBe(0);
+    });
+
+    it('EXECUTE solo para dentalix_app (y el dueño): PUBLIC no puede', async () => {
+      const grants = await raw.$queryRaw<
+        { proname: string; grantee: string }[]
+      >`
+        SELECT p.proname,
+               CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS grantee
+          FROM pg_proc p, aclexplode(p.proacl) a
+         WHERE p.proname IN ('dx_patient_search_ids', 'dx_patient_search_count')
+           AND a.privilege_type = 'EXECUTE'
+         ORDER BY 1, 2`;
+      expect(grants).toEqual([
+        { proname: 'dx_patient_search_count', grantee: 'dentalix_app' },
+        {
+          proname: 'dx_patient_search_count',
+          grantee: 'dentalix_patient_search',
+        },
+        { proname: 'dx_patient_search_ids', grantee: 'dentalix_app' },
+        {
+          proname: 'dx_patient_search_ids',
+          grantee: 'dentalix_patient_search',
+        },
+      ]);
+    });
+
+    it('para el rol de búsqueda el LIKE es condición del índice trigram; para dentalix_app no', async () => {
+      // Sin condición de tenant, el único índice que sirve es el trigram:
+      // así se ve si el LIKE llega a ser Index Cond (política USING (true))
+      // o queda como Filter detrás de la RLS (dentalix_app).
+      // Se mide en una transacción que se DESHACE y sin el índice por fecha
+      // (la otra opción del planner para «vivos», que con pocas filas gana).
+      const explainAs = async (role: string): Promise<string> => {
+        let plan = '';
+        const rollback = new Error('rollback');
+        await raw
+          .$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+              'DROP INDEX patients_tenant_created_live_idx',
+            );
+            await tx.$executeRawUnsafe(`SET LOCAL ROLE ${role}`);
+            await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
+            await tx.$executeRawUnsafe(
+              `SELECT set_config('app.current_tenant', '${a.tenantId}', true)`,
+            );
+            const rows = await tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
+              `EXPLAIN SELECT p.id FROM public.patients p
+                WHERE p."deletedAt" IS NULL AND p.search_text LIKE '%perez%'`,
+            );
+            plan = rows.map((r) => r['QUERY PLAN']).join('\n');
+            throw rollback;
+          })
+          .catch((err: unknown) => {
+            if (err !== rollback) throw err;
+          });
+        return plan;
+      };
+      const definer = await explainAs('dentalix_patient_search');
+      expect(definer).toContain(
+        'Bitmap Index Scan on patients_search_text_trgm_live_idx',
+      );
+      expect(definer).toMatch(/Index Cond: .*search_text ~~ '%perez%'/);
+      const app = await explainAs('dentalix_app');
+      expect(app).not.toMatch(/Index Cond: .*search_text ~~/);
+      const [def] = await raw.$queryRaw<{ indexdef: string; valid: boolean }[]>`
+        SELECT pg_get_indexdef(i.indexrelid) AS indexdef, i.indisvalid AS valid
+          FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE c.relname = 'patients_search_text_trgm_live_idx'`;
+      expect(def.valid).toBe(true);
+      expect(def.indexdef).toContain(
+        'gin ("tenantId", search_text gin_trgm_ops)',
+      );
+      expect(def.indexdef).toContain('WHERE ("deletedAt" IS NULL)');
+    });
+
+    it('un app.current_tenant que no es UUID da error, no filas', async () => {
+      await expect(
+        prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', 'no-es-uuid', true)`;
+          return tx.$queryRaw`SELECT id FROM dx_patient_search_ids(${'jose'}, 50, 0)`;
+        }),
+      ).rejects.toThrow(/invalid input syntax for type uuid/);
+    });
+
+    it('con menos de 2 caracteres la función no devuelve nada (el repositorio usa la RLS)', async () => {
+      const rows = await prisma.runWithTenant(
+        a.tenantId,
+        (tx) =>
+          tx.$queryRaw<
+            { id: string }[]
+          >`SELECT id FROM dx_patient_search_ids(${'o'}, 50, 0)`,
+      );
+      expect(rows).toEqual([]);
     });
 
     it('dentalix_app no puede leer patients saltando la RLS por otra vía', async () => {

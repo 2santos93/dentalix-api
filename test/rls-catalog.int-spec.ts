@@ -44,6 +44,26 @@ const RLS_EXEMPT: Record<string, string> = {
  */
 const VIEW_EXEMPT: Record<string, string> = {};
 
+/**
+ * Políticas permisivas extra permitidas, con la forma EXACTA que deben tener
+ * (tabla, comando y roles). Añadir una entrada exige justificar que ningún rol
+ * que pueda conectarse la recibe.
+ */
+const POLICY_EXEMPT: Record<
+  string,
+  { cmd: string; roles: string[]; reason: string }
+> = {
+  // DX-043: solo SELECT y solo para el rol NOLOGIN dueño de las funciones
+  // SECURITY DEFINER de búsqueda, que filtran ellas mismas por
+  // app.current_tenant (ver docs/adr/0001-busqueda-pacientes-rls.md y
+  // patient-search.int-spec.ts). dentalix_app no la recibe.
+  'patients.patient_search_definer': {
+    cmd: 'SELECT',
+    roles: ['dentalix_patient_search'],
+    reason: 'búsqueda indexable de pacientes (DX-043)',
+  },
+};
+
 /** La forma exacta que generan las migraciones (ver p. ej. la de patients). */
 function tenantPredicate(column: string): string {
   return `("${column}" = (current_setting('app.current_tenant'::text, true))::uuid)`;
@@ -62,6 +82,7 @@ interface Policy {
   permissive: string;
   using: string | null;
   check: string | null;
+  roles: string[];
 }
 
 interface Column {
@@ -97,7 +118,7 @@ describe('Catálogo de RLS (DX-068)', () => {
       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')`;
     policies = await raw.$queryRaw<Policy[]>`
       SELECT tablename AS table, policyname AS policy, cmd, permissive,
-             qual AS using, with_check AS check
+             qual AS using, with_check AS check, roles::text[] AS roles
       FROM pg_policies
       WHERE schemaname = 'public'
       ORDER BY tablename, policyname`;
@@ -197,6 +218,14 @@ describe('Catálogo de RLS (DX-068)', () => {
     // (p. ej. USING (true)) anularía la de tenant.
     const extra = policies
       .filter((p) => p.permissive === 'PERMISSIVE')
+      .filter((p) => {
+        const exempt = POLICY_EXEMPT[`${p.table}.${p.policy}`];
+        return !(
+          exempt &&
+          exempt.cmd === p.cmd &&
+          JSON.stringify(exempt.roles) === JSON.stringify(p.roles)
+        );
+      })
       .filter((p) => {
         const columns = clinic
           .filter((t) => t.table === p.table)

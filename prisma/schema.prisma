@@ -103,7 +103,7 @@ model Location {
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
-  // locations_tenant_id_key (tenantId, id) y se retiró en 20261017110000_patient_search_and_list_indexes.
+  // locations_tenant_id_key (tenantId, id) y se retiró en 20261017114000_patient_search_and_list_indexes.
   @@map("locations")
 }
 
@@ -238,7 +238,7 @@ model Patient {
   // a `id` sola no basta). Ver 20261015130000_tenant_composite_fks (SEC-004).
   @@unique([tenantId, id], map: "patients_tenant_id_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
-  // patients_tenant_id_key y se retiró en 20261017110000.
+  // patients_tenant_id_key y se retiró en 20261017114000.
   // Índices PARCIALES (WHERE "deletedAt" IS NULL) de DX-043 que Prisma no
   // expresa ni introspecciona, así que no se declaran (no generan drift):
   //   patients_tenant_created_live_idx ("tenantId", "createdAt" DESC, id DESC)
@@ -371,7 +371,7 @@ model ToothRecord {
   // 20261016130000_domain_checks; aquí mismo nombre y columnas.
   @@unique([tenantId, sourcePlanItemId], map: "tooth_records_source_plan_item_key")
   // DX-043 (DB-017): sin @@index([tenantId, patientId]); era prefijo exacto
-  // de este y se retiró en 20261017110000_patient_search_and_list_indexes.
+  // de este y se retiró en 20261017114000_patient_search_and_list_indexes.
   @@index([tenantId, patientId, toothNumber])
   @@index([tenantId, sourcePlanItemId])
   @@map("tooth_records")
@@ -970,7 +970,7 @@ model InventoryItem {
   // Destino de la FK compuesta de InventoryMovement.item (SEC-004).
   @@unique([tenantId, id], map: "inventory_items_tenant_id_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
-  // inventory_items_tenant_id_key (tenantId, id) y se retiró en 20261017110000_patient_search_and_list_indexes.
+  // inventory_items_tenant_id_key (tenantId, id) y se retiró en 20261017114000_patient_search_and_list_indexes.
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
   // declara para que migrate diff no lo vea como drift. Indexa además el lado
   // hijo de la FK compuesta (tenantId, locationId).
@@ -1035,7 +1035,7 @@ model LocationSchedule {
   // Destino de la FK compuesta de LocationScheduleRange (SEC-004).
   @@unique([tenantId, id], map: "location_schedules_tenant_id_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
-  // location_schedules_tenant_id_key (tenantId, id) y se retiró en 20261017110000_patient_search_and_list_indexes.
+  // location_schedules_tenant_id_key (tenantId, id) y se retiró en 20261017114000_patient_search_and_list_indexes.
   @@map("location_schedules")
 }
 
