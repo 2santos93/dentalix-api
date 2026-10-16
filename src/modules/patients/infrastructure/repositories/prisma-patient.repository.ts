@@ -7,6 +7,7 @@ import {
   ListPatientsParams,
   ListPatientsResult,
   PARTIAL_SUPPRESSION_FIELDS,
+  PatientArchiveState,
   PatientRepository,
   PatientRetentionState,
   RetentionExpiringParams,
@@ -325,10 +326,19 @@ export class PrismaPatientRepository implements PatientRepository {
 
   async archive(
     id: string,
-    assertCanArchive: (state: PatientRetentionState) => void,
+    assertCanArchive: (state: PatientArchiveState) => void,
   ): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
-      assertCanArchive(await lockRetentionState(tx, id));
+      const retention = await lockRetentionState(tx, id);
+      // Todas las sedes: el paciente es de la clínica, no de una sede.
+      const pendingAppointments = await tx.appointment.count({
+        where: {
+          patientId: id,
+          deletedAt: null,
+          status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        },
+      });
+      assertCanArchive({ ...retention, pendingAppointments });
       await tx.patient.update({
         where: { id },
         data: { deletedAt: new Date() },

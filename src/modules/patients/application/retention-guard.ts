@@ -8,6 +8,27 @@ import {
 
 export const CLINICAL_RECORD_RETENTION = 'CLINICAL_RECORD_RETENTION';
 export const NOT_UNDER_RETENTION = 'NOT_UNDER_RETENTION';
+export const PATIENT_HAS_PENDING_APPOINTMENTS =
+  'PATIENT_HAS_PENDING_APPOINTMENTS';
+
+/**
+ * Un paciente con citas abiertas (programadas o confirmadas) no se archiva:
+ * seguirían en la agenda y en los recordatorios con una ficha que ya no
+ * existe. Hay que cancelarlas o cerrarlas antes.
+ */
+export function assertNoPendingAppointments(pendingAppointments: number): void {
+  if (pendingAppointments === 0) return;
+  throw new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: PATIENT_HAS_PENDING_APPOINTMENTS,
+    message:
+      pendingAppointments === 1
+        ? 'Este paciente tiene 1 cita programada o confirmada: cancélala o márcala como atendida o no asistida antes de archivarlo.'
+        : `Este paciente tiene ${pendingAppointments} citas programadas o confirmadas: cancélalas o márcalas como atendidas o no asistidas antes de archivarlo.`,
+    pendingAppointments,
+  });
+}
 
 /** Mensaje en español con la fecha hasta la que se conserva la HC. */
 export function retentionMessage(until: Date | 'PERMANENT'): string {

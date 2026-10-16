@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -213,15 +214,19 @@ export class PatientsController {
       'conserva siempre. Si la HC está en retención legal (15 años desde la ' +
       'última atención, 30 con DOUBLE, siempre con PERMANENT) responde 409 ' +
       '`CLINICAL_RECORD_RETENTION` con la fecha hasta la que se conserva. Un ' +
-      'paciente sin atenciones clínicas se archiva.',
+      'paciente sin atenciones clínicas se archiva, salvo que tenga citas ' +
+      'programadas o confirmadas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`: ' +
+      'hay que cancelarlas o cerrarlas antes).',
   })
   @ApiNoContentResponse({ description: 'Paciente archivado' })
   @ApiConflictResponse({
     type: ClinicalRecordRetentionErrorDto,
-    description: 'HC en retención legal',
+    description:
+      'HC en retención legal (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
+      '(`PATIENT_HAS_PENDING_APPOINTMENTS`, sin `retentionUntil`)',
   })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
-  async archive(@Param('id') id: string): Promise<void> {
+  async archive(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.archivePatient.execute(id);
   }
 
@@ -244,7 +249,7 @@ export class PatientsController {
   @ApiOkResponse({ type: PatientDto })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
   changeRetention(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetRetentionExtensionDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<Patient> {
@@ -280,7 +285,7 @@ export class PatientsController {
   @ApiConflictResponse({ description: 'La HC no está en retención' })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
   suppress(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PartialSuppressionDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<Patient> {

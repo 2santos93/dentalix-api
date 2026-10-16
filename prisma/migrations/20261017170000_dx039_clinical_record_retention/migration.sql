@@ -20,6 +20,15 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- row_security = off (transacción actual), mismo criterio que
+-- 20261016170000_data_processing_consents: `patients`, `clinical_entries` y
+-- `appointments` tienen RLS FORCE, y con un dueño no superusuario el backfill
+-- de la sección 1 vería 0 filas EN SILENCIO (todas las HC quedarían sin
+-- retención). Así, o ve todas las filas, o la migración falla ("query would be
+-- affected by row-level security policy") y hay que correrla con un rol
+-- superusuario o BYPASSRLS.
+SET LOCAL row_security = off;
+
 CREATE TYPE "RetentionExtension" AS ENUM ('NONE', 'DOUBLE', 'PERMANENT');
 CREATE TYPE "PatientRetentionActionKind" AS ENUM ('EXTENSION_CHANGED', 'PARTIAL_SUPPRESSION');
 
@@ -31,10 +40,11 @@ ALTER TABLE "patients"
 
 -- ---------------------------------------------------------------------------
 -- 1. Backfill: la mayor fecha entre las evoluciones (también las archivadas:
---    siguen siendo HC) y las citas atendidas (COMPLETED, no borradas).
+--    siguen siendo HC) y las citas atendidas (COMPLETED, no borradas), con
+--    tope en el momento actual (ver la sección 2).
 -- ---------------------------------------------------------------------------
 UPDATE "patients" p
-SET "last_attention_at" = a.last_at
+SET "last_attention_at" = LEAST(a.last_at, pg_catalog.timezone('UTC', pg_catalog.now()))
 FROM (
   SELECT "tenantId", "patientId", MAX(at) AS last_at
   FROM (
@@ -52,6 +62,10 @@ WHERE p."tenantId" = a."tenantId" AND p."id" = a."patientId";
 --    SECURITY INVOKER: el UPDATE corre como el rol de la app y bajo su RLS,
 --    así que solo puede tocar pacientes de su propio tenant (el de la fila).
 --    search_path fijo con pg_temp al final y nombres calificados (SEC-032).
+--    Tope en el momento actual: `entryDate` y `start` los fija el cliente, y
+--    una evolución (inmutable) fechada en el futuro alargaría la retención
+--    para siempre sin pasar por el ADMIN. Las columnas son timestamp sin zona
+--    en UTC (Prisma), de ahí timezone('UTC', now()).
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION "dx_bump_patient_last_attention"() RETURNS trigger
 LANGUAGE plpgsql
@@ -68,6 +82,7 @@ BEGIN
     END IF;
     attended_at := NEW."start";
   END IF;
+  attended_at := LEAST(attended_at, pg_catalog.timezone('UTC', pg_catalog.now()));
   UPDATE public."patients"
   SET "last_attention_at" = attended_at
   WHERE "tenantId" = NEW."tenantId"

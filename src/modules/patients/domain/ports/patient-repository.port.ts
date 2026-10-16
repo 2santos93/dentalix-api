@@ -109,6 +109,16 @@ export interface PatientRetentionState {
 }
 
 /**
+ * Lo que archivar necesita saber: la retención y cuántas citas siguen abiertas
+ * (SCHEDULED/CONFIRMED, vivas). Una cita abierta de un paciente archivado
+ * seguiría en la agenda y en los recordatorios apuntando a una ficha 404, y al
+ * atenderla movería `last_attention_at` de un paciente ya archivado.
+ */
+export interface PatientArchiveState extends PatientRetentionState {
+  pendingAppointments: number;
+}
+
+/**
  * Campos NO clínicos que vacía la supresión parcial (DX-039): contacto y notas
  * administrativas. Se conserva la identificación que exige la HC (Res.
  * 1995/1999: nombre, documento, nacimiento, sexo, residencia, estado civil,
@@ -148,11 +158,12 @@ export interface PatientRepository {
    * Archiva (borrado blando) el paciente vivo `id`. En UNA transacción con el
    * paciente bloqueado (FOR UPDATE: una evolución concurrente mueve
    * `last_attention_at` en esa misma fila), llama a `assertCanArchive`, que
-   * lanza si la HC sigue en retención. 404 si no existe en el tenant.
+   * lanza si la HC sigue en retención o hay citas abiertas. 404 si no existe
+   * en el tenant.
    */
   archive(
     id: string,
-    assertCanArchive: (state: PatientRetentionState) => void,
+    assertCanArchive: (state: PatientArchiveState) => void,
   ): Promise<void>;
   /** Cambia la retención extendida y deja el rastro con motivo y autor. */
   setRetentionExtension(

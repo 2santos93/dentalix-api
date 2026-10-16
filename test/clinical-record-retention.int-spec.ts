@@ -167,6 +167,27 @@ describe('retención legal de la HC (DX-039, int)', () => {
     expect(await lastAttention(p)).toEqual(new Date('2026-05-02T14:00:00Z'));
   });
 
+  it('una fecha futura (evolución o cita) no lleva last_attention_at más allá de ahora', async () => {
+    // entryDate y start los fija el cliente: sin tope, una evolución fechada
+    // en 2099 (inmutable) alargaría la retención para siempre sin pasar por
+    // el ADMIN.
+    const before = new Date();
+    const p = await newPatient(tenantA, 'Futura');
+    await entry(tenantA, p, '2099-01-01T15:00:00Z');
+    const afterEntry = await lastAttention(p);
+    expect(afterEntry).not.toBeNull();
+    expect(afterEntry!.getTime()).toBeGreaterThanOrEqual(
+      before.getTime() - 1000,
+    );
+    expect(afterEntry!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+
+    const q = await newPatient(tenantA, 'CitaFutura');
+    await appointment(q, '2099-06-01T15:00:00Z', 'COMPLETED');
+    const afterAppt = await lastAttention(q);
+    expect(afterAppt).not.toBeNull();
+    expect(afterAppt!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
   it('backfill de la migración: max de evoluciones y citas atendidas vivas', async () => {
     expect(BACKFILL).toContain('UPDATE "patients" p');
     const both = await newPatient(tenantA, 'Backfill');

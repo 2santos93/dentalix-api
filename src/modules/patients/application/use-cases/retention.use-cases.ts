@@ -8,6 +8,7 @@ import {
 import type { Patient } from '../../domain/entities/patient.entity';
 import { CLINICAL_RECORD_RETENTION_YEARS } from '../../domain/retention/clinical-record-retention';
 import {
+  assertNoPendingAppointments,
   assertNotUnderRetention,
   assertUnderRetention,
 } from '../retention-guard';
@@ -19,7 +20,8 @@ export const RETENTION_CLOCK = Symbol('RETENTION_CLOCK');
 /**
  * Archivar (borrado blando, `deletedAt`) un paciente — DX-039. Rechaza con 409
  * `CLINICAL_RECORD_RETENTION` si la HC sigue en retención legal; un paciente
- * sin atenciones clínicas (p. ej. un duplicado recién creado) se archiva.
+ * sin atenciones clínicas (p. ej. un duplicado recién creado) se archiva,
+ * salvo que tenga citas abiertas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`).
  */
 @Injectable()
 export class ArchivePatientUseCase {
@@ -30,9 +32,10 @@ export class ArchivePatientUseCase {
 
   execute(id: string): Promise<void> {
     const now = this.now();
-    return this.repo.archive(id, (state) =>
-      assertNotUnderRetention(state, now),
-    );
+    return this.repo.archive(id, (state) => {
+      assertNotUnderRetention(state, now);
+      assertNoPendingAppointments(state.pendingAppointments);
+    });
   }
 }
 

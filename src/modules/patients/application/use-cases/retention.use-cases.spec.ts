@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import type {
+  PatientArchiveState,
   PatientRepository,
   PatientRetentionState,
   RetentionExpiringParams,
@@ -14,12 +15,13 @@ import {
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 const clock = (): Date => NOW;
 
-function repoWith(state: PatientRetentionState) {
+function repoWith(retention: PatientRetentionState, pendingAppointments = 0) {
+  const state: PatientArchiveState = { ...retention, pendingAppointments };
   const archived: string[] = [];
   const repo = {
     archive: async (
       id: string,
-      assert: (s: PatientRetentionState) => void,
+      assert: (s: PatientArchiveState) => void,
     ): Promise<void> => {
       await Promise.resolve();
       assert(state);
@@ -67,6 +69,25 @@ describe('ArchivePatientUseCase (DX-039)', () => {
         clock,
       ).execute('p1'),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(archived).toEqual([]);
+  });
+
+  it('409 PATIENT_HAS_PENDING_APPOINTMENTS si tiene citas sin cerrar (no archiva)', async () => {
+    const { repo, archived } = repoWith(
+      { lastAttentionAt: null, retentionExtended: 'NONE' },
+      2,
+    );
+    const err: unknown = await new ArchivePatientUseCase(
+      repo as unknown as PatientRepository,
+      clock,
+    )
+      .execute('p1')
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      code: 'PATIENT_HAS_PENDING_APPOINTMENTS',
+      pendingAppointments: 2,
+    });
     expect(archived).toEqual([]);
   });
 });

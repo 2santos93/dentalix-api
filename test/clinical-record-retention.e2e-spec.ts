@@ -118,6 +118,52 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
     expect(events).toHaveLength(1);
   });
 
+  it('un paciente con citas pendientes no se archiva (409) hasta cerrarlas', async () => {
+    const p = await createPatient(a, 'ConCita');
+    const location = await raw.location.findFirstOrThrow({
+      where: { tenantId: a.tenantId },
+    });
+    const appt = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: location.id,
+        patientId: p,
+        providerId: a.adminUserId,
+        start: new Date('2099-03-10T15:00:00Z'),
+        end: new Date('2099-03-10T15:30:00Z'),
+        status: 'CONFIRMED',
+      },
+    });
+    const res = await call(a, 'delete', `/patients/${p}`, a.adminToken).expect(
+      409,
+    );
+    expect(res.body).toMatchObject({
+      code: 'PATIENT_HAS_PENDING_APPOINTMENTS',
+      pendingAppointments: 1,
+    });
+    expect((res.body as { message: string }).message).toMatch(/cita/);
+    await raw.appointment.update({
+      where: { id: appt.id },
+      data: { status: 'CANCELLED' },
+    });
+    await call(a, 'delete', `/patients/${p}`, a.adminToken).expect(204);
+  });
+
+  it('un id que no es UUID da 400, no 500', async () => {
+    await call(a, 'delete', '/patients/no-es-uuid', a.adminToken).expect(400);
+    await call(a, 'patch', '/patients/no-es-uuid/retention', a.adminToken)
+      .send({ retentionExtended: 'DOUBLE', reason: REASON })
+      .expect(400);
+    await call(
+      a,
+      'post',
+      '/patients/no-es-uuid/partial-suppression',
+      a.adminToken,
+    )
+      .send({ reason: REASON })
+      .expect(400);
+  });
+
   it('con una evolución: el detalle expone la retención y archivar da 409 en español', async () => {
     const p = await createPatient(a, 'Retenida');
     await attend(a, p);

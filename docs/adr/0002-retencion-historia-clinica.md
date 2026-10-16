@@ -20,7 +20,10 @@ inalterable en la BD (DX-038).
   escritura (ni un INSERT por SQL) se la salte. SECURITY INVOKER: el UPDATE
   corre bajo la RLS del rol de la app. Backfill en la migración con el máximo
   de evoluciones (también las archivadas: siguen siendo HC) y citas atendidas
-  no borradas.
+  no borradas, con `row_security = off` (si el dueño no salta la RLS falla en
+  vez de rellenar 0 filas). La fecha tiene tope en el momento actual: `entryDate`
+  y `start` los fija el cliente y una evolución inmutable fechada en el futuro
+  alargaría la retención sin pasar por el ADMIN.
 - **Cálculo puro** (`clinical-record-retention.ts`): día civil UTC de la última
   atención + 15 años (NONE) o 30 (DOUBLE); PERMANENT nunca se libera. Un 29 de
   febrero termina el 28 si el año final no es bisiesto. El último día cuenta.
@@ -30,6 +33,9 @@ inalterable en la BD (DX-038).
   evalúa dentro de la transacción con la fila del paciente bloqueada
   (`FOR UPDATE`), para que una evolución concurrente no se cuele. 409
   `CLINICAL_RECORD_RETENTION` con mensaje en español y `retentionUntil`.
+  Tampoco se archiva con citas `SCHEDULED`/`CONFIRMED` vivas (409
+  `PATIENT_HAS_PENDING_APPOINTMENTS`): seguirían en la agenda y en los
+  recordatorios apuntando a una ficha 404.
 - **Entradas clínicas**: no tienen endpoint de borrado ni de archivo y la BD
   rechaza su UPDATE/DELETE (DX-038); por eso la regla solo hace falta en el
   paciente. Si algún día se añade, debe llamar a `assertNotUnderRetention`.
