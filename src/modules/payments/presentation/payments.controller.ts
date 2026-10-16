@@ -46,6 +46,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
@@ -83,6 +84,7 @@ export class PaymentsController {
    * `X-Location-Id` (validada por TenantContextInterceptor); sin ella, la vista
    * consolidada de la clínica.
    */
+  @Audit({ action: 'VIEW', resource: 'PAYMENT' })
   @Get('payments')
   @ApiOperation({
     summary: 'Caja: abonos del período con resumen por moneda y método',
@@ -116,6 +118,12 @@ export class PaymentsController {
     );
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Post('treatment-plans/:id/payments')
   @ApiCreatedResponse({ type: PaymentDto })
   create(
@@ -145,18 +153,34 @@ export class PaymentsController {
     );
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PAYMENT',
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Get('treatment-plans/:id/payments')
   @ApiOkResponse({ type: [PaymentDto] })
   list(@Param('id') id: string): Promise<Payment[]> {
     return this.listPayments.execute(id);
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PAYMENT',
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Get('treatment-plans/:id/balance')
   @ApiOkResponse({ type: PlanBalanceDto })
   balance(@Param('id') id: string): Promise<GetPlanBalanceResult> {
     return this.getPlanBalance.execute(id);
   }
 
+  @Audit({
+    action: 'VOID',
+    resource: 'PAYMENT',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'payment', param: 'id' },
+  })
   @Delete('payments/:id')
   @ApiOperation({
     summary: 'Anular un abono (con motivo; queda quién y cuándo)',

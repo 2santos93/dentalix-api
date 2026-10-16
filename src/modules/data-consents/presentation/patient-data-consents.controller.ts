@@ -36,6 +36,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { DATA_CONSENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 type AuthenticatedRequest = EvidenceRequest & { user: JwtPayload };
 
@@ -54,6 +55,11 @@ export class PatientDataConsentsController {
     private readonly recordConsents: RecordDataConsentsUseCase,
   ) {}
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'DATA_CONSENT',
+    patient: { param: 'patientId' },
+  })
   @Get()
   @ApiOperation({
     summary:
@@ -70,6 +76,11 @@ export class PatientDataConsentsController {
     return this.getConsents.execute(patientId);
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'DATA_CONSENT',
+    patient: { param: 'patientId' },
+  })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({

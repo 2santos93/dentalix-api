@@ -53,6 +53,7 @@ import {
   PrescriptionDto,
   PrescriptionIssuerDto,
 } from './dto/prescription.dto';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
@@ -83,6 +84,11 @@ export class PatientPrescriptionsController {
     private readonly issuePrescription: IssuePrescriptionUseCase,
   ) {}
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PRESCRIPTION',
+    patient: { param: 'patientId' },
+  })
   @Get()
   @ApiOkResponse({
     type: [PrescriptionDto],
@@ -97,6 +103,12 @@ export class PatientPrescriptionsController {
     return this.listPrescriptions.execute(patientId);
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'PRESCRIPTION',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+  })
   @Post()
   @Roles(...PRESCRIPTION_ISSUE_ROLES)
   @ApiHeader(LOCATION_HEADER)
@@ -160,6 +172,12 @@ export class PrescriptionsController {
     return this.getIssuer.execute(req.user.sub);
   }
 
+  @Audit({
+    action: 'VIEW',
+    resource: 'PRESCRIPTION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'prescription', param: 'id' },
+  })
   @Get(':id')
   @ApiOkResponse({ type: PrescriptionDocumentDto })
   @ApiNotFoundResponse({ description: 'Receta no encontrada en esta clínica' })
@@ -167,6 +185,12 @@ export class PrescriptionsController {
     return this.getPrescription.execute(id);
   }
 
+  @Audit({
+    action: 'VOID',
+    resource: 'PRESCRIPTION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'prescription', param: 'id' },
+  })
   @Post(':id/void')
   @HttpCode(200)
   @Roles(...PRESCRIPTION_ISSUE_ROLES)
