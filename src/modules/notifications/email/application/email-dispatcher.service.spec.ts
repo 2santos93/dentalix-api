@@ -277,11 +277,11 @@ describe('EmailOutbox + EmailDispatcher', () => {
       const { dispatcher, repo } = setup(new RecordingMailer(), {
         production: true,
       });
-      repo.access = { executable: true, ownerBypassesRls: false };
+      repo.access = { executable: true, ownerSeesAllRows: false };
       await expect(dispatcher.onApplicationBootstrap()).rejects.toThrow(
-        /BYPASSRLS/,
+        /dentalix_email_dispatcher/,
       );
-      repo.access = { executable: false, ownerBypassesRls: true };
+      repo.access = { executable: false, ownerSeesAllRows: true };
       await expect(dispatcher.onApplicationBootstrap()).rejects.toThrow(
         /EXECUTE/,
       );
@@ -289,7 +289,7 @@ describe('EmailOutbox + EmailDispatcher', () => {
 
     it('fuera de producción solo lo registra; con la BD caída no decide nada', async () => {
       const { dispatcher, repo } = setup(new RecordingMailer());
-      repo.access = { executable: false, ownerBypassesRls: false };
+      repo.access = { executable: false, ownerSeesAllRows: false };
       await expect(
         dispatcher.onApplicationBootstrap(),
       ).resolves.toBeUndefined();

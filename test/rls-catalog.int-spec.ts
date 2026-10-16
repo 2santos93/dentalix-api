@@ -62,6 +62,15 @@ const POLICY_EXEMPT: Record<
     roles: ['dentalix_patient_search'],
     reason: 'búsqueda indexable de pacientes (DX-043)',
   },
+  // DX-113: el rol NOLOGIN dueño de las funciones SECURITY DEFINER del
+  // despachador de email (reclamar, cerrar, encolar de plataforma), que
+  // trabaja para todas las clínicas sin que el owner salte la RLS. Ningún rol
+  // que pueda conectarse la recibe (email-outbox.int-spec.ts).
+  'email_outbox.email_outbox_dispatcher': {
+    cmd: 'ALL',
+    roles: ['dentalix_email_dispatcher'],
+    reason: 'despachador de email de todas las clínicas (DX-088, DX-113)',
+  },
 };
 
 /** La forma exacta que generan las migraciones (ver p. ej. la de patients). */

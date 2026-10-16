@@ -111,7 +111,7 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve(pending.length);
   }
 
-  access = { executable: true, ownerBypassesRls: true };
+  access = { executable: true, ownerSeesAllRows: true };
 
   recentSends(
     tenantId: string,
@@ -137,7 +137,7 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
 
   dispatcherAccess(): Promise<{
     executable: boolean;
-    ownerBypassesRls: boolean;
+    ownerSeesAllRows: boolean;
   }> {
     return Promise.resolve(this.access);
   }
