@@ -144,6 +144,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/tooth-records': CLINICAL,
   'GET /patients/:patientId/odontogram': CLINICAL,
   'GET /patients/:patientId/teeth/:fdi/history': CLINICAL,
+  // DX-120: dentición y anulación (además, autor o ADMIN en el caso de uso).
+  'POST /patients/:patientId/tooth-records/:recordId/void': CLINICAL,
+  'GET /patients/:patientId/dentition': CLINICAL,
+  'POST /patients/:patientId/dentition-events': CLINICAL,
   'GET /patients/:patientId/perio-exams': CLINICAL,
   'POST /patients/:patientId/perio-exams': CLINICAL,
   'GET /patients/:patientId/perio-exams/:id': CLINICAL,

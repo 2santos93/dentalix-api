@@ -48,6 +48,15 @@ describe('conflictMessageForTarget', () => {
     );
   });
 
+  it('maps a second void of the same odontogram record (DX-120)', () => {
+    expect(conflictMessageForTarget('tooth_records_void_once_key')).toBe(
+      'Este registro ya está anulado.',
+    );
+    expect(conflictMessageForTarget(['tenantId', 'voidsRecordId'])).toBe(
+      'Este registro ya está anulado.',
+    );
+  });
+
   it('maps a concurrent privacy-policy publish (index name or columns) to a reload hint', () => {
     expect(
       conflictMessageForTarget('privacy_policy_versions_tenant_version_key'),

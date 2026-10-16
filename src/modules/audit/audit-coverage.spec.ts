@@ -133,6 +133,24 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ODONTOGRAM',
     patient: P,
   },
+  // DX-120: dentición, sus cambios y la anulación de un registro.
+  'POST /patients/:patientId/tooth-records/:recordId/void': {
+    action: 'VOID',
+    resource: 'ODONTOGRAM',
+    resourceId: { param: 'recordId' },
+    patient: P,
+  },
+  'GET /patients/:patientId/dentition': {
+    action: 'VIEW',
+    resource: 'ODONTOGRAM',
+    patient: P,
+  },
+  'POST /patients/:patientId/dentition-events': {
+    action: 'UPDATE',
+    resource: 'ODONTOGRAM',
+    patient: P,
+    reason: 'DENTITION_CHANGED',
+  },
 
   'GET /patients/:patientId/perio-exams': {
     action: 'VIEW',

@@ -790,6 +790,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patients/:patientId/clinical-entries':
       'patient-tenant-fk.e2e-spec.ts',
     'POST /patients/:patientId/tooth-records': 'patient-tenant-fk.e2e-spec.ts',
+    // DX-120: B → 404 sobre el paciente y el registro de A.
+    'POST /patients/:patientId/tooth-records/:recordId/void':
+      'odontogram-dentition.e2e-spec.ts',
+    'GET /patients/:patientId/dentition': 'odontogram-dentition.e2e-spec.ts',
+    'POST /patients/:patientId/dentition-events':
+      'odontogram-dentition.e2e-spec.ts',
     'POST /patients/:patientId/clinical-entries/:entryId/addenda':
       'clinical-entry-addenda.e2e-spec.ts',
     'GET /patients/:patientId/clinical-entries/:entryId/addenda':

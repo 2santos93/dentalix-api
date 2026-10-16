@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CatalogKind, ToothRecordStatus, ToothSurface } from '@prisma/client';
+import {
+  CatalogKind,
+  ToothRecordOrigin,
+  ToothRecordStatus,
+  ToothSurface,
+} from '@prisma/client';
 
 // Response shape for ToothRecord endpoints — documents the ToothRecord
 // entity contract for Swagger (same convention as BrandingDto /
@@ -41,9 +46,55 @@ export class ToothRecordDto {
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   performedById!: string | null;
 
+  @ApiProperty({ enum: ToothRecordOrigin })
+  origin!: ToothRecordOrigin;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-120: si no es nulo, este registro es la ANULACIÓN del registro con ese id',
+  })
+  voidsRecordId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  voidReason!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   recordedAt!: Date;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
+}
+
+/** DX-120: la anulación de un registro, vista desde el anulado. */
+export class ToothRecordVoidDto {
+  @ApiProperty({ format: 'uuid', description: 'Id del registro de anulación' })
+  id!: string;
+
+  @ApiProperty()
+  reason!: string;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  performedById!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  performedByName!: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  recordedAt!: Date;
+}
+
+/** DX-120: entrada del historial de un diente (incluye los anulados, marcados). */
+export class ToothTimelineEntryDto extends ToothRecordDto {
+  @ApiProperty({ type: String, nullable: true })
+  performedByName!: string | null;
+
+  @ApiProperty({
+    type: ToothRecordVoidDto,
+    nullable: true,
+    description: 'Anulación del registro; null si sigue vigente',
+  })
+  void!: ToothRecordVoidDto | null;
 }
