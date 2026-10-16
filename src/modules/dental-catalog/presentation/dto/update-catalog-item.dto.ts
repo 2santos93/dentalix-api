@@ -11,6 +11,10 @@ import {
 } from 'class-validator';
 import { CatalogKind } from '@prisma/client';
 import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
+import {
+  IsMoney,
+  MONEY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // All fields optional (partial update). NO `tenantId` field — same rationale
 // as CreateCatalogItemDto: tenant scoping comes from the guarded request context.
@@ -58,10 +62,14 @@ export class UpdateCatalogItemDto {
   })
   color?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'At most 2 decimal places',
+    maximum: MONEY_MAX,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsMoney()
   defaultPrice?: number;
 
   @ApiPropertyOptional()

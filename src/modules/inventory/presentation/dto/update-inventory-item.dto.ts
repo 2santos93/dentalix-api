@@ -6,6 +6,10 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import {
+  IsQuantity,
+  QUANTITY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // All fields optional (partial update). `sku`/`notes` accept `null` to
 // clear the field -- `@IsOptional()` skips validation for both `undefined`
@@ -30,10 +34,16 @@ export class UpdateInventoryItemDto {
   @MinLength(1)
   unit?: string;
 
-  @ApiPropertyOptional({ minimum: 0, example: 1 })
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: QUANTITY_MAX,
+    example: 1,
+    description: 'At most 3 decimal places',
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsQuantity()
   minStock?: number;
 
   @ApiPropertyOptional({ type: String, nullable: true })

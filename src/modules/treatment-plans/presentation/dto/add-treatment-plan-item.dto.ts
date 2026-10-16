@@ -11,6 +11,10 @@ import {
 } from 'class-validator';
 import { ToothSurface } from '@prisma/client';
 import { FDI_TOOTH_NUMBER_PATTERN } from '../../../odontogram/application/use-cases/add-tooth-record.use-case';
+import {
+  IsMoney,
+  MONEY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // NOTE: deliberately NO `tenantId`/`planId`/`status` field — tenant comes
 // from the guarded request context, `planId` from the route param, and a
@@ -51,11 +55,13 @@ export class AddTreatmentPlanItemDto {
 
   @ApiPropertyOptional({
     description:
-      'Explicit price; if omitted, falls back to the catalog item defaultPrice (400 if neither is set)',
+      'Explicit price (at most 2 decimal places); if omitted, falls back to the catalog item defaultPrice (400 if neither is set)',
+    maximum: MONEY_MAX,
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @IsMoney()
   price?: number;
 
   @ApiPropertyOptional()

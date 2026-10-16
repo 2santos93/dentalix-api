@@ -10,6 +10,10 @@ import {
   IsString,
 } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
+import {
+  IsMoney,
+  MONEY_MAX,
+} from '../../../../shared/validation/bounded-decimal';
 
 // Uppercase-normalizes ISO 4217 codes, same convention as ConvertQueryDto
 // (exchange module) / the deleted CreateSaleDto -- snapshots/rates are always
@@ -26,9 +30,14 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 // never from the client body -- same convention as
 // AppointmentsController.create / the deleted CreateSaleDto.
 export class RecordPaymentDto {
-  @ApiProperty({ example: 100, description: 'Must be a finite number > 0' })
+  @ApiProperty({
+    example: 100,
+    description: 'Must be a finite number > 0, with at most 2 decimal places',
+    maximum: MONEY_MAX,
+  })
   @IsNumber()
   @IsPositive()
+  @IsMoney()
   amount!: number;
 
   @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })

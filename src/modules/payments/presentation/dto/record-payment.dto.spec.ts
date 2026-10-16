@@ -38,3 +38,24 @@ describe('RecordPaymentDto currency validation', () => {
     },
   );
 });
+
+// DX-042: un importe que no cabe en `Decimal(14,2)` o con más de 2 decimales
+// se rechaza en la DTO (400), en vez de llegar a la base (500 por overflow) o
+// redondearse en silencio.
+describe('RecordPaymentDto amount bounds', () => {
+  const base = { currency: 'USD', paidAt: '2026-07-01T00:00:00.000Z' };
+
+  it.each([0.01, 150000.5, 9_999_999_999.99])('accepts %p', async (amount) => {
+    const errors = await validate(
+      plainToInstance(RecordPaymentDto, { ...base, amount }),
+    );
+    expect(errors.find((e) => e.property === 'amount')).toBeUndefined();
+  });
+
+  it.each([1_234_567_890_123, 10.005, 0, -1])('rejects %p', async (amount) => {
+    const errors = await validate(
+      plainToInstance(RecordPaymentDto, { ...base, amount }),
+    );
+    expect(errors.find((e) => e.property === 'amount')).toBeDefined();
+  });
+});
