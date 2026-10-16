@@ -16,7 +16,7 @@ import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 // "non-deleted only" like the real Prisma repo, so it tracks `deletedAt` on
 // the stored row and strips it via `toEntity` (mirrors `mapToEntity` in
 // prisma-payment.repository.ts).
-type StoredPayment = Payment & {
+type StoredPayment = Omit<Payment, 'paidOn'> & {
   deletedAt: Date | null;
   idempotencyKey: string | null;
   voidAudit: PaymentVoidAudit | null;
@@ -80,6 +80,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       amount: row.amount,
       currency: row.currency,
       paidAt: row.paidAt,
+      paidOn: civilDateIn(row.paidAt, this.timeZone),
       method: row.method,
       notes: row.notes,
       createdById: row.createdById,
@@ -179,10 +180,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   ): Promise<ReceivedPayment[]> {
     const rows = this.payments
       .filter((p) => p.deletedAt === null)
-      .map((p) => ({
-        ...this.toEntity(p),
-        paidOn: civilDateIn(p.paidAt, this.timeZone),
-      }))
+      .map((p) => this.toEntity(p))
       .filter((p) => p.paidOn >= params.from && p.paidOn <= params.to);
     return Promise.resolve(rows);
   }

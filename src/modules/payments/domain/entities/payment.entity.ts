@@ -17,6 +17,8 @@ export interface Payment {
   amount: number;
   currency: string;
   paidAt: Date;
+  /** Día civil (YYYY-MM-DD) de `paidAt` en la zona de la sede del abono (DX-097). */
+  paidOn: string;
   method: PaymentMethod | null;
   notes: string | null;
   createdById: string | null;

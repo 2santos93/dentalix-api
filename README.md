@@ -251,7 +251,7 @@ cuenta en su día.
   23 y 25 h) está probado con `Europe/Madrid`.
 - **Registro de abonos**: `paidAt` puede ser un instante ISO con hora o solo el
   día `YYYY-MM-DD`, que se guarda al mediodía de la sede. La migración
-  `20261017110000_payments_civil_day_noon` movió los abonos antiguos guardados a
+  `20261017113000_payments_civil_day_noon` movió los abonos antiguos guardados a
   medianoche UTC (los días del formulario) al mediodía de su sede, sin cambiar
   su día civil ni su día UTC.
 - Las filas de caja y los movimientos del estado de cuenta traen `paidOn`: el

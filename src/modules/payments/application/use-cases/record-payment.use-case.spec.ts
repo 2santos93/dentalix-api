@@ -195,6 +195,33 @@ describe('RecordPaymentUseCase', () => {
     expect(payment.paidAt.toISOString()).toBe('2026-10-17T01:00:00.000Z');
   });
 
+  it('DX-097 (B1): una medianoche UTC exacta (web anterior) es un día civil: mediodía de la sede', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan();
+
+    const payment = await uc.execute('plan-1', {
+      amount: 10,
+      currency: 'USD',
+      paidAt: '2026-10-16T00:00:00.000Z',
+    });
+
+    expect(payment.paidAt.toISOString()).toBe('2026-10-16T17:00:00.000Z');
+    expect(payment.paidOn).toBe('2026-10-16');
+  });
+
+  it('rechaza una hora sin Z ni desfase (se leería en la zona del servidor)', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan();
+
+    await expect(
+      uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-10-16T20:00:00',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rechaza un día que no existe (2026-02-30)', async () => {
     const { fakeGetPlan, uc } = makeUseCase();
     fakeGetPlan.plan = makePlan();

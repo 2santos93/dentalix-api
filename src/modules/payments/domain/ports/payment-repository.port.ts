@@ -51,11 +51,8 @@ export interface CivilPeriod {
 
 export type ListPaymentsReceivedInRangeParams = CivilPeriod;
 
-/** Abono del período con su día civil en la zona de su sede. */
-export interface ReceivedPayment extends Payment {
-  /** Día civil (YYYY-MM-DD) de `paidAt` en la zona de la sede del abono. */
-  paidOn: string;
-}
+/** Abono del período (ya trae `paidOn`, su día civil en la zona de su sede). */
+export type ReceivedPayment = Payment;
 
 export interface ListCashRegisterParams extends CivilPeriod {
   method?: PaymentMethod;

@@ -37,15 +37,6 @@ const BILLABLE_STATUSES: ReadonlySet<TreatmentPlanItemStatus> = new Set([
   TreatmentPlanItemStatus.DONE,
 ]);
 
-// `paidAt` is stored as a full timestamp; `ConvertAmountUseCase` looks up an
-// exchange snapshot keyed by calendar date (YYYY-MM-DD), and that snapshot
-// is always fetched/stored in UTC — so each payment must be converted using
-// ITS OWN UTC date, not the server's local timezone (same rationale as
-// GetSalesTotalsUseCase.toUtcDateString).
-function toUtcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 // `ConvertAmountUseCase` throws exactly this kind of error (see
 // convert-amount.use-case.ts) when a payment's stored currency has no rate
 // in that date's snapshot. This is the ONLY failure this use case treats as
@@ -113,7 +104,9 @@ export class GetPlanBalanceUseCase {
       // rate-repository layer (NOT the amount-dependent rateUsed) to
       // remove the per-payment lookup without drift.
       try {
-        const date = toUtcDateString(payment.paidAt);
+        // DX-097: el día civil del abono en SU sede, la misma fecha de tasa
+        // que usa el dashboard (GetPaymentsTotalsUseCase).
+        const date = payment.paidOn;
         const { rateUsed } = await this.convertAmount.execute({
           amount: payment.amount,
           from: payment.currency,

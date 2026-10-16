@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
@@ -49,7 +53,7 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-function mapToEntity(payment: PrismaPayment): Payment {
+function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
   return {
     id: payment.id,
     tenantId: payment.tenantId,
@@ -58,6 +62,7 @@ function mapToEntity(payment: PrismaPayment): Payment {
     amount: payment.amount.toNumber(),
     currency: payment.currency,
     paidAt: payment.paidAt,
+    paidOn: civilDateIn(payment.paidAt, timeZone),
     method: payment.method,
     notes: payment.notes,
     createdById: payment.createdById,
@@ -186,7 +191,17 @@ export class PrismaPaymentRepository implements PaymentRepository {
     );
     const timeZoneOf = (id: string) =>
       zones.get(id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE;
-    const branches = civilPeriodByZone(period.from, period.to, zones);
+    let branches: ReturnType<typeof civilPeriodByZone>;
+    try {
+      branches = civilPeriodByZone(period.from, period.to, zones);
+    } catch (error) {
+      // Un día que no existe en la zona de alguna sede (p. ej. 2011-12-30 en
+      // Pacific/Apia): es la petición la que no vale, no un fallo del servidor.
+      if (error instanceof RangeError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
     const paidAtIn = (b: { start: Date; end: Date }) => ({
       gte: b.start,
       lt: b.end,
@@ -214,6 +229,32 @@ export class PrismaPaymentRepository implements PaymentRepository {
       },
       timeZoneOf,
     };
+  }
+
+  /**
+   * Abonos con su `paidOn` (DX-097): la zona de las sedes de TODAS las filas
+   * en UNA consulta, en la misma transacción.
+   */
+  private async toEntities(
+    tx: Prisma.TransactionClient,
+    rows: PrismaPayment[],
+  ): Promise<Payment[]> {
+    if (rows.length === 0) return [];
+    const zoneOf = await resolveLocationTimeZones(
+      tx,
+      this.requireTenantId(),
+      rows.map((row) => row.locationId),
+    );
+    return rows.map((row) => mapToEntity(row, zoneOf(row.locationId)));
+  }
+
+  private async toEntity(
+    tx: Prisma.TransactionClient,
+    row: PrismaPayment | null,
+  ): Promise<Payment | null> {
+    if (!row) return null;
+    const [entity] = await this.toEntities(tx, [row]);
+    return entity;
   }
 
   async create(input: CreatePaymentRepoInput): Promise<Payment> {
@@ -259,16 +300,14 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // DX-097: un pago con solo el día se guarda al mediodía de ESA sede, así
       // cae en su día de caja (medianoche UTC sería la tarde del día anterior
       // en Bogotá).
+      const timeZone = (
+        await resolveLocationTimeZones(tx, tenantId, [locationId])
+      )(locationId);
       const paidAt =
         input.paidAt instanceof Date
           ? input.paidAt
-          : civilNoonIn(
-              input.paidAt.civilDate,
-              (await resolveLocationTimeZones(tx, tenantId, [locationId]))(
-                locationId,
-              ),
-            );
-      return tx.payment.create({
+          : civilNoonIn(input.paidAt.civilDate, timeZone);
+      const created = await tx.payment.create({
         data: {
           locationId,
           tenantId,
@@ -283,15 +322,18 @@ export class PrismaPaymentRepository implements PaymentRepository {
           createdById: input.createdById,
         },
       });
+      return mapToEntity(created, timeZone);
     });
-    return mapToEntity(payment);
+    return payment;
   }
 
   async findById(id: string): Promise<Payment | null> {
-    const payment = await this.prisma.runWithTenant(async (tx) => {
-      return tx.payment.findFirst({ where: { id, deletedAt: null } });
-    });
-    return payment ? mapToEntity(payment) : null;
+    return this.prisma.runWithTenant(async (tx) =>
+      this.toEntity(
+        tx,
+        await tx.payment.findFirst({ where: { id, deletedAt: null } }),
+      ),
+    );
   }
 
   async findByIdempotencyKey(idempotencyKey: string): Promise<Payment | null> {
@@ -299,10 +341,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
     // (tenantId, idempotencyKey) unique index. NOT filtered by `deletedAt`: a
     // replay must resolve to the SAME row even if it was later voided, so we
     // never insert a duplicate for a key that already exists.
-    const payment = await this.prisma.runWithTenant(async (tx) => {
-      return tx.payment.findFirst({ where: { idempotencyKey } });
-    });
-    return payment ? mapToEntity(payment) : null;
+    return this.prisma.runWithTenant(async (tx) =>
+      this.toEntity(
+        tx,
+        await tx.payment.findFirst({ where: { idempotencyKey } }),
+      ),
+    );
   }
 
   // OJO: listByPlan/listByPatient NO filtran por sede a propósito. El plan y
@@ -313,9 +357,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const payments = await tx.payment.findMany({
         where: { treatmentPlanId, deletedAt: null },
-        orderBy: { paidAt: 'desc' },
+        orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });
-      return payments.map(mapToEntity);
+      return this.toEntities(tx, payments);
     });
   }
 
@@ -323,9 +367,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const payments = await tx.payment.findMany({
         where: { patientId, deletedAt: null },
-        orderBy: { paidAt: 'desc' },
+        orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });
-      return payments.map(mapToEntity);
+      return this.toEntities(tx, payments);
     });
   }
 
@@ -394,13 +438,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
           where: { deletedAt: null, ...scope.where },
           orderBy: { paidAt: 'desc' },
         });
-        return payments.map((payment) => ({
-          ...mapToEntity(payment),
-          paidOn: civilDateIn(
-            payment.paidAt,
-            scope.timeZoneOf(payment.locationId),
-          ),
-        }));
+        return payments.map((payment) =>
+          mapToEntity(payment, scope.timeZoneOf(payment.locationId)),
+        );
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
@@ -435,7 +475,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
             // Varios abonos pueden compartir `paidAt` (los registrados solo
             // con fecha caen al mediodía de la sede): sin un desempate estable
             // la paginación podría repetir o saltarse filas entre páginas.
-            orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
+            // Desempate por alta y luego por id: dentro de un día, los
+            // registrados solo con fecha comparten el mediodía (DX-097).
+            orderBy: [
+              { paidAt: 'desc' },
+              { createdAt: 'desc' },
+              { id: 'desc' },
+            ],
             skip: params.skip,
             take: params.take,
           }),
