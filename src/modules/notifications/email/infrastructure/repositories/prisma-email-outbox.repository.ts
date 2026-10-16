@@ -141,15 +141,33 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     });
   }
 
+  /**
+   * El owner de cada función ve todas las filas de email_outbox si salta la
+   * RLS (superusuario o BYPASSRLS) o si tiene la política permisiva
+   * `USING (true) WITH CHECK (true)` y la función no fija `row_security = off`
+   * (que con RLS aplicable falla): es el rol dentalix_email_dispatcher de
+   * 20261017175000_dx113_email_outbox_dispatcher_role (DX-113).
+   */
   async dispatcherAccess(): Promise<{
     executable: boolean;
-    ownerBypassesRls: boolean;
+    ownerSeesAllRows: boolean;
   }> {
     const rows = await this.prisma.$queryRaw<
-      { executable: boolean; bypass: boolean }[]
+      { executable: boolean; seesAll: boolean }[]
     >`
       SELECT bool_and(has_function_privilege(p.oid, 'EXECUTE')) AS executable,
-             bool_and(r.rolsuper OR r.rolbypassrls) AS bypass
+             bool_and(
+               r.rolsuper OR r.rolbypassrls OR (
+                 NOT ('row_security=off' = ANY (coalesce(p.proconfig, '{}')))
+                 AND EXISTS (
+                   SELECT 1 FROM pg_policies pol
+                    WHERE pol.schemaname = 'public'
+                      AND pol.tablename = 'email_outbox'
+                      AND pol.permissive = 'PERMISSIVE'
+                      AND pol.cmd = 'ALL'
+                      AND pol.qual = 'true' AND pol.with_check = 'true'
+                      AND r.rolname = ANY (pol.roles)))
+             ) AS "seesAll"
         FROM pg_proc p
         JOIN pg_roles r ON r.oid = p.proowner
        WHERE p.proname IN ('email_outbox_claim', 'email_outbox_settle',
@@ -158,7 +176,7 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     const row = rows[0];
     return {
       executable: row?.executable ?? false,
-      ownerBypassesRls: row?.bypass ?? false,
+      ownerSeesAllRows: row?.seesAll ?? false,
     };
   }
 

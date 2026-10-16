@@ -115,7 +115,7 @@ CREATE POLICY tenant_isolation ON "email_outbox"
 -- `row_security = off`) falla al crearlas. Se quita FORCE solo mientras se
 -- crean, en esta misma transacción, y se restaura justo después: el
 -- resultado es el mismo. Cómo leen la tabla sin saltarse la RLS lo resuelve
--- 20261017180000_dx113_email_outbox_dispatcher_role.
+-- 20261017175000_dx113_email_outbox_dispatcher_role.
 ALTER TABLE "email_outbox" NO FORCE ROW LEVEL SECURITY;
 
 CREATE FUNCTION email_outbox_claim(p_limit integer, p_lease_seconds integer)

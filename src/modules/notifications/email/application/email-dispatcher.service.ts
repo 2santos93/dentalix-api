@@ -68,7 +68,7 @@ export class EmailDispatcher
 
   /**
    * Revisión D4: si el rol de la app no puede ejecutar las funciones del
-   * despachador o su owner no se salta la RLS, ningún email saldría nunca y
+   * despachador o su owner no ve todas las filas, ningún email saldría nunca y
    * la web diría «Pendiente» para siempre. En producción la API NO ARRANCA
    * (como con la configuración inválida: es un fallo de despliegue, no un
    * corte pasajero de la BD, que es lo que mide /health/ready). Fuera de
@@ -76,7 +76,7 @@ export class EmailDispatcher
    * se decide nada aquí (eso sí es cosa de la readiness).
    */
   private async verifyAccess(): Promise<void> {
-    let access: { executable: boolean; ownerBypassesRls: boolean };
+    let access: { executable: boolean; ownerSeesAllRows: boolean };
     try {
       access = await this.repo.dispatcherAccess();
     } catch (err) {
@@ -86,10 +86,10 @@ export class EmailDispatcher
       });
       return;
     }
-    if (access.executable && access.ownerBypassesRls) return;
+    if (access.executable && access.ownerSeesAllRows) return;
     const hint = !access.executable
       ? 'El rol de la app no puede ejecutar email_outbox_claim/settle/enqueue_platform: concédele EXECUTE (README, «Email transaccional»).'
-      : 'El owner de las funciones email_outbox_* no se salta la RLS: tiene que ser superusuario o tener BYPASSRLS (el mismo requisito que las migraciones, DX-025).';
+      : 'El owner de las funciones email_outbox_* no ve todas las filas de email_outbox: tiene que ser el rol dentalix_email_dispatcher con su política (migración 20261017175000_dx113_email_outbox_dispatcher_role; README, «Despliegue: roles de la BD»).';
     this.logger.error({ event: 'email.dispatcher_misconfigured', hint });
     if (this.config.production) {
       throw new Error(

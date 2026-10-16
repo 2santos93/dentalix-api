@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../../src/shared/tenancy/tenant-context.service';
 import { PrismaEmailOutboxRepository } from '../../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
@@ -38,7 +38,7 @@ describe('DX-113 · despachador de email con un owner sin superusuario (owner-no
     const { id } = await repo.insert({
       tenantId: null,
       template: 'email-verify',
-      toHash: `owner-nosu-${referenceId}`,
+      toHash: createHash('sha256').update(referenceId).digest('hex'),
       toMasked: 'ow***@example.com',
       referenceId,
       payload: Buffer.from('cifrado'),
