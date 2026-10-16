@@ -64,6 +64,26 @@ export interface CashRegisterPage {
   scopeLocation: { id: string; name: string } | null;
 }
 
+/**
+ * Lo que la regla de anulación necesita saber del abono ANTES de anularlo:
+ * quién lo registró, cuándo, y la zona horaria de su sede (para decidir qué
+ * es "hoy" — ver `isSameCivilDay`).
+ */
+export interface PaymentVoidTarget {
+  id: string;
+  createdById: string | null;
+  createdAt: Date;
+  /** IANA de la sede del abono (su horario), o la zona por defecto. */
+  timeZone: string;
+}
+
+/** Rastro de la anulación (SEC-013). */
+export interface PaymentVoidAudit {
+  voidedById: string;
+  voidedAt: Date;
+  reason: string;
+}
+
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 
 export interface PaymentRepository {
@@ -97,15 +117,21 @@ export interface PaymentRepository {
   listByPatient(patientId: string): Promise<Payment[]>;
 
   /**
-   * Soft-delete (void): atomically sets `deletedAt` ONLY if the row is
-   * currently active (`deletedAt: null`) -- a single check-and-set, not a
-   * separate find then update, so two concurrent voids of the same payment
-   * can't both "win" (TOCTOU race). Returns `true` if this call actually
-   * voided the payment, `false` if it was already voided or doesn't exist
-   * (never throws for that case -- the use case decides 404). Never a hard
-   * delete.
+   * El abono ACTIVO (no anulado) con lo que decide si el actor puede anularlo,
+   * o `null` si no existe, ya está anulado o es de otro tenant (RLS).
    */
-  softDelete(id: string): Promise<boolean>;
+  findVoidTarget(id: string): Promise<PaymentVoidTarget | null>;
+
+  /**
+   * Soft-delete (void): atomically sets `deletedAt` + the void audit
+   * (`voidedById`, `voidedAt`, `voidReason`) ONLY if the row is currently
+   * active (`deletedAt: null`) -- a single check-and-set, not a separate find
+   * then update, so two concurrent voids of the same payment can't both "win"
+   * (TOCTOU race). Returns `true` if this call actually voided the payment,
+   * `false` if it was already voided or doesn't exist (never throws for that
+   * case -- the use case decides 404). Never a hard delete.
+   */
+  softDelete(id: string, audit: PaymentVoidAudit): Promise<boolean>;
 
   /**
    * Active payments (any plan/patient) whose `paidAt` falls within

@@ -1,10 +1,16 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { DocType, Sex } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
+import { ClinicRole, DocType, Sex } from '@prisma/client';
 import { PATIENT_REPOSITORY } from '../../domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../domain/ports/patient-repository.port';
 import { REFERENCE_LOOKUP } from '../../domain/ports/reference-lookup.port';
 import type { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { Patient } from '../../domain/entities/patient.entity';
+import { CLINICAL_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { deriveSafetyFlags } from '../../../medical-history/domain/safety-flags';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
 
@@ -35,6 +41,11 @@ export interface CreatePatientInput {
   guardianName?: string;
   guardianDocNumber?: string;
   createdById?: string;
+  /**
+   * Rol de quien crea (del token, nunca del cuerpo). Obligatorio: decide si
+   * puede adjuntar la anamnesis v1 (ver SEC-005 en `execute`).
+   */
+  actorRole: ClinicRole;
   medicalHistory?: MedicalHistoryVersionData;
 }
 
@@ -46,6 +57,20 @@ export class CreatePatientUseCase {
   ) {}
 
   async execute(input: CreatePatientInput): Promise<Patient> {
+    // SEC-005: la historia clínica es de CLINICAL_ROLES (recepción no la lee
+    // ni la escribe). Si un rol no clínico manda `medicalHistory`, 403
+    // explícito ANTES de crear nada: ignorarlo en silencio haría creer al
+    // cliente que la anamnesis quedó guardada.
+    if (
+      input.medicalHistory !== undefined &&
+      !CLINICAL_ROLES.includes(input.actorRole)
+    ) {
+      throw new ForbiddenException(
+        'Tu rol no puede registrar la historia clínica: crea el paciente sin ' +
+          'anamnesis y la completará el equipo clínico.',
+      );
+    }
+
     const email = input.email ? input.email.trim().toLowerCase() : input.email;
 
     if (input.cityId !== undefined) {

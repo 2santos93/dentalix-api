@@ -395,6 +395,7 @@ describe('Payments (e2e)', () => {
         .delete(`/api/v1/payments/${paymentCopBody.id}`)
         .set('X-Tenant-Host', hostFor(clinicA.subdomain))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .send({ reason: 'Abono registrado por error' })
         .expect(200);
 
       const balance4 = await request(app.getHttpServer())
@@ -447,6 +448,7 @@ describe('Payments (e2e)', () => {
         .delete(`/api/v1/payments/${paymentUsdBody.id}`)
         .set('X-Tenant-Host', hostFor(subdomainB))
         .set('Authorization', `Bearer ${clinicB.accessToken}`)
+        .send({ reason: 'Intento desde otra clínica' })
         .expect(404);
 
       // The payment must still be active for clinic A after B's failed void.

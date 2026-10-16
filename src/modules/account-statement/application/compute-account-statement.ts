@@ -260,6 +260,8 @@ export function computeAccountStatement(
       treatmentPlanId: p.treatmentPlanId,
       voided: p.voidedAt !== null,
       voidedAt: p.voidedAt,
+      voidedBy: p.voidedBy,
+      voidReason: p.voidReason,
     }))
     .sort(
       (a, b) =>

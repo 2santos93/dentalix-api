@@ -51,23 +51,30 @@ describe('InMemoryPaymentRepository#listByPatient', () => {
 // rather than throwing, so VoidPaymentUseCase can make the "already
 // voided/absent -> 404" decision from a single atomic call instead of a
 // separate find-then-update (the double-void TOCTOU race).
+const AUDIT = {
+  voidedById: 'u-admin',
+  voidedAt: new Date('2026-01-02T15:00:00.000Z'),
+  reason: 'Cobro duplicado',
+};
+
 describe('InMemoryPaymentRepository#softDelete', () => {
   it('returns true and sets deletedAt on the first void of an active payment', async () => {
     const repo = new InMemoryPaymentRepository();
     const payment = repo.seedPayment({ id: 'p1' });
 
-    const result = await repo.softDelete(payment.id);
+    const result = await repo.softDelete(payment.id, AUDIT);
 
     expect(result).toBe(true);
     expect(await repo.findById(payment.id)).toBeNull();
+    expect(repo.voidAuditOf(payment.id)).toEqual(AUDIT);
   });
 
   it('returns false (never throws) voiding an already-voided payment', async () => {
     const repo = new InMemoryPaymentRepository();
     const payment = repo.seedPayment({ id: 'p1' });
-    await repo.softDelete(payment.id);
+    await repo.softDelete(payment.id, AUDIT);
 
-    const second = await repo.softDelete(payment.id);
+    const second = await repo.softDelete(payment.id, AUDIT);
 
     expect(second).toBe(false);
   });
@@ -75,7 +82,7 @@ describe('InMemoryPaymentRepository#softDelete', () => {
   it('returns false (never throws) for a nonexistent id', async () => {
     const repo = new InMemoryPaymentRepository();
 
-    const result = await repo.softDelete('missing-id');
+    const result = await repo.softDelete('missing-id', AUDIT);
 
     expect(result).toBe(false);
   });

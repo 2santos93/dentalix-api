@@ -143,7 +143,12 @@ export class CreatePatientDto {
   @IsString()
   guardianDocNumber?: string;
 
-  @ApiPropertyOptional({ type: SaveMedicalHistoryDto })
+  @ApiPropertyOptional({
+    type: SaveMedicalHistoryDto,
+    description:
+      'Anamnesis inicial (versión 1). Solo roles clínicos (DENTIST, ' +
+      'ASSISTANT, ADMIN); con RECEPTION la petición se rechaza con 403.',
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => SaveMedicalHistoryDto)

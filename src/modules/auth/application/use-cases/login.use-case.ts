@@ -7,7 +7,10 @@ import {
 import { ClinicRole } from '@prisma/client';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
-import { PasswordService } from '../../../../shared/crypto/password.service';
+import {
+  DUMMY_PASSWORD_HASH,
+  PasswordService,
+} from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
 
 export interface PlatformLoginInput {
@@ -64,9 +67,10 @@ export class LoginUseCase {
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const user = await this.repo.findUserForAuth(email);
     // Mismo error en todos los casos: nunca revelar si el email existe, si
-    // pertenece a la clínica o si es superadmin.
+    // pertenece a la clínica o si es superadmin. Tampoco por TIEMPO (SEC-017):
+    // se paga el mismo argon2 que con un usuario real.
     if (!user || !user.isPlatformAdmin) {
-      throw new UnauthorizedException('Invalid credentials');
+      return this.rejectAfterDummyVerify(input.password);
     }
     const ok = await this.password.verify(input.password, user.passwordHash);
     if (!ok) {
@@ -96,7 +100,7 @@ export class LoginUseCase {
     const email = input.email.trim().toLowerCase();
     const user = await this.repo.findUserForAuth(email);
     if (!user || !user.isPlatformAdmin) {
-      throw new UnauthorizedException('Invalid credentials');
+      return this.rejectAfterDummyVerify(input.password);
     }
     const ok = await this.password.verify(input.password, user.passwordHash);
     if (!ok) {
@@ -108,5 +112,17 @@ export class LoginUseCase {
       platform: true,
       tv: user.tokenVersion,
     });
+  }
+
+  /**
+   * SEC-017: ejecuta argon2 contra un hash ficticio constante y responde 401
+   * con el mismo mensaje genérico. Sin esto, un email inexistente respondía
+   * antes (sin argon2) que uno real, y el tiempo delataba qué emails usan
+   * Dentalix. El resultado de la verificación se descarta: nunca puede abrir
+   * sesión.
+   */
+  private async rejectAfterDummyVerify(plain: string): Promise<never> {
+    await this.password.verify(plain, DUMMY_PASSWORD_HASH);
+    throw new UnauthorizedException('Invalid credentials');
   }
 }

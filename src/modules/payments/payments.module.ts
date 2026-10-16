@@ -2,7 +2,10 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { RecordPaymentUseCase } from './application/use-cases/record-payment.use-case';
 import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-case';
-import { VoidPaymentUseCase } from './application/use-cases/void-payment.use-case';
+import {
+  PAYMENT_CLOCK,
+  VoidPaymentUseCase,
+} from './application/use-cases/void-payment.use-case';
 import { GetPlanBalanceUseCase } from './application/use-cases/get-plan-balance.use-case';
 import { GetPaymentsTotalsUseCase } from './application/use-cases/get-payments-totals.use-case';
 import { ListCashPaymentsUseCase } from './application/use-cases/list-cash-payments.use-case';
@@ -43,6 +46,9 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
       provide: PAYMENT_REPOSITORY,
       useClass: PrismaPaymentRepository,
     },
+    // Reloj inyectable (mismo patrón que ACCOUNT_STATEMENT_CLOCK): la ventana
+    // de anulación de recepción depende de "hoy".
+    { provide: PAYMENT_CLOCK, useValue: () => new Date() },
     {
       provide: CURRENCY_WHITELIST,
       useClass: PrismaCurrencyWhitelist,

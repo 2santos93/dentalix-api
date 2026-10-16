@@ -25,7 +25,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
    * tenga el paciente (sin N+1): paciente, planes, suma de ítems por plan
    * (`groupBy`), abonos con su sede (Prisma resuelve la relación con un `IN`
    * para todas las filas) y planes de pago con sus cuotas (ídem), más el nombre
-   * de la clínica.
+   * de la clínica, y el nombre de quienes anularon abonos (una consulta más,
+   * solo si hay anulaciones con autor).
    *
    * Todo bajo `runWithTenant` (RLS por `app.current_tenant`) Y con
    * `patientId` en cada `where`: aunque una política RLS se rompiera, ninguna
@@ -102,6 +103,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 paidAt: true,
                 method: true,
                 deletedAt: true,
+                voidedById: true,
+                voidReason: true,
                 location: { select: { id: true, name: true } },
               },
             }),
@@ -129,6 +132,28 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             }),
           ]);
 
+        // Nombre de quien anuló cada abono (SEC-013): UNA consulta para todos.
+        // El usuario es global; su nombre se lee a través de la membresía, que
+        // tiene RLS, así que solo aparece si es (o fue) de esta clínica. Sin
+        // filtrar `deletedAt`: si dejó la clínica, la anulación sigue siendo
+        // suya.
+        const voiderIds = [
+          ...new Set(
+            payments.flatMap((p) => (p.voidedById ? [p.voidedById] : [])),
+          ),
+        ];
+        const voiders =
+          voiderIds.length === 0
+            ? []
+            : await tx.clinicMembership.findMany({
+                // `tenantId` además de RLS, como `patientId` en el resto.
+                where: { tenantId, userId: { in: voiderIds } },
+                select: { userId: true, user: { select: { fullName: true } } },
+              });
+        const voiderName = new Map(
+          voiders.map((m) => [m.userId, m.user.fullName]),
+        );
+
         const billableByPlan = new Map(
           itemSums.map((row) => [row.planId, row._sum.price?.toNumber() ?? 0]),
         );
@@ -153,6 +178,13 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               method: p.method,
               location: p.location,
               voidedAt: p.deletedAt,
+              voidedBy: p.voidedById
+                ? {
+                    id: p.voidedById,
+                    fullName: voiderName.get(p.voidedById) ?? null,
+                  }
+                : null,
+              voidReason: p.voidReason,
             })),
             paymentPlans: paymentPlans.map((pp) => ({
               id: pp.id,

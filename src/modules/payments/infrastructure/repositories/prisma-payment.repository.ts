@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CashRegisterPage,
@@ -9,6 +10,8 @@ import {
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   PaymentRepository,
+  PaymentVoidAudit,
+  PaymentVoidTarget,
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
@@ -229,18 +232,55 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
-  async softDelete(id: string): Promise<boolean> {
+  async findVoidTarget(id: string): Promise<PaymentVoidTarget | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const payment = await tx.payment.findFirst({
+        where: { id, deletedAt: null },
+        select: {
+          id: true,
+          createdById: true,
+          createdAt: true,
+          locationId: true,
+        },
+      });
+      if (!payment) {
+        return null;
+      }
+      // La zona de la sede vive en su horario (LocationSchedule). Una sede sin
+      // horario configurado usa la misma zona con la que nace uno nuevo
+      // (DEFAULT_BUSINESS_HOURS_TIMEZONE), así "hoy" nunca cae en el UTC del
+      // servidor.
+      const schedule = await tx.locationSchedule.findFirst({
+        where: { locationId: payment.locationId, deletedAt: null },
+        select: { timezone: true },
+      });
+      return {
+        id: payment.id,
+        createdById: payment.createdById,
+        createdAt: payment.createdAt,
+        timeZone: schedule?.timezone ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
+      };
+    });
+  }
+
+  async softDelete(id: string, audit: PaymentVoidAudit): Promise<boolean> {
     // Single atomic UPDATE ... WHERE id = ? AND deletedAt IS NULL (RLS
     // additionally scopes it to the current tenant) instead of a
     // findFirst-then-update pair -- that sequence let two concurrent voids
     // of the same payment both pass the "not yet voided" check (TOCTOU
     // race), since `update({ where: { id } })` alone never re-checked
     // `deletedAt`. `count` tells the caller, in one round trip, whether
-    // THIS call actually voided the row.
+    // THIS call actually voided the row. The audit (who/when/why, SEC-013)
+    // goes in the SAME statement, so a voided row never lacks it.
     return this.prisma.runWithTenant(async (tx) => {
       const result = await tx.payment.updateMany({
         where: { id, deletedAt: null },
-        data: { deletedAt: new Date() },
+        data: {
+          deletedAt: audit.voidedAt,
+          voidedAt: audit.voidedAt,
+          voidedById: audit.voidedById,
+          voidReason: audit.reason,
+        },
       });
       return result.count > 0;
     });

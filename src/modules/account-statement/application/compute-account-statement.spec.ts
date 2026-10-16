@@ -39,6 +39,8 @@ function payment(
     method: 'CASH',
     location: SEDE,
     voidedAt: null,
+    voidedBy: null,
+    voidReason: null,
     ...overrides,
   };
 }
@@ -176,6 +178,32 @@ describe('computeAccountStatement', () => {
     expect(out.movements.find((m) => m.amount === 300)).toMatchObject({
       voided: false,
       voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
+    });
+  });
+
+  it('carries who voided a payment and why (SEC-013)', () => {
+    const voidedAt = new Date('2026-02-03T10:00:00.000Z');
+    const voidedBy = { id: 'u-recep', fullName: 'Rita Recepción' };
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [plan('tp-1', { billable: 1000 })],
+        payments: [
+          payment('tp-1', 999, {
+            voidedAt,
+            voidedBy,
+            voidReason: 'Cobro duplicado',
+          }),
+        ],
+      }),
+      { today: TODAY },
+    );
+
+    expect(out.movements[0]).toMatchObject({
+      voided: true,
+      voidedBy,
+      voidReason: 'Cobro duplicado',
     });
   });
 
