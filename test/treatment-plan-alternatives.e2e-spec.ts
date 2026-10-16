@@ -240,6 +240,19 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       }
     });
 
+    it('presentar, crear alternativa y consultar la lista quedan auditados (DX-009)', async () => {
+      const events = await raw.auditEvent.findMany({
+        where: { tenantId: clinicA.tenantId, resourceType: 'TREATMENT_PLAN' },
+        select: { action: true, resourceId: true, patientId: true },
+      });
+      expect(events).toEqual(
+        expect.arrayContaining([
+          { action: 'UPDATE', resourceId: optionA, patientId: patientA },
+          { action: 'CREATE', resourceId: optionB, patientId: patientA },
+        ]),
+      );
+    });
+
     it('presentar dos veces es una transición inválida (409)', async () => {
       const res = await as(clinicA)
         .post(`/treatment-plans/${optionA}/present`)
@@ -437,6 +450,17 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       await as(clinicA, tokens.RECEPTION)
         .get('/treatment-plans/pending-follow-up')
         .expect(200);
+      expect(
+        await raw.auditEvent.count({
+          where: {
+            tenantId: clinicA.tenantId,
+            action: 'VIEW',
+            resourceType: 'TREATMENT_PLAN',
+            resourceId: null,
+            patientId: null,
+          },
+        }),
+      ).toBeGreaterThanOrEqual(1);
       await as(clinicA, tokens.DENTIST)
         .get('/treatment-plans/pending-follow-up')
         .expect(403);

@@ -16,6 +16,7 @@ import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { TREATMENT_PLAN_FOLLOW_UP_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 import { ListPendingFollowUpUseCase } from '../application/use-cases/list-pending-follow-up.use-case';
 import {
   PendingFollowUpPageDto,
@@ -36,6 +37,9 @@ export class PlanFollowUpController {
     private readonly listPendingFollowUp: ListPendingFollowUpUseCase,
   ) {}
 
+  // Lista de muchos pacientes: el evento no lleva paciente, pero queda quién
+  // consultó montos y teléfonos (DX-009).
+  @Audit({ action: 'VIEW', resource: 'TREATMENT_PLAN' })
   @Get('pending-follow-up')
   @ApiHeader({
     name: 'X-Location-Id',

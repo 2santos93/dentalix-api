@@ -203,6 +203,12 @@ export class TreatmentPlansController {
 
   // --- Alternativas, presentación y rechazo (DX-040) -----------------------
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Post('treatment-plans/:id/present')
   @HttpCode(200)
   @Roles(...TREATMENT_PLAN_DECISION_ROLES)
@@ -227,6 +233,12 @@ export class TreatmentPlansController {
     return this.presentTreatmentPlan.execute(id);
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Post('treatment-plans/:id/reject')
   @HttpCode(200)
   @Roles(...TREATMENT_PLAN_REJECT_ROLES)
@@ -257,6 +269,12 @@ export class TreatmentPlansController {
     });
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+  })
   @Post('treatment-plans/:id/alternatives')
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiCreatedResponse({

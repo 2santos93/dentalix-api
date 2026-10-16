@@ -21,6 +21,7 @@ import {
 } from '../prescriptions/presentation/prescriptions.controller';
 import { TreatmentPlansController } from '../treatment-plans/presentation/treatment-plans.controller';
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
+import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
@@ -247,6 +248,32 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'planId' },
     patient: P,
   },
+  // DX-040: presentar y rechazar cambian el plan; una alternativa es un plan
+  // nuevo del mismo paciente. La lista de presupuestos por seguir es de
+  // muchos pacientes (sin paciente en el evento), pero se audita porque
+  // enseña montos y teléfonos.
+  'POST /treatment-plans/:id/present': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+  },
+  'POST /treatment-plans/:id/reject': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+  },
+  'POST /treatment-plans/:id/alternatives': {
+    action: 'CREATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: RES,
+    patient: plan(),
+  },
+  'GET /treatment-plans/pending-follow-up': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+  },
 
   'GET /payments': { action: 'VIEW', resource: 'PAYMENT' },
   'POST /treatment-plans/:id/payments': {
@@ -312,6 +339,7 @@ const CONTROLLERS: Type[] = [
   PatientDataConsentsController,
   PatientPrescriptionsController,
   PrescriptionsController,
+  PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,
   PaymentsController,
