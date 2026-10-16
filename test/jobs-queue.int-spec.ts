@@ -240,10 +240,14 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const txB = b.prisma.runWithTenant(tenantA, (tx) =>
         b.queue.enqueue(name, {}, { tx, idempotencyKey: key }),
       );
+      // pg_locks (no pg_stat_activity, que a un owner sin superusuario le
+      // oculta las sesiones de otros roles): hay un candado sin conceder.
       await waitFor(async () => {
         const [{ waiting }] = await owner.$queryRaw<{ waiting: bigint }[]>`
-          SELECT count(*) AS waiting FROM pg_stat_activity
-          WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+          SELECT count(*) AS waiting FROM pg_locks
+          WHERE NOT granted
+            AND (database IS NULL OR database = (
+              SELECT oid FROM pg_database WHERE datname = current_database()))`;
         return waiting > 0n;
       }, 'B espera el candado del índice único');
       commitA.resolve();

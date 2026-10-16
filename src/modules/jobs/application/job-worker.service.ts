@@ -90,7 +90,18 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.loop) {
       await this.loop;
     }
-    if (this.inFlight.size === 0) return;
+    if (this.inFlight.size > 0) {
+      await this.drainInFlight();
+    }
+    if (this.started) {
+      this.logger.log({
+        event: 'jobs.worker_stopped',
+        workerId: this.config.workerId,
+      });
+    }
+  }
+
+  private async drainInFlight(): Promise<void> {
     this.logger.log({
       event: 'jobs.worker_draining',
       workerId: this.config.workerId,

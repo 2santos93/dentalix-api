@@ -1,13 +1,14 @@
 /**
  * Polling con tope (DX-085): espera a que `condition` se cumpla comprobándola
- * cada `intervalMs`, y falla con `what` si no ocurre en `timeoutMs`. Para los
- * tests de concurrencia en lugar de `sleep` arbitrarios: no espera de más
+ * cada `intervalMs`, y falla con `what` si no ocurre en `timeoutMs` (4 s por
+ * defecto: por debajo de los 5 s de jest, así el error dice qué faltó). Para
+ * los tests de concurrencia en lugar de `sleep` arbitrarios: no espera de más
  * cuando la condición ya se cumple y no cuelga el test cuando nunca se cumple.
  */
 export async function waitFor(
   condition: () => boolean | Promise<boolean>,
   what: string,
-  { timeoutMs = 10_000, intervalMs = 10 } = {},
+  { timeoutMs = 4_000, intervalMs = 10 } = {},
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await condition())) {
