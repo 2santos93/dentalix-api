@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,17 +10,24 @@ import {
 } from './owner-nosu-env';
 
 // DX-134: con RLS FORCE y un owner sin SUPERUSER ni BYPASSRLS, la validación
-// de una FOREIGN KEY recorre la tabla hija con la RLS del owner. Sin
-// `app.current_tenant` no ve ninguna fila de clínica, así que `ADD FOREIGN KEY`
-// y `VALIDATE CONSTRAINT` aceptan la FK aunque haya filas huérfanas.
+// de una FOREIGN KEY lee la hija y la referenciada con la RLS del owner. Sin
+// `app.current_tenant` no ve ninguna fila de clínica:
+//   - FORCE en la hija: `ADD FOREIGN KEY` y `VALIDATE CONSTRAINT` aceptan la
+//     FK aunque haya filas huérfanas, en silencio;
+//   - FORCE en la referenciada: la FK falla aunque todas las filas sean
+//     válidas.
 //
 // Regla (README, «Despliegue: roles de la BD»): añadir o validar una FK cuenta
-// como leer filas: NO FORCE en la misma transacción. Este spec carga huérfanas
-// ocultas (como admin) y comprueba, con `prisma migrate deploy` como el owner:
-//   - con la regla, la migración falla de forma RUIDOSA y no deja nada a medias;
-//   - sin ella, la misma FK entra en silencio con las huérfanas dentro.
-// El lint test/migrations/fk-under-force.spec.ts impide lo segundo en
-// migraciones nuevas.
+// como leer filas: NO FORCE en la hija y en la referenciada, en la misma
+// transacción. Este spec carga una huérfana oculta (como admin) y comprueba,
+// como el owner:
+//   - con la regla, la migración falla de forma RUIDOSA por la huérfana y no
+//     deja nada a medias (igual con VALIDATE CONSTRAINT);
+//   - sin ella, la misma FK entra en silencio con la huérfana dentro;
+//   - control positivo: con solo filas válidas, NO FORCE solo en la hija
+//     falla, y la regla completa deja entrar la FK y devuelve FORCE.
+// El lint test/migrations/fk-under-force.spec.ts impide lo segundo (y el fallo
+// por la referenciada) en migraciones nuevas.
 
 const ROOT = join(__dirname, '..', '..');
 
@@ -90,6 +97,32 @@ describe('DX-134 · FK sobre tablas con FORCE y filas huérfanas ocultas al owne
       throw new Error(
         `prisma ${args.join(' ')} falló:\n${String(stdout ?? '')}${String(stderr ?? '')}`,
       );
+    }
+  }
+
+  /**
+   * SQL como el owner con psql: varias sentencias en un -c son UNA
+   * transacción, y el error trae el DETAIL (la clave que falla), que el
+   * cliente de Prisma no da.
+   */
+  function ownerSql(sql: string): { status: number | null; out: string } {
+    const u = new URL(ownerUrlFor(env, db));
+    u.search = '';
+    const r = spawnSync(
+      'psql',
+      [u.toString(), '-X', '-v', 'ON_ERROR_STOP=1', '-c', sql],
+      { encoding: 'utf8' },
+    );
+    return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  }
+
+  /** Mensaje de error de `migrate deploy` ('' si no falla). */
+  function deployError(): string {
+    try {
+      prisma(['migrate', 'deploy']);
+      return '';
+    } catch (err) {
+      return (err as Error).message;
     }
   }
 
@@ -168,9 +201,12 @@ describe('DX-134 · FK sobre tablas con FORCE y filas huérfanas ocultas al owne
 
   it('con NO FORCE en la misma migración, ADD FOREIGN KEY falla de forma RUIDOSA y no deja nada a medias', async () => {
     migration('20990102000000_fk_con_regla', ADD_FK_WITH_RULE);
-    expect(() => prisma(['migrate', 'deploy'])).toThrow(
+    const error = deployError();
+    expect(error).toMatch(
       /violates foreign key constraint "children_parentId_fkey"/,
     );
+    // Es la huérfana la que lo hace fallar, no la fila válida.
+    expect(error).toContain(ORPHAN_PARENT);
     // Una migración es una transacción: ni FK ni FORCE quitado.
     expect(await snapshot()).toEqual({
       orphans: 1,
@@ -188,22 +224,20 @@ describe('DX-134 · FK sobre tablas con FORCE y filas huérfanas ocultas al owne
     });
   }, 120_000);
 
-  it('con NO FORCE, VALIDATE CONSTRAINT también falla de forma ruidosa', async () => {
+  it('con NO FORCE en las dos tablas, VALIDATE CONSTRAINT falla de forma ruidosa por la huérfana', async () => {
     await owner.$executeRawUnsafe(`${ADD_FK.replace(/;$/, '')} NOT VALID`);
-    await expect(
-      owner.$transaction([
-        owner.$executeRawUnsafe(
-          `ALTER TABLE "children" NO FORCE ROW LEVEL SECURITY`,
-        ),
-        owner.$executeRawUnsafe(
-          `ALTER TABLE "children" VALIDATE CONSTRAINT "children_parentId_fkey"`,
-        ),
-        owner.$executeRawUnsafe(
-          `ALTER TABLE "children" FORCE ROW LEVEL SECURITY`,
-        ),
-      ]),
-    ).rejects.toThrow(/violates foreign key constraint/);
-    expect(await snapshot()).toMatchObject({
+    const r = ownerSql(`
+      ALTER TABLE "children" NO FORCE ROW LEVEL SECURITY;
+      ALTER TABLE "parents" NO FORCE ROW LEVEL SECURITY;
+      ALTER TABLE "children" VALIDATE CONSTRAINT "children_parentId_fkey";
+      ALTER TABLE "parents" FORCE ROW LEVEL SECURITY;
+      ALTER TABLE "children" FORCE ROW LEVEL SECURITY;`);
+    expect(r.status).not.toBe(0);
+    expect(r.out).toMatch(/violates foreign key constraint/);
+    // Es la huérfana la que lo hace fallar, no la fila válida.
+    expect(r.out).toContain(`(${ORPHAN_PARENT}) is not present`);
+    expect(await snapshot()).toEqual({
+      orphans: 1,
       fk: false,
       force: 'children=true,parents=true',
     });
@@ -228,6 +262,32 @@ describe('DX-134 · FK sobre tablas con FORCE y filas huérfanas ocultas al owne
     prisma(['migrate', 'deploy']);
     expect(await snapshot()).toEqual({
       orphans: 1,
+      fk: true,
+      force: 'children=true,parents=true',
+    });
+  }, 120_000);
+  it('control positivo: con solo filas válidas, la regla completa deja entrar la FK y devuelve FORCE', async () => {
+    await target.$executeRawUnsafe(
+      `DELETE FROM "children" WHERE "parentId" = '${ORPHAN_PARENT}'`,
+    );
+    await owner.$executeRawUnsafe(
+      `ALTER TABLE "children" DROP CONSTRAINT "children_parentId_fkey"`,
+    );
+    // NO FORCE solo en la hija NO basta: con FORCE en la referenciada el owner
+    // no ve el padre y la FK falla con una fila VÁLIDA.
+    const childOnly = ownerSql(`
+      ALTER TABLE "children" NO FORCE ROW LEVEL SECURITY;
+      ${ADD_FK}
+      ALTER TABLE "children" FORCE ROW LEVEL SECURITY;`);
+    expect(childOnly.status).not.toBe(0);
+    expect(childOnly.out).toContain(
+      `(${PARENT}) is not present in table "parents"`,
+    );
+
+    migration('20990104000000_fk_con_regla_ok', ADD_FK_WITH_RULE);
+    expect(deployError()).toBe('');
+    expect(await snapshot()).toEqual({
+      orphans: 0,
       fk: true,
       force: 'children=true,parents=true',
     });
