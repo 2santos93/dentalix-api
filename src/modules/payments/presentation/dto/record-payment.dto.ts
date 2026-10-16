@@ -49,9 +49,14 @@ export class RecordPaymentDto {
 
   @ApiProperty({
     type: String,
-    format: 'date-time',
+    example: '2026-10-16',
     description:
-      'When the abono was paid. Its calendar date (UTC) is what GET .../balance uses to look up the exchange rate when this currency differs from the plan currency.',
+      'Cuándo se pagó el abono: un instante ISO 8601 con hora (p. ej. ' +
+      '`2026-10-17T01:00:00.000Z`, que es el 16/10 a las 20:00 en Bogotá) o ' +
+      'solo el día civil `YYYY-MM-DD`, que se guarda al mediodía de la zona ' +
+      'horaria de la sede del abono (DX-097). La caja y el dashboard lo ' +
+      'cuentan en su día civil en la zona de la sede. GET .../balance busca ' +
+      'la tasa de cambio por su fecha UTC.',
   })
   @IsDateString()
   paidAt!: string;

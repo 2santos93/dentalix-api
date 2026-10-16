@@ -87,8 +87,10 @@ class FakeConvertAmountUseCase {
 }
 
 describe('GetPaymentsTotalsUseCase', () => {
-  function makeUseCase() {
-    const repo = new InMemoryPaymentRepository();
+  // Sede en UTC: estos casos fijan instantes a medianoche UTC y esperan ese
+  // día como fecha de la tasa. La zona de la sede se prueba aparte (DX-097).
+  function makeUseCase(timeZone = 'UTC') {
+    const repo = new InMemoryPaymentRepository(timeZone);
     const fakeConvert = new FakeConvertAmountUseCase();
     const uc = new GetPaymentsTotalsUseCase(
       repo,
@@ -113,8 +115,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2026-03-01T00:00:00.000Z'),
-      to: new Date('2026-04-01T00:00:00.000Z'),
+      from: '2026-03-01',
+      to: '2026-03-31',
       currency: 'USD',
     });
 
@@ -156,8 +158,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2026-03-01T00:00:00.000Z'),
-      to: new Date('2026-04-01T00:00:00.000Z'),
+      from: '2026-03-01',
+      to: '2026-03-31',
       currency: 'USD',
     });
 
@@ -176,14 +178,52 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2027-01-01T00:00:00.000Z'),
-      to: new Date('2027-02-01T00:00:00.000Z'),
+      from: '2027-01-01',
+      to: '2027-01-31',
       currency: 'USD',
     });
 
     expect(result.totalConverted).toBe(0);
     expect(result.count).toBe(0);
     expect(result.byCurrency).toEqual({});
+  });
+
+  it('DX-097: el período y la fecha de la tasa son los días civiles de la sede, no los UTC', async () => {
+    const { repo, fakeConvert, uc } = makeUseCase('America/Bogota');
+    // 31/03 a las 22:00 en Bogotá = 01/04 03:00 UTC: es de marzo.
+    repo.seedPayment({
+      id: 'late-march',
+      currency: 'COP',
+      amount: 4000,
+      paidAt: new Date('2026-04-01T03:00:00.000Z'),
+    });
+    // 01/03 a las 00:30 en Bogotá = 01/03 05:30 UTC: es de marzo.
+    repo.seedPayment({
+      id: 'early-march',
+      currency: 'USD',
+      amount: 1,
+      paidAt: new Date('2026-03-01T05:30:00.000Z'),
+    });
+    // 28/02 a las 23:00 en Bogotá = 01/03 04:00 UTC: es de febrero.
+    repo.seedPayment({
+      id: 'late-feb',
+      currency: 'USD',
+      amount: 100,
+      paidAt: new Date('2026-03-01T04:00:00.000Z'),
+    });
+
+    const result = await uc.execute({
+      from: '2026-03-01',
+      to: '2026-03-31',
+      currency: 'USD',
+    });
+
+    expect(result.count).toBe(2);
+    expect(result.byCurrency).toEqual({ COP: 4000, USD: 1 });
+    expect(fakeConvert.calls.map((c) => c.date).sort()).toEqual([
+      '2026-03-01',
+      '2026-03-31',
+    ]);
   });
 
   it('uppercase-normalizes the target currency', async () => {
@@ -196,8 +236,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2026-03-01T00:00:00.000Z'),
-      to: new Date('2026-04-01T00:00:00.000Z'),
+      from: '2026-03-01',
+      to: '2026-03-31',
       currency: 'usd',
     });
 
@@ -232,8 +272,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2026-03-01T00:00:00.000Z'),
-      to: new Date('2026-04-01T00:00:00.000Z'),
+      from: '2026-03-01',
+      to: '2026-03-31',
       currency: 'USD',
     });
 
@@ -273,8 +313,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2026-03-01T00:00:00.000Z'),
-      to: new Date('2026-04-01T00:00:00.000Z'),
+      from: '2026-03-01',
+      to: '2026-03-31',
       currency: 'USD',
     });
 
@@ -306,8 +346,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     const result = await uc.execute({
-      from: new Date('2026-03-01T00:00:00.000Z'),
-      to: new Date('2026-04-01T00:00:00.000Z'),
+      from: '2026-03-01',
+      to: '2026-03-31',
       currency: 'USD',
     });
 
@@ -335,8 +375,8 @@ describe('GetPaymentsTotalsUseCase', () => {
 
     await expect(
       uc.execute({
-        from: new Date('2026-03-01T00:00:00.000Z'),
-        to: new Date('2026-04-01T00:00:00.000Z'),
+        from: '2026-03-01',
+        to: '2026-03-31',
         currency: 'USD',
       }),
     ).rejects.toThrow('simulated infra failure converting COP');

@@ -2,22 +2,39 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
-import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import {
+  loadLocationTimeZones,
+  resolveLocationTimeZones,
+} from '../../../../shared/locations/location-time-zone';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import {
+  civilDateIn,
+  civilNoonIn,
+  civilPeriodByZone,
+} from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CashRegisterPage,
   CashRegisterRow,
+  CivilPeriod,
   CreatePaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   PaymentRepository,
   PaymentVoidAudit,
   PaymentVoidTarget,
+  ReceivedPayment,
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 
 type PrismaPayment = Prisma.PaymentGetPayload<Record<string, never>>;
+
+/** El filtro de un período civil y la zona con que se leyó cada sede. */
+interface PeriodScope {
+  where: Prisma.PaymentWhereInput;
+  timeZoneOf: (locationId: string) => string;
+}
 
 /**
  * ¿Es un P2002 (violación de único)? Para el único PARCIAL (tenantId,
@@ -82,21 +99,26 @@ function mapToCashRow(
   row: PrismaCashPayment,
   timeZoneOf: (locationId: string) => string,
 ): CashRegisterRow {
+  const timeZone = timeZoneOf(row.location.id);
   return {
-    payment: mapToCashPayment(row),
+    payment: mapToCashPayment(row, timeZone),
     voidSubject: {
       createdById: row.createdById,
       createdAt: row.createdAt,
-      timeZone: timeZoneOf(row.location.id),
+      timeZone,
     },
   };
 }
 
-function mapToCashPayment(row: PrismaCashPayment): CashPayment {
+function mapToCashPayment(
+  row: PrismaCashPayment,
+  timeZone: string,
+): CashPayment {
   return {
     id: row.id,
     createdById: row.createdById,
     paidAt: row.paidAt,
+    paidOn: civilDateIn(row.paidAt, timeZone),
     amount: row.amount.toNumber(),
     currency: row.currency,
     method: row.method,
@@ -142,13 +164,56 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   /**
-   * Filtro por sede activa, o `{}` si el request no fijó ninguna (vista
-   * consolidada de la clínica). Se aplica SOLO donde la sede es semánticamente
-   * correcta — ver los comentarios en cada consulta.
+   * DX-097: el período de días CIVILES (`from`..`to`, ambos inclusive) como
+   * filtro de `paidAt` en la zona de CADA sede, leída de la BD en UNA consulta
+   * (nunca del cliente). Con sede activa, un solo rango en su zona. Sin sede
+   * (vista consolidada), una rama por ZONA con sus sedes —
+   * `(locationId IN (...) AND paidAt >= a AND paidAt < b) OR ...`—, y si todas
+   * las sedes comparten zona (lo normal), un único rango sin filtro de sede.
+   * Así el número de ramas no crece con las sedes ni con las filas, y cada
+   * rama la sirve payments_tenantId_locationId_paidAt_active_idx (o
+   * payments_tenantId_paidAt_active_idx con una sola zona).
    */
-  private locationFilter(): { locationId?: string } {
+  private async periodScope(
+    tx: Prisma.TransactionClient,
+    period: CivilPeriod,
+  ): Promise<PeriodScope> {
     const locationId = this.tenantContext.getLocationId();
-    return locationId ? { locationId } : {};
+    const zones = await loadLocationTimeZones(
+      tx,
+      this.requireTenantId(),
+      locationId ? [locationId] : undefined,
+    );
+    const timeZoneOf = (id: string) =>
+      zones.get(id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE;
+    const branches = civilPeriodByZone(period.from, period.to, zones);
+    const paidAtIn = (b: { start: Date; end: Date }) => ({
+      gte: b.start,
+      lt: b.end,
+    });
+
+    if (branches.length === 0) {
+      // Sin sedes visibles no puede haber abonos (FK a la sede): nada casa.
+      return { where: { id: { in: [] } }, timeZoneOf };
+    }
+    if (locationId) {
+      return {
+        where: { locationId, paidAt: paidAtIn(branches[0]) },
+        timeZoneOf,
+      };
+    }
+    if (branches.length === 1) {
+      return { where: { paidAt: paidAtIn(branches[0]) }, timeZoneOf };
+    }
+    return {
+      where: {
+        OR: branches.map((b) => ({
+          locationId: { in: b.locationIds },
+          paidAt: paidAtIn(b),
+        })),
+      },
+      timeZoneOf,
+    };
   }
 
   async create(input: CreatePaymentRepoInput): Promise<Payment> {
@@ -185,20 +250,33 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (!plan) {
         throw new NotFoundException('Treatment plan not found');
       }
+      // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+      // contra esta clínica); si no, la sede por defecto — que es lo que
+      // hacen hoy todos los clientes y mantiene el comportamiento igual.
+      const locationId =
+        this.tenantContext.getLocationId() ??
+        (await resolveDefaultLocationId(tx));
+      // DX-097: un pago con solo el día se guarda al mediodía de ESA sede, así
+      // cae en su día de caja (medianoche UTC sería la tarde del día anterior
+      // en Bogotá).
+      const paidAt =
+        input.paidAt instanceof Date
+          ? input.paidAt
+          : civilNoonIn(
+              input.paidAt.civilDate,
+              (await resolveLocationTimeZones(tx, tenantId, [locationId]))(
+                locationId,
+              ),
+            );
       return tx.payment.create({
         data: {
-          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la sede por defecto — que es lo que
-          // hacen hoy todos los clientes y mantiene el comportamiento igual.
-          locationId:
-            this.tenantContext.getLocationId() ??
-            (await resolveDefaultLocationId(tx)),
+          locationId,
           tenantId,
           treatmentPlanId: input.treatmentPlanId,
           patientId: input.patientId,
           amount: input.amount,
           currency: input.currency,
-          paidAt: input.paidAt,
+          paidAt,
           method: input.method,
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
@@ -306,37 +384,45 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
   async listReceivedInRange(
     params: ListPaymentsReceivedInRangeParams,
-  ): Promise<Payment[]> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const payments = await tx.payment.findMany({
-        where: {
-          deletedAt: null,
-          paidAt: { gte: params.from, lt: params.to },
-          // La CAJA del periodo sí es por sede (es lo que se arquea).
-          ...this.locationFilter(),
-        },
-        orderBy: { paidAt: 'desc' },
-      });
-      return payments.map(mapToEntity);
-    });
+  ): Promise<ReceivedPayment[]> {
+    // La CAJA del período sí es por sede (es lo que se arquea): `periodScope`
+    // filtra por la sede activa si la hay.
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const scope = await this.periodScope(tx, params);
+        const payments = await tx.payment.findMany({
+          where: { deletedAt: null, ...scope.where },
+          orderBy: { paidAt: 'desc' },
+        });
+        return payments.map((payment) => ({
+          ...mapToEntity(payment),
+          paidOn: civilDateIn(
+            payment.paidAt,
+            scope.timeZoneOf(payment.locationId),
+          ),
+        }));
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   async listForCashRegister(
     params: ListCashRegisterParams,
   ): Promise<CashRegisterPage> {
     const locationId = this.tenantContext.getLocationId();
-    const where: Prisma.PaymentWhereInput = {
-      deletedAt: null,
-      paidAt: { gte: params.from, lt: params.toExclusive },
-      ...(params.method ? { method: params.method } : {}),
-      // La caja es por sede, igual que listReceivedInRange: es lo que se
-      // arquea. Con sede, la sirve payments_tenantId_locationId_paidAt_active_idx;
-      // sin ella (vista consolidada), payments_tenantId_paidAt_active_idx.
-      ...this.locationFilter(),
-    };
 
     return this.prisma.runWithTenant(
       async (tx) => {
+        // La caja es por sede, igual que listReceivedInRange: es lo que se
+        // arquea. El período se corta en la zona de cada sede (DX-097), leída
+        // en esta misma foto; ver `periodScope` para los índices que la sirven.
+        const scope = await this.periodScope(tx, params);
+        const where: Prisma.PaymentWhereInput = {
+          deletedAt: null,
+          ...scope.where,
+          ...(params.method ? { method: params.method } : {}),
+        };
+
         // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE
         // READ: todas las sentencias ven la misma foto, así que un abono
         // registrado o anulado a mitad de camino no puede dejar un total que
@@ -346,9 +432,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
           tx.payment.findMany({
             where,
             select: CASH_PAYMENT_SELECT,
-            // `paidAt` es un día civil: todos los abonos de un día empatan, y
-            // sin un desempate estable la paginación podría repetir o saltarse
-            // filas de ese día entre una página y la siguiente.
+            // Varios abonos pueden compartir `paidAt` (los registrados solo
+            // con fecha caen al mediodía de la sede): sin un desempate estable
+            // la paginación podría repetir o saltarse filas entre páginas.
             orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
             skip: params.skip,
             take: params.take,
@@ -372,16 +458,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
             : Promise.resolve(null),
         ]);
 
-        // Zona de cada sede de la página, en UNA consulta y en la misma foto:
+        // La zona de cada sede ya se leyó para el período, en la misma foto:
         // el `canVoid` de cada fila usa el mismo "hoy" que la anulación.
-        const timeZoneOf = await resolveLocationTimeZones(
-          tx,
-          this.requireTenantId(),
-          rows.map((row) => row.location.id),
-        );
-
         return {
-          items: rows.map((row) => mapToCashRow(row, timeZoneOf)),
+          items: rows.map((row) => mapToCashRow(row, scope.timeZoneOf)),
           total,
           groups: groups.map((group) => ({
             currency: group.currency,

@@ -1,17 +1,10 @@
 import { ClinicRole } from '@prisma/client';
 
-/**
- * Día civil (YYYY-MM-DD) de un instante en una zona IANA. `en-CA` formatea
- * fechas como `2026-10-16`, así que el resultado se compara como texto.
- */
-export function civilDateIn(instant: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(instant);
-}
+import { civilDateIn } from '../../../shared/time/civil-day';
+
+// La traducción instante → día civil de la sede vive en el dominio compartido
+// (DX-097); se reexporta porque la caja y el estado de cuenta la importan de aquí.
+export { civilDateIn };
 
 /**
  * ¿Caen `a` y `b` en el MISMO día del calendario de la sede? Es la ventana en

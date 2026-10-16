@@ -35,7 +35,7 @@ export class DashboardIncomesDto {
     example: 1250.5,
     description:
       "Sum of every active payment's amount in the range, each converted " +
-      "to `currency` using ITS OWN paidAt date (never today's rate).",
+      "to `currency` using the rate of ITS OWN civil paid date in its location's time zone (never today's rate).",
   })
   totalConverted!: number;
 

@@ -168,6 +168,46 @@ describe('RecordPaymentUseCase', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('DX-097: un paidAt solo con fecha (YYYY-MM-DD) se guarda al mediodía de la sede, dentro de ese día civil', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan();
+
+    const payment = await uc.execute('plan-1', {
+      amount: 10,
+      currency: 'USD',
+      paidAt: '2026-10-16',
+    });
+
+    // Sede del fake en Bogotá (UTC-5): 12:00 locales = 17:00 UTC.
+    expect(payment.paidAt.toISOString()).toBe('2026-10-16T17:00:00.000Z');
+  });
+
+  it('DX-097: un paidAt con hora es un instante y se guarda tal cual', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan();
+
+    const payment = await uc.execute('plan-1', {
+      amount: 10,
+      currency: 'USD',
+      paidAt: '2026-10-17T01:00:00.000Z',
+    });
+
+    expect(payment.paidAt.toISOString()).toBe('2026-10-17T01:00:00.000Z');
+  });
+
+  it('rechaza un día que no existe (2026-02-30)', async () => {
+    const { fakeGetPlan, uc } = makeUseCase();
+    fakeGetPlan.plan = makePlan();
+
+    await expect(
+      uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-02-30',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('propagates NotFoundException when the plan is absent', async () => {
     const { fakeGetPlan, uc } = makeUseCase();
     fakeGetPlan.plan = null;

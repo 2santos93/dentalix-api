@@ -32,8 +32,8 @@ import { AppointmentStatus } from '@prisma/client';
 class FakeGetPaymentsTotalsUseCase {
   public readonly calls: GetPaymentsTotalsInput[] = [];
   public result: GetPaymentsTotalsResult = {
-    from: new Date('2026-07-01T00:00:00.000Z'),
-    to: new Date('2026-07-31T00:00:00.000Z'),
+    from: '2026-07-01',
+    to: '2026-07-31',
     currency: 'USD',
     totalConverted: 0,
     count: 0,
@@ -162,17 +162,20 @@ describe('GetDoctorDashboardUseCase', () => {
     return { incomesUc, inventoryUc, appointmentsUc, patientsUc, uc };
   }
 
+  // `to` EXCLUSIVO (contrato de GET /dashboard): julio entero.
   const baseInput = {
-    from: new Date('2026-07-01T00:00:00.000Z'),
-    to: new Date('2026-07-31T00:00:00.000Z'),
+    from: '2026-07-01',
+    to: '2026-08-01',
     currency: 'USD',
   };
+  const JULY_FROM = new Date('2026-07-01T00:00:00.000Z');
+  const JULY_TO = new Date('2026-08-01T00:00:00.000Z');
 
-  it('forwards {from,to,currency} to GetPaymentsTotalsUseCase and returns its result', async () => {
+  it('pide los ingresos de los días civiles from..to-1 (inclusive) y devuelve el período como antes', async () => {
     const { incomesUc, uc } = makeUseCase();
     incomesUc.result = {
-      from: baseInput.from,
-      to: baseInput.to,
+      from: '2026-07-01',
+      to: '2026-07-31',
       currency: 'USD',
       totalConverted: 1234.5,
       count: 3,
@@ -182,10 +185,42 @@ describe('GetDoctorDashboardUseCase', () => {
     const result = await uc.execute(baseInput);
 
     expect(incomesUc.calls).toEqual([
-      { from: baseInput.from, to: baseInput.to, currency: 'USD' },
+      { from: '2026-07-01', to: '2026-07-31', currency: 'USD' },
     ]);
-    expect(result.incomes).toEqual(incomesUc.result);
-    expect(result.period).toEqual({ from: baseInput.from, to: baseInput.to });
+    expect(result.incomes).toEqual({
+      ...incomesUc.result,
+      from: JULY_FROM,
+      to: JULY_TO,
+    });
+    expect(result.period).toEqual({ from: JULY_FROM, to: JULY_TO });
+  });
+
+  it('from = to es un período vacío: ingresos en cero sin consultar abonos', async () => {
+    const { incomesUc, uc } = makeUseCase();
+
+    const result = await uc.execute({
+      from: '2026-07-01',
+      to: '2026-07-01',
+      currency: 'usd',
+    });
+
+    expect(incomesUc.calls).toEqual([]);
+    expect(result.incomes).toEqual({
+      from: JULY_FROM,
+      to: JULY_FROM,
+      currency: 'USD',
+      totalConverted: 0,
+      count: 0,
+      byCurrency: {},
+    });
+  });
+
+  it('rechaza un día que no existe (2026-02-30)', async () => {
+    const { uc } = makeUseCase();
+
+    await expect(
+      uc.execute({ ...baseInput, from: '2026-02-30' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('includes ONLY low-stock items in lowStockItems, with a matching count', async () => {
@@ -387,8 +422,8 @@ describe('GetDoctorDashboardUseCase', () => {
 
     await expect(
       uc.execute({
-        from: new Date('2026-08-01T00:00:00.000Z'),
-        to: new Date('2026-07-01T00:00:00.000Z'),
+        from: '2026-08-01',
+        to: '2026-07-01',
         currency: 'USD',
       }),
     ).rejects.toThrow(/from.*to|to.*from/i);
@@ -411,7 +446,7 @@ describe('GetDoctorDashboardUseCase', () => {
   // rejecting wholesale (stock/patients/appointments would otherwise be
   // dragged down by one bad income row).
   it('does not fail wholesale when one payment has an unconvertible currency', async () => {
-    const paymentRepo = new InMemoryPaymentRepository();
+    const paymentRepo = new InMemoryPaymentRepository('UTC');
     paymentRepo.seedPayment({
       id: 'p-good',
       currency: 'USD',
@@ -466,8 +501,8 @@ describe('GetDoctorDashboardUseCase', () => {
     );
 
     const result = await uc.execute({
-      from: new Date('2026-07-01T00:00:00.000Z'),
-      to: new Date('2026-07-31T00:00:00.000Z'),
+      from: '2026-07-01',
+      to: '2026-08-01',
       currency: 'USD',
     });
 

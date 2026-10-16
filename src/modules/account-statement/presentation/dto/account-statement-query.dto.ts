@@ -11,7 +11,9 @@ import { IsOptional, Matches } from 'class-validator';
 export class AccountStatementQueryDto {
   @ApiPropertyOptional({
     example: '2026-01-01',
-    description: 'Primer día de los movimientos (YYYY-MM-DD), inclusive.',
+    description:
+      'Primer día de los movimientos (YYYY-MM-DD), inclusive, en la zona ' +
+      'horaria de la sede de cada abono.',
   })
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must match YYYY-MM-DD' })

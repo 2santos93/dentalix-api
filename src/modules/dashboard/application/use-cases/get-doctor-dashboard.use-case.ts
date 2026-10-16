@@ -4,6 +4,11 @@ import {
   GetPaymentsTotalsUseCase,
   GetPaymentsTotalsResult,
 } from '../../../payments/application/use-cases/get-payments-totals.use-case';
+import {
+  addCivilDays,
+  civilDaysInclusive,
+  parseCivilDate,
+} from '../../../../shared/time/civil-day';
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { ListUpcomingAppointmentsUseCase } from '../../../appointments/application/use-cases/list-upcoming-appointments.use-case';
 import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
@@ -31,8 +36,10 @@ const UPCOMING_WINDOW_DAYS = 90;
 const LOW_STOCK_PREVIEW_SIZE = 100;
 
 export interface GetDoctorDashboardInput {
-  from: Date;
-  to: Date;
+  /** Primer día civil del período (YYYY-MM-DD), inclusive. */
+  from: string;
+  /** Día civil (YYYY-MM-DD) siguiente al último del período: EXCLUSIVO. */
+  to: string;
   currency: string;
   upcomingLimit?: number;
 }
@@ -63,7 +70,10 @@ export interface GetDoctorDashboardResult {
    * the requested currency by each payment's own paidAt date (see
    * GetPaymentsTotalsUseCase, which replaced the old sales-based metric —
    * see docs/plans/2026-07-24-payments-pivot.md). */
-  incomes: GetPaymentsTotalsResult;
+  incomes: Omit<GetPaymentsTotalsResult, 'from' | 'to'> & {
+    from: Date;
+    to: Date;
+  };
   lowStockItems: {
     count: number;
     items: DashboardLowStockItem[];
@@ -72,8 +82,24 @@ export interface GetDoctorDashboardResult {
   patientCount: number;
 }
 
-function isValidDate(value: unknown): value is Date {
-  return value instanceof Date && !Number.isNaN(value.getTime());
+/**
+ * El día civil como medianoche UTC: así se ha devuelto siempre el período en
+ * la respuesta (`period`, `incomes.from/to`), y se mantiene para no romper el
+ * contrato. Es solo una etiqueta del día; el corte real se hace en la zona de
+ * cada sede (DX-097).
+ */
+function civilDateLabel(day: string): Date {
+  return new Date(`${day}T00:00:00.000Z`);
+}
+
+function requireCivilDate(value: string, field: 'from' | 'to'): string {
+  const day = typeof value === 'string' ? parseCivilDate(value) : null;
+  if (day === null) {
+    throw new BadRequestException(
+      `${field} must be a valid calendar date (YYYY-MM-DD)`,
+    );
+  }
+  return day;
 }
 
 /**
@@ -97,13 +123,11 @@ export class GetDoctorDashboardUseCase {
   async execute(
     input: GetDoctorDashboardInput,
   ): Promise<GetDoctorDashboardResult> {
-    if (!isValidDate(input.from)) {
-      throw new BadRequestException('from must be a valid date');
-    }
-    if (!isValidDate(input.to)) {
-      throw new BadRequestException('to must be a valid date');
-    }
-    if (input.from > input.to) {
+    const from = requireCivilDate(input.from, 'from');
+    const to = requireCivilDate(input.to, 'to');
+    // `to` es exclusivo: from = to es un período vacío; from > to, un error.
+    const days = civilDaysInclusive(from, to) - 1;
+    if (days < 0) {
       throw new BadRequestException('from must be <= to');
     }
     if (!input.currency || !input.currency.trim()) {
@@ -123,12 +147,17 @@ export class GetDoctorDashboardUseCase {
     // Currency format/support itself is validated downstream by
     // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
     // throws BadRequestException there) -- not duplicated here.
-    const [incomes, inventoryPage, patientCount] = await Promise.all([
-      this.getPaymentsTotals.execute({
-        from: input.from,
-        to: input.to,
-        currency: input.currency,
-      }),
+    //
+    // Los ingresos van por días CIVILES, inclusive: `from`..`to - 1`, que cada
+    // sede corta a medianoche de su zona (DX-097). Un período vacío no consulta.
+    const [totals, inventoryPage, patientCount] = await Promise.all([
+      days === 0
+        ? Promise.resolve(null)
+        : this.getPaymentsTotals.execute({
+            from,
+            to: addCivilDays(to, -1),
+            currency: input.currency,
+          }),
       // `lowStockOnly` hace el filtrado en el módulo dueño de la regla de
       // signos (ListInventoryItemsUseCase), así que `total` es el número REAL
       // de insumos bajo mínimo, calculado ANTES de cortar por página -- el
@@ -167,8 +196,19 @@ export class GetDoctorDashboardUseCase {
       status: appt.status,
     }));
 
+    const period = { from: civilDateLabel(from), to: civilDateLabel(to) };
+    const incomes = totals
+      ? { ...totals, ...period }
+      : {
+          ...period,
+          currency: input.currency.trim().toUpperCase(),
+          totalConverted: 0,
+          count: 0,
+          byCurrency: {},
+        };
+
     return {
-      period: { from: input.from, to: input.to },
+      period,
       incomes,
       lowStockItems: {
         // Total real, no el tamaño de la página listada arriba.
