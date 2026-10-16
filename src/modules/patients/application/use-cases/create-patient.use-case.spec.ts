@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ClinicRole, DocType, Sex } from '@prisma/client';
 import { CreatePatientUseCase } from './create-patient.use-case';
 import { Patient } from '../../domain/entities/patient.entity';
@@ -29,9 +29,10 @@ function fakePatientFrom(
     countryCode: input.countryCode ?? null,
     cityId: input.cityId ?? null,
     notes: input.notes ?? null,
-    dataConsentAccepted: input.dataConsentAccepted ?? false,
-    dataConsentAt: input.dataConsentAt ?? null,
-    dataConsentPolicyVersion: input.dataConsentPolicyVersion ?? null,
+    // El resumen deprecado lo deriva el repositorio de la fila de consentimiento.
+    dataConsentAccepted: false,
+    dataConsentAt: null,
+    dataConsentPolicyVersion: null,
     maritalStatus: input.maritalStatus ?? null,
     occupation: input.occupation ?? null,
     insurerEps: input.insurerEps ?? null,
@@ -289,5 +290,97 @@ describe('CreatePatientUseCase', () => {
         });
       },
     );
+  });
+
+  describe('autorización de datos en el alta (DX-037)', () => {
+    function capturing(): {
+      uc: CreatePatientUseCase;
+      captured: () => CreatePatientRepoInput | undefined;
+    } {
+      let captured: CreatePatientRepoInput | undefined;
+      const repo = makeRepo({
+        create: (input) => {
+          captured = input;
+          return Promise.resolve(fakePatientFrom('p9', input));
+        },
+      });
+      return {
+        uc: new CreatePatientUseCase(repo, makeReferenceLookup()),
+        captured: () => captured,
+      };
+    }
+    const base = {
+      firstName: 'Ana',
+      lastName: 'Gomez',
+      docType: DocType.CC,
+      sex: Sex.F,
+      createdById: 'u1',
+      actorRole: ClinicRole.RECEPTION,
+    };
+
+    it('sin dataConsents ni booleano no registra ninguna autorización', async () => {
+      const { uc, captured } = capturing();
+      await uc.execute(base);
+      expect(captured()?.consent).toBeUndefined();
+    });
+
+    it('pasa las decisiones explícitas con quién y la evidencia de la petición', async () => {
+      const { uc, captured } = capturing();
+      await uc.execute({
+        ...base,
+        dataConsents: {
+          policyVersionId: 'pol-1',
+          decisions: [{ scope: 'GENERAL', granted: true }],
+        },
+        consentEvidence: { ipAddress: '10.0.0.1', userAgent: 'jest' },
+      });
+      expect(captured()?.consent).toEqual({
+        kind: 'versioned',
+        policyVersionId: 'pol-1',
+        decisions: [{ scope: 'GENERAL', granted: true }],
+        recordedById: 'u1',
+        evidence: { ipAddress: '10.0.0.1', userAgent: 'jest' },
+      });
+    });
+
+    it('rechaza dataConsents sin decisiones (400) antes de crear nada', async () => {
+      const { uc, captured } = capturing();
+      await expect(
+        uc.execute({
+          ...base,
+          dataConsents: { policyVersionId: 'pol-1', decisions: [] },
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(captured()).toBeUndefined();
+    });
+
+    it('el booleano deprecado se traduce a una fila LEGACY', async () => {
+      const { uc, captured } = capturing();
+      await uc.execute({
+        ...base,
+        dataConsentAccepted: true,
+        dataConsentPolicyVersion: 'v1',
+      });
+      expect(captured()?.consent).toEqual({
+        kind: 'legacy',
+        granted: true,
+        legacyPolicyVersion: 'v1',
+        recordedById: 'u1',
+        evidence: {},
+      });
+    });
+
+    it('dataConsents gana sobre el booleano deprecado', async () => {
+      const { uc, captured } = capturing();
+      await uc.execute({
+        ...base,
+        dataConsentAccepted: true,
+        dataConsents: {
+          policyVersionId: 'pol-1',
+          decisions: [{ scope: 'MARKETING', granted: true }],
+        },
+      });
+      expect(captured()?.consent?.kind).toBe('versioned');
+    });
   });
 });

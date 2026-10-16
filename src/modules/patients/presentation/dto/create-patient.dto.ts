@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { DocType, Sex } from '@prisma/client';
 import { SaveMedicalHistoryDto } from '../../../medical-history/presentation/dto/save-medical-history.dto';
+import { RecordDataConsentsDto } from '../../../data-consents/presentation/dto/data-consent.dto';
 
 // NOTE: deliberately NO `tenantId` field — the tenant comes from the guarded
 // request context (JwtAuthGuard -> TenantContextInterceptor), never from the client.
@@ -78,17 +79,30 @@ export class CreatePatientDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    type: RecordDataConsentsDto,
+    description:
+      'Autorización de datos (Ley 1581) que el paciente da en el alta: se registra en la misma transacción, con las mismas reglas que POST /patients/:id/data-consents. Sin este campo no se registra ninguna autorización.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RecordDataConsentsDto)
+  dataConsents?: RecordDataConsentsDto;
+
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-037): usa `dataConsents`. Si llega sin `dataConsents`, se guarda como una autorización GENERAL de canal LEGACY (sin texto versionado). `dataConsentAt` ya no se acepta: la hora es la del servidor.',
+  })
   @IsOptional()
   @IsBoolean()
   dataConsentAccepted?: boolean;
 
-  @ApiPropertyOptional({ type: String, format: 'date-time' })
-  @IsOptional()
-  @IsDateString()
-  dataConsentAt?: string;
-
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-037): etiqueta de versión que acompaña a `dataConsentAccepted`.',
+  })
   @IsOptional()
   @IsString()
   dataConsentPolicyVersion?: string;

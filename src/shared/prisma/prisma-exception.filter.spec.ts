@@ -47,6 +47,15 @@ describe('conflictMessageForTarget', () => {
     );
   });
 
+  it('maps a concurrent privacy-policy publish (index name or columns) to a reload hint', () => {
+    expect(
+      conflictMessageForTarget('privacy_policy_versions_tenant_version_key'),
+    ).toMatch(/política se publicó a la vez/);
+    expect(conflictMessageForTarget(['tenantId', 'version'])).toMatch(
+      /política se publicó a la vez/,
+    );
+  });
+
   it('maps the patient doc index (by constraint name) to a doc message', () => {
     expect(conflictMessageForTarget('patients_tenant_doc_key')).toMatch(
       /documento/i,

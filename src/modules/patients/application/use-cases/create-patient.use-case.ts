@@ -6,13 +6,21 @@ import {
 } from '@nestjs/common';
 import { ClinicRole, DocType, Sex } from '@prisma/client';
 import { PATIENT_REPOSITORY } from '../../domain/ports/patient-repository.port';
-import type { PatientRepository } from '../../domain/ports/patient-repository.port';
+import type {
+  CreatePatientConsent,
+  PatientRepository,
+} from '../../domain/ports/patient-repository.port';
 import { REFERENCE_LOOKUP } from '../../domain/ports/reference-lookup.port';
 import type { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { Patient } from '../../domain/entities/patient.entity';
 import { CLINICAL_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { deriveSafetyFlags } from '../../../medical-history/domain/safety-flags';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
+import type {
+  ConsentDecision,
+  ConsentEvidence,
+} from '../../../data-consents/domain/entities/data-consent.entity';
+import { assertValidDecisions } from '../../../data-consents/domain/consent-state';
 
 export interface CreatePatientInput {
   firstName: string;
@@ -27,8 +35,13 @@ export interface CreatePatientInput {
   countryCode?: string;
   cityId?: number;
   notes?: string;
+  /** Autorización de datos explícita, registrada en la misma transacción (DX-037). */
+  dataConsents?: { policyVersionId: string; decisions: ConsentDecision[] };
+  /** IP / user-agent de la petición, evidencia de `dataConsents`. */
+  consentEvidence?: ConsentEvidence;
+  /** @deprecated Usa `dataConsents`. Se guarda como fila GENERAL LEGACY. */
   dataConsentAccepted?: boolean;
-  dataConsentAt?: Date;
+  /** @deprecated Solo acompaña a `dataConsentAccepted`. */
   dataConsentPolicyVersion?: string;
   maritalStatus?: string;
   occupation?: string;
@@ -96,6 +109,7 @@ export class CreatePatientUseCase {
       : undefined;
 
     return this.repo.create({
+      consent: this.consentFor(input),
       firstName: input.firstName,
       lastName: input.lastName,
       docType: input.docType,
@@ -108,9 +122,6 @@ export class CreatePatientUseCase {
       countryCode: input.countryCode,
       cityId: input.cityId,
       notes: input.notes,
-      dataConsentAccepted: input.dataConsentAccepted,
-      dataConsentAt: input.dataConsentAt,
-      dataConsentPolicyVersion: input.dataConsentPolicyVersion,
       maritalStatus: input.maritalStatus,
       occupation: input.occupation,
       insurerEps: input.insurerEps,
@@ -124,5 +135,40 @@ export class CreatePatientUseCase {
       createdById: input.createdById,
       medicalHistory,
     });
+  }
+
+  /**
+   * `dataConsents` gana sobre el booleano deprecado. Sin ninguno de los dos no
+   * se registra nada: el silencio no es autorización.
+   */
+  private consentFor(
+    input: CreatePatientInput,
+  ): CreatePatientConsent | undefined {
+    const evidence = input.consentEvidence ?? {};
+    if (input.dataConsents) {
+      assertValidDecisions(input.dataConsents.decisions);
+      if (!input.createdById) {
+        throw new Error(
+          'dataConsents requiere createdById (quién lo registra)',
+        );
+      }
+      return {
+        kind: 'versioned',
+        policyVersionId: input.dataConsents.policyVersionId,
+        decisions: input.dataConsents.decisions,
+        recordedById: input.createdById,
+        evidence,
+      };
+    }
+    if (input.dataConsentAccepted !== undefined) {
+      return {
+        kind: 'legacy',
+        granted: input.dataConsentAccepted,
+        legacyPolicyVersion: input.dataConsentPolicyVersion,
+        recordedById: input.createdById,
+        evidence,
+      };
+    }
+    return undefined;
   }
 }

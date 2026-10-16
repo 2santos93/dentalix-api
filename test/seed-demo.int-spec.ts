@@ -48,6 +48,8 @@ const TENANT_TABLES = [
   'inventory_items',
   'location_schedule_ranges',
   'location_schedules',
+  'data_processing_consents',
+  'privacy_policy_versions',
   'patients',
   'dental_catalog_items',
   'clinic_invitations',
@@ -285,6 +287,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.dental_catalog_items).toBeGreaterThan(50);
     // DX-005: una confirmación pendiente + una "pide llamada".
     expect(firstCounts.appointment_confirmations).toBe(2);
+    // DX-037: política v1 y la autorización de cada alta (≥ 2 filas por paciente).
+    expect(firstCounts.privacy_policy_versions).toBe(1);
+    expect(firstCounts.data_processing_consents).toBeGreaterThanOrEqual(50);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );
@@ -308,6 +313,38 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(callMe.response).toBe('CALL_ME');
     expect(callMe.appointment.status).toBe('SCHEDULED');
     expect(callMe.appointment.callbackRequestedAt).not.toBeNull();
+  });
+
+  it('cada paciente tiene su autorización versionada y uno revocó MARKETING (DX-037)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const policy = await raw.privacyPolicyVersion.findFirstOrThrow({
+      where: { tenantId },
+    });
+    expect(policy.version).toBe(1);
+    const patients = await raw.patient.findMany({
+      where: { tenantId },
+      include: { dataProcessingConsents: true },
+    });
+    for (const patient of patients) {
+      const scopes = patient.dataProcessingConsents.map((c) => c.scope);
+      expect(scopes).toEqual(
+        expect.arrayContaining(['GENERAL', 'SENSITIVE_HEALTH']),
+      );
+      expect(
+        patient.dataProcessingConsents.every(
+          (c) => c.channel === 'IN_PERSON' && c.policyVersionId === policy.id,
+        ),
+      ).toBe(true);
+      // Resumen deprecado coherente con la fila GENERAL.
+      expect(patient.dataConsentAccepted).toBe(true);
+      expect(patient.dataConsentPolicyVersion).toBe('v1');
+    }
+    const revoked = patients.filter((p) =>
+      p.dataProcessingConsents.some(
+        (c) => c.scope === 'MARKETING' && !c.granted,
+      ),
+    );
+    expect(revoked).toHaveLength(1);
   });
 
   it('reparte los roles pedidos con la contraseña documentada', async () => {

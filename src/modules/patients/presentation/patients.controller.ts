@@ -37,12 +37,14 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import {
+  consentEvidenceFrom,
+  EvidenceRequest,
+} from '../../data-consents/presentation/consent-evidence';
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
-interface AuthenticatedRequest {
-  user: TenantJwtPayload;
-}
+type AuthenticatedRequest = EvidenceRequest & { user: TenantJwtPayload };
 
 @ApiTags('patients')
 @ApiBearerAuth()
@@ -79,9 +81,7 @@ export class PatientsController {
     return this.createPatient.execute({
       ...dto,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-      dataConsentAt: dto.dataConsentAt
-        ? new Date(dto.dataConsentAt)
-        : undefined,
+      consentEvidence: consentEvidenceFrom(req),
       createdById: req.user.sub,
       actorRole: req.user.role,
     });

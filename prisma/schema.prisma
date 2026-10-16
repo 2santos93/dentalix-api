@@ -21,6 +21,8 @@ model Tenant {
   domains                  TenantDomain[]
   invitations              ClinicInvitation[]
   appointmentConfirmations AppointmentConfirmation[]
+  privacyPolicyVersions    PrivacyPolicyVersion[]
+  dataProcessingConsents   DataProcessingConsent[]
 
   @@map("tenants")
 }
@@ -45,6 +47,9 @@ model User {
   updatedAt       DateTime           @updatedAt
   deletedAt       DateTime?
   memberships     ClinicMembership[]
+
+  privacyPoliciesPublished PrivacyPolicyVersion[]
+  dataConsentsRecorded     DataProcessingConsent[]
 
   @@map("users")
 }
@@ -160,7 +165,10 @@ model Patient {
   countryCode                  String?
   cityId                       Int?
   notes                        String?
-  // Consentimiento Ley 1581 (atributo único, no versionado).
+  // DEPRECADO (DX-037): resumen DERIVADO de la última fila GENERAL de
+  // `data_processing_consents`, que es la prueba de la autorización Ley 1581.
+  // Se sigue escribiendo (en la misma transacción que la fila) solo para no
+  // romper a los clientes que lo leen; nunca es la fuente de verdad.
   dataConsentAccepted          Boolean   @default(false)
   dataConsentAt                DateTime?
   dataConsentPolicyVersion     String?
@@ -186,6 +194,7 @@ model Patient {
   toothRecords           ToothRecord[]
   appointments           Appointment[]
   treatmentPlans         TreatmentPlan[]
+  dataProcessingConsents DataProcessingConsent[]
   country                Country?                @relation(fields: [countryCode], references: [code])
   city                   City?                   @relation(fields: [cityId], references: [id])
 
@@ -415,6 +424,87 @@ model AppointmentConfirmation {
   @@unique([tokenHash])
   @@index([tenantId, appointmentId])
   @@map("appointment_confirmations")
+}
+
+// DX-037: autorización de tratamiento de datos (Ley 1581 / Dec. 1377).
+// GENERAL = datos personales; SENSITIVE_HEALTH = datos sensibles de salud
+// (exige consentimiento expreso y separado); MARKETING = finalidades
+// comerciales (recordatorios comerciales, campañas), siempre opcional.
+enum DataConsentScope {
+  GENERAL
+  SENSITIVE_HEALTH
+  MARKETING
+}
+
+// IN_PERSON = registrado por el personal en la clínica con el texto vigente a
+// la vista. LEGACY = sin prueba suficiente: migrado del antiguo booleano
+// `Patient.dataConsentAccepted` o enviado por un cliente con ese campo
+// deprecado.
+enum DataConsentChannel {
+  IN_PERSON
+  LEGACY
+}
+
+// DX-037: versión publicada de la política de tratamiento de datos de UNA
+// clínica. Inmutable una vez publicada: no hay endpoint de edición y un
+// trigger de BD rechaza todo UPDATE (ver 20261016140000_data_processing_consents).
+// Una versión nueva es una fila nueva con `version` + 1.
+model PrivacyPolicyVersion {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @db.Uuid
+  version             Int
+  // Texto completo de la política (aviso de privacidad).
+  policyText          String
+  // Texto de cada casilla: lo que el titular autoriza, scope a scope.
+  generalText         String
+  sensitiveHealthText String
+  marketingText       String
+  // sha256 de los cuatro textos: identifica el contenido exacto aceptado.
+  contentHash         String
+  publishedAt         DateTime  @default(now())
+  publishedById       String    @db.Uuid
+
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id])
+  publishedBy User                    @relation(fields: [publishedById], references: [id])
+  consents    DataProcessingConsent[]
+
+  @@unique([tenantId, version], map: "privacy_policy_versions_tenant_version_key")
+  // Destino de la FK compuesta de data_processing_consents (SEC-004).
+  @@unique([tenantId, id], map: "privacy_policy_versions_tenant_id_key")
+  @@map("privacy_policy_versions")
+}
+
+// DX-037: prueba de la autorización de datos. APPEND-ONLY: una revocación es
+// una fila nueva con `granted = false`; el estado vigente de cada scope es su
+// última fila (por `recordedAt`). `recordedAt` lo pone el servidor. Un trigger
+// de BD rechaza todo UPDATE (y todo DELETE salvo de un superusuario).
+model DataProcessingConsent {
+  id                  String             @id @default(uuid()) @db.Uuid
+  tenantId            String             @db.Uuid
+  patientId           String             @db.Uuid
+  // NULL solo en filas LEGACY (CHECK en la migración): el booleano antiguo
+  // no guardaba el texto aceptado.
+  policyVersionId     String?            @db.Uuid
+  // Etiqueta de versión que traía el booleano antiguo (p. ej. "v1"). Solo LEGACY.
+  legacyPolicyVersion String?
+  scope               DataConsentScope
+  granted             Boolean
+  channel             DataConsentChannel
+  // NULL solo en filas LEGACY migradas (CHECK en la migración).
+  recordedById        String?            @db.Uuid
+  recordedAt          DateTime           @default(now())
+  ipAddress           String?
+  userAgent           String?
+
+  tenant        Tenant                @relation(fields: [tenantId], references: [id])
+  // FK COMPUESTAS (SEC-004): paciente y versión de política del MISMO tenant.
+  patient       Patient               @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  policyVersion PrivacyPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict)
+  recordedBy    User?                 @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, patientId, scope, recordedAt])
+  @@index([tenantId, policyVersionId])
+  @@map("data_processing_consents")
 }
 
 enum TreatmentPlanStatus {

@@ -71,3 +71,16 @@ export const DASHBOARD_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
 // Gestión de personal (crear/editar rol/desactivar): solo gestión.
 export const STAFF_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Autorización de datos Ley 1581 (DX-037): la registran quienes reciben al
+// paciente — recepción en el mostrador y el personal clínico en el sillón —,
+// y todos necesitan leer el estado vigente y la política vigente.
+export const DATA_CONSENT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+
+// Publicar una versión de la política de tratamiento de datos: solo gestión.
+export const PRIVACY_POLICY_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
