@@ -19,6 +19,11 @@ import { Prisma } from '@prisma/client';
  *
  * `register-clinic.use-case` still maps its own P2002 inline (belt-and-
  * suspenders); this filter covers everything else uniformly.
+ *
+ * DX-042: también traduce las demás reglas de la base a respuestas genéricas,
+ * sin el `DETAIL` de Postgres: CHECK (23514) y desbordamiento numérico (22003)
+ * → 400; FK (P2003 / 23503) → 409. Las violaciones de EXCLUDE (23P01) las
+ * mapean los casos de uso de citas antes de llegar aquí.
  */
 
 // Maps a Prisma unique-index name (or column list) in `meta.target` to a
@@ -37,9 +42,23 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
     match: 'catalog_tenant_code_key',
     message: 'Ya existe un ítem del catálogo con ese código.',
   },
+  // Índice de EXPRESIÓN (tenantId, locationId, lower(name)): Prisma informa
+  // sus columnas, con la expresión tal cual.
   {
-    match: 'inventory_items_tenantId_name_key',
-    message: 'Ya existe un ítem de inventario con ese nombre.',
+    match: 'inventory_items_tenant_location_name_key',
+    message: 'Ya existe un insumo con ese nombre en esta sede.',
+  },
+  {
+    match: 'lower(name)',
+    message: 'Ya existe un insumo con ese nombre en esta sede.',
+  },
+  {
+    match: 'tooth_records_source_plan_item_key',
+    message: 'Ese procedimiento ya está registrado en el odontograma.',
+  },
+  {
+    match: 'sourcePlanItemId',
+    message: 'Ese procedimiento ya está registrado en el odontograma.',
   },
   {
     match: 'payments_tenant_idempotency_key',
@@ -83,34 +102,138 @@ interface HttpishResponse {
   status(code: number): { json(body: unknown): unknown };
 }
 
-@Catch(Prisma.PrismaClientKnownRequestError)
+interface ErrorBody {
+  statusCode: number;
+  error: string;
+  message: string;
+}
+
+// Respuestas GENÉRICAS para violaciones de reglas de la base (DX-042). Nunca
+// llevan el mensaje de Postgres: su DETAIL incluye la fila entera ("Failing
+// row contains (...)"), es decir, datos del paciente y nombres de tablas.
+const CHECK_VIOLATION: ErrorBody = {
+  statusCode: HttpStatus.BAD_REQUEST,
+  error: 'Bad Request',
+  message: 'Los datos enviados no cumplen las reglas de la clínica.',
+};
+const NUMERIC_OVERFLOW: ErrorBody = {
+  statusCode: HttpStatus.BAD_REQUEST,
+  error: 'Bad Request',
+  message: 'Un importe o una cantidad supera el máximo permitido.',
+};
+const FK_VIOLATION: ErrorBody = {
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  message:
+    'La operación hace referencia a datos que no existen o que están en uso.',
+};
+const INTERNAL_ERROR: ErrorBody = {
+  statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+  error: 'Internal Server Error',
+  message: 'Ocurrió un error procesando la solicitud.',
+};
+
+/** SQLSTATE de Postgres → respuesta, para los que tienen una genérica. */
+const BY_SQLSTATE: Record<string, ErrorBody> = {
+  '23514': CHECK_VIOLATION, // check_violation
+  '22003': NUMERIC_OVERFLOW, // numeric_value_out_of_range
+  '23503': FK_VIOLATION, // foreign_key_violation
+};
+
+/**
+ * SQLSTATE de un error de Prisma, si lo trae. Prisma 6 lo expone de dos formas:
+ *  - ORM (`tx.x.create()`): `PrismaClientUnknownRequestError` sin `code` ni
+ *    `meta`; el SQLSTATE solo aparece en `message` (`PostgresError { code: "23514", ...`).
+ *  - raw (`$executeRaw`): `PrismaClientKnownRequestError` P2010 con `meta.code`.
+ */
+function sqlStateOf(
+  exception:
+    | Prisma.PrismaClientKnownRequestError
+    | Prisma.PrismaClientUnknownRequestError,
+): string | undefined {
+  if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+    const meta = exception.meta as { code?: unknown } | undefined;
+    return typeof meta?.code === 'string' ? meta.code : undefined;
+  }
+  return /PostgresError \{ code: "([0-9A-Z]{5})"/.exec(exception.message)?.[1];
+}
+
+/**
+ * Nombre de la constraint violada, solo para el log (nunca para la respuesta).
+ * Es un identificador del esquema, no un dato: el resto del mensaje no se
+ * registra porque el DETAIL de Postgres lleva la fila con datos clínicos.
+ */
+function constraintOf(
+  exception:
+    | Prisma.PrismaClientKnownRequestError
+    | Prisma.PrismaClientUnknownRequestError,
+): string {
+  if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+    const meta = exception.meta as
+      { constraint?: unknown; field_name?: unknown } | undefined;
+    const name = meta?.constraint ?? meta?.field_name;
+    if (typeof name === 'string') return name;
+  }
+  return (
+    /constraint \\?"([A-Za-z0-9_]+)\\?"/.exec(exception.message)?.[1] ?? '-'
+  );
+}
+
+@Catch(
+  Prisma.PrismaClientKnownRequestError,
+  Prisma.PrismaClientUnknownRequestError,
+)
 export class PrismaExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(PrismaExceptionFilter.name);
 
   catch(
-    exception: Prisma.PrismaClientKnownRequestError,
+    exception:
+      | Prisma.PrismaClientKnownRequestError
+      | Prisma.PrismaClientUnknownRequestError,
     host: ArgumentsHost,
   ): void {
     const response = host.switchToHttp().getResponse<HttpishResponse>();
+    const send = (body: ErrorBody): void => {
+      response.status(body.statusCode).json(body);
+    };
 
-    if (exception.code === 'P2002') {
-      const status = HttpStatus.CONFLICT; // 409
-      response.status(status).json({
-        statusCode: status,
+    const prismaCode =
+      exception instanceof Prisma.PrismaClientKnownRequestError
+        ? exception.code
+        : undefined;
+
+    if (prismaCode === 'P2002') {
+      const knownError = exception as Prisma.PrismaClientKnownRequestError;
+      send({
+        statusCode: HttpStatus.CONFLICT, // 409
         error: 'Conflict',
-        message: conflictMessageForTarget(exception.meta?.target),
+        message: conflictMessageForTarget(knownError.meta?.target),
       });
       return;
     }
 
-    // Any other known Prisma error stays a 500, but is logged with its code so
-    // it's diagnosable instead of an opaque stack.
-    this.logger.error(`Prisma error ${exception.code}: ${exception.message}`);
-    const status = HttpStatus.INTERNAL_SERVER_ERROR;
-    response.status(status).json({
-      statusCode: status,
-      error: 'Internal Server Error',
-      message: 'Ocurrió un error procesando la solicitud.',
-    });
+    const sqlState = sqlStateOf(exception);
+    const generic =
+      prismaCode === 'P2003'
+        ? FK_VIOLATION
+        : sqlState
+          ? BY_SQLSTATE[sqlState]
+          : undefined;
+    if (generic) {
+      // Una regla de la base que la validación de la app no cubrió: se
+      // registra para poder cerrarla también en la DTO o el caso de uso.
+      this.logger.warn(
+        `Regla de BD violada (${prismaCode ?? sqlState}): ${constraintOf(exception)}`,
+      );
+      send(generic);
+      return;
+    }
+
+    // Cualquier otro error sigue siendo un 500, registrado con su código para
+    // poder diagnosticarlo, pero sin su `message` (puede llevar datos).
+    this.logger.error(
+      `Prisma error ${prismaCode ?? sqlState ?? 'desconocido'}: ${constraintOf(exception)}`,
+    );
+    send(INTERNAL_ERROR);
   }
 }

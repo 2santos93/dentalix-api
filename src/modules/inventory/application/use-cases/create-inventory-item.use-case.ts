@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { INVENTORY_REPOSITORY } from '../../domain/ports/inventory-repository.port';
 import type { InventoryRepository } from '../../domain/ports/inventory-repository.port';
 import { InventoryItem } from '../../domain/entities/inventory-item.entity';
+import { toInventoryNameConflict } from '../inventory-name-conflict';
 
 // NOTE: deliberately NO `tenantId`/`id` field — tenant comes from the
 // guarded request context (the repository reads it, never this input),
@@ -44,13 +45,17 @@ export class CreateInventoryItemUseCase {
 
     const sku = input.sku?.trim();
 
-    return this.repo.createItem({
-      name,
-      sku: sku ? sku : undefined,
-      unit,
-      minStock,
-      notes: input.notes,
-      createdById,
-    });
+    try {
+      return await this.repo.createItem({
+        name,
+        sku: sku ? sku : undefined,
+        unit,
+        minStock,
+        notes: input.notes,
+        createdById,
+      });
+    } catch (error) {
+      throw toInventoryNameConflict(error);
+    }
   }
 }

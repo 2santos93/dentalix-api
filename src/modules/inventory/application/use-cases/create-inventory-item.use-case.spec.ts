@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { CreateInventoryItemUseCase } from './create-inventory-item.use-case';
 import { InMemoryInventoryRepository } from './__fixtures__/in-memory-inventory.repository';
 
@@ -78,5 +79,32 @@ describe('CreateInventoryItemUseCase', () => {
     await expect(
       uc.execute({ name: 'Gasas', unit: 'caja', minStock: Infinity }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // DX-042 (DB-011): el nombre es único por SEDE y sin distinguir mayúsculas
+  // (índice de expresión en la base). Prisma no puede nombrar ese índice en el
+  // P2002 bajo el rol de la app, así que el caso de uso lo traduce a un 409
+  // con mensaje propio.
+  it('maps a duplicate name in the same location (P2002) to a 409 with a clear message', async () => {
+    const { repo, uc } = makeUseCase();
+    jest.spyOn(repo, 'createItem').mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.19.3',
+      }),
+    );
+
+    await expect(uc.execute({ name: 'guantes', unit: 'caja' })).rejects.toThrow(
+      new ConflictException('Ya existe un insumo con ese nombre en esta sede.'),
+    );
+  });
+
+  it('does not mask other repository errors', async () => {
+    const { repo, uc } = makeUseCase();
+    jest.spyOn(repo, 'createItem').mockRejectedValue(new Error('boom'));
+
+    await expect(uc.execute({ name: 'Gasas', unit: 'caja' })).rejects.toThrow(
+      'boom',
+    );
   });
 });

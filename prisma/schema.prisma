@@ -318,6 +318,10 @@ model ToothRecord {
   // SEC-004, 20261015130000_tenant_composite_fks).
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
+  // PARCIAL (WHERE "sourcePlanItemId" IS NOT NULL AND "deletedAt" IS NULL): un
+  // ítem de plan se espeja como mucho una vez (DX-042). El WHERE vive en
+  // 20261016130000_domain_checks; aquí mismo nombre y columnas.
+  @@unique([tenantId, sourcePlanItemId], map: "tooth_records_source_plan_item_key")
   @@index([tenantId, patientId])
   @@index([tenantId, patientId, toothNumber])
   @@index([tenantId, sourcePlanItemId])
@@ -444,6 +448,8 @@ model TreatmentPlan {
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
   patient      Patient             @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  // La moneda existe en el catálogo `currencies` (DX-042).
+  currencyRef  Currency            @relation(fields: [currency], references: [code])
   items        TreatmentPlanItem[]
   payments     Payment[]
   paymentPlans PaymentPlan[]
@@ -499,6 +505,11 @@ model Currency {
   code   String @id // ISO 4217, p.ej. "USD"
   name   String // "Dólar estadounidense"
   symbol String // "$"
+
+  // FK de `currency` (DX-042, 20261016131000_currency_fks).
+  treatmentPlans TreatmentPlan[]
+  payments       Payment[]
+  paymentPlans   PaymentPlan[]
 
   @@map("currencies")
 }
@@ -586,6 +597,9 @@ model Payment {
   plan     TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
   location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
+  // La moneda existe en el catálogo `currencies` (DX-042).
+  currencyRef Currency @relation(fields: [currency], references: [code])
+
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
   // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
@@ -654,6 +668,9 @@ model PaymentPlan {
   plan         TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
   installments Installment[]
 
+  // La moneda existe en el catálogo `currencies` (DX-042).
+  currencyRef Currency @relation(fields: [currency], references: [code])
+
   // Destino de la FK compuesta de Installment (SEC-004).
   @@unique([tenantId, id], map: "payment_plans_tenant_id_key")
   @@index([tenantId, treatmentPlanId])
@@ -715,13 +732,11 @@ model InventoryItem {
   // FK compuesta: la sede es del MISMO tenant (SEC-004).
   location  Location            @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
-  // Partial unique (WHERE "deletedAt" IS NULL) so two ACTIVE items can't share
-  // a name, while soft-deleted rows don't block re-using the name. The WHERE
-  // lives only in migration 20260731162000_inventory_item_unique_name (Prisma
-  // can't express it); the map keeps migrate-status drift-free. Same pattern as
-  // Patient.@@unique(patients_tenant_doc_key). Do NOT accept a migrate-dev diff
-  // that recreates this as a full index.
-  @@unique([tenantId, name], map: "inventory_items_tenantId_name_key")
+  // Nombre único POR SEDE y sin distinguir mayúsculas, solo entre vivos:
+  // índice de EXPRESIÓN ("tenantId", "locationId", lower(name)) WHERE
+  // "deletedAt" IS NULL, en 20261016130000_domain_checks (DX-042). Prisma no
+  // expresa ni introspecciona índices de expresión, así que no se declara.
+
   // Destino de la FK compuesta de InventoryMovement.item (SEC-004).
   @@unique([tenantId, id], map: "inventory_items_tenant_id_key")
   @@index([tenantId])

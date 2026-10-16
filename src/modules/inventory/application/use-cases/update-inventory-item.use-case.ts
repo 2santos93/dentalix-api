@@ -7,6 +7,7 @@ import {
 import { INVENTORY_REPOSITORY } from '../../domain/ports/inventory-repository.port';
 import type { InventoryRepository } from '../../domain/ports/inventory-repository.port';
 import { InventoryItem } from '../../domain/entities/inventory-item.entity';
+import { toInventoryNameConflict } from '../inventory-name-conflict';
 
 export interface UpdateInventoryItemInput {
   name?: string;
@@ -58,12 +59,16 @@ export class UpdateInventoryItemUseCase {
       throw new BadRequestException('minStock must be a number >= 0');
     }
 
-    return this.repo.updateItem(id, {
-      name,
-      sku: input.sku,
-      unit,
-      minStock: input.minStock,
-      notes: input.notes,
-    });
+    try {
+      return await this.repo.updateItem(id, {
+        name,
+        sku: input.sku,
+        unit,
+        minStock: input.minStock,
+        notes: input.notes,
+      });
+    } catch (error) {
+      throw toInventoryNameConflict(error);
+    }
   }
 }
