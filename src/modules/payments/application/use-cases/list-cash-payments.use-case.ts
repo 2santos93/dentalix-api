@@ -10,7 +10,11 @@ import {
   CashMethodTotal,
   CashPaymentView,
 } from '../../domain/entities/cash-payment.entity';
-import { canVoidPayment, type VoidActor } from '../../domain/void-window';
+import {
+  canVoidPayment,
+  civilDateIn,
+  type VoidActor,
+} from '../../domain/void-window';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 
 const DEFAULT_PAGE = 1;
@@ -201,10 +205,19 @@ export class ListCashPaymentsUseCase {
 
     const now = this.now();
     return {
-      items: result.items.map(({ payment, voidSubject }) => ({
-        ...payment,
-        canVoid: canVoidPayment(voidSubject, actor, now),
-      })),
+      items: result.items.map(({ payment, voidSubject }) => {
+        const registeredOn = civilDateIn(
+          voidSubject.createdAt,
+          voidSubject.timeZone,
+        );
+        return {
+          ...payment,
+          canVoid: canVoidPayment(voidSubject, actor, now),
+          registeredOn,
+          registeredToday:
+            registeredOn === civilDateIn(now, voidSubject.timeZone),
+        };
+      }),
       total: result.total,
       page,
       pageSize,

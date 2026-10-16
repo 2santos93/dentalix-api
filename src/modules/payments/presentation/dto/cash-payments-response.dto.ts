@@ -65,6 +65,20 @@ export class CashPaymentDto {
   })
   paidAt!: Date;
 
+  @ApiProperty({
+    example: '2026-10-16',
+    description:
+      'Día civil (YYYY-MM-DD) en que se registró el abono, en la zona de su ' +
+      'sede. Puede diferir de `paidAt` (fecha de pago antigua registrada ' +
+      'después); la ventana de anulación de recepción mira este día.',
+  })
+  registeredOn!: string;
+
+  @ApiProperty({
+    description: 'Si `registeredOn` es hoy en la zona de la sede del abono.',
+  })
+  registeredToday!: boolean;
+
   @ApiProperty({ example: 150000 })
   amount!: number;
 

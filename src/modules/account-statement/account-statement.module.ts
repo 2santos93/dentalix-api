@@ -4,6 +4,7 @@ import {
   ACCOUNT_STATEMENT_CLOCK,
   GetAccountStatementUseCase,
 } from './application/use-cases/get-account-statement.use-case';
+import { ListBillablePlansUseCase } from './application/use-cases/list-billable-plans.use-case';
 import { ACCOUNT_STATEMENT_REPOSITORY } from './domain/ports/account-statement-repository.port';
 import { PrismaAccountStatementRepository } from './infrastructure/repositories/prisma-account-statement.repository';
 import { AccountStatementController } from './presentation/account-statement.controller';
@@ -22,6 +23,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   controllers: [AccountStatementController],
   providers: [
     GetAccountStatementUseCase,
+    ListBillablePlansUseCase,
     TokenService,
     TenantContextInterceptor,
     {

@@ -300,4 +300,58 @@ describe('ListCashPaymentsUseCase', () => {
       expect(out.items[0]).not.toHaveProperty('timeZone');
     });
   });
+
+  describe('día de registro por fila (DX-067)', () => {
+    function pageWith(...items: CashRegisterRow[]): CashRegisterPage {
+      return { items, total: items.length, groups: [], scopeLocation: null };
+    }
+
+    it('registeredOn es el día civil del alta EN LA SEDE y registeredToday lo compara con hoy allí', async () => {
+      const repo = new SpyPaymentRepository(
+        pageWith(
+          // Alta hoy 08:00 en Bogotá, con fecha de pago de ayer.
+          fakeRow('today'),
+          // 23:30 del 15 en Bogotá: en UTC ya es 16, pero en la sede no es hoy.
+          fakeRow(
+            'late-yesterday',
+            {},
+            { ...OWN_TODAY, createdAt: new Date('2026-10-16T04:30:00.000Z') },
+          ),
+          // 20:00 del 16 en Madrid: allí ya es 16, en UTC también.
+          fakeRow(
+            'madrid',
+            {},
+            {
+              ...OWN_TODAY,
+              createdAt: new Date('2026-10-16T18:00:00.000Z'),
+              timeZone: 'Europe/Madrid',
+            },
+          ),
+        ),
+      );
+
+      const out = await useCaseFor(repo, RECEPTION).execute(RANGE);
+
+      expect(
+        out.items.map((item) => [
+          item.id,
+          item.registeredOn,
+          item.registeredToday,
+        ]),
+      ).toEqual([
+        ['today', '2026-10-16', true],
+        ['late-yesterday', '2026-10-15', false],
+        ['madrid', '2026-10-16', true],
+      ]);
+    });
+
+    it('no depende del rol: ADMIN ve el mismo día de registro', async () => {
+      const repo = new SpyPaymentRepository(pageWith(fakeRow('p1')));
+      const out = await useCaseFor(repo, ADMIN).execute(RANGE);
+      expect(out.items[0]).toMatchObject({
+        registeredOn: '2026-10-16',
+        registeredToday: true,
+      });
+    });
+  });
 });
