@@ -99,7 +99,9 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
   it('purga los tokens vencidos y conserva los vigentes', async () => {
     await raw.revokedToken.createMany({
       data: [
-        { jti: 'dx085-vencido', expiresAt: ago(60_000) },
+        { jti: 'dx085-vencido', expiresAt: ago(10 * 60_000) },
+        // Vencido hace 1 min: dentro del margen de 5 min (reloj de la API).
+        { jti: 'dx085-margen', expiresAt: ago(60_000) },
         { jti: 'dx085-vigente', expiresAt: new Date(Date.now() + DAY) },
       ],
     });
@@ -153,9 +155,10 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
       (
         await raw.revokedToken.findMany({
           where: { jti: { startsWith: 'dx085-' } },
+          orderBy: { jti: 'asc' },
         })
       ).map((t) => t.jti),
-    ).toEqual(['dx085-vigente']);
+    ).toEqual(['dx085-margen', 'dx085-vigente']);
     expect(
       (await raw.userToken.findMany({ where: { userId: user.id } }))
         .map((t) => t.tokenHash[0])

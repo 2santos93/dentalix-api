@@ -176,7 +176,7 @@ describe('JobWorker (unit)', () => {
 
   it('si el latido pierde el arriendo (otro worker reclamó el intento), aborta la señal y NO cierra el intento', async () => {
     const { repo, calls } = fakeRepo([job({})]);
-    (repo.heartbeat as jest.Mock).mockResolvedValue(false);
+    const heartbeat = jest.spyOn(repo, 'heartbeat').mockResolvedValue(false);
     const registry = new JobRegistry();
     registry.register({
       name: 'unit.job',
@@ -195,14 +195,14 @@ describe('JobWorker (unit)', () => {
 
     await worker.runOnce();
 
-    expect(repo.heartbeat).toHaveBeenCalledWith('j1', 1, 300);
+    expect(heartbeat).toHaveBeenCalledWith('j1', 1, 300);
     expect(calls).toEqual([]);
   });
 
   it('mientras el handler trabaja, renueva el arriendo con fencing por intento', async () => {
     const { repo, calls } = fakeRepo([job({ attempts: 2 })]);
     let beats = 0;
-    (repo.heartbeat as jest.Mock).mockImplementation(() => {
+    const heartbeat = jest.spyOn(repo, 'heartbeat').mockImplementation(() => {
       beats += 1;
       return Promise.resolve(true);
     });
@@ -224,7 +224,7 @@ describe('JobWorker (unit)', () => {
 
     await worker.runOnce();
 
-    expect(repo.heartbeat).toHaveBeenCalledWith('j1', 2, 300);
+    expect(heartbeat).toHaveBeenCalledWith('j1', 2, 300);
     expect(calls).toEqual(['complete j1 2']);
   });
 
