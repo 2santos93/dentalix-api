@@ -1,0 +1,221 @@
+import { PrismaClient } from '@prisma/client';
+import { clinicTables, TenantTable } from './support/tenant-tables';
+
+/**
+ * DX-068 (TST-002): invariante de RLS leída del catálogo de Postgres.
+ *
+ * `rls.isolation.int-spec.ts` prueba el comportamiento en una tabla; este
+ * spec fija la CONFIGURACIÓN de todas. Una tabla de clínica (columna
+ * `tenantId`/`tenant_id` o FK a `tenants(id)`, ver support/tenant-tables.ts)
+ * debe tener RLS activada (relrowsecurity) y FORZADA (relforcerowsecurity; si
+ * no, el owner que migra se la salta) y una política que ate esa columna al
+ * tenant del contexto (`app.current_tenant`) al leer (USING) y al escribir
+ * (WITH CHECK). Una tabla nueva sin RLS rompe la CI aquí.
+ *
+ * Lee el catálogo por DIRECT_URL (owner): pg_class y pg_policies no dependen
+ * de la RLS, pero así el spec no depende de los GRANT del rol de la app.
+ */
+
+const raw = new PrismaClient({
+  datasources: { db: { url: process.env.DIRECT_URL } },
+});
+
+/**
+ * Tablas de clínica que NO llevan RLS, cada una con su motivo. Añadir una
+ * entrada exige justificar por qué el aislamiento lo garantiza otra cosa.
+ */
+const RLS_EXEMPT: Record<string, string> = {
+  // Ruteo host -> tenant: TenantHostMiddleware la consulta ANTES de conocer el
+  // tenant (para resolverlo), igual que `tenants`. Las rutas de gestión
+  // (/domains) filtran por el tenant del contexto en
+  // PrismaTenantDomainRepository; lo prueba tenant-isolation-matrix
+  // (POST /domains/:id/verify desde otra clínica → 404). Ver la migración
+  // 20260723170000_add_tenant_domains.
+  tenant_domains: 'ruteo host -> tenant, previo a conocer el tenant',
+};
+
+/**
+ * Vistas y vistas materializadas de `public` permitidas sin
+ * `security_invoker=true`. Hoy ninguna: una vista sin security_invoker lee
+ * las tablas con los permisos de su owner (el de las migraciones, superusuario
+ * que salta la RLS), y una materializada guarda una copia de las filas sin RLS
+ * alguna. Añadir una entrada exige justificar que no expone filas de varias
+ * clínicas.
+ */
+const VIEW_EXEMPT: Record<string, string> = {};
+
+/** La forma exacta que generan las migraciones (ver p. ej. la de patients). */
+function tenantPredicate(column: string): string {
+  return `("${column}" = (current_setting('app.current_tenant'::text, true))::uuid)`;
+}
+
+interface TableRls {
+  table: string;
+  rls: boolean;
+  forced: boolean;
+}
+
+interface Policy {
+  table: string;
+  policy: string;
+  cmd: string;
+  permissive: string;
+  using: string | null;
+  check: string | null;
+}
+
+interface Column {
+  table: string;
+  column: string;
+}
+
+interface View {
+  view: string;
+  kind: string;
+  options: string[] | null;
+}
+
+describe('Catálogo de RLS (DX-068)', () => {
+  let clinic: TenantTable[];
+  let rls: TableRls[];
+  let policies: Policy[];
+
+  const clinicTableNames = (): string[] => [
+    ...new Set(clinic.map((t) => t.table)),
+  ];
+  const checked = (): TenantTable[] =>
+    clinic.filter((t) => !(t.table in RLS_EXEMPT));
+
+  beforeAll(async () => {
+    clinic = await clinicTables(raw);
+    rls = await raw.$queryRaw<TableRls[]>`
+      SELECT c.relname AS table,
+             c.relrowsecurity AS rls,
+             c.relforcerowsecurity AS forced
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')`;
+    policies = await raw.$queryRaw<Policy[]>`
+      SELECT tablename AS table, policyname AS policy, cmd, permissive,
+             qual AS using, with_check AS check
+      FROM pg_policies
+      WHERE schemaname = 'public'
+      ORDER BY tablename, policyname`;
+  });
+
+  afterAll(async () => {
+    await raw.$disconnect();
+  });
+
+  it('encuentra las tablas de clínica (la consulta no está vacía)', () => {
+    expect(clinicTableNames().length).toBeGreaterThanOrEqual(30);
+    expect(clinicTableNames()).toEqual(
+      expect.arrayContaining(['patients', 'payments', 'clinic_memberships']),
+    );
+  });
+
+  it('ninguna columna con «tenant» en el nombre queda fuera de las tablas de clínica', async () => {
+    // Una columna de tenant con otro nombre (p. ej. `clinicTenant`) y sin FK
+    // a tenants(id) escaparía a la detección y, con ella, a la invariante.
+    const columns = await raw.$queryRaw<Column[]>`
+      SELECT c.relname AS table, a.attname AS column
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a
+        ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p', 'v', 'm')
+        AND a.attname ILIKE '%tenant%'
+      ORDER BY 1, 2`;
+    const outside = columns
+      .filter(
+        (col) =>
+          !clinic.some((t) => t.table === col.table && t.column === col.column),
+      )
+      .map((col) => `${col.table}.${col.column}`);
+    expect(outside).toEqual([]);
+  });
+
+  it('ninguna vista de public salta la RLS (security_invoker o lista blanca)', async () => {
+    const views = await raw.$queryRaw<View[]>`
+      SELECT c.relname AS view, c.relkind::text AS kind, c.reloptions AS options
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm')
+      ORDER BY 1`;
+    const offenders = views
+      .filter((v) => !(v.view in VIEW_EXEMPT))
+      .filter(
+        (v) =>
+          v.kind === 'm' ||
+          !(v.options ?? []).includes('security_invoker=true'),
+      )
+      .map((v) => `${v.view} (${v.kind === 'm' ? 'materializada' : 'vista'})`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('cada exención de la lista blanca existe y sigue sin RLS', () => {
+    for (const table of Object.keys(RLS_EXEMPT)) {
+      const found = rls.find((t) => t.table === table);
+      // Si la tabla ya no existe, no es de clínica o ya tiene RLS, la
+      // exención sobra: quítala.
+      expect({
+        table,
+        clinic: clinicTableNames().includes(table),
+        rls: found?.rls,
+      }).toEqual({ table, clinic: true, rls: false });
+    }
+  });
+
+  it('toda tabla de clínica tiene RLS activada y forzada', () => {
+    const offenders = [...new Set(checked().map((t) => t.table))]
+      .map((table) => rls.find((t) => t.table === table) as TableRls)
+      .filter((t) => !t.rls || !t.forced)
+      .map((t) => `${t.table} (rls=${t.rls}, force=${t.forced})`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('toda tabla de clínica tiene una política que la ata al tenant del contexto al leer y al escribir', () => {
+    const offenders = checked()
+      .filter(
+        (t) =>
+          !policies.some(
+            (p) =>
+              p.table === t.table &&
+              p.cmd === 'ALL' &&
+              p.permissive === 'PERMISSIVE' &&
+              p.using === tenantPredicate(t.column) &&
+              p.check === tenantPredicate(t.column),
+          ),
+      )
+      .map((t) => `${t.table}.${t.column}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ninguna política permisiva extra abre una tabla de clínica', () => {
+    // Las políticas PERMISSIVE se combinan con OR: una segunda política
+    // (p. ej. USING (true)) anularía la de tenant.
+    const extra = policies
+      .filter((p) => p.permissive === 'PERMISSIVE')
+      .filter((p) => {
+        const columns = clinic
+          .filter((t) => t.table === p.table)
+          .map((t) => tenantPredicate(t.column));
+        return (
+          columns.length > 0 &&
+          !(columns.includes(p.using ?? '') && p.check === p.using)
+        );
+      })
+      .map((p) => `${p.table}.${p.policy}`);
+    expect(extra).toEqual([]);
+  });
+
+  it('el rol de la app (DATABASE_URL) no es superusuario ni salta la RLS', async () => {
+    const appUser = new URL(process.env.DATABASE_URL ?? '').username;
+    const [role] = await raw.$queryRaw<
+      { super: boolean; bypass: boolean }[]
+    >`SELECT rolsuper AS super, rolbypassrls AS bypass
+      FROM pg_roles WHERE rolname = ${appUser}`;
+    expect(role).toEqual({ super: false, bypass: false });
+  });
+});

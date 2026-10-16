@@ -1,348 +1,174 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
-import { AppModule } from '../src/app.module';
-import { PasswordService } from '../src/shared/crypto/password.service';
-import { hostFor } from './support/tenant-host';
+import {
+  Clinic,
+  createE2eApp,
+  loginAs,
+  platformAdminToken,
+  registerClinic,
+  resetDatabase,
+  seedMember,
+} from './support/e2e-fixtures';
+import {
+  ALL_CLINIC_ROLES,
+  ROUTE_ACCESS,
+  RouteAccess,
+} from './support/route-access-matrix';
 
-// `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
-// DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
-// conexión sin contexto de tenant (rol dentalix_app vía DATABASE_URL) ve 0
-// filas y no podría sembrar/limpiar datos ajenos al tenant. Ver
-// odontogram.e2e-spec.ts / clinical-history.e2e-spec.ts para el mismo patrón.
+/**
+ * DX-068 (TST-001): matriz rol × ruta en HTTP real.
+ *
+ * Recorre TODAS las rutas de `ROUTE_ACCESS` (la misma tabla que el unit
+ * `src/auth-matrix.spec.ts` ata a los metadatos de los controladores) con un
+ * token de cada uno de los 4 roles de una misma clínica:
+ *  - rol no permitido → 403 (lo corta RolesGuard antes de validar nada);
+ *  - rol permitido → ni 401 ni 403 ni 5xx (puede ser 2xx, 400 o 404).
+ *    Los ids son inventados y los cuerpos van vacíos, así que las rutas por id
+ *    no encuentran nada y los POST/PUT/PATCH sin campos obligatorios dan 400.
+ *    La excepción es `DELETE /me/avatar`, que sí escribe: retira el avatar
+ *    del propio usuario (aquí no tiene ninguno) y no afecta a otros casos.
+ * Además: sin token → 401 en toda ruta con sesión, y `/platform/*` solo con
+ * token de plataforma.
+ */
+
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// Misma estrategia de hash que el registro (RegisterClinicUseCase ->
-// PasswordService.hash), para que LoginUseCase.execute (PasswordService.verify)
-// acepte la contraseña sembrada directamente en la fila `users`.
-const passwordService = new PasswordService();
-const SEEDED_PASSWORD = 'S3cret!!';
+// Ids que no existen en ninguna clínica. `:fdi` necesita un diente válido.
+const FAKE_UUID = '00000000-0000-4000-8000-000000000000';
+const PARAM_VALUES: Record<string, string> = { fdi: '11' };
 
-interface RegisterResponseBody {
-  tenantId: string;
-  userId: string;
+function concretePath(routePath: string): string {
+  return routePath.replace(
+    /:([A-Za-z]+)/g,
+    (_match, name: string) => PARAM_VALUES[name] ?? FAKE_UUID,
+  );
 }
 
-interface LoginResponseBody {
-  accessToken: string;
-  refreshToken: string;
-}
+type Verb = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
-interface PatientResponseBody {
-  id: string;
-  tenantId: string;
-}
-
-async function registerAndLogin(
+function call(
   app: INestApplication<App>,
-  opts: { clinicName: string; subdomain: string; email: string },
-): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
-  const register = await request(app.getHttpServer())
-    .post('/api/v1/auth/register')
-    .send({
-      clinicName: opts.clinicName,
-      subdomain: opts.subdomain,
-      email: opts.email,
-      password: SEEDED_PASSWORD,
-      fullName: 'Dr. Owner',
-    })
-    .expect(201);
-  const registerBody = register.body as RegisterResponseBody;
-
-  const login = await request(app.getHttpServer())
-    .post('/api/v1/auth/login')
-    .set('X-Tenant-Host', hostFor(opts.subdomain))
-    .send({
-      email: opts.email,
-      password: SEEDED_PASSWORD,
-    })
-    .expect(201);
-  const loginBody = login.body as LoginResponseBody;
-
-  return {
-    tenantId: registerBody.tenantId,
-    accessToken: loginBody.accessToken,
-    subdomain: opts.subdomain,
-  };
+  routeKey: string,
+  host: string,
+  token?: string,
+): request.Test {
+  const [verb, routePath] = routeKey.split(' ');
+  const method = verb.toLowerCase() as Verb;
+  const req = request(app.getHttpServer())
+    [method](`/api/v1${concretePath(routePath)}`)
+    .set('X-Tenant-Host', host);
+  if (token) req.set('Authorization', `Bearer ${token}`);
+  return method === 'get' || method === 'delete' ? req : req.send({});
 }
 
-async function createPatient(
-  app: INestApplication<App>,
-  accessToken: string,
-  subdomain: string,
-  docNumber: string,
-): Promise<PatientResponseBody> {
-  const create = await request(app.getHttpServer())
-    .post('/api/v1/patients')
-    .set('X-Tenant-Host', hostFor(subdomain))
-    .set('Authorization', `Bearer ${accessToken}`)
-    .send({
-      firstName: 'Rol',
-      lastName: 'Matriz',
-      docType: DocType.CC,
-      docNumber,
-      sex: Sex.F,
-    })
-    .expect(201);
-  return create.body as PatientResponseBody;
-}
+const entries = Object.entries(ROUTE_ACCESS);
+const clinicRoutes = entries.filter(
+  (entry): entry is [string, Extract<RouteAccess, { kind: 'roles' }>] =>
+    entry[1].kind === 'roles',
+);
+const authenticatedRoutes = entries
+  .filter(([, access]) => access.kind === 'authenticated')
+  .map(([key]) => key);
+const platformRoutes = entries
+  .filter(([, access]) => access.kind === 'platform')
+  .map(([key]) => key);
+const sessionRoutes = entries
+  .filter(([, access]) => access.kind !== 'public')
+  .map(([key]) => key);
 
-// Siembra un usuario con contraseña hasheada igual que el registro, más su
-// membresía en la clínica (tenant) dada, con el rol pedido. Usa el cliente
-// `raw` (DIRECT_URL, superuser) porque bypassa RLS -- no hay endpoint de
-// invitación de staff todavía (ver Notas del plan de Fase 2C).
-async function seedRoledMember(
-  tenantId: string,
-  email: string,
-  role: ClinicRole,
-): Promise<{ userId: string }> {
-  const passwordHash = await passwordService.hash(SEEDED_PASSWORD);
-  const user = await raw.user.create({
-    data: {
-      email,
-      passwordHash,
-      fullName: `Seeded ${role}`,
-      // LoginUseCase / JwtAuthGuard no exigen email verificado hoy (solo
-      // membership + password), pero lo marcamos igual para reflejar un
-      // estado realista de un usuario invitado y aceptado.
-      emailVerifiedAt: new Date(),
-    },
-    select: { id: true },
-  });
-  await raw.clinicMembership.create({
-    data: { tenantId, userId: user.id, role },
-  });
-  return { userId: user.id };
-}
-
-async function loginAs(
-  app: INestApplication<App>,
-  opts: { subdomain: string; email: string },
-): Promise<string> {
-  const login = await request(app.getHttpServer())
-    .post('/api/v1/auth/login')
-    .set('X-Tenant-Host', hostFor(opts.subdomain))
-    .send({
-      email: opts.email,
-      password: SEEDED_PASSWORD,
-    })
-    .expect(201);
-  return (login.body as LoginResponseBody).accessToken;
-}
-
-describe('Role matrix (e2e)', () => {
+describe('Role matrix (e2e, DX-068)', () => {
   let app: INestApplication<App>;
+  let clinic: Clinic;
+  const tokens = {} as Record<ClinicRole, string>;
+  let platformToken: string;
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
-    await app.init();
-    // FK-safe order (same as odontogram.e2e-spec.ts): tooth_records ->
-    // medical_history_versions / clinical_entries -> dental_catalog_items ->
-    // patients -> memberships -> users -> tenants.
-    await raw.toothRecord.deleteMany();
-    await raw.medicalHistoryVersion.deleteMany();
-    await raw.clinicalEntry.deleteMany();
-    await raw.dentalCatalogItem.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    app = await createE2eApp();
+    await resetDatabase(raw);
+    clinic = await registerClinic(app, 'clinica-roles');
+    tokens[ClinicRole.ADMIN] = clinic.adminToken;
+    for (const role of ALL_CLINIC_ROLES) {
+      if (role === ClinicRole.ADMIN) continue;
+      const member = await seedMember(raw, clinic, role);
+      tokens[role] = await loginAs(app, clinic.host, member.email);
+    }
+    platformToken = await platformAdminToken(app, raw);
   });
 
   afterAll(async () => {
-    await raw.toothRecord.deleteMany();
-    await raw.medicalHistoryVersion.deleteMany();
-    await raw.clinicalEntry.deleteMany();
-    await raw.dentalCatalogItem.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
   });
 
-  it('enforces the role matrix: reception blocked from clinical data, dentist blocked from catalog writes', async () => {
-    const subdomain = 'clinica-roles-a';
-    const clinicA = await registerAndLogin(app, {
-      clinicName: 'Clinica Roles A',
-      subdomain,
-      email: 'owner@clinica-roles-a.com',
+  it('la tabla tiene rutas restringidas para cada rol (no es trivial)', () => {
+    for (const role of ALL_CLINIC_ROLES) {
+      expect(
+        clinicRoutes.some(([, access]) => !access.roles.includes(role)),
+      ).toBe(role !== ClinicRole.ADMIN);
+    }
+  });
+
+  describe.each(ALL_CLINIC_ROLES)('rol %s', (role) => {
+    const denied = clinicRoutes
+      .filter(([, access]) => !access.roles.includes(role))
+      .map(([key]) => key);
+    const allowed = [
+      ...clinicRoutes
+        .filter(([, access]) => access.roles.includes(role))
+        .map(([key]) => key),
+      ...authenticatedRoutes,
+    ];
+
+    if (denied.length > 0) {
+      it.each(denied)('403 en %s', async (key) => {
+        const res = await call(app, key, clinic.host, tokens[role]);
+        expect({ key, status: res.status }).toEqual({ key, status: 403 });
+      });
+    }
+
+    it.each(allowed)('no 403 en %s', async (key) => {
+      const res = await call(app, key, clinic.host, tokens[role]);
+      expect({
+        key,
+        forbiddenOrUnauthenticated: [401, 403].includes(res.status),
+        serverError: res.status >= 500,
+      }).toEqual({
+        key,
+        forbiddenOrUnauthenticated: false,
+        serverError: false,
+      });
     });
-    const patientA = await createPatient(
-      app,
-      clinicA.accessToken,
-      clinicA.subdomain,
-      '5001',
+
+    it.each(platformRoutes)('403 en %s (token de clínica)', async (key) => {
+      const res = await call(app, key, 'localhost', tokens[role]);
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('plataforma', () => {
+    it.each(platformRoutes)(
+      '200 en %s con token de superadmin',
+      async (key) => {
+        await call(app, key, 'localhost', platformToken).expect(200);
+      },
     );
 
-    // --- Seed a RECEPTION and a DENTIST membership in the SAME clinic (raw
-    // DIRECT_URL client, bypasses RLS -- there is no staff-invite endpoint
-    // yet, see Notas in the Fase 2C plan).
-    await seedRoledMember(
-      clinicA.tenantId,
-      'reception@clinica-roles-a.com',
-      ClinicRole.RECEPTION,
-    );
-    await seedRoledMember(
-      clinicA.tenantId,
-      'dentist@clinica-roles-a.com',
-      ClinicRole.DENTIST,
-    );
-
-    const receptionToken = await loginAs(app, {
-      subdomain,
-      email: 'reception@clinica-roles-a.com',
+    it('el token de plataforma no entra en rutas de clínica', async () => {
+      // Lo corta RolesGuard (un token de plataforma no lleva rol de clínica);
+      // detrás, TenantContextInterceptor también lo rechazaría (401).
+      await call(app, 'GET /patients', clinic.host, platformToken).expect(403);
     });
-    const dentistToken = await loginAs(app, {
-      subdomain,
-      email: 'dentist@clinica-roles-a.com',
+  });
+
+  describe('sin sesión', () => {
+    it.each(sessionRoutes)('401 en %s', async (key) => {
+      const res = await call(app, key, clinic.host);
+      expect({ key, status: res.status }).toEqual({ key, status: 401 });
     });
-
-    // ================= RECEPTION =================
-    // Allowed: patients (demographic) reads and writes.
-    await request(app.getHttpServer())
-      .get('/api/v1/patients')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${receptionToken}`)
-      .expect(200);
-
-    await request(app.getHttpServer())
-      .post('/api/v1/patients')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${receptionToken}`)
-      .send({
-        firstName: 'Recepcion',
-        lastName: 'Creado',
-        docType: DocType.CC,
-        docNumber: '5002',
-        sex: Sex.M,
-      })
-      .expect(201);
-
-    // Blocked: clinical data (medical-history, tooth-records) -- 403, not
-    // 200/404, i.e. the RolesGuard denies BEFORE any handler logic runs.
-    await request(app.getHttpServer())
-      .get(`/api/v1/patients/${patientA.id}/medical-history`)
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${receptionToken}`)
-      .expect(403);
-
-    await request(app.getHttpServer())
-      .put(`/api/v1/patients/${patientA.id}/medical-history`)
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${receptionToken}`)
-      .send({
-        allergies: [
-          {
-            alergeno: 'Intento recepcion',
-            tipo: 'MEDICAMENTO',
-            severidad: 'LEVE',
-            esAlerta: false,
-          },
-        ],
-        notes: 'No deberia guardar',
-      })
-      .expect(403);
-
-    // The odontogram controller's read route for tooth records is
-    // GET /odontogram (there is no literal GET /tooth-records -- see
-    // OdontogramController: POST tooth-records, GET odontogram, GET
-    // teeth/:fdi/history). It carries the same class-level
-    // @Roles(...CLINICAL_ROLES), so it is the correct route to prove
-    // reception is blocked from reading clinical/tooth data.
-    await request(app.getHttpServer())
-      .get(`/api/v1/patients/${patientA.id}/odontogram`)
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${receptionToken}`)
-      .expect(403);
-
-    await request(app.getHttpServer())
-      .post(`/api/v1/patients/${patientA.id}/tooth-records`)
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${receptionToken}`)
-      .send({
-        toothNumber: '11',
-        surfaces: [],
-        kind: 'DIAGNOSIS',
-      })
-      .expect(403);
-
-    // ================= DENTIST =================
-    // Allowed: clinical write (tooth-records) and catalog read.
-    const dentistToothRecord = await request(app.getHttpServer())
-      .post(`/api/v1/patients/${patientA.id}/tooth-records`)
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${dentistToken}`)
-      .send({
-        toothNumber: '21',
-        surfaces: [],
-        kind: 'DIAGNOSIS',
-        notes: 'Registrado por dentista',
-      })
-      .expect(201);
-    expect(
-      (dentistToothRecord.body as { toothNumber: string }).toothNumber,
-    ).toBe('21');
-
-    await request(app.getHttpServer())
-      .get('/api/v1/catalog/items')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${dentistToken}`)
-      .expect(200);
-
-    // Blocked: catalog write (ADMIN only) -- 403.
-    await request(app.getHttpServer())
-      .post('/api/v1/catalog/items')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${dentistToken}`)
-      .send({
-        code: 'DENTIST-ATTEMPT',
-        kind: 'DIAGNOSIS',
-        labelEs: 'Intento dentista',
-        color: '#112233',
-      })
-      .expect(403);
-
-    // ================= ADMIN (sanity: matrix permits, not deny-all) =======
-    await request(app.getHttpServer())
-      .post('/api/v1/catalog/items')
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({
-        code: 'ADMIN-ITEM',
-        kind: 'DIAGNOSIS',
-        labelEs: 'Item admin',
-        color: '#445566',
-      })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .put(`/api/v1/patients/${patientA.id}/medical-history`)
-      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
-      .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({
-        allergies: [
-          {
-            alergeno: 'Ninguna',
-            tipo: 'MEDICAMENTO',
-            severidad: 'LEVE',
-            esAlerta: false,
-          },
-        ],
-        notes: 'Guardado por owner',
-      })
-      .expect(200);
   });
 });

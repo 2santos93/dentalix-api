@@ -43,6 +43,11 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PrismaModule,
     TenantContextModule,
     AuthModule,
+    // InvitationsModule ANTES que cualquier módulo que registre StaffModule
+    // (AppointmentsModule lo importa): Express casa las rutas en orden de
+    // registro y `GET /staff/:userId` capturaría `GET /staff/invitations`
+    // (400 por ParseUUIDPipe, DX-068). Lo vigila src/auth-matrix.spec.ts.
+    InvitationsModule,
     MeModule,
     PatientsModule,
     DentalCatalogModule,
@@ -53,7 +58,6 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AppointmentConfirmationsModule,
     TreatmentPlansModule,
     StaffModule,
-    InvitationsModule,
     DomainsModule,
     PublicBrandingModule,
     ExchangeModule,

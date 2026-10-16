@@ -311,6 +311,41 @@ describe('Staff invitations (e2e)', () => {
     ).toMatchObject({ email: newEmail, role: ClinicRole.DENTIST });
   });
 
+  it('caso 2b: GET /staff/invitations lista las invitaciones de la clínica (no lo captura GET /staff/:userId)', async () => {
+    // DX-068: StaffController (GET /staff/:userId, con ParseUUIDPipe) se
+    // registraba antes que StaffInvitationsController, así que "invitations"
+    // caía en :userId y la lista respondía 400. Lo destapó el unit
+    // src/auth-matrix.spec.ts ("ninguna ruta queda tapada...").
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Inv Lista',
+      subdomain: 'clinica-inv-lista',
+      email: 'owner@clinica-inv-lista.com',
+    });
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/staff/invitations')
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .send({
+        fullName: 'Persona Listada',
+        email: 'listada@example.com',
+        role: ClinicRole.ASSISTANT,
+      })
+      .expect(201);
+
+    const list = await request(app.getHttpServer())
+      .get('/api/v1/staff/invitations')
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    expect(list.body).toEqual([
+      expect.objectContaining({
+        id: (created.body as CreatedInvitationResponseBody).id,
+        email: 'listada@example.com',
+        status: 'VALID',
+      }),
+    ]);
+  });
+
   it('caso 3: contraseña incorrecta de un usuario existente -> 401, y la invitación sigue VALID', async () => {
     const subdomain = 'clinica-inv-c';
     const clinicC = await registerAndLogin(app, {
