@@ -165,6 +165,56 @@ describe('CreateClinicalEntryUseCase con plantilla (DX-170)', () => {
 
 describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
   const start = new Date('2026-10-17T14:00:00.000Z');
+  const timeZone = 'America/Bogota';
+
+  // «Hoy» en Bogotá: 17/10/2026 a las 15:00 (20:00 UTC).
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-10-17T20:00:00.000Z') });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('admite una cita del día aunque empiece más tarde (hora de la sede)', async () => {
+    const { uc, entries } = setup();
+    // 23:30 del 17/10 en Bogotá = 04:30 UTC del 18/10.
+    const tonight = new Date('2026-10-18T04:30:00.000Z');
+    entries.appointments.push({
+      id: 'a-hoy',
+      patientId: 'p1',
+      status: 'SCHEDULED',
+      start: tonight,
+      timeZone,
+    });
+    const entry = await uc.execute(
+      'p1',
+      { notes: 'Control', appointmentId: 'a-hoy' },
+      'd',
+    );
+    expect(entry.appointmentId).toBe('a-hoy');
+  });
+
+  it('400 en español si la cita es de un día futuro (no crea nada)', async () => {
+    const { uc, entries } = setup();
+    // 00:30 del 18/10 en Bogotá.
+    entries.appointments.push({
+      id: 'a-manana',
+      patientId: 'p1',
+      status: 'SCHEDULED',
+      start: new Date('2026-10-18T05:30:00.000Z'),
+      timeZone,
+    });
+    const call = uc.execute(
+      'p1',
+      { notes: 'x', appointmentId: 'a-manana' },
+      'd',
+    );
+    await expect(call).rejects.toThrow(BadRequestException);
+    await expect(call).rejects.toThrow(
+      'No se puede registrar una evolución en una cita de un día futuro',
+    );
+    expect(entries.rows).toHaveLength(0);
+  });
 
   it('liga la evolución a la cita y toma su fecha como fecha de atención', async () => {
     const { uc, entries } = setup();
@@ -173,6 +223,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       patientId: 'p1',
       status: 'COMPLETED',
       start,
+      timeZone,
     });
     const entry = await uc.execute(
       'p1',
@@ -197,6 +248,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       patientId: 'p2',
       status: 'COMPLETED',
       start,
+      timeZone,
     });
     await expect(
       uc.execute('p1', { notes: 'x', appointmentId: 'a2' }, 'd'),
@@ -207,7 +259,13 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     '400 si la cita está %s',
     async (status) => {
       const { uc, entries } = setup();
-      entries.appointments.push({ id: 'a3', patientId: 'p1', status, start });
+      entries.appointments.push({
+        id: 'a3',
+        patientId: 'p1',
+        status,
+        start,
+        timeZone,
+      });
       await expect(
         uc.execute('p1', { notes: 'x', appointmentId: 'a3' }, 'd'),
       ).rejects.toThrow(/cancelada o .*no asistió/);

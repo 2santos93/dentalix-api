@@ -87,7 +87,7 @@ export class ClinicalEntriesController {
   @ApiCreatedResponse({ type: ClinicalEntryDto })
   @ApiBadRequestResponse({
     description:
-      'Texto vacío, respuesta inválida, plantilla desactivada, cita de otro paciente o cita cancelada / no-show.',
+      'Texto vacío, respuesta inválida, plantilla desactivada, cita de otro paciente, cita cancelada / no-show o cita de un día futuro.',
   })
   @ApiNotFoundResponse({
     description:

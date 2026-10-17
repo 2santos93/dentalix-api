@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  loadLocationTimeZones,
+  timeZoneForCountry,
+} from '../../../../shared/locations/location-time-zone';
+import {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
   CreateClinicalEntryRepoInput,
@@ -126,12 +130,30 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
   async findAppointment(
     id: string,
   ): Promise<ClinicalEntryAppointmentRef | null> {
-    return this.prisma.runWithTenant((tx) =>
-      tx.appointment.findFirst({
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.appointment.findFirst({
         where: { id, deletedAt: null },
-        select: { id: true, patientId: true, status: true, start: true },
-      }),
-    );
+        select: {
+          id: true,
+          patientId: true,
+          status: true,
+          start: true,
+          locationId: true,
+          location: { select: { country: true } },
+        },
+      });
+      if (!row) return null;
+      const zones = await loadLocationTimeZones(tx, tenantId, [row.locationId]);
+      return {
+        id: row.id,
+        patientId: row.patientId,
+        status: row.status,
+        start: row.start,
+        timeZone:
+          zones.get(row.locationId) ?? timeZoneForCountry(row.location.country),
+      };
+    });
   }
 
   async listByPatient(

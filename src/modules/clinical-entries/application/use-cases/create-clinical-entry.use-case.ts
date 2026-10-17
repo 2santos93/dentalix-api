@@ -14,6 +14,7 @@ import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repos
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 import { assertAuthor } from '../clinical-record-errors';
+import { civilDateIn } from '../../../../shared/time/civil-day';
 import { CLINICAL_NOTE_TEMPLATE_REPOSITORY } from '../../../clinical-note-templates/domain/ports/clinical-note-template-repository.port';
 import type { ClinicalNoteTemplateRepository } from '../../../clinical-note-templates/domain/ports/clinical-note-template-repository.port';
 import type { ClinicalNoteTemplate } from '../../../clinical-note-templates/domain/entities/clinical-note-template.entity';
@@ -33,6 +34,8 @@ export const ENTRY_APPOINTMENT_OTHER_PATIENT_MESSAGE =
   'La cita no es de este paciente: registra la evolución desde la ficha del paciente de la cita';
 export const ENTRY_APPOINTMENT_NOT_ATTENDED_MESSAGE =
   'No se puede registrar una evolución en una cita cancelada o en la que el paciente no asistió';
+export const ENTRY_APPOINTMENT_FUTURE_MESSAGE =
+  'No se puede registrar una evolución en una cita de un día futuro';
 export const BLANK_NOTES_MESSAGE =
   'El texto de la evolución no puede estar vacío';
 
@@ -136,7 +139,12 @@ export class CreateClinicalEntryUseCase {
     });
   }
 
-  /** Cita viva de la clínica, de ESTE paciente y no cancelada ni no-show. */
+  /**
+   * Cita viva de la clínica, de ESTE paciente, no cancelada ni no-show y no de
+   * un día futuro en la zona de su sede: una evolución documenta una atención
+   * y su fecha (la de la cita) no puede ser de mañana (DX-039 la usa para la
+   * retención).
+   */
   private async appointmentFor(
     patientId: string,
     appointmentId: string,
@@ -150,6 +158,10 @@ export class CreateClinicalEntryUseCase {
     }
     if (NOT_ATTENDED.has(appointment.status)) {
       throw new BadRequestException(ENTRY_APPOINTMENT_NOT_ATTENDED_MESSAGE);
+    }
+    const { start, timeZone } = appointment;
+    if (civilDateIn(start, timeZone) > civilDateIn(new Date(), timeZone)) {
+      throw new BadRequestException(ENTRY_APPOINTMENT_FUTURE_MESSAGE);
     }
     return appointment;
   }

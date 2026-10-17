@@ -22,6 +22,8 @@ const raw = new PrismaClient({
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 2 * DAY_MS).toISOString().slice(0, 10);
 const at = (time: string): string => `${DAY}T${time}:00.000Z`;
+const daysBefore = (iso: string, days: number): string =>
+  new Date(new Date(iso).getTime() - days * DAY_MS).toISOString();
 
 interface PromptBody {
   id: string;
@@ -126,6 +128,19 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     await as(api().patch(`/api/v1/appointments/${id}`), c.adminToken, c.host)
       .send({ status })
       .expect(200);
+  }
+
+  /**
+   * La API no deja agendar en el pasado: se agenda a futuro y se mueve la cita
+   * N días atrás por SQL directo (una evolución no se liga a una cita de un día
+   * futuro).
+   */
+  async function moveToPast(id: string, days: number): Promise<void> {
+    await raw.$executeRaw`
+      UPDATE "appointments"
+         SET "start" = "start" - make_interval(days => ${days}::int),
+             "end" = "end" - make_interval(days => ${days}::int)
+       WHERE "id" = ${id}::uuid`;
   }
 
   async function auditCount(action: string): Promise<number> {
@@ -326,6 +341,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         at('14:30'),
       );
       await setStatus(clinic, appointmentId, 'COMPLETED');
+      await moveToPast(appointmentId, 5);
     });
 
     it('DENTIST usa «Resina» desde la cita: el texto lleva las respuestas y queda ligada', async () => {
@@ -356,7 +372,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
           'Resina en superficie O con Resina A2 y Adhesivo universal. Observaciones: Sin sensibilidad postoperatoria.',
         templateId: resin.id,
         appointmentId,
-        entryDate: at('14:00'),
+        entryDate: daysBefore(at('14:00'), 5),
         appointment: {
           id: appointmentId,
           providerId: dentist.userId,
@@ -457,6 +473,26 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         .expect(400);
       expect((res.body as { message: string }).message).toMatch(
         /La cita no es de este paciente/,
+      );
+    });
+
+    it('una cita de un día futuro no admite evolución (400 en español)', async () => {
+      const future = await book(
+        clinic,
+        patientId,
+        dentist.userId,
+        at('17:00'),
+        at('17:30'),
+      );
+      await setStatus(clinic, future, 'COMPLETED');
+      const res = await as(
+        api().post(`/api/v1/patients/${patientId}/clinical-entries`),
+        dentist.token,
+      )
+        .send({ appointmentId: future, notes: 'Control' })
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        'No se puede registrar una evolución en una cita de un día futuro',
       );
     });
 

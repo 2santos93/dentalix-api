@@ -80,7 +80,7 @@ export class CreateClinicalEntryDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'DX-170: cita en la que se documenta. Tiene que ser de esta clínica (404) y de este paciente (400).',
+      'DX-170: cita en la que se documenta. Tiene que ser de esta clínica (404), de este paciente (400) y no de un día futuro en la zona de su sede (400).',
   })
   @IsOptional()
   @IsUUID('all', { message: 'appointmentId debe ser el id de una cita' })

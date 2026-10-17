@@ -23,6 +23,8 @@ export interface ClinicalEntryAppointmentRef {
   patientId: string;
   status: AppointmentStatus;
   start: Date;
+  /** Zona IANA de la sede de la cita: decide qué es «hoy» para ella. */
+  timeZone: string;
 }
 
 export interface ListClinicalEntriesParams {
