@@ -538,6 +538,46 @@ de esquemas propios de una librería).
   NULL) no las purga nadie: `dentalix_app` no las ve por RLS y el rol del
   despachador no tiene DELETE. No guardan mensaje al terminar.
 
+## Recordatorios de cita por email (DX-026)
+
+Módulo `src/modules/reminders`. Reutiliza la cola y el cron con candado
+(DX-085), `outbound_messages`, el email con outbox (DX-088) y el enlace de
+confirmación firmado (DX-005); no añade otra cola ni otro transporte.
+
+- **Ajustes por sede** (`location_reminder_settings`, RLS FORCE, FK compuesta
+  a la sede): `enabled` (por defecto `false`; sin fila = desactivado) y
+  `leadHours`, hasta 3 antelaciones de 1 a 168 h, de mayor a menor. `GET
+  /reminder-settings` y `PUT /reminder-settings/:locationId`, **solo ADMIN**
+  (otros roles: 403 «Solo un administrador puede ver y cambiar los
+  recordatorios.»); validación y 404 de una sede ajena en español.
+- **Barrido** `reminders.plan.every-5-min` (`*/5 * * * *`, un ejecutor por
+  tick): clínica a clínica, encola `reminders.send-email` por cada cita y
+  antelación cuya hora (inicio − antelación) cae en los próximos 10 min, con
+  `runAt` en esa hora e `idempotencyKey = reminder:<cita>:<h>h:<inicio ISO>`.
+  Un recordatorio atrasado (worker caído) se recupera hasta 1 h después; más
+  tarde no se manda (una cita agendada 30 min antes no recibe el de 48 h).
+- **Envío** (handler, bajo el tenant del trabajo y RLS; nunca se fía del
+  payload, SEC-036): relee cita, paciente y ajustes y **omite con motivo**
+  (`NO_EMAIL`, `CANCELLED`, `COMPLETED`, `NO_SHOW`, `RESCHEDULED`, `DELETED`,
+  `DISABLED`, `TOO_LATE`) o reclama la fila única por (cita, antelación, hora
+  de inicio) de `appointment_reminders`, emite el enlace de DX-005 (sin
+  borrar un «pide llamada»), registra el mensaje en `outbound_messages` y deja
+  el email `appointment-reminder` en `email_outbox` con `referenceId` = id del
+  mensaje. El registro guarda ese id, nunca el cuerpo. Reprogramar la cita
+  cambia la clave: lo de la hora vieja queda `RESCHEDULED` y se recalcula.
+- **Email**: fecha y hora en la zona de la sede (horario de la sede o su
+  país; 12 h en CO, 24 h en ES), sede, profesional y botón «Confirmar o
+  cancelar». Nada clínico (ni motivo ni tratamiento). El enlace va a
+  `<protocolo>://<subdominio>.<PUBLIC_WEB_BASE_HOST>/confirmar/<token>`
+  (sin `PUBLIC_WEB_BASE_HOST`, el primer `TENANT_BASE_DOMAINS`). Emitirlo
+  revoca el enlace anterior de la cita (solo vale el último, como en DX-005).
+- **Estado por cita**: `GET /appointments/:id/reminders` (roles de la agenda)
+  devuelve los ajustes vigentes de su sede y, por antelación, `SENT` (con
+  `sentAt` y la entrega en `email_outbox`), `SKIPPED` (con motivo),
+  `SENDING`, `PENDING` (con `dueAt`) o `MISSED`.
+- **Demo**: `seed:demo` deja la «Sede principal» con `[48, 2]`. Hace falta un
+  worker (`npm run start:dev:all`) para que salgan.
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y
