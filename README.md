@@ -106,7 +106,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), ~90 citas desde el lunes de la semana pasada hasta
-   el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, planes de tratamiento en todos
+   el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos, listo para
    presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
    pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas.
@@ -541,6 +541,32 @@ hasta 1 h (SEC-028).
   `RATE_LIMIT_LOGIN_ACCOUNT_*` ya no se leen: quítalas del despliegue.
 - En local, para salir de una espera sin esperar: `DELETE FROM login_throttles;`
   (o el botón «Desbloquear inicio de sesión» del perfil del miembro).
+
+## Hueco libre → candidatos (DX-210)
+
+- `GET /appointments/openings/:locationId/candidates?start&end&providerId?`
+  lista quién puede ocupar un hueco libre de la sede: pendientes OPEN
+  (DX-122) cuya duración cabe y que no son quien liberó ese hueco, y citas
+  SCHEDULED/CONFIRMED marcadas «Adelantar si hay hueco» (`wantsEarlier`) de
+  un día civil posterior (zona de la sede), del profesional del hueco si se
+  indica. Orden: URGENT, resto de pendientes, citas (la más lejana primero)
+  y, a igualdad, la más antigua; tope de 50. RECEPTION y ADMIN; DENTIST solo
+  con `providerId` = él mismo; ASSISTANT 403.
+- `POST /appointments/openings/:locationId/offers` registra una oferta
+  (`WA_ME` o `PHONE`) en `waitlist_offers` (RLS FORCE, FK compuestas) y la
+  audita (`WAITLIST_OFFER`). Por WhatsApp solo si el paciente no tiene baja de
+  avisos ni canal «Ninguno» (DX-128) y tiene móvil válido. Tope de
+  `WAITLIST_OFFERS_PER_PATIENT_PER_DAY` (2) por paciente y día civil de la
+  sede, contado bajo un candado por paciente: la tercera da 409 «Ya se le
+  ofrecieron 2 huecos hoy». `PATCH /appointments/openings/offers/:id` anota la
+  respuesta una vez.
+- Asignar: un pendiente con `POST /waitlist/:id/schedule`; una cita marcada
+  con `PATCH /appointments/:id/opening` (reglas de reagendar: pasado, horario,
+  bloqueos y solapes; la marca se apaga en la misma sentencia condicional, así
+  que dos movimientos a la vez dan uno y un 409). Dos asignaciones al mismo
+  hueco: la EXCLUDE por profesional deja una y la otra recibe 409.
+- El texto del `wa.me` lo arma la web solo con nombre de pila, fecha, hora,
+  sede y profesional (nunca motivo ni tratamiento).
 
 ## Odontograma: dentición, origen y anulación (DX-120)
 

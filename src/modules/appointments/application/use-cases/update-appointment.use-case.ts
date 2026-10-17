@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -33,6 +34,12 @@ import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
 } from '../appointment-overlap-error';
+import {
+  WANTS_EARLIER_FORBIDDEN_MESSAGE,
+  WANTS_EARLIER_GONE_MESSAGE,
+  canChangeWantsEarlier,
+} from '../../domain/wants-earlier';
+import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 
 /**
  * Lo que el cliente puede cambiar. `revokeConfirmations` y los indicadores de
@@ -40,8 +47,20 @@ import {
  */
 export type UpdateAppointmentInput = Omit<
   UpdateAppointmentRepoInput,
-  'revokeConfirmations' | 'enqueueWaitlist' | 'resolveWaitlist'
+  | 'revokeConfirmations'
+  | 'enqueueWaitlist'
+  | 'resolveWaitlist'
+  | 'requireWantsEarlier'
 >;
+
+/** DX-210: el hueco libre al que se adelanta una cita marcada. */
+export interface MoveToOpeningInput {
+  start: Date;
+  /** Si falta: `start` + la duración actual de la cita. */
+  end?: Date;
+  /** Si falta: el mismo profesional. */
+  providerId?: string;
+}
 
 /** Estados que mandan al paciente a «Pendientes por agendar» (DX-122). */
 const WAITLIST_STATUSES: ReadonlySet<AppointmentStatus> = new Set([
@@ -78,12 +97,67 @@ export class UpdateAppointmentUseCase {
     patch: UpdateAppointmentInput,
     auditContext?: AppointmentAuditContext,
   ): Promise<AppointmentWriteResult> {
+    return this.apply(id, patch, auditContext, false);
+  }
+
+  /**
+   * DX-210 «Asignar» desde «Ocupar este hueco»: mueve una cita marcada
+   * «Adelantar si hay hueco» al hueco libre, con TODAS las reglas de un
+   * reagendado (pasado, horario de la sede, bloqueos, solape del profesional y
+   * del paciente — DX-036), y le quita la marca en la misma transacción. Si ya
+   * no está marcada (otra persona la movió), 409. Su hueco original queda
+   * libre, sin ofrecerlo en cadena.
+   */
+  async moveToOpening(
+    id: string,
+    slot: MoveToOpeningInput,
+    auditContext: AppointmentAuditContext,
+  ): Promise<AppointmentWriteResult> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new NotFoundException('Cita no encontrada');
+    if (!existing.wantsEarlier || !MOVABLE_STATUSES.includes(existing.status)) {
+      throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
+    }
+    const duration = existing.end.getTime() - existing.start.getTime();
+    return this.apply(
+      id,
+      {
+        start: slot.start,
+        end: slot.end ?? new Date(slot.start.getTime() + duration),
+        providerId: slot.providerId,
+        wantsEarlier: false,
+      },
+      auditContext,
+      true,
+    );
+  }
+
+  private async apply(
+    id: string,
+    patch: UpdateAppointmentInput,
+    auditContext: AppointmentAuditContext | undefined,
+    fromOpening: boolean,
+  ): Promise<AppointmentWriteResult> {
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as the Patient use cases: a missing row and a row
       // that belongs to another tenant are indistinguishable here (RLS
       // makes cross-tenant rows invisible), so both surface as NotFound.
       throw new NotFoundException('Appointment not found');
+    }
+
+    // DX-210: «Adelantar si hay hueco» lo cambian recepción, el odontólogo y
+    // gestión (la asistente ve la agenda pero no la marca).
+    const changesWantsEarlier =
+      patch.wantsEarlier !== undefined &&
+      patch.wantsEarlier !== existing.wantsEarlier;
+    if (
+      patch.wantsEarlier !== undefined &&
+      !fromOpening &&
+      auditContext &&
+      !canChangeWantsEarlier(auditContext.actor.role)
+    ) {
+      throw new ForbiddenException(WANTS_EARLIER_FORBIDDEN_MESSAGE);
     }
 
     // Reagendar = cambiar la hora O el profesional (DX-121: «Mover a…» y el
@@ -201,6 +275,7 @@ export class UpdateAppointmentUseCase {
         ? { confirmationSentAt: null, callbackRequestedAt: null }
         : {}),
       ...(isReschedule ? { revokeConfirmations: true } : {}),
+      ...(fromOpening ? { requireWantsEarlier: true } : {}),
       ...(enqueuesWaitlist
         ? {
             enqueueWaitlist: {
@@ -238,6 +313,10 @@ export class UpdateAppointmentUseCase {
 
     if (isReschedule && auditContext) {
       await this.recordMove(existing, updated, auditContext);
+    }
+    // El movimiento a un hueco ya deja su evento (la marca se apaga con él).
+    if (changesWantsEarlier && !fromOpening && auditContext) {
+      await this.recordWantsEarlier(updated, auditContext);
     }
     if (waitlistEntryId !== null && auditContext) {
       await this.recordWaitlistEntry(updated, waitlistEntryId, auditContext);
@@ -287,6 +366,30 @@ export class UpdateAppointmentUseCase {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
       metadata: { reason },
+    });
+  }
+
+  /** `audit_event` de marcar o desmarcar «Adelantar si hay hueco» (DX-210). */
+  private recordWantsEarlier(
+    appointment: Appointment,
+    ctx: AppointmentAuditContext,
+  ): Promise<void> {
+    return this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: appointment.wantsEarlier
+          ? 'WANTS_EARLIER_ON'
+          : 'WANTS_EARLIER_OFF',
+      },
     });
   }
 

@@ -270,6 +270,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // leer y agendar, quien agenda; los bloqueos los escriben ADMIN, recepción y
   // el odontólogo (solo su agenda: 403 del caso de uso), no la asistente.
   'GET /appointments/openings': EVERY_ROLE,
+  // DX-210 «Ocupar este hueco»: candidatos (el odontólogo, solo de su columna:
+  // lo comprueba el caso de uso), ofertas y adelantar una cita marcada.
+  // loop/informes/DX-210.md.
+  'GET /appointments/openings/:locationId/candidates': roles(
+    'ADMIN',
+    'DENTIST',
+    'RECEPTION',
+  ),
+  'POST /appointments/openings/:locationId/offers': BILLING,
+  'PATCH /appointments/openings/offers/:id': BILLING,
+  'PATCH /appointments/:id/opening': BILLING,
   'GET /schedule-blocks': EVERY_ROLE,
   'GET /schedule-blocks/affected-appointments': EVERY_ROLE,
   'POST /schedule-blocks': roles('ADMIN', 'DENTIST', 'RECEPTION'),

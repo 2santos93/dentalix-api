@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../../waitlist/domain/waitlist-rules';
 import { Appointment } from '../../../domain/entities/appointment.entity';
+import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
 import type { InMemoryWaitlistRepository } from '../../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import {
   AppointmentRepository,
@@ -69,6 +70,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       appointmentType: overrides.appointmentType ?? null,
       confirmationSentAt: overrides.confirmationSentAt ?? null,
       callbackRequestedAt: overrides.callbackRequestedAt ?? null,
+      wantsEarlier: overrides.wantsEarlier ?? false,
       createdAt: overrides.createdAt ?? now,
       updatedAt: overrides.updatedAt ?? now,
       deletedAt: overrides.deletedAt ?? null,
@@ -100,6 +102,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       appointmentType: row.appointmentType,
       confirmationSentAt: row.confirmationSentAt,
       callbackRequestedAt: row.callbackRequestedAt,
+      wantsEarlier: row.wantsEarlier,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -136,6 +139,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       appointmentType: null,
       confirmationSentAt: null,
       callbackRequestedAt: null,
+      wantsEarlier: input.wantsEarlier ?? false,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -215,6 +219,16 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         new Error(`InMemoryAppointmentRepository.update: not found ${id}`),
       );
     }
+    if (
+      patch.requireWantsEarlier &&
+      !(
+        row.wantsEarlier &&
+        (row.status === AppointmentStatus.SCHEDULED ||
+          row.status === AppointmentStatus.CONFIRMED)
+      )
+    ) {
+      return Promise.reject(new ConflictException(WANTS_EARLIER_GONE_MESSAGE));
+    }
     // `revokeConfirmations` es una orden al repo (revocar enlaces), no un campo.
     const definedPatch = Object.fromEntries(
       Object.entries(patch).filter(
@@ -222,7 +236,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           value !== undefined &&
           key !== 'revokeConfirmations' &&
           key !== 'enqueueWaitlist' &&
-          key !== 'resolveWaitlist',
+          key !== 'resolveWaitlist' &&
+          key !== 'requireWantsEarlier',
       ),
     );
     Object.assign(row, definedPatch, {

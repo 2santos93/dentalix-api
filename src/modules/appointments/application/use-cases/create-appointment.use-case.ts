@@ -52,6 +52,8 @@ export interface CreateAppointmentInput {
   locationId?: string;
   /** DX-122: la entrada de pendientes que esta cita resuelve (pasa a SCHEDULED). */
   waitlistEntryId?: string;
+  /** DX-210: «Adelantar si hay hueco». */
+  wantsEarlier?: boolean;
 }
 
 /** La entrada con la hora de fin ya resuelta (explícita o por el tipo). */
@@ -234,6 +236,7 @@ export class CreateAppointmentUseCase {
         appointmentTypeId: input.appointmentTypeId,
         locationId: input.locationId,
         waitlistEntryId: input.waitlistEntryId,
+        wantsEarlier: input.wantsEarlier,
       });
       return { ...created, warnings };
     } catch (error) {

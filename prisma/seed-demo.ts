@@ -41,6 +41,7 @@ import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/applicat
 import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/void-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { UpdateReminderSettingsUseCase } from '../src/modules/reminders/application/use-cases/reminder-settings.use-cases';
@@ -62,10 +63,7 @@ import {
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
-import {
-  addCivilDays,
-  civilDateIn,
-} from '../src/shared/time/civil-day';
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
@@ -1086,6 +1084,26 @@ class DemoSeeder {
         },
         ctx,
       );
+
+      // DX-210: la cita agendada más lejana de la primera dentista en la sede
+      // principal queda marcada «Adelantar si hay hueco»: sale como candidata
+      // al cancelar una cita de un día anterior («Ocupar este hueco»).
+      const upcoming = await this.use(ListAppointmentsUseCase).execute({
+        from: daysAgoAt(this.now, -2, 0),
+        to: daysAgoAt(this.now, -21, 0),
+        providerId: dentists[0],
+        locationId: locations.principal,
+      });
+      const farthest = upcoming
+        .filter((a) => a.status === AppointmentStatus.SCHEDULED)
+        .at(-1);
+      if (farthest) {
+        await this.use(UpdateAppointmentUseCase).execute(
+          farthest.id,
+          { wantsEarlier: true },
+          ctx,
+        );
+      }
     });
   }
 
