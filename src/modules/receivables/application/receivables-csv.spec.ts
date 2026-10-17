@@ -1,8 +1,8 @@
 import { emptyBuckets } from '../domain/aging';
-import type { AgingRowView } from './use-cases/get-receivables-aging.use-case';
+import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
 import { RECEIVABLES_CSV_HEADER, toReceivablesCsv } from './receivables-csv';
 
-function row(overrides: Partial<AgingRowView> = {}): AgingRowView {
+function row(overrides: Partial<AgingCsvRow> = {}): AgingCsvRow {
   return {
     patient: {
       id: 'p1',
@@ -31,6 +31,7 @@ function row(overrides: Partial<AgingRowView> = {}): AgingRowView {
     lastPayment: { paidOn: '2026-09-30', amount: 50000, currency: 'COP' },
     nextInstallment: null,
     lastNote: null,
+    lastNoteOn: null,
     promise: null,
     ...overrides,
   };
@@ -63,6 +64,12 @@ describe('toReceivablesCsv', () => {
         'COP',
         '2026-11-07',
         '100000.00',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
       ].join(','),
     );
     expect(lines[2]).toBe('');
@@ -88,7 +95,39 @@ describe('toReceivablesCsv', () => {
       }),
     ]);
     expect(csv.split('\r\n')[1]).toBe(
-      '"Luis","",USD,10.00,10.00,0.00,0.00,0.00,0.00,0.00,10.00,,No,,,,,',
+      '"Luis","",USD,10.00,10.00,0.00,0.00,0.00,0.00,0.00,10.00,,No,,,,,,,,,,,',
+    );
+  });
+
+  it('DX-150: lleva la última gestión (canal · resultado y día de la sede) y el último compromiso, sin el texto de la nota', () => {
+    const csv = toReceivablesCsv([
+      row({
+        lastNote: {
+          channel: 'CALL',
+          outcome: 'PROMISED_PAYMENT',
+          createdAt: new Date('2026-10-16T02:00:00.000Z'),
+        },
+        lastNoteOn: '2026-10-15',
+        promise: {
+          id: 'pp1',
+          amount: 200000,
+          currency: 'COP',
+          dueDate: '2026-11-15',
+          status: 'BROKEN',
+        },
+      }),
+    ]);
+    const header = csv.slice(1).split('\r\n')[0].split(',');
+    expect(header.slice(-6)).toEqual([
+      'Última gestión',
+      'Fecha última gestión',
+      'Compromiso',
+      'Importe compromiso',
+      'Moneda compromiso',
+      'Fecha compromiso',
+    ]);
+    expect(csv.split('\r\n')[1]).toMatch(
+      /,"Llamada · Promete pago",2026-10-15,"Incumplido",200000\.00,COP,2026-11-15$/,
     );
   });
 

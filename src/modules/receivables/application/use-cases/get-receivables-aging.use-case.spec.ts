@@ -277,6 +277,25 @@ describe('GetReceivablesAgingUseCase', () => {
   });
 
   describe('cobranza (DX-150)', () => {
+    it('el CSV lleva el día de la última gestión en la zona de la sede de la deuda', async () => {
+      // 21:00 del 15/10 en Bogotá = 02:00 UTC del 16/10.
+      repo.collections.set('p-antiguo', {
+        lastNote: {
+          channel: 'CALL',
+          outcome: 'NO_ANSWER',
+          createdAt: new Date('2026-10-16T02:00:00.000Z'),
+        },
+        promise: null,
+      });
+      const rows = await useCase.exportRows({});
+      expect(rows.find((r) => r.patient.id === 'p-antiguo')?.lastNoteOn).toBe(
+        '2026-10-15',
+      );
+      expect(rows.find((r) => r.patient.id === 'p-medio')?.lastNoteOn).toBe(
+        null,
+      );
+    });
+
     it('cada fila trae su última gestión y su compromiso, pedidos solo para la página', async () => {
       repo.collections.set('p-antiguo', {
         lastNote: {

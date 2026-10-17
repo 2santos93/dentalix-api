@@ -21,6 +21,7 @@ import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { COLLECTIONS_REPOSITORY } from '../src/modules/collections/domain/ports/collections-repository.port';
 import type { CollectionsRepository } from '../src/modules/collections/domain/ports/collections-repository.port';
 import { SettlePaymentPromises } from '../src/modules/collections/application/settle-payment-promises';
+import { PrismaService } from '../src/shared/prisma/prisma.service';
 
 // DX-150 · Cobranza: nota → compromiso → abono → CUMPLIDO, permisos por rol,
 // aislamiento entre clínicas, la fila de la cartera y el chip «Saldo vencido»
@@ -321,6 +322,24 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       ]),
     );
     expect(JSON.stringify(events)).not.toContain('Paga el viernes');
+
+    // Revisión (lead): el CSV de la cartera lleva la gestión y el compromiso,
+    // nunca el texto de la nota.
+    const csv = await api(
+      clinicA,
+      'get',
+      '/receivables/aging.csv',
+      clinicA.adminToken,
+    ).expect(200);
+    const line = csv.text
+      .split('\r\n')
+      .find((l) => l.includes(`${dueDate}`) && l.includes('Cumplido'));
+    expect(line).toMatch(
+      new RegExp(
+        `,"Llamada · Promete pago",\\d{4}-\\d{2}-\\d{2},"Cumplido",200000\\.00,COP,${dueDate}$`,
+      ),
+    );
+    expect(csv.text).not.toContain('Paga el viernes');
   });
 
   it('el barrido marca INCUMPLIDO el día siguiente a la fecha y es idempotente', async () => {
@@ -501,6 +520,17 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
           id: string;
         }[]
       )[0].id;
+      // Revisión (lead): no basta con espiar el repositorio; se cuentan las
+      // transacciones con el tenant fijado de TODA la petición (la lista de
+      // citas + la marca). Con 6 citas más, las mismas.
+      const prisma = app.get(PrismaService);
+      const transactions = jest.spyOn(prisma, 'runWithTenant');
+      const before = (
+        (await api(clinicA, 'get', range(), receptionToken).expect(200))
+          .body as unknown[]
+      ).length;
+      const callsBefore = transactions.mock.calls.length;
+      transactions.mockClear();
       for (let i = 0; i < 6; i += 1) {
         const p = await patient(clinicA, `Lote${i}`, `COB-L${i}`);
         await plan(clinicA, p, 10_000 + i);
@@ -513,10 +543,17 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
         200,
       );
       expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(8);
+      expect((res.body as unknown[]).length).toBe(before + 6);
       expect(ledgers).toHaveBeenCalledTimes(1);
       expect(zones).toHaveBeenCalledTimes(1);
       ledgers.mockRestore();
       zones.mockRestore();
+      // Solo las de la petición medida (las altas de arriba también abren
+      // transacciones): se mide otra vez con el espía limpio.
+      transactions.mockClear();
+      await api(clinicA, 'get', range(), receptionToken).expect(200);
+      expect(transactions.mock.calls.length).toBe(callsBefore);
+      transactions.mockRestore();
     });
   });
 });

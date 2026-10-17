@@ -70,6 +70,12 @@ export interface AgingRowView extends PatientAging {
   promise: DebtorPromise | null;
 }
 
+/** Fila del CSV (DX-150): con el día civil de la última gestión. */
+export interface AgingCsvRow extends AgingRowView {
+  /** Día (YYYY-MM-DD) de la última gestión en la zona de la sede de la deuda. */
+  lastNoteOn: string | null;
+}
+
 export interface AgingTotal {
   currency: string;
   patients: number;
@@ -222,9 +228,18 @@ export class GetReceivablesAgingUseCase {
   }
 
   /** Todas las filas filtradas, en el mismo orden (para el CSV). */
-  async exportRows(filters: ReceivablesAgingFilters): Promise<AgingRowView[]> {
-    const { rows } = await this.scopedRows(filters);
-    return this.withDetails(rows);
+  async exportRows(filters: ReceivablesAgingFilters): Promise<AgingCsvRow[]> {
+    const { rows, zones } = await this.scopedRows(filters);
+    return (await this.withDetails(rows)).map((row) => ({
+      ...row,
+      lastNoteOn: row.lastNote
+        ? civilDateIn(
+            row.lastNote.createdAt,
+            (row.locationId && zones.get(row.locationId)) ||
+              DEFAULT_BUSINESS_HOURS_TIMEZONE,
+          )
+        : null,
+    }));
   }
 
   private async scopedRows(filters: ReceivablesAgingFilters) {
@@ -276,7 +291,12 @@ export class GetReceivablesAgingUseCase {
       });
     }
     rows.sort(byAge);
-    return { rows: await this.byCollections(rows, filters), location, now };
+    return {
+      rows: await this.byCollections(rows, filters),
+      location,
+      now,
+      zones,
+    };
   }
 
   /**
