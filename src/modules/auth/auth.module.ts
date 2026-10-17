@@ -27,9 +27,16 @@ import { JobsModule } from '../jobs/jobs.module';
 import { TokenMaintenanceJobs } from './application/token-maintenance.jobs';
 import { TOKEN_MAINTENANCE_REPOSITORY } from './domain/ports/token-maintenance-repository.port';
 import { PrismaTokenMaintenanceRepository } from './infrastructure/repositories/prisma-token-maintenance.repository';
+import { LoginLockoutModule } from './login-lockout.module';
 
 @Module({
-  imports: [JwtModule.register({}), EmailModule, JobsModule],
+  // LoginLockoutModule: bloqueo del login por fallos (DX-048).
+  imports: [
+    JwtModule.register({}),
+    EmailModule,
+    JobsModule,
+    LoginLockoutModule,
+  ],
   controllers: [AuthController, PasswordResetController],
   providers: [
     RegisterClinicUseCase,

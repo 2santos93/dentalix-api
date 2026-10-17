@@ -10,8 +10,6 @@ import {
 } from './rate-limit.config';
 import { RATE_LIMIT_POLICIES } from './rate-limit.decorator';
 import {
-  loginAccountRateLimitKey,
-  loginRateLimitKey,
   passwordRateLimitKey,
   staffActorRateLimitKey,
 } from './rate-limit.keys';
@@ -56,7 +54,6 @@ function throttlers(
     `${context.getClass().name}-${context.getHandler().name}-${name}`;
   const request = (context: ExecutionContext) =>
     context.switchToHttp().getRequest<{
-      body?: unknown;
       headers: Record<string, string | string[] | undefined>;
     }>();
   return [
@@ -64,23 +61,7 @@ function throttlers(
     { name: 'default', limit: cfg.global.limit, ttl: cfg.global.ttlMs },
     strict('auth'),
     strict('refresh'),
-    {
-      ...strict('login'),
-      generateKey: (context, ip, name) =>
-        loginRateLimitKey(
-          routePrefix(context, name),
-          ip,
-          request(context).body,
-        ),
-    },
-    {
-      ...strict('login-account'),
-      generateKey: (context, _ip, name) =>
-        loginAccountRateLimitKey(
-          routePrefix(context, name),
-          request(context).body,
-        ),
-    },
+    strict('login-burst'),
     strict('invitation'),
     {
       ...strict('password'),

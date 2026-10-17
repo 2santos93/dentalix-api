@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 
-// Esperas largas (la ventana de login es de 15 min) en minutos, redondeando
+// Esperas largas (p. ej. la de recuperar la contraseña, 15 min) en minutos, redondeando
 // hacia arriba para no invitar a reintentar antes de tiempo.
 function humanWait(seconds: number): string {
   if (seconds < 120)

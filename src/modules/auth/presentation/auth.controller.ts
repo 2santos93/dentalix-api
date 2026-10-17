@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   HttpCode,
+  HttpException,
+  HttpStatus,
   Post,
   Req,
   Res,
@@ -19,6 +21,8 @@ import {
   ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -46,6 +50,8 @@ import {
   SessionCookieService,
 } from './session-cookie.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { LoginLockoutService } from '../application/login-lockout.service';
+import { LoginLockedError, loginLockedMessage } from '../domain/login-lockout';
 
 export const REGISTER_ACCEPTED_MESSAGE =
   'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
@@ -58,6 +64,7 @@ export class AuthController {
     private readonly login: LoginUseCase,
     private readonly refresh: RefreshUseCase,
     private readonly logout: LogoutUseCase,
+    private readonly lockout: LoginLockoutService,
     private readonly cookie: SessionCookieService,
     config: ConfigService,
   ) {
@@ -147,31 +154,78 @@ export class AuthController {
     return this.registerClinic.verify(dto.token, dto.password);
   }
 
+  /**
+   * DX-048 (SEC-028): el bloqueo es por FALLOS y vive en la BD (vale entre
+   * réplicas). Antes de mirar la contraseña, si la cuenta (hash del email) o
+   * la IP están en espera → 429 con `Retry-After` y el mismo mensaje exista o
+   * no el email. Un 401 suma un fallo a la cuenta y a la IP; un login
+   * correcto reinicia la cuenta. El balde `login-burst` del rate limiter solo
+   * frena avalanchas por IP (argon2 cuesta CPU) y es holgado para una clínica
+   * tras NAT.
+   */
   @Audit({ action: 'LOGIN', resource: 'SESSION' })
   @Post('login')
-  @RateLimit('auth', 'login', 'login-account')
   @ApiCreatedResponse({ type: AuthTokensDto })
+  @ApiUnauthorizedResponse({
+    description: 'Credenciales inválidas (mismo error exista o no el email)',
+  })
+  // Encima de @RateLimit: completa su 429 genérico con el caso del bloqueo.
+  @ApiTooManyRequestsResponse({
+    description:
+      'Demasiados intentos fallidos de esta cuenta o desde esta IP, o avalancha de peticiones. `Retry-After` lleva los segundos de espera; el mensaje es el mismo exista o no el email.',
+    headers: {
+      'Retry-After': {
+        description: 'Segundos que faltan para poder reintentar',
+        schema: { type: 'integer', minimum: 1 },
+      },
+    },
+  })
+  @RateLimit('login-burst')
   async loginHandler(
-    @Req() req: TenantHostRequest,
+    // `req.ip` de Express: X-Forwarded-For solo con TRUST_PROXY (SEC-031).
+    @Req() req: TenantHostRequest & { ip?: string },
     @Res({ passthrough: true }) res: Response,
     @Body() dto: LoginDto,
   ): Promise<DeliveredSession> {
     const tenantId = req.tenantHost?.tenantId;
+    try {
+      await this.lockout.assertCanAttempt(dto.email, req.ip);
+    } catch (err) {
+      if (!(err instanceof LoginLockedError)) throw err;
+      res.setHeader('Retry-After', String(err.retryAfterSeconds));
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          error: 'Too Many Requests',
+          message: loginLockedMessage(err.retryAfterSeconds),
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
     // Host SIN clínica (el apex): es la puerta del área de plataforma. Solo la
     // resuelve un superadmin, y recibe un token de plataforma (sin tenant ni
     // rol). Para cualquier otro usuario `executePlatform` lanza el mismo
     // 'Invalid credentials', así que no se filtra si el email existe ni si es
     // superadmin.
-    const pair = tenantId
-      ? await this.login.execute({
-          tenantId,
-          email: dto.email,
-          password: dto.password,
-        })
-      : await this.login.executePlatform({
-          email: dto.email,
-          password: dto.password,
-        });
+    let pair: { accessToken: string; refreshToken: string };
+    try {
+      pair = tenantId
+        ? await this.login.execute({
+            tenantId,
+            email: dto.email,
+            password: dto.password,
+          })
+        : await this.login.executePlatform({
+            email: dto.email,
+            password: dto.password,
+          });
+    } catch (err) {
+      if (err instanceof UnauthorizedException) {
+        await this.lockout.recordFailure(dto.email, req.ip);
+      }
+      throw err;
+    }
+    await this.lockout.recordSuccess(dto.email);
     return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
   }
 

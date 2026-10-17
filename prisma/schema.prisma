@@ -2032,3 +2032,29 @@ model AppointmentReminder {
   //     -> lado hijo de la FK compuesta a outbound_messages.
   @@map("appointment_reminders")
 }
+
+enum LoginThrottleScope {
+  ACCOUNT
+  IP
+}
+
+/// DX-048 (SEC-028): fallos de login por cuenta (hash del email normalizado)
+/// y por IP (hash), compartidos entre réplicas. Solo cuenta FALLOS: un login
+/// correcto borra la fila de su cuenta. Tabla de plataforma sin tenantId ni
+/// RLS (como revoked_tokens): no guarda emails, IPs ni nada de la clínica.
+/// Se escribe con SQL atómico en PrismaLoginThrottleRepository y la purga el
+/// trabajo horario de tokens.
+model LoginThrottle {
+  scope           LoginThrottleScope
+  /// SHA-256 en hex (CHECK en la BD), con prefijo de dominio.
+  keyHash         String
+  failures        Int
+  windowStartedAt DateTime
+  lastFailureAt   DateTime
+  /// Hasta cuándo se responde 429 sin mirar la contraseña.
+  blockedUntil    DateTime?
+
+  @@id([scope, keyHash])
+  @@index([lastFailureAt])
+  @@map("login_throttles")
+}

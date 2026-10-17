@@ -20,8 +20,7 @@ import {
 const LOW_LIMITS: RateLimitConfig = {
   global: { limit: 1000, ttlMs: 60_000 },
   auth: { limit: 8, ttlMs: 60_000 },
-  login: { limit: 3, ttlMs: 60_000 },
-  'login-account': { limit: 6, ttlMs: 60_000 },
+  'login-burst': { limit: 3, ttlMs: 60_000 },
   invitation: { limit: 2, ttlMs: 60_000 },
   password: { limit: 2, ttlMs: 60_000 },
   confirmation: { limit: 2, ttlMs: 60_000 },
@@ -93,34 +92,19 @@ describe('Rate limiting (e2e)', () => {
       await app.close();
     });
 
-    it('POST auth/login: bloquea por IP+email con 429 y Retry-After', async () => {
-      for (let i = 0; i < LOW_LIMITS.login.limit; i++) {
-        const res = await login(app, 'victim@sonrisa.com');
+    it('POST auth/login: login-burst corta la avalancha por IP con 429 y Retry-After', async () => {
+      // DX-048: solo frena avalanchas (cada intento paga argon2). La fuerza
+      // bruta por cuenta/IP la corta el bloqueo por FALLOS de la BD
+      // (test/login-lockout.e2e-spec.ts).
+      for (let i = 0; i < LOW_LIMITS['login-burst'].limit; i++) {
+        const res = await login(app, `burst${i}@sonrisa.com`);
         expect(res.status).toBe(401);
       }
       expectTooMany(await login(app, 'victim@sonrisa.com'));
-      // Mismo email con otra capitalización: mismo balde.
-      expectTooMany(await login(app, 'VICTIM@sonrisa.com'));
     });
 
     it('rotar X-Forwarded-For no evade el límite si no hay proxy de confianza', async () => {
       expectTooMany(await login(app, 'victim@sonrisa.com', '203.0.113.9'));
-    });
-
-    it('otro email desde la misma IP sigue pudiendo intentar (balde IP+email)', async () => {
-      const res = await login(app, 'other@sonrisa.com');
-      expect(res.status).toBe(401);
-    });
-
-    it('POST auth/login: el balde por IP corta el "spraying" de muchos emails', async () => {
-      // Los intentos previos (incluidos los rechazados con 429) ya consumieron
-      // casi todo el balde `auth` por IP: unos pocos emails nuevos lo agotan.
-      let last: request.Response | undefined;
-      for (let i = 0; i < LOW_LIMITS.auth.limit; i++) {
-        last = await login(app, `spray${i}@sonrisa.com`);
-        if (last.status === 429) break;
-      }
-      expectTooMany(last as request.Response);
     });
 
     it('POST auth/register: 429 tras el límite por IP', async () => {
@@ -282,9 +266,9 @@ describe('Rate limiting (e2e)', () => {
     });
 
     it('limita por la IP real del cliente (X-Forwarded-For), no por la del proxy', async () => {
-      for (let i = 0; i < LOW_LIMITS.login.limit; i++) {
+      for (let i = 0; i < LOW_LIMITS['login-burst'].limit; i++) {
         expect(
-          (await login(app, 'victim@sonrisa.com', '198.51.100.1')).status,
+          (await login(app, `victim${i}@sonrisa.com`, '198.51.100.1')).status,
         ).toBe(401);
       }
       expectTooMany(await login(app, 'victim@sonrisa.com', '198.51.100.1'));
@@ -292,16 +276,6 @@ describe('Rate limiting (e2e)', () => {
       expect(
         (await login(app, 'victim@sonrisa.com', '198.51.100.2')).status,
       ).toBe(401);
-    });
-
-    it('login-account: frena la fuerza bruta distribuida contra un email desde muchas IPs', async () => {
-      const email = 'distributed@sonrisa.com';
-      for (let i = 0; i < LOW_LIMITS['login-account'].limit; i++) {
-        expect((await login(app, email, `203.0.113.${i + 1}`)).status).toBe(
-          401,
-        );
-      }
-      expectTooMany(await login(app, email, '203.0.113.200'));
     });
 
     it('solo confía en el salto del proxy: un X-Forwarded-For prefijado por el cliente no cambia la clave', async () => {

@@ -1,6 +1,4 @@
 import {
-  loginAccountRateLimitKey,
-  loginRateLimitKey,
   passwordRateLimitKey,
   staffActorRateLimitKey,
 } from './rate-limit.keys';
@@ -13,61 +11,6 @@ const fakeJwt = (payload: object): string =>
     Buffer.from(JSON.stringify(payload)).toString('base64url'),
     'firma',
   ].join('.');
-
-describe('loginRateLimitKey', () => {
-  const prefix = 'AuthController-loginHandler-login';
-
-  it('separa el balde por email para la misma IP', () => {
-    const a = loginRateLimitKey(prefix, '1.2.3.4', { email: 'a@x.com' });
-    const b = loginRateLimitKey(prefix, '1.2.3.4', { email: 'b@x.com' });
-    expect(a).not.toBe(b);
-  });
-
-  it('separa el balde por IP para el mismo email', () => {
-    const a = loginRateLimitKey(prefix, '1.2.3.4', { email: 'a@x.com' });
-    const b = loginRateLimitKey(prefix, '5.6.7.8', { email: 'a@x.com' });
-    expect(a).not.toBe(b);
-  });
-
-  it('normaliza el email (mayúsculas y espacios no abren baldes nuevos)', () => {
-    const a = loginRateLimitKey(prefix, '1.2.3.4', { email: 'a@x.com' });
-    const b = loginRateLimitKey(prefix, '1.2.3.4', { email: '  A@X.COM ' });
-    expect(b).toBe(a);
-  });
-
-  it('sin email válido cae a un balde solo por IP, estable', () => {
-    const a = loginRateLimitKey(prefix, '1.2.3.4', { email: 42 });
-    const b = loginRateLimitKey(prefix, '1.2.3.4', undefined);
-    expect(a).toBe(b);
-    expect(a).not.toBe(
-      loginRateLimitKey(prefix, '1.2.3.4', { email: 'a@x.com' }),
-    );
-  });
-
-  it('no deja el email en claro en la clave', () => {
-    const key = loginRateLimitKey(prefix, '1.2.3.4', { email: 'a@x.com' });
-    expect(key).not.toContain('a@x.com');
-    expect(key).toMatch(/^[a-f0-9]{64}$/);
-  });
-});
-
-describe('loginAccountRateLimitKey', () => {
-  const prefix = 'AuthController-loginHandler-login-account';
-
-  it('depende solo del email normalizado, no de la IP', () => {
-    const a = loginAccountRateLimitKey(prefix, { email: 'a@x.com' });
-    expect(loginAccountRateLimitKey(prefix, { email: ' A@X.com' })).toBe(a);
-    expect(loginAccountRateLimitKey(prefix, { email: 'b@x.com' })).not.toBe(a);
-    expect(a).toMatch(/^[a-f0-9]{64}$/);
-    expect(a).not.toContain('a@x.com');
-  });
-
-  it('no coincide con la clave IP+email del mismo email', () => {
-    expect(loginAccountRateLimitKey(prefix, { email: 'a@x.com' })).not.toBe(
-      loginRateLimitKey(prefix, '', { email: 'a@x.com' }),
-    );
-  });
-});
 
 describe('passwordRateLimitKey', () => {
   const prefix = 'MeController-changePassword-password';

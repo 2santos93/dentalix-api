@@ -9,8 +9,7 @@ const HIGH_LIMIT = '100000';
 for (const policy of [
   'GLOBAL',
   'AUTH',
-  'LOGIN',
-  'LOGIN_ACCOUNT',
+  'LOGIN_BURST',
   'INVITATION',
   'PASSWORD',
   'CONFIRMATION',
@@ -20,6 +19,13 @@ for (const policy of [
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }
+
+// Bloqueo del login por fallos (DX-048): vive en la BD y sobrevive entre
+// suites y corridas; varias suites prueban credenciales malas a propósito.
+// El backoff y el balde por IP reales se prueban en
+// test/login-lockout.e2e-spec.ts sustituyendo LOGIN_LOCKOUT_CONFIG.
+process.env.LOGIN_LOCKOUT_FREE_FAILURES ??= HIGH_LIMIT;
+process.env.LOGIN_IP_FAILURE_LIMIT ??= HIGH_LIMIT;
 
 // CORS: los e2e asumen los defaults documentados (localhost:3001 + subdominios
 // de dentalix.local). Sin esto, un `.env` local (que ConfigModule también

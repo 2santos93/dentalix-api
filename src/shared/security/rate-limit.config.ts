@@ -4,18 +4,23 @@
  * `RATE_LIMIT_<POLÍTICA>_TTL_MS` (ventana en ms); ver `.env.example`.
  *
  * El límite se cuenta POR RUTA: las rutas que comparten política tienen cada
- * una su propio balde (p. ej. 20/min en login y otros 20/min en register).
+ * una su propio balde (p. ej. 20/min en register y otros 20/min en
+ * register/verify).
  *
  * - global:        cada ruta, por IP (salvo las sondas /health y
  *                  /health/ready, con @SkipThrottle en HealthController). Red
  *                  de seguridad contra abuso/scraping, holgada porque una
  *                  clínica entera suele salir por UNA IP (NAT).
- * - auth:          login y register; por IP (frena el "spraying").
+ * - auth:          register y su verificación; por IP.
  * - refresh:       renovar sesión; por IP. Holgado: la web renueva en cada
  *                  carga de página (DX-062) y una clínica sale por UNA IP; el
  *                  refresh es un JWT firmado, no hay nada que adivinar.
- * - login:         login, por IP+email (fuerza bruta contra una cuenta).
- * - login-account: login, solo por email (fuerza bruta distribuida).
+ * - login-burst:   login, por IP. Solo frena avalanchas (cada intento paga
+ *                  argon2): cuenta también los aciertos, así que es holgado
+ *                  para una clínica entera tras NAT. La fuerza bruta la corta
+ *                  el bloqueo por FALLOS de la BD (DX-048,
+ *                  `modules/auth/domain/login-lockout.ts`), que vale entre
+ *                  réplicas y no cuenta los logins correctos.
  * - invitation:    ver y aceptar invitación por token; por IP (enumeración).
  * - password:      cambio de contraseña, por IP+usuario (contraseña actual).
  * - confirmation:  ver y responder el enlace público de confirmación de cita
@@ -31,8 +36,7 @@
  */
 export type RateLimitPolicy =
   | 'auth'
-  | 'login'
-  | 'login-account'
+  | 'login-burst'
   | 'invitation'
   | 'password'
   | 'confirmation'
@@ -54,8 +58,7 @@ const MINUTE = 60_000;
 export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   global: { limit: 1000, ttlMs: MINUTE },
   auth: { limit: 20, ttlMs: MINUTE },
-  login: { limit: 5, ttlMs: 15 * MINUTE },
-  'login-account': { limit: 50, ttlMs: 60 * MINUTE },
+  'login-burst': { limit: 60, ttlMs: MINUTE },
   invitation: { limit: 10, ttlMs: MINUTE },
   password: { limit: 5, ttlMs: 15 * MINUTE },
   confirmation: { limit: 20, ttlMs: MINUTE },
@@ -89,8 +92,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
   return {
     global: rule('global'),
     auth: rule('auth'),
-    login: rule('login'),
-    'login-account': rule('login-account'),
+    'login-burst': rule('login-burst'),
     invitation: rule('invitation'),
     password: rule('password'),
     confirmation: rule('confirmation'),

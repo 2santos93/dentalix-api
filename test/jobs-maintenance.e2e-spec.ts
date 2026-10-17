@@ -149,8 +149,42 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
       })),
     });
 
+    // DX-048: contadores de login sin fallos en la última hora
+    // (LOGIN_LOCKOUT_RESET_MS) y sin espera vigente: fuera.
+    const throttle = (
+      kind: string,
+      lastFailureAt: Date,
+      blockedUntil: Date | null = null,
+    ) => ({
+      scope: 'ACCOUNT' as const,
+      keyHash: kind.repeat(64),
+      failures: 3,
+      windowStartedAt: lastFailureAt,
+      lastFailureAt,
+      blockedUntil,
+    });
+    await raw.loginThrottle.deleteMany({
+      where: { keyHash: { in: ['e', 'f', '9'].map((k) => k.repeat(64)) } },
+    });
+    await raw.loginThrottle.createMany({
+      data: [
+        throttle('e', ago(2 * 60 * 60_000)),
+        throttle('f', ago(60_000), new Date(Date.now() + 60_000)),
+        throttle('9', ago(10 * 60_000)),
+      ],
+    });
+
     await tick('auth.purge-expired-tokens.hourly');
 
+    expect(
+      (
+        await raw.loginThrottle.findMany({
+          where: { keyHash: { in: ['e', 'f', '9'].map((k) => k.repeat(64)) } },
+        })
+      )
+        .map((t) => t.keyHash[0])
+        .sort(),
+    ).toEqual(['9', 'f']);
     expect(
       (
         await raw.revokedToken.findMany({
