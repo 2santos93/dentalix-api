@@ -233,6 +233,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DENTIST: eso lo comprueba el caso de uso (403), no la ruta.
   'PATCH /treatment-plans/:id': CLINICAL,
   'POST /treatment-plans/:id/items': CLINICAL,
+  // DX-204: «Descuento %» en bloque; el tope por rol lo aplica el caso de uso.
+  'POST /treatment-plans/:id/items/bulk-discount': CLINICAL,
   'PATCH /treatment-plans/:id/items/:itemId': CLINICAL,
   'DELETE /treatment-plans/:id/items/:itemId': CLINICAL,
   // Presupuesto imprimible y aceptación firmada: loop/informes/DX-012.md.
@@ -302,6 +304,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
+  // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
+  // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
+  'GET /discount-policy': CLINICAL,
+  'PUT /discount-policy': ADMIN_ONLY,
+  'GET /reports/discounts': ADMIN_ONLY,
+  'GET /reports/discounts.csv': ADMIN_ONLY,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

@@ -1,5 +1,6 @@
 import {
   CatalogKind,
+  DiscountReason,
   ToothSurface,
   TreatmentPlanItemStatus,
   TreatmentPlanRejectionReason,
@@ -107,6 +108,21 @@ export interface AddTreatmentPlanItemRepoInput {
   /** Ya validado (0 ≤ discount ≤ price) por el caso de uso; 0 si se omite. */
   discount?: number;
   notes?: string;
+  /** DX-204: motivo, nota y autor del descuento (ya validados contra la política). */
+  discountReason?: DiscountReason | null;
+  discountReasonNote?: string | null;
+  discountStamp?: DiscountStamp | null;
+}
+
+/**
+ * Quién da el descuento y cuándo (DX-204). La sede la pone el repositorio: la
+ * del request (`X-Location-Id`) o, en la vista consolidada, la principal.
+ * `null` en un cambio = el ítem se queda sin descuento (autor, hora y sede a
+ * NULL).
+ */
+export interface DiscountStamp {
+  byId: string;
+  at: Date;
 }
 
 export interface UpdateTreatmentPlanItemRepoInput {
@@ -115,7 +131,29 @@ export interface UpdateTreatmentPlanItemRepoInput {
   status?: TreatmentPlanItemStatus;
   surfaces?: ToothSurface[];
   notes?: string | null;
+  discountReason?: DiscountReason | null;
+  discountReasonNote?: string | null;
+  /** Solo cuando el descuento cambia (DX-204); ver `DiscountStamp`. */
+  discountStamp?: DiscountStamp | null;
 }
+
+/** El descuento nuevo de un ítem en la acción en bloque (DX-204). */
+export interface BulkItemDiscount {
+  itemId: string;
+  discount: number;
+  discountReason: DiscountReason | null;
+  discountReasonNote: string | null;
+  discountStamp: DiscountStamp | null;
+}
+
+/**
+ * Decide los descuentos a partir de los ítems LEÍDOS Y BLOQUEADOS (FOR UPDATE)
+ * en la transacción: el precio con el que se calculan es el que se guarda. Si
+ * lanza, no se escribe nada.
+ */
+export type DecideBulkDiscount = (
+  items: TreatmentPlanItem[],
+) => BulkItemDiscount[];
 
 /**
  * Lo que el espejo DONE → odontograma (Pieza B) necesita y el ítem no guarda:
@@ -179,4 +217,16 @@ export interface TreatmentPlanRepository {
 
   /** Soft-delete: sets `deletedAt`. Never a hard delete. */
   softDeleteItem(id: string): Promise<void>;
+
+  /**
+   * Acción «Descuento %» (DX-204): en UNA transacción bloquea el plan (FOR
+   * SHARE) y los ítems pedidos (FOR UPDATE), deja que `decide` calcule cada
+   * descuento y los escribe. 404 si algún ítem no existe, está retirado o es de
+   * otro plan: todo o nada.
+   */
+  applyBulkDiscount(
+    planId: string,
+    itemIds: string[],
+    decide: DecideBulkDiscount,
+  ): Promise<TreatmentPlanItem[]>;
 }

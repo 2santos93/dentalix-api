@@ -621,6 +621,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ price: 1, notes: 'Hackeado' }),
       status: 404,
     },
+    // DX-204: «Descuento %» en bloque sobre un plan y un ítem de A.
+    {
+      name: 'POST /treatment-plans/:id/items/bulk-discount',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.planId}/items/bulk-discount`,
+      body: () => ({ itemIds: [a.planItemId], percent: 5 }),
+      status: 404,
+    },
     // DX-012: presupuesto y aceptación firmada de un plan de A.
     {
       name: 'GET /patients/:patientId/treatment-plans/:planId/quote',

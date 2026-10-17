@@ -27,6 +27,8 @@ import { PaymentReceiptsController } from '../payments/presentation/payment-rece
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
+import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
+import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
@@ -341,6 +343,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'itemId' },
     patient: { lookup: 'treatmentPlanItem', param: 'itemId' },
   },
+  // DX-204: «Descuento %» sobre varios ítems: un evento con los nombres de los
+  // campos, sin importes ni la nota del motivo.
+  'POST /treatment-plans/:id/items/bulk-discount': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN_ITEM',
+    patient: plan(),
+    reason: 'BULK_DISCOUNT',
+  },
   'GET /patients/:patientId/treatment-plans/:planId/quote': {
     action: 'PRINT',
     resource: 'TREATMENT_PLAN',
@@ -464,6 +474,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_AGING',
   },
+  // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
+  // de muchos pacientes, sin paciente en el evento) y su CSV.
+  'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },
+  'GET /reports/discounts': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN_ITEM',
+    reason: 'DISCOUNT_REPORT',
+  },
+  'GET /reports/discounts.csv': {
+    action: 'EXPORT',
+    resource: 'TREATMENT_PLAN_ITEM',
+    reason: 'DISCOUNT_REPORT',
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -563,6 +586,8 @@ const CONTROLLERS: Type[] = [
   PaymentPlansController,
   AccountStatementController,
   ReceivablesController,
+  DiscountPolicyController,
+  DiscountReportController,
   CollectionsController,
   ScheduleBlocksController,
   StaffController,

@@ -8,7 +8,9 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   AddTreatmentPlanItemRepoInput,
+  DecideBulkDiscount,
   DecidePlanChange,
+  DiscountStamp,
   DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
@@ -74,10 +76,40 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
     catalogItemId: item.catalogItemId,
     price: item.price.toNumber(),
     discount: item.discount.toNumber(),
+    discountReason: item.discountReason,
+    discountReasonNote: item.discountReasonNote,
+    discountById: item.discountById,
+    discountAt: item.discountAt,
+    discountLocationId: item.discountLocationId,
     status: item.status,
     notes: item.notes,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+  };
+}
+
+/**
+ * Columnas de autor, hora y sede del descuento (DX-204). `undefined` = no se
+ * tocan; `null` = el ítem se queda sin descuento.
+ */
+async function discountStampData(
+  tx: Prisma.TransactionClient,
+  stamp: DiscountStamp | null | undefined,
+  requestLocationId: string | undefined,
+): Promise<{
+  discountById?: string | null;
+  discountAt?: Date | null;
+  discountLocationId?: string | null;
+}> {
+  if (stamp === undefined) return {};
+  if (stamp === null) {
+    return { discountById: null, discountAt: null, discountLocationId: null };
+  }
+  return {
+    discountById: stamp.byId,
+    discountAt: stamp.at,
+    discountLocationId:
+      requestLocationId ?? (await resolveDefaultLocationId(tx)),
   };
 }
 
@@ -252,6 +284,13 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           price: input.price,
           discount: input.discount ?? 0,
           notes: input.notes,
+          discountReason: input.discountReason ?? null,
+          discountReasonNote: input.discountReasonNote ?? null,
+          ...(await discountStampData(
+            tx,
+            input.discountStamp ?? undefined,
+            this.tenantContext.getLocationId(),
+          )),
         },
       });
     });
@@ -287,9 +326,17 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Treatment plan item not found');
       }
 
+      const { discountStamp, ...fields } = patch;
       const item = await tx.treatmentPlanItem.update({
         where: { id },
-        data: patch,
+        data: {
+          ...fields,
+          ...(await discountStampData(
+            tx,
+            discountStamp,
+            this.tenantContext.getLocationId(),
+          )),
+        },
       });
 
       const becameDone =
@@ -317,6 +364,53 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         where: { id },
         data: { deletedAt: new Date() },
       });
+    });
+  }
+
+  async applyBulkDiscount(
+    planId: string,
+    itemIds: string[],
+    decide: DecideBulkDiscount,
+  ): Promise<TreatmentPlanItem[]> {
+    const ids = [...new Set(itemIds)];
+    return this.prisma.runWithTenant(async (tx) => {
+      await lockPlan(tx, planId);
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "treatment_plan_items"
+         WHERE "id" = ANY(${ids}::uuid[])
+           AND "planId" = ${planId}::uuid
+           AND "deletedAt" IS NULL
+         ORDER BY "id"
+           FOR UPDATE`;
+      if (locked.length !== ids.length) {
+        throw new NotFoundException(
+          'Algún ítem no existe o no es de este plan de tratamiento.',
+        );
+      }
+      const current = await tx.treatmentPlanItem.findMany({
+        where: { id: { in: ids } },
+        orderBy: { id: 'asc' },
+      });
+      const changes = decide(current.map(mapItemToEntity));
+      const requestLocationId = this.tenantContext.getLocationId();
+      const updated: TreatmentPlanItem[] = [];
+      for (const change of changes) {
+        const item = await tx.treatmentPlanItem.update({
+          where: { id: change.itemId },
+          data: {
+            discount: change.discount,
+            discountReason: change.discountReason,
+            discountReasonNote: change.discountReasonNote,
+            ...(await discountStampData(
+              tx,
+              change.discountStamp,
+              requestLocationId,
+            )),
+          },
+        });
+        updated.push(mapItemToEntity(item));
+      }
+      return updated;
     });
   }
 }

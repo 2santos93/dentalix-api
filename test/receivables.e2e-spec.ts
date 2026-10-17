@@ -619,7 +619,8 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     await send(
       'patch',
       `/treatment-plans/${plan.id}/items/${item2.id}`,
-      { discount: 20000 },
+      // DX-204: por encima del 10 % la API pide el motivo.
+      { discount: 20000, discountReason: 'LOYALTY' },
       200,
     );
     await send(

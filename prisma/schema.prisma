@@ -44,6 +44,8 @@ model Tenant {
   // DX-150: cobranza (notas y compromisos de pago).
   collectionNotes          CollectionNote[]
   paymentPromises          PaymentPromise[]
+  // DX-204: topes de descuento por rol (una fila; sin ella, los de por defecto).
+  discountPolicy           DiscountPolicy?
 
   @@map("tenants")
 }
@@ -83,6 +85,9 @@ model User {
   clinicalEntryAddenda     ClinicalEntryAddendum[]
   dentitionEventsRecorded  PatientDentitionEvent[]
   retentionActions         PatientRetentionAction[]
+  // DX-204: descuentos dados en ítems de plan y cambios de la política.
+  planItemDiscounts        TreatmentPlanItem[]       @relation("TreatmentPlanItemDiscountBy")
+  discountPoliciesUpdated  DiscountPolicy[]
 
   @@map("users")
 }
@@ -139,6 +144,8 @@ model Location {
   paymentReceipts    PaymentReceipt[]
   collectionNotes    CollectionNote[]
   paymentPromises    PaymentPromise[]
+  // DX-204: sede donde se dio el descuento de un ítem de plan.
+  planItemDiscounts  TreatmentPlanItem[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1056,14 +1063,71 @@ model TreatmentPlanItem {
   updatedAt     DateTime                @updatedAt
   deletedAt     DateTime?
 
-  plan TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
+  // DX-204: quién dio el descuento vigente, cuándo (hora del servidor), en qué
+  // sede (la del request o la principal) y por qué. NULL en los ítems sin
+  // descuento y en los anteriores a DX-204. CHECK
+  // treatment_plan_items_discount_reason_check: nota de 1..200, solo con
+  // motivo, obligatoria con OTHER.
+  discountReason     DiscountReason?
+  discountReasonNote String?
+  discountById       String?         @db.Uuid
+  discountAt         DateTime?
+  discountLocationId String?         @db.Uuid
+
+  plan             TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
+  discountBy       User?         @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
+  // FK COMPUESTA (SEC-004): la sede del descuento es de la MISMA clínica.
+  discountLocation Location?     @relation(fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
 
   @@index([tenantId, planId])
+  @@index([tenantId, discountLocationId])
+  @@index([discountById])
   // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:
   //   treatment_plan_items_tenant_plan_billable_idx ("tenantId", "planId")
   //     INCLUDE (price, discount, status)
   //     -> DX-145: facturable de todos los planes de la clínica (cartera).
+  // PARCIAL y de EXPRESIÓN, no declarable en Prisma:
+  //   treatment_plan_items_tenant_discounted_at_idx
+  //     ("tenantId", COALESCE("discountAt", "createdAt"))
+  //     WHERE "discount" > 0 AND "deletedAt" IS NULL
+  //     -> DX-204: informe de descuentos por periodo.
   @@map("treatment_plan_items")
+}
+
+// Motivo de un descuento por encima del umbral de la política (DX-204). OTHER
+// exige una nota.
+enum DiscountReason {
+  LOYALTY
+  FAMILY_OR_STAFF
+  PROMOTION
+  FINANCIAL_HARDSHIP
+  SERVICE_RECOVERY
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Política de descuentos de la clínica (DX-204): % máximo de descuento por ítem
+// según el rol de quien lo da y el % a partir del cual (estrictamente por
+// encima) el motivo es obligatorio. Una fila por clínica; sin ella, la API usa
+// los valores por defecto (los mismos que los DEFAULT de la tabla). Solo ADMIN
+// la cambia. RLS FORCE por tenant.
+// ---------------------------------------------------------------------------
+model DiscountPolicy {
+  tenantId                   String   @id @db.Uuid
+  adminMaxPercent            Int      @default(100)
+  dentistMaxPercent          Int      @default(10)
+  assistantMaxPercent        Int      @default(0)
+  receptionMaxPercent        Int      @default(0)
+  reasonRequiredAbovePercent Int      @default(10)
+  updatedById                String?  @db.Uuid
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  updatedBy User?  @relation(fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([updatedById])
+  @@map("discount_policies")
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,6 +1937,8 @@ enum AuditResourceType {
   // cambio de estado, también el que hace el barrido diario sin usuario).
   COLLECTION_NOTE
   PAYMENT_PROMISE
+  // DX-204: cambio de la política de descuentos (topes por rol y umbral).
+  DISCOUNT_POLICY
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

@@ -29,6 +29,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
 import { AccountStatementModule } from './modules/account-statement/account-statement.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
+import { DiscountsModule } from './modules/discounts/discounts.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { DataConsentsModule } from './modules/data-consents/data-consents.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
@@ -84,6 +85,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PaymentPlansModule,
     AccountStatementModule,
     ReceivablesModule,
+    DiscountsModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,
     DataConsentsModule,

@@ -1,3 +1,8 @@
+import {
+  ADMIN_ACTOR,
+  FIXED_CLOCK,
+  testDiscountPolicy,
+} from './__fixtures__/discount-fixtures';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   CatalogKind,
@@ -72,6 +77,11 @@ function fakeItem(
     catalogItemId: 'cat1',
     price: 200,
     discount: 0,
+    discountReason: null,
+    discountReasonNote: null,
+    discountById: null,
+    discountAt: null,
+    discountLocationId: null,
     status: TreatmentPlanItemStatus.PROPOSED,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -110,6 +120,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
+    applyBulkDiscount: (): Promise<TreatmentPlanItem[]> =>
+      Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
 }
@@ -138,10 +150,19 @@ describe('AddTreatmentPlanItemUseCase', () => {
         Promise.resolve(null),
     });
     const catalogRepo = makeCatalogRepo();
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
     await expect(
-      uc.execute('missing-plan', { toothNumber: '11', catalogItemId: 'cat1' }),
+      uc.execute(
+        'missing-plan',
+        { toothNumber: '11', catalogItemId: 'cat1' },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -150,10 +171,19 @@ describe('AddTreatmentPlanItemUseCase', () => {
     const catalogRepo = makeCatalogRepo({
       findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),
     });
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
     await expect(
-      uc.execute('plan1', { toothNumber: '11', catalogItemId: 'missing-cat' }),
+      uc.execute(
+        'plan1',
+        { toothNumber: '11', catalogItemId: 'missing-cat' },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -163,13 +193,22 @@ describe('AddTreatmentPlanItemUseCase', () => {
       findById: (): Promise<DentalCatalogItem | null> =>
         Promise.resolve(fakeCatalogItem({ defaultPrice: 200 })),
     });
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    const result = await uc.execute('plan1', {
-      toothNumber: '11',
-      catalogItemId: 'cat1',
-      price: 350,
-    });
+    const result = await uc.execute(
+      'plan1',
+      {
+        toothNumber: '11',
+        catalogItemId: 'cat1',
+        price: 350,
+      },
+      ADMIN_ACTOR,
+    );
 
     expect(result.price).toBe(350);
   });
@@ -188,12 +227,21 @@ describe('AddTreatmentPlanItemUseCase', () => {
       findById: (): Promise<DentalCatalogItem | null> =>
         Promise.resolve(fakeCatalogItem({ defaultPrice: 275 })),
     });
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    const result = await uc.execute('plan1', {
-      toothNumber: '11',
-      catalogItemId: 'cat1',
-    });
+    const result = await uc.execute(
+      'plan1',
+      {
+        toothNumber: '11',
+        catalogItemId: 'cat1',
+      },
+      ADMIN_ACTOR,
+    );
 
     expect(result.price).toBe(275);
     expect(captured?.price).toBe(275);
@@ -205,23 +253,41 @@ describe('AddTreatmentPlanItemUseCase', () => {
       findById: (): Promise<DentalCatalogItem | null> =>
         Promise.resolve(fakeCatalogItem({ defaultPrice: null })),
     });
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
     await expect(
-      uc.execute('plan1', { toothNumber: '11', catalogItemId: 'cat1' }),
+      uc.execute(
+        'plan1',
+        { toothNumber: '11', catalogItemId: 'cat1' },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('new item starts in PROPOSED status', async () => {
     const repo = makeRepo();
     const catalogRepo = makeCatalogRepo();
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    const result = await uc.execute('plan1', {
-      toothNumber: '11',
-      catalogItemId: 'cat1',
-      price: 100,
-    });
+    const result = await uc.execute(
+      'plan1',
+      {
+        toothNumber: '11',
+        catalogItemId: 'cat1',
+        price: 100,
+      },
+      ADMIN_ACTOR,
+    );
 
     expect(result.status).toBe(TreatmentPlanItemStatus.PROPOSED);
   });
@@ -237,15 +303,24 @@ describe('AddTreatmentPlanItemUseCase', () => {
       },
     });
     const catalogRepo = makeCatalogRepo();
-    const uc = new AddTreatmentPlanItemUseCase(repo, catalogRepo);
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogRepo,
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    await uc.execute('plan1', {
-      toothNumber: '26',
-      surfaces: [ToothSurface.OCCLUSAL, ToothSurface.MESIAL],
-      catalogItemId: 'cat1',
-      price: 100,
-      notes: 'Caries profunda',
-    });
+    await uc.execute(
+      'plan1',
+      {
+        toothNumber: '26',
+        surfaces: [ToothSurface.OCCLUSAL, ToothSurface.MESIAL],
+        catalogItemId: 'cat1',
+        price: 100,
+        notes: 'Caries profunda',
+      },
+      ADMIN_ACTOR,
+    );
 
     expect(captured?.surfaces).toEqual([
       ToothSurface.OCCLUSAL,

@@ -12,11 +12,12 @@ import {
   IsMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
+import { DiscountReasonFieldsDto } from './discount-reason.dto';
 
 // All fields optional (partial update: change price/status/surfaces/notes).
 // NO `tenantId`/`planId` field — same rationale as UpdateAppointmentDto.
 // `surfaces` reuses the odontogram's ToothSurface enum, not a new one.
-export class UpdateTreatmentPlanItemDto {
+export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @ApiPropertyOptional({
     description: 'At most 2 decimal places',
     maximum: MONEY_MAX,
@@ -29,7 +30,7 @@ export class UpdateTreatmentPlanItemDto {
 
   @ApiPropertyOptional({
     description:
-      'Descuento (máx. 2 decimales); nunca mayor que el precio (400). En un plan aceptado con firma: 409',
+      'Descuento (máx. 2 decimales); nunca mayor que el precio (400). DX-204: por encima del tope del rol de quien lo cambia, 403; en un plan aceptado (con o sin firma): 409',
     maximum: MONEY_MAX,
   })
   @IsOptional()

@@ -29,6 +29,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
+    applyBulkDiscount: (): Promise<TreatmentPlanItem[]> =>
+      Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
 }
@@ -69,6 +71,11 @@ describe('GetTreatmentPlanUseCase', () => {
           catalogItemId: 'cat1',
           price: 100,
           discount: 0,
+          discountReason: null,
+          discountReasonNote: null,
+          discountById: null,
+          discountAt: null,
+          discountLocationId: null,
           status: TreatmentPlanItemStatus.PROPOSED,
           notes: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -83,6 +90,11 @@ describe('GetTreatmentPlanUseCase', () => {
           catalogItemId: 'cat2',
           price: 50.5,
           discount: 0,
+          discountReason: null,
+          discountReasonNote: null,
+          discountById: null,
+          discountAt: null,
+          discountLocationId: null,
           status: TreatmentPlanItemStatus.PROPOSED,
           notes: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),

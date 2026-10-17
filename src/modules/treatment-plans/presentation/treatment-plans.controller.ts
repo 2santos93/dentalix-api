@@ -24,6 +24,7 @@ import {
   ApiOkResponse,
   ApiParam,
   ApiTags,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CreateTreatmentPlanDto } from './dto/create-treatment-plan.dto';
 import { UpdateTreatmentPlanDto } from './dto/update-treatment-plan.dto';
@@ -31,6 +32,7 @@ import { AddTreatmentPlanItemDto } from './dto/add-treatment-plan-item.dto';
 import { UpdateTreatmentPlanItemDto } from './dto/update-treatment-plan-item.dto';
 import { RejectTreatmentPlanDto } from './dto/reject-treatment-plan.dto';
 import { CreatePlanAlternativeDto } from './dto/create-plan-alternative.dto';
+import { ApplyBulkDiscountDto } from './dto/apply-bulk-discount.dto';
 import { TreatmentPlanDto } from './dto/treatment-plan.dto';
 import { TreatmentPlanItemDto } from './dto/treatment-plan-item.dto';
 import { CreateTreatmentPlanUseCase } from '../application/use-cases/create-treatment-plan.use-case';
@@ -43,6 +45,7 @@ import { RemoveTreatmentPlanItemUseCase } from '../application/use-cases/remove-
 import { PresentTreatmentPlanUseCase } from '../application/use-cases/present-treatment-plan.use-case';
 import { RejectTreatmentPlanUseCase } from '../application/use-cases/reject-treatment-plan.use-case';
 import { CreatePlanAlternativeUseCase } from '../application/use-cases/create-plan-alternative.use-case';
+import { ApplyBulkDiscountUseCase } from '../application/use-cases/apply-bulk-discount.use-case';
 import {
   TreatmentPlan,
   TreatmentPlanDetail,
@@ -67,6 +70,12 @@ const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
 /** DX-109: además de la firma, un plan cerrado congela sus ítems. */
 const ITEMS_LOCKED_CONFLICT = `${SIGNED_PLAN_CONFLICT}; o el plan está cancelado, rechazado o completado (DX-109)`;
+/** DX-204: un presupuesto aceptado (con o sin firma) no se vuelve a descontar. */
+const DISCOUNT_LOCKED_CONFLICT = `${ITEMS_LOCKED_CONFLICT}; o el descuento cambia en un plan ya aceptado (DX-204)`;
+const DISCOUNT_FORBIDDEN =
+  'DX-204: el descuento supera el tope del rol de quien lo da («Tu rol permite hasta un X % de descuento por ítem.»)';
+const DISCOUNT_UNPROCESSABLE =
+  'DX-204: por encima del umbral de la política falta el motivo, o «Otro» sin nota, o nota sin motivo';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -110,6 +119,7 @@ export class TreatmentPlansController {
     private readonly presentTreatmentPlan: PresentTreatmentPlanUseCase,
     private readonly rejectTreatmentPlan: RejectTreatmentPlanUseCase,
     private readonly createPlanAlternative: CreatePlanAlternativeUseCase,
+    private readonly applyBulkDiscount: ApplyBulkDiscountUseCase,
   ) {}
 
   @Audit({
@@ -309,19 +319,72 @@ export class TreatmentPlansController {
   })
   @Post('treatment-plans/:id/items')
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
-  @ApiConflictResponse({ description: ITEMS_LOCKED_CONFLICT })
+  @ApiForbiddenResponse({ description: DISCOUNT_FORBIDDEN })
+  @ApiConflictResponse({ description: DISCOUNT_LOCKED_CONFLICT })
+  @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
   addItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddTreatmentPlanItemDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlanItem> {
-    return this.addTreatmentPlanItem.execute(id, {
-      toothNumber: dto.toothNumber,
-      surfaces: dto.surfaces,
-      catalogItemId: dto.catalogItemId,
-      price: dto.price,
-      discount: dto.discount,
-      notes: dto.notes,
-    });
+    return this.addTreatmentPlanItem.execute(
+      id,
+      {
+        toothNumber: dto.toothNumber,
+        surfaces: dto.surfaces,
+        catalogItemId: dto.catalogItemId,
+        price: dto.price,
+        discount: dto.discount,
+        discountReason: dto.discountReason,
+        discountReasonNote: dto.discountReasonNote,
+        notes: dto.notes,
+      },
+      actorRole(req),
+    );
+  }
+
+  // Un solo evento por petición (DX-009): UPDATE de TREATMENT_PLAN_ITEM con
+  // `reason` BULK_DISCOUNT y los NOMBRES de los campos; ni importes ni la nota.
+  @Audit({
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN_ITEM',
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'BULK_DISCOUNT',
+  })
+  @Post('treatment-plans/:id/items/bulk-discount')
+  @HttpCode(200)
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description: 'Sede donde se da el descuento; sin ella, la principal',
+  })
+  @ApiOkResponse({
+    type: [TreatmentPlanItemDto],
+    description:
+      'Los ítems con su descuento nuevo: el % de su precio redondeado a la unidad de la moneda del plan (COP sin decimales, EUR a céntimos), nunca por encima del tope del rol ítem a ítem',
+  })
+  @ApiNotFoundResponse({
+    description: 'Plan, o algún ítem, inexistente o de otro plan: nada cambia',
+  })
+  @ApiForbiddenResponse({ description: DISCOUNT_FORBIDDEN })
+  @ApiConflictResponse({ description: DISCOUNT_LOCKED_CONFLICT })
+  @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
+  bulkDiscount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApplyBulkDiscountDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<TreatmentPlanItem[]> {
+    return this.applyBulkDiscount.execute(
+      id,
+      {
+        itemIds: dto.itemIds,
+        percent: dto.percent,
+        discountReason: dto.discountReason,
+        discountReasonNote: dto.discountReasonNote,
+      },
+      actorRole(req),
+    );
   }
 
   @Audit({
@@ -332,26 +395,31 @@ export class TreatmentPlansController {
   })
   @Patch('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ type: TreatmentPlanItemDto })
+  @ApiForbiddenResponse({ description: DISCOUNT_FORBIDDEN })
   @ApiConflictResponse({
-    description: `${ITEMS_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio`,
+    description: `${DISCOUNT_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio`,
   })
+  @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
   updateItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlanItem> {
-    // `performedById` (req.user.sub) stamps the odontogram record auto-created
-    // when this item is marked DONE (Pieza B) — never from the client body.
+    // El actor (token, nunca el body) firma el registro del odontograma que
+    // crea marcar el ítem DONE (Pieza B) y decide el tope del descuento
+    // (DX-204).
     return this.updateTreatmentPlanItem.execute(
       itemId,
       {
         price: dto.price,
         discount: dto.discount,
+        discountReason: dto.discountReason,
+        discountReasonNote: dto.discountReasonNote,
         status: dto.status,
         surfaces: dto.surfaces,
         notes: dto.notes,
       },
-      req.user.sub,
+      actorRole(req),
     );
   }
 

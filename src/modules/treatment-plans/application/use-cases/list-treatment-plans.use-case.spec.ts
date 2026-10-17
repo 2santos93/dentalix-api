@@ -44,6 +44,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
+    applyBulkDiscount: (): Promise<TreatmentPlanItem[]> =>
+      Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
 }
