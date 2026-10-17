@@ -10,7 +10,7 @@ import {
   JwtPayload,
   isTenantPayload,
 } from '../../../../shared/crypto/token.service';
-import { ROLES_KEY } from './roles.decorator';
+import { ROLES_DENIED_MESSAGE_KEY, ROLES_KEY } from './roles.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -29,7 +29,13 @@ export class RolesGuard implements CanActivate {
     // it can never satisfy a @Roles(...) requirement — the superadmin reaches
     // clinic routes with a real tenant token instead.
     if (!user || !isTenantPayload(user) || !required.includes(user.role)) {
-      throw new ForbiddenException('Insufficient role');
+      const message = this.reflector.getAllAndOverride<unknown>(
+        ROLES_DENIED_MESSAGE_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      throw new ForbiddenException(
+        typeof message === 'string' ? message : 'Insufficient role',
+      );
     }
     return true;
   }

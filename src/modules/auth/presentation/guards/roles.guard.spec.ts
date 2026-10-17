@@ -2,6 +2,7 @@ import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClinicRole } from '@prisma/client';
 import { RolesGuard } from './roles.guard';
+import { ROLES_DENIED_MESSAGE_KEY } from './roles.decorator';
 
 function makeCtx(
   role: ClinicRole,
@@ -39,5 +40,20 @@ describe('RolesGuard', () => {
     ]);
     const guard = new RolesGuard(reflector);
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+  });
+
+  it('usa el mensaje de rechazo de la ruta si lo declara (en español)', () => {
+    const reflector = new Reflector();
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockImplementation((key: unknown) =>
+        key === ROLES_DENIED_MESSAGE_KEY
+          ? 'Solo administración configura esto.'
+          : [ClinicRole.ADMIN],
+      );
+    const ctx = makeCtx(ClinicRole.RECEPTION).ctx;
+    expect(() => new RolesGuard(reflector).canActivate(ctx)).toThrow(
+      new ForbiddenException('Solo administración configura esto.'),
+    );
   });
 });
