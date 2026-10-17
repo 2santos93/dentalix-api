@@ -202,6 +202,7 @@ jobs:
         run: npx jest --config ./test/jest-int.json --runInBand test/rls-catalog.int-spec.ts
 
       # Migraciones de datos con filas previas, despachador de email, FK con
-      # filas huérfanas ocultas, create-app-role.sql sin contraseña y dos
-      # owners en el mismo clúster (DX-134).
+      # filas huérfanas ocultas, create-app-role.sql sin contraseña, dos
+      # owners en el mismo clúster (DX-134) y membresías en otras clínicas
+      # vistas por la app (DX-143).
       - run: npm run test:owner-nosu

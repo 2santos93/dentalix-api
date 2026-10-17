@@ -33,6 +33,8 @@ async function cleanup(): Promise<void> {
     'dx029-nueva',
     'dx029-existente',
     'dx029-squat',
+    'dx143-otra',
+    'dx143-invita',
   ];
   await raw.clinicInvitation.deleteMany({
     where: { tenant: { subdomain: { in: subs } } },
@@ -259,9 +261,102 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       expect(b.body).toEqual(a.body);
     });
 
-    it('cuenta sin verificar (pre-secuestro): el enlace del correo la reclama, invalida sesiones previas y audita', async () => {
+    it('DX-143: cuenta sin verificar con membresía ACTIVA en otra clínica: aceptar con otra contraseña da 401 y no cambia nada', async () => {
+      // Cuenta anterior a DX-029, sin verificar, que ya trabaja en otra
+      // clínica. Quien abre el enlace no puede cambiarle la contraseña: con
+      // ella se llevaría esa otra clínica (SEC-033).
+      const email = `multi${DOMAIN}`;
+      await registerVerified(app, {
+        clinicName: 'Clínica Otra',
+        subdomain: 'dx143-otra',
+        email,
+        password: 'Clave-De-Siempre-1!',
+        fullName: 'Dra. Multi',
+      });
+      await raw.user.update({
+        where: { email },
+        data: { emailVerifiedAt: null },
+      });
+      const before = await raw.user.findUniqueOrThrow({ where: { email } });
+      const session = await login(
+        'dx143-otra',
+        email,
+        'Clave-De-Siempre-1!',
+      ).expect(201);
+      const refresh = (session.body as { refreshToken: string }).refreshToken;
+
+      // La invita una clínica distinta (la de SUB_A ya agotó su cupo diario
+      // de invitaciones en este spec).
+      await registerVerified(app, {
+        clinicName: 'Clínica Que Invita',
+        subdomain: 'dx143-invita',
+        email: `owner-invita${DOMAIN}`,
+        password: PASSWORD,
+        fullName: 'Dr. Invita',
+      });
+      const inviter = (
+        (
+          await login('dx143-invita', `owner-invita${DOMAIN}`, PASSWORD).expect(
+            201,
+          )
+        ).body as { accessToken: string }
+      ).accessToken;
+      mailer.clear();
+      await invite('dx143-invita', inviter, email).expect(201);
+      const token = await mailer.invitationToken(email);
+      // La pantalla pide la contraseña actual, no una nueva.
+      const view = await http()
+        .get(`/api/v1/public/invitations/${token}`)
+        .set('X-Tenant-Host', hostFor('dx143-invita'))
+        .expect(200);
+      expect(view.body).toMatchObject({ requiresCurrentPassword: true });
+      const res = await http()
+        .post(`/api/v1/public/invitations/${token}/accept`)
+        .set('X-Tenant-Host', hostFor('dx143-invita'))
+        .send({ password: 'Clave-Del-Que-Abre-1!' })
+        .expect(401);
+      expect((res.body as { message: string }).message).toMatch(
+        /acceso a otra clínica.*«¿Olvidaste tu contraseña\?»/,
+      );
+
+      const after = await raw.user.findUniqueOrThrow({ where: { email } });
+      expect({
+        passwordHash: after.passwordHash,
+        tokenVersion: after.tokenVersion,
+        emailVerifiedAt: after.emailVerifiedAt,
+      }).toEqual({
+        passwordHash: before.passwordHash,
+        tokenVersion: before.tokenVersion,
+        emailVerifiedAt: null,
+      });
+      // Ni membresía nueva ni invitación consumida; su sesión sigue viva.
+      expect(
+        await raw.clinicMembership.count({
+          where: { userId: after.id, tenant: { subdomain: 'dx143-invita' } },
+        }),
+      ).toBe(0);
+      expect(
+        await raw.clinicInvitation.count({
+          where: { email, acceptedAt: { not: null } },
+        }),
+      ).toBe(0);
+      await http()
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: refresh })
+        .expect(201);
+      // Con SU contraseña sí se une (no es un reclamo).
+      await http()
+        .post(`/api/v1/public/invitations/${token}/accept`)
+        .set('X-Tenant-Host', hostFor('dx143-invita'))
+        .send({ password: 'Clave-De-Siempre-1!' })
+        .expect(201);
+    });
+
+    it('cuenta sin verificar (pre-secuestro) SIN membresías activas: el enlace del correo la reclama, invalida sesiones previas y audita', async () => {
       // El «atacante» creó la cuenta de la doctora sin controlar su email
       // (como permitía el sistema antes de DX-029) y tiene sesión abierta.
+      // Su membresía ya no está activa: la cuenta no da acceso a ninguna
+      // otra clínica, así que se puede reclamar (DX-143).
       const victim = `dra.victima${DOMAIN}`;
       await registerVerified(app, {
         clinicName: 'Clínica Atacante',
@@ -281,6 +376,13 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       ).expect(201);
       const attackerRefresh = (attackerSession.body as { refreshToken: string })
         .refreshToken;
+      await raw.clinicMembership.updateMany({
+        where: {
+          user: { email: victim },
+          tenant: { subdomain: 'dx029-squat' },
+        },
+        data: { deletedAt: new Date() },
+      });
 
       // Una clínica legítima la invita: el enlace llega a SU buzón.
       mailer.clear();

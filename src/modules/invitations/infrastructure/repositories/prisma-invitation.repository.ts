@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ClinicRole,
+  Prisma,
   ClinicInvitation as PrismaClinicInvitation,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -10,6 +11,7 @@ import {
   AcceptOutcome,
   GlobalUserRecord,
   AcceptUserResolution,
+  AccountClaimBlockedError,
   AccountClaimConflictError,
 } from '../../domain/ports/invitation-repository.port';
 import { ClinicInvitation } from '../../domain/entities/clinic-invitation.entity';
@@ -27,6 +29,21 @@ function mapToEntity(row: PrismaClinicInvitation): ClinicInvitation {
     invitedById: row.invitedById,
     createdAt: row.createdAt,
   };
+}
+
+/**
+ * DX-143 (SEC-033): `clinic_memberships` está bajo RLS por clínica; la
+ * función SECURITY DEFINER (migración 20261017231000) mira todas y devuelve
+ * solo si hay alguna activa fuera de `tenantId`.
+ */
+async function otherActiveMemberships(
+  db: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  userId: string,
+  tenantId: string,
+): Promise<boolean> {
+  const [row] = await db.$queryRaw<{ other: boolean }[]>`
+    SELECT public.dx_user_has_other_active_memberships(${userId}::uuid, ${tenantId}::uuid) AS other`;
+  return row?.other === true;
 }
 
 @Injectable()
@@ -101,8 +118,13 @@ export class PrismaInvitationRepository implements InvitationRepository {
         passwordHash: true,
         tokenVersion: true,
         emailVerifiedAt: true,
+        isPlatformAdmin: true,
       },
     });
+  }
+
+  async hasOtherActiveMemberships(userId: string): Promise<boolean> {
+    return otherActiveMemberships(this.prisma, userId, this.requireTenantId());
   }
 
   async countCreatedSince(since: Date): Promise<number> {
@@ -234,6 +256,24 @@ export class PrismaInvitationRepository implements InvitationRepository {
         userId = user.id;
         tokenVersion = user.tokenVersion;
       } else if ('claim' in resolution) {
+        // DX-143: con la fila del usuario BLOQUEADA (una aceptación en otra
+        // clínica también la escribe y espera), se repite la comprobación
+        // del caso de uso: sigue sin verificar y no da acceso a otra clínica
+        // ni a la plataforma.
+        const [locked] = await tx.$queryRaw<
+          { emailVerifiedAt: Date | null; isPlatformAdmin: boolean }[]
+        >`SELECT "emailVerifiedAt", "isPlatformAdmin" FROM "users"
+           WHERE "id" = ${resolution.claim.userId}::uuid AND "deletedAt" IS NULL
+           FOR UPDATE`;
+        if (!locked || locked.emailVerifiedAt !== null) {
+          throw new AccountClaimConflictError();
+        }
+        if (
+          locked.isPlatformAdmin ||
+          (await otherActiveMemberships(tx, resolution.claim.userId, tenantId))
+        ) {
+          throw new AccountClaimBlockedError();
+        }
         // Reclamar: solo si SIGUE sin verificar (check-and-set frente a una
         // verificación concurrente).
         const claimed = await tx.user.updateMany({
@@ -241,6 +281,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
             id: resolution.claim.userId,
             deletedAt: null,
             emailVerifiedAt: null,
+            isPlatformAdmin: false,
           },
           data: {
             passwordHash: resolution.claim.passwordHash,

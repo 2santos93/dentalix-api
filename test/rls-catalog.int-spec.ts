@@ -83,6 +83,16 @@ const POLICY_EXEMPT: Record<
     roles: ['dentalix_email_dispatcher'],
     reason: 'despachador de email de todas las clínicas (DX-088, DX-113)',
   },
+  // DX-143 (SEC-033): solo SELECT y solo para el rol NOLOGIN dueño de
+  // dx_user_has_other_active_memberships, que devuelve un booleano (¿tiene el
+  // usuario membresías activas en otra clínica?) para no dejar reclamar una
+  // cuenta con acceso a otra clínica. dentalix_app no la recibe
+  // (account-claim-memberships.int-spec.ts).
+  'clinic_memberships.membership_lookup_definer': {
+    cmd: 'SELECT',
+    roles: ['dentalix_membership_lookup'],
+    reason: 'reclamo de cuenta acotado a cuentas sin otras clínicas (DX-143)',
+  },
 };
 
 /** La forma exacta que generan las migraciones (ver p. ej. la de patients). */

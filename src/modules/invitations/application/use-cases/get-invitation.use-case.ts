@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.port';
-import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
+import type {
+  GlobalUserRecord,
+  InvitationRepository,
+} from '../../domain/ports/invitation-repository.port';
 import { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
 import {
   hashInvitationToken,
@@ -16,12 +19,13 @@ export interface GetInvitationResult {
   role?: ClinicRole;
   maskedEmail?: string;
   /**
-   * `true` solo si el email ya tiene una cuenta VERIFICADA: la pantalla pide
-   * su contraseña actual. Si no (sin cuenta, o cuenta sin verificar que se
-   * puede reclamar), pide crear una. Revelarlo aquí es seguro porque el token
-   * solo llega por email a la persona invitada (DX-029): el ADMIN que invita
-   * ya no lo recibe, así que no sirve para averiguar si un email arbitrario
-   * tiene cuenta.
+   * `true` si el email ya tiene una cuenta VERIFICADA, o una sin verificar
+   * que no se puede reclamar porque da acceso a otra clínica o a la
+   * plataforma (DX-143): la pantalla pide su contraseña actual. Si no (sin
+   * cuenta, o cuenta sin verificar que se puede reclamar), pide crear una.
+   * Revelarlo aquí es seguro porque el token solo llega por email a la
+   * persona invitada (DX-029): el ADMIN que invita ya no lo recibe, así que
+   * no sirve para averiguar si un email arbitrario tiene cuenta.
    */
   requiresCurrentPassword?: boolean;
 }
@@ -78,7 +82,15 @@ export class GetInvitationUseCase {
       ...(clinicName !== null ? { clinicName } : {}),
       role: invitation.role,
       maskedEmail: maskEmail(invitation.email),
-      requiresCurrentPassword: Boolean(existingUser?.emailVerifiedAt),
+      requiresCurrentPassword: await this.requiresCurrentPassword(existingUser),
     };
+  }
+
+  private async requiresCurrentPassword(
+    user: GlobalUserRecord | null,
+  ): Promise<boolean> {
+    if (!user) return false;
+    if (user.emailVerifiedAt || user.isPlatformAdmin) return true;
+    return this.repo.hasOtherActiveMemberships(user.id);
   }
 }

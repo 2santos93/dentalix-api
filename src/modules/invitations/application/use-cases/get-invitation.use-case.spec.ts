@@ -146,6 +146,38 @@ describe('GetInvitationUseCase', () => {
     expect(result.requiresCurrentPassword).toBe(false);
   });
 
+  it('DX-143: cuenta SIN verificar con membresía activa en OTRA clínica -> requiresCurrentPassword true (no se puede reclamar)', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const user = repo.seedUser({
+      email: 'ana@clinic.com',
+      emailVerifiedAt: null,
+    });
+    repo.seedMembership({ userId: user.id, tenantId: 't-otra' });
+    repo.seedInvitation({ token: 'valid-token', email: 'ana@clinic.com' });
+    const ctx = new TenantContextService();
+    const uc = new GetInvitationUseCase(ctx, repo);
+
+    const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
+
+    expect(result.requiresCurrentPassword).toBe(true);
+  });
+
+  it('DX-143: administrador de plataforma SIN verificar -> requiresCurrentPassword true', async () => {
+    const repo = new InMemoryInvitationRepository();
+    repo.seedUser({
+      email: 'ana@clinic.com',
+      emailVerifiedAt: null,
+      isPlatformAdmin: true,
+    });
+    repo.seedInvitation({ token: 'valid-token', email: 'ana@clinic.com' });
+    const ctx = new TenantContextService();
+    const uc = new GetInvitationUseCase(ctx, repo);
+
+    const result = await withTenant(ctx, 't1', () => uc.execute('valid-token'));
+
+    expect(result.requiresCurrentPassword).toBe(true);
+  });
+
   it('invitación válida pero el tenant fue borrado (findTenantName -> null) -> clinicName ausente, no rompe', async () => {
     const repo = new InMemoryInvitationRepository();
     repo.tenantName = null;

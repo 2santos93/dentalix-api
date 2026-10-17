@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import {
+  AccountClaimBlockedError,
   AccountClaimConflictError,
   INVITATION_REPOSITORY,
 } from '../../domain/ports/invitation-repository.port';
@@ -31,6 +32,15 @@ const GONE_MESSAGE: Record<Exclude<InvitationStatus, 'VALID'>, string> = {
   USED: 'Esta invitación ya se usó.',
   REVOKED: 'La clínica revocó esta invitación.',
 };
+
+/**
+ * DX-143 (SEC-033): la cuenta sin verificar ya da acceso a otra clínica, así
+ * que el enlace de una invitación no basta para cambiarle la contraseña. Quien
+ * abre el enlace controla el buzón, así que puede saberlo: entra con su
+ * contraseña o la restablece desde la clínica donde ya trabaja.
+ */
+export const ACCOUNT_CLAIM_BLOCKED_MESSAGE =
+  'Este correo ya tiene una cuenta de Dentalix con acceso a otra clínica. Escribe la contraseña de esa cuenta o, si no la recuerdas, recupérala desde «¿Olvidaste tu contraseña?» en esa clínica y vuelve a abrir esta invitación.';
 
 /** Motivo del evento de auditoría al reclamar una cuenta no verificada. */
 export const ACCOUNT_CLAIM_AUDIT_REASON = 'INVITATION_ACCOUNT_CLAIM';
@@ -117,7 +127,10 @@ export class AcceptInvitationUseCase {
     // - cuenta SIN verificar (pudo crearla alguien sin acceso al email) → si
     //   trae su contraseña actual se une y queda verificada; si trae otra, la
     //   RECLAMA: contraseña nueva, sesiones y enlaces previos invalidados y
-    //   evento de auditoría.
+    //   evento de auditoría. NUNCA si la cuenta ya da acceso a otra clínica o
+    //   a la plataforma (DX-143, SEC-033): el reclamo le daría al dueño del
+    //   enlace esas otras clínicas. Se comprueba aquí y otra vez dentro de
+    //   la transacción.
     let resolution: AcceptUserResolution;
     if (existingUser) {
       const passwordMatches = await this.password.verify(
@@ -131,6 +144,13 @@ export class AcceptInvitationUseCase {
           'La contraseña no es correcta. Usa la de tu cuenta de Dentalix o recupérala desde «¿Olvidaste tu contraseña?».',
         );
       } else {
+        if (
+          existingUser.isPlatformAdmin ||
+          (await this.repo.hasOtherActiveMemberships(existingUser.id))
+        ) {
+          this.logClaimBlocked(tenantId, existingUser.id, invitation.id);
+          throw new UnauthorizedException(ACCOUNT_CLAIM_BLOCKED_MESSAGE);
+        }
         assertNewPassword(input.password);
         resolution = {
           claim: {
@@ -165,6 +185,10 @@ export class AcceptInvitationUseCase {
           'Tu cuenta cambió mientras aceptabas. Vuelve a abrir el enlace e inténtalo de nuevo.',
         );
       }
+      if (err instanceof AccountClaimBlockedError && 'claim' in resolution) {
+        this.logClaimBlocked(tenantId, resolution.claim.userId, invitation.id);
+        throw new UnauthorizedException(ACCOUNT_CLAIM_BLOCKED_MESSAGE);
+      }
       throw err;
     }
     const { userId, tokenVersion } = outcome;
@@ -198,6 +222,20 @@ export class AcceptInvitationUseCase {
       tenantId,
       role: invitation.role,
       tv: tokenVersion,
+    });
+  }
+
+  /** Sin email ni token: solo ids (DX-143). */
+  private logClaimBlocked(
+    tenantId: string,
+    userId: string,
+    invitationId: string,
+  ): void {
+    this.logger.warn({
+      event: 'invitation.account_claim_blocked',
+      tenantId,
+      userId,
+      invitationId,
     });
   }
 }
