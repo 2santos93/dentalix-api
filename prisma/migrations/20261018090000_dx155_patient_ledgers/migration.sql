@@ -103,17 +103,6 @@ CREATE INDEX "patient_ledgers_owing_idx"
   ON "patient_ledgers" ("tenantId", "locationId")
   WHERE "owing";
 
--- Último abono vivo de un paciente (sede de la deuda de quien no tiene citas
--- atendidas), en el orden exacto del LATERAL de patient_ledgers_compute. Sin él,
--- con estadísticas viejas (una carga masiva en la misma transacción) el
--- planificador recorría payments por ("tenantId", "paidAt") hacia atrás
--- filtrando el paciente: una pasada por toda la clínica para CADA paciente.
--- Parcial y sin CONCURRENTLY: la migración ya tiene payments en exclusiva
--- (NO FORCE, abajo) y el índice es pequeño.
-CREATE INDEX "payments_tenant_patient_paid_live_idx"
-  ON "payments" ("tenantId", "patientId", "paidAt" DESC, "id" DESC)
-  WHERE "deletedAt" IS NULL;
-
 -- FK COMPUESTAS por tenant (SEC-004). La hija se crea vacía en esta misma
 -- migración, así que la validación no lee filas.
 --   Paciente del MISMO tenant. CASCADE: el resumen es del paciente; si se

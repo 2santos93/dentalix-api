@@ -1157,9 +1157,6 @@ model Payment {
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   @@index([tenantId, treatmentPlanId])
-  // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma (DX-155):
-  //   payments_tenant_patient_paid_live_idx ("tenantId", "patientId",
-  //     "paidAt" DESC, id DESC) -> último abono vivo de un paciente.
   @@index([tenantId, patientId])
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
   // declara para que migrate diff no lo vea como drift. Indexa además el lado
