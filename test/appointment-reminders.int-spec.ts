@@ -550,6 +550,38 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
           },
         }),
       ).rejects.toThrow(/audit_events_actor_check/);
+
+      // Ni siquiera con el motivo de la baja si no la hizo el propio paciente
+      // (origen LINK o MESSAGE, sobre su propia ficha y sin rol).
+      const patientId = await patient(clinicA, 'ana@example.com');
+      const optOut = {
+        tenantId: clinicA.tenantId,
+        action: 'UPDATE' as const,
+        resourceType: 'PATIENT' as const,
+        resourceId: patientId,
+        patientId,
+        metadata: { reason: 'REMINDER_OPT_OUT', origin: 'LINK' },
+      };
+      for (const data of [
+        {
+          ...optOut,
+          metadata: { reason: 'REMINDER_OPT_OUT', origin: 'STAFF' },
+        },
+        { ...optOut, metadata: { reason: 'REMINDER_OPT_OUT' } },
+        { ...optOut, metadata: { origin: 'LINK' } },
+        { ...optOut, metadata: {} },
+        { ...optOut, resourceId: null },
+        { ...optOut, patientId: null },
+        { ...optOut, resourceId: randomUUID() },
+        { ...optOut, actorRole: 'ADMIN' as const },
+      ]) {
+        await expect(owner.auditEvent.create({ data })).rejects.toThrow(
+          /audit_events_actor_check/,
+        );
+      }
+      await expect(
+        owner.auditEvent.create({ data: optOut }),
+      ).resolves.toMatchObject({ actorUserId: null });
     });
 
     it('enlaces de baja: RLS forzada y FK compuesta al paciente de la misma clínica', async () => {

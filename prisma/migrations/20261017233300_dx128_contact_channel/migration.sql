@@ -25,9 +25,14 @@
 --
 -- Compatible hacia atrás: solo AÑADE columnas con DEFAULT constante (sin
 -- reescribir la tabla en PG ≥ 11), una tabla vacía, valores de enum y un
--- CHECK de auditoría MÁS PERMISIVO que el anterior (NOT VALID + VALIDATE: no
--- bloquea las escrituras mientras se comprueba). El código anterior no lee ni
--- escribe las columnas nuevas y sus INSERT toman los DEFAULT.
+-- CHECK de auditoría MÁS PERMISIVO que el anterior. El código anterior no lee
+-- ni escribe las columnas nuevas y sus INSERT toman los DEFAULT.
+--
+-- Bloqueo: el DROP CONSTRAINT toma ACCESS EXCLUSIVE sobre audit_events y sus
+-- particiones hasta el COMMIT, y el VALIDATE recorre todas las particiones:
+-- mientras dure, las escrituras auditadas esperan. Es un recorrido secuencial
+-- sin reescritura (segundos con millones de filas); lock_timeout evita quedar
+-- encolado detrás de una transacción larga.
 --
 -- row_security = off: con RLS FORCE el owner sin BYPASSRLS vería 0 pacientes
 -- y el backfill no haría nada en silencio (ver 20261016130000_domain_checks).
@@ -132,16 +137,23 @@ CREATE POLICY tenant_isolation ON "reminder_opt_out_links"
 
 -- ---------------------------------------------------------------------------
 -- Auditoría: la baja que hace el propio paciente no tiene usuario de la
--- clínica. Solo esa escritura concreta (UPDATE de PATIENT con el motivo
--- REMINDER_OPT_OUT) puede ir sin actor, además del login fallido.
+-- clínica. Solo esa escritura concreta puede ir sin actor, además del login
+-- fallido: UPDATE de PATIENT sobre su PROPIA ficha (resourceId = patientId),
+-- sin rol, con el motivo REMINDER_OPT_OUT y el origen del paciente (enlace o
+-- mensaje). Una baja anotada por recepción (STAFF) lleva su usuario.
 -- ---------------------------------------------------------------------------
 ALTER TABLE "audit_events" DROP CONSTRAINT "audit_events_actor_check";
 ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
   CHECK (
     "actorUserId" IS NOT NULL
     OR "action" = 'LOGIN_FAILED'
+    -- IS TRUE: un CHECK que da NULL PASA; sin «reason» u «origin» en el
+    -- JSON (o sin resourceId) la comparación sería NULL y admitiría el evento.
     OR ("action" = 'UPDATE'
         AND "resourceType" = 'PATIENT'
-        AND "metadata" ->> 'reason' = 'REMINDER_OPT_OUT')
+        AND "actorRole" IS NULL
+        AND "resourceId" = "patientId"
+        AND "metadata" ->> 'reason' = 'REMINDER_OPT_OUT'
+        AND "metadata" ->> 'origin' IN ('LINK', 'MESSAGE')) IS TRUE
   ) NOT VALID;
 ALTER TABLE "audit_events" VALIDATE CONSTRAINT "audit_events_actor_check";
