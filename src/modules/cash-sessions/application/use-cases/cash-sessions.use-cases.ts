@@ -12,7 +12,7 @@ import {
   civilDaysInclusive,
   parseCivilDate,
 } from '../../../../shared/time/civil-day';
-import { arqueo, centsOf } from '../../domain/arqueo';
+import { arqueo, centsOf, fromCents } from '../../domain/arqueo';
 import {
   CASH_MAX_AMOUNT,
   CASH_MAX_CURRENCIES,
@@ -69,12 +69,17 @@ const unknownCurrencies = (codes: string[]) =>
 const trimmed = (value?: string | null): string | null =>
   value?.trim() ? value.trim() : null;
 
-/** Céntimos exactos de un importe que ya pasó la validación del DTO. */
+/**
+ * Céntimos exactos de un importe que ya pasó la validación del DTO. Tiene 2
+ * decimales como mucho si `céntimos / 100` vuelve al MISMO número: comparar
+ * `amount * 100` con un entero falla por el error del coma flotante en
+ * importes grandes (555555555.55 × 100 = 55555555554.999…).
+ */
 function exactCents(amount: number): number {
   const cents = centsOf(amount);
   if (
     !Number.isFinite(amount) ||
-    Math.abs(amount * 100 - cents) > 1e-6 ||
+    fromCents(cents) !== amount ||
     Math.abs(amount) > CASH_MAX_AMOUNT
   ) {
     throw new BadRequestException(AMOUNT_PRECISION_MESSAGE);

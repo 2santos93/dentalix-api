@@ -175,6 +175,20 @@ describe('OpenCashSessionUseCase (DX-027)', () => {
     });
   });
 
+  it('importes grandes con 2 decimales exactos no son 400 (el error del coma flotante no cuenta como decimal)', async () => {
+    const { repo, open } = build();
+    // 555.555.555,55 × 100 = 55.555.555.554,999… en coma flotante.
+    await open.execute(
+      { floats: [{ currency: 'COP', amount: 555_555_555.55 }] },
+      RECEPTION,
+    );
+    expect(repo.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        floats: [{ currency: 'COP', cents: 55_555_555_555 }],
+      }),
+    );
+  });
+
   it('otra caja abierta del mismo usuario en la sede: 409', async () => {
     const { repo, open } = build();
     repo.open.mockResolvedValue('ALREADY_OPEN');
