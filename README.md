@@ -559,7 +559,8 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
 - **Envío** (handler, bajo el tenant del trabajo y RLS; nunca se fía del
   payload, SEC-036): relee cita, paciente y ajustes y **omite con motivo**
   (`NO_EMAIL`, `CANCELLED`, `COMPLETED`, `NO_SHOW`, `RESCHEDULED`, `DELETED`,
-  `DISABLED`, `TOO_LATE`) o reclama la fila única por (cita, antelación, hora
+  `DISABLED`, `TOO_LATE`: la cita ya empezó o el trabajo corre más de 1 h
+  después de la hora del recordatorio, p. ej. tras un worker caído) o reclama la fila única por (cita, antelación, hora
   de inicio) de `appointment_reminders`, emite el enlace de DX-005 (sin
   borrar un «pide llamada»), registra el mensaje en `outbound_messages` y deja
   el email `appointment-reminder` en `email_outbox` con `referenceId` = id del

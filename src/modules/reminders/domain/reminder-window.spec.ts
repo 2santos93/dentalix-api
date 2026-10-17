@@ -131,6 +131,25 @@ describe('decideReminder (DX-026)', () => {
     });
   });
 
+  it('omite uno atrasado más allá del margen (worker caído): no llega a deshora', () => {
+    // El de 48 h de una cita dentro de 2 h: su hora pasó hace 46 h.
+    expect(decideReminder({ ...base, leadHours: 48 })).toEqual({
+      action: 'SKIP',
+      reason: 'TOO_LATE',
+    });
+    // Dentro del margen de recuperación sí sale.
+    const due = reminderDueAt(start, 2).getTime();
+    expect(
+      decideReminder({
+        ...base,
+        now: new Date(due + REMINDER_CATCH_UP_MS - MIN),
+      }),
+    ).toEqual({ action: 'SEND' });
+    expect(
+      decideReminder({ ...base, now: new Date(due + REMINDER_CATCH_UP_MS) }),
+    ).toEqual({ action: 'SKIP', reason: 'TOO_LATE' });
+  });
+
   it('omite si el paciente no tiene email (o es solo espacios)', () => {
     expect(decideReminder({ ...base, patientEmail: null })).toEqual({
       action: 'SKIP',

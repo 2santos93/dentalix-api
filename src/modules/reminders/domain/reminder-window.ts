@@ -94,7 +94,12 @@ export function decideReminder(input: ReminderDecisionInput): ReminderDecision {
   if (!settings?.enabled || !settings.leadHours.includes(input.leadHours)) {
     return { action: 'SKIP', reason: 'DISABLED' };
   }
-  if (appointment.start.getTime() <= input.now.getTime()) {
+  // Ya empezó, o el trabajo corre más tarde que el margen de recuperación
+  // (worker caído, cola atascada): uno de 48 h no sale 1 h antes de la cita
+  // ni junto al de 2 h. Mismo margen que el barrido y que el panel (MISSED).
+  const now = input.now.getTime();
+  const due = reminderDueAt(appointment.start, input.leadHours).getTime();
+  if (appointment.start.getTime() <= now || due <= now - REMINDER_CATCH_UP_MS) {
     return { action: 'SKIP', reason: 'TOO_LATE' };
   }
   if (!input.patientEmail?.trim()) {
