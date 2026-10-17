@@ -383,6 +383,11 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   confirmación de cita (DX-005) sí puede usar el dominio de la clínica: solo
   confirma esa cita.
+  Pendiente (DX-143): el reclamo de una cuenta sin verificar al aceptar una
+  invitación todavía no comprueba si la cuenta tiene membresías activas en
+  otras clínicas (hace falta una lectura entre clínicas, con su propio rol
+  SECURITY DEFINER); hoy lo cubre que el token solo viaja al buzón de la
+  persona y a un host de Dentalix.
   Si se superan los topes `MAIL_*` no se envía (y tampoco se dice).
 - `POST /auth/reset-password/check` `{ token }` → `{ status: VALID | EXPIRED | USED | INVALID }`.
 - `POST /auth/reset-password` `{ token, password }` → 204. Exige la política de
