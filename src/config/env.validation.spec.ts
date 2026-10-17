@@ -398,32 +398,6 @@ describe('validateEnv', () => {
     });
   });
 
-  describe('enlaces de los recordatorios (DX-026)', () => {
-    it('acepta PUBLIC_WEB_BASE_HOST con puerto fuera de producción', () => {
-      expect(() =>
-        validateEnv(baseEnv({ PUBLIC_WEB_BASE_HOST: 'localhost:3001' })),
-      ).not.toThrow();
-    });
-
-    it('rechaza un PUBLIC_WEB_BASE_HOST que no sea nombre[:puerto]', () => {
-      expect(
-        errorOf(baseEnv({ PUBLIC_WEB_BASE_HOST: 'evil.com/@x' })),
-      ).toContain('PUBLIC_WEB_BASE_HOST');
-      expect(
-        errorOf(baseEnv({ PUBLIC_WEB_BASE_HOST: 'https://dentalix.app' })),
-      ).toContain('PUBLIC_WEB_BASE_HOST');
-    });
-
-    it('en producción no puede ser local', () => {
-      expect(
-        errorOf(prodEnv({ PUBLIC_WEB_BASE_HOST: 'localhost:3001' })),
-      ).toContain('PUBLIC_WEB_BASE_HOST');
-      expect(() =>
-        validateEnv(prodEnv({ PUBLIC_WEB_BASE_HOST: 'dentalix.app' })),
-      ).not.toThrow();
-    });
-  });
-
   describe('trabajos en segundo plano (DX-085)', () => {
     it('acepta APP_ROLE api, worker y all (y sin definir)', () => {
       for (const role of [undefined, 'api', 'worker', 'all', 'WORKER']) {

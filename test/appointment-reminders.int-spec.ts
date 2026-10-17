@@ -291,8 +291,8 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     expect(text).toContain(label);
     expect(text).toContain('Sede: Sede Centro (Calle 1 # 2-3)');
     expect(text).toContain('Profesional: Dra. Laura Gómez');
-    // Host de la clínica sin petición: PUBLIC_WEB_BASE_HOST o, como en
-    // .env.test, el primer TENANT_BASE_DOMAINS.
+    // Sin petición: el host de plataforma de la clínica (SEC-033), con el
+    // primer TENANT_BASE_DOMAINS de .env.test y sin puerto.
     expect(text).toMatch(
       new RegExp(
         `http://${SUBDOMAINS[0]}\\.dentalix\\.app/confirmar/[A-Za-z0-9_-]{43}`,

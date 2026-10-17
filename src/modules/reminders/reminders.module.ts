@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
@@ -20,11 +19,6 @@ import { RemindersJobs } from './application/reminders-jobs';
 import { ReminderClock } from './application/reminder-clock';
 import { REMINDER_REPOSITORY } from './domain/ports/reminder-repository.port';
 import { PrismaReminderRepository } from './infrastructure/prisma-reminder.repository';
-import {
-  REMINDER_LINK_CONFIG,
-  loadReminderLinkConfig,
-  type ReminderLinkConfig,
-} from './infrastructure/reminder-link-config';
 
 /**
  * Recordatorio automático de cita por email, por sede (DX-026). Reutiliza la
@@ -52,12 +46,6 @@ import {
     TokenService,
     TenantContextInterceptor,
     { provide: REMINDER_REPOSITORY, useClass: PrismaReminderRepository },
-    {
-      provide: REMINDER_LINK_CONFIG,
-      inject: [ConfigService],
-      useFactory: (config: ConfigService): ReminderLinkConfig =>
-        loadReminderLinkConfig((key) => config.get<string>(key)),
-    },
   ],
 })
 export class RemindersModule {}

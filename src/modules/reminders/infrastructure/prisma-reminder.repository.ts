@@ -154,19 +154,14 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
       });
       if (!appointment) return null;
-      const [settings, zones, tenant] = await Promise.all([
+      const [settings, zones] = await Promise.all([
         tx.locationReminderSettings.findFirst({
           where: { locationId: appointment.locationId },
           select: { enabled: true, leadHours: true },
         }),
         loadLocationTimeZones(tx, tenantId, [appointment.locationId]),
-        tx.tenant.findUniqueOrThrow({
-          where: { id: tenantId },
-          select: { subdomain: true },
-        }),
       ]);
       return {
-        tenantSubdomain: tenant.subdomain,
         appointment: {
           id: appointment.id,
           start: appointment.start,

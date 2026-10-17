@@ -11,7 +11,6 @@ const START = new Date(NOW.getTime() + 2 * HOUR);
 
 function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
   return {
-    tenantSubdomain: 'demo',
     appointment: {
       id: APPT,
       start: START,
@@ -31,6 +30,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
   let createLink: { execute: jest.Mock };
   let outbound: { record: jest.Mock; settle: jest.Mock };
   let email: { enqueue: jest.Mock };
+  let links: { forTenant: jest.Mock };
   let handler: SendAppointmentReminder;
   const payload = {
     appointmentId: APPT,
@@ -63,6 +63,10 @@ describe('SendAppointmentReminder (DX-026)', () => {
         return Promise.resolve({ id: 'mail-1' });
       }),
     };
+    // SEC-033: el host de plataforma de la clínica, sin petición.
+    links = {
+      forTenant: jest.fn().mockResolvedValue('https://demo.dentalix.app'),
+    };
     const clock: ReminderClock = { now: () => NOW };
     const tenantContext = { getTenantId: () => TENANT };
     handler = new SendAppointmentReminder(
@@ -70,7 +74,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       createLink as never,
       outbound as never,
       email as never,
-      { protocol: 'https', baseHost: 'dentalix.app' },
+      links as never,
       clock,
       tenantContext as never,
     );
@@ -112,6 +116,22 @@ describe('SendAppointmentReminder (DX-026)', () => {
         sentAt: NOW,
       }),
     ]);
+  });
+
+  it('arma el enlace con el host de plataforma de la clínica del trabajo (SEC-033)', async () => {
+    repo.contexts.set(APPT, context());
+    await handler.handle(payload);
+    expect(links.forTenant).toHaveBeenCalledWith(TENANT);
+  });
+
+  it('sin host seguro para la clínica, el email sale sin enlace', async () => {
+    repo.contexts.set(APPT, context());
+    links.forTenant.mockResolvedValue(null);
+    await handler.handle(payload);
+    const [input] = email.enqueue.mock.calls[0] as [
+      { vars: { confirmUrl: string | null } },
+    ];
+    expect(input.vars.confirmUrl).toBeNull();
   });
 
   it('ejecutarse dos veces no manda dos emails', async () => {

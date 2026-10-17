@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CreateConfirmationLinkUseCase } from '../../appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
-import { buildConfirmationUrl } from '../../appointment-confirmations/presentation/confirmation-url';
 import { OutboundMessages } from '../../notifications/outbound/application/outbound-messages.service';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -12,11 +11,8 @@ import {
 import { decideReminder } from '../domain/reminder-window';
 import { startsAtLabel } from '../domain/starts-at-label';
 import { MAX_LEAD_HOURS, MIN_LEAD_HOURS } from '../domain/reminder-lead-hours';
-import {
-  REMINDER_LINK_CONFIG,
-  clinicLinkHost,
-  type ReminderLinkConfig,
-} from '../infrastructure/reminder-link-config';
+import { CONFIRMATION_PATH } from '../../appointment-confirmations/presentation/confirmation-url';
+import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { ReminderClock } from './reminder-clock';
 
 const TEMPLATE = 'appointment-reminder';
@@ -66,7 +62,7 @@ export class SendAppointmentReminder {
     private readonly createLink: CreateConfirmationLinkUseCase,
     private readonly outbound: OutboundMessages,
     private readonly email: EmailOutbox,
-    @Inject(REMINDER_LINK_CONFIG) private readonly links: ReminderLinkConfig,
+    private readonly links: TenantLinkBaseService,
     private readonly clock: ReminderClock,
     private readonly tenantContext: TenantContextService,
   ) {}
@@ -122,7 +118,10 @@ export class SendAppointmentReminder {
     }
 
     const to = (ctx.patientEmail ?? '').trim();
-    const host = clinicLinkHost(this.links, ctx.tenantSubdomain);
+    const tenantId = this.tenantContext.getTenantId();
+    // Sin petición: el host de PLATAFORMA de la clínica (`<sub>.<base>`),
+    // nunca su dominio personalizado (SEC-033). null = sale sin enlace.
+    const linkBase = tenantId ? await this.links.forTenant(tenantId) : null;
     const link = await this.createLink.execute({
       appointmentId,
       automatic: true,
@@ -141,7 +140,7 @@ export class SendAppointmentReminder {
       await this.repo.attachOutbound(claim.id, outboundId);
     }
     await this.email.enqueue({
-      tenantId: this.tenantContext.getTenantId(),
+      tenantId,
       to,
       template: TEMPLATE,
       referenceId: outboundId,
@@ -155,8 +154,8 @@ export class SendAppointmentReminder {
         locationName: link.appointment.locationName,
         locationAddress: link.appointment.locationAddress,
         providerName: link.appointment.providerName,
-        confirmUrl: host
-          ? buildConfirmationUrl(this.links.protocol, host, link.token)
+        confirmUrl: linkBase
+          ? `${linkBase}${CONFIRMATION_PATH}/${link.token}`
           : null,
       },
     });

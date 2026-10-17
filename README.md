@@ -568,9 +568,11 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
   cambia la clave: lo de la hora vieja queda `RESCHEDULED` y se recalcula.
 - **Email**: fecha y hora en la zona de la sede (horario de la sede o su
   país; 12 h en CO, 24 h en ES), sede, profesional y botón «Confirmar o
-  cancelar». Nada clínico (ni motivo ni tratamiento). El enlace va a
-  `<protocolo>://<subdominio>.<PUBLIC_WEB_BASE_HOST>/confirmar/<token>`
-  (sin `PUBLIC_WEB_BASE_HOST`, el primer `TENANT_BASE_DOMAINS`). Emitirlo
+  cancelar». Nada clínico (ni motivo ni tratamiento). El enlace va al host de
+  plataforma de la clínica, como los de restablecer e invitación (SEC-033,
+  `TenantLinkBaseService.forTenant`): `<protocolo>://<subdominio>.<primer
+  TENANT_BASE_DOMAINS>/confirmar/<token>`, sin puerto y nunca su dominio
+  personalizado (en local, añade `:3001` a mano al abrirlo). Emitirlo
   revoca el enlace anterior de la cita (solo vale el último, como en DX-005).
 - **Estado por cita**: `GET /appointments/:id/reminders` (roles de la agenda)
   devuelve los ajustes vigentes de su sede y, por antelación, `SENT` (con

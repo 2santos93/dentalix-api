@@ -28,7 +28,6 @@ export interface ReminderCandidate {
 
 /** Lo que el handler relee de la cita al ejecutarse, bajo el tenant del trabajo. */
 export interface ReminderSendContext {
-  tenantSubdomain: string;
   appointment: {
     id: string;
     start: Date;
