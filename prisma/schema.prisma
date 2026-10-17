@@ -9,46 +9,48 @@ datasource db {
 }
 
 model Tenant {
-  id                       String                     @id @default(uuid()) @db.Uuid
-  name                     String
-  subdomain                String                     @unique
-  primaryColor             String                     @default("#0F5E9C")
-  logoUrl                  String?
+  id                        String                     @id @default(uuid()) @db.Uuid
+  name                      String
+  subdomain                 String                     @unique
+  primaryColor              String                     @default("#0F5E9C")
+  logoUrl                   String?
   // DX-128: canal de los avisos automáticos con el que nace cada paciente.
-  defaultContactChannel    ContactChannel             @default(EMAIL)
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
-  deletedAt                DateTime?
-  memberships              ClinicMembership[]
-  domains                  TenantDomain[]
-  invitations              ClinicInvitation[]
-  appointmentConfirmations AppointmentConfirmation[]
-  privacyPolicyVersions    PrivacyPolicyVersion[]
-  dataProcessingConsents   DataProcessingConsent[]
-  consentTemplates         ConsentTemplate[]
-  prescriptionTemplates    PrescriptionTemplate[]
-  emailOutbox              EmailOutbox[]
-  clinicalEntryAddenda     ClinicalEntryAddendum[]
-  dentitionEvents          PatientDentitionEvent[]
-  appointmentTypes         AppointmentType[]
-  jobs                     Job[]
-  outboundMessages         OutboundMessage[]
-  scheduleBlocks           ScheduleBlock[]
-  waitlistEntries          AppointmentWaitlistEntry[]
+  defaultContactChannel     ContactChannel             @default(EMAIL)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  deletedAt                 DateTime?
+  memberships               ClinicMembership[]
+  domains                   TenantDomain[]
+  invitations               ClinicInvitation[]
+  appointmentConfirmations  AppointmentConfirmation[]
+  privacyPolicyVersions     PrivacyPolicyVersion[]
+  dataProcessingConsents    DataProcessingConsent[]
+  consentTemplates          ConsentTemplate[]
+  prescriptionTemplates     PrescriptionTemplate[]
+  emailOutbox               EmailOutbox[]
+  clinicalEntryAddenda      ClinicalEntryAddendum[]
+  dentitionEvents           PatientDentitionEvent[]
+  appointmentTypes          AppointmentType[]
+  jobs                      Job[]
+  outboundMessages          OutboundMessage[]
+  scheduleBlocks            ScheduleBlock[]
+  waitlistEntries           AppointmentWaitlistEntry[]
   // DX-210: ofertas de huecos libres a candidatos.
-  waitlistOffers           WaitlistOffer[]
-  reminderSettings         LocationReminderSettings[]
-  appointmentReminders     AppointmentReminder[]
-  paymentReceipts          PaymentReceipt[]
-  paymentReceiptCounters   PaymentReceiptCounter[]
-  reminderOptOutLinks      ReminderOptOutLink[]
-  clinicalNoteTemplates    ClinicalNoteTemplate[]
+  waitlistOffers            WaitlistOffer[]
+  reminderSettings          LocationReminderSettings[]
+  appointmentReminders      AppointmentReminder[]
+  paymentReceipts           PaymentReceipt[]
+  paymentReceiptCounters    PaymentReceiptCounter[]
+  reminderOptOutLinks       ReminderOptOutLink[]
+  clinicalNoteTemplates     ClinicalNoteTemplate[]
   // DX-150: cobranza (notas y compromisos de pago).
-  collectionNotes          CollectionNote[]
-  paymentPromises          PaymentPromise[]
-  platformAccesses         PlatformAccessAudit[]
+  collectionNotes           CollectionNote[]
+  // DX-203: responsables de pago y avisos de los pacientes.
+  patientResponsibleParties PatientResponsibleParty[]
+  paymentPromises           PaymentPromise[]
+  platformAccesses          PlatformAccessAudit[]
   // DX-204: topes de descuento por rol (una fila; sin ella, los de por defecto).
-  discountPolicy           DiscountPolicy?
+  discountPolicy            DiscountPolicy?
 
   @@map("tenants")
 }
@@ -271,6 +273,10 @@ model Patient {
   emergencyContactName         String?
   emergencyContactRelationship String?
   emergencyContactPhone        String?
+  // DEPRECADO (DX-203): solo lectura. El acudiente vive ahora en
+  // `patient_responsible_parties` (la migración 20261018010100 copió cada
+  // valor a un contacto responsable con `migratedFromGuardian`). La API ya no
+  // los escribe; se conservan para no perder el dato ni romper a quien los lee.
   guardianName                 String?
   guardianDocNumber            String?
   createdById                  String?               @db.Uuid
@@ -327,6 +333,9 @@ model Patient {
   paymentPromises        PaymentPromise[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutLinks    ReminderOptOutLink[]
+  // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
+  responsibleParties     PatientResponsibleParty[]  @relation("PatientResponsibleParties")
+  responsibleFor         PatientResponsibleParty[]  @relation("ResponsiblePatient")
   country                Country?                   @relation(fields: [countryCode], references: [code])
   city                   City?                      @relation(fields: [cityId], references: [id])
 
@@ -2343,6 +2352,8 @@ model OutboundMessage {
   channel         OutboundChannel
   template        String
   recipientMasked String
+  /// DX-203: a quién se envió: al propio paciente o a su responsable.
+  recipientKind   OutboundRecipientKind @default(PATIENT)
   status          OutboundMessageStatus @default(PENDING)
   attempts        Int                   @default(0)
   lastError       String?
@@ -2725,4 +2736,67 @@ model PlatformAccessAudit {
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([userId, createdAt])
   @@map("platform_access_audit")
+}
+
+// DX-203: parentesco del responsable con el paciente.
+enum ResponsibleRelationship {
+  MOTHER
+  FATHER
+  LEGAL_GUARDIAN
+  GRANDPARENT
+  SIBLING
+  SPOUSE
+  CHILD
+  OTHER
+}
+
+// DX-203: destinatario de un mensaje saliente.
+enum OutboundRecipientKind {
+  PATIENT
+  RESPONSIBLE
+}
+
+/// DX-203: responsable de pago y/o de los avisos de un paciente (el acudiente
+/// de un menor, la madre que paga a sus hijos). Es OTRO paciente de la clínica
+/// (`responsiblePatientId`) o un contacto sin ficha (nombre, documento, email
+/// y teléfono): CHECK en la BD, una de las dos formas. Datos de un tercero
+/// tratados bajo la autorización del paciente (finalidad «gestión de cobro y
+/// avisos»): no crea usuario ni da acceso al portal.
+/// Como mucho UN pagador principal vivo por paciente y el mismo paciente
+/// responsable una sola vez (índices únicos PARCIALES, solo en SQL). Se quita
+/// en blando (`deletedAt`). RLS FORCE y FK COMPUESTAS por tenant.
+model PatientResponsibleParty {
+  id                   String                  @id @default(uuid()) @db.Uuid
+  tenantId             String                  @db.Uuid
+  patientId            String                  @db.Uuid
+  /// El responsable es otro paciente de la clínica (sus datos, de su ficha).
+  responsiblePatientId String?                 @db.Uuid
+  /// Contacto sin ficha: NULL los cinco si es un paciente.
+  fullName             String?
+  docType              DocType?
+  docNumber            String?
+  email                String?
+  phone                String?
+  relationship         ResponsibleRelationship
+  isPayer              Boolean                 @default(false)
+  receivesNotices      Boolean                 @default(true)
+  /// Copiado de `patients.guardianName/guardianDocNumber` por la migración.
+  migratedFromGuardian Boolean                 @default(false)
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById          String?                 @db.Uuid
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  deletedAt            DateTime?
+
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient            Patient  @relation("PatientResponsibleParties", fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_responsible_parties_patient_fkey")
+  responsiblePatient Patient? @relation("ResponsiblePatient", fields: [tenantId, responsiblePatientId], references: [tenantId, id], onDelete: Restrict, map: "patient_responsible_parties_responsible_fkey")
+
+  @@index([tenantId, patientId, createdAt], map: "patient_responsible_parties_tenant_patient_idx")
+  // PARCIALES (no declarables en Prisma, no generan drift):
+  //   patient_responsible_parties_one_payer_key   UNIQUE ("tenantId", "patientId") WHERE "isPayer" AND "deletedAt" IS NULL
+  //   patient_responsible_parties_patient_link_key UNIQUE ("tenantId", "patientId", "responsiblePatientId") WHERE "deletedAt" IS NULL AND "responsiblePatientId" IS NOT NULL
+  //   patient_responsible_parties_migrated_key    UNIQUE ("tenantId", "patientId") WHERE "migratedFromGuardian"
+  //   patient_responsible_parties_responsible_idx ("tenantId", "responsiblePatientId") WHERE "responsiblePatientId" IS NOT NULL
+  @@map("patient_responsible_parties")
 }
