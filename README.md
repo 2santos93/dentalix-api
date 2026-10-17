@@ -633,7 +633,7 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
 - **Rendimiento**: número fijo de consultas, sin N+1; índices parciales
   `appointments_tenant_patient_completed_idx` y
   `treatment_plan_items_tenant_plan_billable_idx`. Medición con 60k pacientes
-  en `docs/perf/DX-145.md` (~0,9 s por sede con 13k deudores en una máquina
+  en `docs/perf/DX-145.md` (~0,65 s por sede con 13k deudores en una máquina
   compartida; el objetivo de 500 ms no se alcanza con esa siembra).
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
