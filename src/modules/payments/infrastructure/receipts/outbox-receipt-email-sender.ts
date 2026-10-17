@@ -21,7 +21,11 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
     private readonly prisma: PrismaService,
   ) {}
 
-  async send(to: string, receipt: PaymentReceiptView): Promise<void> {
+  async send(
+    to: string,
+    receipt: PaymentReceiptView,
+    responsibleName: string | null = null,
+  ): Promise<void> {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) {
       throw new Error('No tenant in context');
@@ -51,7 +55,10 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
       tenantId,
       to,
       template: 'payment-receipt',
-      vars: receiptEmailVars(receipt, zoneOf(locationId)),
+      vars: {
+        ...receiptEmailVars(receipt, zoneOf(locationId)),
+        responsibleName,
+      },
       referenceId: receipt.paymentId,
     });
   }

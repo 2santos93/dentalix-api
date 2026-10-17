@@ -3,6 +3,12 @@ import type {
   ReceiptSnapshotInput,
 } from '../receipt-snapshot';
 
+import type {
+  NoticeLocation,
+  NoticePatientFields,
+  NoticeResponsible,
+} from '../../../patients/domain/communication/notice-recipient';
+
 export const PAYMENT_RECEIPT_REPOSITORY = Symbol('PAYMENT_RECEIPT_REPOSITORY');
 
 /** Recibo numerado tal como se emitió (DX-136). */
@@ -27,11 +33,22 @@ export interface LegacyReceiptSource {
   snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'>;
 }
 
+/**
+ * DX-203: lo que decide si el recibo va al responsable: edad (con el país y
+ * el día civil de la SEDE DEL ABONO) y responsables vivos del paciente.
+ */
+export interface ReceiptNoticeData {
+  patient: NoticePatientFields;
+  responsibles: NoticeResponsible[];
+  location: NoticeLocation;
+}
+
 interface ReceiptSourceBase {
   paymentId: string;
   treatmentPlanId: string;
   /** Email ACTUAL del paciente (para enviarle el recibo), o null si no tiene. */
   patientEmail: string | null;
+  notice: ReceiptNoticeData;
 }
 
 export type PaymentReceiptSource =

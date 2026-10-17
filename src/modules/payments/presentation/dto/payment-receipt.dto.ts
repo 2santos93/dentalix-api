@@ -202,4 +202,10 @@ export class SendPaymentReceiptResponseDto {
     description: 'Destino enmascarado.',
   })
   sentTo!: string;
+
+  @ApiProperty({
+    description:
+      'DX-203: salió al email del responsable (un menor o un paciente sin email).',
+  })
+  sentToResponsible!: boolean;
 }

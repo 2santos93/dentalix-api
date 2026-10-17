@@ -109,7 +109,9 @@ export class PaymentReceiptsController {
     summary: 'Enviar el recibo por email al paciente',
     description:
       'Encola el email (outbox, DX-088) con el MISMO recibo al email de la ' +
-      'ficha del paciente, con el documento enmascarado.',
+      'ficha del paciente, con el documento enmascarado. DX-203: el de un ' +
+      'menor o de un paciente sin email va al responsable que recibe avisos ' +
+      '(`sentToResponsible`).',
   })
   @ApiAcceptedResponse({ type: SendPaymentReceiptResponseDto })
   @ApiForbiddenResponse({
@@ -118,7 +120,10 @@ export class PaymentReceiptsController {
   @ApiNotFoundResponse({
     description: 'El abono no existe o es de otra clínica',
   })
-  @ApiUnprocessableEntityResponse({ description: 'El paciente no tiene email' })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'Ni el paciente ni un responsable que recibe avisos tienen email',
+  })
   @ApiTooManyRequestsResponse({ description: 'Topes de envío de la clínica' })
   email(
     @Param('id', ParseUUIDPipe) id: string,

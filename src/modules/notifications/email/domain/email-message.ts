@@ -96,6 +96,11 @@ export interface AppointmentReminderEmailVars {
  */
 export interface PaymentReceiptEmailVars {
   patientName: string;
+  /**
+   * DX-203: va al responsable del paciente (nombre de pila): el email lo
+   * saluda a él y dice de quién es el abono.
+   */
+  responsibleName?: string | null;
   /** `NOR-000123`, o `REC-xxxxxxxx` si es un abono «sin serie». */
   reference: string;
   legacy: boolean;

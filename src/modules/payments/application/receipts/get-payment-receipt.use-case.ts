@@ -3,6 +3,7 @@ import { PAYMENT_RECEIPT_REPOSITORY } from '../../domain/ports/payment-receipt-r
 import type {
   PaymentReceiptRepository,
   PaymentReceiptSource,
+  ReceiptNoticeData,
 } from '../../domain/ports/payment-receipt-repository.port';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import {
@@ -21,6 +22,8 @@ export interface LoadedPaymentReceipt {
   view: PaymentReceiptView;
   /** Email actual del paciente (para enviarle el recibo), o null. */
   patientEmail: string | null;
+  /** DX-203: para decidir si va al responsable. */
+  notice: ReceiptNoticeData;
 }
 
 /**
@@ -53,6 +56,7 @@ export class GetPaymentReceiptUseCase {
           ? this.issuedView(source)
           : await this.legacyView(source),
       patientEmail: source.patientEmail,
+      notice: source.notice,
     };
   }
 
