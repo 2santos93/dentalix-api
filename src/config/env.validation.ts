@@ -18,6 +18,9 @@
  * de trabajos en segundo plano.
  * SEC-009: `DOMAIN_RECHECK_MAX_FAILURES`, re-verificaciones fallidas seguidas
  * antes de desactivar un dominio personalizado.
+ * SEC-008: `MFA_ENCRYPTION_KEY` (cifra los secretos TOTP del MFA de los
+ * superadmins; obligatoria en producción) y `BREAK_GLASS_TTL_MINUTES`
+ * (duración del acceso de soporte a una clínica, 5–60).
  */
 
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
@@ -28,6 +31,11 @@ import {
   parseAppRole,
 } from '../modules/jobs/infrastructure/jobs-config';
 import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
+import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
+import {
+  BREAK_GLASS_MAX_TTL_MINUTES,
+  BREAK_GLASS_MIN_TTL_MINUTES,
+} from '../modules/auth/domain/break-glass';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -424,6 +432,47 @@ function domainProblems(env: Env): string[] {
   return [];
 }
 
+/** SEC-008: MFA de los superadmins y duración del acceso break-glass. */
+function breakGlassProblems(env: Env, isProd: boolean): string[] {
+  const problems: string[] = [];
+  const rawKey = str(env, 'MFA_ENCRYPTION_KEY');
+  if (rawKey != null) {
+    const key = parseMfaEncryptionKey(rawKey);
+    const mailKey = parseMailEncryptionKey(str(env, 'MAIL_ENCRYPTION_KEY'));
+    if (key == null) {
+      problems.push(
+        `MFA_ENCRYPTION_KEY debe ser de 32 bytes, en hex (64 caracteres) o base64. ${HOW_TO_GENERATE_MAIL_KEY}`,
+      );
+    } else if (new Set(key).size < JWT_SECRET_MIN_DISTINCT_CHARS) {
+      problems.push(
+        `MFA_ENCRYPTION_KEY es demasiado repetitiva (un valor de ejemplo). ${HOW_TO_GENERATE_MAIL_KEY}`,
+      );
+    } else if (mailKey != null && mailKey.equals(key)) {
+      problems.push(
+        `MFA_ENCRYPTION_KEY no puede ser igual a MAIL_ENCRYPTION_KEY. ${HOW_TO_GENERATE_MAIL_KEY}`,
+      );
+    }
+  } else if (isProd) {
+    problems.push(
+      `MFA_ENCRYPTION_KEY es obligatoria en producción: cifra los secretos del MFA de los superadmins. ${HOW_TO_GENERATE_MAIL_KEY}`,
+    );
+  }
+  const ttl = str(env, 'BREAK_GLASS_TTL_MINUTES');
+  if (ttl != null) {
+    const value = Number(ttl.trim());
+    if (
+      !/^\d{1,2}$/.test(ttl.trim()) ||
+      value < BREAK_GLASS_MIN_TTL_MINUTES ||
+      value > BREAK_GLASS_MAX_TTL_MINUTES
+    ) {
+      problems.push(
+        `BREAK_GLASS_TTL_MINUTES debe ser un entero entre ${BREAK_GLASS_MIN_TTL_MINUTES} y ${BREAK_GLASS_MAX_TTL_MINUTES} (minutos que dura el acceso de soporte a una clínica).`,
+      );
+    }
+  }
+  return problems;
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -443,6 +492,7 @@ export function validateEnv(env: Env): Env {
   problems.push(...auditProblems(env));
   problems.push(...jobsProblems(env));
   problems.push(...domainProblems(env));
+  problems.push(...breakGlassProblems(env, isProd));
 
   if (problems.length > 0) {
     throw new Error(

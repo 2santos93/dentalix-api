@@ -1,6 +1,9 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
 import { LoginUseCase } from './login.use-case';
+import type {
+  BreakGlassInput,
+  BreakGlassService,
+} from '../break-glass.service';
 import {
   AuthRepository,
   AuthUserRecord,
@@ -43,6 +46,23 @@ function makeTokens() {
   };
 }
 
+/** Captura lo que el login delega al break-glass (SEC-008). */
+function makeBreakGlass() {
+  const opened: BreakGlassInput[] = [];
+  const expiresAt = new Date('2026-10-17T12:30:00.000Z');
+  const service = {
+    open: (input: BreakGlassInput) => {
+      opened.push(input);
+      return Promise.resolve({
+        accessToken: 'bg-acc',
+        breakGlass: true as const,
+        expiresAt,
+      });
+    },
+  } as unknown as BreakGlassService;
+  return { opened, service, expiresAt };
+}
+
 async function platformUser(pass: string): Promise<AuthUserRecord> {
   return {
     id: 'super-1',
@@ -54,29 +74,43 @@ async function platformUser(pass: string): Promise<AuthUserRecord> {
 
 describe('LoginUseCase — superadmin de plataforma', () => {
   describe('en el host de una clínica donde NO tiene membresía', () => {
-    it('le emite un token de CLÍNICA con rol ADMIN para ese tenant', async () => {
+    it('SEC-008: ya NO emite un token ADMIN con la contraseña: delega en el break-glass (MFA + motivo, sin refresh)', async () => {
       const tokens = makeTokens();
+      const breakGlass = makeBreakGlass();
       const uc = new LoginUseCase(
         makeRepo(await platformUser('S3cret!')),
         password,
         tokens.service,
+        breakGlass.service,
       );
 
       const result = await uc.execute({
         tenantId: 'tenant-ajeno',
         email: 'super@dentalix.com',
         password: 'S3cret!',
+        mfaCode: '123456',
+        breakGlassReason: 'Ticket 42: no cuadra la caja',
+        ip: '10.0.0.1',
+        userAgent: 'UA',
       });
 
-      expect(result.accessToken).toBe('acc');
-      // Token de clínica normal: el aislamiento sigue siendo por tenant, no hay
-      // ningún permiso "global" viajando dentro del token.
-      expect(tokens.issued).toEqual([
+      // Nada de par con refresh de 30 días.
+      expect(tokens.issued).toEqual([]);
+      expect(result).toEqual({
+        accessToken: 'bg-acc',
+        breakGlass: true,
+        expiresAt: breakGlass.expiresAt,
+      });
+      expect(breakGlass.opened).toHaveLength(1);
+      const [{ user, ...rest }] = breakGlass.opened;
+      expect(user).toMatchObject({ id: 'super-1', tokenVersion: 2 });
+      expect([rest]).toEqual([
         {
-          sub: 'super-1',
           tenantId: 'tenant-ajeno',
-          role: ClinicRole.ADMIN,
-          tv: 2,
+          mfaCode: '123456',
+          reason: 'Ticket 42: no cuadra la caja',
+          ip: '10.0.0.1',
+          userAgent: 'UA',
         },
       ]);
     });
@@ -92,6 +126,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         }),
         password,
         tokens.service,
+        makeBreakGlass().service,
       );
 
       await expect(
@@ -110,6 +145,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         makeRepo(await platformUser('S3cret!')),
         password,
         tokens.service,
+        makeBreakGlass().service,
       );
 
       await expect(
@@ -130,6 +166,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         makeRepo(await platformUser('S3cret!')),
         password,
         tokens.service,
+        makeBreakGlass().service,
       );
 
       await uc.executePlatform({
@@ -152,6 +189,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         }),
         password,
         makeTokens().service,
+        makeBreakGlass().service,
       );
 
       await expect(
@@ -167,6 +205,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         makeRepo(null),
         password,
         makeTokens().service,
+        makeBreakGlass().service,
       );
 
       await expect(

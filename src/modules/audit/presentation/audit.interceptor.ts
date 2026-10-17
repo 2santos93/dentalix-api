@@ -14,6 +14,7 @@ import type { AuditActorRef } from '../domain/audit-event';
 import { AUDIT_OPTIONS, type AuditOptions } from './audit-options';
 import {
   buildAuditDraft,
+  isBreakGlassLogin,
   loginActor,
   type AuditedRequest,
   type AuditScope,
@@ -93,7 +94,8 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   /**
-   * Login: el correcto con el usuario del token recién emitido; el fallido
+   * Login: el correcto con el usuario del token recién emitido (con
+   * `reason: BREAK_GLASS` si es un acceso de soporte, SEC-008); el fallido
    * (solo 401, no un 400 de validación) con el email como pista para
    * resolver al miembro. Ni el email ni la contraseña se guardan.
    */
@@ -105,6 +107,7 @@ export class AuditInterceptor implements NestInterceptor {
     const record = (
       action: 'LOGIN' | 'LOGIN_FAILED',
       actor: AuditActorRef,
+      breakGlass = false,
     ): Promise<void> =>
       this.recorder.record({
         tenantId: scope.tenantId,
@@ -118,12 +121,17 @@ export class AuditInterceptor implements NestInterceptor {
         ip: req.ip ?? null,
         userAgent: headerValue(req, 'user-agent'),
         metadata:
-          action === 'LOGIN_FAILED' ? { reason: 'INVALID_CREDENTIALS' } : {},
+          action === 'LOGIN_FAILED'
+            ? { reason: 'INVALID_CREDENTIALS' }
+            : breakGlass
+              ? { reason: 'BREAK_GLASS' }
+              : {},
       });
     return next.handle().pipe(
       concatMap(async (body: unknown) => {
         const actor = loginActor(body);
-        if (actor) await record('LOGIN', actor);
+        // SEC-008: el acceso de soporte de un superadmin queda marcado.
+        if (actor) await record('LOGIN', actor, isBreakGlassLogin(body));
         return body;
       }),
       catchError((err: unknown) => {

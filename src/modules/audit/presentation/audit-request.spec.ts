@@ -1,5 +1,6 @@
 import {
   buildAuditDraft,
+  isBreakGlassLogin,
   loginActor,
   type AuditedRequest,
 } from './audit-request';
@@ -218,5 +219,18 @@ describe('loginActor (DX-009)', () => {
     ['rol desconocido', { accessToken: token({ sub: USER, role: 'ROOT' }) }],
   ])('%s: null', (_name, body) => {
     expect(loginActor(body)).toBeNull();
+  });
+});
+
+describe('isBreakGlassLogin (SEC-008)', () => {
+  it('solo con `breakGlass: true` en la respuesta del login', () => {
+    expect(isBreakGlassLogin({ accessToken: 'x', breakGlass: true })).toBe(
+      true,
+    );
+    expect(isBreakGlassLogin({ accessToken: 'x' })).toBe(false);
+    expect(isBreakGlassLogin({ accessToken: 'x', breakGlass: 'true' })).toBe(
+      false,
+    );
+    expect(isBreakGlassLogin(null)).toBe(false);
   });
 });

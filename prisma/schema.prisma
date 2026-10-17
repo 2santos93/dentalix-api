@@ -44,30 +44,40 @@ model Tenant {
   // DX-150: cobranza (notas y compromisos de pago).
   collectionNotes          CollectionNote[]
   paymentPromises          PaymentPromise[]
+  platformAccesses         PlatformAccessAudit[]
 
   @@map("tenants")
 }
 
 model User {
-  id              String             @id @default(uuid()) @db.Uuid
-  email           String             @unique
-  passwordHash    String
-  fullName        String
-  avatarUrl       String?
-  emailVerifiedAt DateTime?
+  id                      String             @id @default(uuid()) @db.Uuid
+  email                   String             @unique
+  passwordHash            String
+  fullName                String
+  avatarUrl               String?
+  emailVerifiedAt         DateTime?
   // Superadmin de PLATAFORMA: transversal a todos los tenants (por eso no es
   // un ClinicRole, que siempre es por-clínica vía ClinicMembership). Se otorga
   // SOLO por migración; ningún endpoint lo concede.
-  isPlatformAdmin Boolean            @default(false)
+  isPlatformAdmin         Boolean            @default(false)
   // Versión de sesión: viaja en el claim `tv` de cada token y /auth/refresh
   // exige que coincida. Incrementarla invalida TODOS los refresh tokens del
   // usuario a la vez (lo hace el cambio de contraseña). Los tokens anteriores
   // a esta columna no traen `tv` y cuentan como 0.
-  tokenVersion    Int                @default(0)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  deletedAt       DateTime?
-  memberships     ClinicMembership[]
+  tokenVersion            Int                @default(0)
+  // SEC-008: MFA (TOTP) del superadmin, exigido para el acceso break-glass a
+  // una clínica sin membresía. Los secretos van cifrados (AES-256-GCM con
+  // MFA_ENCRYPTION_KEY y el id del usuario como AAD); nunca en claro.
+  // `mfaTotpPendingSecretEnc`: alta pedida y aún sin confirmar con un código.
+  // `mfaLastUsedStep`: último paso TOTP aceptado (anti-reutilización).
+  mfaTotpSecretEnc        String?
+  mfaTotpPendingSecretEnc String?
+  mfaEnabledAt            DateTime?
+  mfaLastUsedStep         Int?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  deletedAt               DateTime?
+  memberships             ClinicMembership[]
 
   privacyPoliciesPublished PrivacyPolicyVersion[]
   dataConsentsRecorded     DataProcessingConsent[]
@@ -83,6 +93,7 @@ model User {
   clinicalEntryAddenda     ClinicalEntryAddendum[]
   dentitionEventsRecorded  PatientDentitionEvent[]
   retentionActions         PatientRetentionAction[]
+  platformAccesses         PlatformAccessAudit[]
 
   @@map("users")
 }
@@ -2507,4 +2518,26 @@ model PaymentPromise {
   @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "payment_promises_tenant_patient_created_idx")
   @@index([tenantId, locationId], map: "payment_promises_tenant_location_idx")
   @@map("payment_promises")
+}
+
+/// SEC-008: cada acceso break-glass de un superadmin a una clínica en la que
+/// no es miembro. Append-only (un trigger rechaza UPDATE/DELETE/TRUNCATE) y
+/// con RLS forzada por tenant: el ADMIN de la clínica lee solo los suyos.
+model PlatformAccessAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  userId    String   @db.Uuid
+  reason    String
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  /// Caducidad del token emitido (createdAt + BREAK_GLASS_TTL_MINUTES).
+  expiresAt DateTime
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, createdAt])
+  @@map("platform_access_audit")
 }

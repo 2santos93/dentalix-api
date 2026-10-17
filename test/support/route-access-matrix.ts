@@ -118,6 +118,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /platform/tenants': PLATFORM,
   // Cola de fallidos de los trabajos en segundo plano: loop/informes/DX-085.md.
   'GET /platform/jobs/failed': PLATFORM,
+  // MFA del superadmin, exigido para el break-glass: loop/informes/SEC-008.md.
+  'GET /platform/mfa': PLATFORM,
+  'POST /platform/mfa/enrollment': PLATFORM,
+  'POST /platform/mfa/enrollment/confirm': PLATFORM,
 
   // --- Pacientes (demográficos) --------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (PATIENT_ROLES).
@@ -361,4 +365,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /domains/:id/verify': ADMIN_ONLY,
   // SEC-009: eliminar (soft) un dominio propio: loop/informes/SEC-009.md.
   'DELETE /domains/:id': ADMIN_ONLY,
+
+  // --- Accesos de soporte (break-glass) -------------------------------------
+  // Lista de accesos de superadmins a la clínica: loop/informes/SEC-008.md.
+  'GET /support-accesses': ADMIN_ONLY,
 };

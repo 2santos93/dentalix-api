@@ -132,6 +132,19 @@ export function buildAuditDraft(
 const ROLES = new Set<string>(Object.values(ClinicRole));
 
 /**
+ * SEC-008: ¿la respuesta del login es un acceso break-glass? Lo dice la propia
+ * API en el cuerpo (`breakGlass: true`), que también va firmado en el token.
+ */
+export function isBreakGlassLogin(body: unknown): boolean {
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    'breakGlass' in body &&
+    body.breakGlass === true
+  );
+}
+
+/**
  * Actor de un login correcto, del access token que la PROPIA API acaba de
  * firmar en esta petición (por eso basta decodificarlo). `null` si la
  * respuesta no trae uno legible.
