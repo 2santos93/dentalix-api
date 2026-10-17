@@ -78,4 +78,13 @@ export class StaffMemberDetailDto {
 
   @ApiProperty({ enum: ['ACTIVE', 'INACTIVE'] })
   status!: 'ACTIVE' | 'INACTIVE';
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-048: hasta cuándo no puede iniciar sesión por intentos fallidos (null = sin bloqueo). Se quita con POST /staff/:userId/login-unlock.',
+  })
+  loginBlockedUntil!: Date | null;
 }

@@ -11,12 +11,17 @@ import { STAFF_REPOSITORY } from './domain/ports/staff-repository.port';
 import { PrismaStaffRepository } from './infrastructure/repositories/prisma-staff.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { UnlockStaffLoginUseCase } from './application/use-cases/unlock-staff-login.use-case';
+import { STAFF_LOGIN_LOCKS } from './domain/ports/staff-login-locks.port';
+import { LoginLockoutModule } from '../auth/login-lockout.module';
+import { LoginLockoutService } from '../auth/application/login-lockout.service';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/AppointmentsModule:
   // JwtAuthGuard depends on TokenService, which depends on JwtService — must
   // be available here since the guard is applied on this module's controller.
-  imports: [JwtModule.register({})],
+  // LoginLockoutModule: estado y desbloqueo del inicio de sesión (DX-048).
+  imports: [JwtModule.register({}), LoginLockoutModule],
   controllers: [StaffController],
   providers: [
     ListStaffUseCase,
@@ -25,6 +30,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     UpdateStaffUseCase,
     ReactivateStaffUseCase,
     DeactivateStaffUseCase,
+    UnlockStaffLoginUseCase,
+    { provide: STAFF_LOGIN_LOCKS, useExisting: LoginLockoutService },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on StaffController.

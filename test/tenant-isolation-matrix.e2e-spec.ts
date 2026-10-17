@@ -825,6 +825,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({}),
       status: 404,
     },
+    {
+      // DX-048: desbloquear el login de un miembro de A desde B.
+      name: 'POST /staff/:userId/login-unlock',
+      verb: 'post',
+      path: () => `/staff/${a.dentistUserId}/login-unlock`,
+      body: () => ({}),
+      status: 404,
+    },
     // --- invitations ---
     {
       name: 'DELETE /staff/invitations/:id',

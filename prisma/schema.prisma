@@ -1672,6 +1672,8 @@ enum AuditResourceType {
   // DX-122: bloqueos de agenda y «Pendientes por agendar».
   SCHEDULE_BLOCK
   WAITLIST_ENTRY
+  // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
+  STAFF_MEMBER
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

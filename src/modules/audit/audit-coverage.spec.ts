@@ -26,6 +26,7 @@ import { PaymentsController } from '../payments/presentation/payments.controller
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
+import { StaffController } from '../staff/presentation/staff.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -396,6 +397,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'SCHEDULE_BLOCK',
     resourceId: { param: 'id' },
   },
+
+  // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
+  'POST /staff/:userId/login-unlock': {
+    action: 'UPDATE',
+    resource: 'STAFF_MEMBER',
+    resourceId: { param: 'userId' },
+    reason: 'LOGIN_UNLOCKED',
+  },
 };
 
 const CONTROLLERS: Type[] = [
@@ -416,6 +425,7 @@ const CONTROLLERS: Type[] = [
   PaymentPlansController,
   AccountStatementController,
   ScheduleBlocksController,
+  StaffController,
 ];
 
 function joinPath(...parts: string[]): string {

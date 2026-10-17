@@ -13,10 +13,23 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ListStaffUseCase } from '../application/use-cases/list-staff.use-case';
 import { ListStaffDirectoryUseCase } from '../application/use-cases/list-staff-directory.use-case';
-import { GetStaffDetailUseCase } from '../application/use-cases/get-staff-detail.use-case';
+import {
+  GetStaffDetailUseCase,
+  type StaffMemberDetail,
+} from '../application/use-cases/get-staff-detail.use-case';
+import { UnlockStaffLoginUseCase } from '../application/use-cases/unlock-staff-login.use-case';
+import { Audit } from '../../audit/presentation/audit.decorator';
 import { ReactivateStaffUseCase } from '../application/use-cases/reactivate-staff.use-case';
 import { UpdateStaffUseCase } from '../application/use-cases/update-staff.use-case';
 import { DeactivateStaffUseCase } from '../application/use-cases/deactivate-staff.use-case';
@@ -66,6 +79,7 @@ export class StaffController {
     private readonly updateStaff: UpdateStaffUseCase,
     private readonly deactivateStaff: DeactivateStaffUseCase,
     private readonly reactivateStaff: ReactivateStaffUseCase,
+    private readonly unlockLogin: UnlockStaffLoginUseCase,
   ) {}
 
   // Sigue SIN paginar a propósito: alimenta selectores (profesional de la
@@ -100,7 +114,7 @@ export class StaffController {
   @ApiOkResponse({ type: StaffMemberDetailDto })
   detail(
     @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<StaffMember & { status: 'ACTIVE' | 'INACTIVE' }> {
+  ): Promise<StaffMemberDetail> {
     return this.getStaffDetail.execute(userId);
   }
 
@@ -124,6 +138,30 @@ export class StaffController {
     @Param('userId', ParseUUIDPipe) userId: string,
   ): Promise<StaffMember> {
     return this.reactivateStaff.execute(userId);
+  }
+
+  // DX-048: quitar el bloqueo por intentos fallidos de un miembro de ESTA
+  // clínica (otra clínica → 404 bajo RLS; otro rol → 403). Auditado.
+  @Audit({
+    action: 'UPDATE',
+    resource: 'STAFF_MEMBER',
+    resourceId: { param: 'userId' },
+    reason: 'LOGIN_UNLOCKED',
+  })
+  @Post(':userId/login-unlock')
+  @Roles(...STAFF_WRITE_ROLES)
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Desbloquea el inicio de sesión de un miembro (borra la espera y los intentos fallidos)',
+  })
+  @ApiNoContentResponse({ description: 'Desbloqueado (o no estaba bloqueado)' })
+  @ApiNotFoundResponse({ description: 'No es miembro de esta clínica' })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  async unlockLoginHandler(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<void> {
+    await this.unlockLogin.execute(userId);
   }
 
   @Delete(':userId')

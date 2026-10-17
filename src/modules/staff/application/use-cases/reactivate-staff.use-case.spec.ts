@@ -9,6 +9,7 @@ import type {
   UpdateStaffOutcome,
 } from '../../domain/ports/staff-repository.port';
 import { StaffDirectoryPage } from '../../domain/entities/staff-directory-entry.entity';
+import type { StaffLoginLocks } from '../../domain/ports/staff-login-locks.port';
 
 function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
   return {
@@ -27,6 +28,11 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     ...overrides,
   };
 }
+
+const noLocks: StaffLoginLocks = {
+  blockedUntil: () => Promise.resolve(null),
+  unlock: () => Promise.resolve(),
+};
 
 const miembro: StaffMember = {
   userId: 'u1',
@@ -78,17 +84,18 @@ describe('GetStaffDetailUseCase', () => {
       findById: () => Promise.resolve(null),
     });
     await expect(
-      new GetStaffDetailUseCase(repo).execute('u1'),
+      new GetStaffDetailUseCase(repo, noLocks).execute('u1'),
     ).resolves.toEqual({
       ...miembro,
       status: 'INACTIVE',
+      loginBlockedUntil: null,
     });
   });
 
   it('404 cuando no existe la persona en esta clínica', async () => {
     const repo = makeRepo({ findDetailById: () => Promise.resolve(null) });
-    await expect(new GetStaffDetailUseCase(repo).execute('u1')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      new GetStaffDetailUseCase(repo, noLocks).execute('u1'),
+    ).rejects.toThrow(NotFoundException);
   });
 });
