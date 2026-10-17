@@ -287,9 +287,14 @@ CREATE INDEX "cash_session_reopenings_tenant_closing_idx"
 -- payments."cashSessionId"
 -- ---------------------------------------------------------------------------
 ALTER TABLE "payments" ADD COLUMN "cashSessionId" UUID;
+-- DX-134: con FORCE en "payments" (la hija), un owner sin BYPASSRLS validaría
+-- la FK sin ver ninguna fila. Se quita FORCE solo mientras se añade, en esta
+-- misma transacción; "cash_sessions" (la referenciada) aún no tiene RLS.
+ALTER TABLE "payments" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "payments" ADD CONSTRAINT "payments_cash_session_fkey"
   FOREIGN KEY ("tenantId", "cashSessionId") REFERENCES "cash_sessions"("tenantId", "id")
   ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "payments" FORCE ROW LEVEL SECURITY;
 -- Abonos de una caja (esperado al cerrar) y lado hijo de la FK. Parcial: los
 -- abonos sin caja (los de antes y los de sin «exigir caja») no ocupan índice.
 CREATE INDEX "payments_tenant_cash_session_idx"
