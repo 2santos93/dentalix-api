@@ -140,6 +140,14 @@ const FIXTURE_LOCATIONS = [
      (gen_random_uuid(),'${T_B}','Sede Norte',now() + interval '1 day',now())`,
 ];
 
+/**
+ * Esquema de 20261017233300 (DX-128): un móvil escrito a mano, el que usa el
+ * botón wa.me manual; la migración no lo toca.
+ */
+const FIXTURE_CONTACT = [
+  `UPDATE "patients" SET "phone" = '310 555 0101' WHERE "id" = '${P_A}'`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -171,7 +179,10 @@ const STEPS: Step[] = [
   { until: '20261017233050' },
   // dx136_receipt_enums, dx136_audit_events_receipt_idx y
   // dx136_payment_receipts (FORCE fuera de locations durante el relleno).
-  { until: '99999999999999', fixture: FIXTURE_LOCATIONS },
+  { until: '20261017233300', fixture: FIXTURE_LOCATIONS },
+  // dx128_contact_channel (FORCE fuera de patients durante el backfill del
+  // canal por defecto de la clínica).
+  { until: '99999999999999', fixture: FIXTURE_CONTACT },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -438,6 +449,30 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
            FROM "locations"`,
       ),
     ).toBe(`${T_A}:PRI,${T_A}:NOR,${T_A}:NOR2,${T_B}:PRI,${T_B}:NOR`);
+  }, 180_000);
+
+  it('canal de contacto (DX-128): los pacientes quedan con el canal de su clínica, sin opt-in ni baja, y el móvil intacto', async () => {
+    const events = await scalar<number>(
+      `SELECT count(*)::int AS v FROM "audit_events"`,
+    );
+    await run(STEPS[10]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("contactChannel"::text || ':' || coalesce("phone", '-') || ':' ||
+                (("whatsappOptInAt" IS NULL) AND ("reminderOptOutAt" IS NULL))::text,
+                ',' ORDER BY "tenantId") AS v FROM "patients"`,
+      ),
+    ).toBe('EMAIL:310 555 0101:true,EMAIL:-:true');
+    expect(
+      await scalar<number>(`SELECT count(*)::int AS v FROM "audit_events"`),
+    ).toBe(events);
+    expect(
+      await scalar<boolean>(
+        `SELECT convalidated AS v FROM pg_constraint
+          WHERE conname = 'audit_events_actor_check'
+            AND conrelid = 'public.audit_events'::regclass`,
+      ),
+    ).toBe(true);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {
