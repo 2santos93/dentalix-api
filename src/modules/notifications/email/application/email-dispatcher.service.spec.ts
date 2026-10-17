@@ -30,6 +30,7 @@ function setup(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
       recipientDaily: 1000,
       recipientCooldownSeconds: 0,
     },
+    platformQuotas: { recipientDaily: 1000, recipientCooldownSeconds: 0 },
     ...overrides,
   };
   const repo = new InMemoryEmailOutboxRepository();
@@ -241,10 +242,76 @@ describe('EmailOutbox + EmailDispatcher', () => {
   it('sin tenant: email de plataforma firmado por Dentalix', async () => {
     const mailer = new RecordingMailer();
     const { repo, outbox, dispatcher } = setup(mailer);
-    await outbox.enqueue({ ...invitationInput, tenantId: undefined });
+    const { tenantId: _ignored, ...platform } = invitationInput;
+    expect(_ignored).toBe(TENANT);
+    await outbox.enqueuePlatform(platform);
     await dispatcher.whenIdle();
     expect(repo.rows[0].tenantId).toBeNull();
     expect(mailer.sent[0].subject).toBe('Te invitaron a unirte a Dentalix');
+  });
+
+  describe('tope por destinatario de los emails de plataforma (DX-144)', () => {
+    const verify = {
+      to: 'Victima@Correo.co',
+      template: 'email-verify' as const,
+      vars: {
+        verifyUrl: 'https://dentalix.app/register/verificar/TOKEN',
+        expiresInHours: 24,
+      },
+    };
+
+    function strict() {
+      const ctx = setup(new RecordingMailer(), {
+        platformQuotas: { recipientDaily: 3, recipientCooldownSeconds: 600 },
+      });
+      return ctx;
+    }
+
+    it('como mucho uno por enfriamiento y N en 24 h, contados por el hash del destinatario', async () => {
+      const { repo, outbox, dispatcher, cipher } = strict();
+      await dispatcher.onModuleDestroy();
+      const age = (ms: number) => {
+        for (const r of repo.rows) {
+          r.createdAt = new Date(r.createdAt.getTime() - ms);
+        }
+      };
+
+      expect(await outbox.enqueuePlatform(verify)).toEqual({
+        id: expect.any(String) as string,
+      });
+      expect(await outbox.enqueuePlatform(verify)).toBeNull();
+      // Mismo buzón con otras mayúsculas o espacios: mismo destinatario.
+      expect(
+        await outbox.enqueuePlatform({ ...verify, to: ' victima@correo.co ' }),
+      ).toBeNull();
+      expect(repo.rows).toHaveLength(1);
+      expect(repo.rows[0].toHash).toBe(
+        cipher.hashRecipient('victima@correo.co'),
+      );
+
+      age(601_000);
+      expect(await outbox.enqueuePlatform(verify)).not.toBeNull();
+      age(601_000);
+      expect(await outbox.enqueuePlatform(verify)).not.toBeNull();
+      age(601_000);
+      // 3 en 24 h: el 4.º no sale aunque haya pasado el enfriamiento.
+      expect(await outbox.withinPlatformRecipientQuota(verify.to)).toBe(false);
+      expect(await outbox.enqueuePlatform(verify)).toBeNull();
+      expect(repo.rows).toHaveLength(3);
+
+      // Otro destinatario no comparte cuenta, y lo de una clínica no cuenta.
+      expect(
+        await outbox.enqueuePlatform({ ...verify, to: 'otra@correo.co' }),
+      ).not.toBeNull();
+      expect(outbox.platformRecipientCooldownSeconds).toBe(600);
+    });
+
+    it('los emails de clínica al mismo correo no consumen el tope de plataforma', async () => {
+      const { outbox, dispatcher } = strict();
+      await dispatcher.onModuleDestroy();
+      await outbox.enqueue({ ...invitationInput, to: verify.to });
+      expect(await outbox.withinPlatformRecipientQuota(verify.to)).toBe(true);
+    });
   });
 
   it('barrido periódico: arranca con la app y se apaga ordenadamente', async () => {

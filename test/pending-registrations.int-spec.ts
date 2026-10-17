@@ -24,8 +24,15 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
   let prisma: PrismaService;
   let repo: PrismaRegistrationRepository;
 
-  const save = (token: string, subdomain = 'reg-int') =>
+  const COOLDOWN_MS = 600_000;
+  // Por defecto: como si el enfriamiento ya hubiera pasado (reemplaza).
+  const save = (
+    token: string,
+    subdomain = 'reg-int',
+    replaceCreatedBefore = new Date(Date.now() + 60_000),
+  ) =>
     repo.savePending({
+      replaceCreatedBefore,
       email: EMAIL,
       clinicName: 'Clínica Int',
       subdomain,
@@ -54,11 +61,11 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     await raw.$disconnect();
   });
 
-  it('un registro nuevo para el mismo email reemplaza al anterior: el enlace viejo deja de existir', async () => {
+  it('pasado el enfriamiento, un registro nuevo para el mismo email reemplaza al anterior: el enlace viejo deja de existir', async () => {
     const first = generateRegistrationToken();
     const second = generateRegistrationToken();
-    await save(first, 'reg-int-1');
-    await save(second, 'reg-int-2');
+    expect(await save(first, 'reg-int-1')).toBe(true);
+    expect(await save(second, 'reg-int-2')).toBe(true);
 
     expect(
       await raw.pendingRegistration.count({ where: { email: EMAIL } }),
@@ -69,6 +76,60 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     expect(
       await repo.findPendingByTokenHash(hashRegistrationToken(second)),
     ).toMatchObject({ email: EMAIL, subdomain: 'reg-int-2' });
+  });
+
+  it('DX-144: dentro del enfriamiento NO reemplaza el pendiente vigente: el primer enlace sigue valiendo', async () => {
+    const first = generateRegistrationToken();
+    const second = generateRegistrationToken();
+    const cutoff = () => new Date(Date.now() - COOLDOWN_MS);
+    expect(await save(first, 'reg-int-1', cutoff())).toBe(true);
+    expect(await save(second, 'reg-int-2', cutoff())).toBe(false);
+
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(first)),
+    ).toMatchObject({ email: EMAIL, subdomain: 'reg-int-1' });
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(second)),
+    ).toBeNull();
+
+    // Envejecido más allá del enfriamiento, ya se puede reemplazar.
+    await raw.pendingRegistration.update({
+      where: { email: EMAIL },
+      data: { createdAt: new Date(Date.now() - COOLDOWN_MS - 1000) },
+    });
+    expect(await save(second, 'reg-int-2', cutoff())).toBe(true);
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(second)),
+    ).toMatchObject({ subdomain: 'reg-int-2' });
+  });
+
+  it('DX-144: un pendiente caducado se reemplaza aunque sea reciente', async () => {
+    const first = generateRegistrationToken();
+    await save(first, 'reg-int-1');
+    await raw.pendingRegistration.update({
+      where: { email: EMAIL },
+      data: {
+        createdAt: new Date(Date.now() - 120_000),
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+    const second = generateRegistrationToken();
+    expect(
+      await save(second, 'reg-int-2', new Date(Date.now() - COOLDOWN_MS)),
+    ).toBe(true);
+  });
+
+  it('DX-144: dos registros a la vez para un email nuevo dejan uno solo (el otro no reemplaza)', async () => {
+    const cutoff = new Date(Date.now() - COOLDOWN_MS);
+    const results = await Promise.all(
+      Array.from({ length: 4 }, (_, i) =>
+        save(generateRegistrationToken(), `reg-int-${i}`, cutoff),
+      ),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(
+      await raw.pendingRegistration.count({ where: { email: EMAIL } }),
+    ).toBe(1);
   });
 
   it('la BD rechaza un tokenHash que no sea SHA-256 hex (nada parecido a un token en claro)', async () => {

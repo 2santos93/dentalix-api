@@ -88,7 +88,7 @@ export class EmailDispatcher
     }
     if (access.executable && access.ownerSeesAllRows) return;
     const hint = !access.executable
-      ? 'El rol de la app no puede ejecutar email_outbox_claim/settle/enqueue_platform: concédele EXECUTE (README, «Email transaccional»).'
+      ? 'El rol de la app no puede ejecutar email_outbox_claim/settle/enqueue_platform_capped/platform_allowed/purge_platform: concédele EXECUTE (README, «Email transaccional»).'
       : 'El owner de las funciones email_outbox_* no ve todas las filas de email_outbox: tiene que ser el rol dentalix_email_dispatcher con su política (migración 20261017175000_dx113_email_outbox_dispatcher_role; README, «Despliegue: roles de la BD»).';
     this.logger.error({ event: 'email.dispatcher_misconfigured', hint });
     if (this.config.production) {

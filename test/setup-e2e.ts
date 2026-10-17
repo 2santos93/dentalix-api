@@ -45,3 +45,10 @@ process.env.LOG_LEVEL ??= 'silent';
 process.env.MAIL_RECIPIENT_COOLDOWN_SECONDS ??= '0';
 process.env.MAIL_RECIPIENT_DAILY_LIMIT ??= '1000';
 process.env.MAIL_TENANT_DAILY_LIMIT ??= '1000';
+
+// Tope por destinatario de los emails de PLATAFORMA (DX-144): los e2e se
+// registran una y otra vez con los mismos correos, y las filas de
+// email_outbox sobreviven entre corridas. El tope real se prueba en
+// test/registration-recipient-quota.e2e-spec.ts sustituyendo MAIL_CONFIG.
+process.env.MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS ??= '0';
+process.env.MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT ??= '1000';

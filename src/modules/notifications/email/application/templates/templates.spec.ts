@@ -134,14 +134,16 @@ describe('plantillas reservadas para otras tareas', () => {
     const email = renderEmail(
       'email-verify',
       {
-        userName: 'Luis <b>',
         verifyUrl: 'https://demo.dentalix.app/verificar/abc',
         expiresInHours: 1,
       },
       null,
     );
     expect(email.subject).toBe('Confirma tu correo electrónico');
-    expect(email.html).toContain('Hola, Luis &lt;b&gt;');
+    // DX-144 (SEC-034): saludo genérico, sin el nombre que escribió quien
+    // pidió el alta (cualquiera puede pedirla con un email ajeno).
+    expect(email.html).toContain('Hola:');
+    expect(email.text).toContain('\nHola:\n');
     expect(email.text).toContain('caduca en 1 hora.');
     // DX-029 (R2): quien no pidió el alta sabe que no debe confirmarla.
     expect(email.text).toContain(
@@ -212,7 +214,7 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(() =>
       renderEmail(
         'email-verify',
-        { userName: 'x', verifyUrl: 'https://a.co', expiresInHours: 1 },
+        { verifyUrl: 'https://a.co', expiresInHours: 1 },
         null,
         'en' as 'es',
       ),

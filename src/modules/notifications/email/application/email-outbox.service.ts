@@ -15,15 +15,21 @@ import { maskEmail } from '../../../../shared/privacy/mask-email';
 import { EmailDispatcher } from './email-dispatcher.service';
 import { renderEmail } from './templates/templates';
 
-export interface EnqueueEmailInput<T extends EmailTemplateName> {
-  /** Clínica que envía (marca y RLS); sin ella es un email de plataforma. */
-  tenantId?: string;
+/** Email de plataforma (sin clínica): firma Dentalix y tiene tope propio. */
+export interface EnqueuePlatformEmailInput<T extends EmailTemplateName> {
   to: string;
   template: T;
   vars: EmailVarsByTemplate[T];
   locale?: EmailLocale;
   /** Entidad que lo origina (p. ej. la invitación), para su estado de envío. */
   referenceId?: string;
+}
+
+export interface EnqueueEmailInput<
+  T extends EmailTemplateName,
+> extends EnqueuePlatformEmailInput<T> {
+  /** Clínica que envía (marca y RLS). Sin clínica: `enqueuePlatform`. */
+  tenantId: string;
 }
 
 /**
@@ -89,8 +95,64 @@ export class EmailOutbox {
   async enqueue<T extends EmailTemplateName>(
     input: EnqueueEmailInput<T>,
   ): Promise<{ id: string }> {
-    const tenantId = input.tenantId ?? null;
-    const brand = tenantId ? await this.brandOf(tenantId) : null;
+    const brand = await this.brandOf(input.tenantId);
+    const row = this.prepare(input, brand);
+    const { id } = await this.repo.insert({ ...row, tenantId: input.tenantId });
+    this.enqueued(id, input.tenantId, input.template, row.toMasked);
+    return { id };
+  }
+
+  /**
+   * Segundos mínimos entre dos emails de plataforma al mismo destinatario
+   * (DX-144). El registro no reemplaza un pendiente más joven que esto.
+   */
+  get platformRecipientCooldownSeconds(): number {
+    return this.config.platformQuotas.recipientCooldownSeconds;
+  }
+
+  /**
+   * ¿Cabe otro email de plataforma a `to`? Lo cuenta la BD por el hash del
+   * destinatario (vale entre réplicas). No escribe nada.
+   */
+  withinPlatformRecipientQuota(to: string): Promise<boolean> {
+    return this.repo.platformRecipientAllowed(
+      this.cipher.hashRecipient(to),
+      this.config.platformQuotas,
+    );
+  }
+
+  /**
+   * Email de PLATAFORMA (sin clínica, firma Dentalix: verificación y aviso del
+   * registro público). Solo sale si cabe en el tope por destinatario
+   * (DX-144, SEC-034: el alta pública no puede servir para bombardear un
+   * buzón con el DKIM de Dentalix); la comprobación y la escritura son una
+   * sola operación en la BD. `null` si el tope lo frenó: quien llama decide
+   * qué hacer, y NUNCA se lo dice a quien hizo la petición pública.
+   */
+  async enqueuePlatform<T extends EmailTemplateName>(
+    input: EnqueuePlatformEmailInput<T>,
+  ): Promise<{ id: string } | null> {
+    const row = this.prepare(input, null);
+    const created = await this.repo.insertPlatform(
+      row,
+      this.config.platformQuotas,
+    );
+    if (!created) {
+      this.logger.log({
+        event: 'email.platform_recipient_capped',
+        template: input.template,
+        to: row.toMasked,
+      });
+      return null;
+    }
+    this.enqueued(created.id, null, input.template, row.toMasked);
+    return created;
+  }
+
+  private prepare<T extends EmailTemplateName>(
+    input: EnqueuePlatformEmailInput<T>,
+    brand: EmailBrand | null,
+  ) {
     const rendered = renderEmail(
       input.template,
       input.vars,
@@ -98,27 +160,30 @@ export class EmailOutbox {
       input.locale ?? 'es',
     );
     const to = input.to.trim();
-    const toMasked = maskEmail(to);
-
-    const { id } = await this.repo.insert({
-      tenantId,
+    return {
       template: input.template,
       toHash: this.cipher.hashRecipient(to),
-      toMasked,
+      toMasked: maskEmail(to),
       referenceId: input.referenceId ?? null,
       payload: this.cipher.encrypt({ to, ...rendered }),
-    });
+    };
+  }
 
+  private enqueued(
+    id: string,
+    tenantId: string | null,
+    template: EmailTemplateName,
+    toMasked: string,
+  ): void {
     this.logger.log({
       event: 'email.enqueued',
       outboxId: id,
       tenantId,
-      template: input.template,
+      template,
       to: toMasked,
     });
     // La fila ya está confirmada (el insert cerró su transacción).
     this.dispatcher.kick();
-    return { id };
   }
 
   /**

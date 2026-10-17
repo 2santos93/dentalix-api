@@ -13,12 +13,18 @@ export interface PendingRegistrationRecord {
 
 export interface RegistrationRepository {
   /**
-   * Guarda (o REEMPLAZA, si ya había uno para ese email) el registro
-   * pendiente: el enlace anterior deja de servir.
+   * Guarda el registro pendiente. Si ya había uno para ese email solo lo
+   * REEMPLAZA (y su enlace deja de servir) cuando se creó antes de
+   * `replaceCreatedBefore` o ya caducó (DX-144: otra petición no puede
+   * invalidar el enlace de quien se está registrando). Atómico: de varias
+   * peticiones a la vez, como mucho una guarda. Devuelve si guardó.
    */
   savePending(
-    input: Omit<PendingRegistrationRecord, 'id'> & { tokenHash: string },
-  ): Promise<void>;
+    input: Omit<PendingRegistrationRecord, 'id'> & {
+      tokenHash: string;
+      replaceCreatedBefore: Date;
+    },
+  ): Promise<boolean>;
 
   findPendingByTokenHash(
     tokenHash: string,

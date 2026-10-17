@@ -44,8 +44,12 @@ export interface PasswordResetEmailVars {
   expiresInMinutes: number;
 }
 
+/**
+ * DX-144 (SEC-034): sin el nombre de quien pidió el alta. Cualquiera puede
+ * pedirla con un email ajeno, así que el email no lleva NADA escrito por el
+ * solicitante (saludo genérico).
+ */
 export interface EmailVerifyEmailVars {
-  userName: string;
   verifyUrl: string;
   expiresInHours: number;
 }

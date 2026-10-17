@@ -364,6 +364,30 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
+    it('tope de los emails de plataforma (DX-144): enfriamiento 0..86400 s y 1..1000 al día', () => {
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS: '0',
+            MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT: '1000',
+          }),
+        ),
+      ).not.toThrow();
+      expect(
+        errorOf(baseEnv({ MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS: '86401' })),
+      ).toContain(
+        'MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS debe ser un entero entre 0 y 86400.',
+      );
+      expect(
+        errorOf(baseEnv({ MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT: '0' })),
+      ).toContain(
+        'MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT debe ser un entero entre 1 y 1000.',
+      );
+      expect(
+        errorOf(baseEnv({ MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT: 'x' })),
+      ).toContain('MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT');
+    });
+
     it('intervalos: enteros no negativos (0 apaga el barrido)', () => {
       expect(() =>
         validateEnv(baseEnv({ MAIL_DISPATCH_INTERVAL_MS: '0' })),

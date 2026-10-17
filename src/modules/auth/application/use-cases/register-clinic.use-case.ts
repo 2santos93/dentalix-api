@@ -37,8 +37,18 @@ export interface RegisterClinicInput {
   linkBase: string;
 }
 
-/** Qué pasó, solo para el log y los tests: NUNCA llega a la respuesta. */
-export type RegisterOutcome = 'VERIFICATION_SENT' | 'EXISTING_ACCOUNT_NOTIFIED';
+/**
+ * Qué pasó, solo para el log y los tests: NUNCA llega a la respuesta.
+ * - RECIPIENT_QUOTA_REACHED: el destinatario ya recibió el máximo de emails
+ *   del registro (enfriamiento o diario, DX-144); no se envía ni guarda nada.
+ * - PENDING_KEPT: ya había un pendiente vigente más joven que el
+ *   enfriamiento; se conserva (y su enlace sigue valiendo) y no se envía nada.
+ */
+export type RegisterOutcome =
+  | 'VERIFICATION_SENT'
+  | 'EXISTING_ACCOUNT_NOTIFIED'
+  | 'RECIPIENT_QUOTA_REACHED'
+  | 'PENDING_KEPT';
 
 export const SUBDOMAIN_TAKEN = 'Ese subdominio ya está en uso. Elige otro.';
 
@@ -66,6 +76,13 @@ export const REGISTRATION_EMAIL_TAKEN =
  * (`accept`), así que ni el cuerpo ni el tiempo de respuesta dependen de que
  * el email exista. El subdominio sí se comprueba en línea: es público (es el
  * host de la clínica) y no dice nada de ninguna persona.
+ *
+ * Sin relé de emails (DX-144, SEC-034): en segundo plano, y por eso sin que
+ * cambie la respuesta, cada destinatario recibe como mucho un email del
+ * registro por enfriamiento y unos pocos al día (contados en la BD por el
+ * hash del destinatario, valen entre réplicas). El email de verificación no
+ * lleva nada escrito por el solicitante, y un alta repetida dentro del
+ * enfriamiento no reemplaza el pendiente de quien se está registrando.
  */
 @Injectable()
 export class RegisterClinicUseCase {
@@ -117,34 +134,44 @@ export class RegisterClinicUseCase {
     passwordHash: string,
   ): Promise<RegisterOutcome> {
     const email = input.email.trim().toLowerCase();
+    // Antes de guardar nada: con el tope alcanzado, ni siquiera se reemplaza
+    // el pendiente (su enlace, ya enviado, sigue valiendo).
+    if (!(await this.notifier.withinRecipientQuota(email))) {
+      return this.done('RECIPIENT_QUOTA_REACHED');
+    }
     const existing = await this.repo.findUserByEmail(email);
     if (existing) {
-      await this.notifier.sendExistingAccountNotice({
+      const sent = await this.notifier.sendExistingAccountNotice({
         to: email,
         userName: existing.fullName,
         loginUrl: `${input.linkBase}${REGISTRATION_NOTICE_PATH}`,
       });
-      return this.done('EXISTING_ACCOUNT_NOTIFIED');
+      return this.done(
+        sent ? 'EXISTING_ACCOUNT_NOTIFIED' : 'RECIPIENT_QUOTA_REACHED',
+      );
     }
 
     const token = generateRegistrationToken();
-    const fullName = input.fullName.trim();
-    await this.pending.savePending({
+    const now = new Date();
+    const saved = await this.pending.savePending({
       email,
       clinicName: input.clinicName.trim(),
       subdomain: input.subdomain,
-      fullName,
+      fullName: input.fullName.trim(),
       passwordHash,
       tokenHash: hashRegistrationToken(token),
-      expiresAt: registrationExpiresAt(new Date()),
+      expiresAt: registrationExpiresAt(now),
+      replaceCreatedBefore: new Date(
+        now.getTime() - this.notifier.recipientCooldownSeconds * 1000,
+      ),
     });
-    await this.notifier.sendVerification({
+    if (!saved) return this.done('PENDING_KEPT');
+    const sent = await this.notifier.sendVerification({
       to: email,
-      userName: fullName,
       verifyUrl: `${input.linkBase}${REGISTRATION_VERIFY_PATH}/${token}`,
       expiresInHours: REGISTRATION_TTL_HOURS,
     });
-    return this.done('VERIFICATION_SENT');
+    return this.done(sent ? 'VERIFICATION_SENT' : 'RECIPIENT_QUOTA_REACHED');
   }
 
   /**

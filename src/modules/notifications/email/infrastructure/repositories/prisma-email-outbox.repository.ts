@@ -6,7 +6,9 @@ import {
   ClaimedOutboxEmail,
   EmailOutboxRepository,
   NewOutboxEmail,
+  NewPlatformOutboxEmail,
   OutboxSettlement,
+  PlatformRecipientQuota,
 } from '../../domain/ports/email-outbox-repository.port';
 
 const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
@@ -22,22 +24,40 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
  * pendientes) se escribe con `runWithTenant`, bajo la RLS de la clínica. El
  * despachador, que trabaja para todas las clínicas a la vez, pasa por las
  * funciones SECURITY DEFINER de la migración 20261017120000_email_outbox
- * (reclamar, cerrar) y los emails de plataforma (sin clínica) se insertan por
- * la suya.
+ * (reclamar, cerrar). Los emails de plataforma (sin clínica) se insertan por
+ * la de DX-144 (20261018090000_dx144_platform_email_quota), que comprueba el
+ * tope por destinatario y escribe en la misma operación.
  */
 @Injectable()
 export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async insertPlatform(
+    row: NewPlatformOutboxEmail,
+    quota: PlatformRecipientQuota,
+  ): Promise<{ id: string } | null> {
+    const [created] = await this.prisma.$queryRaw<{ id: string | null }[]>`
+      SELECT email_outbox_enqueue_platform_capped(
+        ${row.template}::"EmailTemplate", ${row.toHash},
+        ${row.toMasked}, ${row.payload}, ${row.referenceId}::uuid,
+        ${quota.recipientCooldownSeconds}::int, ${quota.recipientDaily}::int
+      ) AS id`;
+    return created.id ? { id: created.id } : null;
+  }
+
+  async platformRecipientAllowed(
+    toHash: string,
+    quota: PlatformRecipientQuota,
+  ): Promise<boolean> {
+    const [result] = await this.prisma.$queryRaw<{ allowed: boolean }[]>`
+      SELECT email_outbox_platform_allowed(
+        ${toHash}, ${quota.recipientCooldownSeconds}::int,
+        ${quota.recipientDaily}::int
+      ) AS allowed`;
+    return result.allowed;
+  }
+
   async insert(row: NewOutboxEmail): Promise<{ id: string }> {
-    if (row.tenantId === null) {
-      const [created] = await this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT email_outbox_enqueue_platform(
-          ${row.template}::"EmailTemplate", ${row.toHash}, ${row.toMasked},
-          ${row.payload}, ${row.referenceId}::uuid
-        ) AS id`;
-      return { id: created.id };
-    }
     const tenantId = row.tenantId;
     return this.prisma.runWithTenant(tenantId, (tx) =>
       tx.emailOutbox.create({
@@ -171,8 +191,10 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
         FROM pg_proc p
         JOIN pg_roles r ON r.oid = p.proowner
        WHERE p.proname IN ('email_outbox_claim', 'email_outbox_settle',
-                           'email_outbox_enqueue_platform')
-      HAVING count(*) = 3`;
+                           'email_outbox_enqueue_platform_capped',
+                           'email_outbox_platform_allowed',
+                           'email_outbox_purge_platform')
+      HAVING count(*) = 5`;
     const row = rows[0];
     return {
       executable: row?.executable ?? false,

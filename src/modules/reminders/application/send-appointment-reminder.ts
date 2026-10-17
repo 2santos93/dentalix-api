@@ -119,9 +119,13 @@ export class SendAppointmentReminder {
 
     const to = (ctx.patientEmail ?? '').trim();
     const tenantId = this.tenantContext.getTenantId();
+    // El trabajo corre bajo su clínica (su repositorio ya lo exige); el email
+    // es de la clínica, nunca de plataforma (DX-144: EmailOutbox.enqueue la
+    // pide).
+    if (!tenantId) throw new Error('No tenant in context');
     // Sin petición: el host de PLATAFORMA de la clínica (`<sub>.<base>`),
     // nunca su dominio personalizado (SEC-033). null = sale sin enlace.
-    const linkBase = tenantId ? await this.links.forTenant(tenantId) : null;
+    const linkBase = await this.links.forTenant(tenantId);
     const link = await this.createLink.execute({
       appointmentId,
       automatic: true,
