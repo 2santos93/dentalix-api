@@ -1047,6 +1047,13 @@ interface DemoPlan {
    * ACCEPTED, con sus ítems.
    */
   signedAcceptance?: true;
+  /**
+   * DX-145: días desde que se abrió el plan (su `createdAt`). Es la fecha desde
+   * la que envejece en la cartera el saldo que no está en cuotas, así que la
+   * demo deja deudores en los cuatro tramos (0–30, 31–60, 61–90 y > 90). Sin
+   * él, el plan es de hoy. Siempre anterior a sus abonos.
+   */
+  openedDaysAgo?: number;
   /** Plan de pagos (cuotas) sobre el total facturable del plan. */
   paymentPlan?: {
     downPayment: number;
@@ -1064,6 +1071,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 0,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Rehabilitación de 36 con implante y corona.',
+    openedDaysAgo: 60,
     items: [
       { code: 'IMG-RX-PANORAMICA', tooth: '36', status: DONE },
       { code: 'CX-EXO-SIMPLE', tooth: '36', status: DONE },
@@ -1114,6 +1122,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 0,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Endodoncia y rehabilitación de 46.',
+    openedDaysAgo: 40,
     items: [
       { code: 'IMG-RX-PERIAPICAL', tooth: '46', status: DONE },
       { code: 'ENDO-MULTI', tooth: '46', status: DONE },
@@ -1167,6 +1176,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Tratamiento periodontal por cuadrantes.',
+    openedDaysAgo: 75,
     items: [
       { code: 'PERIO-RASPADO', tooth: '16', status: DONE },
       { code: 'PERIO-RASPADO', tooth: '26', status: DONE },
@@ -1203,6 +1213,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Prevención odontopediátrica.',
+    openedDaysAgo: 100,
     items: [
       { code: 'PED-SELLANTE', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
       { code: 'PED-SELLANTE', tooth: '26', surfaces: [OCCLUSAL], status: DONE },
@@ -1217,6 +1228,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 0,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Resinas en molares.',
+    openedDaysAgo: 20,
     items: [
       {
         code: 'OP-RESINA-3',

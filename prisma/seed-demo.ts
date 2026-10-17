@@ -1045,6 +1045,17 @@ class DemoSeeder {
             { role: ClinicRole.DENTIST },
           );
         }
+        if (spec.openedDaysAgo !== undefined) {
+          // DX-145: el plan se abrió hace N días (ningún caso de uso fecha un
+          // plan en el pasado). Bajo `app.current_tenant`, como el resto.
+          const openedAt = daysAgoAt(this.now, spec.openedDaysAgo, 9 * 60);
+          await this.prisma.runWithTenant((tx) =>
+            tx.treatmentPlan.update({
+              where: { id: plan.id },
+              data: { createdAt: openedAt },
+            }),
+          );
+        }
         if (spec.paymentPlan) {
           await this.use(CreatePaymentPlanUseCase).execute(
             plan.id,
