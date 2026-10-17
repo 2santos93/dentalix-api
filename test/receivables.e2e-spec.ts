@@ -426,6 +426,108 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     }
   });
 
+  it('cuadra con el estado de cuenta con abonos en otra moneda y anulados, y omite pacientes retirados', async () => {
+    const clinicC = await registerClinic(app, 'cartera-c');
+    const sedesC = await get(clinicC, '/locations').expect(200);
+    const sedeC = (sedesC.body as { id: string }[])[0].id;
+    const catalogC = await raw.dentalCatalogItem.create({
+      data: {
+        tenantId: clinicC.tenantId,
+        code: 'CARTERA-C',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Resina',
+        color: '#2A2B3C',
+        defaultPrice: 1,
+      },
+      select: { id: true },
+    });
+    const payment = (
+      planId: string,
+      patientId: string,
+      amount: number,
+      currency: string,
+      deletedAt: Date | null = null,
+    ) =>
+      raw.payment.create({
+        data: {
+          tenantId: clinicC.tenantId,
+          locationId: sedeC,
+          treatmentPlanId: planId,
+          patientId,
+          amount,
+          currency,
+          paidAt: noonDaysAgo(3),
+          method: 'CASH',
+          deletedAt,
+        },
+      });
+
+    // mixto: COP 100.000, abona 30.000 COP y 10 USD; un abono de 50.000 COP
+    // anulado no cuenta. Debe 70.000 COP y tiene 10 USD a favor.
+    const mixto = await patient(clinicC, 'Mixto', 'CAR-C1');
+    const planMixto = await plan(clinicC, mixto, 100000, {
+      createdDaysAgo: 45,
+      catalog: catalogC.id,
+    });
+    await payment(planMixto, mixto, 30000, 'COP');
+    await payment(planMixto, mixto, 10, 'USD');
+    await payment(planMixto, mixto, 50000, 'COP', new Date());
+    await attended(clinicC, mixto, sedeC, 4);
+
+    // sinSede: ni citas, ni abonos, ni presentación: solo en la consolidada.
+    const sinSede = await patient(clinicC, 'Sinsede', 'CAR-C2');
+    await plan(clinicC, sinSede, 60000, {
+      createdDaysAgo: 10,
+      catalog: catalogC.id,
+    });
+
+    // retirado: debe, pero el paciente está borrado: no es cartera.
+    const retirado = await patient(clinicC, 'Retirado', 'CAR-C3');
+    await plan(clinicC, retirado, 400000, {
+      createdDaysAgo: 100,
+      catalog: catalogC.id,
+    });
+    await attended(clinicC, retirado, sedeC, 50);
+    await raw.patient.update({
+      where: { id: retirado },
+      data: { deletedAt: new Date() },
+    });
+
+    const all = (await get(clinicC, '/receivables/aging').expect(200))
+      .body as AgingPage;
+    expect(all.items.map((r) => r.patient.id).sort()).toEqual(
+      [mixto, sinSede].sort(),
+    );
+    for (const row of all.items) {
+      const statement = await get(
+        clinicC,
+        `/patients/${row.patient.id}/account-statement`,
+      ).expect(200);
+      expect(row.currencies.map((c) => [c.currency, c.balance])).toEqual(
+        (statement.body as StatementBody).summary.map((s) => [
+          s.currency,
+          s.balance,
+        ]),
+      );
+    }
+    const mixtoRow = all.items.find((r) => r.patient.id === mixto);
+    expect(mixtoRow?.locationId).toBe(sedeC);
+    expect(
+      mixtoRow?.currencies.map((c) => [c.currency, c.debt, c.credit]),
+    ).toEqual([
+      ['COP', 70000, 0],
+      ['USD', 0, 10],
+    ]);
+    expect(all.items.find((r) => r.patient.id === sinSede)?.locationId).toBe(
+      null,
+    );
+
+    const bySede = (
+      await get(clinicC, `/receivables/aging?locationId=${sedeC}`).expect(200)
+    ).body as AgingPage;
+    expect(bySede.items.map((r) => r.patient.id)).toEqual([mixto]);
+  });
+
   it('la sede de la deuda es la de la última cita atendida y se puede pedir por locationId', async () => {
     const res = await get(
       clinicA,
