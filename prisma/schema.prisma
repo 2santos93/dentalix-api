@@ -101,6 +101,8 @@ model User {
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
   planItemDiscounts        TreatmentPlanItem[]       @relation("TreatmentPlanItemDiscountBy")
   discountPoliciesUpdated  DiscountPolicy[]
+  // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
+  platformAuditEvents      PlatformAuditEvent[]
 
   @@map("users")
 }
@@ -2268,6 +2270,50 @@ model JobSchedule {
   updatedAt DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
 
   @@map("job_schedules")
+}
+
+/// DX-220 (OPS-029): latido de cada proceso worker (APP_ROLE worker|all). Lo
+/// actualiza en cada vuelta del bucle; `GET /platform/jobs/stats` cuenta como
+/// vivo el que latió hace menos de 60 s. Tabla de PLATAFORMA sin tenant ni
+/// RLS: solo ids técnicos, versión y fechas. La purga diaria de la cola borra
+/// los que llevan más de 7 días sin latir.
+model JobWorker {
+  /// `JobsConfig.workerId` (host:pid:aleatorio), el mismo de `jobs.lockedBy`.
+  id         String   @id
+  role       String
+  /// APP_VERSION del proceso (p. ej. el SHA de la imagen), si se fija.
+  version    String?
+  startedAt  DateTime @default(dbgenerated("timezone('utc'::text, now())"))
+  lastBeatAt DateTime @default(dbgenerated("timezone('utc'::text, now())"))
+
+  @@index([lastBeatAt])
+  @@map("job_workers")
+}
+
+/// DX-220: acciones de un superadmin sobre la PLATAFORMA (no sobre una
+/// clínica, que van a audit_events): hoy reencolar un trabajo FAILED.
+/// Append-only (trigger) y sin tenant ni RLS; nunca el payload del trabajo.
+model PlatformAuditEvent {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorUserId  String   @db.Uuid
+  /// `JOB_RETRIED` (CHECK en la migración).
+  action       String
+  /// `JOB` (CHECK en la migración).
+  resourceType String
+  resourceId   String?  @db.Uuid
+  requestId    String?
+  ip           String?
+  userAgent    String?
+  /// Solo ids y valores técnicos (nombre del trabajo, intentos, error).
+  metadata     Json     @default("{}")
+  occurredAt   DateTime @default(dbgenerated("timezone('utc'::text, now())"))
+
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt(sort: Desc), id(sort: Desc)])
+  @@index([actorUserId, occurredAt])
+  @@index([resourceType, resourceId])
+  @@map("platform_audit_events")
 }
 
 /// DX-085: canal de un mensaje saliente al paciente.

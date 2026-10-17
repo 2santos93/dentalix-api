@@ -47,6 +47,26 @@ const RLS_EXEMPT: Record<string, string> = {
 };
 
 /**
+ * Tablas de PLATAFORMA sin RLS a propósito y SIN columna de tenant (ni FK a
+ * tenants), así que no son «de clínica» y la invariante de arriba no las ve.
+ * Se fijan aquí para que añadirles un tenant (o RLS) obligue a revisar su
+ * exención, igual que `jobs` (SEC-036).
+ */
+const PLATFORM_TABLES: Record<string, string> = {
+  // DX-085: una fila por tarea programada (nombre, cron, ticks).
+  job_schedules: 'tareas programadas de la cola de plataforma',
+  // DX-220 (OPS-029): latido de cada proceso worker (id técnico, papel,
+  // versión y fechas). La escribe el worker de todas las clínicas y la lee
+  // GET /platform/jobs/stats (solo superadmin). Ver la migración
+  // 20261018000000_dx220_job_workers_platform_audit.
+  job_workers: 'latido de los workers de la cola de plataforma',
+  // DX-220: acciones de un superadmin sobre la plataforma (reencolar un
+  // trabajo), append-only y sin el payload del trabajo. Las acciones sobre
+  // una clínica van a audit_events, con RLS.
+  platform_audit_events: 'auditoría de acciones de plataforma del superadmin',
+};
+
+/**
  * Vistas y vistas materializadas de `public` permitidas sin
  * `security_invoker=true`. Hoy ninguna: una vista sin security_invoker lee
  * las tablas con los permisos de su owner (el de las migraciones, superusuario
@@ -242,6 +262,19 @@ describe('Catálogo de RLS (DX-068)', () => {
         clinic: clinicTableNames().includes(table),
         rls: found?.rls,
       }).toEqual({ table, clinic: true, rls: false });
+    }
+  });
+
+  it('DX-220: las tablas de plataforma existen, no tienen tenant y siguen sin RLS', () => {
+    for (const table of Object.keys(PLATFORM_TABLES)) {
+      const found = rls.find((t) => t.table === table);
+      // Si ahora tiene tenant pasa a ser de clínica: o RLS o RLS_EXEMPT.
+      expect({
+        table,
+        exists: found !== undefined,
+        clinic: clinicTableNames().includes(table),
+        rls: found?.rls,
+      }).toEqual({ table, exists: true, clinic: false, rls: false });
     }
   });
 
