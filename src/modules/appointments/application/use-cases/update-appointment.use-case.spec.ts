@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -53,6 +54,7 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     appointmentType: null,
     confirmationSentAt: null,
     callbackRequestedAt: null,
+    wantsEarlier: false,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -1185,6 +1187,165 @@ describe('UpdateAppointmentUseCase', () => {
       await uc.execute(existing.id, { status: AppointmentStatus.NO_SHOW });
       await uc.execute(existing.id, { notes: 'llamar' });
       expect(waitlist.rows[0].status).toBe('OPEN');
+    });
+  });
+
+  describe('«Adelantar si hay hueco» (DX-210)', () => {
+    const ctx = (
+      role: AppointmentAuditContext['actor']['role'],
+    ): AppointmentAuditContext => ({
+      tenantId: 't1',
+      locationId: null,
+      actor: { userId: 'u-1', role },
+      requestId: 'req-1',
+      ip: null,
+      userAgent: null,
+    });
+    // Tres semanas después: la cita que el paciente quiere adelantar.
+    const FAR = new Date(Date.now() + 21 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const far = (t: string) => new Date(`${FAR}T${t}:00.000Z`);
+
+    function setup() {
+      const repo = new InMemoryAppointmentRepository();
+      const drafts: AuditEventDraft[] = [];
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(),
+        makeStaff(),
+        makeAudit(drafts),
+        makeBlocks(),
+      );
+      return { repo, drafts, uc };
+    }
+
+    it.each(['RECEPTION', 'DENTIST', 'ADMIN'] as const)(
+      '%s la marca y queda auditado',
+      async (role) => {
+        const { repo, drafts, uc } = setup();
+        const a = repo.seed({ start: far('10:00'), end: far('10:30') });
+        const res = await uc.execute(a.id, { wantsEarlier: true }, ctx(role));
+        expect(res.wantsEarlier).toBe(true);
+        expect(drafts).toEqual([
+          expect.objectContaining({
+            action: 'UPDATE',
+            resourceType: 'APPOINTMENT',
+            resourceId: a.id,
+            patient: { kind: 'patient', id: a.patientId },
+            metadata: { reason: 'WANTS_EARLIER_ON' },
+          }),
+        ]);
+      },
+    );
+
+    it('la asistente no la cambia (403) y no se escribe nada', async () => {
+      const { repo, drafts, uc } = setup();
+      const a = repo.seed({ start: far('10:00'), end: far('10:30') });
+      await expect(
+        uc.execute(a.id, { wantsEarlier: true }, ctx('ASSISTANT')),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect((await repo.findById(a.id))?.wantsEarlier).toBe(false);
+      expect(drafts).toHaveLength(0);
+    });
+
+    it('quitarla audita WANTS_EARLIER_OFF; repetir el mismo valor no audita', async () => {
+      const { repo, drafts, uc } = setup();
+      const a = repo.seed({
+        start: far('10:00'),
+        end: far('10:30'),
+        wantsEarlier: true,
+      });
+      await uc.execute(a.id, { wantsEarlier: true }, ctx('RECEPTION'));
+      expect(drafts).toHaveLength(0);
+      await uc.execute(a.id, { wantsEarlier: false }, ctx('RECEPTION'));
+      expect(drafts.map((d) => d.metadata)).toEqual([
+        { reason: 'WANTS_EARLIER_OFF' },
+      ]);
+    });
+
+    it('mover al hueco: la cita va al hueco (misma duración), pierde la marca y se audita el movimiento', async () => {
+      const { repo, drafts, uc } = setup();
+      const a = repo.seed({
+        start: far('10:00'),
+        end: far('10:30'),
+        wantsEarlier: true,
+      });
+      const res = await uc.moveToOpening(
+        a.id,
+        { start: at('15:00'), providerId: 'prov2' },
+        ctx('RECEPTION'),
+      );
+      expect(res).toMatchObject({
+        start: at('15:00'),
+        end: at('15:30'),
+        providerId: 'prov2',
+        wantsEarlier: false,
+      });
+      expect(drafts.map((d) => d.metadata.reason)).toEqual([
+        'APPOINTMENT_MOVED',
+      ]);
+    });
+
+    it('mover al hueco una cita sin la marca (o cancelada) da 409 en español', async () => {
+      const { repo, uc } = setup();
+      const plain = repo.seed({ start: far('10:00'), end: far('10:30') });
+      const cancelled = repo.seed({
+        start: far('11:00'),
+        end: far('11:30'),
+        wantsEarlier: true,
+        status: AppointmentStatus.CANCELLED,
+      });
+      for (const id of [plain.id, cancelled.id]) {
+        await expect(
+          uc.moveToOpening(id, { start: at('15:00') }, ctx('RECEPTION')),
+        ).rejects.toThrow(/ya no está para adelantar/);
+      }
+    });
+
+    it('mover al hueco respeta el anti-solape: si otro ya lo ocupó, 409 y la cita conserva su hora y su marca', async () => {
+      const { repo, uc } = setup();
+      repo.seed({ patientId: 'p9', start: at('15:00'), end: at('15:30') });
+      const a = repo.seed({
+        start: far('10:00'),
+        end: far('10:30'),
+        wantsEarlier: true,
+      });
+      await expect(
+        uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(await repo.findById(a.id)).toMatchObject({
+        start: far('10:00'),
+        wantsEarlier: true,
+      });
+    });
+
+    it('mover al hueco fuera del horario de la sede: 422', async () => {
+      const repo = new InMemoryAppointmentRepository();
+      const a = repo.seed({
+        start: far('10:00'),
+        end: far('10:30'),
+        wantsEarlier: true,
+      });
+      // Abre solo de 08:00 a 09:00 UTC todos los días: las 15:00 quedan fuera.
+      const hours: BusinessHours = {
+        timezone: 'UTC',
+        ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+          weekday,
+          startMinute: 480,
+          endMinute: 540,
+        })),
+      };
+      const uc = new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(hours),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(),
+      );
+      await expect(
+        uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
   });
 });

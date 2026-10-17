@@ -35,6 +35,8 @@ model Tenant {
   outboundMessages         OutboundMessage[]
   scheduleBlocks           ScheduleBlock[]
   waitlistEntries          AppointmentWaitlistEntry[]
+  // DX-210: ofertas de huecos libres a candidatos.
+  waitlistOffers           WaitlistOffer[]
   reminderSettings         LocationReminderSettings[]
   appointmentReminders     AppointmentReminder[]
   paymentReceipts          PaymentReceipt[]
@@ -151,6 +153,7 @@ model Location {
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
   scheduleBlocks     ScheduleBlock[]
   waitlistEntries    AppointmentWaitlistEntry[]
+  waitlistOffers     WaitlistOffer[]
   reminderSettings   LocationReminderSettings[]
   paymentReceipts    PaymentReceipt[]
   collectionNotes    CollectionNote[]
@@ -314,6 +317,8 @@ model Patient {
   retentionActions       PatientRetentionAction[]
   // DX-122: pendientes por agendar del paciente.
   waitlistEntries        AppointmentWaitlistEntry[]
+  // DX-210: huecos que se le ofrecieron.
+  waitlistOffers         WaitlistOffer[]
   // DX-155: entradas de su cartera, mantenidas por la BD.
   ledger                 PatientLedger?
   collectionNotes        CollectionNote[]
@@ -662,11 +667,16 @@ model Appointment {
   // DX-005: el paciente pulsó "Quiero que me llamen" en el enlace. Se limpia
   // cuando recepción reagenda o cambia el estado de la cita.
   callbackRequestedAt DateTime?
+  // DX-210: «Adelantar si hay hueco». La cita es candidata para ocupar un
+  // hueco libre anterior; al moverla a uno se apaga.
+  wantsEarlier        Boolean           @default(false)
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   deletedAt           DateTime?
 
   confirmations    AppointmentConfirmation[]
+  // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
+  waitlistOffers   WaitlistOffer[]
   outboundMessages OutboundMessage[]
   // DX-122: la entrada de «Pendientes por agendar» que creó su cancelación o
   // no-show, y la que se resolvió agendando esta cita.
@@ -706,6 +716,10 @@ model Appointment {
   //   appointments_tenant_patient_completed_idx ("tenantId", "patientId",
   //     start DESC, id DESC) INCLUDE ("locationId") WHERE status = 'COMPLETED'
   //     -> DX-145: sede de la deuda = la de la última cita atendida.
+  //   appointments_tenant_location_wants_earlier_idx ("tenantId",
+  //     "locationId", start) WHERE "wantsEarlier" AND "deletedAt" IS NULL
+  //     AND status IN ('SCHEDULED', 'CONFIRMED')
+  //     -> DX-210: citas candidatas a adelantarse a un hueco de la sede.
   @@map("appointments")
 }
 
@@ -834,6 +848,8 @@ model AppointmentWaitlistEntry {
   sourceAppointment   Appointment?     @relation("WaitlistSource", fields: [tenantId, sourceAppointmentId], references: [tenantId, id], onDelete: Cascade)
   resolvedAppointment Appointment?     @relation("WaitlistResolved", fields: [tenantId, resolvedAppointmentId], references: [tenantId, id], onDelete: Cascade)
   appointmentType     AppointmentType? @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
+  // DX-210: huecos ofrecidos a esta entrada.
+  offers              WaitlistOffer[]
 
   @@unique([tenantId, id], map: "appointment_waitlist_tenant_id_key")
   // Único PARCIAL (WHERE "sourceAppointmentId" IS NOT NULL): el WHERE vive en
@@ -845,6 +861,61 @@ model AppointmentWaitlistEntry {
   @@index([tenantId, resolvedAppointmentId])
   @@index([tenantId, appointmentTypeId])
   @@map("appointment_waitlist")
+}
+
+// DX-210: oferta de un hueco libre de la agenda a un candidato (un pendiente
+// de la lista o una cita marcada «Adelantar si hay hueco»), por WhatsApp
+// (enlace wa.me que abre recepción) o por teléfono. `offerDay` es el día civil
+// de la oferta en la zona de la sede: el tope de ofertas por paciente y día se
+// cuenta con él. Datos personales: RLS FORCE por tenant y FK compuestas.
+enum WaitlistOfferChannel {
+  WA_ME
+  PHONE
+}
+
+enum WaitlistOfferOutcome {
+  PENDING
+  ACCEPTED
+  DECLINED
+  NO_ANSWER
+}
+
+model WaitlistOffer {
+  id              String               @id @default(uuid()) @db.Uuid
+  tenantId        String               @db.Uuid
+  locationId      String               @db.Uuid
+  // El hueco ofrecido, [slotStart, slotEnd) (CHECK slotEnd > slotStart).
+  slotStart       DateTime
+  slotEnd         DateTime
+  // Profesional del hueco (usuario del personal, sin FK como las citas).
+  providerId      String               @db.Uuid
+  patientId       String               @db.Uuid
+  // A lo sumo uno de los dos (CHECK): el pendiente o la cita a adelantar.
+  waitlistEntryId String?              @db.Uuid
+  appointmentId   String?              @db.Uuid
+  channel         WaitlistOfferChannel
+  outcome         WaitlistOfferOutcome @default(PENDING)
+  offerDay        DateTime             @db.Date
+  createdById     String               @db.Uuid
+  outcomeById     String?              @db.Uuid
+  outcomeAt       DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id])
+  // FK COMPUESTAS (SEC-004): todo lo referenciado es del MISMO tenant.
+  location      Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  patient       Patient                   @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Cascade)
+  waitlistEntry AppointmentWaitlistEntry? @relation(fields: [tenantId, waitlistEntryId], references: [tenantId, id], onDelete: Cascade)
+  appointment   Appointment?              @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Cascade)
+
+  // Tope por paciente y día; también lado hijo de la FK al paciente.
+  @@index([tenantId, patientId, offerDay], map: "waitlist_offers_tenant_patient_day_idx")
+  // «Aviso enviado» de un hueco; también lado hijo de la FK a la sede.
+  @@index([tenantId, locationId, slotStart], map: "waitlist_offers_tenant_location_slot_idx")
+  @@index([tenantId, waitlistEntryId], map: "waitlist_offers_tenant_entry_idx")
+  @@index([tenantId, appointmentId], map: "waitlist_offers_tenant_appointment_idx")
+  @@map("waitlist_offers")
 }
 
 enum AppointmentConfirmationResponse {
@@ -1950,6 +2021,8 @@ enum AuditResourceType {
   PAYMENT_PROMISE
   // DX-204: cambio de la política de descuentos (topes por rol y umbral).
   DISCOUNT_POLICY
+  // DX-210: oferta de un hueco libre a un candidato (registrarla y su resultado).
+  WAITLIST_OFFER
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

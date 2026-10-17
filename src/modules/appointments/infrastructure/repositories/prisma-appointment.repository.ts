@@ -13,6 +13,8 @@ import {
   resolveWaitlistForReactivated,
 } from '../../../waitlist/infrastructure/waitlist-transitions';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../waitlist/domain/waitlist-rules';
+import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
+import { WANTS_EARLIER_GONE_MESSAGE } from '../../domain/wants-earlier';
 import {
   AppointmentRepository,
   AppointmentUpdate,
@@ -72,6 +74,7 @@ function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
     appointmentType: appointment.appointmentType ?? null,
     confirmationSentAt: appointment.confirmationSentAt,
     callbackRequestedAt: appointment.callbackRequestedAt,
+    wantsEarlier: appointment.wantsEarlier,
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };
@@ -132,6 +135,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           notes: input.notes,
           createdById: input.createdById,
           appointmentTypeId: input.appointmentTypeId,
+          wantsEarlier: input.wantsEarlier,
         },
         include: INCLUDE_PATIENT_NAME,
       });
@@ -282,8 +286,30 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         throw new NotFoundException('Appointment not found');
       }
 
-      const { revokeConfirmations, enqueueWaitlist, resolveWaitlist, ...data } =
-        patch;
+      const {
+        revokeConfirmations,
+        enqueueWaitlist,
+        resolveWaitlist,
+        requireWantsEarlier,
+        ...data
+      } = patch;
+      // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
+      // bloquea la fila: si dos personas la mueven a la vez, la segunda
+      // re-evalúa la condición tras el COMMIT de la primera y no la cumple.
+      if (requireWantsEarlier) {
+        const { count } = await tx.appointment.updateMany({
+          where: {
+            id,
+            deletedAt: null,
+            wantsEarlier: true,
+            status: { in: [...MOVABLE_STATUSES] },
+          },
+          data: { wantsEarlier: false },
+        });
+        if (count === 0) {
+          throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
+        }
+      }
       const appointment = await tx.appointment.update({
         where: { id },
         data,
