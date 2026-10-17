@@ -27,6 +27,7 @@ import { PaymentReceiptsController } from '../payments/presentation/payment-rece
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
+import { CollectionsController } from '../collections/presentation/collections.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
@@ -463,6 +464,26 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_AGING',
   },
+  // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
+  // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
+  'POST /patients/:id/collection-notes': {
+    action: 'CREATE',
+    resource: 'COLLECTION_NOTE',
+    resourceId: RES,
+    patient: { param: 'id' },
+  },
+  'POST /patients/:id/payment-promises': {
+    action: 'CREATE',
+    resource: 'PAYMENT_PROMISE',
+    resourceId: RES,
+    patient: { param: 'id' },
+  },
+  'GET /patients/:id/collections': {
+    action: 'VIEW',
+    resource: 'PAYMENT_PROMISE',
+    patient: { param: 'id' },
+    reason: 'PATIENT_COLLECTIONS',
+  },
 
   // DX-122: bloqueos de agenda (sin paciente). Las altas y bajas de
   // «Pendientes por agendar» las audita el caso de uso, con el paciente.
@@ -542,6 +563,7 @@ const CONTROLLERS: Type[] = [
   PaymentPlansController,
   AccountStatementController,
   ReceivablesController,
+  CollectionsController,
   ScheduleBlocksController,
   StaffController,
   ClinicalNoteTemplatesController,

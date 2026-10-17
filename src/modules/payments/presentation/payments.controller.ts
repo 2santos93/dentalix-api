@@ -49,10 +49,16 @@ import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { SettlePaymentPromises } from '../../collections/application/settle-payment-promises';
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
-interface AuthenticatedRequest {
+interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
 }
 
@@ -77,6 +83,9 @@ export class PaymentsController {
     private readonly voidPayment: VoidPaymentUseCase,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
     private readonly listCashPayments: ListCashPaymentsUseCase,
+    // DX-150: el abono que cubre un compromiso de pago lo cierra en el acto.
+    private readonly settlePromises: SettlePaymentPromises,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -142,7 +151,7 @@ export class PaymentsController {
     description:
       'La Idempotency-Key ya se usó con otro plan u otro cuerpo (DX-109): genera una clave nueva.',
   })
-  create(
+  async create(
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
     // Idempotency-Key (UUID) dedup header. Optional: absent → today's behavior
@@ -155,7 +164,7 @@ export class PaymentsController {
     // `createdById` comes from the authenticated user (req.user.sub), never
     // from the client body -- same convention as
     // AppointmentsController.create / TreatmentPlansController.create.
-    return this.recordPayment.execute(
+    const payment = await this.recordPayment.execute(
       id,
       {
         amount: dto.amount,
@@ -167,6 +176,14 @@ export class PaymentsController {
       req.user.sub,
       idempotencyKey,
     );
+    // DX-150: si con este abono se cumple el compromiso abierto del paciente,
+    // pasa a KEPT ya (auditado con este usuario). Nunca falla la petición: el
+    // abono está confirmado y el barrido horario lo recogería.
+    const context = auditRequestContext(req, this.tenantContext);
+    if (context) {
+      await this.settlePromises.afterPayment(payment.patientId, context);
+    }
+    return payment;
   }
 
   @Audit({

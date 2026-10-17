@@ -26,7 +26,9 @@ import {
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto';
-import { PatientDto } from './dto/patient.dto';
+import { PatientDetailDto, PatientDto } from './dto/patient.dto';
+import { PatientBalanceFlags } from '../../collections/application/patient-balance-flags';
+import type { OverdueBalance } from '../../collections/domain/overdue-balance';
 import { ListPatientsResponseDto } from './dto/list-patients-response.dto';
 import { CreatePatientUseCase } from '../application/use-cases/create-patient.use-case';
 import {
@@ -85,6 +87,8 @@ export class PatientsController {
     private readonly setRetention: SetRetentionExtensionUseCase,
     private readonly partiallySuppress: PartiallySuppressPatientUseCase,
     private readonly listRetentionExpiring: ListRetentionExpiringUseCase,
+    // DX-150: marca «Saldo vencido» de la cabecera de la ficha.
+    private readonly balanceFlags: PatientBalanceFlags,
   ) {}
 
   @Audit({
@@ -168,9 +172,21 @@ export class PatientsController {
     patient: { param: 'id' },
   })
   @Get(':id')
-  @ApiOkResponse({ type: PatientDto })
-  get(@Param('id') id: string): Promise<Patient> {
-    return this.getPatient.execute(id);
+  @ApiOkResponse({
+    type: PatientDetailDto,
+    description:
+      'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION.',
+  })
+  async get(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<Patient & { balance: OverdueBalance }> {
+    const patient = await this.getPatient.execute(id);
+    const balance = await this.balanceFlags.forPatient(
+      patient.id,
+      req.user.role,
+    );
+    return { ...patient, balance };
   }
 
   @Audit({

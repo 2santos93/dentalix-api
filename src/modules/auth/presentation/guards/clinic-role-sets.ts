@@ -203,3 +203,12 @@ export const IMPLANT_WRITE_ROLES: ClinicRole[] = [
 // «¿Quién recibió este lote?» y su CSV (DX-191): datos personales de muchos
 // pacientes para una retirada de lote. Solo gestión, y queda auditado.
 export const IMPLANT_LOT_SEARCH_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Cobranza (DX-150): registrar gestiones y compromisos de pago y leerlos en la
+// ficha. Mismo dato financiero que la cartera: ADMIN y RECEPTION. DENTIST y
+// ASSISTANT solo ven la marca «Saldo vencido» (sin importe) en la agenda y en
+// la cabecera de la ficha.
+export const COLLECTION_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];

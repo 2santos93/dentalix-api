@@ -87,7 +87,9 @@ async function resolveActor(
   actor: AuditActorRef,
 ): Promise<{ userId: string | null; role: ClinicRole | null }> {
   if (actor.kind === 'user') return { userId: actor.userId, role: actor.role };
-  if (actor.kind === 'patient') return { userId: null, role: null };
+  if (actor.kind === 'patient' || actor.kind === 'system') {
+    return { userId: null, role: null };
+  }
   const membership = await tx.clinicMembership.findFirst({
     where: { user: { email: actor.email.trim().toLowerCase() } },
     select: { userId: true },

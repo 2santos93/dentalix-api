@@ -30,6 +30,8 @@ function row(overrides: Partial<AgingRowView> = {}): AgingRowView {
     ],
     lastPayment: { paidOn: '2026-09-30', amount: 50000, currency: 'COP' },
     nextInstallment: null,
+    lastNote: null,
+    promise: null,
     ...overrides,
   };
 }

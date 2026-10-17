@@ -124,7 +124,7 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
   });
 
   describe('origin (DX-128: de dónde salió un cambio de comunicación)', () => {
-    it.each(['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF'])(
+    it.each(['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF', 'JOB'])(
       'guarda %s',
       (origin) => {
         expect(sanitizeAuditMetadata({ origin })).toEqual({ origin });

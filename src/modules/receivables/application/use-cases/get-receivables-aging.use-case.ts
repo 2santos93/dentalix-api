@@ -2,6 +2,8 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { RECEIVABLES_REPOSITORY } from '../../domain/ports/receivables-repository.port';
 import type { ReceivablesRepository } from '../../domain/ports/receivables-repository.port';
 import type {
+  DebtorLastNote,
+  DebtorPromise,
   PatientAging,
   PatientAgingCurrency,
 } from '../../domain/entities/receivables.entity';
@@ -38,6 +40,10 @@ export interface ReceivablesAgingFilters {
   minBalance?: number;
   /** Días mínimos de la deuda exigible más antigua (91 = «más de 90»). */
   minAgeDays?: number;
+  /** DX-150: profesional de la última cita atendida del paciente. */
+  providerId?: string;
+  /** DX-150: con (true) o sin (false) compromiso de pago abierto. */
+  hasPromise?: boolean;
 }
 
 export interface ReceivablesAgingInput extends ReceivablesAgingFilters {
@@ -58,6 +64,10 @@ export interface AgingRowView extends PatientAging {
   lastPayment: { paidOn: string; amount: number; currency: string } | null;
   /** La próxima cuota por vencer, de cualquier moneda. */
   nextInstallment: { dueDate: Date; amount: number; currency: string } | null;
+  /** DX-150: última gestión de cobro. */
+  lastNote: DebtorLastNote | null;
+  /** DX-150: último compromiso de pago (el vigente si está abierto). */
+  promise: DebtorPromise | null;
 }
 
 export interface AgingTotal {
@@ -266,17 +276,44 @@ export class GetReceivablesAgingUseCase {
       });
     }
     rows.sort(byAge);
-    return { rows, location, now };
+    return { rows: await this.byCollections(rows, filters), location, now };
+  }
+
+  /**
+   * DX-150: filtros de cobranza sobre los deudores ya calculados; una consulta
+   * por filtro, solo si se pide.
+   */
+  private async byCollections(
+    rows: ScopedRow[],
+    filters: ReceivablesAgingFilters,
+  ): Promise<ScopedRow[]> {
+    let out = rows;
+    if (filters.providerId !== undefined && out.length > 0) {
+      const ofProvider = await this.repo.patientsOfProvider(
+        filters.providerId,
+        out.map((r) => r.patientId),
+      );
+      out = out.filter((r) => ofProvider.has(r.patientId));
+    }
+    if (filters.hasPromise !== undefined && out.length > 0) {
+      const withPromise = await this.repo.patientsWithOpenPromise(
+        out.map((r) => r.patientId),
+      );
+      out = out.filter(
+        (r) => withPromise.has(r.patientId) === filters.hasPromise,
+      );
+    }
+    return out;
   }
 
   private async withDetails(rows: ScopedRow[]): Promise<AgingRowView[]> {
     if (rows.length === 0) return [];
-    const details = new Map(
-      (await this.repo.loadDebtors(rows.map((r) => r.patientId))).map((d) => [
-        d.patientId,
-        d,
-      ]),
-    );
+    const ids = rows.map((r) => r.patientId);
+    const [debtors, collections] = await Promise.all([
+      this.repo.loadDebtors(ids),
+      this.repo.loadCollections(ids),
+    ]);
+    const details = new Map(debtors.map((d) => [d.patientId, d]));
     return rows.flatMap((row) => {
       const d = details.get(row.patientId);
       // Retirado entre las dos lecturas: no se muestra a medias.
@@ -302,6 +339,8 @@ export class GetReceivablesAgingUseCase {
               }
             : null,
           nextInstallment: earliestNext(row.aging.currencies),
+          lastNote: collections.get(row.patientId)?.lastNote ?? null,
+          promise: collections.get(row.patientId)?.promise ?? null,
         },
       ];
     });

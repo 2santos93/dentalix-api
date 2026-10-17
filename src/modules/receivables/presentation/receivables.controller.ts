@@ -86,7 +86,9 @@ export class ReceivablesController {
       'repartido por antigüedad: cada cuota desde su vencimiento; el saldo sin ' +
       'cuotas desde la aceptación (o presentación, o creación) del plan, con ' +
       '`ageApproximate`. Días civiles de la zona de la sede. Por moneda, sin ' +
-      'convertir; el saldo a favor va aparte. Sin datos clínicos.',
+      'convertir; el saldo a favor va aparte. Sin datos clínicos. DX-150: ' +
+      'cada fila trae su última gestión de cobro y su último compromiso de ' +
+      'pago; filtros `providerId` y `hasPromise`.',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: ReceivablesAgingPageDto })
@@ -102,6 +104,8 @@ export class ReceivablesController {
       currency: query.currency,
       minBalance: query.minBalance,
       minAgeDays: query.minAgeDays,
+      providerId: query.providerId,
+      hasPromise: query.hasPromise,
       page: query.page,
       pageSize: query.pageSize,
     });
@@ -141,6 +145,8 @@ export class ReceivablesController {
       currency: query.currency,
       minBalance: query.minBalance,
       minAgeDays: query.minAgeDays,
+      providerId: query.providerId,
+      hasPromise: query.hasPromise,
     });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(

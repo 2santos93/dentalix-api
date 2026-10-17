@@ -19,7 +19,8 @@ export interface AuditMetadata {
   /**
    * DX-128: de dónde salió un cambio de canal, de opt-in de WhatsApp o una
    * baja de recordatorios: en persona, enlace, mensaje del paciente, o
-   * anotado por el personal.
+   * anotado por el personal. DX-150: `JOB` = lo hizo un trabajo programado
+   * (el barrido de cobranza que cierra compromisos de pago), sin usuario.
    */
   origin?: AuditOrigin;
   /**
@@ -37,7 +38,13 @@ export interface AuditSearch {
   rows: number;
 }
 
-export const AUDIT_ORIGINS = ['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF'] as const;
+export const AUDIT_ORIGINS = [
+  'IN_PERSON',
+  'LINK',
+  'MESSAGE',
+  'STAFF',
+  'JOB',
+] as const;
 export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 
 /** Hueco de una cita en un movimiento auditado (DX-121). */

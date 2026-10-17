@@ -1,3 +1,4 @@
+import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   ContactChannel,
@@ -203,4 +204,13 @@ export class PatientDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+}
+
+/**
+ * GET /patients/:id (DX-150): la ficha con la marca «Saldo vencido» de su
+ * cabecera. El importe (`balance.amounts`) solo llega a ADMIN y RECEPTION.
+ */
+export class PatientDetailDto extends PatientDto {
+  @ApiProperty({ type: OverdueBalanceDto })
+  balance!: OverdueBalanceDto;
 }

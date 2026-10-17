@@ -1,4 +1,5 @@
 import type {
+  DebtorCollections,
   DebtorDetails,
   PatientLedger,
 } from '../entities/receivables.entity';
@@ -40,4 +41,24 @@ export interface ReceivablesRepository {
 
   /** Contacto y último abono vivo de estos pacientes (de esta clínica). */
   loadDebtors(patientIds: readonly string[]): Promise<DebtorDetails[]>;
+
+  /**
+   * DX-150: de estos pacientes, los que tienen un compromiso de pago OPEN
+   * (filtro `hasPromise`). Una consulta por el índice parcial de abiertos.
+   */
+  patientsWithOpenPromise(patientIds: readonly string[]): Promise<Set<string>>;
+
+  /**
+   * DX-150: de estos pacientes, los que tuvo por última vez este profesional
+   * (su última cita ATENDIDA, como la sede de la deuda). Filtro `providerId`.
+   */
+  patientsOfProvider(
+    providerId: string,
+    patientIds: readonly string[],
+  ): Promise<Set<string>>;
+
+  /** DX-150: última gestión y último compromiso de estos pacientes. */
+  loadCollections(
+    patientIds: readonly string[],
+  ): Promise<Map<string, DebtorCollections>>;
 }

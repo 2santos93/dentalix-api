@@ -2,6 +2,11 @@ import type {
   StatementPaymentPlanRow,
   StatementPlanRow,
 } from '../../../account-statement/domain/entities/account-statement.entity';
+import type {
+  CollectionChannel,
+  CollectionOutcome,
+  PaymentPromiseStatus,
+} from '@prisma/client';
 import type { AgingBuckets } from '../aging';
 
 /*
@@ -85,4 +90,30 @@ export interface PatientAging {
   currencies: PatientAgingCurrency[];
   oldestAgeDays: number | null;
   ageApproximate: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Cobranza de la fila (DX-150).
+// ---------------------------------------------------------------------------
+
+/** La última gestión de cobro del paciente (sin su texto: va en la ficha). */
+export interface DebtorLastNote {
+  channel: CollectionChannel;
+  outcome: CollectionOutcome;
+  createdAt: Date;
+}
+
+/** El último compromiso de pago del paciente (el vigente si está OPEN). */
+export interface DebtorPromise {
+  id: string;
+  amount: number;
+  currency: string;
+  /** Día civil (YYYY-MM-DD) en la zona de la sede del compromiso. */
+  dueDate: string;
+  status: PaymentPromiseStatus;
+}
+
+export interface DebtorCollections {
+  lastNote: DebtorLastNote | null;
+  promise: DebtorPromise | null;
 }
