@@ -85,6 +85,8 @@ interface ScopedRow {
   patientId: string;
   locationId: string | null;
   aging: PatientAging;
+  /** Deuda total en centavos (clave de orden, calculada una vez). */
+  debtCents: number;
 }
 
 function wholeOrDefault(
@@ -106,7 +108,7 @@ function byAge(a: ScopedRow, b: ScopedRow): number {
   const ageB = b.aging.oldestAgeDays ?? -1;
   return (
     ageB - ageA ||
-    debtCents(b.aging) - debtCents(a.aging) ||
+    b.debtCents - a.debtCents ||
     a.patientId.localeCompare(b.patientId)
   );
 }
@@ -260,6 +262,7 @@ export class GetReceivablesAgingUseCase {
         patientId: ledger.patientId,
         locationId: ledger.locationId,
         aging,
+        debtCents: debtCents(aging),
       });
     }
     rows.sort(byAge);

@@ -18,6 +18,26 @@ describe('ageInDays', () => {
   it('es negativo para un día futuro', () => {
     expect(ageInDays('2026-10-20', '2026-10-17')).toBe(-3);
   });
+
+  it('rechaza un día que no existe, también la segunda vez (memo)', () => {
+    for (let i = 0; i < 2; i++) {
+      expect(() => ageInDays('2026-02-30', '2026-10-17')).toThrow(RangeError);
+      expect(() => ageInDays('2026-10-17', '17/10/2026')).toThrow(RangeError);
+    }
+  });
+
+  it('da lo mismo con el memo caliente, en miles de llamadas', () => {
+    for (let n = 0; n < 2000; n++) {
+      const from = new Date(Date.UTC(2020, 0, 1 + n))
+        .toISOString()
+        .slice(0, 10);
+      expect(ageInDays(from, '2026-10-17')).toBe(
+        Math.round(
+          (Date.UTC(2026, 9, 17) - Date.UTC(2020, 0, 1 + n)) / 86_400_000,
+        ),
+      );
+    }
+  });
 });
 
 describe('bucketOf', () => {

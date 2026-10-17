@@ -1,4 +1,4 @@
-import { civilDaysInclusive } from '../../../shared/time/civil-day';
+import { parseCivilDate } from '../../../shared/time/civil-day';
 
 /*
  * Tramos de la cartera por antigüedad (DX-145). Fijos, como en Open Dental:
@@ -29,9 +29,28 @@ export interface AgedAmount {
   due: boolean;
 }
 
+const DAY_MS = 86_400_000;
+const MAX_MEMO = 20_000;
+// Día civil → días desde 1970. La cartera mide decenas de miles de líneas por
+// petición con pocos días distintos: validar y convertir cada texto una sola
+// vez (docs/perf/DX-145.md). Acotado para no crecer sin fin en el proceso.
+const epochDays = new Map<string, number>();
+
+function epochDayOf(day: string): number {
+  const cached = epochDays.get(day);
+  if (cached !== undefined) return cached;
+  if (parseCivilDate(day) === null) {
+    throw new RangeError(`Invalid civil date: ${day}`);
+  }
+  const value = Math.round(Date.parse(`${day}T00:00:00.000Z`) / DAY_MS);
+  if (epochDays.size >= MAX_MEMO) epochDays.clear();
+  epochDays.set(day, value);
+  return value;
+}
+
 /** Días de calendario de `from` a `to` (mismo día = 0; futuro = negativo). */
 export function ageInDays(from: string, to: string): number {
-  return civilDaysInclusive(from, to) - 1;
+  return epochDayOf(to) - epochDayOf(from);
 }
 
 export function bucketOf(line: AgedAmount): AgingBucket {

@@ -25,7 +25,10 @@ interface PlanSqlRow {
   createdAt: Date;
   agingFrom: Date;
   billable: number;
-  paid: { currency: string; amount: number }[];
+  /** Abonos vivos del plan en SU moneda, sumados; `null` si no hay. */
+  paidOwn: number | null;
+  /** Abonos vivos del plan en OTRA moneda, sueltos; `null` si no hay. */
+  paidOther: { currency: string; amount: number }[] | null;
 }
 
 interface PaymentPlanSqlRow {
@@ -110,7 +113,8 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
    * 1. Planes de los DEUDORES de la sede, con su sede, facturable y abonos:
    *    - `billable`: Σ precio − Σ descuento de los ítems vivos ACCEPTED|DONE
    *      (el facturable del estado de cuenta) de cada plan vivo;
-   *    - `paid`: abonos vivos de cada plan sumados por moneda (json);
+   *    - `paidOwn`: abonos vivos del plan en su moneda, sumados; `paidOther`:
+   *      los de otra moneda, sueltos (raros; `computeBalances` los suma);
    *    - `agingFrom`: aceptación firmada, presentación o creación del plan;
    *    - DEUDOR = paciente vivo con algún plan vivo cuyo facturable supera lo
    *      abonado en la moneda del plan. Es un SUPERCONJUNTO exacto de quien
@@ -118,12 +122,15 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
    *      saldo > 0, y el saldo a favor nunca la compensa), así que no decide
    *      nada: solo evita traer a quien lo tiene todo pagado. El cálculo
    *      (estados que cuentan, cuotas, monedas) sigue siendo el del estado de
-   *      cuenta, en la aplicación;
-   *    - SEDE DE LA DEUDA: la de su última cita ATENDIDA (COMPLETED, viva;
-   *      índice appointments_tenant_patient_completed_idx); si nunca fue
-   *      atendido, la de su último abono vivo; si tampoco, la de la última
-   *      presentación de un plan. Sin ninguna, `null`: solo sale en la vista
-   *      consolidada. Se filtra por la sede pedida.
+   *      cuenta, en la aplicación. Que el paciente siga vivo se mira solo en
+   *      los deudores, no en todos los planes;
+   *    - SEDE DE LA DEUDA: la de su última cita ATENDIDA (COMPLETED, viva),
+   *      sacada de UNA pasada ordenada por el índice parcial
+   *      appointments_tenant_patient_completed_idx (DISTINCT ON, Index Only
+   *      Scan; más barato que una búsqueda por deudor, docs/perf/DX-145.md);
+   *      si nunca fue atendido, la de su último abono vivo; si tampoco, la de
+   *      la última presentación de un plan. Sin ninguna, `null`: solo sale en
+   *      la vista consolidada. Se filtra por la sede pedida.
    * 2. Los planes de pago vivos no cancelados de esos pacientes, con sus
    *    cuotas en un json_agg.
    *
@@ -138,14 +145,7 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
     return this.prisma.runWithTenant(
       async (tx) => {
         const plans = await tx.$queryRaw<PlanSqlRow[]>`
-          WITH paid AS MATERIALIZED (
-            SELECT p."treatmentPlanId", p."currency",
-                   sum(p."amount")::float8 AS "amount"
-              FROM "payments" p
-             WHERE p."tenantId" = ${tenantId}::uuid
-               AND p."deletedAt" IS NULL
-             GROUP BY p."treatmentPlanId", p."currency"
-          ), billable AS (
+          WITH billable AS (
             SELECT i."planId",
                    (sum(i."price") - sum(i."discount"))::float8 AS "billable"
               FROM "treatment_plan_items" i
@@ -153,39 +153,40 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
                AND i."deletedAt" IS NULL
                AND i."status" IN ('ACCEPTED', 'DONE')
              GROUP BY i."planId"
+          ), paid AS (
+            SELECT p."treatmentPlanId",
+                   (sum(p."amount") FILTER (WHERE p."currency" = tp."currency"))::float8
+                     AS "own",
+                   json_agg(json_build_object(
+                     'currency', p."currency", 'amount', p."amount"::float8))
+                     FILTER (WHERE p."currency" <> tp."currency") AS "other"
+              FROM "payments" p
+              JOIN "treatment_plans" tp
+                ON tp."tenantId" = p."tenantId" AND tp."id" = p."treatmentPlanId"
+             WHERE p."tenantId" = ${tenantId}::uuid
+               AND p."deletedAt" IS NULL
+             GROUP BY p."treatmentPlanId"
           ), plans AS MATERIALIZED (
-            SELECT tp."id", tp."patientId", tp."status"::text AS "status",
-                   tp."currency", tp."createdAt",
-                   coalesce(acc."acceptedAt", tp."presentedAt", tp."createdAt")
-                     AS "agingFrom",
-                   coalesce(b."billable", 0) AS "billable"
+            SELECT tp."id", tp."patientId", tp."status", tp."currency",
+                   tp."createdAt", tp."presentedAt",
+                   coalesce(b."billable", 0) AS "billable",
+                   pd."own" AS "paidOwn", pd."other" AS "paidOther"
               FROM "treatment_plans" tp
-              JOIN "patients" pa
-                ON pa."tenantId" = tp."tenantId"
-               AND pa."id" = tp."patientId"
-               AND pa."deletedAt" IS NULL
               LEFT JOIN billable b ON b."planId" = tp."id"
-              LEFT JOIN "treatment_plan_acceptances" acc
-                ON acc."tenantId" = tp."tenantId" AND acc."planId" = tp."id"
+              LEFT JOIN paid pd ON pd."treatmentPlanId" = tp."id"
              WHERE tp."tenantId" = ${tenantId}::uuid
                AND tp."deletedAt" IS NULL
-          ), debtors AS MATERIALIZED (
-            SELECT DISTINCT pl."patientId"
-              FROM plans pl
-              LEFT JOIN paid own
-                ON own."treatmentPlanId" = pl."id"
-               AND own."currency" = pl."currency"
-             WHERE pl."billable" > coalesce(own."amount", 0)
+          ), last_visit AS (
+            SELECT DISTINCT ON (a."patientId") a."patientId", a."locationId"
+              FROM "appointments" a
+             WHERE a."tenantId" = ${tenantId}::uuid
+               AND a."status" = 'COMPLETED'
+               AND a."deletedAt" IS NULL
+             ORDER BY a."patientId", a."start" DESC, a."id" DESC
           ), located AS MATERIALIZED (
             SELECT d."patientId",
                    coalesce(
-                     (SELECT a."locationId" FROM "appointments" a
-                       WHERE a."tenantId" = ${tenantId}::uuid
-                         AND a."patientId" = d."patientId"
-                         AND a."status" = 'COMPLETED'
-                         AND a."deletedAt" IS NULL
-                       ORDER BY a."start" DESC, a."id" DESC
-                       LIMIT 1),
+                     lv."locationId",
                      (SELECT p."locationId" FROM "payments" p
                        WHERE p."tenantId" = ${tenantId}::uuid
                          AND p."patientId" = d."patientId"
@@ -200,20 +201,23 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
                        ORDER BY tp."presentedAt" DESC NULLS LAST, tp."id" DESC
                        LIMIT 1)
                    ) AS "locationId"
-              FROM debtors d
-          ), paid_by_plan AS (
-            SELECT "treatmentPlanId",
-                   json_agg(json_build_object(
-                     'currency', "currency", 'amount', "amount")) AS "paid"
-              FROM paid
-             GROUP BY "treatmentPlanId"
+              FROM (SELECT DISTINCT pl."patientId" FROM plans pl
+                     WHERE pl."billable" > coalesce(pl."paidOwn", 0)) d
+              JOIN "patients" pa
+                ON pa."tenantId" = ${tenantId}::uuid
+               AND pa."id" = d."patientId"
+               AND pa."deletedAt" IS NULL
+              LEFT JOIN last_visit lv ON lv."patientId" = d."patientId"
           )
-          SELECT l."patientId", l."locationId", pl."id", pl."status",
-                 pl."currency", pl."createdAt", pl."agingFrom", pl."billable",
-                 coalesce(pp."paid", '[]'::json) AS "paid"
+          SELECT l."patientId", l."locationId", pl."id",
+                 pl."status"::text AS "status", pl."currency", pl."createdAt",
+                 coalesce(acc."acceptedAt", pl."presentedAt", pl."createdAt")
+                   AS "agingFrom",
+                 pl."billable", pl."paidOwn", pl."paidOther"
             FROM located l
             JOIN plans pl ON pl."patientId" = l."patientId"
-            LEFT JOIN paid_by_plan pp ON pp."treatmentPlanId" = pl."id"
+            LEFT JOIN "treatment_plan_acceptances" acc
+              ON acc."tenantId" = ${tenantId}::uuid AND acc."planId" = pl."id"
           ${locationFilter}`;
         if (plans.length === 0) return [];
         const ids = [...new Set(plans.map((p) => p.patientId))];
@@ -276,11 +280,18 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
             billable: p.billable,
             agingFrom: p.agingFrom,
           });
-          for (const paid of p.paid) {
+          if (p.paidOwn !== null) {
             ledger.paid.push({
               treatmentPlanId: p.id,
-              currency: paid.currency,
-              amount: paid.amount,
+              currency: p.currency,
+              amount: p.paidOwn,
+            });
+          }
+          for (const other of p.paidOther ?? []) {
+            ledger.paid.push({
+              treatmentPlanId: p.id,
+              currency: other.currency,
+              amount: other.amount,
             });
           }
         }

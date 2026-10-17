@@ -26,7 +26,7 @@ export interface AgingPlanRow extends StatementPlanRow {
   agingFrom: Date;
 }
 
-/** Abonos VIVOS de un plan en una moneda, ya sumados. */
+/** Abonos VIVOS de un plan en una moneda: ya sumados o sueltos (computeBalances los suma). */
 export interface PaidSum {
   treatmentPlanId: string;
   currency: string;
