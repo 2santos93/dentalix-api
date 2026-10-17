@@ -20,6 +20,7 @@ export interface AuditedRequest {
   ip?: string;
   headers: IncomingHttpHeaders | Record<string, string | string[] | undefined>;
   params?: Record<string, string | undefined>;
+  query?: Record<string, unknown>;
   body?: unknown;
   user?: JwtPayload;
   tenantHost?: { host?: string; tenantId: string | null };
@@ -95,6 +96,7 @@ export function buildAuditDraft(
   req: AuditedRequest,
   responseBody: unknown,
   scope: AuditScope,
+  resultCount: number | null = null,
 ): AuditEventDraft | null {
   if (!req.user || !isTenantPayload(req.user)) return null;
   return {
@@ -114,6 +116,15 @@ export function buildAuditDraft(
         : {}),
       params: req.params,
       ...(options.reason ? { reason: options.reason } : {}),
+      ...(options.search && resultCount !== null
+        ? {
+            search: {
+              lot: req.query?.lot,
+              reference: req.query?.reference,
+              rows: resultCount,
+            },
+          }
+        : {}),
     }),
   };
 }

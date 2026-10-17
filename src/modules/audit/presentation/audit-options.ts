@@ -28,4 +28,9 @@ export interface AuditOptions {
    * `PARTIAL_SUPPRESSION`, DX-039). Va a `metadata.reason`; formato CODE.
    */
   reason?: string;
+  /**
+   * DX-191: búsqueda por lote/REF. La metadata guarda `lot` y `reference` de
+   * la query y el nº de filas de la cabecera `X-Result-Count` de la respuesta.
+   */
+  search?: true;
 }

@@ -19,6 +19,16 @@ import {
   type AuditScope,
 } from './audit-request';
 
+/** `X-Result-Count` de la respuesta (búsquedas auditadas, DX-191). */
+function resultCountOf(context: ExecutionContext): number | null {
+  const res = context
+    .switchToHttp()
+    .getResponse<{ getHeader?: (name: string) => unknown }>();
+  const raw = res.getHeader?.('x-result-count');
+  const value = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
 function headerValue(req: AuditedRequest, name: string): string | null {
   const value = req.headers[name];
   return (Array.isArray(value) ? value[0] : value) ?? null;
@@ -69,7 +79,13 @@ export class AuditInterceptor implements NestInterceptor {
     if (options.action === 'LOGIN') return this.login(req, scope, next);
     return next.handle().pipe(
       concatMap(async (body: unknown) => {
-        const draft = buildAuditDraft(options, req, body, scope);
+        const draft = buildAuditDraft(
+          options,
+          req,
+          body,
+          scope,
+          options.search ? resultCountOf(context) : null,
+        );
         if (draft) await this.recorder.record(draft);
         return body;
       }),

@@ -137,4 +137,28 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
       expect(sanitizeAuditMetadata({ origin: 1 })).toEqual({});
     });
   });
+
+  describe('search (DX-191: búsqueda de implantes por lote/REF)', () => {
+    it('guarda lote, REF y nº de filas', () => {
+      expect(
+        sanitizeAuditMetadata({
+          search: { lot: 'LOT-AB12', reference: '021.5310', rows: 2 },
+        }),
+      ).toEqual({
+        search: { lot: 'LOT-AB12', reference: '021.5310', rows: 2 },
+      });
+    });
+
+    it('descarta lo que no es un código y exige un nº de filas', () => {
+      expect(
+        sanitizeAuditMetadata({
+          search: { lot: 'Ana Gómez <script>', reference: 12, rows: 0 },
+        }),
+      ).toEqual({ search: { rows: 0 } });
+      expect(sanitizeAuditMetadata({ search: { lot: 'LOT-1' } })).toEqual({});
+      expect(
+        sanitizeAuditMetadata({ search: { lot: 'LOT-1', rows: -1 } }),
+      ).toEqual({});
+    });
+  });
 });

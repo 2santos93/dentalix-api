@@ -38,6 +38,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { ImplantsModule } from './modules/implants/implants.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { OutboundMessagesModule } from './modules/notifications/outbound/outbound-messages.module';
@@ -91,6 +92,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ConsentsModule,
     PeriodontalModule,
     PrescriptionsModule,
+    ImplantsModule,
     // Trabajos en segundo plano (DX-085): cola, tareas programadas y worker
     // (APP_ROLE=worker|all), y el registro de mensajes salientes.
     JobsModule,
