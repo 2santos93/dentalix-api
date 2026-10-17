@@ -15,6 +15,11 @@
  *     owner de esta base, o el owner con SET o INHERIT. ADMIN OPTION equivale
  *     a poder darse SET, y con SET se leen esas tablas de TODAS las bases del
  *     clúster: un owner por clúster (README).
+ *   - `dispatcher_delete`: tablas de `public` en las que
+ *     `dentalix_email_dispatcher` tiene DELETE sin una política RESTRICTIVA
+ *     para él que lo acote a `"tenantId" IS NULL` (DX-144: el rol solo purga
+ *     emails de plataforma; con su política permisiva `USING (true)`, sin la
+ *     restrictiva podría borrar filas de cualquier clínica).
  *
  *   npm run db:check-force
  *
@@ -38,6 +43,7 @@ const CLUSTER_ROLES = [
   // DX-143: lee las membresías de todas las clínicas (solo SELECT).
   'dentalix_membership_lookup',
 ];
+const DISPATCHER_ROLE = 'dentalix_email_dispatcher';
 
 async function main(): Promise<number> {
   const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
@@ -81,10 +87,27 @@ async function main(): Promise<number> {
                             WHERE datname = current_database())
               OR m.set_option OR m.inherit_option)
        ORDER BY 1`;
+    const dispatcherDelete = await prisma.$queryRaw<{ name: string }[]>`
+      SELECT c.relname AS name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND c.relkind IN ('r', 'p')
+         AND CASE WHEN to_regrole(${DISPATCHER_ROLE}) IS NULL THEN false
+                  ELSE has_table_privilege(${DISPATCHER_ROLE}, c.oid, 'DELETE') END
+         AND NOT EXISTS (
+           SELECT 1 FROM pg_policies p
+            WHERE p.schemaname = 'public' AND p.tablename = c.relname
+              AND p.permissive = 'RESTRICTIVE'
+              AND p.cmd IN ('DELETE', 'ALL')
+              AND p.roles = ARRAY[${DISPATCHER_ROLE}]::name[]
+              AND p.qual = '("tenantId" IS NULL)')
+       ORDER BY 1`;
     const result = {
       tables: unforced.map((r) => r.name),
       rls_disabled: disabled.map((r) => r.name),
       members: members.map((r) => r.name),
+      dispatcher_delete: dispatcherDelete.map((r) => r.name),
     };
     if (Object.values(result).some((list) => list.length > 0)) {
       console.error(

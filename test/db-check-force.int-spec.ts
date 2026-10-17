@@ -9,7 +9,8 @@ import { PrismaClient } from '@prisma/client';
  * vigila fuera de la CI. El script sale con código ≠ 0 y lista las tablas de
  * `public` con RLS activada y sin FORZAR, las de clínica (o particiones de
  * una tabla con RLS) sin RLS, y los miembros inesperados de los roles NOLOGIN
- * del clúster (README, runbook de despliegue). Los miembros se prueban en
+ * del clúster y los DELETE del rol despachador sin su política restrictiva
+ * de plataforma (DX-144) (README, runbook de despliegue). Los miembros se prueban en
  * test/owner-nosu/shared-cluster.owner-spec.ts: aquí el clúster es compartido.
  */
 
@@ -90,6 +91,26 @@ describe('db:check-force (DX-134)', () => {
     expect(out).toContain(`"rls_disabled":["${TABLE}_p1"]`);
     expect(status).toBe(1);
     await raw.$executeRawUnsafe(`DROP TABLE public."${TABLE}"`);
+  }, 60_000);
+
+  it('DELETE del rol despachador sin la política restrictiva de plataforma: sale con 1 y nombra la tabla (DX-144)', async () => {
+    await raw.$executeRawUnsafe(`DROP TABLE IF EXISTS public."${TABLE}"`);
+    await raw.$executeRawUnsafe(
+      `CREATE TABLE public."${TABLE}" ("id" int PRIMARY KEY)`,
+    );
+    await raw.$executeRawUnsafe(
+      `GRANT DELETE ON public."${TABLE}" TO dentalix_email_dispatcher`,
+    );
+    const { status, out } = checkForce();
+    expect(out).toContain(`"dispatcher_delete":["${TABLE}"]`);
+    // email_outbox tiene la suya: no sale.
+    expect(out).not.toContain('"dispatcher_delete":["email_outbox"');
+    expect(status).toBe(1);
+
+    await raw.$executeRawUnsafe(
+      `REVOKE DELETE ON public."${TABLE}" FROM dentalix_email_dispatcher`,
+    );
+    expect(checkForce().status).toBe(0);
   }, 60_000);
 
   it('solo mira el esquema public', async () => {
