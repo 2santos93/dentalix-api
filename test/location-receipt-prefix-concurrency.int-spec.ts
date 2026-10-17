@@ -72,6 +72,39 @@ async function prefixesOf(tenantId: string): Promise<string[]> {
   return rows.map((r) => r.receiptPrefix ?? '');
 }
 
+/**
+ * Sesiones con el candado consultivo de la clínica (clave doble del trigger)
+ * concedido (`granted`) o esperándolo. pg_locks guarda cada int4 de la clave
+ * como oid (sin signo).
+ */
+async function advisoryLocks(
+  tenantId: string,
+  granted: boolean,
+): Promise<number> {
+  const [row] = await raw.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n
+      FROM pg_catalog.pg_locks
+     WHERE locktype = 'advisory'
+       AND database = (SELECT oid FROM pg_catalog.pg_database
+                        WHERE datname = pg_catalog.current_database())
+       AND objsubid = 2
+       AND classid::bigint = (pg_catalog.hashtext('dx_location_receipt_prefix')::bigint & 4294967295)
+       AND objid::bigint = (pg_catalog.hashtext(${tenantId})::bigint & 4294967295)
+       AND granted = ${granted}`;
+  return row.n;
+}
+
+/** Espera (hasta 10 s) a que una sesión quede bloqueada en el candado. */
+async function waitForAdvisoryWaiter(tenantId: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while ((await advisoryLocks(tenantId, false)) === 0) {
+    if (Date.now() > deadline) {
+      throw new Error('ninguna alta llegó a esperar el candado de la clínica');
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 /** Una promesa que se resuelve desde fuera (para ordenar dos transacciones). */
 function gate(): { wait: Promise<void>; open: () => void } {
   let open = () => {};
@@ -154,10 +187,17 @@ describe('DX-216 · serie de recibos de la sede ante altas concurrentes (int)', 
     // Si la primera falla, que el test falle en vez de quedarse esperando.
     await Promise.race([inserted.wait, first]);
     const second = createLocation(tenantA, 'Sede Sur');
-    // La segunda queda esperando el candado de la clínica; se suelta la
-    // primera y la segunda sigue (sin ella, choca con el índice único).
-    await new Promise((r) => setTimeout(r, 300));
-    release.open();
+    // La segunda queda esperando el candado de la clínica (se comprueba en
+    // pg_locks, no con una pausa: así la carrera ocurre siempre); se suelta la
+    // primera y la segunda sigue con un snapshot nuevo (sin el candado, choca
+    // con el índice único).
+    // Pase lo que pase, se suelta la primera: sin el candado la segunda
+    // esperaría al índice único y el test se colgaría en vez de fallar.
+    try {
+      await waitForAdvisoryWaiter(tenantA);
+    } finally {
+      release.open();
+    }
     const [a, b] = await Promise.all([first, second]);
     expect(a.receiptPrefix).toBe('SUR');
     expect(b.receiptPrefix).toBe('SUR2');
@@ -177,6 +217,8 @@ describe('DX-216 · serie de recibos de la sede ante altas concurrentes (int)', 
     );
     await Promise.race([inserted.wait, holder]);
     try {
+      // La primera retiene de verdad el candado de su clínica.
+      expect(await advisoryLocks(tenantA, true)).toBe(1);
       // Con lock_timeout corto: si esperara el candado de A, fallaría.
       const other = await asApp(tenantB, async (tx) => {
         await tx.$executeRaw`SET LOCAL lock_timeout = '1s'`;
