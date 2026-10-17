@@ -472,10 +472,20 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
           tokens.RECEPTION,
         ).expect(200);
         const summary = (single.body as { summary: Summary[] }).summary;
-        expect(member.summary).toEqual(
-          summary.map(({ currency, budgeted, paid, balance }) =>
-            expect.objectContaining({ currency, budgeted, paid, balance }),
-          ),
+        expect(
+          member.summary.map(({ currency, budgeted, paid, balance }) => ({
+            currency,
+            budgeted,
+            paid,
+            balance,
+          })),
+        ).toEqual(
+          summary.map(({ currency, budgeted, paid, balance }) => ({
+            currency,
+            budgeted,
+            paid,
+            balance,
+          })),
         );
         for (const s of summary) {
           cents.budgeted += Math.round(s.budgeted * 100);
