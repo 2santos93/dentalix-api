@@ -6,6 +6,8 @@ import type {
 } from '@prisma/client';
 import type { ReminderSettingsInput } from '../reminder-lead-hours';
 import type { ReminderRecord } from '../reminder-timeline';
+import type { ReminderContact } from '../reminder-eligibility';
+import type { RecipientPatientFields } from '../../../patients/domain/communication/reminder-recipient';
 
 // Sin `tenantId` en ningún input salvo el barrido, que corre como trabajo de
 // PLATAFORMA y recorre las clínicas: el tenant sale SIEMPRE del contexto
@@ -36,7 +38,11 @@ export interface ReminderSendContext {
   };
   locationCountry: ClinicCountry;
   locationTimeZone: string;
-  patientEmail: string | null;
+  patientId: string;
+  /** Canal, baja y email VIGENTES del paciente (DX-128). */
+  contact: ReminderContact;
+  /** Para saludar al tutor de un menor (DX-128). */
+  recipient: RecipientPatientFields;
   settings: { enabled: boolean; leadHours: number[] } | null;
 }
 
@@ -49,6 +55,8 @@ export interface ReminderClaim {
 export interface AppointmentRemindersSnapshot {
   appointment: { start: Date; status: AppointmentStatus; deleted: boolean };
   settings: { enabled: boolean; leadHours: number[] } | null;
+  /** Preferencia vigente del paciente de la cita (DX-128). */
+  contact: ReminderContact;
   records: ReminderRecord[];
 }
 
@@ -66,7 +74,11 @@ export interface ReminderRepository {
 
   /** Clínicas vivas (para el barrido; `tenants` no tiene RLS). */
   tenantIds(): Promise<string[]>;
-  /** Citas de las sedes con recordatorios activos cuya hora toca en la ventana del barrido. */
+  /**
+   * Citas de las sedes con recordatorios activos cuya hora toca en la ventana
+   * del barrido. Sin las de pacientes con baja o con canal distinto de EMAIL
+   * (DX-128): esos no entran en la cola.
+   */
   dueCandidates(tenantId: string, now: Date): Promise<ReminderCandidate[]>;
 
   /** null si la cita no existe en la clínica del contexto. */

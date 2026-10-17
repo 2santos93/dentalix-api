@@ -98,6 +98,12 @@ function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
       until instanceof Date ? until.toISOString().slice(0, 10) : null,
     underRetention: isUnderRetention(until, now),
     partiallySuppressedAt: patient.partiallySuppressedAt,
+    contactChannel: patient.contactChannel,
+    whatsappOptInAt: patient.whatsappOptInAt,
+    whatsappOptInSource: patient.whatsappOptInSource,
+    whatsappOptInById: patient.whatsappOptInById,
+    reminderOptOutAt: patient.reminderOptOutAt,
+    reminderOptOutSource: patient.reminderOptOutSource,
     createdAt: patient.createdAt,
     updatedAt: patient.updatedAt,
   };
@@ -130,9 +136,16 @@ export class PrismaPatientRepository implements PatientRepository {
   async create(input: CreatePatientRepoInput): Promise<Patient> {
     const tenantId = this.requireTenantId();
     const patient = await this.prisma.runWithTenant(async (tx) => {
+      // DX-128: el paciente nace con el canal por defecto de su clínica
+      // (`tenants` no tiene RLS: se lee por el id del contexto).
+      const clinic = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { defaultContactChannel: true },
+      });
       const created = await tx.patient.create({
         data: {
           tenantId,
+          contactChannel: clinic.defaultContactChannel,
           firstName: input.firstName,
           lastName: input.lastName,
           docType: input.docType,

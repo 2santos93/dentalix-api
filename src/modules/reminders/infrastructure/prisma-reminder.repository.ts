@@ -14,6 +14,7 @@ import {
 } from '../domain/reminder-window';
 import type { ReminderSettingsInput } from '../domain/reminder-lead-hours';
 import type { ReminderEmailDelivery } from '../domain/reminder-timeline';
+import type { ReminderContact } from '../domain/reminder-eligibility';
 import type {
   AppointmentRemindersSnapshot,
   LocationReminderSettingsView,
@@ -26,6 +27,24 @@ import type {
 /** Las columnas son TIMESTAMP(3) en UTC (sin zona), como el resto del esquema. */
 const utc = (d: Date) =>
   Prisma.sql`(${d.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+
+/** Lo que decide si el paciente recibe el email automático (DX-128). */
+const CONTACT_SELECT = {
+  id: true,
+  email: true,
+  contactChannel: true,
+  reminderOptOutAt: true,
+} as const satisfies Prisma.PatientSelect;
+
+function toContact(
+  patient: Prisma.PatientGetPayload<{ select: typeof CONTACT_SELECT }>,
+): ReminderContact {
+  return {
+    contactChannel: patient.contactChannel,
+    reminderOptOutAt: patient.reminderOptOutAt,
+    email: patient.email,
+  };
+}
 
 const SETTINGS_SELECT = {
   enabled: true,
@@ -117,6 +136,9 @@ export class PrismaReminderRepository implements ReminderRepository {
     // de recordatorio cae en (now - catchUp, now + lookahead]: lo sirve
     // appointments_tenant_location_start_idx (tenantId, locationId, start).
     // Todos los estados: el handler registra el motivo si la cita ya no va.
+    // DX-128: sin los pacientes con baja o con canal distinto de EMAIL (regla
+    // de reminder-eligibility.ts): esos nunca entran en la cola. El paciente
+    // se lee por su PK (tenantId, id) desde cada cita.
     return this.prisma.runWithTenant(
       tenantId,
       (tx) => tx.$queryRaw<ReminderCandidate[]>`
@@ -126,9 +148,14 @@ export class PrismaReminderRepository implements ReminderRepository {
           JOIN "appointments" a
             ON a."tenantId" = rs."tenantId"
            AND a."locationId" = rs."locationId"
+          JOIN "patients" p
+            ON p."tenantId" = a."tenantId"
+           AND p."id" = a."patientId"
          WHERE rs."tenantId" = ${tenantId}::uuid
            AND rs."enabled"
            AND a."deletedAt" IS NULL
+           AND p."contactChannel" = 'EMAIL'
+           AND p."reminderOptOutAt" IS NULL
            AND a."start" > ${utc(now)}
            AND a."start" <= ${utc(now)} + make_interval(hours => lead, secs => ${lookahead})
            AND a."start" > ${utc(now)} + make_interval(hours => lead, secs => ${-catchUp})
@@ -149,7 +176,15 @@ export class PrismaReminderRepository implements ReminderRepository {
           status: true,
           deletedAt: true,
           locationId: true,
-          patient: { select: { email: true } },
+          patient: {
+            select: {
+              ...CONTACT_SELECT,
+              firstName: true,
+              birthDate: true,
+              guardianName: true,
+              emergencyContactName: true,
+            },
+          },
           location: { select: { country: true } },
         },
       });
@@ -171,7 +206,14 @@ export class PrismaReminderRepository implements ReminderRepository {
         locationCountry: appointment.location.country,
         locationTimeZone:
           zones.get(appointment.locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
-        patientEmail: appointment.patient.email,
+        patientId: appointment.patient.id,
+        contact: toContact(appointment.patient),
+        recipient: {
+          firstName: appointment.patient.firstName,
+          birthDate: appointment.patient.birthDate,
+          guardianName: appointment.patient.guardianName,
+          emergencyContactName: appointment.patient.emergencyContactName,
+        },
         settings,
       };
     });
@@ -266,7 +308,12 @@ export class PrismaReminderRepository implements ReminderRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const appointment = await tx.appointment.findFirst({
         where: { id: appointmentId, deletedAt: null },
-        select: { start: true, status: true, locationId: true },
+        select: {
+          start: true,
+          status: true,
+          locationId: true,
+          patient: { select: CONTACT_SELECT },
+        },
       });
       if (!appointment) return null;
       const [settings, records] = await Promise.all([
@@ -313,6 +360,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           deleted: false,
         },
         settings,
+        contact: toContact(appointment.patient),
         records: records.map((r) => ({
           leadHours: r.leadHours,
           appointmentStart: r.appointmentStart,

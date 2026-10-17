@@ -2,6 +2,10 @@ import type {
   AppointmentReminderSkipReason,
   AppointmentStatus,
 } from '@prisma/client';
+import {
+  emailReminderBlocker,
+  type ReminderContact,
+} from './reminder-eligibility';
 
 const HOUR_MS = 3_600_000;
 
@@ -63,7 +67,8 @@ export interface ReminderDecisionInput {
   leadHours: number;
   /** Ajustes VIGENTES de la sede de la cita; null = sin fila (desactivado). */
   settings: { enabled: boolean; leadHours: number[] } | null;
-  patientEmail: string | null;
+  /** Canal, baja y email VIGENTES del paciente (DX-128). */
+  contact: ReminderContact;
   now: Date;
 }
 
@@ -79,9 +84,9 @@ const STATUS_SKIP: Partial<Record<AppointmentStatus, ReminderSkipReason>> = {
 /**
  * Lo que decide el handler al ejecutarse, con la cita releída: entre el
  * encolado y la hora del envío pudo cancelarse, reprogramarse, cambiar la
- * sede de ajustes o el paciente quedarse sin email. El orden importa: el
- * primer motivo es el que se registra (el estado de la cita explica más que
- * la falta de email).
+ * sede de ajustes, el paciente darse de baja, cambiar de canal o quedarse
+ * sin email. El orden importa: el primer motivo es el que se registra (el
+ * estado de la cita explica más que la preferencia o la falta de email).
  */
 export function decideReminder(input: ReminderDecisionInput): ReminderDecision {
   const { appointment, settings } = input;
@@ -102,8 +107,7 @@ export function decideReminder(input: ReminderDecisionInput): ReminderDecision {
   if (appointment.start.getTime() <= now || due <= now - REMINDER_CATCH_UP_MS) {
     return { action: 'SKIP', reason: 'TOO_LATE' };
   }
-  if (!input.patientEmail?.trim()) {
-    return { action: 'SKIP', reason: 'NO_EMAIL' };
-  }
+  const blocker = emailReminderBlocker(input.contact);
+  if (blocker) return { action: 'SKIP', reason: blocker };
   return { action: 'SEND' };
 }

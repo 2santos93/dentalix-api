@@ -835,6 +835,56 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
 - **Demo**: `seed:demo` deja la «Sede principal» con `[48, 2]`. Hace falta un
   worker (`npm run start:dev:all`) para que salgan.
 
+## Canal de contacto y baja de recordatorios (DX-128)
+
+Canal OPERATIVO de los avisos automáticos (no el consentimiento de marketing
+de DX-037). Migración `20261017233300_dx128_contact_channel`.
+
+- **Datos**: `patients.contactChannel` (`EMAIL` | `WHATSAPP` | `NONE`; nace
+  con `tenants.defaultContactChannel`, hoy `EMAIL` en todas las clínicas y sin
+  pantalla para cambiarlo), opt-in de WhatsApp (`whatsappOptInAt`, `…Source`
+  `IN_PERSON` | `LINK` | `MESSAGE`, `…ById`) y baja (`reminderOptOutAt`,
+  `…Source` `LINK` | `MESSAGE` | `STAFF`), con CHECK de que fecha y origen van
+  juntos. Los pacientes existentes migran con el canal de su clínica, sin
+  opt-in ni baja; `phone` no se toca (el wa.me manual sigue igual).
+- **Regla de elegibilidad** (`reminders/domain/reminder-eligibility.ts`): con
+  baja no sale NINGÚN envío automático; canal `NONE`, nada; canal `WHATSAPP`,
+  no se manda el email automático (el de WhatsApp llegará con DX-126 y exigirá
+  opt-in y móvil válido; mientras, «Abrir WhatsApp» manual); canal `EMAIL` sin
+  email, `NO_EMAIL`. El barrido aplica las tres primeras en SQL (esos
+  pacientes no entran en la cola) y el handler la relee entera al enviar
+  (motivos `OPTED_OUT`, `CHANNEL_NONE`, `CHANNEL_WHATSAPP`).
+- **Ficha**: `GET /patients/:id/communication` (4 roles) y `PATCH` (solo
+  RECEPTION y ADMIN; 403 en español). El móvil se valida y normaliza a E.164
+  con el país de la sede activa o la principal (`whatsapp-phone.ts` + forma de
+  móvil de CO/ES); uno inválido se guarda con aviso, pero no puede ser canal
+  WhatsApp (400 `WHATSAPP_REQUIRES_VALID_MOBILE`, también desde `PATCH
+  /patients/:id`). Cada cambio deja un `audit_event` UPDATE de PATIENT con
+  `reason: COMMUNICATION_PREFERENCES_CHANGED`, los campos y `origin`.
+- **Baja por enlace**: cada email de recordatorio lleva su enlace
+  `<host de plataforma>/baja/<token>` (32 bytes base64url; en la BD solo su
+  SHA-256, `reminder_opt_out_links`, RLS FORCE y FK compuesta). `GET
+  /public/reminder-opt-outs/:token` solo lee; `POST` registra la baja
+  (idempotente) y la audita sin actor (`reason: REMINDER_OPT_OUT`, `origin:
+  LINK`; `audit_events_actor_check` admite actor NULL solo para eso y el
+  login fallido). Mismo límite por IP que la confirmación.
+- **Baja por mensaje**: `OptOutByMessageUseCase` (exportado por
+  `RemindersModule`) reconoce «BAJA», «STOP» y «NO MÁS» (sin tildes ni
+  mayúsculas, mensaje entero) y da de baja a todos los pacientes vivos de la
+  clínica con ese móvil (prefiltro indexado `dx_phone_tail`), con origen
+  MESSAGE. Lo invocará el webhook de WhatsApp de DX-126, que aún no existe.
+- **Menores** (`patients/domain/communication/reminder-recipient.ts`): los
+  avisos de un menor de 18 años se dirigen a su tutor (`guardianName`) o, sin
+  tutor, a su contacto principal (`emergencyContactName`), como Dentrix
+  Ascend: el email de recordatorio lo saluda a él y nombra al paciente («Te
+  recordamos la cita de Mateo»), y la ficha lo muestra (`recipient` en `GET
+  /patients/:id/communication`). Se usan el correo y el móvil de la ficha:
+  no hay campos de contacto propios del tutor.
+- **Demo**: `seed:demo` deja a Laura con WhatsApp y opt-in en persona, al
+  tercer paciente con canal ninguno, al cuarto dado de baja y al quinto con un
+  fijo (móvil no válido). Sofía Ortiz (menor, tutora Claudia) muestra el
+  destinatario tutor.
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y

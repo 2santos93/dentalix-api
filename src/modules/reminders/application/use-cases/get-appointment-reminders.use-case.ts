@@ -7,7 +7,17 @@ import {
   buildReminderTimeline,
   type ReminderTimelineItem,
 } from '../../domain/reminder-timeline';
+import {
+  emailReminderBlocker,
+  type ReminderContactBlocker,
+} from '../../domain/reminder-eligibility';
 import { ReminderClock } from '../reminder-clock';
+
+/** Lo que la preferencia del paciente impide (NO_EMAIL se ve por recordatorio). */
+export type PatientReminderBlocker = Exclude<
+  ReminderContactBlocker,
+  'NO_EMAIL'
+>;
 
 export const APPOINTMENT_NOT_FOUND_MESSAGE = 'Cita no encontrada';
 
@@ -15,6 +25,11 @@ export interface AppointmentReminders {
   /** Ajustes vigentes de la sede de la cita. */
   enabled: boolean;
   leadHours: number[];
+  /**
+   * DX-128: por qué este paciente no recibe el email automático (baja o
+   * canal), o null. Con él no hay recordatorios pendientes.
+   */
+  patientBlocker: PatientReminderBlocker | null;
   items: ReminderTimelineItem[];
 }
 
@@ -29,10 +44,17 @@ export class GetAppointmentRemindersUseCase {
   async execute(appointmentId: string): Promise<AppointmentReminders> {
     const snapshot = await this.repo.findAppointmentReminders(appointmentId);
     if (!snapshot) throw new NotFoundException(APPOINTMENT_NOT_FOUND_MESSAGE);
+    const blocker = emailReminderBlocker(snapshot.contact);
+    const patientBlocker = blocker === 'NO_EMAIL' ? null : blocker;
     return {
       enabled: snapshot.settings?.enabled ?? false,
       leadHours: snapshot.settings?.leadHours ?? [],
-      items: buildReminderTimeline({ ...snapshot, now: this.clock.now() }),
+      patientBlocker,
+      items: buildReminderTimeline({
+        ...snapshot,
+        patientBlocked: patientBlocker !== null,
+        now: this.clock.now(),
+      }),
     };
   }
 }

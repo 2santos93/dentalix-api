@@ -22,11 +22,14 @@ export type AuditPatientRef = {
 /**
  * Quién. `email` solo en un login fallido: se resuelve a un MIEMBRO de esta
  * clínica (nunca a un usuario de otra, que filtraría quién usa Dentalix) y el
- * email en sí no se guarda.
+ * email en sí no se guarda. `patient`: el propio paciente (DX-128, baja de
+ * los recordatorios por enlace o mensaje), que no es un usuario: el evento va
+ * sin actor y la BD solo lo admite para esa escritura (audit_events_actor_check).
  */
 export type AuditActorRef =
   | { kind: 'user'; userId: string; role: ClinicRole | null }
-  | { kind: 'email'; email: string };
+  | { kind: 'email'; email: string }
+  | { kind: 'patient' };
 
 /** Lo que el interceptor sabe de una petición auditada. */
 export interface AuditEventDraft {

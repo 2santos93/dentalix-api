@@ -14,6 +14,8 @@ model Tenant {
   subdomain                String                     @unique
   primaryColor             String                     @default("#0F5E9C")
   logoUrl                  String?
+  // DX-128: canal de los avisos automáticos con el que nace cada paciente.
+  defaultContactChannel    ContactChannel             @default(EMAIL)
   createdAt                DateTime                   @default(now())
   updatedAt                DateTime                   @updatedAt
   deletedAt                DateTime?
@@ -37,6 +39,7 @@ model Tenant {
   appointmentReminders     AppointmentReminder[]
   paymentReceipts          PaymentReceipt[]
   paymentReceiptCounters   PaymentReceiptCounter[]
+  reminderOptOutLinks      ReminderOptOutLink[]
 
   @@map("tenants")
 }
@@ -202,14 +205,14 @@ enum Sex {
 }
 
 model Patient {
-  id                           String             @id @default(uuid()) @db.Uuid
-  tenantId                     String             @db.Uuid
+  id                           String                @id @default(uuid()) @db.Uuid
+  tenantId                     String                @db.Uuid
   firstName                    String
   lastName                     String
-  docType                      DocType            @default(CC)
+  docType                      DocType               @default(CC)
   docNumber                    String?
   birthDate                    DateTime?
-  sex                          Sex                @default(UNSPECIFIED)
+  sex                          Sex                   @default(UNSPECIFIED)
   phone                        String?
   email                        String?
   address                      String?
@@ -220,7 +223,7 @@ model Patient {
   // `data_processing_consents`, que es la prueba de la autorización Ley 1581.
   // Se sigue escribiendo (en la misma transacción que la fila) solo para no
   // romper a los clientes que lo leen; nunca es la fuente de verdad.
-  dataConsentAccepted          Boolean            @default(false)
+  dataConsentAccepted          Boolean               @default(false)
   dataConsentAt                DateTime?
   dataConsentPolicyVersion     String?
   // Identificación ampliada.
@@ -235,9 +238,9 @@ model Patient {
   emergencyContactPhone        String?
   guardianName                 String?
   guardianDocNumber            String?
-  createdById                  String?            @db.Uuid
-  createdAt                    DateTime           @default(now())
-  updatedAt                    DateTime           @updatedAt
+  createdById                  String?               @db.Uuid
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
   deletedAt                    DateTime?
   // DX-043: columna GENERADA (STORED) para la búsqueda: nombre, apellido y
   // documento sin tildes, en minúsculas y con espacios colapsados
@@ -248,10 +251,22 @@ model Patient {
   // mantienen triggers de BD (evolución insertada / cita COMPLETED) y nunca
   // retrocede; la app solo lo lee. `retentionExtended` lo cambia solo ADMIN
   // (rastro en patient_retention_actions + audit_events).
-  lastAttentionAt              DateTime?          @map("last_attention_at")
-  retentionExtended            RetentionExtension @default(NONE) @map("retention_extended")
-  partiallySuppressedAt        DateTime?          @map("partially_suppressed_at")
-  searchText                   String?            @default(dbgenerated("dx_search_normalize(((((\"firstName\" || ' '::text) || \"lastName\") || ' '::text) || COALESCE(\"docNumber\", ''::text)))")) @map("search_text") @ignore
+  lastAttentionAt              DateTime?             @map("last_attention_at")
+  retentionExtended            RetentionExtension    @default(NONE) @map("retention_extended")
+  partiallySuppressedAt        DateTime?             @map("partially_suppressed_at")
+  // DX-128: canal OPERATIVO de los avisos automáticos (recordatorios), no el
+  // consentimiento de marketing (DX-037). Nace con el de la clínica
+  // (Tenant.defaultContactChannel). El opt-in de WhatsApp guarda cuándo, por
+  // dónde y quién lo registró (NULL si lo dio el propio paciente por enlace o
+  // mensaje). `reminderOptOutAt`: baja de los recordatorios; con ella no sale
+  // ningún envío automático. CHECK en la BD: fecha y origen van juntos.
+  contactChannel               ContactChannel        @default(EMAIL)
+  whatsappOptInAt              DateTime?
+  whatsappOptInSource          WhatsappOptInSource?
+  whatsappOptInById            String?               @db.Uuid
+  reminderOptOutAt             DateTime?
+  reminderOptOutSource         ReminderOptOutSource?
+  searchText                   String?               @default(dbgenerated("dx_search_normalize(((((\"firstName\" || ' '::text) || \"lastName\") || ' '::text) || COALESCE(\"docNumber\", ''::text)))")) @map("search_text") @ignore
 
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
@@ -269,6 +284,8 @@ model Patient {
   waitlistEntries        AppointmentWaitlistEntry[]
   // DX-155: entradas de su cartera, mantenidas por la BD.
   ledger                 PatientLedger?
+  // DX-128: enlaces de baja de los recordatorios enviados al paciente.
+  reminderOptOutLinks    ReminderOptOutLink[]
   country                Country?                   @relation(fields: [countryCode], references: [code])
   city                   City?                      @relation(fields: [cityId], references: [id])
 
@@ -289,6 +306,8 @@ model Patient {
   //     -> búsqueda (dx_patient_search_ids/_count).
   //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
   //     -> historias que salen de retención (DX-039).
+  //   patients_tenant_phone_tail_live_idx ("tenantId", dx_phone_tail(phone))
+  //     -> pacientes de un móvil que respondió «BAJA» (DX-128).
   @@map("patients")
 }
 
@@ -2063,6 +2082,10 @@ enum AppointmentReminderSkipReason {
   DELETED
   DISABLED
   TOO_LATE
+  // DX-128: el paciente se dio de baja, o su canal no es el email.
+  OPTED_OUT
+  CHANNEL_NONE
+  CHANNEL_WHATSAPP
 }
 
 /// DX-026: un recordatorio de una cita por (antelación, hora de inicio). Guarda
@@ -2170,4 +2193,49 @@ model PaymentReceipt {
   @@unique([tenantId, seriesPrefix, number], map: "payment_receipts_tenant_series_number_key")
   @@index([tenantId, locationId, issuedAt(sort: Desc)])
   @@map("payment_receipts")
+}
+
+// ---------------------------------------------------------------------------
+// Canal de contacto y baja de recordatorios (DX-128)
+// ---------------------------------------------------------------------------
+
+/// DX-128: canal de los avisos automáticos del paciente. NONE = ninguno.
+enum ContactChannel {
+  EMAIL
+  WHATSAPP
+  NONE
+}
+
+/// DX-128: dónde aceptó el paciente que la clínica le escriba por WhatsApp.
+enum WhatsappOptInSource {
+  IN_PERSON
+  LINK
+  MESSAGE
+}
+
+/// DX-128: cómo se dio de baja de los recordatorios: con el enlace del email,
+/// respondiendo «BAJA» al mensaje, o lo anotó recepción a petición suya.
+enum ReminderOptOutSource {
+  LINK
+  MESSAGE
+  STAFF
+}
+
+/// DX-128: enlace de baja de los recordatorios que viaja en cada email. El
+/// token en claro solo va en el email; aquí su SHA-256. No caduca: darse de
+/// baja tiene que funcionar siempre. `usedAt`: la primera vez que se usó.
+model ReminderOptOutLink {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @db.Uuid
+  patientId String    @db.Uuid
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  usedAt    DateTime?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // FK COMPUESTA (SEC-004): el paciente tiene que ser del MISMO tenant.
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, patientId])
+  @@map("reminder_opt_out_links")
 }

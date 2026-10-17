@@ -1,4 +1,11 @@
-import { DocType, RetentionExtension, Sex } from '@prisma/client';
+import {
+  ContactChannel,
+  DocType,
+  ReminderOptOutSource,
+  RetentionExtension,
+  Sex,
+  WhatsappOptInSource,
+} from '@prisma/client';
 
 /**
  * API-facing shape of a Patient. Deliberately NOT the raw Prisma model:
@@ -47,6 +54,17 @@ export interface Patient {
   underRetention: boolean;
   /** DX-039: cuándo se vaciaron los datos no clínicos (supresión parcial). */
   partiallySuppressedAt: Date | null;
+  /**
+   * DX-128: canal de los avisos automáticos, opt-in de WhatsApp y baja de los
+   * recordatorios (van en la ficha, y así en la exportación y el derecho de
+   * acceso). Se cambian por `PATCH /patients/:id/communication`.
+   */
+  contactChannel: ContactChannel;
+  whatsappOptInAt: Date | null;
+  whatsappOptInSource: WhatsappOptInSource | null;
+  whatsappOptInById: string | null;
+  reminderOptOutAt: Date | null;
+  reminderOptOutSource: ReminderOptOutSource | null;
   createdAt: Date;
   updatedAt: Date;
 }

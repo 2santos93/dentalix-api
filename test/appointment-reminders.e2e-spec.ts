@@ -418,6 +418,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       expect(await reminders(id)).toEqual({
         enabled: false,
         leadHours: [48, 2],
+        patientBlocker: null,
         items: [],
       });
     });

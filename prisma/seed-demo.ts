@@ -90,10 +90,12 @@ import {
   ListWaitlistUseCase,
 } from '../src/modules/waitlist/application/use-cases/waitlist.use-cases';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import { UpdatePatientCommunicationUseCase } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
 import {
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
   DEMO_CLINICAL_ADDENDA,
+  DEMO_COMMUNICATION,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
@@ -740,6 +742,22 @@ class DemoSeeder {
         );
       }
       ids.push(patient.id);
+    }
+    // DX-128: preferencias de comunicación, como las registraría recepción.
+    const ctx: AuditRequestContext = {
+      tenantId: this.tenantContext.getTenantId() as string,
+      locationId: null,
+      actor: { userId: receptionId, role: ClinicRole.RECEPTION },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+    for (const c of DEMO_COMMUNICATION) {
+      await this.use(UpdatePatientCommunicationUseCase).execute(
+        ids[c.patientIndex],
+        c.input,
+        ctx,
+      );
     }
     return ids;
   }

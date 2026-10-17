@@ -44,6 +44,11 @@ export interface ReminderTimelineInput {
   appointment: { start: Date; status: AppointmentStatus; deleted: boolean };
   settings: { enabled: boolean; leadHours: number[] } | null;
   records: ReminderRecord[];
+  /**
+   * DX-128: la preferencia del paciente (baja o canal distinto de EMAIL)
+   * impide el email automático: no queda nada pendiente que mostrar.
+   */
+  patientBlocked?: boolean;
   now: Date;
 }
 
@@ -85,7 +90,10 @@ export function buildReminderTimeline(
   const items = current.map((r) => fromRecord(r, true));
 
   const live =
-    !appointment.deleted && ACTIVE.has(appointment.status) && settings?.enabled;
+    input.patientBlocked !== true &&
+    !appointment.deleted &&
+    ACTIVE.has(appointment.status) &&
+    settings?.enabled;
   if (live) {
     for (const leadHours of settings.leadHours) {
       if (current.some((r) => r.leadHours === leadHours)) continue;

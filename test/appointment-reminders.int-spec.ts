@@ -12,6 +12,7 @@ import {
   PLAN_REMINDERS_SCHEDULE,
   SEND_REMINDER_JOB,
 } from '../src/modules/reminders/application/plan-reminders';
+import { OptOutByMessageUseCase } from '../src/modules/reminders/application/use-cases/reminder-opt-out.use-cases';
 import { CapturingMailer } from './support/capture-mailer';
 import { waitFor } from './support/wait-for';
 
@@ -137,6 +138,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
   async function patient(
     clinic: Clinic,
     email: string | null,
+    extra: Partial<Prisma.PatientUncheckedCreateInput> = {},
   ): Promise<string> {
     const p = await owner.patient.create({
       data: {
@@ -144,6 +146,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
         firstName: 'Carolina',
         lastName: 'Duque',
         email,
+        ...extra,
       },
     });
     return p.id;
@@ -299,6 +302,20 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       ),
     );
     expect(text).not.toContain('muela');
+    // DX-128: cada email lleva su propio enlace de baja, en el mismo host.
+    const optOut = new RegExp(
+      `http://${SUBDOMAINS[0]}\\.dentalix\\.app/baja/([A-Za-z0-9_-]{43})`,
+    );
+    expect(mailer.sent[0].text).toMatch(optOut);
+    expect(text).toMatch(optOut);
+    expect(optOut.exec(text)?.[1]).not.toBe(
+      optOut.exec(mailer.sent[0].text)?.[1],
+    );
+    expect(
+      await owner.reminderOptOutLink.count({
+        where: { tenantId: clinicA.tenantId },
+      }),
+    ).toBe(2);
   });
 
   it('no envía a canceladas ni a pacientes sin email, y registra el motivo', async () => {
@@ -419,6 +436,200 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       }),
     ).toBe(0);
     expect(mailer.sent).toEqual([]);
+  });
+
+  describe('DX-128 · canal de contacto y baja', () => {
+    const jobsFor = async (tenantId: string) =>
+      (
+        await owner.job.findMany({
+          where: { tenantId, name: SEND_REMINDER_JOB },
+          select: { payload: true },
+        })
+      ).map((j) => (j.payload as { appointmentId: string }).appointmentId);
+
+    it('canal NONE, canal WHATSAPP o con baja: nunca entran en la cola del trabajo programado', async () => {
+      await configure(clinicA, [2]);
+      // Citas de 5 min seguidas (mismo profesional, sin solaparse) cuyo
+      // recordatorio de 2 h cae en la ventana de este barrido.
+      const base = Date.now() + 2 * HOUR - 10 * MIN;
+      let slot = 0;
+      const book = async (
+        email: string,
+        extra: Partial<Prisma.PatientUncheckedCreateInput> = {},
+      ) => {
+        const start = new Date(base + 6 * MIN * slot++);
+        const created = await owner.appointment.create({
+          data: {
+            tenantId: clinicA.tenantId,
+            locationId: clinicA.locationId,
+            patientId: await patient(clinicA, email, extra),
+            providerId: clinicA.providerId,
+            start,
+            end: new Date(start.getTime() + 5 * MIN),
+          },
+        });
+        return created.id;
+      };
+      const email = await book('ana@example.com');
+      const none = await book('bea@example.com', { contactChannel: 'NONE' });
+      const whatsapp = await book('cami@example.com', {
+        contactChannel: 'WHATSAPP',
+        phone: '+573101234567',
+      });
+      const optedOut = await book('dani@example.com', {
+        reminderOptOutAt: new Date(Date.now() - HOUR),
+        reminderOptOutSource: 'LINK',
+      });
+
+      await sweep();
+      await sweep();
+      expect(await jobsFor(clinicA.tenantId)).toEqual([email]);
+      await releaseDue(clinicA.tenantId);
+
+      expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+      for (const id of [none, whatsapp, optedOut]) {
+        expect(await records(id)).toEqual([]);
+      }
+      expect((await records(email)).map((r) => r.status)).toEqual(['SENT']);
+    });
+
+    it('«BAJA» por WhatsApp registra la baja al momento y el recordatorio ya encolado no sale', async () => {
+      await configure(clinicA, [2]);
+      const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+      const patientId = await patient(clinicA, 'ana@example.com', {
+        phone: '310 555 0001',
+      });
+      const id = await appointment(clinicA, patientId, start);
+      await sweep(); // encolado para su hora (dentro de 3 min)
+      expect(await jobsFor(clinicA.tenantId)).toEqual([id]);
+
+      // Lo que hará el webhook de DX-126 al recibir la respuesta.
+      const before = Date.now();
+      const result = await a.get(OptOutByMessageUseCase).execute({
+        tenantId: clinicA.tenantId,
+        fromPhone: '573105550001',
+        text: 'Baja',
+      });
+      expect(result).toEqual({ isOptOut: true, optedOut: [patientId] });
+      const row = await owner.patient.findUniqueOrThrow({
+        where: { id: patientId },
+      });
+      expect(row.reminderOptOutSource).toBe('MESSAGE');
+      expect(row.reminderOptOutAt!.getTime() - before).toBeLessThan(60_000);
+
+      // Auditada sin actor, con el origen.
+      const [event] = await owner.auditEvent.findMany({
+        where: { tenantId: clinicA.tenantId, patientId },
+      });
+      expect(event).toMatchObject({
+        actorUserId: null,
+        action: 'UPDATE',
+        resourceType: 'PATIENT',
+        metadata: {
+          reason: 'REMINDER_OPT_OUT',
+          origin: 'MESSAGE',
+          changedFields: ['reminderOptOutAt'],
+        },
+      });
+
+      await releaseDue(clinicA.tenantId);
+      expect(await reminderEmails(clinicA.tenantId)).toBe(0);
+      expect((await records(id)).map((r) => r.skipReason)).toEqual([
+        'OPTED_OUT',
+      ]);
+    });
+
+    it('la BD solo admite actor vacío para la baja del propio paciente', async () => {
+      await expect(
+        owner.auditEvent.create({
+          data: {
+            tenantId: clinicA.tenantId,
+            action: 'UPDATE',
+            resourceType: 'PATIENT',
+            metadata: { reason: 'COMMUNICATION_PREFERENCES_CHANGED' },
+          },
+        }),
+      ).rejects.toThrow(/audit_events_actor_check/);
+
+      // Ni siquiera con el motivo de la baja si no la hizo el propio paciente
+      // (origen LINK o MESSAGE, sobre su propia ficha y sin rol).
+      const patientId = await patient(clinicA, 'ana@example.com');
+      const optOut = {
+        tenantId: clinicA.tenantId,
+        action: 'UPDATE' as const,
+        resourceType: 'PATIENT' as const,
+        resourceId: patientId,
+        patientId,
+        metadata: { reason: 'REMINDER_OPT_OUT', origin: 'LINK' },
+      };
+      for (const data of [
+        {
+          ...optOut,
+          metadata: { reason: 'REMINDER_OPT_OUT', origin: 'STAFF' },
+        },
+        { ...optOut, metadata: { reason: 'REMINDER_OPT_OUT' } },
+        { ...optOut, metadata: { origin: 'LINK' } },
+        { ...optOut, metadata: {} },
+        { ...optOut, resourceId: null },
+        { ...optOut, patientId: null },
+        { ...optOut, resourceId: randomUUID() },
+        { ...optOut, actorRole: 'ADMIN' as const },
+      ]) {
+        await expect(owner.auditEvent.create({ data })).rejects.toThrow(
+          /audit_events_actor_check/,
+        );
+      }
+      await expect(
+        owner.auditEvent.create({ data: optOut }),
+      ).resolves.toMatchObject({ actorUserId: null });
+    });
+
+    it('enlaces de baja: RLS forzada y FK compuesta al paciente de la misma clínica', async () => {
+      const patientA = await patient(clinicA, 'ana@example.com');
+      const prisma = a.get(PrismaService);
+      await prisma.runWithTenant(clinicA.tenantId, (tx) =>
+        tx.reminderOptOutLink.create({
+          data: {
+            tenantId: clinicA.tenantId,
+            patientId: patientA,
+            tokenHash: 'a'.repeat(64),
+          },
+        }),
+      );
+      await prisma.runWithTenant(clinicB.tenantId, async (tx) => {
+        expect(await tx.reminderOptOutLink.count()).toBe(0);
+      });
+      await expect(
+        prisma.runWithTenant(clinicB.tenantId, (tx) =>
+          tx.reminderOptOutLink.create({
+            data: {
+              tenantId: clinicA.tenantId,
+              patientId: patientA,
+              tokenHash: 'b'.repeat(64),
+            },
+          }),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      await expect(
+        owner.reminderOptOutLink.create({
+          data: {
+            tenantId: clinicB.tenantId,
+            patientId: patientA,
+            tokenHash: 'c'.repeat(64),
+          },
+        }),
+      ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      // Nunca el token en claro: solo un SHA-256 en hex.
+      await expect(
+        owner.reminderOptOutLink.create({
+          data: {
+            tenantId: clinicA.tenantId,
+            patientId: patientA,
+            tokenHash: 'token-en-claro',
+          },
+        }),
+      ).rejects.toThrow(/token_hash_check/);
+    });
   });
 
   describe('RLS entre clínicas', () => {

@@ -72,6 +72,11 @@ export interface RegistrationNoticeEmailVars {
 export interface AppointmentReminderEmailVars {
   /** Nombre de pila del paciente. */
   patientName: string;
+  /**
+   * DX-128: a quién se saluda cuando no es el paciente (un menor: su tutor o
+   * contacto principal, nombre de pila). null/ausente = al paciente.
+   */
+  guardianName?: string | null;
   /** Fecha y hora ya formateadas en la zona de la sede ("martes 20 de octubre de 2026 a las 9:30 a. m."). */
   startsAtLabel: string;
   locationName: string;
@@ -80,6 +85,8 @@ export interface AppointmentReminderEmailVars {
   providerName: string | null;
   /** Enlace de confirmación (DX-005), si se emitió uno. */
   confirmUrl: string | null;
+  /** Enlace de baja de los recordatorios (DX-128), si se emitió uno. */
+  unsubscribeUrl: string | null;
 }
 
 /**

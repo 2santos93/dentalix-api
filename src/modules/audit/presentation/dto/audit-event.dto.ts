@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AuditAction, AuditResourceType, ClinicRole } from '@prisma/client';
+import { AUDIT_ORIGINS, type AuditOrigin } from '../../domain/audit-metadata';
 
 // Forma de la respuesta de `GET /audit-events` (DX-009). Solo documenta el
 // contrato en Swagger (de ahí sale el tipo del cliente web), no valida entrada.
@@ -75,6 +76,14 @@ export class AuditMetadataDto {
       'DX-121: cita movida — hora y profesional antes y después (nunca datos del paciente).',
   })
   move?: AuditAppointmentMoveDto;
+
+  @ApiPropertyOptional({
+    enum: AUDIT_ORIGINS,
+    enumName: 'AuditOrigin',
+    description:
+      'DX-128: de dónde salió un cambio de canal, opt-in o baja de recordatorios (en persona, enlace, mensaje del paciente o anotado por el personal).',
+  })
+  origin?: AuditOrigin;
 }
 
 export class AuditEventDto {
