@@ -1151,6 +1151,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /implants/:id/void': 'implants.e2e-spec.ts',
     'GET /patients/:patientId/account-statement':
       'account-statement.e2e-spec.ts',
+    // DX-203: B → 404 sobre el pagador de A (y el familiar no suma de otra).
+    'GET /patients/:patientId/family-account-statement':
+      'patient-responsible-parties.e2e-spec.ts',
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
   };
 

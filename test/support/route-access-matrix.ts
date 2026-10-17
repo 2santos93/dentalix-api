@@ -323,6 +323,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,
   'GET /patients/:patientId/account-statement': BILLING,
+  // DX-203: estado de cuenta familiar del pagador, mismos roles.
+  'GET /patients/:patientId/family-account-statement': BILLING,
   'GET /patients/:patientId/billable-plans': BILLING,
   // Cartera por antigüedad: loop/informes/DX-145.md. El CSV es un dato
   // personal de muchos pacientes: solo ADMIN.

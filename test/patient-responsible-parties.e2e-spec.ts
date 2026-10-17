@@ -339,4 +339,191 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       guardianDocNumber: null,
     });
   });
+  describe('estado de cuenta familiar del pagador', () => {
+    let catalogItemId: string;
+    let brother: string;
+    let sister: string;
+    let payer: string;
+
+    async function planWith(patientId: string, price: number): Promise<string> {
+      const plan = await as(
+        api().post(`/api/v1/patients/${patientId}/treatment-plans`),
+        clinic.adminToken,
+      )
+        .send({ currency: 'COP', notes: 'Nota clínica que no sale' })
+        .expect(201);
+      const planId = (plan.body as { id: string }).id;
+      const item = await as(
+        api().post(`/api/v1/treatment-plans/${planId}/items`),
+        clinic.adminToken,
+      )
+        .send({ toothNumber: '11', catalogItemId, price })
+        .expect(201);
+      await as(
+        api().patch(
+          `/api/v1/treatment-plans/${planId}/items/${(item.body as { id: string }).id}`,
+        ),
+        clinic.adminToken,
+      )
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+      return planId;
+    }
+
+    async function pay(planId: string, amount: number): Promise<void> {
+      await as(
+        api().post(`/api/v1/treatment-plans/${planId}/payments`),
+        tokens.RECEPTION,
+      )
+        .send({ amount, currency: 'COP', paidAt: '2026-01-15', method: 'CASH' })
+        .expect(201);
+    }
+
+    interface Summary {
+      currency: string;
+      budgeted: number;
+      paid: number;
+      balance: number;
+    }
+
+    beforeAll(async () => {
+      const catalog = await as(
+        api().post('/api/v1/catalog/items'),
+        clinic.adminToken,
+      )
+        .send({
+          code: 'DX203-RESINA',
+          kind: 'PROCEDURE',
+          labelEs: 'Resina',
+          color: '#2A2B3C',
+          defaultPrice: 1,
+        })
+        .expect(201);
+      catalogItemId = (catalog.body as { id: string }).id;
+      payer = await createPatient(clinic, {
+        firstName: 'Marta',
+        lastName: 'Gil',
+        docNumber: '41000001',
+        email: 'marta@example.com',
+        birthDate: '1980-05-05',
+      });
+      brother = await createPatient(clinic, {
+        firstName: 'Iván',
+        lastName: 'Gil',
+        docType: 'TI',
+        docNumber: '1011000101',
+        sex: 'M',
+        birthDate: '2014-08-01',
+      });
+      sister = await createPatient(clinic, {
+        firstName: 'Lucía',
+        lastName: 'Gil',
+        docType: 'TI',
+        docNumber: '1011000102',
+        birthDate: '2017-03-03',
+      });
+      for (const child of [brother, sister]) {
+        await as(api().post(parties(child)), tokens.RECEPTION)
+          .send({
+            responsiblePatientId: payer,
+            relationship: 'MOTHER',
+            isPayer: true,
+          })
+          .expect(201);
+      }
+      const b1 = await planWith(brother, 350000.35);
+      await pay(b1, 100000.1);
+      await pay(b1, 0.15);
+      const s1 = await planWith(sister, 1200000.2);
+      const s2 = await planWith(sister, 99999.99);
+      await pay(s1, 450000.05);
+      await pay(s2, 0.99);
+      const own = await planWith(payer, 80000);
+      await pay(own, 30000);
+    });
+
+    it('suma los saldos de sus pacientes con subtotal por paciente y cuadra al céntimo con los individuales', async () => {
+      const res = await as(
+        api().get(`/api/v1/patients/${payer}/family-account-statement`),
+        tokens.RECEPTION,
+      ).expect(200);
+      const body = res.body as {
+        payer: { id: string };
+        members: {
+          patient: { id: string; firstName: string };
+          self: boolean;
+          relationship: string | null;
+          summary: Summary[];
+        }[];
+        totals: Summary[];
+      };
+      expect(body.payer.id).toBe(payer);
+      expect(body.members.map((m) => [m.patient.firstName, m.self])).toEqual([
+        ['Marta', true],
+        ['Iván', false],
+        ['Lucía', false],
+      ]);
+
+      // Cada subtotal = su estado de cuenta individual; el total, su suma.
+      const cents = { budgeted: 0, paid: 0, balance: 0 };
+      for (const member of body.members) {
+        const single = await as(
+          api().get(`/api/v1/patients/${member.patient.id}/account-statement`),
+          tokens.RECEPTION,
+        ).expect(200);
+        const summary = (single.body as { summary: Summary[] }).summary;
+        expect(member.summary).toEqual(
+          summary.map(({ currency, budgeted, paid, balance }) =>
+            expect.objectContaining({ currency, budgeted, paid, balance }),
+          ),
+        );
+        for (const s of summary) {
+          cents.budgeted += Math.round(s.budgeted * 100);
+          cents.paid += Math.round(s.paid * 100);
+          cents.balance += Math.round(s.balance * 100);
+        }
+      }
+      expect(body.totals).toEqual([
+        expect.objectContaining({
+          currency: 'COP',
+          budgeted: cents.budgeted / 100,
+          paid: cents.paid / 100,
+          balance: cents.balance / 100,
+        }),
+      ]);
+      expect(body.totals[0]).toMatchObject({
+        budgeted: 1730000.54,
+        paid: 580001.29,
+        balance: 1149999.25,
+      });
+      // Solo importes y nombres.
+      const json = JSON.stringify(body);
+      expect(json).not.toContain('1011000101');
+      expect(json).not.toContain('Nota clínica');
+    });
+
+    it('el estado de cuenta individual de un menor sale a nombre de su responsable', async () => {
+      const res = await as(
+        api().get(`/api/v1/patients/${brother}/account-statement`),
+        tokens.RECEPTION,
+      ).expect(200);
+      expect((res.body as { addressee: unknown }).addressee).toEqual({
+        kind: 'RESPONSIBLE',
+        name: 'Marta Gil',
+        email: 'marta@example.com',
+      });
+    });
+
+    it('roles y aislamiento: DENTIST 403; otra clínica 404', async () => {
+      await as(
+        api().get(`/api/v1/patients/${payer}/family-account-statement`),
+        tokens.DENTIST,
+      ).expect(403);
+      await as(
+        api().get(`/api/v1/patients/${payer}/family-account-statement`),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+    });
+  });
 });

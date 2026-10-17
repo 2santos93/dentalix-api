@@ -481,6 +481,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     patient: P,
   },
+  'GET /patients/:patientId/family-account-statement': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    patient: P,
+    reason: 'FAMILY_ACCOUNT_STATEMENT',
+  },
   'GET /patients/:patientId/billable-plans': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN',

@@ -2,6 +2,7 @@ import {
   DocType,
   PaymentMethod,
   PaymentPlanStatus,
+  ResponsibleRelationship,
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { InstallmentStatus } from '../../../payment-plans/application/schedule/derive-statuses';
@@ -200,10 +201,55 @@ export interface StatementClinic {
   logoUrl: string | null;
 }
 
+/**
+ * A nombre de quién sale el estado de cuenta (DX-203): el de un menor (CO <
+ * 18, ES < 16) o de un paciente sin email, a nombre de su responsable que
+ * recibe avisos (primero el pagador principal); si no, del propio paciente.
+ */
+export interface StatementAddressee {
+  kind: 'PATIENT' | 'RESPONSIBLE';
+  /** Nombre completo. */
+  name: string;
+  /** Email al que se le haría llegar; null si no tiene. */
+  email: string | null;
+}
+
 export interface AccountStatement extends ComputedAccountStatement {
   issuedAt: Date;
   clinic: StatementClinic;
   patient: StatementPatient;
+  addressee: StatementAddressee;
   /** Filtro aplicado a `movements` (días civiles inclusive), o `null`. */
   range: { from: string | null; to: string | null };
+}
+
+// ---------------------------------------------------------------------------
+// Estado de cuenta FAMILIAR del pagador (DX-203): solo importes y nombres.
+// ---------------------------------------------------------------------------
+
+/** Cifras de UNA moneda: las mismas del resumen individual. */
+export interface FamilyCurrencyAmounts {
+  currency: string;
+  budgeted: number;
+  paid: number;
+  balance: number;
+  overdueAmount: number;
+}
+
+export interface FamilyStatementMember {
+  patient: { id: string; firstName: string; lastName: string };
+  /** Parentesco del pagador con el paciente; null = el propio pagador. */
+  relationship: ResponsibleRelationship | null;
+  self: boolean;
+  /** Subtotal del paciente por moneda (= su estado de cuenta individual). */
+  summary: FamilyCurrencyAmounts[];
+}
+
+export interface FamilyAccountStatement {
+  issuedAt: Date;
+  clinic: StatementClinic;
+  payer: { id: string; firstName: string; lastName: string };
+  members: FamilyStatementMember[];
+  /** Suma de los subtotales, por moneda y al céntimo. */
+  totals: FamilyCurrencyAmounts[];
 }

@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { DocType, PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
+import {
+  DocType,
+  PaymentMethod,
+  ResponsibleRelationship,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 
 // Forma de la respuesta de `GET /patients/:patientId/account-statement`. Solo
 // documenta el contrato en Swagger (de aquí sale el tipo del cliente web vía
@@ -273,6 +278,23 @@ export class AccountStatementInstallmentDto {
   status!: (typeof INSTALLMENT_STATUSES)[number];
 }
 
+/** DX-203: a nombre de quién sale el estado de cuenta. */
+export class AccountStatementAddresseeDto {
+  @ApiProperty({
+    enum: ['PATIENT', 'RESPONSIBLE'],
+    enumName: 'StatementAddresseeKind',
+    description:
+      'RESPONSIBLE: un menor (CO < 18, ES < 16) o un paciente sin email; sale a nombre de su responsable que recibe avisos (primero el pagador principal).',
+  })
+  kind!: 'PATIENT' | 'RESPONSIBLE';
+
+  @ApiProperty({ description: 'Nombre completo' })
+  name!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  email!: string | null;
+}
+
 export class AccountStatementDto {
   @ApiProperty({ format: 'date-time' })
   issuedAt!: Date;
@@ -282,6 +304,9 @@ export class AccountStatementDto {
 
   @ApiProperty({ type: AccountStatementPatientDto })
   patient!: AccountStatementPatientDto;
+
+  @ApiProperty({ type: AccountStatementAddresseeDto })
+  addressee!: AccountStatementAddresseeDto;
 
   @ApiProperty({ type: AccountStatementRangeDto })
   range!: AccountStatementRangeDto;
@@ -297,4 +322,79 @@ export class AccountStatementDto {
 
   @ApiProperty({ type: [AccountStatementInstallmentDto] })
   installments!: AccountStatementInstallmentDto[];
+}
+
+// ---------------------------------------------------------------------------
+// `GET /patients/:patientId/family-account-statement` (DX-203).
+// ---------------------------------------------------------------------------
+
+export class FamilyCurrencyAmountsDto {
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({ description: 'Igual que `summary[].budgeted` individual' })
+  budgeted!: number;
+
+  @ApiProperty()
+  paid!: number;
+
+  @ApiProperty()
+  balance!: number;
+
+  @ApiProperty()
+  overdueAmount!: number;
+}
+
+export class FamilyMemberPatientDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  firstName!: string;
+
+  @ApiProperty()
+  lastName!: string;
+}
+
+export class FamilyStatementMemberDto {
+  @ApiProperty({ type: FamilyMemberPatientDto })
+  patient!: FamilyMemberPatientDto;
+
+  @ApiProperty({
+    enum: ResponsibleRelationship,
+    enumName: 'ResponsibleRelationship',
+    nullable: true,
+    description:
+      'Parentesco del pagador con el paciente; null = el propio pagador.',
+  })
+  relationship!: ResponsibleRelationship | null;
+
+  @ApiProperty({ description: 'Es el propio pagador' })
+  self!: boolean;
+
+  @ApiProperty({
+    type: [FamilyCurrencyAmountsDto],
+    description: 'Subtotal del paciente: su estado de cuenta individual.',
+  })
+  summary!: FamilyCurrencyAmountsDto[];
+}
+
+export class FamilyAccountStatementDto {
+  @ApiProperty({ format: 'date-time' })
+  issuedAt!: Date;
+
+  @ApiProperty({ type: AccountStatementClinicDto })
+  clinic!: AccountStatementClinicDto;
+
+  @ApiProperty({ type: FamilyMemberPatientDto })
+  payer!: FamilyMemberPatientDto;
+
+  @ApiProperty({ type: [FamilyStatementMemberDto] })
+  members!: FamilyStatementMemberDto[];
+
+  @ApiProperty({
+    type: [FamilyCurrencyAmountsDto],
+    description: 'Suma de los subtotales por moneda, al céntimo.',
+  })
+  totals!: FamilyCurrencyAmountsDto[];
 }
