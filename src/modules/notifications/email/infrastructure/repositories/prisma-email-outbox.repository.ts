@@ -25,7 +25,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
  * despachador, que trabaja para todas las clínicas a la vez, pasa por las
  * funciones SECURITY DEFINER de la migración 20261017120000_email_outbox
  * (reclamar, cerrar). Los emails de plataforma (sin clínica) se insertan por
- * la de DX-144 (20261018090000_dx144_platform_email_quota), que comprueba el
+ * la de DX-144 (20261017231200_dx144_platform_email_quota), que comprueba el
  * tope por destinatario y escribe en la misma operación.
  */
 @Injectable()

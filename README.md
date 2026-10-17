@@ -283,7 +283,7 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
   trabaja para todas a la vez, y los emails de plataforma (`tenantId` NULL)
   pasan por tres funciones `SECURITY DEFINER` de la migración
   `20261017120000_email_outbox` (y las del tope y la purga de plataforma de
-  `20261018090000_dx144_platform_email_quota`, DX-144), concedidas
+  `20261017231200_dx144_platform_email_quota`, DX-144), concedidas
   explícitamente a `dentalix_app`.
   Desde DX-113 son del rol NOLOGIN `dentalix_email_dispatcher` (sin
   BYPASSRLS, con una política permisiva en `email_outbox` solo para él), no
@@ -794,7 +794,7 @@ Con `dispatcher_delete`, alguien concedió DELETE a `dentalix_email_dispatcher`
 sobre esa tabla, o quitó la política `email_outbox_dispatcher_delete_platform`
 de `email_outbox`: retira el DELETE (`REVOKE DELETE ON "<tabla>" FROM
 dentalix_email_dispatcher`) o repón la política como en
-`20261018090000_dx144_platform_email_quota`. La CI la ejecuta en los jobs de integración y
+`20261017231200_dx144_platform_email_quota`. La CI la ejecuta en los jobs de integración y
 `owner-nosu`, y `test/rls-catalog.int-spec.ts` la cubre también.
 
 - **FORCE y el owner**: todas las tablas con `tenantId` tienen RLS ENABLE +
