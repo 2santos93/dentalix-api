@@ -153,7 +153,7 @@ const STEPS: Step[] = [
   { until: '20261017231100', dropped: ['audit_events_dx009'] },
   // dx143_verify_active_accounts (FORCE fuera de audit_events y
   // clinic_memberships durante el backfill), dx144 y dx145.
-  { until: '20261018090000', fixture: FIXTURE_LOGINS },
+  { until: '20261017233000', fixture: FIXTURE_LOGINS },
   // dx155_patient_ledgers (FORCE fuera de las tablas que lee y escribe
   // durante el backfill).
   { until: '99999999999999' },

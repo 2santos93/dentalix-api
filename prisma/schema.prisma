@@ -999,7 +999,7 @@ model TreatmentPlanAcceptance {
 // La app solo lo lee (PrismaReceivablesRepository). Guarda ENTRADAS (sumas por
 // plan, planes de cuotas, sede de la deuda), no un saldo: el saldo sale de
 // `computeBalances`. Formato de `ledger` y reglas: migración
-// 20261018090000_dx155_patient_ledgers.
+// 20261017233000_dx155_patient_ledgers.
 // No declarables en Prisma (solo SQL):
 //   patient_ledgers_owing_idx ("tenantId", "locationId") WHERE "owing";
 //   patient_ledgers_location_fkey ("tenantId", "locationId") -> locations

@@ -881,7 +881,7 @@ dentalix_email_dispatcher`) o repón la política como en
   `treatment_plans`, sus ítems o aceptaciones, `payments`, `payment_plans` o
   `installments` recalcula `patient_ledgers` leyendo todas esas tablas; quita
   FORCE también a `patient_ledgers` y a ellas (como hace
-  `20261018090000_dx155_patient_ledgers`), o el refresco falla («no se ven N
+  `20261017233000_dx155_patient_ledgers`), o el refresco falla («no se ven N
   de M pacientes…») y la migración con él.
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …

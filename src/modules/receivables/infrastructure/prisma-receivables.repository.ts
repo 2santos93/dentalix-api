@@ -18,7 +18,7 @@ import type {
 
 /*
  * Entradas de la cartera de un paciente tal como las guarda `patient_ledgers`
- * (DX-155; formato en la migración 20261018090000_dx155_patient_ledgers).
+ * (DX-155; formato en la migración 20261017233000_dx155_patient_ledgers).
  */
 
 /**
