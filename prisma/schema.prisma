@@ -258,6 +258,8 @@ model Patient {
   retentionActions       PatientRetentionAction[]
   // DX-122: pendientes por agendar del paciente.
   waitlistEntries        AppointmentWaitlistEntry[]
+  // DX-155: entradas de su cartera, mantenidas por la BD.
+  ledger                 PatientLedger?
   country                Country?                   @relation(fields: [countryCode], references: [code])
   city                   City?                      @relation(fields: [cityId], references: [id])
 
@@ -988,6 +990,38 @@ model TreatmentPlanAcceptance {
   @@map("treatment_plan_acceptances")
 }
 
+// ---------------------------------------------------------------------------
+// Resumen por paciente para la cartera por antigüedad (DX-155). Lo escribe SOLO
+// la BD: triggers por sentencia en patients, treatment_plans, sus ítems y
+// aceptaciones, payments, payment_plans, installments y appointments
+// recalculan la fila de los pacientes afectados (`patient_ledgers_refresh`);
+// un trigger de guarda rechaza las escrituras directas con contexto de tenant.
+// La app solo lo lee (PrismaReceivablesRepository). Guarda ENTRADAS (sumas por
+// plan, planes de cuotas, sede de la deuda), no un saldo: el saldo sale de
+// `computeBalances`. Formato de `ledger` y reglas: migración
+// 20261018090000_dx155_patient_ledgers.
+// No declarables en Prisma (solo SQL):
+//   patient_ledgers_owing_idx ("tenantId", "locationId") WHERE "owing";
+//   patient_ledgers_location_fkey ("tenantId", "locationId") -> locations
+//     ON DELETE SET NULL ("locationId") (Prisma no admite SET NULL de una sola
+//     columna de una FK compuesta).
+// ---------------------------------------------------------------------------
+model PatientLedger {
+  tenantId   String   @db.Uuid
+  patientId  String   @db.Uuid
+  locationId String?  @db.Uuid
+  owing      Boolean  @default(false)
+  ledger     Json     @default("{\"plans\": [], \"paymentPlans\": []}")
+  updatedAt  DateTime @default(now())
+
+  // FK COMPUESTA (SEC-004): paciente del MISMO tenant. CASCADE: el resumen es
+  // del paciente y se va con él.
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Cascade, map: "patient_ledgers_patient_fkey")
+
+  @@id([tenantId, patientId])
+  @@map("patient_ledgers")
+}
+
 // Tasas de cambio (referencia/mercado, base USD). Tabla GLOBAL, no de dominio:
 // no lleva tenantId ni RLS ni deletedAt (excepción técnica documentada en la
 // migración, igual que cache/colas). Snapshot inmutable por (date, currency);
@@ -1123,6 +1157,9 @@ model Payment {
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   @@index([tenantId, treatmentPlanId])
+  // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma (DX-155):
+  //   payments_tenant_patient_paid_live_idx ("tenantId", "patientId",
+  //     "paidAt" DESC, id DESC) -> último abono vivo de un paciente.
   @@index([tenantId, patientId])
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
   // declara para que migrate diff no lo vea como drift. Indexa además el lado
