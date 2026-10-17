@@ -792,7 +792,7 @@ Apertura y cierre de la caja de **un usuario en una sede** con arqueo por
 moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
 `cash_session_floats`, `cash_session_closings`, `cash_session_closing_lines`,
 `cash_session_adjustments` y `cash_session_reopenings` (migración
-`20261018000200_dx027_cash_sessions`).
+`20261018140200_dx027_cash_sessions`).
 
 - **Una caja abierta por (sede, usuario)**: índice único parcial
   `cash_sessions_open_key`; abrir otra es 409. `POST /cash-sessions/open`

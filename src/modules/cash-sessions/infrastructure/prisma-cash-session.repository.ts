@@ -175,7 +175,7 @@ const countedPayments = (sessionId: string): Prisma.PaymentWhereInput => ({
  * Caja por turno (DX-027). Todo con `runWithTenant` (RLS FORCE) y `tenantId`
  * explícito; los nombres del personal y las zonas de las sedes se resuelven
  * en consultas fijas (sin N+1). La inmutabilidad la garantiza la BD
- * (triggers de 20261018000200_dx027_cash_sessions); aquí solo se escriben las
+ * (triggers de 20261018140200_dx027_cash_sessions); aquí solo se escriben las
  * transiciones con su fila.
  */
 @Injectable()
