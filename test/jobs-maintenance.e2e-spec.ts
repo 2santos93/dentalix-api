@@ -211,7 +211,7 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
     expect(job).toMatchObject({ state: 'COMPLETED', tenantId: null });
   });
 
-  it('purga de email_outbox los envíos terminados antiguos de cada clínica, y nada pendiente', async () => {
+  it('purga de email_outbox los envíos terminados antiguos de cada clínica y de plataforma, y nada pendiente', async () => {
     const base = {
       tenantId: clinic.tenantId,
       template: 'INVITATION' as const,
@@ -252,7 +252,56 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
       ],
     });
 
+    // DX-144 (SEC-037): las de PLATAFORMA (sin clínica) también, por la
+    // función del rol despachador; nada pendiente ni reciente.
+    const platform = {
+      tenantId: null,
+      template: 'EMAIL_VERIFY' as const,
+      toMasked: 'qu***@example.com',
+      updatedAt: new Date(),
+    };
+    await raw.emailOutbox.createMany({
+      data: [
+        {
+          ...platform,
+          id: '00000000-0000-4000-8000-0000000000b1',
+          toHash: hex(),
+          status: 'SENT',
+          createdAt: ago(100 * DAY),
+        },
+        {
+          ...platform,
+          id: '00000000-0000-4000-8000-0000000000b2',
+          toHash: hex(),
+          status: 'FAILED',
+          createdAt: ago(100 * DAY),
+        },
+        {
+          ...platform,
+          id: '00000000-0000-4000-8000-0000000000b3',
+          toHash: hex(),
+          status: 'SENT',
+          createdAt: ago(10 * DAY),
+        },
+        {
+          ...platform,
+          id: '00000000-0000-4000-8000-0000000000b4',
+          toHash: hex(),
+          status: 'PENDING',
+          payload: Buffer.from('x'),
+          createdAt: ago(100 * DAY),
+        },
+      ],
+    });
+
     await tick('email.purge-outbox.daily');
+
+    const platformLeft = await raw.emailOutbox.findMany({
+      where: { tenantId: null, toMasked: 'qu***@example.com' },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    expect(platformLeft.map((r) => r.id.slice(-2))).toEqual(['b3', 'b4']);
 
     const left = await raw.emailOutbox.findMany({
       where: { tenantId: clinic.tenantId },

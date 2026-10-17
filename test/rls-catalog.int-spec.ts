@@ -95,6 +95,26 @@ const POLICY_EXEMPT: Record<
   },
 };
 
+/**
+ * Políticas RESTRICTIVAS esperadas, con su forma EXACTA. Una restrictiva solo
+ * recorta (se suma con AND), pero también fija qué puede hacer un rol NOLOGIN:
+ * cambiarla o quitarla debe revisarse aquí.
+ */
+const RESTRICTIVE_POLICIES: Record<
+  string,
+  { cmd: string; roles: string[]; using: string; reason: string }
+> = {
+  // DX-144 (SEC-037): el rol despachador recibe DELETE para purgar los emails
+  // de PLATAFORMA; su permisiva `USING (true)` le dejaría borrar filas de
+  // cualquier clínica, y esta lo acota (db:check-force también lo vigila).
+  'email_outbox.email_outbox_dispatcher_delete_platform': {
+    cmd: 'DELETE',
+    roles: ['dentalix_email_dispatcher'],
+    using: '("tenantId" IS NULL)',
+    reason: 'purga de emails de plataforma (DX-144)',
+  },
+};
+
 /** La forma exacta que generan las migraciones (ver p. ej. la de patients). */
 function tenantPredicate(column: string): string {
   return `("${column}" = (current_setting('app.current_tenant'::text, true))::uuid)`;
@@ -286,6 +306,25 @@ describe('Catálogo de RLS (DX-068)', () => {
       })
       .map((p) => `${p.table}.${p.policy}`);
     expect(extra).toEqual([]);
+  });
+
+  it('las políticas restrictivas son exactamente las esperadas (DX-144)', () => {
+    const restrictive = Object.fromEntries(
+      policies
+        .filter((p) => p.permissive === 'RESTRICTIVE')
+        .map((p) => [
+          `${p.table}.${p.policy}`,
+          { cmd: p.cmd, roles: p.roles, using: p.using },
+        ]),
+    );
+    expect(restrictive).toEqual(
+      Object.fromEntries(
+        Object.entries(RESTRICTIVE_POLICIES).map(([key, p]) => [
+          key,
+          { cmd: p.cmd, roles: p.roles, using: p.using },
+        ]),
+      ),
+    );
   });
 
   it('el rol de la app (DATABASE_URL) no es superusuario ni salta la RLS', async () => {

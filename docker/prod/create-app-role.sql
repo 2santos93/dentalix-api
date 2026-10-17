@@ -94,3 +94,27 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 -- Por si el script se ejecuta sobre una base ya migrada (no-op en una vacía).
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dentalix_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dentalix_app;
+
+-- Las funciones del despachador de email (email_outbox_*: reclamar, cerrar,
+-- encolar de plataforma con su tope y purgar, DX-088/DX-113/DX-144) las
+-- concede a dentalix_app cada migración, y solo si el rol ya existía. Si esta
+-- base ya estaba migrada sin él, avisa de cuáles le faltan: sin ellas no sale
+-- ningún email y la API no arranca en producción (README, «Email
+-- transaccional»).
+DO $$
+DECLARE
+  missing text;
+BEGIN
+  SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.proname) INTO missing
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public'
+     AND p.proname IN ('email_outbox_claim', 'email_outbox_settle',
+                       'email_outbox_enqueue_platform_capped',
+                       'email_outbox_platform_allowed',
+                       'email_outbox_purge_platform')
+     AND NOT has_function_privilege('dentalix_app', p.oid, 'EXECUTE');
+  IF missing IS NOT NULL THEN
+    RAISE WARNING 'dentalix_app no puede ejecutar: %. Concédeselo como el dueño de las funciones (dentalix_email_dispatcher; README, «Email transaccional»).', missing;
+  END IF;
+END
+$$;

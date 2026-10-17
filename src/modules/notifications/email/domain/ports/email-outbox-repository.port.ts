@@ -4,16 +4,28 @@ export const EMAIL_OUTBOX_REPOSITORY = Symbol('EMAIL_OUTBOX_REPOSITORY');
 
 export type EmailDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED';
 
-/** Fila nueva: sin el email ni el token en claro (ver la migración). */
-export interface NewOutboxEmail {
-  /** `null` = email de plataforma. */
-  tenantId: string | null;
+/** Fila nueva de PLATAFORMA (sin clínica): sin el email ni el token en claro. */
+export interface NewPlatformOutboxEmail {
   template: EmailTemplateName;
   toHash: string;
   toMasked: string;
   referenceId: string | null;
   /** Mensaje cifrado (AES-256-GCM). */
   payload: Buffer;
+}
+
+/** Fila nueva de una clínica (se inserta bajo su RLS). */
+export interface NewOutboxEmail extends NewPlatformOutboxEmail {
+  tenantId: string;
+}
+
+/**
+ * Tope por destinatario de los emails de plataforma (DX-144): como mucho uno
+ * cada `recipientCooldownSeconds` y `recipientDaily` en 24 h al mismo hash.
+ */
+export interface PlatformRecipientQuota {
+  recipientCooldownSeconds: number;
+  recipientDaily: number;
 }
 
 /** Envío reclamado por el despachador (ya en SENDING, con el intento sumado). */
@@ -32,6 +44,22 @@ export type OutboxSettlement =
 
 export interface EmailOutboxRepository {
   insert(row: NewOutboxEmail): Promise<{ id: string }>;
+
+  /**
+   * Encola un email de plataforma SOLO si cabe en el tope de su destinatario
+   * (`toHash`), comprobado y escrito en la misma operación de la BD (atómico
+   * entre réplicas). `null` si el tope lo frenó.
+   */
+  insertPlatform(
+    row: NewPlatformOutboxEmail,
+    quota: PlatformRecipientQuota,
+  ): Promise<{ id: string } | null>;
+
+  /** ¿Cabe ahora otro email de plataforma a `toHash`? (sin escribir nada). */
+  platformRecipientAllowed(
+    toHash: string,
+    quota: PlatformRecipientQuota,
+  ): Promise<boolean>;
 
   /**
    * Reclama hasta `limit` envíos vencidos de cualquier clínica (FOR UPDATE

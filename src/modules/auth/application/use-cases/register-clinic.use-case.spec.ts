@@ -36,18 +36,39 @@ function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   };
 }
 
-/** Pendientes en memoria, con la misma regla de «uno por email». */
+/**
+ * Pendientes en memoria, con la misma regla de «uno por email» y la de no
+ * reemplazar uno vigente creado después de `replaceCreatedBefore` (DX-144).
+ */
 class InMemoryPending implements RegistrationRepository {
-  readonly rows: (PendingRegistrationRecord & { tokenHash: string })[] = [];
+  readonly rows: (PendingRegistrationRecord & {
+    tokenHash: string;
+    createdAt: Date;
+  })[] = [];
 
   savePending(
-    input: Omit<PendingRegistrationRecord, 'id'> & { tokenHash: string },
-  ): Promise<void> {
-    const i = this.rows.findIndex((r) => r.email === input.email);
-    const row = { id: `p-${this.rows.length + 1}`, ...input };
-    if (i >= 0) this.rows[i] = row;
-    else this.rows.push(row);
-    return Promise.resolve();
+    input: Omit<PendingRegistrationRecord, 'id'> & {
+      tokenHash: string;
+      replaceCreatedBefore: Date;
+    },
+  ): Promise<boolean> {
+    const { replaceCreatedBefore, ...data } = input;
+    const i = this.rows.findIndex((r) => r.email === data.email);
+    const row = {
+      id: `p-${this.rows.length + 1}`,
+      ...data,
+      createdAt: new Date(),
+    };
+    if (i < 0) {
+      this.rows.push(row);
+      return Promise.resolve(true);
+    }
+    const current = this.rows[i];
+    const replaceable =
+      current.createdAt < replaceCreatedBefore ||
+      current.expiresAt.getTime() <= Date.now();
+    if (replaceable) this.rows[i] = row;
+    return Promise.resolve(replaceable);
   }
 
   findPendingByTokenHash(
@@ -66,17 +87,24 @@ class InMemoryPending implements RegistrationRepository {
   }
 }
 
-function makeNotifier() {
+function makeNotifier(cooldownSeconds = 0) {
   return {
+    recipientCooldownSeconds: cooldownSeconds,
+    withinRecipientQuota: jest
+      .fn<Promise<boolean>, [string]>()
+      .mockResolvedValue(true),
     sendVerification: jest
-      .fn<Promise<void>, Parameters<RegistrationNotifier['sendVerification']>>()
-      .mockResolvedValue(undefined),
+      .fn<
+        Promise<boolean>,
+        Parameters<RegistrationNotifier['sendVerification']>
+      >()
+      .mockResolvedValue(true),
     sendExistingAccountNotice: jest
       .fn<
-        Promise<void>,
+        Promise<boolean>,
         Parameters<RegistrationNotifier['sendExistingAccountNotice']>
       >()
-      .mockResolvedValue(undefined),
+      .mockResolvedValue(true),
   } satisfies RegistrationNotifier;
 }
 
@@ -166,6 +194,144 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       await expect(uc.accept(INPUT)).resolves.toBeUndefined();
     }
     expect(password.hash).toHaveBeenCalledTimes(2);
+  });
+
+  describe('tope por destinatario y pendiente vigente (DX-144, SEC-034)', () => {
+    it('el email de verificación no lleva nada escrito por el solicitante', async () => {
+      const notifier = makeNotifier();
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        new InMemoryPending(),
+        notifier,
+        realPassword,
+      );
+      await uc.execute({
+        ...INPUT,
+        fullName: 'Tu banco bloqueó tu cuenta: llama al +57 300',
+        clinicName: 'Entra en bit.ly/xxxx',
+      });
+      const [args] = notifier.sendVerification.mock.calls[0];
+      expect(Object.keys(args).sort()).toEqual([
+        'expiresInHours',
+        'to',
+        'verifyUrl',
+      ]);
+      expect(JSON.stringify(args)).not.toMatch(/banco|bit\.ly/);
+    });
+
+    it('tope del destinatario alcanzado: ni guarda el pendiente ni envía nada', async () => {
+      const pending = new InMemoryPending();
+      const notifier = makeNotifier();
+      notifier.withinRecipientQuota.mockResolvedValue(false);
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        pending,
+        notifier,
+        realPassword,
+      );
+
+      expect(await uc.execute(INPUT)).toBe('RECIPIENT_QUOTA_REACHED');
+      expect(notifier.withinRecipientQuota).toHaveBeenCalledWith(
+        'owner@clinic.com',
+      );
+      expect(pending.rows).toHaveLength(0);
+      expect(notifier.sendVerification).not.toHaveBeenCalled();
+    });
+
+    it('tope alcanzado con un email ya registrado: tampoco le llega otro aviso', async () => {
+      const notifier = makeNotifier();
+      notifier.withinRecipientQuota.mockResolvedValue(false);
+      const uc = new RegisterClinicUseCase(
+        makeRepo({
+          findUserByEmail: () =>
+            Promise.resolve({ id: 'u0', fullName: 'Dra. Titular' }),
+        }),
+        new InMemoryPending(),
+        notifier,
+        realPassword,
+      );
+      expect(await uc.execute(INPUT)).toBe('RECIPIENT_QUOTA_REACHED');
+      expect(notifier.sendExistingAccountNotice).not.toHaveBeenCalled();
+    });
+
+    it('un segundo registro dentro del enfriamiento no reemplaza el pendiente: el primer enlace sigue valiendo', async () => {
+      const pending = new InMemoryPending();
+      const notifier = makeNotifier(600);
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        pending,
+        notifier,
+        realPassword,
+      );
+
+      expect(await uc.execute(INPUT)).toBe('VERIFICATION_SENT');
+      const firstToken = tokenFrom(
+        notifier.sendVerification.mock.calls[0][0].verifyUrl,
+      );
+      expect(
+        await uc.execute({
+          ...INPUT,
+          subdomain: 'otra',
+          password: 'Otra-Clave-2026!',
+        }),
+      ).toBe('PENDING_KEPT');
+
+      expect(notifier.sendVerification).toHaveBeenCalledTimes(1);
+      expect(pending.rows).toHaveLength(1);
+      expect(pending.rows[0].subdomain).toBe('sonrisa');
+      await expect(
+        uc.verify(firstToken, INPUT.password),
+      ).resolves.toMatchObject({ subdomain: 'sonrisa' });
+    });
+
+    it('pasado el enfriamiento, un registro nuevo sí reemplaza al anterior', async () => {
+      const pending = new InMemoryPending();
+      const notifier = makeNotifier(600);
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        pending,
+        notifier,
+        realPassword,
+      );
+      await uc.execute(INPUT);
+      pending.rows[0].createdAt = new Date(Date.now() - 601_000);
+
+      expect(await uc.execute({ ...INPUT, subdomain: 'otra' })).toBe(
+        'VERIFICATION_SENT',
+      );
+      expect(pending.rows).toHaveLength(1);
+      expect(pending.rows[0].subdomain).toBe('otra');
+      expect(notifier.sendVerification).toHaveBeenCalledTimes(2);
+    });
+
+    it('si el tope lo frena al encolar (carrera entre réplicas), el resultado lo dice', async () => {
+      const notifier = makeNotifier();
+      notifier.sendVerification.mockResolvedValue(false);
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        new InMemoryPending(),
+        notifier,
+        realPassword,
+      );
+      expect(await uc.execute(INPUT)).toBe('RECIPIENT_QUOTA_REACHED');
+    });
+
+    it('accept() no espera al tope: resuelve aunque la comprobación no termine (ni el cuerpo ni el tiempo dependen de él)', async () => {
+      const notifier = makeNotifier();
+      notifier.withinRecipientQuota.mockReturnValue(new Promise(() => {}));
+      const password = {
+        hash: jest.fn().mockResolvedValue('H'),
+        verify: jest.fn(),
+      };
+      const uc = new RegisterClinicUseCase(
+        makeRepo(),
+        new InMemoryPending(),
+        notifier,
+        password,
+      );
+      await expect(uc.accept(INPUT)).resolves.toBeUndefined();
+      expect(password.hash).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('subdominio ocupado: 409 en español (el subdominio es público)', async () => {

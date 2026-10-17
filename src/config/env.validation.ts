@@ -318,6 +318,20 @@ function mailProblems(env: Env, isProd: boolean): string[] {
     }
   }
 
+  // DX-144: tope por destinatario de los emails de plataforma. La función de
+  // la BD acota a estos mismos rangos.
+  for (const [key, min, max] of [
+    ['MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS', 0, 86_400],
+    ['MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT', 1, 1000],
+  ] as const) {
+    const raw = str(env, key);
+    if (raw == null) continue;
+    const value = Number(raw.trim());
+    if (!/^\d{1,9}$/.test(raw.trim()) || value < min || value > max) {
+      problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
+    }
+  }
+
   return problems;
 }
 

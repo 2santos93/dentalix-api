@@ -54,4 +54,25 @@ describe('loadMailConfig', () => {
     expect(config.encryptionKey.toString('hex')).toBe(key);
     expect(config.retryBaseMs).toBe(10);
   });
+
+  it('tope por destinatario de los emails de plataforma (DX-144): 10 min y 3/24 h por defecto', () => {
+    expect(loadMailConfig(env({})).platformQuotas).toEqual({
+      recipientCooldownSeconds: 600,
+      recipientDaily: 3,
+    });
+    expect(
+      loadMailConfig(
+        env({
+          MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS: '0',
+          MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT: '7',
+        }),
+      ).platformQuotas,
+    ).toEqual({ recipientCooldownSeconds: 0, recipientDaily: 7 });
+    // Un valor que no es entero cae al default (la validación del arranque
+    // ya lo habría rechazado).
+    expect(
+      loadMailConfig(env({ MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT: 'x' }))
+        .platformQuotas.recipientDaily,
+    ).toBe(3);
+  });
 });

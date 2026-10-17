@@ -47,6 +47,7 @@ function config(overrides: Partial<MailConfig> = {}): MailConfig {
       recipientDaily: 1000,
       recipientCooldownSeconds: 0,
     },
+    platformQuotas: { recipientDaily: 1000, recipientCooldownSeconds: 0 },
     ...overrides,
   };
 }
@@ -58,7 +59,7 @@ function services(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
   return { dispatcher, outbox };
 }
 
-const invitation = (tenantId: string | undefined, referenceId?: string) => ({
+const invitation = (tenantId: string, referenceId?: string) => ({
   tenantId,
   to: EMAIL,
   template: 'invitation' as const,
@@ -344,7 +345,10 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       },
     };
     const { outbox, dispatcher } = services(recording);
-    const { id } = await outbox.enqueue(invitation(undefined));
+    const { tenantId: _clinic, ...platformInput } = invitation(tenantA);
+    expect(_clinic).toBe(tenantA);
+    const queued = await outbox.enqueuePlatform(platformInput);
+    const id = queued!.id;
     await dispatcher.whenIdle();
 
     const platform = await row(id);
@@ -480,12 +484,24 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     expect(rows.map((r) => r.fn)).toEqual([
       'email_outbox_claim',
       'email_outbox_enqueue_platform',
+      // DX-144: tope por destinatario y purga de los emails de plataforma.
+      'email_outbox_enqueue_platform_capped',
+      'email_outbox_platform_allowed',
+      'email_outbox_purge_platform',
       'email_outbox_settle',
     ]);
     for (const r of rows) {
       expect(r).toMatchObject({
         secdef: true,
-        config: ['search_path=public, pg_temp'],
+        // Las de DX-144 ponen pg_catalog primero (SEC-035); las de DX-088
+        // siguen como estaban.
+        config: [
+          r.fn === 'email_outbox_enqueue_platform_capped' ||
+          r.fn === 'email_outbox_platform_allowed' ||
+          r.fn === 'email_outbox_purge_platform'
+            ? 'search_path=pg_catalog, public, pg_temp'
+            : 'search_path=public, pg_temp',
+        ],
         owner: 'dentalix_email_dispatcher',
         login: false,
         bypass: false,
@@ -503,6 +519,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     expect(policies).toEqual([
       {
         policy: 'email_outbox_dispatcher',
+        roles: ['dentalix_email_dispatcher'],
+      },
+      // DX-144: RESTRICTIVA, solo DELETE y solo filas de plataforma.
+      {
+        policy: 'email_outbox_dispatcher_delete_platform',
         roles: ['dentalix_email_dispatcher'],
       },
       { policy: 'tenant_isolation', roles: ['public'] },
@@ -527,6 +548,9 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     expect(grants).toEqual([
       { fn: 'email_outbox_claim', public: false },
       { fn: 'email_outbox_enqueue_platform', public: false },
+      { fn: 'email_outbox_enqueue_platform_capped', public: false },
+      { fn: 'email_outbox_platform_allowed', public: false },
+      { fn: 'email_outbox_purge_platform', public: false },
       { fn: 'email_outbox_settle', public: false },
     ]);
   });

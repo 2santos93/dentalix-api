@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { parseMailEncryptionKey } from './email-payload-cipher';
+import type { PlatformRecipientQuota } from '../domain/ports/email-outbox-repository.port';
 
 export const MAIL_CONFIG = Symbol('MAIL_CONFIG');
 
@@ -32,6 +33,14 @@ export interface MailConfig {
     recipientCooldownSeconds: number;
   };
   /**
+   * Tope por destinatario de los emails de PLATAFORMA (sin clínica:
+   * verificación y aviso del registro público, DX-144). Contado en la BD por
+   * el hash del destinatario; al pasarlo el email no sale, sin error visible.
+   * MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS (600 s) y
+   * MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT (3).
+   */
+  platformQuotas: PlatformRecipientQuota;
+  /**
    * La clave se generó al arrancar porque MAIL_ENCRYPTION_KEY no venía (solo
    * fuera de producción: la validación del arranque la exige allí). Los
    * pendientes de un arranque anterior no se podrán descifrar y quedan FAILED.
@@ -48,6 +57,8 @@ const BATCH_SIZE = 20;
 const DEFAULT_TENANT_DAILY = 50;
 const DEFAULT_RECIPIENT_DAILY = 5;
 const DEFAULT_RECIPIENT_COOLDOWN_S = 60;
+const DEFAULT_PLATFORM_RECIPIENT_COOLDOWN_S = 600;
+const DEFAULT_PLATFORM_RECIPIENT_DAILY = 3;
 
 function intOr(raw: string | undefined, fallback: number): number {
   const value = raw?.trim();
@@ -69,6 +80,9 @@ function intOr(raw: string | undefined, fallback: number): number {
  * - Topes: `MAIL_TENANT_DAILY_LIMIT` (50/24 h por clínica),
  *   `MAIL_RECIPIENT_DAILY_LIMIT` (5/24 h al mismo destinatario) y
  *   `MAIL_RECIPIENT_COOLDOWN_SECONDS` (60 s entre dos al mismo destinatario).
+ * - Tope de los emails de plataforma (DX-144):
+ *   `MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS` (600 s) y
+ *   `MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT` (3/24 h al mismo destinatario).
  */
 export function loadMailConfig(
   get: (key: string) => string | undefined,
@@ -107,6 +121,19 @@ export function loadMailConfig(
       recipientCooldownSeconds: intOr(
         get('MAIL_RECIPIENT_COOLDOWN_SECONDS'),
         DEFAULT_RECIPIENT_COOLDOWN_S,
+      ),
+    },
+    platformQuotas: {
+      recipientCooldownSeconds: intOr(
+        get('MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS'),
+        DEFAULT_PLATFORM_RECIPIENT_COOLDOWN_S,
+      ),
+      recipientDaily: Math.max(
+        1,
+        intOr(
+          get('MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT'),
+          DEFAULT_PLATFORM_RECIPIENT_DAILY,
+        ),
       ),
     },
     ephemeralKey: configuredKey === null,

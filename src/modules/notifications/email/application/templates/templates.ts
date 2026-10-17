@@ -73,7 +73,7 @@ function emailVerify(
   return renderLayout({
     brand,
     subject: 'Confirma tu correo electrónico',
-    heading: `Hola, ${vars.userName}`,
+    heading: 'Hola:',
     blocks: [
       {
         kind: 'paragraph',

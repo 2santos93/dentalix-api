@@ -7,13 +7,14 @@ const BATCH = 1000;
  * Purga de envíos terminados de `email_outbox` (DX-085), con los permisos que
  * la app YA tiene: clínica a clínica, dentro de `runWithTenant`, así que la
  * política `tenant_isolation` (RLS FORCE) acota cada DELETE a esa clínica. No
- * pasa por las funciones del despachador ni le da privilegios nuevos a nadie.
+ * da privilegios nuevos a `dentalix_app`.
  *
- * Límite conocido: las filas de PLATAFORMA (`tenantId` NULL: verificación del
- * registro, aviso de registro) no las ve `dentalix_app` por RLS y el rol
- * `dentalix_email_dispatcher` no tiene DELETE, así que esta purga no las toca.
- * Al terminar ya no guardan el mensaje (CHECK: payload NULL en SENT/FAILED),
- * solo `toHash`/`toMasked`.
+ * Las filas de PLATAFORMA (`tenantId` NULL: verificación y aviso del
+ * registro) no las ve `dentalix_app` por RLS: las borra la función
+ * `email_outbox_purge_platform` del rol `dentalix_email_dispatcher` (DX-144,
+ * SEC-037), cuyo DELETE acota además una política RESTRICTIVA a
+ * `tenantId IS NULL`. La función nunca borra nada de los últimos 7 días (el
+ * tope por destinatario mira 24 h).
  */
 @Injectable()
 export class PrismaEmailOutboxRetentionRepository {
@@ -41,6 +42,20 @@ export class PrismaEmailOutboxRetentionRepository {
               LIMIT ${BATCH}
            )`,
       );
+      total += n;
+      if (n < BATCH) return total;
+    }
+  }
+
+  /** SENT y FAILED de plataforma creados antes de `before`, por tandas. */
+  async purgePlatformFinished(before: Date): Promise<number> {
+    let total = 0;
+    for (;;) {
+      const [{ n }] = await this.prisma.$queryRaw<{ n: number }[]>`
+        SELECT email_outbox_purge_platform(
+          (${before.toISOString()}::timestamptz AT TIME ZONE 'UTC')::timestamp(3),
+          ${BATCH}::int
+        ) AS n`;
       total += n;
       if (n < BATCH) return total;
     }

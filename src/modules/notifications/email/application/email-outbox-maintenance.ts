@@ -12,8 +12,9 @@ export const DEFAULT_OUTBOX_RETENTION_DAYS = 90;
  * FAILED) de hace más de MAIL_OUTBOX_RETENTION_DAYS (default 90, mínimo 7:
  * los topes anti-abuso miran 24 h y una invitación caduca a los 7 días, así
  * que nada vivo depende de filas más antiguas). Los PENDING/SENDING nunca se
- * tocan. Ver PrismaEmailOutboxRetentionRepository para el límite con las
- * filas de plataforma.
+ * tocan. Las de plataforma (sin clínica) se purgan con la misma retención
+ * por la función del rol despachador (DX-144, SEC-037; ver
+ * PrismaEmailOutboxRetentionRepository).
  */
 @Injectable()
 export class EmailOutboxMaintenance implements OnModuleInit {
@@ -42,7 +43,12 @@ export class EmailOutboxMaintenance implements OnModuleInit {
         for (const tenantId of await this.repo.tenantIds()) {
           purged += await this.repo.purgeFinished(tenantId, before);
         }
-        this.logger.log({ event: 'email.outbox_purged', purged });
+        const platformPurged = await this.repo.purgePlatformFinished(before);
+        this.logger.log({
+          event: 'email.outbox_purged',
+          purged,
+          platformPurged,
+        });
       },
     });
     this.registry.schedule({

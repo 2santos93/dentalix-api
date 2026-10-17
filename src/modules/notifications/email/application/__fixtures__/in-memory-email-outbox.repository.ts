@@ -4,10 +4,14 @@ import {
   EmailDeliveryStatus,
   EmailOutboxRepository,
   NewOutboxEmail,
+  NewPlatformOutboxEmail,
   OutboxSettlement,
+  PlatformRecipientQuota,
 } from '../../domain/ports/email-outbox-repository.port';
 
-export interface StoredOutboxEmail extends NewOutboxEmail {
+export interface StoredOutboxEmail extends NewPlatformOutboxEmail {
+  /** `null` = email de plataforma. */
+  tenantId: string | null;
   id: string;
   payload: Buffer;
   storedPayload: Buffer | null;
@@ -34,6 +38,39 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   >();
 
   insert(row: NewOutboxEmail): Promise<{ id: string }> {
+    return Promise.resolve(this.store(row));
+  }
+
+  /** Misma regla que email_outbox_platform_allowed (DX-144). */
+  platformRecipientAllowed(
+    toHash: string,
+    quota: PlatformRecipientQuota,
+  ): Promise<boolean> {
+    const now = Date.now();
+    const mine = this.rows.filter(
+      (r) => r.tenantId === null && r.toHash === toHash,
+    );
+    const inCooldown = mine.some(
+      (r) =>
+        now - r.createdAt.getTime() < quota.recipientCooldownSeconds * 1000,
+    );
+    const today = mine.filter(
+      (r) => now - r.createdAt.getTime() < 24 * 60 * 60 * 1000,
+    ).length;
+    return Promise.resolve(!inCooldown && today < quota.recipientDaily);
+  }
+
+  async insertPlatform(
+    row: NewPlatformOutboxEmail,
+    quota: PlatformRecipientQuota,
+  ): Promise<{ id: string } | null> {
+    if (!(await this.platformRecipientAllowed(row.toHash, quota))) return null;
+    return this.store({ ...row, tenantId: null });
+  }
+
+  private store(row: NewPlatformOutboxEmail & { tenantId: string | null }): {
+    id: string;
+  } {
     const id = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
     this.rows.push({
       ...row,
@@ -46,7 +83,7 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
       lastError: null,
       sentAt: null,
     });
-    return Promise.resolve({ id });
+    return { id };
   }
 
   claimDue(limit: number, leaseSeconds: number): Promise<ClaimedOutboxEmail[]> {
