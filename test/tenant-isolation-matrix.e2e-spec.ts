@@ -147,6 +147,7 @@ interface SeedA {
   scheduleBlockId: string;
   waitlistEntryId: string;
   noteTemplateId: string;
+  waitlistOfferId: string;
 }
 
 interface SeedB {
@@ -331,6 +332,20 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     note: 'Llamar por la mañana',
   });
 
+  // DX-210: una oferta de hueco al paciente (por teléfono, sin resultado).
+  const waitlistOffer = await create(
+    app,
+    a,
+    `/appointments/openings/${location.id}/offers`,
+    {
+      slotStart: futureAt(60, 15),
+      slotEnd: futureAt(60, 16),
+      providerId: dentist.userId,
+      patientId,
+      channel: 'PHONE',
+    },
+  );
+
   // DX-170: una plantilla de evolución de A.
   const noteTemplate = await create(app, a, '/clinical-note-templates', {
     name: 'Resina de A',
@@ -371,6 +386,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
+    waitlistOfferId: waitlistOffer.id,
   };
 }
 
@@ -865,6 +881,41 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         providerId: clinicB.adminUserId,
         start: futureAt(61, 15),
       }),
+      status: 404,
+    },
+    // --- «Ocupar este hueco» (DX-210) ---
+    {
+      name: 'GET /appointments/openings/:locationId/candidates',
+      verb: 'get',
+      path: () =>
+        `/appointments/openings/${a.locationId}/candidates?start=${encodeURIComponent(futureAt(61, 15))}&end=${encodeURIComponent(futureAt(61, 16))}`,
+      status: 404,
+    },
+    {
+      name: 'POST /appointments/openings/:locationId/offers',
+      verb: 'post',
+      path: () => `/appointments/openings/${a.locationId}/offers`,
+      body: () => ({
+        slotStart: futureAt(61, 15),
+        slotEnd: futureAt(61, 16),
+        providerId: clinicB.adminUserId,
+        patientId: b.patientId,
+        channel: 'PHONE',
+      }),
+      status: 404,
+    },
+    {
+      name: 'PATCH /appointments/openings/offers/:id',
+      verb: 'patch',
+      path: () => `/appointments/openings/offers/${a.waitlistOfferId}`,
+      body: () => ({ outcome: 'ACCEPTED' }),
+      status: 404,
+    },
+    {
+      name: 'PATCH /appointments/:id/opening',
+      verb: 'patch',
+      path: () => `/appointments/${a.appointmentId}/opening`,
+      body: () => ({ start: futureAt(62, 15) }),
       status: 404,
     },
     // --- data-consents (sobre un paciente de A) ---

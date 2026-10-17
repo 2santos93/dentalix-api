@@ -44,6 +44,11 @@ export interface Appointment {
   confirmationSentAt: Date | null;
   /** DX-005: el paciente pidió que lo llamen desde el enlace (la cita sigue SCHEDULED). */
   callbackRequestedAt: Date | null;
+  /**
+   * DX-210: «Adelantar si hay hueco». La cita sale como candidata para los
+   * huecos libres de días anteriores; al moverla a uno se apaga.
+   */
+  wantsEarlier: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

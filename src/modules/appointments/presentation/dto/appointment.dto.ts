@@ -83,6 +83,12 @@ export class AppointmentDto {
   })
   callbackRequestedAt!: Date | null;
 
+  @ApiProperty({
+    description:
+      'DX-210: «Adelantar si hay hueco». Se apaga al moverla a un hueco libre.',
+  })
+  wantsEarlier!: boolean;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 

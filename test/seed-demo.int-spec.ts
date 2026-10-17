@@ -60,6 +60,8 @@ const TENANT_TABLES = [
   'clinical_note_templates',
   'medical_history_versions',
   'appointment_confirmations',
+  // DX-210: ofertas de huecos (hijas de appointment_waitlist y appointments).
+  'waitlist_offers',
   'appointment_waitlist',
   'appointments',
   'appointment_types',

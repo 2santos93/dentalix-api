@@ -26,6 +26,7 @@ function fakeAppointment(id: string): Appointment {
     appointmentType: null,
     confirmationSentAt: null,
     callbackRequestedAt: null,
+    wantsEarlier: false,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };

@@ -27,6 +27,8 @@ export interface CreateAppointmentRepoInput {
    * la cita.
    */
   waitlistEntryId?: string;
+  /** DX-210: «Adelantar si hay hueco» (por defecto false). */
+  wantsEarlier?: boolean;
 }
 
 export interface UpdateAppointmentRepoInput {
@@ -59,6 +61,14 @@ export interface UpdateAppointmentRepoInput {
    * cierra en la MISMA transacción, resuelta por la propia cita.
    */
   resolveWaitlist?: { resolvedById: string | null };
+  /** DX-210: «Adelantar si hay hueco». */
+  wantsEarlier?: boolean;
+  /**
+   * DX-210: mover la cita a un hueco libre SOLO si sigue marcada «Adelantar si
+   * hay hueco» y agendada o confirmada. La condición y el cambio van en la
+   * misma sentencia (a prueba de carreras): si ya no se cumple, 409.
+   */
+  requireWantsEarlier?: boolean;
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */

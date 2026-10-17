@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -46,7 +48,18 @@ import {
 } from '../application/use-cases/find-openings.use-case';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
-import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import {
+  Roles,
+  RolesDeniedMessage,
+} from '../../auth/presentation/guards/roles.decorator';
+import { ClinicRole } from '@prisma/client';
+import { MoveToOpeningDto } from './dto/move-to-opening.dto';
+import {
+  WANTS_EARLIER_FORBIDDEN_MESSAGE,
+  canChangeWantsEarlier,
+} from '../domain/wants-earlier';
+import { OPENING_ASSIGN_FORBIDDEN_MESSAGE } from '../../waitlist/domain/waitlist-offer-rules';
+import { RecordAuditEventUseCase } from '../../audit/application/record-audit-event.use-case';
 import { APPOINTMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import {
   isTenantPayload,
@@ -82,6 +95,7 @@ export class AppointmentsController {
     private readonly tenantContext: TenantContextService,
     // DX-150: marca «Saldo vencido» de las tarjetas de la agenda.
     private readonly balanceFlags: PatientBalanceFlags,
+    private readonly audit: RecordAuditEventUseCase,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -108,14 +122,22 @@ export class AppointmentsController {
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede',
   })
-  create(
+  @ApiForbiddenResponse({
+    description:
+      'DX-210: `wantsEarlier` solo lo marcan RECEPTION, DENTIST y ADMIN',
+  })
+  async create(
     @Body() dto: CreateAppointmentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
+    const ctx = this.auditContext(req);
+    if (dto.wantsEarlier && !canChangeWantsEarlier(ctx?.actor.role ?? null)) {
+      throw new ForbiddenException(WANTS_EARLIER_FORBIDDEN_MESSAGE);
+    }
     // `createdById` comes from the authenticated user (req.user.sub), never
     // from the client body — same convention as PatientsController.create /
     // OdontogramController.create.
-    return this.createAppointment.execute({
+    const created = await this.createAppointment.execute({
       patientId: dto.patientId,
       providerId: dto.providerId,
       start: new Date(dto.start),
@@ -124,7 +146,29 @@ export class AppointmentsController {
       notes: dto.notes,
       createdById: req.user.sub,
       appointmentTypeId: dto.appointmentTypeId,
+      wantsEarlier: dto.wantsEarlier,
     });
+    // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.
+    if (created.wantsEarlier && ctx) {
+      await this.audit.record({
+        tenantId: ctx.tenantId,
+        locationId: ctx.locationId,
+        actor: {
+          kind: 'user',
+          userId: ctx.actor.userId,
+          role: ctx.actor.role,
+        },
+        action: 'UPDATE',
+        resourceType: 'APPOINTMENT',
+        resourceId: created.id,
+        patient: { kind: 'patient', id: created.patientId },
+        requestId: ctx.requestId,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        metadata: { reason: 'WANTS_EARLIER_ON' },
+      });
+    }
+    return created;
   }
 
   @Get()
@@ -219,8 +263,51 @@ export class AppointmentsController {
         status: dto.status,
         reason: dto.reason,
         notes: dto.notes,
+        wantsEarlier: dto.wantsEarlier,
       },
       this.auditContext(req),
+    );
+  }
+
+  @Patch(':id/opening')
+  @Roles(ClinicRole.ADMIN, ClinicRole.RECEPTION)
+  @RolesDeniedMessage(OPENING_ASSIGN_FORBIDDEN_MESSAGE)
+  @ApiOkResponse({
+    type: AppointmentWriteDto,
+    description:
+      'DX-210 «Asignar» desde «Ocupar este hueco»: adelanta una cita marcada «Adelantar si hay hueco» al hueco libre con las reglas de un reagendado (pasado, horario, bloqueos, solape del profesional y del paciente) y le quita la marca en la misma transacción. Su hora original queda libre.',
+  })
+  @ApiBadRequestResponse({
+    description: 'Datos inválidos o hueco en el pasado',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo RECEPTION y ADMIN asignan huecos',
+  })
+  @ApiNotFoundResponse({
+    description: 'Cita o profesional no encontrados en esta clínica',
+  })
+  @ApiConflictResponse({
+    description:
+      'La cita ya no está marcada (otra persona la movió), el hueco no es anterior a la cita, o ya está ocupado o bloqueado',
+  })
+  @ApiUnprocessableEntityResponse({
+    description: 'Fuera del horario de atención de la sede de la cita',
+  })
+  moveToOpening(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MoveToOpeningDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<AppointmentWriteResult> {
+    const ctx = this.auditContext(req);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateAppointment.moveToOpening(
+      id,
+      {
+        start: new Date(dto.start),
+        end: dto.end !== undefined ? new Date(dto.end) : undefined,
+        providerId: dto.providerId,
+      },
+      ctx,
     );
   }
 }
