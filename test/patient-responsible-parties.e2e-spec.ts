@@ -250,6 +250,81 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     expect((await list(son)).parties[0]).toMatchObject({ isPayer: true });
   });
 
+  it('IDOR dentro de la clínica: el responsable de otro paciente es 404 por su :patientId', async () => {
+    const [party] = (await list(son)).parties;
+    const res = await as(
+      api().patch(`${parties(daughter)}/${party.id}`),
+      tokens.RECEPTION,
+    )
+      .send({ receivesNotices: false })
+      .expect(404);
+    expect((res.body as { message: string }).message).toBe(
+      'Responsable no encontrado',
+    );
+    await as(
+      api().delete(`${parties(daughter)}/${party.id}`),
+      tokens.RECEPTION,
+    ).expect(404);
+    expect((await list(son)).parties[0]).toMatchObject({
+      id: party.id,
+      isPayer: true,
+      receivesNotices: true,
+    });
+  });
+
+  it('dos altas simultáneas como pagador principal: una entra y la otra 422 en español, nunca 500', async () => {
+    for (let round = 0; round < 4; round += 1) {
+      const patient = await createPatient(clinic, {
+        firstName: `Simultáneo ${round}`,
+        docNumber: `1011100${round}`,
+      });
+      const responses = await Promise.all(
+        ['Abuela', 'Abuelo'].map((fullName) =>
+          as(api().post(parties(patient)), tokens.RECEPTION).send({
+            fullName,
+            relationship: 'GRANDPARENT',
+            isPayer: true,
+          }),
+        ),
+      );
+      expect(responses.map((r) => r.status).sort()).toEqual([201, 422]);
+      const rejected = responses.find((r) => r.status === 422);
+      expect((rejected?.body as { message: string }).message).toMatch(
+        /pagador principal/,
+      );
+      const payers = await raw.patientResponsibleParty.count({
+        where: { patientId: patient, isPayer: true, deletedAt: null },
+      });
+      expect(payers).toBe(1);
+    }
+  });
+
+  it('dos ediciones simultáneas que marcan pagador: una entra y la otra 422, nunca 500', async () => {
+    const patient = await createPatient(clinic, {
+      firstName: 'Edición simultánea',
+      docNumber: '10111999',
+    });
+    const ids: string[] = [];
+    for (const fullName of ['Tía', 'Tío']) {
+      const res = await as(api().post(parties(patient)), tokens.RECEPTION)
+        .send({ fullName, relationship: 'OTHER' })
+        .expect(201);
+      ids.push((res.body as { id: string }).id);
+    }
+    const responses = await Promise.all(
+      ids.map((id) =>
+        as(api().patch(`${parties(patient)}/${id}`), tokens.RECEPTION).send({
+          isPayer: true,
+        }),
+      ),
+    );
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 422]);
+    const payers = await raw.patientResponsibleParty.count({
+      where: { patientId: patient, isPayer: true, deletedAt: null },
+    });
+    expect(payers).toBe(1);
+  });
+
   it('validación en español: forma, email, parentesco e ids', async () => {
     const both = await as(api().post(parties(daughter)), tokens.RECEPTION)
       .send({
