@@ -62,6 +62,14 @@ import {
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
+import {
+  addCivilDays,
+  civilDateIn,
+} from '../src/shared/time/civil-day';
+import {
+  CreateCollectionNoteUseCase,
+  CreatePaymentPromiseUseCase,
+} from '../src/modules/collections/application/use-cases/collections.use-cases';
 import { VoidPaymentUseCase } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
@@ -117,6 +125,8 @@ import {
   DEMO_PASSWORD,
   DEMO_PATIENTS,
   DEMO_PLANS,
+  DEMO_COLLECTION_NOTES,
+  DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
   DEMO_PRICES,
   DEMO_PRIMARY_COLOR,
@@ -555,6 +565,8 @@ class DemoSeeder {
       dentists,
       catalog,
     );
+
+    await this.createCollections(tenantId, locations, patientIds, receptionId);
 
     await this.createInventory(tenantId, locations, userIds[4]);
 
@@ -1212,6 +1224,43 @@ class DemoSeeder {
         });
       }
     }
+  }
+
+  /**
+   * DX-150: gestiones de cobro y un compromiso de pago abierto de los deudores
+   * de la cartera, por los mismos casos de uso que la API (recepción, en la
+   * sede principal). El compromiso vence dentro de unos días: «Abierto».
+   */
+  private async createCollections(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    receptionId: string,
+  ): Promise<void> {
+    await this.inTenant(tenantId, locations.principal, async () => {
+      for (const note of DEMO_COLLECTION_NOTES) {
+        await this.use(CreateCollectionNoteUseCase).execute(
+          patientIds[note.patientIndex],
+          { channel: note.channel, outcome: note.outcome, text: note.text },
+          receptionId,
+        );
+      }
+    });
+    const promise = DEMO_PAYMENT_PROMISE;
+    await this.inTenant(tenantId, locations[promise.location], () =>
+      this.use(CreatePaymentPromiseUseCase).execute(
+        patientIds[promise.patientIndex],
+        {
+          amount: promise.amount,
+          currency: DEMO_CURRENCY,
+          dueDate: addCivilDays(
+            civilDateIn(this.now, 'America/Bogota'),
+            promise.dueInDays,
+          ),
+        },
+        receptionId,
+      ),
+    );
   }
 
   /**

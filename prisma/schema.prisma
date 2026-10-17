@@ -41,6 +41,9 @@ model Tenant {
   paymentReceiptCounters   PaymentReceiptCounter[]
   reminderOptOutLinks      ReminderOptOutLink[]
   clinicalNoteTemplates    ClinicalNoteTemplate[]
+  // DX-150: cobranza (notas y compromisos de pago).
+  collectionNotes          CollectionNote[]
+  paymentPromises          PaymentPromise[]
 
   @@map("tenants")
 }
@@ -134,6 +137,8 @@ model Location {
   waitlistEntries    AppointmentWaitlistEntry[]
   reminderSettings   LocationReminderSettings[]
   paymentReceipts    PaymentReceipt[]
+  collectionNotes    CollectionNote[]
+  paymentPromises    PaymentPromise[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -293,6 +298,8 @@ model Patient {
   waitlistEntries        AppointmentWaitlistEntry[]
   // DX-155: entradas de su cartera, mantenidas por la BD.
   ledger                 PatientLedger?
+  collectionNotes        CollectionNote[]
+  paymentPromises        PaymentPromise[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutLinks    ReminderOptOutLink[]
   country                Country?                   @relation(fields: [countryCode], references: [code])
@@ -1157,9 +1164,11 @@ model Currency {
   symbol String // "$"
 
   // FK de `currency` (DX-042, 20261016131000_currency_fks).
-  treatmentPlans TreatmentPlan[]
-  payments       Payment[]
-  paymentPlans   PaymentPlan[]
+  treatmentPlans  TreatmentPlan[]
+  payments        Payment[]
+  paymentPlans    PaymentPlan[]
+  // DX-150: compromisos de pago en esa moneda.
+  paymentPromises PaymentPromise[]
 
   @@map("currencies")
 }
@@ -1195,30 +1204,30 @@ enum TenantDomainStatus {
 }
 
 model TenantDomain {
-  id          String             @id @default(uuid()) @db.Uuid
-  tenantId    String             @db.Uuid
+  id            String             @id @default(uuid()) @db.Uuid
+  tenantId      String             @db.Uuid
   // SEC-009: el host solo es único entre los VERIFIED vivos (índice PARCIAL
   // `WHERE status = 'VERIFIED' AND "deletedAt" IS NULL`, migración
   // 20261017234400_sec009_tenant_domain_verified_unique; Prisma no expresa el
   // predicado). Varias clínicas pueden tenerlo en PENDING: lo gana la primera
   // que verifica el TXT. NO uses findUnique por host: puede haber varias filas.
-  host        String             @unique(map: "tenant_domains_verified_host_key")
-  status      TenantDomainStatus @default(PENDING)
-  verifyToken String
-  verifiedAt  DateTime?
+  host          String             @unique(map: "tenant_domains_verified_host_key")
+  status        TenantDomainStatus @default(PENDING)
+  verifyToken   String
+  verifiedAt    DateTime?
   // SEC-009: hasta cuándo se puede verificar un PENDING (72 h desde el alta).
   // Pasado ese momento está EXPIRADO: no se verifica ni bloquea a nadie. null
   // en VERIFIED/DISABLED. El default de la BD cubre a quien inserte sin darlo.
-  expiresAt   DateTime?          @default(dbgenerated("(CURRENT_TIMESTAMP + '72:00:00'::interval)"))
+  expiresAt     DateTime?          @default(dbgenerated("(CURRENT_TIMESTAMP + '72:00:00'::interval)"))
   // SEC-009: re-verificación periódica de los VERIFIED (tarea programada).
   // `lastCheckedAt` es el instante de la ronda que lo comprobó por última vez.
   lastCheckedAt DateTime?
-  failedChecks  Int              @default(0)
+  failedChecks  Int                @default(0)
   disabledAt    DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  deletedAt   DateTime?
-  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  deletedAt     DateTime?
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
 
   // SEC-009: un host una sola vez por clínica entre los vivos (PARCIAL
   // `WHERE "deletedAt" IS NULL`, mismo patrón que tooth_records).
@@ -1860,6 +1869,10 @@ enum AuditResourceType {
   PATIENT_IMPLANT
   // SEC-009: verificar o eliminar un dominio personalizado.
   TENANT_DOMAIN
+  // DX-150: gestión de cobranza (nota) y compromiso de pago (crear y su
+  // cambio de estado, también el que hace el barrido diario sin usuario).
+  COLLECTION_NOTE
+  PAYMENT_PROMISE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -2413,4 +2426,85 @@ model PatientImplant {
   @@index([voidedById])
   @@index([cardDeliveredById])
   @@map("patient_implants")
+}
+
+// ---------------------------------------------------------------------------
+// Cobranza (DX-150): gestiones de cobro y compromisos de pago del paciente.
+// APPEND-ONLY en la BD (triggers de 20261017235600_dx150_collections): una nota
+// no se edita ni se borra (una corrección es otra nota) y un compromiso solo
+// pasa de OPEN a KEPT o BROKEN una vez. RLS FORCE y FK compuestas por tenant.
+// ---------------------------------------------------------------------------
+
+enum CollectionChannel {
+  CALL
+  WHATSAPP_LINK
+  EMAIL
+  IN_PERSON
+}
+
+enum CollectionOutcome {
+  NO_ANSWER
+  PROMISED_PAYMENT
+  WILL_PAY_AT_APPOINTMENT
+  DISPUTE
+  WRONG_NUMBER
+}
+
+enum PaymentPromiseStatus {
+  OPEN
+  KEPT
+  BROKEN
+}
+
+/// Una gestión de cobro (llamada, WhatsApp, email, en persona) y su resultado.
+/// `text` (<= 280) es una nota administrativa: nunca sale en logs ni auditoría.
+model CollectionNote {
+  id         String            @id @default(uuid()) @db.Uuid
+  tenantId   String            @db.Uuid
+  patientId  String            @db.Uuid
+  /// Sede activa al registrarla; NULL = vista consolidada.
+  locationId String?           @db.Uuid
+  channel    CollectionChannel
+  outcome    CollectionOutcome
+  text       String?
+  /// Puntero suave a User, como `Payment.createdById`.
+  authorId   String            @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  createdAt  DateTime          @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient  Patient   @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "collection_notes_patient_fkey")
+  location Location? @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "collection_notes_location_fkey")
+
+  @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "collection_notes_tenant_patient_created_idx")
+  @@map("collection_notes")
+}
+
+/// Compromiso de pago: importe, moneda y fecha (día civil de la sede). Lo
+/// cierra el barrido de cobranza (KEPT al cubrirse con abonos registrados
+/// desde el compromiso y fechados hasta ese día; BROKEN al día siguiente) o el
+/// propio abono que lo cubre.
+model PaymentPromise {
+  id          String               @id @default(uuid()) @db.Uuid
+  tenantId    String               @db.Uuid
+  patientId   String               @db.Uuid
+  /// Sede cuya zona decide los días del compromiso.
+  locationId  String               @db.Uuid
+  amount      Decimal              @db.Decimal(14, 2)
+  currency    String
+  dueDate     DateTime             @db.Date
+  status      PaymentPromiseStatus @default(OPEN)
+  createdById String               @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  createdAt   DateTime             @default(now())
+  settledAt   DateTime?
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient     Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "payment_promises_patient_fkey")
+  location    Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_promises_location_fkey")
+  currencyRef Currency @relation(fields: [currency], references: [code])
+
+  @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "payment_promises_tenant_patient_created_idx")
+  @@index([tenantId, locationId], map: "payment_promises_tenant_location_idx")
+  @@map("payment_promises")
 }

@@ -16,6 +16,7 @@ import { AppointmentTypesModule } from '../appointment-types/appointment-types.m
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { ScheduleBlocksModule } from '../schedule-blocks/schedule-blocks.module';
 import { LocationsModule } from '../locations/locations.module';
+import { CollectionsModule } from '../collections/collections.module';
 import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-case';
 
 @Module({
@@ -35,6 +36,8 @@ import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-c
     // DX-122: bloqueos al agendar/mover y «Buscar hueco» (sede y su zona).
     ScheduleBlocksModule,
     LocationsModule,
+    // DX-150: marca «Saldo vencido» de las tarjetas, por lote.
+    CollectionsModule,
   ],
   controllers: [AppointmentsController],
   providers: [

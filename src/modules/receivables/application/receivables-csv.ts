@@ -1,4 +1,9 @@
-import type { AgingRowView } from './use-cases/get-receivables-aging.use-case';
+import type {
+  CollectionChannel,
+  CollectionOutcome,
+  PaymentPromiseStatus,
+} from '@prisma/client';
+import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
 
 /*
  * CSV de la cartera (DX-145): una línea por paciente y moneda, con los mismos
@@ -12,6 +17,9 @@ import type { AgingRowView } from './use-cases/get-receivables-aging.use-case';
  *   CSV). El nombre y el teléfono son texto libre.
  * - «Fecha aproximada» = Sí cuando parte de la deuda envejece desde la fecha
  *   del plan y no desde un vencimiento (nunca en silencio).
+ * - DX-150: al final, la última gestión de cobro (canal · resultado y su día
+ *   en la zona de la sede de la deuda; NUNCA el texto de la nota) y el último
+ *   compromiso de pago con su estado.
  */
 export const RECEIVABLES_CSV_HEADER = [
   'Paciente',
@@ -32,7 +40,33 @@ export const RECEIVABLES_CSV_HEADER = [
   'Moneda último abono',
   'Próxima cuota',
   'Importe próxima cuota',
+  'Última gestión',
+  'Fecha última gestión',
+  'Compromiso',
+  'Importe compromiso',
+  'Moneda compromiso',
+  'Fecha compromiso',
 ] as const;
+
+// Mismas etiquetas que la pantalla de la cartera (web).
+const CHANNEL_LABELS: Record<CollectionChannel, string> = {
+  CALL: 'Llamada',
+  WHATSAPP_LINK: 'WhatsApp',
+  EMAIL: 'Email',
+  IN_PERSON: 'En persona',
+};
+const OUTCOME_LABELS: Record<CollectionOutcome, string> = {
+  NO_ANSWER: 'No contesta',
+  PROMISED_PAYMENT: 'Promete pago',
+  WILL_PAY_AT_APPOINTMENT: 'Pagará en la cita',
+  DISPUTE: 'Disputa el saldo',
+  WRONG_NUMBER: 'Número erróneo',
+};
+const PROMISE_STATUS_LABELS: Record<PaymentPromiseStatus, string> = {
+  OPEN: 'Abierto',
+  KEPT: 'Cumplido',
+  BROKEN: 'Incumplido',
+};
 
 const FORMULA_START = /^[=+\-@\t\r]/;
 
@@ -46,7 +80,7 @@ function money(value: number): string {
   return value.toFixed(2);
 }
 
-export function toReceivablesCsv(rows: readonly AgingRowView[]): string {
+export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
   const lines: string[] = [RECEIVABLES_CSV_HEADER.join(',')];
   for (const row of rows) {
     for (const c of row.currencies) {
@@ -72,6 +106,16 @@ export function toReceivablesCsv(rows: readonly AgingRowView[]): string {
             ? c.nextInstallment.dueDate.toISOString().slice(0, 10)
             : '',
           c.nextInstallment ? money(c.nextInstallment.amount) : '',
+          row.lastNote
+            ? text(
+                `${CHANNEL_LABELS[row.lastNote.channel]} · ${OUTCOME_LABELS[row.lastNote.outcome]}`,
+              )
+            : '',
+          row.lastNoteOn ?? '',
+          row.promise ? text(PROMISE_STATUS_LABELS[row.promise.status]) : '',
+          row.promise ? money(row.promise.amount) : '',
+          row.promise?.currency ?? '',
+          row.promise?.dueDate ?? '',
         ].join(','),
       );
     }

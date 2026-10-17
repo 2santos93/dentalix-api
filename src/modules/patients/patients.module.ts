@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { CollectionsModule } from '../collections/collections.module';
 import { PatientsController } from './presentation/patients.controller';
 import { PatientCommunicationController } from './presentation/patient-communication.controller';
 import {
@@ -32,7 +33,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   // JwtModule.register({}) mirrors AuthModule: JwtAuthGuard depends on
   // TokenService, which depends on JwtService — must be available here since
   // the guard is applied on this module's controller.
-  imports: [JwtModule.register({})],
+  // DX-150: CollectionsModule da la marca «Saldo vencido» de la ficha.
+  imports: [JwtModule.register({}), CollectionsModule],
   controllers: [PatientsController, PatientCommunicationController],
   providers: [
     CreatePatientUseCase,

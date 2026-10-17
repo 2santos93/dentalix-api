@@ -20,6 +20,7 @@ import { PAYMENT_RECEIPT_REPOSITORY } from './domain/ports/payment-receipt-repos
 import { RECEIPT_EMAIL_SENDER } from './domain/ports/receipt-email-sender.port';
 import { PrismaPaymentReceiptRepository } from './infrastructure/repositories/prisma-payment-receipt.repository';
 import { OutboxReceiptEmailSender } from './infrastructure/receipts/outbox-receipt-email-sender';
+import { CollectionsModule } from '../collections/collections.module';
 import { EmailModule } from '../notifications/email/email.module';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { TreatmentPlansModule } from '../treatment-plans/treatment-plans.module';
@@ -44,6 +45,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     ExchangeModule,
     TreatmentPlansModule,
     EmailModule,
+    // DX-150: cerrar el compromiso de pago que cubre un abono.
+    CollectionsModule,
   ],
   controllers: [PaymentsController, PaymentReceiptsController],
   providers: [

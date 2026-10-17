@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { PaymentPlanStatus, Prisma, TreatmentPlanStatus } from '@prisma/client';
+import {
+  CollectionChannel,
+  CollectionOutcome,
+  PaymentPlanStatus,
+  PaymentPromiseStatus,
+  Prisma,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
@@ -7,6 +14,7 @@ import {
   resolveLocationTimeZones,
 } from '../../../shared/locations/location-time-zone';
 import type {
+  DebtorCollections,
   DebtorDetails,
   PatientLedger,
 } from '../domain/entities/receivables.entity';
@@ -61,7 +69,7 @@ interface LedgerSqlRow {
   ledger: string;
 }
 
-function toLedger({
+export function toLedger({
   patientId,
   locationId,
   ledger: text,
@@ -122,6 +130,28 @@ function toLedger({
     }
   }
   return out;
+}
+
+/**
+ * El resumen `patient_ledgers` (DX-155) de ESTOS pacientes con deuda, en UNA
+ * consulta por la clave primaria (tenantId, patientId). La usan la marca
+ * «Saldo vencido» de la agenda y de la ficha (DX-150): una consulta por lote,
+ * sin N+1. Corre en la transacción del llamador (RLS por tenant).
+ */
+export async function loadLedgersOf(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  patientIds: readonly string[],
+): Promise<PatientLedger[]> {
+  const ids = [...new Set(patientIds)];
+  if (ids.length === 0) return [];
+  const rows = await tx.$queryRaw<LedgerSqlRow[]>`
+    SELECT l."patientId", l."locationId", l."ledger"::text AS "ledger"
+      FROM "patient_ledgers" l
+     WHERE l."tenantId" = ${tenantId}::uuid
+       AND l."patientId" = ANY(${ids}::uuid[])
+       AND l."owing"`;
+  return rows.map(toLedger);
 }
 
 interface DebtorSqlRow {
@@ -272,6 +302,127 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
               }
             : null,
       }));
+    });
+  }
+
+  /** DX-150: por payment_promises_open_patient_key (parcial, OPEN). */
+  async patientsWithOpenPromise(
+    patientIds: readonly string[],
+  ): Promise<Set<string>> {
+    const tenantId = this.tenantId();
+    if (patientIds.length === 0) return new Set();
+    const ids = [...patientIds];
+    const rows = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<{ patientId: string }[]>`
+          SELECT pp."patientId"
+            FROM "payment_promises" pp
+           WHERE pp."tenantId" = ${tenantId}::uuid
+             AND pp."status" = 'OPEN'
+             AND pp."patientId" = ANY(${ids}::uuid[])`,
+    );
+    return new Set(rows.map((r) => r.patientId));
+  }
+
+  /**
+   * DX-150: profesional de la última cita ATENDIDA de cada paciente, por
+   * appointments_tenant_patient_completed_idx (DX-145), en una consulta.
+   */
+  async patientsOfProvider(
+    providerId: string,
+    patientIds: readonly string[],
+  ): Promise<Set<string>> {
+    const tenantId = this.tenantId();
+    if (patientIds.length === 0) return new Set();
+    const ids = [...patientIds];
+    const rows = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<{ patientId: string }[]>`
+          SELECT last."patientId"
+            FROM unnest(${ids}::uuid[]) AS p("id")
+            JOIN LATERAL (
+              SELECT a."patientId", a."providerId"
+                FROM "appointments" a
+               WHERE a."tenantId" = ${tenantId}::uuid
+                 AND a."patientId" = p."id"
+                 AND a."status" = 'COMPLETED'
+                 AND a."deletedAt" IS NULL
+               ORDER BY a."start" DESC, a."id" DESC
+               LIMIT 1
+            ) last ON true
+           WHERE last."providerId" = ${providerId}::uuid`,
+    );
+    return new Set(rows.map((r) => r.patientId));
+  }
+
+  /**
+   * DX-150: última gestión y último compromiso de los pacientes de la página,
+   * en dos consultas por los índices (tenantId, patientId, createdAt DESC).
+   */
+  async loadCollections(
+    patientIds: readonly string[],
+  ): Promise<Map<string, DebtorCollections>> {
+    const tenantId = this.tenantId();
+    const out = new Map<string, DebtorCollections>();
+    if (patientIds.length === 0) return out;
+    const ids = [...patientIds];
+    return this.prisma.runWithTenant(async (tx) => {
+      const notes = await tx.$queryRaw<
+        {
+          patientId: string;
+          channel: CollectionChannel;
+          outcome: CollectionOutcome;
+          createdAt: Date;
+        }[]
+      >`
+        SELECT DISTINCT ON (n."patientId")
+               n."patientId", n."channel", n."outcome", n."createdAt"
+          FROM "collection_notes" n
+         WHERE n."tenantId" = ${tenantId}::uuid
+           AND n."patientId" = ANY(${ids}::uuid[])
+         ORDER BY n."patientId", n."createdAt" DESC, n."id" DESC`;
+      const promises = await tx.$queryRaw<
+        {
+          id: string;
+          patientId: string;
+          amount: number;
+          currency: string;
+          dueDate: string;
+          status: PaymentPromiseStatus;
+        }[]
+      >`
+        SELECT DISTINCT ON (pp."patientId")
+               pp."id", pp."patientId", pp."amount"::float8 AS "amount",
+               pp."currency", to_char(pp."dueDate", 'YYYY-MM-DD') AS "dueDate",
+               pp."status"
+          FROM "payment_promises" pp
+         WHERE pp."tenantId" = ${tenantId}::uuid
+           AND pp."patientId" = ANY(${ids}::uuid[])
+         ORDER BY pp."patientId", pp."createdAt" DESC, pp."id" DESC`;
+      const entry = (patientId: string): DebtorCollections => {
+        const existing = out.get(patientId);
+        if (existing) return existing;
+        const created: DebtorCollections = { lastNote: null, promise: null };
+        out.set(patientId, created);
+        return created;
+      };
+      for (const n of notes) {
+        entry(n.patientId).lastNote = {
+          channel: n.channel,
+          outcome: n.outcome,
+          createdAt: n.createdAt,
+        };
+      }
+      for (const p of promises) {
+        entry(p.patientId).promise = {
+          id: p.id,
+          amount: p.amount,
+          currency: p.currency,
+          dueDate: p.dueDate,
+          status: p.status,
+        };
+      }
+      return out;
     });
   }
 }

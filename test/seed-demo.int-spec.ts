@@ -35,6 +35,9 @@ const raw = new PrismaClient({
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
   'patient_implants',
+  // DX-150: cobranza (hijas de patients y locations).
+  'collection_notes',
+  'payment_promises',
   'prescription_items',
   'prescriptions',
   'prescription_templates',
@@ -326,6 +329,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patient_implants).toBe(3);
     // DX-170: las 6 plantillas de evolución de ejemplo.
     expect(firstCounts.clinical_note_templates).toBe(6);
+    // DX-150: tres gestiones de cobro y un compromiso abierto.
+    expect(firstCounts.collection_notes).toBe(3);
+    expect(firstCounts.payment_promises).toBe(1);
     // DX-121: 5 tipos de cita con color.
     expect(firstCounts.appointment_types).toBe(5);
     // DX-122: vacaciones y almuerzo; pendientes del calendario + uno manual.

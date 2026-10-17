@@ -1,4 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  CollectionChannel,
+  CollectionOutcome,
+  PaymentPromiseStatus,
+} from '@prisma/client';
 
 // Forma de la respuesta de GET /receivables/aging (DX-145). Solo documenta el
 // contrato en Swagger (de aquí sale el tipo del cliente web vía
@@ -109,6 +114,34 @@ export class AgingRowNextInstallmentDto extends AgingNextInstallmentDto {
   currency!: string;
 }
 
+export class AgingLastNoteDto {
+  @ApiProperty({ enum: CollectionChannel, enumName: 'CollectionChannel' })
+  channel!: CollectionChannel;
+
+  @ApiProperty({ enum: CollectionOutcome, enumName: 'CollectionOutcome' })
+  outcome!: CollectionOutcome;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: Date;
+}
+
+export class AgingPromiseDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  amount!: number;
+
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({ example: '2026-11-15', description: 'Día civil de la sede' })
+  dueDate!: string;
+
+  @ApiProperty({ enum: PaymentPromiseStatus, enumName: 'PaymentPromiseStatus' })
+  status!: PaymentPromiseStatus;
+}
+
 export class AgingRowDto {
   @ApiProperty({ type: AgingPatientDto })
   patient!: AgingPatientDto;
@@ -147,6 +180,21 @@ export class AgingRowDto {
     description: 'La próxima cuota por vencer, de cualquier moneda',
   })
   nextInstallment!: AgingRowNextInstallmentDto | null;
+
+  @ApiProperty({
+    type: AgingLastNoteDto,
+    nullable: true,
+    description: 'DX-150: última gestión de cobro (el texto, en la ficha)',
+  })
+  lastNote!: AgingLastNoteDto | null;
+
+  @ApiProperty({
+    type: AgingPromiseDto,
+    nullable: true,
+    description:
+      'DX-150: último compromiso de pago; el vigente si está OPEN, o cómo terminó (KEPT/BROKEN)',
+  })
+  promise!: AgingPromiseDto | null;
 }
 
 export class AgingTotalDto {

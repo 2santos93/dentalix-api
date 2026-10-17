@@ -24,7 +24,13 @@ import {
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { ListAppointmentsQueryDto } from './dto/list-appointments-query.dto';
-import { AppointmentDto, AppointmentWriteDto } from './dto/appointment.dto';
+import {
+  AppointmentDto,
+  AppointmentListItemDto,
+  AppointmentWriteDto,
+} from './dto/appointment.dto';
+import { PatientBalanceFlags } from '../../collections/application/patient-balance-flags';
+import type { OverdueBalance } from '../../collections/domain/overdue-balance';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
 import { CreateAppointmentUseCase } from '../application/use-cases/create-appointment.use-case';
 import { ListAppointmentsUseCase } from '../application/use-cases/list-appointments.use-case';
@@ -42,7 +48,10 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { APPOINTMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
+import {
+  isTenantPayload,
+  JwtPayload,
+} from '../../../shared/crypto/token.service';
 import { auditRequestContext } from '../../audit/presentation/audit-request-context';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -71,6 +80,8 @@ export class AppointmentsController {
     private readonly updateAppointment: UpdateAppointmentUseCase,
     private readonly findOpenings: FindOpeningsUseCase,
     private readonly tenantContext: TenantContextService,
+    // DX-150: marca «Saldo vencido» de las tarjetas de la agenda.
+    private readonly balanceFlags: PatientBalanceFlags,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -117,18 +128,36 @@ export class AppointmentsController {
   }
 
   @Get()
-  @ApiOkResponse({ type: [AppointmentDto] })
+  @ApiOkResponse({
+    type: [AppointmentListItemDto],
+    description:
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION.',
+  })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
   })
-  list(@Query() query: ListAppointmentsQueryDto): Promise<Appointment[]> {
-    return this.listAppointments.execute({
+  async list(
+    @Query() query: ListAppointmentsQueryDto,
+    @Req() req: { user: JwtPayload },
+  ): Promise<(Appointment & { balance: OverdueBalance })[]> {
+    const appointments = await this.listAppointments.execute({
       from: new Date(query.from),
       to: new Date(query.to),
       providerId: query.providerId,
       providerIds: query.providerIds,
       locationId: query.locationId,
     });
+    const flags = await this.balanceFlags.forPatients(
+      appointments.map((a) => a.patientId),
+      isTenantPayload(req.user) ? req.user.role : null,
+    );
+    return appointments.map((a) => ({
+      ...a,
+      balance: flags.get(a.patientId) ?? {
+        hasOverdue: false,
+        overdueDays: null,
+      },
+    }));
   }
 
   // Antes de `:id`: si no, «openings» se tomaría por el id de una cita.

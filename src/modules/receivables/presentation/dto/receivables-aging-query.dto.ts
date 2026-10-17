@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsInt,
   IsNumber,
   IsOptional,
@@ -69,6 +70,27 @@ export class ReceivablesAgingFiltersDto {
     message: `minAgeDays admite hasta ${MAX_AGE_DAYS} días.`,
   })
   minAgeDays?: number;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-150: solo los pacientes cuya última cita atendida fue con este profesional',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'providerId debe ser un UUID.' })
+  providerId?: string;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'DX-150: true = solo con compromiso de pago abierto; false = solo sin él',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean({ message: 'hasPromise debe ser true o false.' })
+  hasPromise?: boolean;
 }
 
 export class ReceivablesAgingQueryDto extends ReceivablesAgingFiltersDto {

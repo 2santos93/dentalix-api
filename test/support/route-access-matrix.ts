@@ -302,6 +302,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
+  // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
+  'POST /patients/:id/collection-notes': BILLING,
+  'POST /patients/:id/payment-promises': BILLING,
+  'GET /patients/:id/collections': BILLING,
 
   // --- Inventario ----------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-inventory.md (INVENTORY_ROLES).

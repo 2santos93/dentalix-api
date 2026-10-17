@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type {
+  DebtorCollections,
   DebtorDetails,
   PatientLedger,
 } from '../../domain/entities/receivables.entity';
@@ -83,6 +84,35 @@ class InMemoryReceivablesRepository implements ReceivablesRepository {
     this.debtorQueries.push([...patientIds]);
     return Promise.resolve(
       this.debtors.filter((d) => patientIds.includes(d.patientId)),
+    );
+  }
+
+  // DX-150: cobranza.
+  openPromisePatients = new Set<string>();
+  providerOf = new Map<string, string>();
+  collections = new Map<string, DebtorCollections>();
+  readonly collectionQueries: string[][] = [];
+
+  patientsWithOpenPromise(): Promise<Set<string>> {
+    return Promise.resolve(new Set(this.openPromisePatients));
+  }
+
+  patientsOfProvider(providerId: string): Promise<Set<string>> {
+    return Promise.resolve(
+      new Set(
+        [...this.providerOf]
+          .filter(([, provider]) => provider === providerId)
+          .map(([patientId]) => patientId),
+      ),
+    );
+  }
+
+  loadCollections(
+    patientIds: readonly string[],
+  ): Promise<Map<string, DebtorCollections>> {
+    this.collectionQueries.push([...patientIds]);
+    return Promise.resolve(
+      new Map([...this.collections].filter(([id]) => patientIds.includes(id))),
     );
   }
 }
@@ -244,5 +274,85 @@ describe('GetReceivablesAgingUseCase', () => {
       'p-medio',
       'p-reciente',
     ]);
+  });
+
+  describe('cobranza (DX-150)', () => {
+    it('el CSV lleva el día de la última gestión en la zona de la sede de la deuda', async () => {
+      // 21:00 del 15/10 en Bogotá = 02:00 UTC del 16/10.
+      repo.collections.set('p-antiguo', {
+        lastNote: {
+          channel: 'CALL',
+          outcome: 'NO_ANSWER',
+          createdAt: new Date('2026-10-16T02:00:00.000Z'),
+        },
+        promise: null,
+      });
+      const rows = await useCase.exportRows({});
+      expect(rows.find((r) => r.patient.id === 'p-antiguo')?.lastNoteOn).toBe(
+        '2026-10-15',
+      );
+      expect(rows.find((r) => r.patient.id === 'p-medio')?.lastNoteOn).toBe(
+        null,
+      );
+    });
+
+    it('cada fila trae su última gestión y su compromiso, pedidos solo para la página', async () => {
+      repo.collections.set('p-antiguo', {
+        lastNote: {
+          channel: 'CALL',
+          outcome: 'PROMISED_PAYMENT',
+          createdAt: new Date('2026-10-16T15:00:00.000Z'),
+        },
+        promise: {
+          id: 'prom-1',
+          amount: 200000,
+          currency: 'COP',
+          dueDate: '2026-11-15',
+          status: 'OPEN',
+        },
+      });
+      const out = await useCase.execute({ locationId: NORTE.id, pageSize: 2 });
+      expect(out.items[0]).toMatchObject({
+        patient: { id: 'p-antiguo' },
+        lastNote: { channel: 'CALL', outcome: 'PROMISED_PAYMENT' },
+        promise: { id: 'prom-1', status: 'OPEN', dueDate: '2026-11-15' },
+      });
+      expect(out.items[1]).toMatchObject({ lastNote: null, promise: null });
+      expect(repo.collectionQueries).toEqual([['p-antiguo', 'p-medio']]);
+    });
+
+    it('hasPromise=true deja solo a quien tiene un compromiso abierto; false, al resto', async () => {
+      repo.openPromisePatients = new Set(['p-medio']);
+      const con = await useCase.execute({
+        locationId: NORTE.id,
+        hasPromise: true,
+      });
+      expect(con.items.map((r) => r.patient.id)).toEqual(['p-medio']);
+      expect(con.totals[0]).toMatchObject({ patients: 1, debt: 200000 });
+      const sin = await useCase.execute({
+        locationId: NORTE.id,
+        hasPromise: false,
+      });
+      expect(sin.items.map((r) => r.patient.id)).toEqual([
+        'p-antiguo',
+        'p-reciente',
+      ]);
+    });
+
+    it('providerId deja a los pacientes atendidos por última vez por ese profesional', async () => {
+      repo.providerOf = new Map([
+        ['p-antiguo', 'dr-a'],
+        ['p-reciente', 'dr-a'],
+        ['p-medio', 'dr-b'],
+      ]);
+      const out = await useCase.execute({
+        locationId: NORTE.id,
+        providerId: 'dr-a',
+      });
+      expect(out.items.map((r) => r.patient.id)).toEqual([
+        'p-antiguo',
+        'p-reciente',
+      ]);
+    });
   });
 });
