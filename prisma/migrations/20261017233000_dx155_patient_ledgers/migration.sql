@@ -37,10 +37,16 @@
 -- la sentencia (en un UPDATE, solo si cambió una columna que cuenta) y llaman
 -- UNA vez a `patient_ledgers_refresh`, que RECALCULA su fila desde las tablas
 -- fuente con `patient_ledgers_compute` (no aplica deltas: volver a llamarla
--- repara una fila). Antes de recalcular bloquea las filas de esos pacientes
--- (FOR UPDATE, en orden de tenant y paciente: dos sentencias con varios
--- pacientes no se bloquean en cruz). Así dos escrituras simultáneas del mismo
--- paciente se ponen en fila y, en READ COMMITTED (el nivel de las escrituras
+-- repara una fila). Antes de recalcular bloquea la fila de esos pacientes en
+-- `patients` (FOR NO KEY UPDATE: no choca con el FOR KEY SHARE de las FK) y
+-- luego su fila del resumen (FOR UPDATE), siempre en orden de tenant y
+-- paciente (dos sentencias con varios pacientes no se bloquean en cruz). El
+-- bloqueo va sobre `patients` porque esa fila SIEMPRE existe: la del resumen
+-- no existe hasta el primer plan, y sin ella una escritura simultánea al alta
+-- del primer plan (una cita atendida, retirar al paciente) no esperaría y el
+-- alta confirmaría una fila calculada sin ella. Así dos escrituras
+-- simultáneas del mismo paciente se ponen en fila y, en READ COMMITTED (el
+-- nivel de las escrituras
 -- de la app), la sentencia que recalcula toma una foto nueva que ya ve lo que
 -- confirmó la otra. En REPEATABLE READ la segunda falla con un error de
 -- serialización: nunca un resumen viejo en silencio.
@@ -271,13 +277,22 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Un refresco que no ve a los pacientes no puede recalcularlos: falla en
-  -- vez de dejar sus filas viejas (ver la cabecera).
-  SELECT pg_catalog.count(DISTINCT (k.t, k.p)),
-         pg_catalog.count(DISTINCT pa."id")
-    INTO wanted, visible
-    FROM ROWS FROM (pg_catalog.unnest(p_tenants), pg_catalog.unnest(p_patients)) AS k(t, p)
-    LEFT JOIN public."patients" pa ON pa."tenantId" = k.t AND pa."id" = k.p;
+  -- Bloqueo por paciente, en orden, sobre su fila de `patients` (existe
+  -- aunque aún no tenga fila en el resumen; ver la cabecera). De paso cuenta
+  -- los que ve: un refresco que no ve a los pacientes no puede recalcularlos
+  -- y falla en vez de dejar sus filas viejas (ver la cabecera).
+  SELECT pg_catalog.count(DISTINCT (k.t, k.p))
+    INTO wanted
+    FROM ROWS FROM (pg_catalog.unnest(p_tenants), pg_catalog.unnest(p_patients)) AS k(t, p);
+  SELECT pg_catalog.count(*)
+    INTO visible
+    FROM (SELECT 1
+            FROM public."patients" pa
+            JOIN (SELECT DISTINCT k.t, k.p
+                    FROM ROWS FROM (pg_catalog.unnest(p_tenants), pg_catalog.unnest(p_patients)) AS k(t, p)) k
+              ON pa."tenantId" = k.t AND pa."id" = k.p
+           ORDER BY pa."tenantId", pa."id"
+             FOR NO KEY UPDATE OF pa) locked;
   IF visible < wanted THEN
     RAISE EXCEPTION 'patient_ledgers: no se ven % de % pacientes que hay que recalcular (¿escritura sin contexto de tenant con RLS FORCE?)',
       wanted - visible, wanted

@@ -659,6 +659,49 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
     await expectInSync(a);
   });
 
+  it('el primer plan y una escritura simultánea del mismo paciente (aún sin fila) se ponen en fila', async () => {
+    // Sin fila en el resumen no hay nada que bloquear: el bloqueo por
+    // paciente no puede depender de que la fila exista. El primero da de alta
+    // el primer plan (crea la fila) y se queda con la transacción abierta;
+    // mientras, otro atiende una cita y otro retira al paciente. Si esos dos
+    // no esperaran, el primero confirmaría una fila calculada sin ellos.
+    const ana = await newPatient(a);
+    const bea = await newPatient(a);
+    const slow = (patientId: string) =>
+      as(a, async (tx) => {
+        const plan = await tx.treatmentPlan.create({
+          data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+          select: { id: true },
+        });
+        await tx.treatmentPlanItem.create({
+          data: {
+            tenantId: a.tenantId,
+            planId: plan.id,
+            toothNumber: '11',
+            catalogItemId: a.catalogItemId,
+            price: 5000,
+            status: 'ACCEPTED',
+          },
+        });
+        await sleep(400);
+      });
+    const first = Promise.all([slow(ana), slow(bea)]);
+    await sleep(150);
+    await Promise.all([
+      visit(a, ana, a.sede2, 1),
+      as(a, (tx) =>
+        tx.patient.update({
+          where: { id: bea },
+          data: { deletedAt: new Date() },
+        }),
+      ),
+    ]);
+    await first;
+    expect((await rowOf(a, ana))?.locationId).toBe(a.sede2);
+    expect((await rowOf(a, bea))?.owing).toBe(false);
+    await expectInSync(a);
+  });
+
   it('la otra clínica no ve el resumen de A, y A no ve el de B', async () => {
     const bea = await newPatient(b);
     const planB = await newPlan(b, bea);

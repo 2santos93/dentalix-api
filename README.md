@@ -643,9 +643,11 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
     con `patient_ledgers_compute`: una sola definición, también para el
     backfill). Ningún caso de uso tiene que acordarse de nada, y una escritura
     nueva en esas tablas (p. ej. otro tipo de abono) queda cubierta sola.
-  - **Concurrencia**: el refresco bloquea las filas de esos pacientes en
-    orden y recalcula después, con una foto nueva (READ COMMITTED): dos abonos
-    simultáneos del mismo paciente cuentan los dos.
+  - **Concurrencia**: el refresco bloquea en orden la fila de esos pacientes
+    en `patients` (FOR NO KEY UPDATE, que existe aunque aún no tengan fila en
+    el resumen) y la del resumen, y recalcula después con una foto nueva (READ
+    COMMITTED): dos abonos simultáneos del mismo paciente cuentan los dos, y una
+    cita atendida o un archivado simultáneos al alta del primer plan también.
   - **Solo la BD lo escribe**: un trigger de guarda rechaza INSERT, UPDATE y
     DELETE directos con contexto de tenant. Para reparar una fila, como el
     owner con `app.current_tenant` fijado: `SELECT
