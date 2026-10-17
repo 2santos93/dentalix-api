@@ -7,8 +7,25 @@
 --             mensuales. Las citas pasadas pasan a COMPLETED (atendidas), así
 --             que cada paciente tiene «sede de la deuda».
 --   Tenant B: lo mismo con sus 10.000 pacientes (ruido y aislamiento).
+-- DX-155: es una carga masiva en UNA transacción. Los triggers que mantienen
+-- patient_ledgers recalcularían decenas de miles de pacientes por sentencia
+-- con las estadísticas de tablas que, para el planificador, siguen vacías (y
+-- elegiría recorrer la clínica entera por paciente). Se pausan durante la
+-- carga y el resumen se recalcula UNA vez al final, tras ANALYZE, como el
+-- backfill de la migración (20261018090000_dx155_patient_ledgers).
 \set ON_ERROR_STOP on
 BEGIN;
+
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tgrelid::regclass AS rel, tgname FROM pg_trigger
+            WHERE tgname LIKE 'patient\_ledgers\_%' AND tgname <> 'patient_ledgers_guard'
+  LOOP
+    EXECUTE format('ALTER TABLE %s DISABLE TRIGGER %I', r.rel, r.tgname);
+  END LOOP;
+END;
+$$;
 
 UPDATE appointments SET status = 'COMPLETED'
  WHERE status = 'SCHEDULED' AND start < timestamp '2026-10-16';
@@ -80,7 +97,22 @@ SELECT md5('inst:' || plan_id::text || ':' || s)::uuid, tenant_id,
   FROM bench_plans, generate_series(1, 6) AS s
  WHERE n % 10 = 1;
 
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tgrelid::regclass AS rel, tgname FROM pg_trigger
+            WHERE tgname LIKE 'patient\_ledgers\_%' AND tgname <> 'patient_ledgers_guard'
+  LOOP
+    EXECUTE format('ALTER TABLE %s ENABLE TRIGGER %I', r.rel, r.tgname);
+  END LOOP;
+END;
+$$;
+ANALYZE appointments, treatment_plans, treatment_plan_items, payments,
+        payment_plans, installments, patients;
+SELECT patient_ledgers_refresh(array_agg("tenantId"), array_agg("id")) FROM patients;
+
 COMMIT;
+VACUUM ANALYZE patient_ledgers;
 VACUUM ANALYZE appointments;
 VACUUM ANALYZE treatment_plans;
 VACUUM ANALYZE treatment_plan_items;
