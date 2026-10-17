@@ -49,7 +49,8 @@ const LOCATION_HEADER = {
 };
 
 const SCOPE =
-  'Ítems vivos (no retirados, de planes vivos) con descuento > 0, fechados ' +
+  'Ítems vivos (no retirados, de planes vivos y no anulados: ni rechazados ' +
+  'ni cancelados) con descuento > 0, fechados ' +
   'por su descuento (antes de DX-204, por su alta) en días civiles de la zona ' +
   'de su sede. La sede es la del descuento (antes de DX-204, la de ' +
   'presentación del plan). Los totales cuadran con la suma de `discount` de ' +

@@ -693,7 +693,9 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
   Los triggers de bloqueo de ítems cubren también las columnas del descuento.
 - **Informe** `GET /api/v1/reports/discounts` y `.csv` (solo ADMIN, auditados
   como VIEW/EXPORT de `TREATMENT_PLAN_ITEM` con `reason` DISCOUNT_REPORT):
-  ítems vivos con descuento > 0 de planes vivos, por días civiles de la zona de
+  ítems vivos con descuento > 0 de planes vivos y no anulados (ni rechazados
+  ni cancelados: una alternativa DX-040 copia los descuentos y la opción
+  rechazada los duplicaría), por días civiles de la zona de
   su sede (`from`/`to`, como mucho 366 días), sede (`locationId` o
   `X-Location-Id`) y quién lo dio (`professionalId`). Totales por moneda (bruto
   = precio de esos ítems, % sobre el bruto) y detalle paginado. Los descuentos

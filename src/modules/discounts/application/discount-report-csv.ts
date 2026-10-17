@@ -1,5 +1,6 @@
 import type { DiscountReason, TreatmentPlanStatus } from '@prisma/client';
 import type { DiscountReportRowView } from './use-cases/get-discount-report.use-case';
+import { currencyDecimals } from '../domain/discount-policy';
 
 /*
  * CSV del informe de descuentos (DX-204): una línea por ítem, mismos filtros
@@ -54,8 +55,9 @@ function text(value: string | null): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-function money(value: number): string {
-  return value.toFixed(2);
+/** En la unidad de la moneda: COP sin decimales, EUR a céntimos. */
+function money(value: number, currency: string): string {
+  return value.toFixed(currencyDecimals(currency));
 }
 
 function planLabel(row: DiscountReportRowView): string {
@@ -76,11 +78,11 @@ export function toDiscountReportCsv(
         text(row.patientName),
         text(planLabel(row)),
         PLAN_STATUS_LABELS[row.planStatus],
-        row.toothNumber,
+        text(row.toothNumber),
         text(row.procedure),
         row.currency,
-        money(row.price),
-        money(row.discount),
+        money(row.price, row.currency),
+        money(row.discount, row.currency),
         row.percent.toFixed(2),
         row.reason ? text(DISCOUNT_REASON_LABELS[row.reason]) : '',
         text(row.reasonNote),

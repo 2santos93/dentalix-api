@@ -540,7 +540,11 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           deletedAt: null,
           discount: { gt: 0 },
           discountAt: { gte: from },
-          plan: { currency: 'COP', deletedAt: null },
+          plan: {
+            currency: 'COP',
+            deletedAt: null,
+            status: { notIn: ['REJECTED', 'CANCELLED'] },
+          },
         },
       });
       const expected = live.reduce((s, i) => s + Number(i.discount), 0);
@@ -594,6 +598,42 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       expect((header.body as Report).items.map((i) => i.itemId)).not.toContain(
         northItem.id,
       );
+    });
+
+    it('no cuenta los planes anulados: ni la opción rechazada (copia del descuento, DX-040) ni el cancelado', async () => {
+      const chosen = await newPlan();
+      const kept = await addItem(chosen, 400000, { discount: 40000 });
+      const alt = await as(clinicA)
+        .post(`/treatment-plans/${chosen}/alternatives`, {})
+        .expect(201);
+      const altId = (alt.body as { id: string }).id;
+      const [copied] = await planItems(altId);
+      expect(copied.discount).toBe(40000);
+      await as(clinicA)
+        .patch(`/treatment-plans/${chosen}`, { status: 'ACCEPTED' })
+        .expect(200);
+      const cancelled = await newPlan();
+      const voided = await addItem(cancelled, 300000, { discount: 15000 });
+      await as(clinicA)
+        .patch(`/treatment-plans/${cancelled}`, { status: 'CANCELLED' })
+        .expect(200);
+
+      const res = await as(clinicA)
+        .get(`/reports/discounts?${period()}&pageSize=200`)
+        .expect(200);
+      const ids = (res.body as Report).items.map((i) => i.itemId);
+      expect(ids).toContain(kept.id);
+      expect(ids).not.toContain(copied.id);
+      expect(ids).not.toContain(voided.id);
+      const csv = await as(clinicA)
+        .get(`/reports/discounts.csv?${period()}`)
+        .expect(200);
+      const lines = csv.text.split('\r\n').filter(Boolean);
+      expect(lines).toHaveLength(
+        (res.body as Report).total + 1, // + cabecera
+      );
+      expect(csv.text).not.toContain('Rechazado');
+      expect(csv.text).not.toContain('Cancelado');
     });
 
     it('CSV con BOM, protegido contra fórmulas y auditado como EXPORT', async () => {

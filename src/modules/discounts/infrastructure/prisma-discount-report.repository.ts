@@ -47,11 +47,15 @@ interface RawTotal {
 
 /**
  * Informe de descuentos (DX-204). Una línea por ítem VIVO (sin `deletedAt`, de
- * un plan vivo) con descuento > 0, fechado por su descuento (`discountAt`; en
+ * un plan vivo y no anulado: ni rechazado ni cancelado) con descuento > 0, fechado por su descuento (`discountAt`; en
  * los anteriores a DX-204, el alta del ítem) y con la sede del descuento (o, si
  * no la tiene, la de presentación del plan). El periodo son días civiles de la
  * zona de CADA sede, como la caja (DX-097); sin sede, la zona por defecto.
  * Sirve el índice parcial `treatment_plan_items_tenant_discounted_at_idx`.
+ *
+ * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
+ * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
+ * aceptar una opción la hermana rechazada lo duplicaría.
  */
 @Injectable()
 export class PrismaDiscountReportRepository implements DiscountReportRepository {
@@ -132,6 +136,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
            AND i."discount" > 0
            AND i."deletedAt" IS NULL
            AND p."deletedAt" IS NULL
+           AND p."status" NOT IN ('REJECTED', 'CANCELLED')
            AND COALESCE(i."discountAt", i."createdAt") >= ${minStart}
            AND COALESCE(i."discountAt", i."createdAt") < ${maxEnd}
       ),

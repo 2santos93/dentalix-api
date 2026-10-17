@@ -48,7 +48,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
         `"'=HYPERLINK(""http://x"")"`,
         '"Plan del 2026-10-01 · Opción A"',
         'Presentado',
-        '36',
+        '"36"',
         '"Corona ""zirconio"""',
         'EUR',
         '450.00',
@@ -60,5 +60,31 @@ describe('CSV del informe de descuentos (DX-204)', () => {
         `"' -Sede"`,
       ].join(','),
     );
+  });
+
+  it('importes en la unidad de la moneda: COP sin decimales, EUR a céntimos', () => {
+    const cop: DiscountReportRowView = {
+      ...row,
+      currency: 'COP',
+      price: 123457,
+      discount: 9259,
+      percent: 7.5,
+    };
+    const [, eurLine, copLine] = toDiscountReportCsv([row, cop])
+      .slice(1)
+      .split('\r\n');
+    expect(eurLine.split(',').slice(7, 10)).toEqual([
+      '450.00',
+      '67.50',
+      '15.00',
+    ]);
+    expect(copLine.split(',').slice(7, 10)).toEqual(['123457', '9259', '7.50']);
+  });
+
+  it('el diente también va entre comillas y protegido (dato heredado sin validar)', () => {
+    const line = toDiscountReportCsv([{ ...row, toothNumber: '=1+1' }])
+      .slice(1)
+      .split('\r\n')[1];
+    expect(line).toContain(`,"'=1+1",`);
   });
 });
