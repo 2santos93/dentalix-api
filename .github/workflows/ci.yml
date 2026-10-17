@@ -16,7 +16,7 @@ permissions:
 jobs:
   checks:
     name: Lint, tipos, unit y build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
 
   integration:
     name: Integración y e2e (Postgres 16)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -125,7 +125,7 @@ jobs:
   # la BD».
   owner-nosu:
     name: Migraciones con owner sin superusuario (Postgres 16)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
