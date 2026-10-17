@@ -19,6 +19,8 @@ export interface IssueConfirmationInput {
   appointmentStart: Date;
   appointmentStatus: AppointmentStatus;
   createdById?: string;
+  /** true = no limpiar `callbackRequestedAt` (enlace del recordatorio automático). */
+  keepCallbackRequest: boolean;
   now: Date;
 }
 

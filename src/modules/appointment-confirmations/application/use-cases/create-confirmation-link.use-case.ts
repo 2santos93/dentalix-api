@@ -27,6 +27,11 @@ const CONFIRMABLE: ReadonlySet<AppointmentStatus> = new Set([
 export interface CreateConfirmationLinkInput {
   appointmentId: string;
   createdById?: string;
+  /**
+   * Lo emite el recordatorio automático (DX-026), no recepción: no limpia un
+   * «pide llamada» pendiente, que recepción todavía tiene que atender.
+   */
+  automatic?: boolean;
 }
 
 export interface CreateConfirmationLinkResult {
@@ -79,6 +84,7 @@ export class CreateConfirmationLinkUseCase {
       appointmentStart: appointment.start,
       appointmentStatus: appointment.status,
       createdById: input.createdById,
+      keepCallbackRequest: input.automatic === true,
       now,
     });
 

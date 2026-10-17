@@ -35,5 +35,8 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
       useClass: PrismaAppointmentConfirmationRepository,
     },
   ],
+  // Los recordatorios automáticos (DX-026) emiten el enlace con el MISMO caso
+  // de uso que recepción.
+  exports: [CreateConfirmationLinkUseCase],
 })
 export class AppointmentConfirmationsModule {}

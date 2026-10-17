@@ -141,11 +141,15 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           createdById: input.createdById,
         },
       });
-      // Un nuevo enlace reemplaza a cualquier "pide llamada" anterior: la
-      // conversación vuelve a empezar desde este mensaje.
+      // Un nuevo enlace de recepción reemplaza a cualquier "pide llamada"
+      // anterior: la conversación vuelve a empezar desde este mensaje. El del
+      // recordatorio automático (DX-026) no: la llamada sigue pendiente.
       await tx.appointment.update({
         where: { id: input.appointmentId },
-        data: { confirmationSentAt: input.now, callbackRequestedAt: null },
+        data: {
+          confirmationSentAt: input.now,
+          ...(input.keepCallbackRequest ? {} : { callbackRequestedAt: null }),
+        },
       });
     });
   }

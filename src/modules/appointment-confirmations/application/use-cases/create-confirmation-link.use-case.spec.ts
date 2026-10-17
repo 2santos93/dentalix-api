@@ -53,6 +53,21 @@ describe('CreateConfirmationLinkUseCase', () => {
     });
   });
 
+  it('el recordatorio automático (DX-026) pide conservar «pide llamada»; recepción, no', async () => {
+    const appointment = repo.addAppointment();
+    const issue = jest.spyOn(repo, 'issue');
+
+    await uc.execute({ appointmentId: appointment.id, automatic: true });
+    expect(issue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keepCallbackRequest: true }),
+    );
+
+    await uc.execute({ appointmentId: appointment.id, createdById: 'u-1' });
+    expect(issue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keepCallbackRequest: false }),
+    );
+  });
+
   it('whatsappPhone es null si el paciente no tiene un teléfono utilizable', async () => {
     const appointment = repo.addAppointment({ patientPhone: null });
     const result = await uc.execute({ appointmentId: appointment.id });
