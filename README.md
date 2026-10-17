@@ -282,14 +282,19 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
 - **RLS**: la tabla lleva la política estándar por clínica. El despachador, que
   trabaja para todas a la vez, y los emails de plataforma (`tenantId` NULL)
   pasan por tres funciones `SECURITY DEFINER` de la migración
-  `20261017120000_email_outbox`, concedidas explícitamente a `dentalix_app`.
+  `20261017120000_email_outbox` (y las del tope y la purga de plataforma de
+  `20261018090000_dx144_platform_email_quota`, DX-144), concedidas
+  explícitamente a `dentalix_app`.
   Desde DX-113 son del rol NOLOGIN `dentalix_email_dispatcher` (sin
   BYPASSRLS, con una política permisiva en `email_outbox` solo para él), no
   del owner de las migraciones, que en un Postgres gestionado no se salta la
   RLS (ver «Despliegue: roles de la BD»). El arriendo de un reclamo se acota a 900 s y el cierre de
   un intento solo vale para ESE intento (fencing por `attempts`). Si el rol de la app se crea después de migrar, concédele
-  `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle` y
-  `email_outbox_enqueue_platform`.
+  `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle`,
+  `email_outbox_enqueue_platform_capped`, `email_outbox_platform_allowed` y
+  `email_outbox_purge_platform` (`create-app-role.sql` avisa de las que
+  falten). `email_outbox_enqueue_platform`, sin tope, solo queda para las
+  réplicas de la versión anterior durante el despliegue de DX-144.
 - **Producción**: la API **no arranca** sin `MAIL_TRANSPORT="smtp"`,
   `SMTP_URL` (smtp:// o smtps://, sin `?query`), `MAIL_FROM` y
   `MAIL_ENCRYPTION_KEY` (`openssl rand -hex 32`), ni con
@@ -312,6 +317,22 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
   `MAIL_TENANT_DAILY_LIMIT`). Al pasarlos: 429 con el motivo en español, sin
   tocar la invitación (el enlace vigente sigue valiendo). `fullName` ≤ 120 y
   `email` ≤ 254 caracteres.
+- **Tope de los emails de plataforma** (DX-144, SEC-034; sin clínica: la
+  verificación y el aviso del registro público): como mucho **1 cada 10 min
+  y 3 en 24 h al mismo destinatario**, contados en la BD por el **hash** del
+  destinatario (`toHash`, nunca el email) y atómicos entre réplicas (un
+  candado por hash en `email_outbox_enqueue_platform_capped`). Al pasarlo el
+  email no sale y nadie se entera: el registro sigue respondiendo el mismo
+  202. Variables (ver `.env.example`):
+
+  | Variable | Default | Rango |
+  |----------|---------|-------|
+  | `MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS` | `600` | 0..86400 (0 = sin enfriamiento) |
+  | `MAIL_PLATFORM_RECIPIENT_DAILY_LIMIT` | `3` | 1..1000 |
+
+  `EmailOutbox.enqueue` exige clínica; los de plataforma solo pueden salir
+  por `EmailOutbox.enqueuePlatform`, que aplica el tope. Los e2e lo apagan en
+  `test/setup-e2e.ts` (se registran sin parar con los mismos correos).
 
 **Invitaciones**: `POST /staff/invitations` encola el email `invitation` con
 el enlace `<protocolo>://<host de la clínica>/invitacion/<token>` (el host con
@@ -338,7 +359,16 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   token y de la contraseña, uno por email, 24 h) y email `email-verify` con
   `<protocolo>://<host>/register/verificar/<token>`. Email ya registrado → no
   se guarda nada y el titular recibe `registration-notice` («alguien intentó
-  registrar una clínica con tu correo…»). 409 solo si el **subdominio** está
+  registrar una clínica con tu correo…»).
+  **Sin relé de emails** (DX-144, SEC-034): `clinicName` y `fullName` ≤ 120
+  caracteres (400 en español); el email de verificación saluda con un
+  «Hola:» genérico y no lleva nada escrito por el solicitante; cada
+  destinatario recibe como mucho los emails del tope de plataforma (ver
+  «Email transaccional»), comprobado en segundo plano, así que ni el cuerpo
+  ni el tiempo de la respuesta cambian al alcanzarlo; y un alta repetida con
+  el mismo email dentro del enfriamiento (10 min) **no reemplaza** el
+  pendiente vigente: el enlace de quien se está registrando sigue valiendo.
+  Pasado el enfriamiento (o caducado el pendiente), sí lo reemplaza. 409 solo si el **subdominio** está
   ocupado (es público). `POST /auth/register/verify { token, password }`
   (la contraseña elegida al registrarse: quien no pidió el alta no puede
   confirmarla con un clic) crea la clínica, su sede y su dueño con
@@ -630,7 +660,7 @@ de esquemas propios de una librería).
   | Tarea | Cron (UTC) | Qué hace |
   |-------|------------|----------|
   | `auth.purge-expired-tokens.hourly` | `17 * * * *` | Borra `revoked_tokens` y `pending_registrations` vencidos y `user_tokens` caducados/usados hace > 7 días. Sustituye a la limpieza lazy de cada logout/refresh |
-  | `email.purge-outbox.daily` | `23 4 * * *` | Borra de `email_outbox` los SENT/FAILED de más de `MAIL_OUTBOX_RETENTION_DAYS` (90), clínica a clínica bajo su RLS |
+  | `email.purge-outbox.daily` | `23 4 * * *` | Borra de `email_outbox` los SENT/FAILED de más de `MAIL_OUTBOX_RETENTION_DAYS` (90), clínica a clínica bajo su RLS, y los de plataforma por `email_outbox_purge_platform` (DX-144) |
   | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`); la petición conserva el `fetch` como respaldo |
   | `jobs.purge-finished.daily` | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS` |
 - **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
@@ -640,9 +670,12 @@ de esquemas propios de una librería).
   destinatario **enmascarado**, plantilla, estado, intentos, error y la cita
   (FK compuesta por tenant). Para EMAIL el transporte sigue siendo
   `email_outbox` (DX-088) con `referenceId` = id del mensaje.
-- **Límite conocido**: las filas de plataforma de `email_outbox` (`tenantId`
-  NULL) no las purga nadie: `dentalix_app` no las ve por RLS y el rol del
-  despachador no tiene DELETE. No guardan mensaje al terminar.
+- **Filas de plataforma de `email_outbox`** (`tenantId` NULL; SEC-037,
+  DX-144): `dentalix_app` no las ve por RLS ni recibe DELETE nuevo; las borra
+  la función `email_outbox_purge_platform` del rol despachador (SENT/FAILED
+  anteriores a la retención, por tandas, y nunca de los últimos 7 días). El
+  DELETE de ese rol lo acota a `"tenantId" IS NULL` la política RESTRICTIVA
+  `email_outbox_dispatcher_delete_platform`.
 
 ## Recordatorios de cita por email (DX-026)
 
@@ -701,7 +734,7 @@ FORCE y `npm run test:owner-nosu`).
 | owner (p. ej. `dentalix_owner`) | `DIRECT_URL`: solo `prisma migrate deploy`, `prisma db seed` y `audit:purge` | `LOGIN`, `CREATEROLE` (crea `dentalix_app` y los roles NOLOGIN de abajo), dueño de la base (`CREATE` para las extensiones *trusted* `unaccent`, `btree_gist`, `pg_trgm`, `btree_gin`) y del esquema `public` (lo es por `pg_database_owner`) | `SUPERUSER`, `BYPASSRLS`, `CREATEDB`, `REPLICATION`; ni lo usa la API |
 | `dentalix_app` (nombre fijo: lo citan las migraciones) | `DATABASE_URL`: la API y `seed:demo` | `LOGIN`, `CONNECT`, `USAGE` en `public`, `SELECT/INSERT/UPDATE/DELETE` en tablas y `USAGE/SELECT` en secuencias (privilegios por defecto del owner) y `EXECUTE` en las funciones que le conceden las migraciones (búsqueda de pacientes, despachador de email, particiones de auditoría, membresías en otras clínicas) | dueño de tablas, `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` |
 | `dentalix_patient_search` (DX-043) | NOLOGIN | dueño de `dx_patient_search_*`; `SELECT` de 5 columnas de `patients` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
-| `dentalix_email_dispatcher` (DX-113) | NOLOGIN | dueño de `email_outbox_claim/_settle/_enqueue_platform`; `SELECT/INSERT/UPDATE` de `email_outbox` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
+| `dentalix_email_dispatcher` (DX-113) | NOLOGIN | dueño de `email_outbox_claim/_settle/_enqueue_platform` y, desde DX-144, de `email_outbox_enqueue_platform_capped/_platform_allowed/_purge_platform`; `SELECT/INSERT/UPDATE/DELETE` de `email_outbox` con su política permisiva y, para DELETE, una RESTRICTIVA que lo limita a filas de plataforma | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT`, DELETE sin su política restrictiva |
 | `dentalix_membership_lookup` (DX-143) | NOLOGIN | dueño de `dx_user_has_other_active_memberships`; `SELECT` de 3 columnas (`userId`, `tenantId`, `deletedAt`) de `clinic_memberships` y su política de solo `SELECT` | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
 
 Pasos (el `psql` no acepta el `?schema=public` de las URL de Prisma:
@@ -729,7 +762,9 @@ npx prisma migrate deploy && npx prisma db seed
 #      rls_disabled  tablas de clínica sin RLS (salvo tenant_domains) y
 #                    particiones sin RLS de una tabla con RLS;
 #      members       miembros de los roles NOLOGIN del clúster que no son el
-#                    owner de la base, o el owner con SET/INHERIT.
+#                    owner de la base, o el owner con SET/INHERIT;
+#      dispatcher_delete  tablas donde dentalix_email_dispatcher tiene DELETE
+#                    sin la política restrictiva `"tenantId" IS NULL` (DX-144).
 npm run db:check-force
 ```
 
@@ -754,7 +789,12 @@ partición fuera de las migraciones (o una migración olvidó la RLS):
 `ENABLE` + `FORCE ROW LEVEL SECURITY` y su política, o una migración que lo
 haga. Con `members`, alguien añadió un miembro a un rol del clúster: retíralo
 como admin (`REVOKE <rol> FROM <miembro>`) y averigua por qué; mientras
-estuvo, pudo leer `patients`/`email_outbox`/`clinic_memberships` de todas las bases del clúster. La CI la ejecuta en los jobs de integración y
+estuvo, pudo leer `patients`/`email_outbox`/`clinic_memberships` de todas las bases del clúster.
+Con `dispatcher_delete`, alguien concedió DELETE a `dentalix_email_dispatcher`
+sobre esa tabla, o quitó la política `email_outbox_dispatcher_delete_platform`
+de `email_outbox`: retira el DELETE (`REVOKE DELETE ON "<tabla>" FROM
+dentalix_email_dispatcher`) o repón la política como en
+`20261018090000_dx144_platform_email_quota`. La CI la ejecuta en los jobs de integración y
 `owner-nosu`, y `test/rls-catalog.int-spec.ts` la cubre también.
 
 - **FORCE y el owner**: todas las tablas con `tenantId` tienen RLS ENABLE +
