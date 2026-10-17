@@ -50,6 +50,13 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
 // Leerlos (selector del formulario de cita): APPOINTMENT_ROLES.
 export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Plantillas de evolución (DX-170) — crear, editar, desactivar y cargar las de
+// ejemplo: solo gestión. Leerlas (selector de «Nueva evolución»):
+// CLINICAL_ROLES; recepción no documenta evoluciones.
+export const CLINICAL_NOTE_TEMPLATE_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+];
+
 // Bloqueos de agenda (DX-122) — crear/cambiar/retirar: recepción y ADMIN, que
 // gestionan la agenda de todos, y el odontólogo, solo la SUYA (lo comprueba el
 // caso de uso: 403 si toca otra agenda o la de toda la sede). La asistente los

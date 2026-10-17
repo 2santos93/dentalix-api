@@ -3,6 +3,11 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  loadLocationTimeZones,
+  timeZoneForCountry,
+} from '../../../../shared/locations/location-time-zone';
+import {
+  ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
   CreateClinicalEntryRepoInput,
   ListClinicalEntriesParams,
@@ -13,11 +18,19 @@ import {
   mapAddendum,
 } from './prisma-clinical-entry-addendum.repository';
 
+/** DX-170: lo que la ficha muestra de la cita ligada. */
+const APPOINTMENT_SUMMARY = {
+  select: { id: true, start: true, providerId: true },
+} as const;
+
 type PrismaClinicalEntry = Prisma.ClinicalEntryGetPayload<{
-  include: { addenda: true };
+  include: { addenda: true; appointment: typeof APPOINTMENT_SUMMARY };
 }>;
 
-function mapToEntity(row: PrismaClinicalEntry): ClinicalEntry {
+function mapToEntity(
+  row: PrismaClinicalEntry,
+  providerNames: Map<string, string>,
+): ClinicalEntry {
   return {
     id: row.id,
     tenantId: row.tenantId,
@@ -26,9 +39,42 @@ function mapToEntity(row: PrismaClinicalEntry): ClinicalEntry {
     reason: row.reason,
     notes: row.notes,
     performedById: row.performedById,
+    appointmentId: row.appointmentId,
+    templateId: row.templateId,
+    appointment: row.appointment
+      ? {
+          id: row.appointment.id,
+          start: row.appointment.start,
+          providerId: row.appointment.providerId,
+          providerName: providerNames.get(row.appointment.providerId) ?? null,
+        }
+      : null,
     createdAt: row.createdAt,
     addenda: row.addenda.map(mapAddendum),
   };
+}
+
+/**
+ * Nombres de los profesionales de las citas ligadas. El profesional es un
+ * usuario global: su nombre se lee a través de la membresía, que tiene RLS,
+ * así que solo aparece si es (o fue) de esta clínica. Sin filtrar `deletedAt`:
+ * si dejó la clínica, la cita sigue siendo suya.
+ */
+async function providerNamesOf(
+  tx: Prisma.TransactionClient,
+  rows: PrismaClinicalEntry[],
+): Promise<Map<string, string>> {
+  const ids = [
+    ...new Set(
+      rows.flatMap((r) => (r.appointment ? [r.appointment.providerId] : [])),
+    ),
+  ];
+  if (ids.length === 0) return new Map();
+  const memberships = await tx.clinicMembership.findMany({
+    where: { userId: { in: ids } },
+    select: { userId: true, user: { select: { fullName: true } } },
+  });
+  return new Map(memberships.map((m) => [m.userId, m.user.fullName]));
 }
 
 @Injectable()
@@ -61,8 +107,8 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     // Append-only: this is a plain INSERT. There is no update/delete method
     // on this repository at all — immutability enforced at the interface
     // level, not just by convention.
-    const row = await this.prisma.runWithTenant(async (tx) => {
-      return tx.clinicalEntry.create({
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.clinicalEntry.create({
         data: {
           tenantId,
           patientId: input.patientId,
@@ -70,11 +116,44 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           reason: input.reason,
           notes: input.notes,
           performedById: input.performedById,
+          // DX-170: FK compuestas — la cita tiene que ser de esta clínica y
+          // de este paciente; la plantilla, de esta clínica.
+          appointmentId: input.appointmentId,
+          templateId: input.templateId,
         },
-        include: { addenda: true },
+        include: { addenda: true, appointment: APPOINTMENT_SUMMARY },
       });
+      return mapToEntity(row, await providerNamesOf(tx, [row]));
     });
-    return mapToEntity(row);
+  }
+
+  async findAppointment(
+    id: string,
+  ): Promise<ClinicalEntryAppointmentRef | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.appointment.findFirst({
+        where: { id, deletedAt: null },
+        select: {
+          id: true,
+          patientId: true,
+          status: true,
+          start: true,
+          locationId: true,
+          location: { select: { country: true } },
+        },
+      });
+      if (!row) return null;
+      const zones = await loadLocationTimeZones(tx, tenantId, [row.locationId]);
+      return {
+        id: row.id,
+        patientId: row.patientId,
+        status: row.status,
+        start: row.start,
+        timeZone:
+          zones.get(row.locationId) ?? timeZoneForCountry(row.location.country),
+      };
+    });
   }
 
   async listByPatient(
@@ -99,9 +178,13 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
         where,
         orderBy: [{ entryDate: 'desc' }, { id: 'desc' }],
         // DX-038: las adendas viajan con su evolución, en orden cronológico.
-        include: { addenda: { orderBy: ADDENDA_ORDER } },
+        include: {
+          addenda: { orderBy: ADDENDA_ORDER },
+          appointment: APPOINTMENT_SUMMARY,
+        },
       });
-      return rows.map(mapToEntity);
+      const names = await providerNamesOf(tx, rows);
+      return rows.map((row) => mapToEntity(row, names));
     });
   }
 }

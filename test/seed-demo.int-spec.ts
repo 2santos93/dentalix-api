@@ -52,6 +52,8 @@ const TENANT_TABLES = [
   'patient_dentition_events',
   'clinical_entry_addenda',
   'clinical_entries',
+  'clinical_note_template_prompts',
+  'clinical_note_templates',
   'medical_history_versions',
   'appointment_confirmations',
   'appointment_waitlist',
@@ -319,6 +321,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.prescription_templates).toBe(3);
     expect(firstCounts.prescriptions).toBe(1);
     expect(firstCounts.prescription_items).toBe(2);
+    // DX-170: las 6 plantillas de evolución de ejemplo.
+    expect(firstCounts.clinical_note_templates).toBe(6);
     // DX-121: 5 tipos de cita con color.
     expect(firstCounts.appointment_types).toBe(5);
     // DX-122: vacaciones y almuerzo; pendientes del calendario + uno manual.
@@ -337,6 +341,28 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId, appointmentTypeId: { not: null } },
     });
     expect(typed).toBeGreaterThanOrEqual(10);
+  });
+
+  it('deja evoluciones redactadas con plantilla y ligadas a su cita atendida (DX-170)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const entries = await raw.clinicalEntry.findMany({
+      where: { tenantId, templateId: { not: null } },
+      include: { appointment: true, template: true },
+    });
+    expect(entries.map((e) => e.template?.name).sort()).toEqual([
+      'Profilaxis',
+      'Resina',
+    ]);
+    for (const e of entries) {
+      expect(e.appointment).toMatchObject({
+        status: 'COMPLETED',
+        patientId: e.patientId,
+        providerId: e.performedById,
+      });
+      expect(e.notes).not.toMatch(/\{\{/);
+    }
+    const resin = entries.find((e) => e.template?.name === 'Resina');
+    expect(resin?.notes).toContain('Diente 36, superficie O');
   });
 
   it('deja un bloqueo de vacaciones, uno de almuerzo y 3 pendientes abiertos (DX-122)', async () => {

@@ -18,6 +18,9 @@ function fakeEntry(
     reason: null,
     notes: 'Nota',
     performedById: null,
+    appointmentId: null,
+    templateId: null,
+    appointment: null,
     createdAt: new Date(entryDate),
     addenda: [],
     ...overrides,
@@ -31,6 +34,7 @@ function makeRepo(
     create: (): Promise<ClinicalEntry> =>
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
+    findAppointment: () => Promise.resolve(null),
     ...overrides,
   };
 }
@@ -53,6 +57,10 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
 
   create(): Promise<ClinicalEntry> {
     return Promise.reject(new Error('not implemented in this fake'));
+  }
+
+  findAppointment(): Promise<null> {
+    return Promise.resolve(null);
   }
 
   listByPatient(

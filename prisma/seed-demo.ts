@@ -42,6 +42,7 @@ import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/us
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
+import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { UpdateReminderSettingsUseCase } from '../src/modules/reminders/application/use-cases/reminder-settings.use-cases';
 import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
@@ -96,6 +97,7 @@ import {
   DEMO_CLINICAL_ENTRIES,
   DEMO_CLINICAL_ADDENDA,
   DEMO_COMMUNICATION,
+  DEMO_TEMPLATE_EVOLUTIONS,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
@@ -178,6 +180,14 @@ export {
  */
 
 export type DemoSeedStatus = 'created' | 'skipped' | 'rebuilt';
+
+/** DX-170: cita atendida de la demo, para ligarle una evolución. */
+interface AttendedAppointment {
+  id: string;
+  patientId: string;
+  providerId: string;
+  start: Date;
+}
 
 export interface DemoSeedOptions {
   /** Retira la demo existente (en blando) y la reconstruye. */
@@ -504,7 +514,7 @@ class DemoSeeder {
       this.createAppointmentTypes(ownerId),
     );
 
-    await this.createAppointments(
+    const attended = await this.createAppointments(
       tenantId,
       locations,
       hours,
@@ -512,6 +522,10 @@ class DemoSeeder {
       dentists,
       receptionId,
       typeByReason,
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createTemplateEvolutions(ownerId, attended),
     );
 
     await this.createScheduleBlocksAndWaitlist(
@@ -881,7 +895,7 @@ class DemoSeeder {
     dentists: string[],
     createdById: string,
     typeByReason: Map<string, string>,
-  ): Promise<void> {
+  ): Promise<AttendedAppointment[]> {
     // DX-040: el paciente de las opciones A/B no tiene cita futura (por eso
     // sale en «Presupuestos por seguir»); sus citas pasadas se quedan.
     const planned = planAppointments(
@@ -894,6 +908,7 @@ class DemoSeeder {
         a.end.getTime() <= this.now.getTime(),
     );
     const appointments = this.use(CreateAppointmentUseCase);
+    const attended: AttendedAppointment[] = [];
 
     for (const a of planned) {
       await this.inTenant(tenantId, locations[a.location], async () => {
@@ -920,7 +935,53 @@ class DemoSeeder {
             status: a.status,
           });
         }
+        if (a.status === AppointmentStatus.COMPLETED) {
+          attended.push({
+            id: created.id,
+            patientId: created.patientId,
+            providerId: created.providerId,
+            start: created.start,
+          });
+        }
       });
+    }
+    return attended;
+  }
+
+  /**
+   * DX-170: el ADMIN carga las plantillas de ejemplo (como el botón de
+   * Ajustes) y los odontólogos redactan con ellas la evolución de las últimas
+   * citas atendidas, ligada a la cita, por el mismo caso de uso que la API.
+   */
+  private async createTemplateEvolutions(
+    ownerId: string,
+    attended: AttendedAppointment[],
+  ): Promise<void> {
+    const templates = await this.use(LoadSampleNoteTemplatesUseCase).execute(
+      ownerId,
+    );
+    const latest = [...attended]
+      .filter((a) => a.start.getTime() <= this.now.getTime())
+      .sort((x, y) => y.start.getTime() - x.start.getTime());
+    for (const [i, evolution] of DEMO_TEMPLATE_EVOLUTIONS.entries()) {
+      const appointment = latest[i];
+      const template = templates.find((t) => t.name === evolution.template);
+      if (!appointment || !template) continue;
+      await this.use(CreateClinicalEntryUseCase).execute(
+        appointment.patientId,
+        {
+          appointmentId: appointment.id,
+          templateId: template.id,
+          reason: template.name,
+          answers: template.prompts
+            .filter((p) => p.label in evolution.answers)
+            .map((p) => ({
+              promptId: p.id,
+              values: [...evolution.answers[p.label]],
+            })),
+        },
+        appointment.providerId,
+      );
     }
   }
 

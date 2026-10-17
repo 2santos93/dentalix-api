@@ -28,6 +28,7 @@ function fakeTx() {
   const tx = {
     patient: model('patient'),
     locationScheduleRange: model('locationScheduleRange'),
+    clinicalNoteTemplatePrompt: model('clinicalNoteTemplatePrompt'),
     $executeRaw: jest.fn(() => {
       calls.push('$executeRaw');
       return Promise.resolve(1);
@@ -92,5 +93,13 @@ describe('guardHardDeletes', () => {
     const guarded = guard(tx);
 
     expect(guarded.patient).toBe(guarded.patient);
+  });
+
+  it('deja borrar las preguntas de una plantilla de evolución (allowlist, DX-170)', async () => {
+    const { tx, calls } = fakeTx();
+    const guarded = guard(tx);
+
+    await guarded.clinicalNoteTemplatePrompt.deleteMany();
+    expect(calls).toEqual(['clinicalNoteTemplatePrompt.deleteMany']);
   });
 });

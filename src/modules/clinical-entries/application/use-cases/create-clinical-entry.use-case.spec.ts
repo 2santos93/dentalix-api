@@ -1,62 +1,23 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
-import {
-  ClinicalEntryRepository,
-  CreateClinicalEntryRepoInput,
-  ListClinicalEntriesParams,
-} from '../../domain/ports/clinical-entry-repository.port';
+import { CreateClinicalEntryRepoInput } from '../../domain/ports/clinical-entry-repository.port';
+import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
+import { InMemoryClinicalNoteTemplateRepository } from '../../../clinical-note-templates/application/__fixtures__/in-memory-clinical-note-templates';
 
-/**
- * A REAL (stateful) in-memory fake — not just a jest-mock object — because
- * part of the behavior under test IS the append-only storage contract
- * itself. `rows` is exposed so tests can assert directly on what got
- * persisted, the same way an e2e test would assert against the real table.
- * Deliberately has NO update/delete method — immutability enforced at the
- * interface level.
- */
-class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
-  readonly rows: ClinicalEntry[] = [];
-  private nextId = 1;
-
-  create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
-    const row: ClinicalEntry = {
-      id: `ce-${this.nextId++}`,
-      tenantId: 't1',
-      patientId: input.patientId,
-      entryDate: input.entryDate ?? new Date('2026-07-23T00:00:00.000Z'),
-      reason: input.reason ?? null,
-      notes: input.notes,
-      performedById: input.performedById ?? null,
-      createdAt: new Date('2026-07-23T00:00:00.000Z'),
-      addenda: [],
-    };
-    // Append-only: push a NEW row, never mutate/replace an existing one.
-    this.rows.push(row);
-    return Promise.resolve(row);
-  }
-
-  listByPatient(
-    patientId: string,
-    params?: ListClinicalEntriesParams,
-  ): Promise<ClinicalEntry[]> {
-    let entries = this.rows.filter((r) => r.patientId === patientId);
-    if (params?.from) {
-      entries = entries.filter((r) => r.entryDate >= params.from!);
-    }
-    if (params?.to) {
-      entries = entries.filter((r) => r.entryDate <= params.to!);
-    }
-    entries.sort((a, b) => b.entryDate.getTime() - a.entryDate.getTime());
-    return Promise.resolve(entries);
-  }
+/** Alta con la clínica de los tests: paciente p1 y sin plantillas. */
+function useCase(repo: InMemoryClinicalEntryRepository) {
+  return new CreateClinicalEntryUseCase(
+    repo,
+    patientsInClinic('p1'),
+    new InMemoryClinicalNoteTemplateRepository(),
+  );
 }
 
 describe('CreateClinicalEntryUseCase', () => {
   it('appends a new entry and returns it', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
 
     const result = await uc.execute(
       'p1',
@@ -72,7 +33,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('defaults entryDate to now when not provided', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
     const before = new Date();
 
     const result = await uc.execute('p1', { notes: 'Nota' }, 'user-1');
@@ -84,7 +45,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('uses the provided entryDate when given', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
     const explicitDate = new Date('2025-01-15T10:00:00.000Z');
 
     const result = await uc.execute(
@@ -98,7 +59,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('rejects blank notes (notes is required content, not just a required field)', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
 
     await expect(
       uc.execute('p1', { notes: '   ' }, 'user-1'),
@@ -114,7 +75,7 @@ describe('CreateClinicalEntryUseCase', () => {
       captured = input;
       return originalCreate(input);
     };
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
 
     const maliciousInput = {
       notes: 'Nota',
@@ -128,7 +89,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('forwards performedById from the explicit argument, not from the input payload', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
 
     const result = await uc.execute('p1', { notes: 'Nota' }, 'user-77');
 
@@ -137,7 +98,7 @@ describe('CreateClinicalEntryUseCase', () => {
 
   it('DX-038: sin profesional autenticado → 403, sin insertar (autoría obligatoria)', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
 
     await expect(
       uc.execute('p1', { notes: 'Nota' }, ''),
@@ -149,7 +110,7 @@ describe('CreateClinicalEntryUseCase', () => {
 describe('CreateClinicalEntryUseCase — pertenencia del paciente (SEC-004)', () => {
   it('rechaza con 404 "Paciente no encontrado" un paciente que no es de la clínica, sin insertar', async () => {
     const repo = new InMemoryClinicalEntryRepository();
-    const uc = new CreateClinicalEntryUseCase(repo, patientsInClinic('p1'));
+    const uc = useCase(repo);
 
     await expect(
       uc.execute('p-otra-clinica', { notes: 'Nota' }, 'user-1'),

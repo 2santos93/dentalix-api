@@ -79,10 +79,19 @@ export class ClinicalEntriesController {
     patient: { param: 'patientId' },
   })
   @Post()
+  @ApiOperation({
+    summary: 'Registra una evolución (inalterable, DX-038)',
+    description:
+      'DX-170: con `templateId`, el texto compuesto se guarda en `notes` (enviado ya revisado, o compuesto por el servidor con `answers`). Con `appointmentId`, la evolución queda ligada a la cita.',
+  })
   @ApiCreatedResponse({ type: ClinicalEntryDto })
+  @ApiBadRequestResponse({
+    description:
+      'Texto vacío, respuesta inválida, plantilla desactivada, cita de otro paciente, cita cancelada / no-show o cita de un día futuro.',
+  })
   @ApiNotFoundResponse({
     description:
-      'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
+      'Paciente, cita o plantilla no encontrados en esta clínica (inexistentes o de otra clínica).',
   })
   create(
     @Param('patientId', ParseUUIDPipe) patientId: string,
@@ -95,6 +104,13 @@ export class ClinicalEntriesController {
         entryDate: dto.entryDate ? new Date(dto.entryDate) : undefined,
         reason: dto.reason,
         notes: dto.notes,
+        appointmentId: dto.appointmentId,
+        templateId: dto.templateId,
+        answers: dto.answers?.map((a) => ({
+          promptId: a.promptId,
+          values: a.values,
+          skipped: a.skipped,
+        })),
       },
       req.user.sub,
     );
