@@ -110,7 +110,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
    el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
-   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas.
+   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2.000 (con su motivo) y la de la tarde abierta con su fondo y un cobro; los abonos históricos quedan sin caja.
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
      imprimir las credenciales). `--reset` retira la demo anterior **en blando**
@@ -785,6 +785,64 @@ en la MISMA transacción que el abono (`issuePaymentReceipt`):
   convertido con la tasa de su día. Si no se puede calcular, el recibo sale
   sin saldo y el cobro no se bloquea. Con dos abonos simultáneos al MISMO plan,
   la foto de cada uno no incluye el otro.
+
+## Caja por turno (DX-027)
+
+Apertura y cierre de la caja de **un usuario en una sede** con arqueo por
+moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
+`cash_session_floats`, `cash_session_closings`, `cash_session_closing_lines`,
+`cash_session_adjustments` y `cash_session_reopenings` (migración
+`20261018000200_dx027_cash_sessions`).
+
+- **Una caja abierta por (sede, usuario)**: índice único parcial
+  `cash_sessions_open_key`; abrir otra es 409. `POST /cash-sessions/open`
+  (sede del cuerpo, de `X-Location-Id` o la principal) con el **fondo
+  inicial por moneda** (≥ 0, en efectivo) y notas. `GET /cash-sessions/current`
+  devuelve la caja abierta de quien consulta en la sede y los ajustes de caja.
+- **Abonos**: cada abono nuevo entra en la caja abierta de quien lo registra
+  en su sede (`payments."cashSessionId"`, en la misma transacción y con la caja
+  bloqueada `FOR SHARE`). Sin caja abierta, como antes (sin caja), salvo que la
+  clínica active «exigir caja abierta»: entonces un abono en **efectivo** es
+  409 en español; los demás métodos siguen igual.
+- **Cierre** `POST /cash-sessions/:id/close` con lo contado por moneda y
+  método: con la caja bloqueada `FOR UPDATE` calcula el **esperado** = fondo
+  (efectivo) + abonos activos del turno + ajustes que entraron en ella (un abono
+  sin método cuenta como «Otro») y guarda esperado, contado y diferencia
+  (CHECK `difference = counted - expected`). Una diferencia distinta de 0 exige
+  `differenceReason` (400). Deja `suggestedLockDate` (día civil del cierre en la
+  sede) para DX-091, sin bloquear nada todavía. **Inalterable** por trigger:
+  la apertura, el fondo, el cierre y sus líneas no se editan ni se borran, y un
+  abono solo entra en una caja ABIERTA de su sede y nunca cambia de caja.
+- **Arqueo ciego** (ajuste de la clínica): con la caja abierta, quien no es
+  ADMIN recibe `expected` y `payments` a `null` en `GET /cash-sessions/:id` y
+  cuenta antes de ver el teórico. El 400 por diferencia no dice cuánto.
+  `GET /payments` (la caja del período, DX-002) sigue mostrando los abonos.
+- **Lo que llega tarde no toca una caja cerrada**: anular uno de sus abonos o
+  registrar un abono con fecha de un día ya cerrado en la sede crea un
+  **ajuste** (`VOID` en negativo, `LATE_PAYMENT` en positivo) en la caja
+  abierta de quien lo hace en esa sede, con enlace a la cerrada
+  (`originalSessionId`). Sin caja abierta, queda pendiente y se une (una vez)
+  a la siguiente caja que se abra en la sede. Un abono anulado con su caja aún
+  abierta deja de contar y sale en «Anulados».
+- **Reabrir** (`POST /cash-sessions/:id/reopen`, solo ADMIN, con motivo): el
+  cierre anterior se conserva; el siguiente es la vuelta 2. 409 si quien la
+  abrió ya tiene otra caja abierta en la sede. **Corregir** un cierre (`POST
+  /cash-sessions/:id/adjustments`, solo ADMIN): un ajuste `CORRECTION` con
+  motivo y autor, que cuenta en la caja abierta del ADMIN en la sede (o en la
+  siguiente).
+- **Roles**: ADMIN y RECEPTION (403 en español al resto). ADMIN ve y cierra
+  todas; RECEPTION solo ve, abre y cierra las suyas (404 en las ajenas).
+  `GET /cash-sessions` filtra por `locationId`, `from`/`to` (días de apertura
+  en la zona de cada sede), `status` y página.
+- **Ajustes de caja** de la clínica (`tenants."cashRequireOpenSession"` y
+  `"cashBlindClose"`, por defecto `false` = el comportamiento de antes):
+  `GET /cash-sessions/settings` (ADMIN y RECEPTION) y `PUT` (solo ADMIN).
+- **Auditoría**: recurso `CASH_SESSION` (abrir `CREATE`, cerrar/reabrir/ajustes
+  `UPDATE` con `metadata.reason`, correcciones `CREATE`, consultas `VIEW`).
+  Motivos y notas no van a la auditoría ni a los logs.
+- **Informe de cierre**: la web imprime la vista A4 (`/print/cash-sessions/:id`)
+  y el navegador la guarda como PDF (la API no genera PDF). El envío por email
+  al ADMIN queda fuera de esta entrega.
 
 ## Registro de implantes (DX-191)
 
