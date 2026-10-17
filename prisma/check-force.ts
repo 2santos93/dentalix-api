@@ -10,7 +10,8 @@
  *     test/rls-catalog.int-spec.ts, y particiones sin RLS de una tabla con RLS
  *     (consultadas directamente no aplican la del padre);
  *   - `members`: miembros de los roles NOLOGIN del clúster
- *     (`dentalix_patient_search`, `dentalix_email_dispatcher`) que no son el
+ *     (`dentalix_patient_search`, `dentalix_email_dispatcher`,
+ *     `dentalix_membership_lookup`) que no son el
  *     owner de esta base, o el owner con SET o INHERIT. ADMIN OPTION equivale
  *     a poder darse SET, y con SET se leen esas tablas de TODAS las bases del
  *     clúster: un owner por clúster (README).
@@ -31,7 +32,12 @@ const RLS_EXEMPT = [
   'jobs',
 ];
 
-const CLUSTER_ROLES = ['dentalix_patient_search', 'dentalix_email_dispatcher'];
+const CLUSTER_ROLES = [
+  'dentalix_patient_search',
+  'dentalix_email_dispatcher',
+  // DX-143: lee las membresías de todas las clínicas (solo SELECT).
+  'dentalix_membership_lookup',
+];
 
 async function main(): Promise<number> {
   const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;

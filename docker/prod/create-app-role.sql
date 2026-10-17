@@ -21,11 +21,11 @@
 -- dentalix_app, REVOKE … FROM dentalix_app).
 \set ON_ERROR_STOP on
 
--- DX-134: un owner por clúster. dentalix_patient_search y
--- dentalix_email_dispatcher son roles del CLÚSTER que crean las migraciones, y
--- ADMIN OPTION sobre ellos equivale a poder darse SET: quien la tenga lee
--- `patients` y `email_outbox` de TODAS las bases del clúster sin RLS de
--- clínica. Antes de crear nada (y de migrar), se aborta si ya tienen otro
+-- DX-134: un owner por clúster. dentalix_patient_search,
+-- dentalix_email_dispatcher y dentalix_membership_lookup (DX-143) son roles
+-- del CLÚSTER que crean las migraciones, y ADMIN OPTION sobre ellos equivale a
+-- poder darse SET: quien la tenga lee `patients`, `email_outbox` y
+-- `clinic_memberships` de TODAS las bases del clúster sin RLS de clínica. Antes de crear nada (y de migrar), se aborta si ya tienen otro
 -- miembro que el owner actual, o si el owner actual no podrá traspasarles las
 -- funciones (sin ADMIN OPTION). Ver README, «Despliegue: roles de la BD».
 DO $$
@@ -33,7 +33,7 @@ DECLARE
   role_name text;
   others text;
 BEGIN
-  FOREACH role_name IN ARRAY ARRAY['dentalix_patient_search', 'dentalix_email_dispatcher'] LOOP
+  FOREACH role_name IN ARRAY ARRAY['dentalix_patient_search', 'dentalix_email_dispatcher', 'dentalix_membership_lookup'] LOOP
     CONTINUE WHEN to_regrole(role_name) IS NULL;
     SELECT string_agg(DISTINCT u.rolname, ', ' ORDER BY u.rolname) INTO others
       FROM pg_auth_members m JOIN pg_roles u ON u.oid = m.member
@@ -46,7 +46,7 @@ BEGIN
                         WHERE m.roleid = to_regrole(role_name)
                           AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
                           AND m.admin_option) THEN
-      RAISE EXCEPTION 'El rol % ya existe en el clúster y % no tiene ADMIN OPTION sobre él (lo creó otro rol, p. ej. un superusuario). Si este clúster es solo de este owner, un admin del clúster debe ejecutar antes: GRANT dentalix_patient_search, dentalix_email_dispatcher TO % WITH ADMIN OPTION, INHERIT FALSE, SET FALSE. Si ya lo usa otro owner, usa ese owner o un clúster distinto (README, «Despliegue: roles de la BD»). No se ha creado nada.', role_name, current_user, quote_ident(current_user);
+      RAISE EXCEPTION 'El rol % ya existe en el clúster y % no tiene ADMIN OPTION sobre él (lo creó otro rol, p. ej. un superusuario). Si este clúster es solo de este owner, un admin del clúster debe ejecutar antes: GRANT dentalix_patient_search, dentalix_email_dispatcher, dentalix_membership_lookup TO % WITH ADMIN OPTION, INHERIT FALSE, SET FALSE. Si ya lo usa otro owner, usa ese owner o un clúster distinto (README, «Despliegue: roles de la BD»). No se ha creado nada.', role_name, current_user, quote_ident(current_user);
     END IF;
   END LOOP;
 END

@@ -9,10 +9,11 @@ import {
   requireOwnerNosuEnv,
 } from './owner-nosu-env';
 
-// DX-134: los roles NOLOGIN `dentalix_patient_search` y
-// `dentalix_email_dispatcher` son del CLÚSTER, y ADMIN OPTION sobre ellos
-// equivale a poder darse SET: quien la tenga puede leer `patients` y
-// `email_outbox` de TODAS las bases del clúster. Por eso la restricción es
+// DX-134: los roles NOLOGIN `dentalix_patient_search`,
+// `dentalix_email_dispatcher` y `dentalix_membership_lookup` (DX-143) son del
+// CLÚSTER, y ADMIN OPTION sobre ellos equivale a poder darse SET: quien la
+// tenga puede leer `patients`, `email_outbox` y `clinic_memberships` de TODAS
+// las bases del clúster. Por eso la restricción es
 // un owner por clúster (README, «Despliegue: roles de la BD»):
 //   - create-app-role.sql, que corre como el owner ANTES de migrar, aborta
 //     con un error que explica la restricción si los roles ya tienen otros
@@ -23,7 +24,11 @@ import {
 //     inesperado añadido después (aunque sea solo con ADMIN).
 
 const ROOT = join(__dirname, '..', '..');
-const ROLES = ['dentalix_patient_search', 'dentalix_email_dispatcher'];
+const ROLES = [
+  'dentalix_patient_search',
+  'dentalix_email_dispatcher',
+  'dentalix_membership_lookup',
+];
 
 /** psql no acepta el `?schema=public` de las URL de Prisma. */
 const psqlUrl = (url: string): string => {
@@ -142,6 +147,8 @@ describe('DX-134 · un owner por clúster: segundo owner con error claro (owner-
     await admin.$executeRawUnsafe(
       `CREATE DATABASE "${dbA2}" OWNER "${env.owner}"`,
     );
+    // Un rol cualquiera del clúster que se cuela como miembro (último test).
+    await admin.$executeRawUnsafe(`CREATE ROLE "${intruder}" NOLOGIN`);
   });
 
   afterAll(async () => {
@@ -211,28 +218,27 @@ describe('DX-134 · un owner por clúster: segundo owner con error claro (owner-
     expect(check.status).toBe(0);
   }, 300_000);
 
-  it('un miembro añadido después, aunque sea solo con ADMIN: db:check-force lo detecta y create-app-role aborta', async () => {
-    await admin.$executeRawUnsafe(`CREATE ROLE "${intruder}" NOLOGIN`);
-    await admin.$executeRawUnsafe(
-      `GRANT dentalix_email_dispatcher TO "${intruder}" WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
-    );
-    try {
-      const check = checkForce(env.ownerUrl);
-      expect(check.out).toContain('"event":"db.check_force_failed"');
-      expect(check.out).toContain(
-        `"members":["dentalix_email_dispatcher:${intruder}"]`,
-      );
-      expect(check.status).toBe(1);
-      const r = createAppRole(ownerUrlFor(env, dbA2));
-      expect(r.status).not.toBe(0);
-      expect(r.out).toContain(
-        `Este clúster ya tiene el rol dentalix_email_dispatcher de otro owner (miembros: ${intruder})`,
-      );
-    } finally {
+  it.each(['dentalix_email_dispatcher', 'dentalix_membership_lookup'])(
+    'un miembro de %s añadido después, aunque sea solo con ADMIN: db:check-force lo detecta y create-app-role aborta',
+    async (role) => {
       await admin.$executeRawUnsafe(
-        `REVOKE dentalix_email_dispatcher FROM "${intruder}"`,
+        `GRANT ${role} TO "${intruder}" WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
       );
-    }
-    expect(checkForce(env.ownerUrl).status).toBe(0);
-  }, 120_000);
+      try {
+        const check = checkForce(env.ownerUrl);
+        expect(check.out).toContain('"event":"db.check_force_failed"');
+        expect(check.out).toContain(`"members":["${role}:${intruder}"]`);
+        expect(check.status).toBe(1);
+        const r = createAppRole(ownerUrlFor(env, dbA2));
+        expect(r.status).not.toBe(0);
+        expect(r.out).toContain(
+          `Este clúster ya tiene el rol ${role} de otro owner (miembros: ${intruder})`,
+        );
+      } finally {
+        await admin.$executeRawUnsafe(`REVOKE ${role} FROM "${intruder}"`);
+      }
+      expect(checkForce(env.ownerUrl).status).toBe(0);
+    },
+    120_000,
+  );
 });
