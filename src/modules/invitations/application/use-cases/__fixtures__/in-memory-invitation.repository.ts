@@ -3,6 +3,7 @@ import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.ent
 import {
   AcceptOutcome,
   AcceptUserResolution,
+  AccountClaimBlockedError,
   AccountClaimConflictError,
   GlobalUserRecord,
   InvitationRepository,
@@ -23,6 +24,7 @@ interface StoredUser {
   tokenVersion: number;
   /** Por defecto verificado; `null` = cuenta reclamable (DX-029). */
   emailVerifiedAt: Date | null;
+  isPlatformAdmin: boolean;
 }
 
 interface StoredMembership {
@@ -90,6 +92,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
         overrides.emailVerifiedAt === undefined
           ? NOW
           : overrides.emailVerifiedAt,
+      isPlatformAdmin: overrides.isPlatformAdmin ?? false,
     };
     this.users.push(user);
     return user;
@@ -112,6 +115,34 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       deletedAt: null,
     });
     return user;
+  }
+
+  /** Test helper: una membresía de un usuario ya sembrado, en cualquier clínica. */
+  seedMembership(input: {
+    userId: string;
+    tenantId: string;
+    role?: ClinicRole;
+    deletedAt?: Date | null;
+  }): void {
+    this.memberships.push({
+      userId: input.userId,
+      tenantId: input.tenantId,
+      role: input.role ?? ClinicRole.ASSISTANT,
+      deletedAt: input.deletedAt ?? null,
+    });
+  }
+
+  /** Test helper: las membresías de un usuario, de todas las clínicas. */
+  membershipsOf(userId: string): StoredMembership[] {
+    return this.memberships.filter((m) => m.userId === userId);
+  }
+
+  /** Test helper: ¿se aceptó la invitación de ese token? */
+  isAccepted(token: string): boolean {
+    const row = this.invitations.find(
+      (i) => i.tokenHash === hashInvitationToken(token),
+    );
+    return row?.acceptedAt != null;
   }
 
   // Explicit field-by-field mapping (mirrors `mapToEntity` in the Prisma
@@ -165,8 +196,20 @@ export class InMemoryInvitationRepository implements InvitationRepository {
             passwordHash: user.passwordHash,
             tokenVersion: user.tokenVersion,
             emailVerifiedAt: user.emailVerifiedAt,
+            isPlatformAdmin: user.isPlatformAdmin,
           }
         : null,
+    );
+  }
+
+  hasOtherActiveMemberships(userId: string): Promise<boolean> {
+    return Promise.resolve(this.otherActive(userId));
+  }
+
+  private otherActive(userId: string): boolean {
+    return this.memberships.some(
+      (m) =>
+        m.userId === userId && m.deletedAt === null && m.tenantId !== TENANT_ID,
     );
   }
 
@@ -266,6 +309,9 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       const found = this.userById(resolution.claim.userId);
       if (!found || found.emailVerifiedAt !== null) {
         return Promise.reject(new AccountClaimConflictError());
+      }
+      if (found.isPlatformAdmin || this.otherActive(found.id)) {
+        return Promise.reject(new AccountClaimBlockedError());
       }
       found.passwordHash = resolution.claim.passwordHash;
       found.emailVerifiedAt = NOW;

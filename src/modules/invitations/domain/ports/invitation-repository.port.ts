@@ -20,6 +20,11 @@ export interface GlobalUserRecord {
    * «reclamar» desde un enlace que llegó a ese email.
    */
   emailVerifiedAt: Date | null;
+  /**
+   * Administrador de PLATAFORMA (acceso a todas las clínicas): nunca se puede
+   * reclamar (DX-143).
+   */
+  isPlatformAdmin: boolean;
 }
 
 /**
@@ -36,6 +41,16 @@ export interface GlobalUserRecord {
 export class AccountClaimConflictError extends Error {
   constructor() {
     super('account claim lost a race');
+  }
+}
+
+/**
+ * DX-143 (SEC-033): la cuenta a reclamar da acceso a OTRA clínica (o a la
+ * plataforma), comprobado dentro de la transacción: no se tocó nada.
+ */
+export class AccountClaimBlockedError extends Error {
+  constructor() {
+    super('account claim blocked: access to another clinic');
   }
 }
 
@@ -66,6 +81,14 @@ export interface InvitationRepository {
    * reutiliza uno existente al aceptar.
    */
   findUserByEmailGlobal(email: string): Promise<GlobalUserRecord | null>;
+
+  /**
+   * DX-143 (SEC-033): ¿tiene el usuario alguna membresía ACTIVA (no borrada)
+   * en una clínica distinta de la del contexto? `clinic_memberships` está
+   * bajo RLS por clínica: lo responde la función SECURITY DEFINER
+   * `dx_user_has_other_active_memberships` (solo un booleano).
+   */
+  hasOtherActiveMemberships(userId: string): Promise<boolean>;
 
   /** Revoca la invitación PENDIENTE de ese correo, si existe. Devuelve los ids revocados. */
   revokePendingByEmail(email: string): Promise<string[]>;
@@ -113,7 +136,10 @@ export interface InvitationRepository {
    * Transacción de aceptación: resuelve el usuario (`user`, ver
    * AcceptUserResolution) marcando su email como verificado, crea o REACTIVA
    * la membresía (limpiando `deletedAt` y aplicando el rol), y marca la
-   * invitación como aceptada. Todo o nada. `tokenVersion` es la vigente tras
+   * invitación como aceptada. Todo o nada. En `claim` vuelve a comprobar,
+   * con la fila del usuario bloqueada, que la cuenta sigue sin verificar
+   * (`AccountClaimConflictError`) y que no da acceso a otra clínica ni a la
+   * plataforma (`AccountClaimBlockedError`). `tokenVersion` es la vigente tras
    * la transacción (la del par que se emite).
    */
   acceptTransactional(input: {

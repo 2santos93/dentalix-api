@@ -30,7 +30,7 @@ export class PublicInvitationDto {
   @ApiProperty({
     required: false,
     description:
-      'true = el email ya tiene una cuenta verificada: pide la contraseña actual. false = pide crear una contraseña (cuenta nueva, o cuenta sin verificar que se reclama). El token solo llega por email a la persona invitada.',
+      'true = el email ya tiene una cuenta verificada, o una sin verificar con acceso a otra clínica o a la plataforma (no se puede reclamar, DX-143): pide la contraseña actual. false = pide crear una contraseña (cuenta nueva, o cuenta sin verificar que se reclama). El token solo llega por email a la persona invitada.',
   })
   requiresCurrentPassword?: boolean;
 }

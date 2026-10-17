@@ -472,4 +472,152 @@ describe('AcceptInvitationUseCase', () => {
       expect(repo.userById('user-ok')?.passwordHash).toBe('HASH');
     });
   });
+
+  describe('DX-143 (SEC-033): el reclamo no alcanza una cuenta con acceso a otra clínica', () => {
+    function claimSetup(opts: { isPlatformAdmin?: boolean } = {}): {
+      repo: InMemoryInvitationRepository;
+      ctx: TenantContextService;
+    } {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedUser({
+        id: 'user-multi',
+        email: 'dra@clinic.com',
+        passwordHash: 'ORIGINAL_HASH',
+        tokenVersion: 5,
+        emailVerifiedAt: null,
+        isPlatformAdmin: opts.isPlatformAdmin ?? false,
+      });
+      repo.seedInvitation({ token: 'tok-multi', email: 'dra@clinic.com' });
+      return { repo, ctx: new TenantContextService() };
+    }
+
+    function makeUseCase(
+      repo: InMemoryInvitationRepository,
+      ctx: TenantContextService,
+      audit = makeAudit(),
+      password = makePassword({ verify: jest.fn().mockResolvedValue(false) }),
+    ) {
+      return {
+        uc: new AcceptInvitationUseCase(
+          repo,
+          password,
+          makeTokens(),
+          ctx,
+          audit,
+        ),
+        audit,
+        password,
+      };
+    }
+
+    function expectUntouched(repo: InMemoryInvitationRepository): void {
+      const user = repo.userById('user-multi');
+      expect(user?.passwordHash).toBe('ORIGINAL_HASH');
+      expect(user?.tokenVersion).toBe(5);
+      expect(user?.emailVerifiedAt).toBeNull();
+    }
+
+    it('cuenta SIN verificar con membresía ACTIVA en otra clínica y otra contraseña: 401 en español que remite a «¿Olvidaste tu contraseña?» y no toca nada', async () => {
+      const { repo, ctx } = claimSetup();
+      repo.seedMembership({ userId: 'user-multi', tenantId: 't-otra' });
+      const { uc, audit, password } = makeUseCase(repo, ctx);
+
+      const run = ctx.run('t1', () =>
+        uc.execute({ token: 'tok-multi', password: 'la-del-atacante' }),
+      );
+
+      await expect(run).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(run).rejects.toThrow(/¿Olvidaste tu contraseña\?/);
+      expectUntouched(repo);
+      expect(password.hash).not.toHaveBeenCalled();
+      expect(audit.recordMock).not.toHaveBeenCalled();
+      expect(repo.isAccepted('tok-multi')).toBe(false);
+      expect(repo.membershipsOf('user-multi')).toEqual([
+        expect.objectContaining({ tenantId: 't-otra', deletedAt: null }),
+      ]);
+    });
+
+    it('se comprueba de nuevo DENTRO de la transacción: una membresía en otra clínica que aparece entre medias también da 401 y no toca nada', async () => {
+      const { repo, ctx } = claimSetup();
+      // La comprobación previa no la ve (llega justo después)…
+      jest
+        .spyOn(repo, 'hasOtherActiveMemberships')
+        .mockImplementationOnce(() => {
+          repo.seedMembership({ userId: 'user-multi', tenantId: 't-otra' });
+          return Promise.resolve(false);
+        });
+      const { uc, audit } = makeUseCase(repo, ctx);
+
+      const run = ctx.run('t1', () =>
+        uc.execute({ token: 'tok-multi', password: 'la-del-atacante' }),
+      );
+
+      await expect(run).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(run).rejects.toThrow(/¿Olvidaste tu contraseña\?/);
+      expectUntouched(repo);
+      expect(audit.recordMock).not.toHaveBeenCalled();
+      expect(repo.isAccepted('tok-multi')).toBe(false);
+    });
+
+    it('administrador de PLATAFORMA sin verificar: tampoco se puede reclamar (401)', async () => {
+      const { repo, ctx } = claimSetup({ isPlatformAdmin: true });
+      const { uc } = makeUseCase(repo, ctx);
+
+      await expect(
+        ctx.run('t1', () =>
+          uc.execute({ token: 'tok-multi', password: 'la-del-atacante' }),
+        ),
+      ).rejects.toThrow(/¿Olvidaste tu contraseña\?/);
+      expectUntouched(repo);
+    });
+
+    it('una membresía BORRADA en otra clínica o una en ESTA clínica no bloquean el reclamo', async () => {
+      const { repo, ctx } = claimSetup();
+      repo.seedMembership({
+        userId: 'user-multi',
+        tenantId: 't-otra',
+        deletedAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+      repo.seedMembership({
+        userId: 'user-multi',
+        tenantId: 't1',
+        deletedAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+      const { uc, audit } = makeUseCase(repo, ctx);
+
+      await ctx.run('t1', () =>
+        uc.execute({ token: 'tok-multi', password: 'la-de-la-doctora' }),
+      );
+
+      const user = repo.userById('user-multi');
+      expect(user?.passwordHash).toBe('NEW_HASH');
+      expect(user?.tokenVersion).toBe(6);
+      expect(user?.emailVerifiedAt).toBeInstanceOf(Date);
+      expect(audit.recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { reason: 'INVITATION_ACCOUNT_CLAIM' },
+        }),
+      );
+    });
+
+    it('con membresía en otra clínica pero SU contraseña actual: se une como siempre (no es un reclamo)', async () => {
+      const { repo, ctx } = claimSetup();
+      repo.seedMembership({ userId: 'user-multi', tenantId: 't-otra' });
+      const { uc } = makeUseCase(
+        repo,
+        ctx,
+        makeAudit(),
+        makePassword({ verify: jest.fn().mockResolvedValue(true) }),
+      );
+
+      await ctx.run('t1', () =>
+        uc.execute({ token: 'tok-multi', password: 'su-clave-de-siempre' }),
+      );
+
+      const user = repo.userById('user-multi');
+      expect(user?.passwordHash).toBe('ORIGINAL_HASH');
+      expect(user?.tokenVersion).toBe(5);
+      expect(repo.isAccepted('tok-multi')).toBe(true);
+    });
+  });
 });
