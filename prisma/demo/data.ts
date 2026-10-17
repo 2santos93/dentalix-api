@@ -1832,3 +1832,70 @@ export const DEMO_COMMUNICATION = [
   { patientIndex: 3, input: { reminderOptOut: true } },
   { patientIndex: 4, input: { phone: '601 555 0105' } },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// DX-191: registro de implantes. El paciente del plan de implante recibe el
+// implante y su pilar en el 36 (con la tarjeta pendiente de entregar) y otro
+// paciente recibió un implante del MISMO lote en el 46: buscar ese lote en
+// Ajustes → Implantes devuelve a los dos.
+// ---------------------------------------------------------------------------
+
+export const DEMO_IMPLANT_RECALL_LOT = 'DEMO-LOT-2026A';
+
+export interface DemoImplant {
+  patientIndex: number;
+  dentistIndex: number;
+  daysAgo: number;
+  toothNumber: string;
+  kind: 'IMPLANT' | 'ABUTMENT';
+  manufacturer: string;
+  system: string;
+  reference: string;
+  lot: string;
+  diameterMm?: number;
+  lengthMm?: number;
+  sanitaryRegistration: string;
+}
+
+export const DEMO_IMPLANTS: readonly DemoImplant[] = [
+  {
+    patientIndex: 1,
+    dentistIndex: 0,
+    daysAgo: 10,
+    toothNumber: '36',
+    kind: 'IMPLANT',
+    manufacturer: 'Straumann',
+    system: 'BLT Roxolid SLActive',
+    reference: '021.5310',
+    lot: DEMO_IMPLANT_RECALL_LOT,
+    diameterMm: 4.1,
+    lengthMm: 10,
+    sanitaryRegistration: 'INVIMA 2019DM-0019876',
+  },
+  {
+    patientIndex: 1,
+    dentistIndex: 0,
+    daysAgo: 10,
+    toothNumber: '36',
+    kind: 'ABUTMENT',
+    manufacturer: 'Straumann',
+    system: 'BLT Roxolid SLActive',
+    reference: '022.4200',
+    lot: 'DEMO-PIL-0420',
+    sanitaryRegistration: 'INVIMA 2019DM-0019876',
+  },
+  {
+    patientIndex: 4,
+    dentistIndex: 1,
+    daysAgo: 25,
+    toothNumber: '46',
+    kind: 'IMPLANT',
+    manufacturer: 'Straumann',
+    system: 'BLT Roxolid SLActive',
+    reference: '021.5310',
+    lot: DEMO_IMPLANT_RECALL_LOT,
+    diameterMm: 4.1,
+    lengthMm: 10,
+    sanitaryRegistration: 'INVIMA 2019DM-0019876',
+  },
+];

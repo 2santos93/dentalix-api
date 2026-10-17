@@ -199,6 +199,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /prescriptions/:id': CLINICAL,
   'POST /prescriptions/:id/void': PRESCRIBERS,
 
+  // --- Registro de implantes (DX-191) --------------------------------------
+  // loop/informes/DX-191.md. Ver e imprimir la tarjeta: los 4 roles
+  // (recepción la entrega); registrar y anular: odontólogo y ADMIN; buscar
+  // por lote y exportar: solo ADMIN.
+  'GET /patients/:patientId/implants': EVERY_ROLE,
+  'POST /patients/:patientId/implants': PRESCRIBERS,
+  'GET /patients/:patientId/implant-card': EVERY_ROLE,
+  'POST /patients/:patientId/implant-card/print': EVERY_ROLE,
+  'GET /implants/catalog': PRESCRIBERS,
+  'GET /implants/search': ADMIN_ONLY,
+  'GET /implants/search.csv': ADMIN_ONLY,
+  'POST /implants/:id/void': PRESCRIBERS,
+
   // --- Catálogo dental -----------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,
   // escritura solo ADMIN).

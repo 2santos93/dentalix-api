@@ -53,6 +53,17 @@ export class AuditAppointmentMoveDto {
   to!: AuditAppointmentSlotDto;
 }
 
+export class AuditSearchDto {
+  @ApiPropertyOptional({ example: 'LOT-AB12' })
+  lot?: string;
+
+  @ApiPropertyOptional({ example: '021.5310' })
+  reference?: string;
+
+  @ApiProperty({ example: 2 })
+  rows!: number;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -84,6 +95,13 @@ export class AuditMetadataDto {
       'DX-128: de dónde salió un cambio de canal, opt-in o baja de recordatorios (en persona, enlace, mensaje del paciente o anotado por el personal).',
   })
   origin?: AuditOrigin;
+
+  @ApiPropertyOptional({
+    type: AuditSearchDto,
+    description:
+      'DX-191: búsqueda de implantes por lote/REF — lo buscado y cuántas filas salieron.',
+  })
+  search?: AuditSearchDto;
 }
 
 export class AuditEventDto {

@@ -22,6 +22,19 @@ export interface AuditMetadata {
    * anotado por el personal.
    */
   origin?: AuditOrigin;
+  /**
+   * DX-191: búsqueda «¿quién recibió este lote / esta referencia?» de
+   * implantes (y su CSV): el lote y la REF buscados (códigos de producto del
+   * fabricante, no datos del paciente) y cuántas filas salieron.
+   */
+  search?: AuditSearch;
+}
+
+/** Lo buscado en una búsqueda auditada por lote/REF (DX-191). */
+export interface AuditSearch {
+  lot?: string;
+  reference?: string;
+  rows: number;
 }
 
 export const AUDIT_ORIGINS = ['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF'] as const;
@@ -40,6 +53,8 @@ const SHORT_NUMBER = /^\d{1,6}$/;
 const CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 /** Instante ISO 8601 en UTC tal como lo emite `Date.toISOString()`. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/** Lote o REF de un producto sanitario: alfanumérico con . _ - / y espacios. */
+const PRODUCT_CODE = /^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,79}$/;
 const MAX_FIELDS = 50;
 const MAX_PARAMS = 10;
 
@@ -90,6 +105,21 @@ function appointmentMove(value: unknown): AuditMetadata['move'] | null {
   return from && to ? { from, to } : null;
 }
 
+/** Lote/REF con formato de código y nº de filas; si no, nada. */
+function search(value: unknown): AuditSearch | null {
+  if (!isRecord(value)) return null;
+  const { lot, reference, rows } = value;
+  if (typeof rows !== 'number' || !Number.isInteger(rows) || rows < 0) {
+    return null;
+  }
+  const out: AuditSearch = { rows };
+  if (typeof lot === 'string' && PRODUCT_CODE.test(lot)) out.lot = lot;
+  if (typeof reference === 'string' && PRODUCT_CODE.test(reference)) {
+    out.reference = reference;
+  }
+  return out;
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -109,5 +139,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (move) out.move = move;
   const origin = AUDIT_ORIGINS.find((o) => o === input.origin);
   if (origin) out.origin = origin;
+  const searched = search(input.search);
+  if (searched) out.search = searched;
   return out;
 }

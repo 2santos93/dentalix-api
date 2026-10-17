@@ -31,6 +31,10 @@ import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedu
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
+import {
+  ImplantsController,
+  PatientImplantsController,
+} from '../implants/presentation/implants.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -250,6 +254,49 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PRESCRIPTION',
     resourceId: { param: 'id' },
     patient: { lookup: 'prescription', param: 'id' },
+  },
+
+  // DX-191: registro de implantes, tarjeta y búsqueda por lote.
+  'GET /patients/:patientId/implants': {
+    action: 'VIEW',
+    resource: 'PATIENT_IMPLANT',
+    patient: P,
+  },
+  'POST /patients/:patientId/implants': {
+    action: 'CREATE',
+    resource: 'PATIENT_IMPLANT',
+    resourceId: RES,
+    patient: P,
+  },
+  'GET /patients/:patientId/implant-card': {
+    action: 'VIEW',
+    resource: 'PATIENT_IMPLANT',
+    patient: P,
+    reason: 'IMPLANT_CARD',
+  },
+  'POST /patients/:patientId/implant-card/print': {
+    action: 'PRINT',
+    resource: 'PATIENT_IMPLANT',
+    patient: P,
+    reason: 'IMPLANT_CARD',
+  },
+  'GET /implants/search': {
+    action: 'VIEW',
+    resource: 'PATIENT_IMPLANT',
+    reason: 'IMPLANT_LOT_SEARCH',
+    search: true,
+  },
+  'GET /implants/search.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPLANT',
+    reason: 'IMPLANT_LOT_SEARCH',
+    search: true,
+  },
+  'POST /implants/:id/void': {
+    action: 'VOID',
+    resource: 'PATIENT_IMPLANT',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'patientImplant', param: 'id' },
   },
 
   'POST /patients/:patientId/treatment-plans': {
@@ -485,6 +532,8 @@ const CONTROLLERS: Type[] = [
   PatientDataConsentsController,
   PatientPrescriptionsController,
   PrescriptionsController,
+  PatientImplantsController,
+  ImplantsController,
   PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,

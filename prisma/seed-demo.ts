@@ -70,6 +70,7 @@ import { CreateConsentTemplateUseCase } from '../src/modules/consents/applicatio
 import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-templates.use-cases';
 import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
+import { RegisterImplantUseCase } from '../src/modules/implants/application/use-cases/implants.use-cases';
 import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/update-staff.use-case';
 import {
   CreatePerioExamUseCase,
@@ -104,6 +105,7 @@ import {
   DEMO_VACATION,
   DEMO_WAITLIST,
   DEMO_PERIO,
+  DEMO_IMPLANTS,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
   DEMO_PROFESSIONAL_LICENSES,
@@ -566,6 +568,10 @@ class DemoSeeder {
 
     await this.inTenant(tenantId, undefined, () =>
       this.createPrescriptions(ownerId, patientIds, dentists),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createImplants(patientIds, dentists),
     );
 
     return this.requestConfirmations(tenantId, receptionId);
@@ -1413,6 +1419,43 @@ class DemoSeeder {
       { items: [...DEMO_PRESCRIPTION.items], notes: DEMO_PRESCRIPTION.notes },
       dentists[DEMO_PRESCRIPTION.dentistIndex],
     );
+  }
+
+  /**
+   * DX-191: implante y pilar del paciente del plan de implante, y un segundo
+   * paciente con el MISMO lote (para la búsqueda por lote). Por el caso de
+   * uso de la API; sin X-Location-Id: la sede principal.
+   */
+  private async createImplants(
+    patientIds: string[],
+    dentists: string[],
+  ): Promise<void> {
+    const dayFormat = new Intl.DateTimeFormat('en-CA', {
+      timeZone: DEMO_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    for (const spec of DEMO_IMPLANTS) {
+      await this.use(RegisterImplantUseCase).execute(
+        patientIds[spec.patientIndex],
+        {
+          toothNumber: spec.toothNumber,
+          kind: spec.kind,
+          manufacturer: spec.manufacturer,
+          system: spec.system,
+          reference: spec.reference,
+          lot: spec.lot,
+          diameterMm: spec.diameterMm,
+          lengthMm: spec.lengthMm,
+          sanitaryRegistration: spec.sanitaryRegistration,
+          placedOn: dayFormat.format(
+            daysAgoAt(this.now, spec.daysAgo, 10 * 60),
+          ),
+        },
+        dentists[spec.dentistIndex],
+      );
+    }
   }
 
   private async createInventory(

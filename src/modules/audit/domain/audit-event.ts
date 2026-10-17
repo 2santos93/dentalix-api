@@ -15,7 +15,8 @@ export type AuditPatientRef = {
     | 'treatmentPlan'
     | 'treatmentPlanItem'
     | 'payment'
-    | 'prescription';
+    | 'prescription'
+    | 'patientImplant';
   id: string;
 };
 

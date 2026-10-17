@@ -71,6 +71,10 @@ model User {
   perioExamsPerformed      PerioExam[]
   prescriptionsIssued      Prescription[]            @relation("PrescriptionProfessional")
   prescriptionsVoided      Prescription[]            @relation("PrescriptionVoidedBy")
+  // DX-191: implantes colocados, anulados y tarjetas entregadas.
+  implantsPlaced           PatientImplant[]          @relation("PatientImplantProfessional")
+  implantsVoided           PatientImplant[]          @relation("PatientImplantVoidedBy")
+  implantCardsDelivered    PatientImplant[]          @relation("PatientImplantCardDeliveredBy")
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
   tokens                   UserToken[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
@@ -121,6 +125,8 @@ model Location {
   inventoryItems     InventoryItem[]
   inventoryMovements InventoryMovement[]
   prescriptions      Prescription[]
+  // DX-191: implantes colocados en la sede.
+  patientImplants    PatientImplant[]
   planAcceptances    TreatmentPlanAcceptance[]
   presentedPlans     TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
@@ -280,6 +286,8 @@ model Patient {
   consents               PatientConsent[]
   perioExams             PerioExam[]
   prescriptions          Prescription[]
+  // DX-191: implantes y demás componentes colocados.
+  implants               PatientImplant[]
   retentionActions       PatientRetentionAction[]
   // DX-122: pendientes por agendar del paciente.
   waitlistEntries        AppointmentWaitlistEntry[]
@@ -1848,6 +1856,8 @@ enum AuditResourceType {
   PAYMENT_RECEIPT
   // DX-170: plantillas de evolución (crear, editar, desactivar).
   CLINICAL_NOTE_TEMPLATE
+  // DX-191: registro de implantes (alta, anulación, tarjeta, búsqueda por lote).
+  PATIENT_IMPLANT
   // SEC-009: verificar o eliminar un dominio personalizado.
   TENANT_DOMAIN
 }
@@ -2337,4 +2347,70 @@ model ReminderOptOutLink {
 
   @@index([tenantId, patientId])
   @@map("reminder_opt_out_links")
+}
+
+// DX-191: tipo de componente implantado.
+enum PatientImplantKind {
+  IMPLANT
+  ABUTMENT
+  GRAFT
+  MEMBRANE
+  OTHER
+}
+
+/// DX-191: un implante (o pilar, injerto, membrana…) colocado a un paciente:
+/// ficha de la Res. 4816/2008 (CO) y datos de la tarjeta de implante del
+/// RD 192/2023 (ES). INALTERABLE en la BD (trigger
+/// `dx_patient_implants_immutable`): solo se anula una vez (motivo, autor y
+/// fecha) o se marca su tarjeta como entregada una vez. RLS forzada.
+/// Índices de expresión que Prisma no declara (20261017235200):
+///   patient_implants_tenant_lot_idx       ("tenantId", upper(btrim(lot)))
+///   patient_implants_tenant_reference_idx ("tenantId", upper(btrim(reference)))
+/// FK (tenantId, treatmentPlanItemId) -> treatment_plan_items(tenantId, id)
+/// solo en SQL (20261017235400): Prisma no la modela sin relación inversa.
+model PatientImplant {
+  id                   String             @id @default(uuid()) @db.Uuid
+  tenantId             String             @db.Uuid
+  locationId           String             @db.Uuid
+  patientId            String             @db.Uuid
+  // Quien lo coloca: sale del token, nunca del cuerpo.
+  professionalId       String             @db.Uuid
+  // Día civil de la colocación (zona de la sede); la intervención de la tarjeta.
+  placedOn             DateTime           @db.Date
+  toothNumber          String
+  treatmentPlanItemId  String?            @db.Uuid
+  kind                 PatientImplantKind
+  manufacturer         String
+  system               String?
+  reference            String
+  lot                  String
+  udi                  String?
+  diameterMm           Decimal?           @db.Decimal(4, 2)
+  lengthMm             Decimal?           @db.Decimal(4, 2)
+  // Registro sanitario INVIMA (CO) o marcado CE (ES).
+  sanitaryRegistration String?
+  notes                String?
+  createdAt            DateTime           @default(now())
+  voidedAt             DateTime?
+  voidedById           String?            @db.Uuid
+  voidReason           String?
+  cardDeliveredAt      DateTime?
+  cardDeliveredById    String?            @db.Uuid
+
+  // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
+  patient       Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  location      Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  professional  User     @relation("PatientImplantProfessional", fields: [professionalId], references: [id], onDelete: Restrict)
+  voidedBy      User?    @relation("PatientImplantVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  cardDelivered User?    @relation("PatientImplantCardDeliveredBy", fields: [cardDeliveredById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "patient_implants_tenant_id_key")
+  @@index([tenantId, patientId, placedOn(sort: Desc), createdAt], map: "patient_implants_patient_placed_idx")
+  @@index([tenantId, manufacturer, system], map: "patient_implants_tenant_manufacturer_system_idx")
+  @@index([tenantId, locationId])
+  @@index([tenantId, treatmentPlanItemId])
+  @@index([professionalId])
+  @@index([voidedById])
+  @@index([cardDeliveredById])
+  @@map("patient_implants")
 }

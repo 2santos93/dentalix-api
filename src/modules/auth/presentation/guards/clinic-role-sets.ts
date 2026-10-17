@@ -181,3 +181,25 @@ export const RECEIVABLES_ROLES: ClinicRole[] = [
 // Exportar la cartera a CSV (DX-145): un dato personal de muchos pacientes
 // fuera del sistema. Solo gestión, y queda auditado.
 export const RECEIVABLES_EXPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Registro de implantes (DX-191) — VER la sección de la ficha e IMPRIMIR la
+// tarjeta de implante: los cuatro roles. Recepción entrega la tarjeta en el
+// mostrador (como el presupuesto, DX-012), aunque no registre clínica.
+export const IMPLANT_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+
+// REGISTRAR y ANULAR un implante (y el autocompletar de fabricantes): quien lo
+// coloca (odontólogo) y gestión. Anular, además, solo el autor o un ADMIN (lo
+// comprueba el caso de uso). Asistente y recepción, no.
+export const IMPLANT_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+
+// «¿Quién recibió este lote?» y su CSV (DX-191): datos personales de muchos
+// pacientes para una retirada de lote. Solo gestión, y queda auditado.
+export const IMPLANT_LOT_SEARCH_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

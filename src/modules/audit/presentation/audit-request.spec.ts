@@ -29,6 +29,26 @@ function req(overrides: Partial<AuditedRequest> = {}): AuditedRequest {
 }
 
 describe('buildAuditDraft (DX-009)', () => {
+  it('búsqueda por lote (DX-191): lote/REF de la query y filas de la respuesta', () => {
+    const options: AuditOptions = {
+      action: 'EXPORT',
+      resource: 'PATIENT_IMPLANT',
+      search: true,
+    };
+    const draft = buildAuditDraft(
+      options,
+      req({ query: { lot: 'LOT-AB12' } }),
+      'csv',
+      scope,
+      2,
+    );
+    expect(draft?.metadata).toEqual({ search: { lot: 'LOT-AB12', rows: 2 } });
+    expect(
+      buildAuditDraft(options, req({ query: { lot: 'X' } }), 'csv', scope)
+        ?.metadata,
+    ).toEqual({});
+  });
+
   it('lectura de la HC: actor, rol, paciente de la ruta, IP, UA y request id', () => {
     const options: AuditOptions = {
       action: 'VIEW',
