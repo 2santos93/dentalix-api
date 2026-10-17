@@ -18,8 +18,9 @@
 --                                         días: el tope mira 24 h).
 --
 -- Las tres son SECURITY DEFINER del rol NOLOGIN dentalix_email_dispatcher
--- (DX-113), con search_path fijo y llamadas a pg_catalog calificadas
--- (SEC-035), y EXECUTE solo para dentalix_app. El tope se cuenta por el hash
+-- (DX-113), con search_path = pg_catalog, public, pg_temp, la tabla y el
+-- tipo calificados con su esquema y las llamadas a pg_catalog calificadas
+-- (SEC-032, SEC-035), y EXECUTE solo para dentalix_app. El tope se cuenta por el hash
 -- del destinatario (HMAC), nunca por el email en claro.
 --
 -- Para la purga, el rol despachador recibe DELETE sobre email_outbox, acotado
@@ -84,7 +85,7 @@ RETURNS boolean
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_now timestamp(3) := pg_catalog.timezone('utc', pg_catalog.now());
@@ -100,7 +101,7 @@ BEGIN
   -- El enfriamiento nunca pasa de 24 h: basta mirar ese día.
   SELECT pg_catalog.count(*)::integer, pg_catalog.max(o."createdAt")
     INTO v_count, v_last
-    FROM "email_outbox" AS o
+    FROM public."email_outbox" AS o
    WHERE o."tenantId" IS NULL
      AND o."toHash" = p_to_hash
      AND o."createdAt" > v_now - pg_catalog.make_interval(hours => 24);
@@ -111,7 +112,7 @@ END;
 $$;
 
 CREATE FUNCTION email_outbox_enqueue_platform_capped(
-  p_template "EmailTemplate",
+  p_template public."EmailTemplate",
   p_to_hash text,
   p_to_masked text,
   p_payload bytea,
@@ -123,7 +124,7 @@ RETURNS uuid
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_id uuid;
@@ -138,7 +139,7 @@ BEGIN
     RETURN NULL;
   END IF;
   -- "tenantId" NULL por construcción: esta vía no escribe en una clínica.
-  INSERT INTO "email_outbox"
+  INSERT INTO public."email_outbox"
     ("id", "tenantId", "template", "toHash", "toMasked", "referenceId",
      "payload", "status", "attempts", "nextAttemptAt", "createdAt", "updatedAt")
   VALUES
@@ -160,7 +161,7 @@ RETURNS integer
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   -- Nunca lo de los últimos 7 días (MAIL_OUTBOX_RETENTION_DAYS ≥ 7).
@@ -173,10 +174,10 @@ BEGIN
   IF p_before IS NULL THEN
     RAISE EXCEPTION 'email_outbox_purge_platform: falta p_before';
   END IF;
-  DELETE FROM "email_outbox"
+  DELETE FROM public."email_outbox"
    WHERE "id" IN (
      SELECT o."id"
-       FROM "email_outbox" AS o
+       FROM public."email_outbox" AS o
       WHERE o."tenantId" IS NULL
         AND o."status" IN ('SENT', 'FAILED')
         AND o."createdAt" < v_cutoff

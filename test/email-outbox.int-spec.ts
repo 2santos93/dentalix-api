@@ -493,7 +493,15 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     for (const r of rows) {
       expect(r).toMatchObject({
         secdef: true,
-        config: ['search_path=public, pg_temp'],
+        // Las de DX-144 ponen pg_catalog primero (SEC-035); las de DX-088
+        // siguen como estaban.
+        config: [
+          r.fn === 'email_outbox_enqueue_platform_capped' ||
+          r.fn === 'email_outbox_platform_allowed' ||
+          r.fn === 'email_outbox_purge_platform'
+            ? 'search_path=pg_catalog, public, pg_temp'
+            : 'search_path=public, pg_temp',
+        ],
         owner: 'dentalix_email_dispatcher',
         login: false,
         bypass: false,

@@ -260,10 +260,14 @@ describe('DX-144 · emails de plataforma: tope por destinatario y purga (int)', 
           owner: string;
           app: boolean;
           public: boolean;
+          unqualifiedTable: boolean;
         }[]
       >`
         SELECT p.proname AS fn, p.prosecdef AS secdef, p.proconfig AS config,
                pg_get_userbyid(p.proowner) AS owner,
+               -- Nombres cualificados (SEC-035): ninguna referencia a la
+               -- tabla sin su esquema.
+               p.prosrc ~ '(FROM|INTO|UPDATE)[[:space:]]+"email_outbox"' AS "unqualifiedTable",
                has_function_privilege('dentalix_app', p.oid, 'EXECUTE') AS app,
                has_function_privilege('public', p.oid, 'EXECUTE') AS public
           FROM pg_proc p
@@ -279,10 +283,12 @@ describe('DX-144 · emails de plataforma: tope por destinatario y purga (int)', 
         ].map((fn) => ({
           fn,
           secdef: true,
-          config: ['search_path=public, pg_temp'],
+          // pg_catalog primero y pg_temp al final, explícitos (SEC-032/SEC-035).
+          config: ['search_path=pg_catalog, public, pg_temp'],
           owner: 'dentalix_email_dispatcher',
           app: true,
           public: false,
+          unqualifiedTable: false,
         })),
       );
     });
