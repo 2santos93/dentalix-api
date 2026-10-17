@@ -9,7 +9,7 @@ export interface VerifiedDomainRef {
 
 /**
  * Lectura de PLATAFORMA para el barrido de re-verificación (SEC-009): los
- * dominios VERIFIED vivos de TODAS las clínicas, solo ids. Es la única
+ * dominios VERIFIED vivos de TODAS las clínicas vivas, solo ids. Es la única
  * lectura de tenant_domains sin tenant aparte del ruteo
  * (TenantResolverService); cada comprobación corre después bajo el tenant
  * de su dominio.

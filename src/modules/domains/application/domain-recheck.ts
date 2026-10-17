@@ -89,10 +89,13 @@ export class DomainRecheckSweep {
  * DISABLED: deja de enrutar (TenantResolverService solo enruta VERIFIED) y la
  * clínica lo ve «Desactivado».
  *
- * Un DNS que no responde (SERVFAIL, timeout) se reintenta con el backoff de
- * la cola; si sigue sin responder en el último intento cuenta como fallo: un
- * tercero que compre el dominio no puede esquivar la desactivación haciendo
- * que su DNS falle. Idempotente por ronda (la cola es «al menos una vez»).
+ * Solo cuentan las respuestas definitivas: NXDOMAIN / NODATA o TXT sin el
+ * token. Un DNS que no responde (SERVFAIL, timeout, conexión rechazada…) se
+ * reintenta con el backoff de la cola y, si sigue sin responder en el último
+ * intento, la ronda NO cuenta (decisión SEC-009): el token es público, así que
+ * contar esos errores no protege de nada y desactivaría dominios legítimos (o
+ * todos, si cae el resolver). Idempotente por ronda (la cola es «al menos una
+ * vez»).
  */
 @Injectable()
 export class RecheckDomain {
@@ -132,7 +135,14 @@ export class RecheckDomain {
     } catch (error) {
       if (!(error instanceof DnsLookupError)) throw error;
       if (context.attempt < context.maxAttempts) throw error;
-      found = false;
+      // Sin respuesta definitiva: la ronda no cuenta (ni suma ni reinicia).
+      this.logger.warn({
+        event: 'domains.recheck_inconclusive',
+        domainId: domain.id,
+        tenantId: context.tenantId,
+        code: error.code,
+      });
+      return;
     }
 
     const next = nextCheckState(

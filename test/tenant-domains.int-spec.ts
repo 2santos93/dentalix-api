@@ -353,6 +353,33 @@ describe('SEC-009 · dominios personalizados (int)', () => {
       expect(await resolver.resolve(host)).toBe(B);
     });
 
+    it('el barrido no comprueba los VERIFIED de una clínica borrada', async () => {
+      const host = 'citas.sweep-tenant-deleted-int.com';
+      const row = await owner.tenantDomain.create({
+        data: { tenantId: A, host, verifyToken: 'a', status: 'VERIFIED' },
+      });
+      const source = new PrismaDomainRecheckSource(prisma);
+      const ids = async () =>
+        (await source.listVerified(null, 10_000)).map((d) => d.id);
+      expect(await ids()).toContain(row.id);
+      await owner.tenant.update({
+        where: { id: A },
+        data: { deletedAt: new Date() },
+      });
+      try {
+        expect(await ids()).not.toContain(row.id);
+      } finally {
+        await owner.tenant.update({
+          where: { id: A },
+          data: { deletedAt: null },
+        });
+        await owner.tenantDomain.update({
+          where: { id: row.id },
+          data: { deletedAt: new Date() },
+        });
+      }
+    });
+
     it('el resolver no enruta un VERIFIED de una clínica borrada', async () => {
       const host = 'citas.tenant-deleted-int.com';
       await owner.tenantDomain.create({

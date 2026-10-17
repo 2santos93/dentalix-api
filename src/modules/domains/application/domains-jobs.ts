@@ -24,7 +24,8 @@ export class DomainsJobs implements OnModuleInit {
   onModuleInit(): void {
     this.registry.register({
       name: RECHECK_DOMAIN_JOB,
-      // Reintentos solo si el DNS no responde; el último cuenta como fallo.
+      // Reintentos solo si el DNS no responde; si el último tampoco obtiene
+      // respuesta, la ronda no cuenta.
       maxAttempts: 3,
       retryBaseMs: 60_000,
       handle: (payload, context) => this.recheck.handle(payload, context),

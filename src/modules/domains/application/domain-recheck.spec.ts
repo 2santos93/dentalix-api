@@ -192,28 +192,42 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
     expect(store.rows[0].status).toBe('DISABLED');
   });
 
-  it('un DNS que no responde se reintenta (lanza) salvo en el último intento, que cuenta como fallo', async () => {
-    const { store, dns, sweep, queued, handlerFor, verified } = setup(1);
+  it('un DNS que no responde (timeout, SERVFAIL…) se reintenta y NO cuenta como fallo, ni en el último intento', async () => {
+    const { store, dns, sweep, queued, handlerFor, verified, round } = setup(3);
     const row = verified(A, 'citas.a.com');
+    // Dos fallos definitivos previos (TXT ausente).
+    dns.records.delete(txt(row.host));
+    await round();
+    await round();
+    expect(store.rows[0].failedChecks).toBe(2);
+
+    // Ahora el DNS no responde: ni suma ni reinicia la cuenta.
     dns.failing.add(txt(row.host));
+    queued.length = 0;
     await sweep.run();
     const [job] = queued;
     const handler = handlerFor(A);
-
     await expect(
       handler.handle(job.payload, { tenantId: A, attempt: 1, maxAttempts: 3 }),
     ).rejects.toThrow('DNS lookup failed');
+    await expect(
+      handler.handle(job.payload, { tenantId: A, attempt: 3, maxAttempts: 3 }),
+    ).resolves.toBeUndefined();
     expect(store.rows[0]).toMatchObject({
       status: 'VERIFIED',
-      failedChecks: 0,
+      failedChecks: 2,
     });
+  });
 
-    await handler.handle(job.payload, {
-      tenantId: A,
-      attempt: 3,
-      maxAttempts: 3,
-    });
-    expect(store.rows[0].status).toBe('DISABLED');
+  it('un resolver caído durante muchas rondas no desactiva ningún dominio', async () => {
+    const { store, dns, round, verified } = setup(1);
+    const a = verified(A, 'citas.a.com');
+    const b = verified(B, 'citas.b.com');
+    dns.failing.add(txt(a.host));
+    dns.failing.add(txt(b.host));
+    for (let i = 0; i < 5; i += 1) await round({ attempt: 3, maxAttempts: 3 });
+    expect(store.rows.map((r) => r.status)).toEqual(['VERIFIED', 'VERIFIED']);
+    expect(store.rows.map((r) => r.failedChecks)).toEqual([0, 0]);
   });
 
   it('idempotente: entregar dos veces la comprobación de una ronda no cuenta dos fallos', async () => {

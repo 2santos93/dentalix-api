@@ -18,6 +18,9 @@ export class PrismaDomainRecheckSource implements DomainRecheckSource {
       where: {
         status: 'VERIFIED',
         deletedAt: null,
+        // Una clínica borrada ya no enruta (TenantResolverService): no se
+        // re-verifican sus dominios.
+        tenant: { deletedAt: null },
         ...(afterHost ? { host: { gt: afterHost } } : {}),
       },
       select: { id: true, tenantId: true, host: true },

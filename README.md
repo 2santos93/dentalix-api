@@ -863,16 +863,20 @@ así que desactivar o borrar surte efecto al momento.
   `TENANT_DOMAIN`).
 - **Re-verificación periódica** (cola de DX-085): cada hora
   `domains.recheck-sweep.hourly` encola un `domains.recheck` por dominio
-  VERIFIED, en la clínica del dominio, con clave por (dominio, ronda); la
+  VERIFIED de una clínica viva, en la clínica del dominio, con clave por
+  (dominio, ronda); la
   ronda es la hora UTC truncada, así que repetir el barrido en la misma hora
   (reintento, arriendo perdido) no cuenta dos veces el mismo fallo. Si el
   TXT con el token sigue publicado, `failedChecks` vuelve a 0; si no, suma uno
   y al llegar a `DOMAIN_RECHECK_MAX_FAILURES` (default **3**, 1..20) seguidos
-  pasa a **DISABLED**: deja de enrutar y queda `disabledAt`. Un DNS que no
-  responde (SERVFAIL, timeout) se reintenta con el backoff de la cola y, si
-  sigue sin responder en el último intento, **cuenta como fallo** (fail-closed:
-  quien compre el dominio no puede esquivar la desactivación haciendo fallar
-  su DNS). Un DISABLED se puede volver a verificar (mismo token) o eliminar.
+  pasa a **DISABLED**: deja de enrutar y queda `disabledAt`. Solo cuentan
+  las respuestas definitivas (NXDOMAIN, NODATA o TXT sin el token). Un DNS
+  que no responde (SERVFAIL, timeout, conexión rechazada…) se reintenta con el
+  backoff de la cola y, si sigue sin responder en el último intento, la ronda
+  **no cuenta** (ni suma ni reinicia; log `domains.recheck_inconclusive`). El
+  token es público, así que contar esos errores no protegería de nada y
+  desactivaría dominios legítimos (o todos, si cae el resolver). Un DISABLED
+  se puede volver a verificar (mismo token) o eliminar.
   La desactivación la hace el sistema, sin usuario: `audit_events` exige un
   actor (CHECK `audit_events_actor_check`), así que queda en el log
   (`domains.disabled`, con ids, sin el host) y en la propia fila
