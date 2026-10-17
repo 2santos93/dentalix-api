@@ -64,8 +64,8 @@ type Probe = RecheckResult | 'inconclusive';
  *
  * DX-220 (OPS-033): antes de encolar nada consulta el TXT de TODOS los
  * dominios VERIFIED vivos de la ronda (con el resolver acotado,
- * NodeDnsResolver). Si más de la mitad dan fallo definitivo (y son al menos
- * 4, `isSuspectRound`), la ronda NO cuenta para ninguno: no encola nada y
+ * NodeDnsResolver). Si más de la mitad fallan (sin el TXT o sin respuesta,
+ * y son al menos 4, `isSuspectRound`), la ronda NO cuenta para ninguno: no encola nada y
  * deja `domains.recheck_suspect` en el log; lo probable es que falle el DNS
  * propio, no medio parque de clínicas a la vez. Si no, encola una
  * comprobación por dominio, en su clínica, con `idempotencyKey` por
@@ -101,7 +101,10 @@ export class DomainRecheckSweep {
     const probes = await this.probeAll(domains, signal);
     const missing = probes.filter((p) => p === 'missing').length;
     const inconclusive = probes.filter((p) => p === 'inconclusive').length;
-    if (isSuspectRound(domains.length, missing)) {
+    // Un timeout también es un fallo de la ronda (revisión DX-220): un DNS
+    // propio medio roto mezcla timeouts con NXDOMAIN falsos, y contar solo
+    // los definitivos dejaría pasar esos NXDOMAIN aunque falle casi todo.
+    if (isSuspectRound(domains.length, missing + inconclusive)) {
       // Sin hosts ni tokens: la ronda y los contadores.
       this.logger.warn({
         event: 'domains.recheck_suspect',

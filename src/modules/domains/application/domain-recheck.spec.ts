@@ -374,18 +374,40 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
       expect(store.rows.every((r) => r.status === 'DISABLED')).toBe(true);
     });
 
-    it('los que no responden (timeout) no cuentan como fallo definitivo ni para el freno: van sin resultado y su trabajo consulta el DNS', async () => {
-      const { dns, sweep, queued, rows } = fleet(4);
+    it('los que no responden (timeout) también cuentan para el freno: 3 timeouts y 1 NXDOMAIN de 4 no suman fallos a nadie (revisión DX-220)', async () => {
+      const { store, dns, sweep, queued, rows } = fleet(4);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      // DNS propio medio roto: unos no contestan y otro da un NXDOMAIN falso.
       dns.failing.add(txt(rows[0].host));
       dns.failing.add(txt(rows[1].host));
       dns.failing.add(txt(rows[2].host));
       dns.records.delete(txt(rows[3].host));
 
-      await expect(sweep.run()).resolves.toBe(4);
+      await expect(sweep.run()).resolves.toBe(0);
+
+      expect(queued).toEqual([]);
+      expect(store.rows.every((r) => r.failedChecks === 0)).toBe(true);
+      expect(warn).toHaveBeenCalledWith({
+        event: 'domains.recheck_suspect',
+        round: expect.any(String) as string,
+        domains: 4,
+        missing: 1,
+        inconclusive: 3,
+      });
+      warn.mockRestore();
+    });
+
+    it('con pocos timeouts la ronda cuenta: los que no responden van sin resultado y su trabajo consulta el DNS', async () => {
+      const { dns, sweep, queued, rows } = fleet(6);
+      dns.failing.add(txt(rows[0].host));
+      dns.records.delete(txt(rows[1].host));
+
+      await expect(sweep.run()).resolves.toBe(6);
 
       const byId = new Map(queued.map((q) => [q.payload.domainId, q.payload]));
       expect(byId.get(rows[0].id)?.result).toBeUndefined();
-      expect(byId.get(rows[3].id)?.result).toBe('missing');
+      expect(byId.get(rows[1].id)?.result).toBe('missing');
+      expect(byId.get(rows[2].id)?.result).toBe('found');
     });
 
     it('cada dominio se consulta UNA vez por ronda (el barrido), no dos', async () => {

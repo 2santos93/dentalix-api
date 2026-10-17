@@ -1130,8 +1130,9 @@ así que desactivar o borrar surte efecto al momento.
   (`domains.disabled`, con ids, sin el host) y en la propia fila
   (`disabledAt`, `failedChecks`, `lastCheckedAt`).
 - **Freno del barrido (DX-220, OPS-033)**: el barrido consulta primero el TXT
-  de **todos** los dominios de la ronda (16 a la vez). Si más del **50 %** da
-  fallo definitivo y son al menos **4**, lo probable es que falle el DNS
+  de **todos** los dominios de la ronda (16 a la vez). Si más del **50 %**
+  falla (sin el TXT con el token **o** sin respuesta del DNS: un DNS medio
+  roto mezcla timeouts con NXDOMAIN falsos) y son al menos **4**, lo probable es que falle el DNS
   propio (o la salida a internet), no que media flota de clínicas pierda su
   dominio a la vez: la ronda **no cuenta para ninguno** (no encola nada) y
   queda `domains.recheck_suspect` en el log (ronda y contadores, sin hosts).
