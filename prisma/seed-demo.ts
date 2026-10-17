@@ -62,10 +62,7 @@ import {
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
-import {
-  addCivilDays,
-  civilDateIn,
-} from '../src/shared/time/civil-day';
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
@@ -1107,8 +1104,12 @@ class DemoSeeder {
           notes: spec.notes,
           createdById: dentistId,
         });
+        const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
+        const owner = { userId: ownerId, role: ClinicRole.ADMIN };
         for (const item of spec.items) {
-          // Sin `price`: el caso de uso toma la tarifa del catálogo.
+          // Sin `price`: el caso de uso toma la tarifa del catálogo. El
+          // descuento pasa por la política de la clínica (DX-204) con el rol
+          // de quien lo da.
           const added = await this.use(AddTreatmentPlanItemUseCase).execute(
             plan.id,
             {
@@ -1116,14 +1117,16 @@ class DemoSeeder {
               surfaces: item.surfaces,
               catalogItemId: catalogId(catalog, item.code),
               discount: item.discount,
+              discountReason: item.discountReason,
             },
+            item.discountBy === 'owner' ? owner : dentist,
           );
           if (item.status !== 'PROPOSED') {
             // DONE refleja el ítem en el odontograma (lo hace el caso de uso).
             await this.use(UpdateTreatmentPlanItemUseCase).execute(
               added.id,
               { status: item.status },
-              dentistId,
+              dentist,
             );
           }
         }
@@ -1285,10 +1288,14 @@ class DemoSeeder {
       items: readonly { code: string; tooth: string }[],
     ) => {
       for (const item of items) {
-        await this.use(AddTreatmentPlanItemUseCase).execute(planId, {
-          toothNumber: item.tooth,
-          catalogItemId: catalogId(catalog, item.code),
-        });
+        await this.use(AddTreatmentPlanItemUseCase).execute(
+          planId,
+          {
+            toothNumber: item.tooth,
+            catalogItemId: catalogId(catalog, item.code),
+          },
+          { userId: dentistId, role: ClinicRole.DENTIST },
+        );
       }
     };
     const presentedAt = daysAgoAt(this.now, spec.presentedDaysAgo, 10 * 60);

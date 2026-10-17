@@ -136,6 +136,8 @@ export function isClosedPlanItemChangeAllowed(
     status?: TreatmentPlanItemStatus;
     price?: unknown;
     discount?: unknown;
+    discountReason?: unknown;
+    discountReasonNote?: unknown;
     surfaces?: unknown;
     notes?: unknown;
   },
@@ -146,6 +148,8 @@ export function isClosedPlanItemChangeAllowed(
     patch.status === TreatmentPlanItemStatus.DONE &&
     patch.price === undefined &&
     patch.discount === undefined &&
+    patch.discountReason === undefined &&
+    patch.discountReasonNote === undefined &&
     patch.surfaces === undefined &&
     patch.notes === undefined
   );

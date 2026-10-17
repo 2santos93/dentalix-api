@@ -1,7 +1,13 @@
+import {
+  ADMIN_ACTOR,
+  FIXED_CLOCK,
+  testDiscountPolicy,
+} from './__fixtures__/discount-fixtures';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
+  DiscountReason,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
@@ -74,8 +80,18 @@ function setup(acceptance: typeof SIGNED | null, status?: TreatmentPlanStatus) {
     repo,
     plan,
     item,
-    add: new AddTreatmentPlanItemUseCase(repo, catalog()),
-    update: new UpdateTreatmentPlanItemUseCase(repo, catalog()),
+    add: new AddTreatmentPlanItemUseCase(
+      repo,
+      catalog(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    ),
+    update: new UpdateTreatmentPlanItemUseCase(
+      repo,
+      catalog(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    ),
     remove: new RemoveTreatmentPlanItemUseCase(repo),
     updatePlan: new UpdateTreatmentPlanUseCase(
       repo,
@@ -91,12 +107,17 @@ const DENTIST = { role: ClinicRole.DENTIST };
 describe('Descuento por ítem (DX-012)', () => {
   it('el total del plan es Σ(precio − descuento)', async () => {
     const { get, add } = setup(null);
-    await add.execute('plan1', {
-      toothNumber: '21',
-      catalogItemId: 'cat1',
-      price: 100,
-      discount: 15.5,
-    });
+    await add.execute(
+      'plan1',
+      {
+        toothNumber: '21',
+        catalogItemId: 'cat1',
+        price: 100,
+        discount: 15.5,
+        discountReason: DiscountReason.PROMOTION,
+      },
+      ADMIN_ACTOR,
+    );
     const detail = await get.execute('plan1');
     expect(detail.items.map((i) => i.discount)).toEqual([20, 15.5]);
     expect(detail.total).toBe(264.5);
@@ -104,35 +125,59 @@ describe('Descuento por ítem (DX-012)', () => {
 
   it('el descuento se guarda (0 si se omite) y nunca supera el precio (400)', async () => {
     const { add, update } = setup(null);
-    const created = await add.execute('plan1', {
-      toothNumber: '21',
-      catalogItemId: 'cat1',
-    });
-    expect(created.discount).toBe(0);
-    await expect(
-      add.execute('plan1', {
+    const created = await add.execute(
+      'plan1',
+      {
         toothNumber: '21',
         catalogItemId: 'cat1',
-        price: 100,
-        discount: 100.01,
-      }),
+      },
+      ADMIN_ACTOR,
+    );
+    expect(created.discount).toBe(0);
+    await expect(
+      add.execute(
+        'plan1',
+        {
+          toothNumber: '21',
+          catalogItemId: 'cat1',
+          price: 100,
+          discount: 100.01,
+        },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     // Bajar el precio por debajo del descuento ya guardado (20) tampoco vale.
-    await expect(update.execute('item1', { price: 10 })).rejects.toThrow(
-      'El descuento no puede ser mayor que el precio',
-    );
     await expect(
-      update.execute('item1', { discount: 201 }),
+      update.execute('item1', { price: 10 }, ADMIN_ACTOR),
+    ).rejects.toThrow('El descuento no puede ser mayor que el precio');
+    await expect(
+      update.execute('item1', { discount: 201 }, ADMIN_ACTOR),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect((await update.execute('item1', { discount: 50 })).discount).toBe(50);
+    expect(
+      (
+        await update.execute(
+          'item1',
+          { discount: 50, discountReason: DiscountReason.LOYALTY },
+          ADMIN_ACTOR,
+        )
+      ).discount,
+    ).toBe(50);
   });
 });
 
 describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
   it('sin firma, todo sigue editable como antes', async () => {
     const { add, update, remove, updatePlan } = setup(null);
-    await add.execute('plan1', { toothNumber: '21', catalogItemId: 'cat1' });
-    await update.execute('item1', { price: 300, surfaces: ['MESIAL'] });
+    await add.execute(
+      'plan1',
+      { toothNumber: '21', catalogItemId: 'cat1' },
+      ADMIN_ACTOR,
+    );
+    await update.execute(
+      'item1',
+      { price: 300, surfaces: ['MESIAL'] },
+      ADMIN_ACTOR,
+    );
     await remove.execute('item1');
     await updatePlan.execute(
       'plan1',
@@ -144,7 +189,11 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
   it('no admite ítems nuevos (409)', async () => {
     const { add } = setup(SIGNED);
     await expect(
-      add.execute('plan1', { toothNumber: '21', catalogItemId: 'cat1' }),
+      add.execute(
+        'plan1',
+        { toothNumber: '21', catalogItemId: 'cat1' },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toThrow(SIGNED_PLAN_LOCKED_MESSAGE);
   });
 
@@ -157,17 +206,21 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
       { notes: 'otra' },
       { status: TreatmentPlanItemStatus.PROPOSED },
     ]) {
-      await expect(update.execute('item1', patch)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        update.execute('item1', patch, ADMIN_ACTOR),
+      ).rejects.toBeInstanceOf(ConflictException);
     }
   });
 
   it('sí deja avanzar el tratamiento: marcar el ítem como realizado', async () => {
     const { update } = setup(SIGNED);
-    const done = await update.execute('item1', {
-      status: TreatmentPlanItemStatus.DONE,
-    });
+    const done = await update.execute(
+      'item1',
+      {
+        status: TreatmentPlanItemStatus.DONE,
+      },
+      ADMIN_ACTOR,
+    );
     expect(done.status).toBe(TreatmentPlanItemStatus.DONE);
   });
 
@@ -220,13 +273,21 @@ describe('Plan cerrado: ítems congelados y moneda fija (DX-109)', () => {
     async (status) => {
       const { add, update, remove } = setup(null, status);
       await expect(
-        add.execute('plan1', { toothNumber: '21', catalogItemId: 'cat1' }),
+        add.execute(
+          'plan1',
+          { toothNumber: '21', catalogItemId: 'cat1' },
+          ADMIN_ACTOR,
+        ),
       ).rejects.toThrow(/sus ítems ya no se pueden/);
       await expect(
-        update.execute('item1', { price: 300 }),
+        update.execute('item1', { price: 300 }, ADMIN_ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
       await expect(
-        update.execute('item1', { status: TreatmentPlanItemStatus.DONE }),
+        update.execute(
+          'item1',
+          { status: TreatmentPlanItemStatus.DONE },
+          ADMIN_ACTOR,
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
       await expect(remove.execute('item1')).rejects.toBeInstanceOf(
         ConflictException,
@@ -305,9 +366,13 @@ describe('Plan cerrado: ítems congelados y moneda fija (DX-109)', () => {
       price: 100,
       status: TreatmentPlanItemStatus.ACCEPTED,
     });
-    const done = await update.execute('item2', {
-      status: TreatmentPlanItemStatus.DONE,
-    });
+    const done = await update.execute(
+      'item2',
+      {
+        status: TreatmentPlanItemStatus.DONE,
+      },
+      ADMIN_ACTOR,
+    );
     expect(done.status).toBe(TreatmentPlanItemStatus.DONE);
   });
 
@@ -326,16 +391,28 @@ describe('Plan cerrado: ítems congelados y moneda fija (DX-109)', () => {
       status: TreatmentPlanItemStatus.DONE,
     });
     await expect(
-      update.execute('item2', {
-        status: TreatmentPlanItemStatus.DONE,
-        price: 50,
-      }),
+      update.execute(
+        'item2',
+        {
+          status: TreatmentPlanItemStatus.DONE,
+          price: 50,
+        },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toThrow(/Solo se puede marcar como realizado/);
     await expect(
-      update.execute('item1', { status: TreatmentPlanItemStatus.DONE }),
+      update.execute(
+        'item1',
+        { status: TreatmentPlanItemStatus.DONE },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
-      update.execute('item3', { status: TreatmentPlanItemStatus.ACCEPTED }),
+      update.execute(
+        'item3',
+        { status: TreatmentPlanItemStatus.ACCEPTED },
+        ADMIN_ACTOR,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -350,7 +427,11 @@ describe('Plan cerrado: ítems congelados y moneda fija (DX-109)', () => {
         status: TreatmentPlanItemStatus.ACCEPTED,
       });
       await expect(
-        update.execute('item2', { status: TreatmentPlanItemStatus.DONE }),
+        update.execute(
+          'item2',
+          { status: TreatmentPlanItemStatus.DONE },
+          ADMIN_ACTOR,
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
     },
   );

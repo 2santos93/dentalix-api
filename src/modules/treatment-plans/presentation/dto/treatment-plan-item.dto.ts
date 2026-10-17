@@ -1,5 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ToothSurface, TreatmentPlanItemStatus } from '@prisma/client';
+import {
+  DiscountReason,
+  ToothSurface,
+  TreatmentPlanItemStatus,
+} from '@prisma/client';
 
 // Response shape for TreatmentPlanItem — documents the TreatmentPlanItem
 // entity contract for Swagger (same convention as AppointmentDto /
@@ -31,6 +35,41 @@ export class TreatmentPlanItemDto {
 
   @ApiProperty({ description: 'Descuento en la moneda del plan (0 si no hay)' })
   discount!: number;
+
+  @ApiProperty({
+    enum: DiscountReason,
+    nullable: true,
+    description: 'DX-204: motivo del descuento vigente',
+  })
+  discountReason!: DiscountReason | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  discountReasonNote!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-204: quién dio el descuento vigente (null sin descuento o anterior a DX-204)',
+  })
+  discountById!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-204: cuándo (hora del servidor)',
+  })
+  discountAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-204: sede donde se dio (la activa o la principal)',
+  })
+  discountLocationId!: string | null;
 
   @ApiProperty({ enum: TreatmentPlanItemStatus })
   status!: TreatmentPlanItemStatus;

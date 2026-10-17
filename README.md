@@ -107,8 +107,9 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, planes de tratamiento en todos
-   sus estados (con un presupuesto en borrador con descuentos, listo para
-   presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
+   sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
+   odontólogo y otro del 15 % de la administración con su motivo, que salen en
+   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
    pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas.
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
@@ -665,6 +666,42 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
   del estado de cuenta, que crece con los deudores.
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
+
+## Tope de descuento por rol e informe de descuentos (DX-204)
+
+- **Política** (`discount_policies`, una fila por clínica, RLS FORCE): % máximo
+  de descuento por ítem según el rol de quien lo da y el % por encima del cual
+  el motivo es obligatorio. Sin fila, los valores por defecto: ADMIN 100,
+  DENTIST 10, ASSISTANT y RECEPTION 0; motivo por encima del 10 %.
+  `GET /api/v1/discount-policy` (ADMIN, DENTIST, ASSISTANT) y
+  `PUT /api/v1/discount-policy` (solo ADMIN, auditado como `DISCOUNT_POLICY`).
+- **En el servidor**: al crear o editar un ítem del plan (y en
+  `POST /treatment-plans/:id/items/bulk-discount`) el descuento se compara en
+  céntimos con el tope del rol del token: si lo supera, 403 «Tu rol permite
+  hasta un X % de descuento por ítem.» y no se escribe nada. Por encima del
+  umbral sin `discountReason` (o con `OTHER` sin nota), 422. Cambiar el precio
+  de un ítem con descuento vuelve a comprobar su %. Quitar un descuento (0) lo
+  puede cualquier rol que edite el plan. Cada descuento guarda
+  `discountById`, `discountAt` (hora del servidor) y `discountLocationId` (la
+  sede del request o la principal).
+- **«Descuento %» en bloque**: el % de cada precio, redondeado a la unidad de la
+  moneda del plan (COP, CLP, JPY, KRW y PYG sin decimales; el resto a
+  céntimos) y nunca por encima del tope del rol ítem a ítem (si el redondeo lo
+  pasara, baja a la unidad que lo respeta). Todo o nada, en una transacción;
+  un evento de auditoría (`reason` BULK_DISCOUNT) sin importes ni la nota.
+- **Plan aceptado** (con o sin firma) o cerrado: sus descuentos no cambian (409).
+  Los triggers de bloqueo de ítems cubren también las columnas del descuento.
+- **Informe** `GET /api/v1/reports/discounts` y `.csv` (solo ADMIN, auditados
+  como VIEW/EXPORT de `TREATMENT_PLAN_ITEM` con `reason` DISCOUNT_REPORT):
+  ítems vivos con descuento > 0 de planes vivos y no anulados (ni rechazados
+  ni cancelados: una alternativa DX-040 copia los descuentos y la opción
+  rechazada los duplicaría), por días civiles de la zona de
+  su sede (`from`/`to`, como mucho 366 días), sede (`locationId` o
+  `X-Location-Id`) y quién lo dio (`professionalId`). Totales por moneda (bruto
+  = precio de esos ítems, % sobre el bruto) y detalle paginado. Los descuentos
+  anteriores a DX-204 se fechan por el alta del ítem, con la sede de
+  presentación del plan y sin autor. El CSV protege las celdas contra fórmulas
+  como el de la cartera.
 
 ## Recibo de caja por abono (DX-136)
 

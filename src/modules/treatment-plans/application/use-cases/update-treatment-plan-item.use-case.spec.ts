@@ -1,6 +1,12 @@
+import {
+  ADMIN_ACTOR,
+  FIXED_CLOCK,
+  testDiscountPolicy,
+} from './__fixtures__/discount-fixtures';
 import { NotFoundException } from '@nestjs/common';
 import {
   CatalogKind,
+  ClinicRole,
   ToothSurface,
   TreatmentPlanItemStatus,
 } from '@prisma/client';
@@ -30,6 +36,11 @@ function fakeItem(
     catalogItemId: 'cat1',
     price: 200,
     discount: 0,
+    discountReason: null,
+    discountReasonNote: null,
+    discountById: null,
+    discountAt: null,
+    discountLocationId: null,
     status: TreatmentPlanItemStatus.PROPOSED,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -56,6 +67,8 @@ function makeRepo(
     updateItem: (): Promise<TreatmentPlanItem> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    applyBulkDiscount: (): Promise<TreatmentPlanItem[]> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
@@ -90,10 +103,15 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       updateItem: (): Promise<TreatmentPlanItem> =>
         Promise.reject(new Error('updateItem should not be called')),
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeCatalogRepo(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
     await expect(
-      uc.execute('missing-id', { price: 100 }),
+      uc.execute('missing-id', { price: 100 }, ADMIN_ACTOR),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -114,9 +132,14 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         });
       },
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeCatalogRepo(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    const result = await uc.execute(existing.id, { price: 999 });
+    const result = await uc.execute(existing.id, { price: 999 }, ADMIN_ACTOR);
 
     expect(result.price).toBe(999);
     expect(receivedPatch).toEqual({ price: 999 });
@@ -134,9 +157,14 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       updateItem: (): Promise<TreatmentPlanItem> =>
         Promise.resolve({ ...existing, status }),
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeCatalogRepo(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    const result = await uc.execute(existing.id, { status });
+    const result = await uc.execute(existing.id, { status }, ADMIN_ACTOR);
 
     expect(result.status).toBe(status);
   });
@@ -159,12 +187,21 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         });
       },
     });
-    const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeCatalogRepo(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
 
-    const result = await uc.execute(existing.id, {
-      surfaces: [ToothSurface.DISTAL],
-      notes: 'Actualizado',
-    });
+    const result = await uc.execute(
+      existing.id,
+      {
+        surfaces: [ToothSurface.DISTAL],
+        notes: 'Actualizado',
+      },
+      ADMIN_ACTOR,
+    );
 
     expect(result.surfaces).toEqual([ToothSurface.DISTAL]);
     expect(result.notes).toBe('Actualizado');
@@ -210,12 +247,17 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         findById: (): Promise<DentalCatalogItem | null> =>
           Promise.resolve({ kind: CatalogKind.DIAGNOSIS } as DentalCatalogItem),
       });
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, catalog);
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        catalog,
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
 
       const result = await uc.execute(
         existing.id,
         { status: TreatmentPlanItemStatus.DONE },
-        'user1',
+        { userId: 'user1', role: ClinicRole.ADMIN },
       );
 
       expect(result.status).toBe(TreatmentPlanItemStatus.DONE);
@@ -233,14 +275,23 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
 
     it('defaults the record kind to PROCEDURE when the catalog item is gone', async () => {
       const { repo, calls } = capture(fakeItem());
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
 
-      await uc.execute('item1', { status: TreatmentPlanItemStatus.DONE });
+      await uc.execute(
+        'item1',
+        { status: TreatmentPlanItemStatus.DONE },
+        ADMIN_ACTOR,
+      );
 
       expect(calls[0].mirror).toEqual({
         patientId: 'pat1',
         kind: CatalogKind.PROCEDURE,
-        performedById: undefined,
+        performedById: ADMIN_ACTOR.userId,
       });
     });
 
@@ -248,18 +299,32 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       const { repo, calls } = capture(
         fakeItem({ status: TreatmentPlanItemStatus.DONE }),
       );
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
 
-      await uc.execute('item1', { status: TreatmentPlanItemStatus.DONE });
+      await uc.execute(
+        'item1',
+        { status: TreatmentPlanItemStatus.DONE },
+        ADMIN_ACTOR,
+      );
 
       expect(calls[0].mirror).toBeUndefined();
     });
 
     it('does not ask for a mirror on a patch that does not touch the status', async () => {
       const { repo, calls } = capture(fakeItem());
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
 
-      await uc.execute('item1', { price: 300 });
+      await uc.execute('item1', { price: 300 }, ADMIN_ACTOR);
 
       expect(calls[0].mirror).toBeUndefined();
     });
@@ -274,10 +339,19 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         updateItem: (): Promise<TreatmentPlanItem> =>
           Promise.reject(new Error('odontogram write failed')),
       });
-      const uc = new UpdateTreatmentPlanItemUseCase(repo, makeCatalogRepo());
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
 
       await expect(
-        uc.execute(existing.id, { status: TreatmentPlanItemStatus.DONE }),
+        uc.execute(
+          existing.id,
+          { status: TreatmentPlanItemStatus.DONE },
+          ADMIN_ACTOR,
+        ),
       ).rejects.toThrow('odontogram write failed');
     });
   });

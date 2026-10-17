@@ -22,6 +22,11 @@ function fakeItem(
     catalogItemId: 'cat1',
     price: 200,
     discount: 0,
+    discountReason: null,
+    discountReasonNote: null,
+    discountById: null,
+    discountAt: null,
+    discountLocationId: null,
     status: TreatmentPlanItemStatus.PROPOSED,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -48,6 +53,8 @@ function makeRepo(
     updateItem: (): Promise<TreatmentPlanItem> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
+      Promise.reject(new Error('not implemented in this fake')),
+    applyBulkDiscount: (): Promise<TreatmentPlanItem[]> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };

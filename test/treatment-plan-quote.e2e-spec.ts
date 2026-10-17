@@ -262,6 +262,8 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       catalogItemId: catalogA,
       price: 1000,
       discount: 150.5,
+      // DX-204: por encima del 10 % la API pide el motivo.
+      discountReason: 'PROMOTION',
     });
     await addItem(clinicA, planA, {
       toothNumber: '16',

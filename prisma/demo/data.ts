@@ -2,6 +2,7 @@ import {
   ClinicRole,
   DentitionEventReason,
   DentitionType,
+  DiscountReason,
   DocType,
   InventoryMovementType,
   PaymentMethod,
@@ -1052,6 +1053,13 @@ interface DemoPlanItem {
   status: TreatmentPlanItemStatus;
   /** Descuento en COP sobre la tarifa del catálogo (DX-012). */
   discount?: number;
+  /**
+   * DX-204: motivo del descuento y quién lo da. Sin `discountBy`, el
+   * odontólogo del plan (tope 10 %); `owner`, la administradora (tope 100 %),
+   * que por encima del 10 % tiene que dar el motivo.
+   */
+  discountReason?: DiscountReason;
+  discountBy?: 'owner';
 }
 
 interface DemoPayment {
@@ -1183,7 +1191,10 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
         tooth: '22',
         surfaces: [VESTIBULAR],
         status: PROPOSED,
-        discount: 38000,
+        // DX-204: 15 % de la administradora, con motivo (sale en el informe).
+        discount: 57000,
+        discountReason: 'PROMOTION',
+        discountBy: 'owner',
       },
     ],
     payments: [],
@@ -1286,6 +1297,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
         tooth: '21',
         status: PROPOSED,
         discount: 120000,
+        discountReason: 'LOYALTY',
       },
     ],
     signedAcceptance: true,
@@ -1916,7 +1928,11 @@ export interface DemoCollectionNote {
 }
 
 export const DEMO_COLLECTION_NOTES: readonly DemoCollectionNote[] = [
-  { patientIndex: 8, channel: CollectionChannel.CALL, outcome: CollectionOutcome.NO_ANSWER },
+  {
+    patientIndex: 8,
+    channel: CollectionChannel.CALL,
+    outcome: CollectionOutcome.NO_ANSWER,
+  },
   {
     patientIndex: 8,
     channel: CollectionChannel.WHATSAPP_LINK,

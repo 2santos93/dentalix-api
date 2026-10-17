@@ -212,3 +212,17 @@ export const COLLECTION_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];
+
+// Política de descuentos (DX-204) — LEERLA: quienes editan ítems de plan
+// (CLINICAL_ROLES), para que el formulario avise del tope y del motivo antes de
+// enviar; la frontera es el servidor. CAMBIARLA: solo gestión.
+export const DISCOUNT_POLICY_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.ADMIN,
+];
+export const DISCOUNT_POLICY_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Informe «Descuentos» y su CSV (DX-204): lo que se regala, por profesional y
+// sede, con nombres de pacientes. Solo gestión, y queda auditado.
+export const DISCOUNT_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
