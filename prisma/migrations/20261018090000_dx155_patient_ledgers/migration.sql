@@ -70,7 +70,7 @@
 -- superusuario, FORCE lo sujeta a la RLS y el INSERT … SELECT vería 0 filas).
 -- `NO FORCE` toma un ACCESS EXCLUSIVE sobre esas tablas hasta el COMMIT: el
 -- despliegue para las escrituras de pacientes, citas, planes y abonos lo que
--- dura (~3 s con 60k pacientes, 42k planes, 28k abonos y 350k citas en la
+-- dura (~6 s con 60k pacientes, 42k planes, 28k abonos y 350k citas en la
 -- máquina del benchmark de docs/perf/DX-145.md). `lock_timeout`: si una
 -- transacción larga las retiene, falla limpia y se reintenta el deploy.
 --
