@@ -32,6 +32,25 @@ describe('TokenService', () => {
     expect(decoded.role).toBe('ADMIN');
   });
 
+  it('SEC-008: issueAccessOnly firma solo un access token con su TTL y devuelve el exp', async () => {
+    const before = Math.floor(Date.now() / 1000);
+    const { accessToken, expiresAt } = await svc.issueAccessOnly(
+      { ...payload, breakGlass: true },
+      1800,
+    );
+    const decoded = (await svc.verifyAccess(accessToken)) as unknown as {
+      breakGlass: boolean;
+      exp: number;
+      iat: number;
+    };
+    expect(decoded.breakGlass).toBe(true);
+    expect(decoded.exp - decoded.iat).toBe(1800);
+    expect(decoded.iat).toBeGreaterThanOrEqual(before);
+    expect(expiresAt.getTime()).toBe(decoded.exp * 1000);
+    // No vale como refresh (otro secreto).
+    await expect(svc.verifyRefresh(accessToken)).rejects.toBeDefined();
+  });
+
   it('rejects a tampered access token', async () => {
     await expect(svc.verifyAccess('not-a-token')).rejects.toBeDefined();
   });

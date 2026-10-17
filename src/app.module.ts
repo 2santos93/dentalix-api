@@ -45,6 +45,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
 import { OutboundMessagesModule } from './modules/notifications/outbound/outbound-messages.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
+import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -91,6 +92,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     LocationsModule,
     LocationScheduleModule,
     PlatformModule,
+    // Accesos de soporte (break-glass) visibles para el ADMIN (SEC-008).
+    SupportAccessesModule,
     DashboardModule,
     ConsentsModule,
     PeriodontalModule,

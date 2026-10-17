@@ -133,9 +133,8 @@ describe('RefreshUseCase', () => {
     expect(tokens.issue).not.toHaveBeenCalled();
   });
 
-  it('keeps a platform admin who entered a clinic without membership as ADMIN', async () => {
-    // Mismo criterio que LoginUseCase.loginAsPlatformAdminInTenant.
-    const { uc, tokens } = setup({
+  it('SEC-008: NO renueva la sesión de clínica de un superadmin sin membresía (los refresh de antes)', async () => {
+    const { uc, tokens, repo } = setup({
       state: {
         tokenVersion: 0,
         isPlatformAdmin: true,
@@ -143,14 +142,24 @@ describe('RefreshUseCase', () => {
       },
     });
 
-    await uc.execute({ refreshToken: 'old-ref' });
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
+  });
 
-    expect(tokens.issue).toHaveBeenCalledWith({
-      sub: 'u1',
-      tenantId: 't1',
-      role: ClinicRole.ADMIN,
-      tv: 0,
+  it('SEC-008: rechaza un refresh break-glass sin mirar la BD', async () => {
+    const { uc, tokens, repo } = setup({
+      payload: { ...tenantPayload, breakGlass: true },
+      state: activeMember(ClinicRole.ADMIN),
     });
+
+    await expect(
+      uc.execute({ refreshToken: 'old-ref' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(repo.findSessionState).not.toHaveBeenCalled();
+    expect(tokens.issue).not.toHaveBeenCalled();
   });
 
   it('renews a platform session while the user is still platform admin', async () => {

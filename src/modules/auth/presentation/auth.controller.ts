@@ -29,7 +29,11 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RegisterClinicUseCase } from '../application/use-cases/register-clinic.use-case';
-import { LoginUseCase } from '../application/use-cases/login.use-case';
+import {
+  LoginUseCase,
+  isBreakGlassSession,
+  type LoginResult,
+} from '../application/use-cases/login.use-case';
 import { RefreshUseCase } from '../application/use-cases/refresh.use-case';
 import { LogoutUseCase } from '../application/use-cases/logout.use-case';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
@@ -52,6 +56,35 @@ import {
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { LoginLockoutService } from '../application/login-lockout.service';
 import { LoginLockedError, loginLockedMessage } from '../domain/login-lockout';
+
+/** SEC-008: respuesta del login break-glass (solo access token). */
+interface BreakGlassResponse {
+  accessToken: string;
+  breakGlass: true;
+  expiresAt: string;
+}
+
+/**
+ * 429 con `Retry-After` si `err` es un bloqueo del login (DX-048) o del código
+ * MFA (SEC-008); el mismo mensaje en ambos casos. Cualquier otro error, tal cual.
+ */
+function lockedOr(err: unknown, res: Response): unknown {
+  if (!(err instanceof LoginLockedError)) return err;
+  res.setHeader('Retry-After', String(err.retryAfterSeconds));
+  return new HttpException(
+    {
+      statusCode: HttpStatus.TOO_MANY_REQUESTS,
+      error: 'Too Many Requests',
+      message: loginLockedMessage(err.retryAfterSeconds),
+    },
+    HttpStatus.TOO_MANY_REQUESTS,
+  );
+}
+
+function userAgentOf(req: TenantHostRequest): string | null {
+  const value = req.headers['user-agent'];
+  return (Array.isArray(value) ? value[0] : value) || null;
+}
 
 export const REGISTER_ACCEPTED_MESSAGE =
   'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
@@ -166,13 +199,28 @@ export class AuthController {
   @Audit({ action: 'LOGIN', resource: 'SESSION' })
   @Post('login')
   @ApiCreatedResponse({ type: AuthTokensDto })
+  @ApiOperation({
+    summary:
+      'Inicia sesión en la clínica del host (o en plataforma desde el apex)',
+    description:
+      'SEC-008: un superadmin SIN membresía en la clínica solo entra como acceso de soporte (break-glass): ' +
+      'necesita el MFA enrolado (`/platform/mfa`), `mfaCode` y `breakGlassReason`. Recibe solo un access token ' +
+      'ADMIN de vida corta (`breakGlass: true`, `expiresAt`), sin refresh, y el acceso queda en ' +
+      '`GET /support-accesses` de la clínica.',
+  })
   @ApiUnauthorizedResponse({
-    description: 'Credenciales inválidas (mismo error exista o no el email)',
+    description:
+      'Credenciales inválidas (mismo error exista o no el email). Solo tras una contraseña correcta de superadmin sin membresía: ' +
+      '`code: "MFA_NOT_ENROLLED"` (debe activar el MFA en plataforma), `code: "MFA_COOLDOWN"` (MFA recién activado: espera de seguridad hasta `availableAt`) o `code: "BREAK_GLASS_REQUIRED"` (faltan código y motivo).',
+  })
+  @ApiBadRequestResponse({
+    description:
+      '`mfaCode` no es de 6 dígitos o `breakGlassReason` no tiene 10–500 caracteres',
   })
   // Encima de @RateLimit: completa su 429 genérico con el caso del bloqueo.
   @ApiTooManyRequestsResponse({
     description:
-      'Demasiados intentos fallidos de esta cuenta o desde esta IP, o avalancha de peticiones. `Retry-After` lleva los segundos de espera; el mensaje es el mismo exista o no el email.',
+      'Demasiados intentos fallidos de esta cuenta, desde esta IP o del código MFA de un superadmin, o avalancha de peticiones. `Retry-After` lleva los segundos de espera; el mensaje es el mismo exista o no el email.',
     headers: {
       'Retry-After': {
         description: 'Segundos que faltan para poder reintentar',
@@ -186,34 +234,29 @@ export class AuthController {
     @Req() req: TenantHostRequest & { ip?: string },
     @Res({ passthrough: true }) res: Response,
     @Body() dto: LoginDto,
-  ): Promise<DeliveredSession> {
+  ): Promise<DeliveredSession | BreakGlassResponse> {
     const tenantId = req.tenantHost?.tenantId;
     try {
       await this.lockout.assertCanAttempt(dto.email, req.ip);
     } catch (err) {
-      if (!(err instanceof LoginLockedError)) throw err;
-      res.setHeader('Retry-After', String(err.retryAfterSeconds));
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: 'Too Many Requests',
-          message: loginLockedMessage(err.retryAfterSeconds),
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      throw lockedOr(err, res);
     }
     // Host SIN clínica (el apex): es la puerta del área de plataforma. Solo la
     // resuelve un superadmin, y recibe un token de plataforma (sin tenant ni
     // rol). Para cualquier otro usuario `executePlatform` lanza el mismo
     // 'Invalid credentials', así que no se filtra si el email existe ni si es
     // superadmin.
-    let pair: { accessToken: string; refreshToken: string };
+    let result: LoginResult;
     try {
-      pair = tenantId
+      result = tenantId
         ? await this.login.execute({
             tenantId,
             email: dto.email,
             password: dto.password,
+            mfaCode: dto.mfaCode,
+            breakGlassReason: dto.breakGlassReason,
+            ip: req.ip ?? null,
+            userAgent: userAgentOf(req),
           })
         : await this.login.executePlatform({
             email: dto.email,
@@ -223,10 +266,21 @@ export class AuthController {
       if (err instanceof UnauthorizedException) {
         await this.lockout.recordFailure(dto.email, req.ip);
       }
-      throw err;
+      // SEC-008: el código MFA del break-glass tiene su propio bloqueo.
+      throw lockedOr(err, res);
     }
     await this.lockout.recordSuccess(dto.email);
-    return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
+    if (isBreakGlassSession(result)) {
+      // Sin refresh: y si en este navegador quedaba la cookie de una sesión
+      // anterior en esta clínica, se borra para que nada renueve el acceso.
+      if (this.cookie.wantsCookie(req)) this.cookie.clear(res);
+      return {
+        accessToken: result.accessToken,
+        breakGlass: true,
+        expiresAt: result.expiresAt.toISOString(),
+      };
+    }
+    return this.cookie.deliver(res, result, this.cookie.wantsCookie(req));
   }
 
   // Renovación: el tenant va dentro del refresh token. Por cookie, la sesión

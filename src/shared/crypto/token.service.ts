@@ -9,6 +9,12 @@ export interface TenantJwtPayload {
   sub: string;
   tenantId: string;
   role: ClinicRole;
+  /**
+   * SEC-008: acceso de soporte (break-glass) de un superadmin a una clínica
+   * en la que no es miembro. Solo lo lleva un access token de vida corta:
+   * nunca se emite un refresh con él y /auth/refresh lo rechaza.
+   */
+  breakGlass?: true;
 }
 
 /**
@@ -88,6 +94,23 @@ export class TokenService {
       jwtid: randomUUID(),
     });
     return { accessToken, refreshToken };
+  }
+
+  /**
+   * SEC-008: solo un access token, con su propio TTL (el break-glass, ≤ 60
+   * min) y SIN refresh: la sesión no se puede prolongar. Devuelve también el
+   * instante de caducidad (el `exp` firmado) para registrarlo y mostrarlo.
+   */
+  async issueAccessOnly(
+    payload: IssuablePayload,
+    ttlSeconds: number,
+  ): Promise<{ accessToken: string; expiresAt: Date }> {
+    const accessToken = await this.jwt.signAsync(payload, {
+      secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      expiresIn: ttlSeconds,
+    });
+    const { exp } = this.jwt.decode<{ exp: number }>(accessToken);
+    return { accessToken, expiresAt: new Date(exp * 1000) };
   }
 
   verifyAccess(token: string): Promise<JwtPayload> {

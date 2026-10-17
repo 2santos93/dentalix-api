@@ -7,6 +7,11 @@ import {
   PasswordService,
 } from '../../../../shared/crypto/password.service';
 
+// Un miembro de la clínica nunca pasa por el break-glass (SEC-008).
+const unusedBreakGlass = {
+  open: () => Promise.reject(new Error('break-glass no esperado')),
+} as never;
+
 const password = new PasswordService();
 
 function makeRepo(
@@ -38,7 +43,7 @@ describe('LoginUseCase', () => {
       role: ClinicRole.ADMIN,
       tokenVersion: 0,
     });
-    const uc = new LoginUseCase(repo, password, tokens);
+    const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
     const result = await uc.execute({
       tenantId: 't1',
       email: 'A@B.com',
@@ -58,7 +63,12 @@ describe('LoginUseCase', () => {
     const issue = jest
       .fn()
       .mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref' });
-    const uc = new LoginUseCase(repo, password, { issue } as never);
+    const uc = new LoginUseCase(
+      repo,
+      password,
+      { issue } as never,
+      unusedBreakGlass,
+    );
     await uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'S3cret!' });
     expect(issue).toHaveBeenCalledWith({
       sub: 'u1',
@@ -69,7 +79,12 @@ describe('LoginUseCase', () => {
   });
 
   it('rejects when there is no membership', async () => {
-    const uc = new LoginUseCase(makeRepo(null), password, tokens);
+    const uc = new LoginUseCase(
+      makeRepo(null),
+      password,
+      tokens,
+      unusedBreakGlass,
+    );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'x' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -83,7 +98,7 @@ describe('LoginUseCase', () => {
       role: ClinicRole.ADMIN,
       tokenVersion: 0,
     });
-    const uc = new LoginUseCase(repo, password, tokens);
+    const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'wrong' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -95,7 +110,12 @@ describe('LoginUseCase', () => {
   describe('timing parity (SEC-017)', () => {
     it('runs argon2 against the dummy hash when the email does not exist', async () => {
       const spy = jest.spyOn(password, 'verify');
-      const uc = new LoginUseCase(makeRepo(null), password, tokens);
+      const uc = new LoginUseCase(
+        makeRepo(null),
+        password,
+        tokens,
+        unusedBreakGlass,
+      );
       await expect(
         uc.execute({ tenantId: 't1', email: 'nadie@x.com', password: 'pw' }),
       ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
@@ -114,7 +134,7 @@ describe('LoginUseCase', () => {
           tokenVersion: 0,
         });
       const spy = jest.spyOn(password, 'verify');
-      const uc = new LoginUseCase(repo, password, tokens);
+      const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
       await expect(
         uc.execute({ tenantId: 't1', email: 'otra@x.com', password: 'pw' }),
       ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
@@ -125,7 +145,12 @@ describe('LoginUseCase', () => {
 
     it('runs argon2 against the dummy hash on the apex login when the email does not exist', async () => {
       const spy = jest.spyOn(password, 'verify');
-      const uc = new LoginUseCase(makeRepo(null), password, tokens);
+      const uc = new LoginUseCase(
+        makeRepo(null),
+        password,
+        tokens,
+        unusedBreakGlass,
+      );
       await expect(
         uc.executePlatform({ email: 'nadie@x.com', password: 'pw' }),
       ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));

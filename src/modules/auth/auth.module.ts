@@ -28,6 +28,10 @@ import { TokenMaintenanceJobs } from './application/token-maintenance.jobs';
 import { TOKEN_MAINTENANCE_REPOSITORY } from './domain/ports/token-maintenance-repository.port';
 import { PrismaTokenMaintenanceRepository } from './infrastructure/repositories/prisma-token-maintenance.repository';
 import { LoginLockoutModule } from './login-lockout.module';
+import { BreakGlassService } from './application/break-glass.service';
+import { BREAK_GLASS_REPOSITORY } from './domain/ports/break-glass-repository.port';
+import { PrismaBreakGlassRepository } from './infrastructure/repositories/prisma-break-glass.repository';
+import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
 
 @Module({
   // LoginLockoutModule: bloqueo del login por fallos (DX-048).
@@ -48,6 +52,10 @@ import { LoginLockoutModule } from './login-lockout.module';
     PasswordService,
     TokenService,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
+    // Acceso break-glass del superadmin a una clínica (SEC-008).
+    BreakGlassService,
+    { provide: BREAK_GLASS_REPOSITORY, useClass: PrismaBreakGlassRepository },
+    mfaSecretCipherProvider,
     // Registro con verificación del email (DX-029).
     {
       provide: REGISTRATION_REPOSITORY,

@@ -11,7 +11,19 @@ export class AuthTokensDto {
 
   @ApiPropertyOptional({
     description:
-      'Solo sin `X-Refresh-Transport: cookie` (clientes antiguos). En modo cookie el refresh viaja en la cookie HttpOnly `dentalix_rt` (Path=/api/v1/auth) y no se devuelve aquí.',
+      'Solo sin `X-Refresh-Transport: cookie` (clientes antiguos). En modo cookie el refresh viaja en la cookie HttpOnly `dentalix_rt` (Path=/api/v1/auth) y no se devuelve aquí. Nunca en un acceso break-glass.',
   })
   refreshToken?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'SEC-008: `true` en el acceso de soporte de un superadmin a una clínica sin membresía. El token no se puede renovar: al caducar hay que volver a entrar.',
+  })
+  breakGlass?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'SEC-008: caducidad del token break-glass (ISO 8601).',
+    format: 'date-time',
+  })
+  expiresAt?: string;
 }

@@ -4,7 +4,6 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 import {
@@ -12,6 +11,10 @@ import {
   PasswordService,
 } from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
+import {
+  BreakGlassService,
+  type BreakGlassSession,
+} from '../break-glass.service';
 
 export interface PlatformLoginInput {
   email: string;
@@ -22,6 +25,25 @@ export interface LoginInput {
   tenantId: string;
   email: string;
   password: string;
+  /**
+   * SEC-008: solo cuentan para el acceso break-glass del superadmin a una
+   * clínica en la que no es miembro. Un miembro que los mande no nota nada.
+   */
+  mfaCode?: string;
+  breakGlassReason?: string;
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+export type SessionPair = { accessToken: string; refreshToken: string };
+
+/** Login de clínica: el par de siempre, o la sesión break-glass (sin refresh). */
+export type LoginResult = SessionPair | BreakGlassSession;
+
+export function isBreakGlassSession(
+  result: LoginResult,
+): result is BreakGlassSession {
+  return 'breakGlass' in result && result.breakGlass === true;
 }
 
 @Injectable()
@@ -32,18 +54,18 @@ export class LoginUseCase {
     @Inject(AUTH_REPOSITORY) private readonly repo: AuthRepository,
     private readonly password: PasswordService,
     private readonly tokens: TokenService,
+    private readonly breakGlass: BreakGlassService,
   ) {}
 
-  async execute(
-    input: LoginInput,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+  async execute(input: LoginInput): Promise<LoginResult> {
     const email = input.email.trim().toLowerCase();
     const membership = await this.repo.findMembership(input.tenantId, email);
     if (!membership) {
       // Sin membresía en esta clínica: solo puede pasar el superadmin de
       // plataforma, que por diseño no es miembro de las clínicas de los
-      // clientes. Entra con rol ADMIN en el tenant del host — no hay bypass de
-      // RLS en ningún punto: recibe un token de clínica normal.
+      // clientes, y solo como acceso break-glass (SEC-008): MFA + motivo,
+      // token ADMIN corto sin refresh y fila en platform_access_audit. No hay
+      // bypass de RLS en ningún punto.
       return this.loginAsPlatformAdminInTenant(email, input);
     }
     const ok = await this.password.verify(
@@ -64,7 +86,7 @@ export class LoginUseCase {
   private async loginAsPlatformAdminInTenant(
     email: string,
     input: LoginInput,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+  ): Promise<BreakGlassSession> {
     const user = await this.repo.findUserForAuth(email);
     // Mismo error en todos los casos: nunca revelar si el email existe, si
     // pertenece a la clínica o si es superadmin. Tampoco por TIEMPO (SEC-017):
@@ -76,16 +98,16 @@ export class LoginUseCase {
     if (!ok) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    // Auditoría mínima acordada: queda rastro de qué superadmin entró a qué
-    // clínica y cuándo (el timestamp lo pone el logger).
-    this.logger.warn(
-      `Platform admin access: user=${user.id} entered tenant=${input.tenantId} as ADMIN`,
-    );
-    return this.tokens.issue({
-      sub: user.id,
+    // Contraseña correcta de un superadmin: a partir de aquí las respuestas
+    // pueden pedir el paso siguiente (MFA / motivo) sin filtrar nada a quien
+    // no la conoce.
+    return this.breakGlass.open({
       tenantId: input.tenantId,
-      role: ClinicRole.ADMIN,
-      tv: user.tokenVersion,
+      user,
+      mfaCode: input.mfaCode,
+      reason: input.breakGlassReason,
+      ip: input.ip,
+      userAgent: input.userAgent,
     });
   }
 

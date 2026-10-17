@@ -151,10 +151,21 @@ describe('Role matrix (e2e, DX-068)', () => {
   });
 
   describe('plataforma', () => {
+    // Un POST con cuerpo vacío puede dar 400 de validación (p. ej. confirmar
+    // el MFA sin código, SEC-008): lo que se comprueba es que el guard deja
+    // pasar al superadmin.
     it.each(platformRoutes)(
-      '200 en %s con token de superadmin',
+      'no 401/403 en %s con token de superadmin',
       async (key) => {
-        await call(app, key, 'localhost', platformToken).expect(200);
+        const res = await call(app, key, 'localhost', platformToken);
+        const ok = key.startsWith('GET ')
+          ? res.status === 200
+          : ![401, 403].includes(res.status) && res.status < 500;
+        expect({ key, status: res.status, ok }).toEqual({
+          key,
+          status: res.status,
+          ok: true,
+        });
       },
     );
 

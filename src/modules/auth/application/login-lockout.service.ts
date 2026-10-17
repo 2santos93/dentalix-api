@@ -4,6 +4,7 @@ import {
   LoginLockedError,
   accountKeyHash,
   ipKeyHash,
+  mfaKeyHash,
   type LoginLockoutConfig,
 } from '../domain/login-lockout';
 import {
@@ -64,6 +65,25 @@ export class LoginLockoutService {
   /** Login correcto: la cuenta vuelve a empezar (la IP, no). */
   recordSuccess(email: string): Promise<void> {
     return this.repo.clearAccount(accountKeyHash(email));
+  }
+
+  /**
+   * SEC-008: cobra un intento de código MFA al superadmin (mismo backoff que
+   * la cuenta, contador propio). Lanza `LoginLockedError` si está en espera.
+   * Solo lo borra un código correcto (`clearMfa`): ni un login correcto ni el
+   * desbloqueo de un ADMIN de clínica.
+   */
+  async claimMfaAttempt(userId: string): Promise<void> {
+    const seconds = await this.repo.claimAccountAttempt(
+      mfaKeyHash(userId),
+      this.cfg,
+    );
+    if (seconds > 0) throw new LoginLockedError(seconds);
+  }
+
+  /** Código MFA correcto: su contador vuelve a empezar. */
+  clearMfa(userId: string): Promise<void> {
+    return this.repo.clearAccount(mfaKeyHash(userId));
   }
 
   /** Desbloqueo por un ADMIN: borra espera y fallos de la cuenta. */
