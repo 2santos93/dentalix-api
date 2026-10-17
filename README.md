@@ -109,7 +109,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos, listo para
    presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, un plan de
-   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo.
+   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes.
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
      imprimir las credenciales). `--reset` retira la demo anterior **en blando**
@@ -597,6 +597,46 @@ cuenta en su día.
 - Las filas de caja y los movimientos del estado de cuenta traen `paidOn`: el
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
+
+## Cartera por antigüedad (DX-145)
+
+`GET /api/v1/receivables/aging` (ADMIN y RECEPTION; 403 en español al resto):
+los deudores de la sede, de la deuda vencida más antigua a la más reciente,
+paginados (`page`, `pageSize` ≤ 100) y con una fila de totales por tramo y
+moneda de TODAS las filas filtradas. Filtros: `locationId` (si no, la sede de
+`X-Location-Id`; sin ninguna, toda la clínica), `currency`, `minBalance` y
+`minAgeDays` (91 = «más de 90 días»). `GET /api/v1/receivables/aging.csv`:
+mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
+`EXPORT` en la auditoría (recurso `ACCOUNT_STATEMENT`, `reason`
+`RECEIVABLES_AGING`; la lista deja un `VIEW` igual). Módulo
+`src/modules/receivables`.
+
+- **Un solo cálculo de saldo**: el de cada paciente es el del estado de cuenta
+  (`computeBalances`, el núcleo de `computeAccountStatement`); la cartera solo lo
+  reparte en líneas fechadas. El e2e comprueba que cada fila = su estado de
+  cuenta.
+- **Antigüedad** por línea de deuda, en días civiles de la zona de la sede
+  (DX-097): una cuota de un plan de pagos, desde su vencimiento (si aún no
+  vence, tramo «por vencer», `current`); lo que no está en cuotas, desde la
+  aceptación firmada del plan, o su presentación, o su creación, **siempre con
+  `ageApproximate: true`** (aún no hay fecha de realización por ítem, DX-050).
+  Si el calendario suma más que el saldo del plan, solo envejece el saldo,
+  desde la cuota más antigua.
+- **Tramos** 0–30, 31–60, 61–90 y > 90 días (y «por vencer») por moneda, sin
+  convertir. El **saldo a favor** (abonos de más, de un plan cancelado o en otra
+  moneda) va aparte y nunca se resta de los tramos: `balance = debt − credit`.
+  Un paciente con solo saldo a favor no es deudor y no sale.
+- **Sede de la deuda**: la de la última cita ATENDIDA (COMPLETED) del paciente;
+  sin citas atendidas, la de su último abono; sin abonos, la de la última
+  presentación de un plan; sin nada de eso, ninguna (`locationId: null`), y
+  entonces solo sale en la vista de toda la clínica.
+- **Rendimiento**: número fijo de consultas, sin N+1; índices parciales
+  `appointments_tenant_patient_completed_idx` y
+  `treatment_plan_items_tenant_plan_billable_idx`. Medición con 60k pacientes
+  en `docs/perf/DX-145.md` (~0,9 s por sede con 13k deudores en una máquina
+  compartida; el objetivo de 500 ms no se alcanza con esa siembra).
+- **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
+  importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
 
 ## Trabajos en segundo plano (DX-085)
 
