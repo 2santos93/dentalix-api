@@ -39,6 +39,7 @@ import { PrescriptionsModule } from './modules/prescriptions/prescriptions.modul
 import { AuditModule } from './modules/audit/audit.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { OutboundMessagesModule } from './modules/notifications/outbound/outbound-messages.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
@@ -90,6 +91,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     // (APP_ROLE=worker|all), y el registro de mensajes salientes.
     JobsModule,
     OutboundMessagesModule,
+    // Recordatorio automático de cita por email, por sede (DX-026).
+    RemindersModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

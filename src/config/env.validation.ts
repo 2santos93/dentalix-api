@@ -16,8 +16,11 @@
  * emails van al ConsoleMailer.
  * DX-085: `APP_ROLE` (api | worker | all) y los ajustes `JOBS_*` de la cola
  * de trabajos en segundo plano.
+ * DX-026: `PUBLIC_WEB_BASE_HOST`, el host base de la web de las clínicas para
+ * los enlaces de los recordatorios (los manda un worker, sin petición).
  */
 
+import { safeLinkHost } from '../shared/tenancy/public-link';
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
 import {
@@ -390,6 +393,22 @@ function jobsProblems(env: Env): string[] {
   return problems;
 }
 
+function publicWebProblems(env: Env, isProd: boolean): string[] {
+  const base = str(env, 'PUBLIC_WEB_BASE_HOST')?.trim();
+  if (!base) return [];
+  if (!safeLinkHost(base)) {
+    return [
+      'PUBLIC_WEB_BASE_HOST debe ser un host sin protocolo ni ruta (p. ej. "dentalix.app" o "localhost:3001").',
+    ];
+  }
+  if (isProd && isLocalHost(base.split(':')[0])) {
+    return [
+      'PUBLIC_WEB_BASE_HOST no puede ser un dominio local en producción.',
+    ];
+  }
+  return [];
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -408,6 +427,7 @@ export function validateEnv(env: Env): Env {
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
   problems.push(...jobsProblems(env));
+  problems.push(...publicWebProblems(env, isProd));
 
   if (problems.length > 0) {
     throw new Error(

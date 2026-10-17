@@ -36,11 +36,19 @@ describe('startsAtLabel (DX-026)', () => {
   it('una sede de España usa su zona (con horario de verano) y 24 h', () => {
     // 14:30 UTC en julio = 16:30 en Madrid (UTC+2).
     expect(
-      startsAtLabel(new Date('2026-07-14T14:30:00.000Z'), 'Europe/Madrid', 'ES'),
+      startsAtLabel(
+        new Date('2026-07-14T14:30:00.000Z'),
+        'Europe/Madrid',
+        'ES',
+      ),
     ).toBe('martes 14 de julio de 2026 a las 16:30');
     // En noviembre (UTC+1) la misma hora UTC es una hora menos.
     expect(
-      startsAtLabel(new Date('2026-11-10T14:30:00.000Z'), 'Europe/Madrid', 'ES'),
+      startsAtLabel(
+        new Date('2026-11-10T14:30:00.000Z'),
+        'Europe/Madrid',
+        'ES',
+      ),
     ).toBe('martes 10 de noviembre de 2026 a las 15:30');
   });
 });

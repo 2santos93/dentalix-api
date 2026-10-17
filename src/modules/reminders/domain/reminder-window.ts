@@ -68,8 +68,7 @@ export interface ReminderDecisionInput {
 }
 
 export type ReminderDecision =
-  | { action: 'SEND' }
-  | { action: 'SKIP'; reason: ReminderSkipReason };
+  { action: 'SEND' } | { action: 'SKIP'; reason: ReminderSkipReason };
 
 const STATUS_SKIP: Partial<Record<AppointmentStatus, ReminderSkipReason>> = {
   CANCELLED: 'CANCELLED',

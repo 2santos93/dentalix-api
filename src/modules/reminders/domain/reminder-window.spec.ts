@@ -27,9 +27,9 @@ describe('ventanas del recordatorio (DX-026)', () => {
     // 48 h antes cae dentro de la ventana de previsión: se encola ya, con runAt.
     expect(isInSweepWindow(at(48 * HOUR + 5 * MIN), 48, NOW)).toBe(true);
     // Justo en el borde de la previsión: todavía sí.
-    expect(isInSweepWindow(at(48 * HOUR + REMINDER_LOOKAHEAD_MS), 48, NOW)).toBe(
-      true,
-    );
+    expect(
+      isInSweepWindow(at(48 * HOUR + REMINDER_LOOKAHEAD_MS), 48, NOW),
+    ).toBe(true);
     // Más allá: lo encolará un barrido posterior.
     expect(
       isInSweepWindow(at(48 * HOUR + REMINDER_LOOKAHEAD_MS + 1), 48, NOW),

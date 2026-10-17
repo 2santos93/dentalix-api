@@ -1,0 +1,516 @@
+import { randomUUID } from 'node:crypto';
+import { Logger } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+import { AppointmentStatus, Prisma, PrismaClient } from '@prisma/client';
+import { AppModule } from '../src/app.module';
+import { JobQueue } from '../src/modules/jobs/application/job-queue.service';
+import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
+import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
+import { PrismaService } from '../src/shared/prisma/prisma.service';
+import { ReminderClock } from '../src/modules/reminders/application/reminder-clock';
+import {
+  PLAN_REMINDERS_SCHEDULE,
+  SEND_REMINDER_JOB,
+} from '../src/modules/reminders/application/plan-reminders';
+import { CapturingMailer } from './support/capture-mailer';
+import { waitFor } from './support/wait-for';
+
+// DX-026, capa de BD con la app REAL (AppModule) y DOS workers (dos apps, dos
+// pools), como dos réplicas: el barrido programado de DX-085 encola, el
+// handler deja el email en email_outbox (DX-088) con el enlace de DX-005.
+// El tiempo avanza con un reloj de prueba (ReminderClock); los trabajos que
+// esperan a su hora se adelantan en `jobs.runAt`, sin dormir.
+const owner = new PrismaClient({
+  datasources: { db: { url: process.env.DIRECT_URL } },
+});
+
+const SUBDOMAINS = ['dx026-int-a', 'dx026-int-b'];
+const HOUR = 3_600_000;
+const MIN = 60_000;
+
+class TestClock extends ReminderClock {
+  current = new Date();
+  now(): Date {
+    return new Date(this.current);
+  }
+}
+
+interface Clinic {
+  tenantId: string;
+  locationId: string;
+  providerId: string;
+}
+
+async function seedClinic(subdomain: string): Promise<Clinic> {
+  const tenant = await owner.tenant.create({
+    data: { name: `Clínica ${subdomain}`, subdomain },
+  });
+  const location = await owner.location.create({
+    data: {
+      tenantId: tenant.id,
+      name: 'Sede Centro',
+      address: 'Calle 1 # 2-3',
+    },
+  });
+  const provider = await owner.user.create({
+    data: {
+      email: `doc@${subdomain}.test`,
+      passwordHash: 'x',
+      fullName: 'Dra. Laura Gómez',
+    },
+  });
+  await owner.clinicMembership.create({
+    data: { tenantId: tenant.id, userId: provider.id, role: 'DENTIST' },
+  });
+  return {
+    tenantId: tenant.id,
+    locationId: location.id,
+    providerId: provider.id,
+  };
+}
+
+async function cleanup(): Promise<void> {
+  const tenants = await owner.tenant.findMany({
+    where: { subdomain: { in: SUBDOMAINS } },
+    select: { id: true },
+  });
+  const ids = tenants.map((t) => t.id);
+  const where = { tenantId: { in: ids } };
+  await owner.appointmentReminder.deleteMany({ where });
+  await owner.outboundMessage.deleteMany({ where });
+  await owner.emailOutbox.deleteMany({ where });
+  await owner.appointmentConfirmation.deleteMany({ where });
+  await owner.appointment.deleteMany({ where });
+  await owner.locationReminderSettings.deleteMany({ where });
+  await owner.patient.deleteMany({ where });
+  await owner.clinicMembership.deleteMany({ where });
+  await owner.location.deleteMany({ where });
+  await owner.job.deleteMany({ where });
+  await owner.user.deleteMany({
+    where: { email: { in: SUBDOMAINS.map((s) => `doc@${s}.test`) } },
+  });
+  await owner.tenant.deleteMany({ where: { id: { in: ids } } });
+}
+
+describe('DX-026 · recordatorios automáticos por email (int)', () => {
+  const clock = new TestClock();
+  const mailer = new CapturingMailer();
+  let a: TestingModule;
+  let b: TestingModule;
+  let clinicA: Clinic;
+  let clinicB: Clinic;
+
+  async function app(): Promise<TestingModule> {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(ReminderClock)
+      .useValue(clock)
+      .overrideProvider(MAILER)
+      .useValue(mailer)
+      .compile();
+    await moduleRef.init();
+    return moduleRef;
+  }
+
+  /** Los dos workers a la vez hasta que no quede nada vencido. */
+  const drainBoth = () =>
+    Promise.all([a.get(JobWorker).drain(), b.get(JobWorker).drain()]);
+
+  /** Un tick del barrido programado, disputado por los dos workers. */
+  async function sweep(): Promise<void> {
+    await Promise.all([a.get(JobWorker).runOnce(), b.get(JobWorker).runOnce()]);
+    await owner.jobSchedule.update({
+      where: { name: PLAN_REMINDERS_SCHEDULE },
+      data: { nextRunAt: new Date(Date.now() - MIN) },
+    });
+    await drainBoth();
+  }
+
+  /** Adelanta los envíos de la clínica que esperan a su hora y los ejecuta. */
+  async function releaseDue(tenantId: string): Promise<void> {
+    await owner.job.updateMany({
+      where: { tenantId, name: SEND_REMINDER_JOB, state: 'PENDING' },
+      data: { runAt: new Date(Date.now() - MIN) },
+    });
+    await drainBoth();
+  }
+
+  async function patient(
+    clinic: Clinic,
+    email: string | null,
+  ): Promise<string> {
+    const p = await owner.patient.create({
+      data: {
+        tenantId: clinic.tenantId,
+        firstName: 'Carolina',
+        lastName: 'Duque',
+        email,
+      },
+    });
+    return p.id;
+  }
+
+  async function appointment(
+    clinic: Clinic,
+    patientId: string,
+    start: Date,
+    status: AppointmentStatus = 'SCHEDULED',
+  ): Promise<string> {
+    const appt = await owner.appointment.create({
+      data: {
+        tenantId: clinic.tenantId,
+        locationId: clinic.locationId,
+        patientId,
+        providerId: clinic.providerId,
+        start,
+        end: new Date(start.getTime() + 30 * MIN),
+        status,
+        reason: 'Dolor en la muela 36',
+      },
+    });
+    return appt.id;
+  }
+
+  async function configure(clinic: Clinic, leadHours: number[]) {
+    await owner.locationReminderSettings.upsert({
+      where: {
+        tenantId_locationId: {
+          tenantId: clinic.tenantId,
+          locationId: clinic.locationId,
+        },
+      },
+      create: {
+        tenantId: clinic.tenantId,
+        locationId: clinic.locationId,
+        enabled: true,
+        leadHours,
+      },
+      update: { enabled: true, leadHours },
+    });
+  }
+
+  const reminderEmails = (tenantId: string) =>
+    owner.emailOutbox.count({
+      where: { tenantId, template: 'APPOINTMENT_REMINDER' },
+    });
+
+  const records = (appointmentId: string) =>
+    owner.appointmentReminder.findMany({
+      where: { appointmentId },
+      orderBy: [{ appointmentStart: 'asc' }, { leadHours: 'desc' }],
+    });
+
+  beforeAll(async () => {
+    Logger.overrideLogger(false);
+    await cleanup();
+    clinicA = await seedClinic(SUBDOMAINS[0]);
+    clinicB = await seedClinic(SUBDOMAINS[1]);
+    a = await app();
+    b = await app();
+  });
+
+  afterAll(async () => {
+    await cleanup();
+    await a?.close();
+    await b?.close();
+    await owner.$disconnect();
+    Logger.overrideLogger(true);
+  });
+
+  beforeEach(async () => {
+    clock.current = new Date();
+    mailer.clear();
+    const where = { tenantId: { in: [clinicA.tenantId, clinicB.tenantId] } };
+    await owner.appointmentReminder.deleteMany({ where });
+    await owner.outboundMessage.deleteMany({ where });
+    await owner.emailOutbox.deleteMany({ where });
+    await owner.appointmentConfirmation.deleteMany({ where });
+    await owner.appointment.deleteMany({ where });
+    await owner.job.deleteMany({ where });
+    await owner.locationReminderSettings.deleteMany({ where });
+  });
+
+  it('con [48, 2] una cita recibe exactamente 2 emails aunque el barrido corra varias veces y en dos workers', async () => {
+    await configure(clinicA, [48, 2]);
+    const email = 'carolina.duque@example.com';
+    const start = new Date(Date.now() + 48 * HOUR + 5 * MIN);
+    const id = await appointment(clinicA, await patient(clinicA, email), start);
+
+    // 48 h antes: tres ticks seguidos, cada uno disputado por los dos workers.
+    await sweep();
+    await sweep();
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+
+    // 2 h antes.
+    clock.current = new Date(start.getTime() - 2 * HOUR - MIN);
+    await sweep();
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+
+    expect(await reminderEmails(clinicA.tenantId)).toBe(2);
+    expect(
+      await owner.job.count({
+        where: { tenantId: clinicA.tenantId, name: SEND_REMINDER_JOB },
+      }),
+    ).toBe(2);
+    const rows = await records(id);
+    expect(rows.map((r) => [r.leadHours, r.status])).toEqual([
+      [48, 'SENT'],
+      [2, 'SENT'],
+    ]);
+    // El registro guarda el id del mensaje (DX-085), nunca el cuerpo.
+    const outbound = await owner.outboundMessage.findMany({
+      where: { appointmentId: id },
+    });
+    expect(outbound).toHaveLength(2);
+    expect(outbound.every((m) => m.status === 'QUEUED')).toBe(true);
+    expect(outbound.map((m) => m.recipientMasked)).toEqual([
+      'ca***@example.com',
+      'ca***@example.com',
+    ]);
+    expect(rows.map((r) => r.outboundMessageId).sort()).toEqual(
+      outbound.map((m) => m.id).sort(),
+    );
+
+    // El email: fecha y hora en la zona de la sede (Bogotá), sede, profesional
+    // y el enlace de confirmación de DX-005; nada clínico.
+    await waitFor(() => mailer.sent.length === 2, 'el despachador entrega 2');
+    const text = mailer.sent[1].text;
+    expect(mailer.sent[1].subject).toBe(
+      `Recordatorio de tu cita en Clínica ${SUBDOMAINS[0]}`,
+    );
+    const label = new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      day: 'numeric',
+      month: 'long',
+    }).format(start);
+    expect(text).toContain(label);
+    expect(text).toContain('Sede: Sede Centro (Calle 1 # 2-3)');
+    expect(text).toContain('Profesional: Dra. Laura Gómez');
+    // Host de la clínica sin petición: PUBLIC_WEB_BASE_HOST o, como en
+    // .env.test, el primer TENANT_BASE_DOMAINS.
+    expect(text).toMatch(
+      new RegExp(
+        `http://${SUBDOMAINS[0]}\\.dentalix\\.app/confirmar/[A-Za-z0-9_-]{43}`,
+      ),
+    );
+    expect(text).not.toContain('muela');
+  });
+
+  it('no envía a canceladas ni a pacientes sin email, y registra el motivo', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+    const cancelled = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+      'CANCELLED',
+    );
+    const noEmail = await appointment(
+      clinicA,
+      await patient(clinicA, null),
+      start,
+    );
+
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+
+    expect(await reminderEmails(clinicA.tenantId)).toBe(0);
+    expect((await records(cancelled)).map((r) => r.skipReason)).toEqual([
+      'CANCELLED',
+    ]);
+    expect((await records(noEmail)).map((r) => r.skipReason)).toEqual([
+      'NO_EMAIL',
+    ]);
+  });
+
+  it('reprogramada: omite el de la hora vieja (RESCHEDULED) y recalcula el de la nueva', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    await sweep(); // encolado para su hora (dentro de 3 min)
+
+    const moved = new Date(start.getTime() + HOUR);
+    await owner.appointment.update({
+      where: { id },
+      data: { start: moved, end: new Date(moved.getTime() + 30 * MIN) },
+    });
+    await releaseDue(clinicA.tenantId);
+    expect(await reminderEmails(clinicA.tenantId)).toBe(0);
+
+    clock.current = new Date(moved.getTime() - 2 * HOUR - MIN);
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+
+    expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+    expect(
+      (await records(id)).map((r) => [
+        r.appointmentStart.toISOString(),
+        r.status,
+        r.skipReason,
+      ]),
+    ).toEqual([
+      [start.toISOString(), 'SKIPPED', 'RESCHEDULED'],
+      [moved.toISOString(), 'SENT', null],
+    ]);
+  });
+
+  it('el enlace automático no borra un «pide llamada» pendiente', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const callback = new Date(Date.now() - HOUR);
+    await owner.appointment.update({
+      where: { id },
+      data: { callbackRequestedAt: callback },
+    });
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+
+    const after = await owner.appointment.findUniqueOrThrow({ where: { id } });
+    expect(after.callbackRequestedAt).toEqual(callback);
+    expect(after.confirmationSentAt).not.toBeNull();
+  });
+
+  it('SEC-036: un trabajo de la clínica B con una cita de A no lee ni envía nada', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+
+    // Un payload manipulado: la cita es de A pero el trabajo corre como B.
+    await a
+      .get(JobQueue)
+      .enqueue(
+        SEND_REMINDER_JOB,
+        { appointmentId: id, leadHours: 2, start: start.toISOString() },
+        { tenantId: clinicB.tenantId },
+      );
+    await drainBoth();
+
+    const job = await owner.job.findFirstOrThrow({
+      where: { tenantId: clinicB.tenantId, name: SEND_REMINDER_JOB },
+    });
+    expect(job.state).toBe('COMPLETED');
+    expect(await records(id)).toEqual([]);
+    expect(
+      await owner.emailOutbox.count({
+        where: { tenantId: { in: [clinicA.tenantId, clinicB.tenantId] } },
+      }),
+    ).toBe(0);
+    expect(
+      await owner.appointmentConfirmation.count({
+        where: { appointmentId: id },
+      }),
+    ).toBe(0);
+    expect(mailer.sent).toEqual([]);
+  });
+
+  describe('RLS entre clínicas', () => {
+    it('B no ve ni cambia los ajustes ni los recordatorios de A', async () => {
+      await configure(clinicA, [48]);
+      const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, null),
+        start,
+      );
+      await configure(clinicA, [2]);
+      await sweep();
+      await releaseDue(clinicA.tenantId);
+      expect(await records(id)).toHaveLength(1);
+
+      const prisma = a.get(PrismaService);
+      await prisma.runWithTenant(clinicB.tenantId, async (tx) => {
+        expect(await tx.locationReminderSettings.count()).toBe(0);
+        expect(await tx.appointmentReminder.count()).toBe(0);
+        const updated = await tx.locationReminderSettings.updateMany({
+          data: { enabled: false },
+        });
+        expect(updated.count).toBe(0);
+      });
+
+      // Escribir filas de A con el contexto de B: lo para WITH CHECK.
+      await expect(
+        prisma.runWithTenant(clinicB.tenantId, (tx) =>
+          tx.appointmentReminder.create({
+            data: {
+              tenantId: clinicA.tenantId,
+              appointmentId: id,
+              leadHours: 24,
+              appointmentStart: start,
+              status: 'SKIPPED',
+              skipReason: 'DISABLED',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      await expect(
+        prisma.runWithTenant(clinicB.tenantId, (tx) =>
+          tx.locationReminderSettings.create({
+            data: {
+              tenantId: clinicA.tenantId,
+              locationId: clinicA.locationId,
+              enabled: false,
+            },
+          }),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      // FK compuesta: ni con el tenant de B se puede apuntar a la sede de A.
+      await expect(
+        owner.locationReminderSettings.create({
+          data: {
+            tenantId: clinicB.tenantId,
+            locationId: clinicA.locationId,
+          },
+        }),
+      ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+
+      const settings = await owner.locationReminderSettings.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId },
+      });
+      expect(settings.enabled).toBe(true);
+    });
+
+    it('la BD rechaza ajustes fuera de rango aunque la API no esté delante', async () => {
+      for (const leadHours of [[0], [169], [1, 2, 3, 4]]) {
+        await expect(
+          owner.locationReminderSettings.create({
+            data: {
+              id: randomUUID(),
+              tenantId: clinicA.tenantId,
+              locationId: clinicA.locationId,
+              leadHours,
+            },
+          }),
+        ).rejects.toThrow(/lead_hours_check/);
+      }
+      await expect(
+        owner.locationReminderSettings.create({
+          data: {
+            tenantId: clinicA.tenantId,
+            locationId: clinicA.locationId,
+            enabled: true,
+            leadHours: [],
+          },
+        }),
+      ).rejects.toThrow(/enabled_check/);
+    });
+  });
+});

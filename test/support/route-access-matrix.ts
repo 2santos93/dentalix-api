@@ -232,6 +232,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointments/:id': EVERY_ROLE,
   'PATCH /appointments/:id': EVERY_ROLE,
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
+  // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
+  'GET /appointments/:id/reminders': EVERY_ROLE,
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,
@@ -293,6 +295,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /locations/:id': ADMIN_ONLY,
   'GET /locations/schedule': EVERY_ROLE,
   'PUT /locations/schedule': ADMIN_ONLY,
+  // Ajustes → Recordatorios por sede (DX-026): solo ADMIN, también para leer.
+  'GET /reminder-settings': ADMIN_ONLY,
+  'PUT /reminder-settings/:locationId': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)

@@ -25,7 +25,8 @@ export interface ReminderRecord {
  * - PENDING: saldrá en `dueAt` (calculado: no hay fila todavía).
  * - MISSED: su hora pasó sin enviarse (la cita se agendó después).
  */
-export type ReminderState = 'SENT' | 'SKIPPED' | 'SENDING' | 'PENDING' | 'MISSED';
+export type ReminderState =
+  'SENT' | 'SKIPPED' | 'SENDING' | 'PENDING' | 'MISSED';
 
 export interface ReminderTimelineItem {
   leadHours: number;
