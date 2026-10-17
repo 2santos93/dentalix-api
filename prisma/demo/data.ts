@@ -1842,6 +1842,12 @@ export const DEMO_COMMUNICATION = [
       whatsappOptInSource: 'IN_PERSON',
     },
   },
+  // DX-210: el pendiente urgente de la lista también dio el permiso de
+  // WhatsApp: en «Ocupar este hueco» sale con «Ofrecer por WhatsApp».
+  {
+    patientIndex: 5,
+    input: { whatsappOptIn: true, whatsappOptInSource: 'IN_PERSON' },
+  },
   { patientIndex: 2, input: { contactChannel: 'NONE' } },
   { patientIndex: 3, input: { reminderOptOut: true } },
   { patientIndex: 4, input: { phone: '601 555 0105' } },

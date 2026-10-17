@@ -21,6 +21,8 @@ export interface CandidatePatient {
   phone: string | null;
   contactChannel: ContactChannel;
   reminderOptOutAt: Date | null;
+  /** DX-128: permiso de WhatsApp; sin él no se le ofrece por WhatsApp. */
+  whatsappOptInAt: Date | null;
 }
 
 export interface EntryCandidateRow extends EntryCandidateSource {
@@ -75,6 +77,8 @@ export interface OfferSummary {
   today: number;
   /** Ya se le ofreció ESTE hueco («aviso enviado»). */
   forSlot: boolean;
+  /** La última oferta de ESTE hueco aún sin respuesta (para anotarla). */
+  pendingOfferId: string | null;
 }
 
 /** Lo que se comprueba antes de ofrecer: de quién es y si sigue vigente. */

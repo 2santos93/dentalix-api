@@ -296,8 +296,39 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
         }),
       );
       expect(Object.fromEntries(summary)).toEqual({
-        [a.patientIds[1]]: { today: 1, forSlot: true },
+        [a.patientIds[1]]: { today: 1, forSlot: true, pendingOfferId: null },
       });
+    });
+
+    it('`pendingOfferId`: la oferta MÁS RECIENTE del hueco aún sin respuesta', async () => {
+      const pending = (n: number) =>
+        inA(() =>
+          offers.createOffer(
+            { ...input(), channel: 'WA_ME', outcome: 'PENDING' },
+            n,
+          ),
+        );
+      const first = await pending(5);
+      const second = await pending(5);
+      const summary = () =>
+        inA(() =>
+          offers.offersSummary({
+            patientIds: [a.patientIds[1]],
+            offerDay: DAY,
+            locationId: a.locationId,
+            slotStart: at('10:00'),
+            slotEnd: at('10:30'),
+          }),
+        );
+      expect((await summary()).get(a.patientIds[1])?.pendingOfferId).toBe(
+        second!.offer.id,
+      );
+      await inA(() =>
+        offers.recordOutcome(second!.offer.id, 'DECLINED', DOCTOR),
+      );
+      expect((await summary()).get(a.patientIds[1])?.pendingOfferId).toBe(
+        first!.offer.id,
+      );
     });
   });
 

@@ -33,6 +33,7 @@ const PATIENT_SELECT = {
   phone: true,
   contactChannel: true,
   reminderOptOutAt: true,
+  whatsappOptInAt: true,
 } as const satisfies Prisma.PatientSelect;
 
 const TYPE_SELECT = {
@@ -177,7 +178,8 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
           },
           _count: { _all: true },
         }),
-        // waitlist_offers_tenant_location_slot_idx
+        // waitlist_offers_tenant_location_slot_idx. La más reciente primero:
+        // la primera PENDING de cada paciente es la que se anota.
         tx.waitlistOffer.findMany({
           where: {
             patientId: { in: params.patientIds },
@@ -185,17 +187,27 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
             slotStart: { lt: params.slotEnd },
             slotEnd: { gt: params.slotStart },
           },
-          select: { patientId: true },
-          distinct: ['patientId'],
+          select: { id: true, patientId: true, outcome: true },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         }),
       ]),
     );
+    const empty: OfferSummary = {
+      today: 0,
+      forSlot: false,
+      pendingOfferId: null,
+    };
     for (const row of today) {
-      out.set(row.patientId, { today: row._count._all, forSlot: false });
+      out.set(row.patientId, { ...empty, today: row._count._all });
     }
     for (const row of forSlot) {
-      const current = out.get(row.patientId) ?? { today: 0, forSlot: false };
-      out.set(row.patientId, { ...current, forSlot: true });
+      const current = out.get(row.patientId) ?? empty;
+      out.set(row.patientId, {
+        ...current,
+        forSlot: true,
+        pendingOfferId:
+          current.pendingOfferId ?? (row.outcome === 'PENDING' ? row.id : null),
+      });
     }
     return out;
   }

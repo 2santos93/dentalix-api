@@ -37,6 +37,7 @@ import {
 import {
   WANTS_EARLIER_FORBIDDEN_MESSAGE,
   WANTS_EARLIER_GONE_MESSAGE,
+  WANTS_EARLIER_NOT_EARLIER_MESSAGE,
   canChangeWantsEarlier,
 } from '../../domain/wants-earlier';
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
@@ -117,6 +118,10 @@ export class UpdateAppointmentUseCase {
     if (!existing) throw new NotFoundException('Cita no encontrada');
     if (!existing.wantsEarlier || !MOVABLE_STATUSES.includes(existing.status)) {
       throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
+    }
+    // Adelantar, no retrasar: el hueco empieza antes que la cita.
+    if (slot.start.getTime() >= existing.start.getTime()) {
+      throw new ConflictException(WANTS_EARLIER_NOT_EARLIER_MESSAGE);
     }
     const duration = existing.end.getTime() - existing.start.getTime();
     return this.apply(

@@ -60,6 +60,8 @@ interface Candidate {
   priority: string;
   whatsappPhone: string | null;
   whatsappBlocked: boolean;
+  whatsappBlockedReason: string | null;
+  pendingOfferId: string | null;
   offersToday: number;
   offeredForSlot: boolean;
   currentAppointment: { start: string } | null;
@@ -232,6 +234,12 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
       patient[name] = await createPatient(clinic, `21000${i}`, name);
     }
     patient.Otra = await createPatient(other, '210900', 'Otra');
+    // DX-128: Ana y Berta dieron en persona el permiso de WhatsApp; el resto
+    // no (sin él no se les ofrece por WhatsApp: se les llama).
+    await raw.patient.updateMany({
+      where: { id: { in: [patient.Ana, patient.Berta] } },
+      data: { whatsappOptInAt: new Date(), whatsappOptInSource: 'IN_PERSON' },
+    });
 
     // Pendientes: Ana URGENT y Berta NORMAL (30 min, sede principal), Carla
     // de 60 min, Dora en la Sede Norte y Otra en la otra clínica.
@@ -281,7 +289,9 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
       waitlistEntryId: entry.Ana,
       whatsappPhone: '573101234567',
       whatsappBlocked: false,
+      whatsappBlockedReason: null,
       offersToday: 0,
+      pendingOfferId: null,
     });
     expect(view.items[2]).toMatchObject({
       kind: 'APPOINTMENT',
@@ -351,14 +361,14 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
     );
 
     const view = (await candidates().expect(200)).body as CandidatesView;
+    // Respuesta al WhatsApp: el panel la anota sobre `pendingOfferId`.
+    const offerId = (wa.body as Body).id;
     expect(view.items[0]).toMatchObject({
       patientFirstName: 'Ana',
       offersToday: 2,
       offeredForSlot: true,
+      pendingOfferId: offerId,
     });
-
-    // Respuesta al WhatsApp: una sola vez.
-    const offerId = (wa.body as Body).id;
     await as(
       api().patch(`/api/v1/appointments/openings/offers/${offerId}`),
       reception.token,
@@ -371,6 +381,8 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
     )
       .send({ outcome: 'ACCEPTED' })
       .expect(409);
+    const after = (await candidates().expect(200)).body as CandidatesView;
+    expect(after.items[0].pendingOfferId).toBeNull();
 
     await expect(
       raw.auditEvent.count({
@@ -390,7 +402,11 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
     });
     const view = (await candidates().expect(200)).body as CandidatesView;
     expect(view.items.find((c) => c.patientId === patient.Berta)).toMatchObject(
-      { whatsappBlocked: true, whatsappPhone: null },
+      {
+        whatsappBlocked: true,
+        whatsappBlockedReason: 'OPTED_OUT',
+        whatsappPhone: null,
+      },
     );
     const res = await offer({
       patientId: patient.Berta,
@@ -403,6 +419,25 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
       channel: 'PHONE',
       outcome: 'ACCEPTED',
     }).expect(201);
+  });
+
+  it('sin el permiso de WhatsApp (DX-128): bloqueado en la lista y 409 al ofrecer por WhatsApp', async () => {
+    const view = (await candidates().expect(200)).body as CandidatesView;
+    expect(view.items.find((c) => c.patientId === patient.Elena)).toMatchObject(
+      {
+        whatsappBlocked: true,
+        whatsappBlockedReason: 'NO_OPT_IN',
+        whatsappPhone: null,
+      },
+    );
+    const res = await offer({
+      patientId: patient.Elena,
+      appointmentId: farAppointmentId,
+      channel: 'WA_ME',
+    }).expect(409);
+    expect((res.body as { message: string }).message).toBe(
+      'Este paciente no ha dado permiso para escribirle por WhatsApp. Llámalo.',
+    );
   });
 
   it('asignar un pendiente reutiliza waitlist/:id/schedule; el segundo al mismo hueco recibe 409 en español y sale de la lista el asignado', async () => {
