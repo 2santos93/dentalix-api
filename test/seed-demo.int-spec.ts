@@ -297,6 +297,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.location_schedules).toBe(2);
     expect(firstCounts.clinic_memberships).toBe(5);
     expect(firstCounts.patients).toBe(25);
+    // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
+    expect(firstCounts.patient_responsible_parties).toBe(4);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);

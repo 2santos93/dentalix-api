@@ -1078,17 +1078,72 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
   mayúsculas, mensaje entero) y da de baja a todos los pacientes vivos de la
   clínica con ese móvil (prefiltro indexado `dx_phone_tail`), con origen
   MESSAGE. Lo invocará el webhook de WhatsApp de DX-126, que aún no existe.
-- **Menores** (`patients/domain/communication/reminder-recipient.ts`): los
-  avisos de un menor de 18 años se dirigen a su tutor (`guardianName`) o, sin
-  tutor, a su contacto principal (`emergencyContactName`), como Dentrix
-  Ascend: el email de recordatorio lo saluda a él y nombra al paciente («Te
-  recordamos la cita de Mateo»), y la ficha lo muestra (`recipient` en `GET
-  /patients/:id/communication`). Se usan el correo y el móvil de la ficha:
-  no hay campos de contacto propios del tutor.
+- **Menores**: desde DX-203 los avisos de un menor (o de un paciente sin
+  email) van al email de su **responsable** (ver la sección siguiente). Sin
+  responsable con email, el de la ficha saluda al responsable o, sin él, a su
+  contacto principal (`emergencyContactName`), como Dentrix Ascend («Te
+  recordamos la cita de Mateo»); la ficha lo muestra (`recipient` en `GET
+  /patients/:id/communication`).
 - **Demo**: `seed:demo` deja a Laura con WhatsApp y opt-in en persona, al
   tercer paciente con canal ninguno, al cuarto dado de baja y al quinto con un
-  fijo (móvil no válido). Sofía Ortiz (menor, tutora Claudia) muestra el
-  destinatario tutor.
+  fijo (móvil no válido). Sofía Ortiz (menor) muestra los avisos dirigidos a
+  su madre Claudia.
+
+## Responsable de pago y grupo familiar (DX-203)
+
+Quién paga y quién recibe los avisos de un paciente (el acudiente de un
+menor, la madre que paga a sus hijos), como el garante de Open Dental o
+Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
+`20261018010000_dx203_patient_responsible_parties` y
+`20261018010100_dx203_guardian_to_responsible`.
+
+- **Datos**: el responsable es OTRO paciente de la clínica
+  (`responsiblePatientId`; nombre, documento, email y teléfono salen de su
+  ficha) o un contacto sin ficha (nombre, tipo y nº de documento, email,
+  teléfono). Con `relationship`, `isPayer` (pagador principal) y
+  `receivesNotices`. RLS FORCE, FK COMPUESTAS a `patients` por las dos
+  columnas (vincular a un paciente de otra clínica es imposible en la BD) y
+  CHECK de forma. Índices únicos parciales: un pagador principal vivo por
+  paciente y el mismo paciente responsable una sola vez. Se quita en blando.
+  Datos de un tercero bajo la autorización del paciente (finalidad «gestión de
+  cobro y avisos»): no crea usuario ni acceso al portal.
+- **Endpoints** (los 4 roles, como «Editar» de la ficha; recepción lo
+  gestiona sin ver la historia): `GET|POST /patients/:patientId/responsible-parties`
+  y `PATCH|DELETE …/:partyId`. 404 si el paciente o el paciente responsable
+  no son de la clínica, 409 el mismo paciente dos veces, 422 en español un
+  segundo pagador o más de 5 responsables. El GET trae también
+  `responsibleFor` («Responsable de: …»), si es menor y a quién van hoy sus
+  avisos. Auditoría: UPDATE de PATIENT con `reason`
+  `RESPONSIBLE_PARTY_ADDED|CHANGED|REMOVED` y los nombres de los campos.
+- **Regla de destinatario**
+  (`patients/domain/communication/notice-recipient.ts`): un paciente MENOR
+  (CO < 18, ES < 16 —menor maduro, Ley 41/2002—, con el país y el día civil
+  de la sede) o SIN email recibe el recordatorio (DX-026), el recibo (DX-136)
+  y el estado de cuenta (DX-011) en el email de su responsable que recibe
+  avisos, primero el pagador. El canal y la baja del PACIENTE (DX-128) se
+  respetan igual; en el recordatorio automático, tampoco recibe un paciente
+  responsable dado de baja o con canal distinto de EMAIL. El registro de
+  envíos (`outbound_messages."recipientKind"`) y el estado de los
+  recordatorios (`sentToResponsible`) dicen «enviado al responsable»; `POST
+  /payments/:id/receipt/email` devuelve `sentToResponsible`; el estado de
+  cuenta trae `addressee` (a nombre de quién sale).
+- **Estado de cuenta familiar**: `GET
+  /patients/:patientId/family-account-statement` (ADMIN y RECEPTION) del
+  pagador: su saldo y el de cada paciente del que es pagador principal, con
+  subtotal por paciente y moneda (el MISMO `computeAccountStatement` que el
+  individual, sobre la misma lectura) y el total en céntimos. Solo importes y
+  nombres; solo lectura (no hay abono familiar). Auditoría VIEW de
+  ACCOUNT_STATEMENT con `reason: FAMILY_ACCOUNT_STATEMENT`.
+- **Acudiente antiguo**: `patients.guardianName/guardianDocNumber` quedan
+  DEPRECADOS y de solo lectura (la API ya no los escribe; un cliente antiguo
+  que los mande no da error). La migración copió cada valor a un contacto
+  responsable `LEGAL_GUARDIAN` que recibe avisos y no paga, de forma
+  idempotente (índice único parcial `migratedFromGuardian`) y sin tocar las
+  columnas viejas.
+- **Demo**: la abuela Martha Lucía Becerra paga a Sofía Ortiz y a Mateo
+  Cifuentes (su ficha muestra «Responsable de» y el estado de cuenta
+  familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
+  Mateo a la abuela.
 
 ## Dominios personalizados (SEC-009)
 

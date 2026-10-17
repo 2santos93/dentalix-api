@@ -140,8 +140,6 @@ interface DemoPatient {
   emergencyContactName?: string;
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
-  guardianName?: string;
-  guardianDocNumber?: string;
   medicalHistory?: MedicalHistoryVersionData;
 }
 
@@ -411,8 +409,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 160 # 58-10',
     city: 'Bogotá D.C.',
     insurerEps: 'Compensar',
-    guardianName: 'Claudia Navarro',
-    guardianDocNumber: '52987654',
     emergencyContactName: 'Claudia Navarro',
     emergencyContactRelationship: 'Madre',
     emergencyContactPhone: '+57 318 555 0209',
@@ -508,8 +504,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Carrera 68 # 24-15',
     city: 'Bogotá D.C.',
     insurerEps: 'Nueva EPS',
-    guardianName: 'Óscar Cifuentes',
-    guardianDocNumber: '79345678',
   },
   {
     firstName: 'Ana María',
@@ -1852,6 +1846,72 @@ export const DEMO_COMMUNICATION = [
   { patientIndex: 3, input: { reminderOptOut: true } },
   { patientIndex: 4, input: { phone: '601 555 0105' } },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// DX-203: responsables de pago y avisos. La abuela Martha Lucía Becerra
+// (paciente) es la pagadora principal de Sofía y de Mateo: su ficha muestra
+// «Responsable de» y el estado de cuenta familiar. Los avisos de Sofía van a
+// su madre Claudia (contacto sin ficha; la abuela solo paga); los de Mateo, a
+// la abuela (su padre Óscar no tiene email).
+// ---------------------------------------------------------------------------
+
+export interface DemoResponsible {
+  patientIndex: number;
+  /** Otro paciente de la demo, o un contacto sin ficha. */
+  responsiblePatientIndex?: number;
+  contact?: {
+    fullName: string;
+    docType: DocType;
+    docNumber: string;
+    email?: string;
+    phone: string;
+  };
+  relationship: 'MOTHER' | 'FATHER' | 'GRANDPARENT';
+  isPayer: boolean;
+  receivesNotices: boolean;
+}
+
+export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
+  {
+    patientIndex: 8,
+    responsiblePatientIndex: 6,
+    relationship: 'GRANDPARENT',
+    isPayer: true,
+    receivesNotices: false,
+  },
+  {
+    patientIndex: 8,
+    contact: {
+      fullName: 'Claudia Navarro',
+      docType: DocType.CC,
+      docNumber: '52987654',
+      email: 'claudia.navarro@example.com',
+      phone: '+57 318 555 0209',
+    },
+    relationship: 'MOTHER',
+    isPayer: false,
+    receivesNotices: true,
+  },
+  {
+    patientIndex: 12,
+    responsiblePatientIndex: 6,
+    relationship: 'GRANDPARENT',
+    isPayer: true,
+    receivesNotices: true,
+  },
+  {
+    patientIndex: 12,
+    contact: {
+      fullName: 'Óscar Cifuentes',
+      docType: DocType.CC,
+      docNumber: '79345678',
+      phone: '+57 322 555 0213',
+    },
+    relationship: 'FATHER',
+    isPayer: false,
+    receivesNotices: true,
+  },
+];
 
 // ---------------------------------------------------------------------------
 // DX-191: registro de implantes. El paciente del plan de implante recibe el

@@ -148,6 +148,15 @@ const FIXTURE_CONTACT = [
   `UPDATE "patients" SET "phone" = '310 555 0101' WHERE "id" = '${P_A}'`,
 ];
 
+/**
+ * Esquema de 20261018010000 (DX-203): el acudiente en texto libre de un
+ * paciente de cada clínica; la migración lo copia a un contacto responsable.
+ */
+const FIXTURE_GUARDIAN = [
+  `UPDATE "patients" SET "guardianName" = 'Claudia Navarro', "guardianDocNumber" = '52987654' WHERE "id" = '${P_A}'`,
+  `UPDATE "patients" SET "guardianName" = 'Óscar Cifuentes' WHERE "id" = '${P_B}'`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -181,8 +190,11 @@ const STEPS: Step[] = [
   // dx136_payment_receipts (FORCE fuera de locations durante el relleno).
   { until: '20261017233300', fixture: FIXTURE_LOCATIONS },
   // dx128_contact_channel (FORCE fuera de patients durante el backfill del
-  // canal por defecto de la clínica).
-  { until: '99999999999999', fixture: FIXTURE_CONTACT },
+  // canal por defecto de la clínica) y las siguientes hasta DX-203.
+  { until: '20261018010100', fixture: FIXTURE_CONTACT },
+  // dx203_guardian_to_responsible (FORCE fuera de patients y de
+  // patient_responsible_parties durante la copia).
+  { until: '99999999999999', fixture: FIXTURE_GUARDIAN },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -473,6 +485,25 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
             AND conrelid = 'public.audit_events'::regclass`,
       ),
     ).toBe(true);
+  }, 180_000);
+
+  it('acudiente (DX-203): cada guardianName pasa a un contacto responsable, una vez, y los campos antiguos quedan', async () => {
+    await run(STEPS[11]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(r."tenantId"::text || ':' || r."fullName" || ':' ||
+                coalesce(r."docNumber", '-') || ':' || r."relationship"::text || ':' ||
+                r."migratedFromGuardian"::text, ',' ORDER BY r."tenantId") AS v
+           FROM "patient_responsible_parties" r`,
+      ),
+    ).toBe(
+      `${T_A}:Claudia Navarro:52987654:LEGAL_GUARDIAN:true,${T_B}:Óscar Cifuentes:-:LEGAL_GUARDIAN:true`,
+    );
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(coalesce("guardianName", '-'), ',' ORDER BY "tenantId") AS v FROM "patients"`,
+      ),
+    ).toBe('Claudia Navarro,Óscar Cifuentes');
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {
