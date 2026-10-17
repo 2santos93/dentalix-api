@@ -37,6 +37,7 @@ model Tenant {
   appointmentReminders     AppointmentReminder[]
   paymentReceipts          PaymentReceipt[]
   paymentReceiptCounters   PaymentReceiptCounter[]
+  clinicalNoteTemplates    ClinicalNoteTemplate[]
 
   @@map("tenants")
 }
@@ -333,14 +334,24 @@ model ClinicalEntry {
   reason        String?
   notes         String
   performedById String?   @db.Uuid
+  // DX-170: la cita en la que se documentó (NULL = evolución suelta, como todas
+  // las anteriores) y la plantilla con la que se redactó. El texto compuesto
+  // vive en `notes`: cambiar o desactivar la plantilla no toca la evolución.
+  appointmentId String?   @db.Uuid
+  templateId    String?   @db.Uuid
   createdAt     DateTime  @default(now())
   deletedAt     DateTime?
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
-  patient Patient                 @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  addenda ClinicalEntryAddendum[]
+  patient     Patient                 @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  addenda     ClinicalEntryAddendum[]
+  // DX-170: FK COMPUESTA con el paciente: la cita tiene que ser de la MISMA
+  // clínica Y del MISMO paciente. RESTRICT en las dos acciones: la evolución
+  // es inalterable (DX-038) y nada puede reescribirla en cascada.
+  appointment Appointment?            @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
+  template    ClinicalNoteTemplate?   @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
 
   // DX-038: INALTERABLE en la BD (trigger: ni UPDATE ni DELETE para el rol de
   // la app), `createdAt` lo fija el servidor de BD en el INSERT y
@@ -349,7 +360,66 @@ model ClinicalEntry {
   // Destino de la FK compuesta de las adendas (misma clínica y paciente).
   @@unique([tenantId, patientId, id], map: "clinical_entries_tenantId_patientId_id_key")
   @@index([tenantId, patientId, entryDate])
+  // PARCIALES (WHERE ... IS NOT NULL), no declarables en Prisma (DX-170):
+  //   clinical_entries_tenant_patient_appointment_idx
+  //     ("tenantId", "patientId", "appointmentId") -> lado hijo de la FK a la cita.
+  //   clinical_entries_tenant_template_idx ("tenantId", "templateId")
+  //     -> lado hijo de la FK a la plantilla.
   @@map("clinical_entries")
+}
+
+// DX-170: tipo de pregunta de una plantilla de evolución: opción única, opción
+// múltiple o texto libre.
+enum ClinicalNotePromptType {
+  ONE
+  MULTI
+  TEXT
+}
+
+/// Plantilla de evolución de la clínica (DX-170): texto fijo con marcadores
+/// `{{Etiqueta}}` que se rellenan con las respuestas a sus preguntas. No lleva
+/// datos de pacientes. Nunca se borra: `active = false` la quita del selector.
+/// Editarla o desactivarla no cambia ninguna evolución ya guardada.
+model ClinicalNoteTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  name        String
+  // Carpeta del selector (p. ej. «Operatoria»); NULL = sin carpeta.
+  category    String?
+  body        String
+  active      Boolean  @default(true)
+  createdById String?  @db.Uuid
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant                       @relation(fields: [tenantId], references: [id])
+  prompts ClinicalNoteTemplatePrompt[]
+  entries ClinicalEntry[]
+
+  // Destino de las FK compuestas de las preguntas y de clinical_entries.
+  @@unique([tenantId, id], map: "clinical_note_templates_tenant_id_key")
+  @@unique([tenantId, name], map: "clinical_note_templates_tenant_name_key")
+  @@index([tenantId, category, name], map: "clinical_note_templates_tenant_category_name_idx")
+  @@map("clinical_note_templates")
+}
+
+/// Pregunta de una plantilla de evolución (DX-170). Su etiqueta es el marcador
+/// del cuerpo (`{{Superficie}}`). ONE/MULTI llevan opciones; TEXT, ninguna.
+model ClinicalNoteTemplatePrompt {
+  id           String                 @id @default(uuid()) @db.Uuid
+  tenantId     String                 @db.Uuid
+  templateId   String                 @db.Uuid
+  label        String
+  type         ClinicalNotePromptType
+  options      String[]               @default([])
+  defaultValue String?
+  position     Int
+
+  template ClinicalNoteTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, templateId, position], map: "clinical_note_template_prompts_position_key")
+  @@map("clinical_note_template_prompts")
 }
 
 /// Adenda (nota aclaratoria) de una evolución — DX-038, Res. 1995/1999 art. 18.
@@ -551,6 +621,8 @@ model Appointment {
   waitlistSourced  AppointmentWaitlistEntry[] @relation("WaitlistSource")
   waitlistResolved AppointmentWaitlistEntry[] @relation("WaitlistResolved")
   reminders        AppointmentReminder[]
+  // DX-170: evoluciones documentadas en esta cita.
+  clinicalEntries  ClinicalEntry[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -564,6 +636,9 @@ model Appointment {
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
   @@unique([tenantId, id], map: "appointments_tenant_id_key")
+  // DX-170: destino de la FK compuesta de clinical_entries: la cita de una
+  // evolución es de la misma clínica y del mismo paciente.
+  @@unique([tenantId, patientId, id], map: "appointments_tenant_patient_id_key")
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
   // DX-121: lado hijo de la FK compuesta al tipo de cita.
@@ -1732,6 +1807,8 @@ enum AuditResourceType {
   STAFF_MEMBER
   // DX-136: recibo de caja de un abono (ver, reimprimir, enviar).
   PAYMENT_RECEIPT
+  // DX-170: plantillas de evolución (crear, editar, desactivar).
+  CLINICAL_NOTE_TEMPLATE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

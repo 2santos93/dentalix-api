@@ -1,3 +1,4 @@
+import type { AppointmentStatus } from '@prisma/client';
 import { ClinicalEntry } from '../entities/clinical-entry.entity';
 
 // NOTE: deliberately NO `tenantId`/`id`/`createdAt` field — the tenant comes
@@ -10,6 +11,18 @@ export interface CreateClinicalEntryRepoInput {
   reason?: string;
   notes: string;
   performedById: string;
+  /** DX-170: ya validada (de esta clínica y de este paciente) por el use-case. */
+  appointmentId?: string;
+  /** DX-170: ya validada (de esta clínica y activa) por el use-case. */
+  templateId?: string;
+}
+
+/** DX-170: lo que el alta necesita saber de la cita a la que se liga. */
+export interface ClinicalEntryAppointmentRef {
+  id: string;
+  patientId: string;
+  status: AppointmentStatus;
+  start: Date;
 }
 
 export interface ListClinicalEntriesParams {
@@ -27,6 +40,12 @@ export interface ClinicalEntryRepository {
    * convention).
    */
   create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry>;
+
+  /**
+   * DX-170: cita viva por id, de cualquier paciente de la clínica. Bajo RLS,
+   * una de otra clínica (o retirada) da `null`, igual que una inexistente.
+   */
+  findAppointment(id: string): Promise<ClinicalEntryAppointmentRef | null>;
 
   /**
    * Non-deleted entries for the patient, ordered by `entryDate` DESC

@@ -146,6 +146,7 @@ interface SeedA {
   appointmentTypeId: string;
   scheduleBlockId: string;
   waitlistEntryId: string;
+  noteTemplateId: string;
 }
 
 interface SeedB {
@@ -330,6 +331,13 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     note: 'Llamar por la mañana',
   });
 
+  // DX-170: una plantilla de evolución de A.
+  const noteTemplate = await create(app, a, '/clinical-note-templates', {
+    name: 'Resina de A',
+    body: 'Superficie {{Superficie}}',
+    prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
+  });
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -350,6 +358,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     appointmentTypeId: appointmentType.id,
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
+    noteTemplateId: noteTemplate.id,
   };
 }
 
@@ -405,6 +414,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'email_outbox',
       'tenant_domains',
       'prescription_templates',
+      // DX-170: plantillas de evolución y sus preguntas.
+      'clinical_note_templates',
+      'clinical_note_template_prompts',
       'location_reminder_settings',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
@@ -738,6 +750,30 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/appointment-types/${a.appointmentTypeId}`,
       status: 404,
     },
+    // --- clinical-note-templates (DX-170) ---
+    {
+      name: 'PATCH /clinical-note-templates/:id',
+      verb: 'patch',
+      path: () => `/clinical-note-templates/${a.noteTemplateId}`,
+      body: () => ({ name: 'Hackeada', active: false }),
+      status: 404,
+    },
+    // La evolución de B no puede colgarse de la cita ni de la plantilla de A
+    // (contra el paciente de A: patient-tenant-fk.e2e-spec.ts).
+    {
+      name: 'POST /patients/:patientId/clinical-entries (cita de A)',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/clinical-entries`,
+      body: () => ({ notes: 'Intento', appointmentId: a.appointmentId }),
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/clinical-entries (plantilla de A)',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/clinical-entries`,
+      body: () => ({ templateId: a.noteTemplateId, answers: [] }),
+      status: 404,
+    },
     // --- schedule-blocks y waitlist (DX-122) ---
     {
       name: 'PATCH /schedule-blocks/:id',
@@ -904,8 +940,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patients/:patientId/treatment-plans':
       'patient-tenant-fk.e2e-spec.ts',
     'PUT /patients/:patientId/medical-history': 'patient-tenant-fk.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries':
-      'patient-tenant-fk.e2e-spec.ts',
     'POST /patients/:patientId/tooth-records': 'patient-tenant-fk.e2e-spec.ts',
     // DX-120: B → 404 sobre el paciente y el registro de A.
     'POST /patients/:patientId/tooth-records/:recordId/void':

@@ -29,6 +29,7 @@ import { AccountStatementController } from '../account-statement/presentation/ac
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
+import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -440,6 +441,24 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'userId' },
     reason: 'LOGIN_UNLOCKED',
   },
+
+  // DX-170: plantillas de evolución (sin paciente: no llevan sus datos).
+  // Desactivar es un PATCH con `active` en `changedFields`.
+  'POST /clinical-note-templates': {
+    action: 'CREATE',
+    resource: 'CLINICAL_NOTE_TEMPLATE',
+    resourceId: RES,
+  },
+  'POST /clinical-note-templates/samples': {
+    action: 'CREATE',
+    resource: 'CLINICAL_NOTE_TEMPLATE',
+    reason: 'SAMPLE_TEMPLATES',
+  },
+  'PATCH /clinical-note-templates/:id': {
+    action: 'UPDATE',
+    resource: 'CLINICAL_NOTE_TEMPLATE',
+    resourceId: { param: 'id' },
+  },
 };
 
 const CONTROLLERS: Type[] = [
@@ -463,6 +482,7 @@ const CONTROLLERS: Type[] = [
   ReceivablesController,
   ScheduleBlocksController,
   StaffController,
+  ClinicalNoteTemplatesController,
 ];
 
 function joinPath(...parts: string[]): string {

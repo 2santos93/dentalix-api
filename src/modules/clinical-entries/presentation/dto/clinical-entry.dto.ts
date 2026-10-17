@@ -1,6 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ClinicalEntryAddendumDto } from './clinical-entry-addendum.dto';
 
+/** DX-170: la cita en la que se documentó la evolución. */
+export class ClinicalEntryAppointmentDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  start!: Date;
+
+  @ApiProperty({ format: 'uuid' })
+  providerId!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Nombre del profesional de la cita (null si ya no es de la clínica)',
+  })
+  providerName!: string | null;
+}
+
 // Response shape for ClinicalEntry endpoints — documents the ClinicalEntry
 // entity contract for Swagger (same convention as BrandingDto /
 // StaffMemberDto). The use cases already return values shaped exactly like
@@ -28,6 +48,26 @@ export class ClinicalEntryDto {
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   performedById!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-170: cita ligada (null en las evoluciones sueltas)',
+  })
+  appointmentId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-170: plantilla con la que se redactó (solo procedencia; el texto está en notes)',
+  })
+  templateId!: string | null;
+
+  @ApiProperty({ type: ClinicalEntryAppointmentDto, nullable: true })
+  appointment!: ClinicalEntryAppointmentDto | null;
 
   @ApiProperty({
     format: 'date-time',
