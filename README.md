@@ -598,7 +598,7 @@ cuenta en su día.
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
 
-## Cartera por antigüedad (DX-145)
+## Cartera por antigüedad (DX-145, DX-155)
 
 `GET /api/v1/receivables/aging` (ADMIN y RECEPTION; 403 en español al resto):
 los deudores de la sede, de la deuda vencida más antigua a la más reciente,
@@ -630,11 +630,39 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
   sin citas atendidas, la de su último abono; sin abonos, la de la última
   presentación de un plan; sin nada de eso, ninguna (`locationId: null`), y
   entonces solo sale en la vista de toda la clínica.
-- **Rendimiento**: número fijo de consultas, sin N+1; índices parciales
-  `appointments_tenant_patient_completed_idx` y
-  `treatment_plan_items_tenant_plan_billable_idx`. Medición con 60k pacientes
-  en `docs/perf/DX-145.md` (~0,65 s por sede con 13k deudores en una máquina
-  compartida; el objetivo de 500 ms no se alcanza con esa siembra).
+- **Resumen por paciente `patient_ledgers` (DX-155)**: la lista lee, en UNA
+  consulta, las ENTRADAS de cada deudor ya reunidas por la BD: las sumas de
+  cada plan vivo (facturable y abonado, en su moneda y en otras), sus planes de
+  cuotas con las cuotas, la sede de la deuda y si debe (`owing`, índice parcial
+  `patient_ledgers_owing_idx`). No guarda saldos: el saldo y los tramos siguen
+  saliendo de `computeBalances` con el «hoy» de cada petición.
+  - **Lo mantiene la BD**: triggers por sentencia en `patients`,
+    `treatment_plans`, `treatment_plan_items`, `treatment_plan_acceptances`,
+    `payments`, `payment_plans`, `installments` y `appointments` recalculan la
+    fila de los pacientes que toca cada escritura (`patient_ledgers_refresh`,
+    con `patient_ledgers_compute`: una sola definición, también para el
+    backfill). Ningún caso de uso tiene que acordarse de nada, y una escritura
+    nueva en esas tablas (p. ej. otro tipo de abono) queda cubierta sola.
+  - **Concurrencia**: el refresco bloquea en orden la fila de esos pacientes
+    en `patients` (FOR NO KEY UPDATE, que existe aunque aún no tengan fila en
+    el resumen) y la del resumen, y recalcula después con una foto nueva (READ
+    COMMITTED): dos abonos simultáneos del mismo paciente cuentan los dos, y una
+    cita atendida o un archivado simultáneos al alta del primer plan también.
+  - **Solo la BD lo escribe**: un trigger de guarda rechaza INSERT, UPDATE y
+    DELETE directos con contexto de tenant. Para reparar una fila, como el
+    owner con `app.current_tenant` fijado: `SELECT
+    patient_ledgers_refresh(ARRAY['<tenant>']::uuid[], ARRAY['<paciente>']::uuid[])`.
+  - **RLS FORCE** por tenant y FK compuesta al paciente; los triggers corren
+    con el rol de la app. Un refresco que no ve a un paciente afectado falla
+    («no se ven N de M pacientes…») en vez de dejar su fila vieja: una
+    migración de datos que escriba en esas tablas sin contexto de tenant debe
+    quitar FORCE también a `patient_ledgers` y a las tablas que lee el refresco
+    (ver «Despliegue: roles de la BD»).
+- **Rendimiento**: con 60k pacientes (13k deudores en la sede, 23k en la
+  clínica) la lista de una sede tarda ~0,25–0,3 s y la de toda la clínica
+  ~0,6 s en una máquina compartida; antes de DX-155, ~0,65 s y ~1,2 s
+  (`docs/perf/DX-145.md`). Lo que queda es el cálculo en memoria con el núcleo
+  del estado de cuenta, que crece con los deudores.
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
 
@@ -897,7 +925,13 @@ dentalix_email_dispatcher`) o repón la política como en
   SECURITY` / `FORCE …`). `SET LOCAL row_security = off` solo no basta: con
   este owner hace fallar la migración; y sin él, un UPDATE o un INSERT …
   SELECT actúa sobre 0 filas en silencio. Añade un tramo con filas previas a
-  `test/owner-nosu/migrations-data.owner-spec.ts`.
+  `test/owner-nosu/migrations-data.owner-spec.ts`. **Ojo con los triggers del
+  resumen de la cartera (DX-155)**: escribir en `patients`, `appointments`,
+  `treatment_plans`, sus ítems o aceptaciones, `payments`, `payment_plans` o
+  `installments` recalcula `patient_ledgers` leyendo todas esas tablas; quita
+  FORCE también a `patient_ledgers` y a ellas (como hace
+  `20261017233000_dx155_patient_ledgers`), o el refresco falla («no se ven N
+  de M pacientes…») y la migración con él.
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …
   REFERENCES` o `VALIDATE CONSTRAINT` necesita `NO FORCE` **en la tabla hija y

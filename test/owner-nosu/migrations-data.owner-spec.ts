@@ -164,8 +164,12 @@ const STEPS: Step[] = [
   // audit_events_partitioned (DX-102) y dx039_clinical_record_retention.
   { until: '20261017231100', dropped: ['audit_events_dx009'] },
   // dx143_verify_active_accounts (FORCE fuera de audit_events y
-  // clinic_memberships durante el backfill).
-  { until: '20261017233200', fixture: FIXTURE_LOGINS },
+  // clinic_memberships durante el backfill), dx144 y dx145.
+  { until: '20261017233000', fixture: FIXTURE_LOGINS },
+  // dx155_patient_ledgers (FORCE fuera de las tablas que lee y escribe
+  // durante el backfill).
+  { until: '20261017233050' },
+  // dx136_receipt_enums, dx136_audit_events_receipt_idx y
   // dx136_payment_receipts (FORCE fuera de locations durante el relleno).
   { until: '99999999999999', fixture: FIXTURE_LOCATIONS },
 ];
@@ -411,8 +415,23 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
     expect(await verified()).toBe(expected);
   }, 180_000);
 
-  it('serie de recibos (DX-136): cada sede previa recibe la suya, desambiguada dentro de su clínica', async () => {
+  it('resumen de la cartera (DX-155): el backfill ve las filas de las dos clínicas', async () => {
     await run(STEPS[8]);
+    // A: abonó 50.000 vivos (el de 20.000 está anulado) a un plan sin ítems,
+    // atendido en su sede; B: abonó 80.000, sin citas atendidas (la sede es
+    // la del abono). Ninguno debe (facturable 0).
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("patientId"::text || ':' || "owing" || ':' ||
+                           ("ledger" -> 'plans' -> 0 ->> 6) || ':' ||
+                           ("locationId" IS NOT NULL), ',' ORDER BY "tenantId") AS v
+           FROM "patient_ledgers"`,
+      ),
+    ).toBe(`${P_A}:false:50000.00:true,${P_B}:false:80000.00:true`);
+  }, 180_000);
+
+  it('serie de recibos (DX-136): cada sede previa recibe la suya, desambiguada dentro de su clínica', async () => {
+    await run(STEPS[9]);
     expect(
       await scalar<string>(
         `SELECT string_agg("tenantId"::text || ':' || "receiptPrefix", ',' ORDER BY "tenantId", "createdAt") AS v
