@@ -1,6 +1,7 @@
 import {
   addCivilDays,
   civilDateIn,
+  civilDateResolver,
   civilDayRange,
   civilNoonIn,
   civilPeriodByZone,
@@ -232,5 +233,26 @@ describe('civilNoonIn', () => {
       expect(civilWeekday('2026-10-20')).toBe(2);
       expect(civilWeekday('2026-10-24')).toBe(6);
     });
+  });
+});
+
+describe('civilDateResolver (DX-145)', () => {
+  it('da el mismo día que civilDateIn, también el día del cambio de hora', () => {
+    const zones = ['America/Bogota', 'Europe/Madrid', 'Asia/Kathmandu'];
+    // Cada 7 min durante el fin de semana del cambio de hora de octubre en
+    // Madrid (25-oct-2026, 03:00 → 02:00) y el de marzo (29-mar-2026).
+    const starts = [Date.UTC(2026, 9, 24, 0, 0), Date.UTC(2026, 2, 28, 0, 0)];
+    for (const timeZone of zones) {
+      const resolve = civilDateResolver(timeZone);
+      for (const start of starts) {
+        for (let ms = start; ms < start + 3 * 86_400_000; ms += 7 * 60_000) {
+          const instant = new Date(ms);
+          expect([timeZone, resolve(instant)]).toEqual([
+            timeZone,
+            civilDateIn(instant, timeZone),
+          ]);
+        }
+      }
+    }
   });
 });
