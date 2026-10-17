@@ -7,6 +7,7 @@ import {
   EmailVerifyEmailVars,
   InvitationEmailVars,
   PasswordResetEmailVars,
+  PaymentReceiptEmailVars,
   RegistrationNoticeEmailVars,
   RenderedEmail,
 } from '../../domain/email-message';
@@ -149,6 +150,68 @@ function appointmentReminder(
   });
 }
 
+function paymentReceipt(
+  vars: PaymentReceiptEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const clinic = brand?.clinicName ?? PRODUCT_NAME;
+  const where = vars.locationAddress
+    ? `${vars.locationName} (${vars.locationAddress})`
+    : vars.locationName;
+  const blocks: EmailBlock[] = [
+    {
+      kind: 'paragraph',
+      text: `Te enviamos el recibo de tu abono en ${clinic}.`,
+    },
+    {
+      kind: 'paragraph',
+      text: vars.legacy
+        ? `Recibo de caja N.º ${vars.reference} (abono anterior a la numeración consecutiva: sin serie).`
+        : `Recibo de caja N.º ${vars.reference}`,
+    },
+  ];
+  if (vars.voided) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `ANULADO el ${vars.voided.dateLabel}. Motivo: ${vars.voided.reason}`,
+    });
+  }
+  if (vars.patientDocLabel) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `Documento: ${vars.patientDocLabel}`,
+    });
+  }
+  blocks.push(
+    {
+      kind: 'paragraph',
+      text: `Valor: ${vars.amountLabel} · ${vars.methodLabel} · ${vars.paidOnLabel}`,
+    },
+    { kind: 'paragraph', text: `Plan: ${vars.planLabel}` },
+  );
+  if (vars.balanceLabel) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `Saldo del plan tras el abono: ${vars.balanceLabel}`,
+    });
+  }
+  blocks.push({ kind: 'paragraph', text: `Sede: ${where}` });
+  if (vars.cashierName) {
+    blocks.push({ kind: 'paragraph', text: `Recibió: ${vars.cashierName}` });
+  }
+  blocks.push(
+    { kind: 'note', text: vars.fiscalLine ?? 'Datos fiscales pendientes' },
+    { kind: 'note', text: vars.legalNotice },
+  );
+  return renderLayout({
+    brand,
+    subject: `Recibo de caja ${vars.reference}${vars.voided ? ' (ANULADO)' : ''} · ${clinic}`,
+    heading: `Hola, ${vars.patientName}`,
+    blocks,
+    action: null,
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -160,6 +223,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'email-verify': emailVerify,
   'appointment-reminder': appointmentReminder,
   'registration-notice': registrationNotice,
+  'payment-receipt': paymentReceipt,
 };
 
 /**

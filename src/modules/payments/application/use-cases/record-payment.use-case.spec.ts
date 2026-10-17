@@ -11,6 +11,34 @@ import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/us
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
+import type { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
+import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
+
+/** Fake del saldo del recibo (DX-136): devuelve lo que se le diga y anota las llamadas. */
+class FakeReceiptPlanBalance {
+  public result: ReceiptPlanBalance | null = {
+    currency: 'USD',
+    billable: 1000,
+    paid: 150,
+    balance: 850,
+  };
+  public readonly calls: {
+    treatmentPlanId: string;
+    amount: number;
+    currency: string;
+    paidOn: string;
+  }[] = [];
+
+  afterPayment(payment: {
+    treatmentPlanId: string;
+    amount: number;
+    currency: string;
+    paidOn: string;
+  }): Promise<ReceiptPlanBalance | null> {
+    this.calls.push(payment);
+    return Promise.resolve(this.result);
+  }
+}
 
 /**
  * Fake for `GetTreatmentPlanUseCase` -- concrete class (not an interface
@@ -67,13 +95,70 @@ describe('RecordPaymentUseCase', () => {
   function makeUseCase() {
     const repo = new InMemoryPaymentRepository();
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
+    const receiptBalance = new FakeReceiptPlanBalance();
     const uc = new RecordPaymentUseCase(
       repo,
       fakeGetPlan as unknown as GetTreatmentPlanUseCase,
       makeWhitelist(),
+      receiptBalance as unknown as ReceiptPlanBalanceCalculator,
     );
-    return { repo, fakeGetPlan, uc };
+    return { repo, fakeGetPlan, uc, receiptBalance };
   }
+
+  describe('DX-136: saldo del plan para el recibo', () => {
+    it('pasa al repositorio el saldo tras el abono, calculado con el día civil del abono en su sede', async () => {
+      const { repo, fakeGetPlan, uc, receiptBalance } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1' });
+
+      await uc.execute(
+        'plan-1',
+        { amount: 150, currency: 'usd', paidAt: '2026-03-05' },
+        'user-1',
+      );
+
+      expect(receiptBalance.calls).toEqual([
+        {
+          treatmentPlanId: 'plan-1',
+          amount: 150,
+          currency: 'USD',
+          paidOn: '2026-03-05',
+        },
+      ]);
+      expect(repo.lastCreateInput?.receiptPlanBalance).toEqual({
+        currency: 'USD',
+        billable: 1000,
+        paid: 150,
+        balance: 850,
+      });
+    });
+
+    it('sin saldo (null) el abono se registra igual', async () => {
+      const { repo, fakeGetPlan, uc, receiptBalance } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1' });
+      receiptBalance.result = null;
+
+      const payment = await uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-03-05T15:00:00.000Z',
+      });
+
+      expect(payment.amount).toBe(10);
+      expect(repo.lastCreateInput?.receiptPlanBalance).toBeNull();
+    });
+
+    it('una repetición idempotente no vuelve a calcular el saldo', async () => {
+      const { fakeGetPlan, uc, receiptBalance } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1' });
+      const key = '6f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
+      const body = { amount: 10, currency: 'USD', paidAt: '2026-03-05' };
+
+      await uc.execute('plan-1', body, 'u1', key);
+      await uc.execute('plan-1', body, 'u1', key);
+
+      expect(receiptBalance.calls).toHaveLength(1);
+    });
+  });
 
   it('records a payment against an existing plan, deriving patientId from the plan', async () => {
     const { repo, fakeGetPlan, uc } = makeUseCase();

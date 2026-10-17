@@ -42,8 +42,18 @@ import {
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
+import { formatReceiptNumber } from '../../domain/receipt-number';
+import { issuePaymentReceipt } from '../receipts/issue-payment-receipt';
 
-type PrismaPayment = Prisma.PaymentGetPayload<Record<string, never>>;
+// DX-136: cada abono se lee con la serie y el número de su recibo (o sin
+// recibo, si es anterior a la numeración).
+const PAYMENT_INCLUDE = {
+  receipt: { select: { seriesPrefix: true, number: true } },
+} satisfies Prisma.PaymentInclude;
+
+type PrismaPayment = Prisma.PaymentGetPayload<{
+  include: typeof PAYMENT_INCLUDE;
+}>;
 
 /** El filtro de un período civil y la zona con que se leyó cada sede. */
 interface PeriodScope {
@@ -79,6 +89,12 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     createdById: payment.createdById,
     createdAt: payment.createdAt,
     updatedAt: payment.updatedAt,
+    receiptNumber: payment.receipt
+      ? formatReceiptNumber(
+          payment.receipt.seriesPrefix,
+          payment.receipt.number,
+        )
+      : null,
   };
 }
 
@@ -356,16 +372,53 @@ export class PrismaPaymentRepository implements PaymentRepository {
           createdById: input.createdById,
         },
       });
-      return mapToEntity(created, timeZone);
+      const entity = mapToEntity({ ...created, receipt: null }, timeZone);
+      // DX-136: el recibo numerado nace en la MISMA transacción que el abono.
+      const receiptNumber = await issuePaymentReceipt(
+        tx,
+        {
+          id: created.id,
+          tenantId,
+          locationId,
+          treatmentPlanId: created.treatmentPlanId,
+          patientId: created.patientId,
+          amount: entity.amount,
+          currency: created.currency,
+          method: created.method,
+          paidAt: created.paidAt,
+          paidOn: entity.paidOn,
+          createdById: created.createdById,
+        },
+        input.receiptPlanBalance,
+      );
+      return { ...entity, receiptNumber };
     });
     return payment;
+  }
+
+  async resolvePaidOn(paidAt: Date | { civilDate: string }): Promise<string> {
+    if (!(paidAt instanceof Date)) return paidAt.civilDate;
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // La misma sede que usará `insert`: la del request o la principal.
+      const locationId =
+        this.tenantContext.getLocationId() ??
+        (await resolveDefaultLocationId(tx));
+      const timeZone = (
+        await resolveLocationTimeZones(tx, tenantId, [locationId])
+      )(locationId);
+      return civilDateIn(paidAt, timeZone);
+    });
   }
 
   async findById(id: string): Promise<Payment | null> {
     return this.prisma.runWithTenant(async (tx) =>
       this.toEntity(
         tx,
-        await tx.payment.findFirst({ where: { id, deletedAt: null } }),
+        await tx.payment.findFirst({
+          where: { id, deletedAt: null },
+          include: PAYMENT_INCLUDE,
+        }),
       ),
     );
   }
@@ -378,7 +431,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
     // replay must resolve to the SAME row even if it was later voided, so we
     // never insert a duplicate for a key that already exists.
     return this.prisma.runWithTenant(async (tx) => {
-      const row = await tx.payment.findFirst({ where: { idempotencyKey } });
+      const row = await tx.payment.findFirst({
+        where: { idempotencyKey },
+        include: PAYMENT_INCLUDE,
+      });
       const payment = await this.toEntity(tx, row);
       if (!row || !payment) return null;
       return { payment, requestFingerprint: row.idempotencyFingerprint };
@@ -393,6 +449,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const payments = await tx.payment.findMany({
         where: { treatmentPlanId, deletedAt: null },
+        include: PAYMENT_INCLUDE,
         orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });
       return this.toEntities(tx, payments);
@@ -403,6 +460,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const payments = await tx.payment.findMany({
         where: { patientId, deletedAt: null },
+        include: PAYMENT_INCLUDE,
         orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });
       return this.toEntities(tx, payments);
@@ -458,7 +516,19 @@ export class PrismaPaymentRepository implements PaymentRepository {
           voidReason: audit.reason,
         },
       });
-      return result.count > 0;
+      if (result.count === 0) return false;
+      // DX-136: el recibo conserva su número y queda marcado ANULADO con la
+      // misma fecha, autor y motivo, en la misma transacción. Los abonos
+      // anteriores a la numeración no tienen recibo (0 filas).
+      await tx.paymentReceipt.updateMany({
+        where: { paymentId: id, voidedAt: null },
+        data: {
+          voidedAt: audit.voidedAt,
+          voidedById: audit.voidedById,
+          voidReason: audit.reason,
+        },
+      });
+      return true;
     });
   }
 
@@ -472,6 +542,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         const scope = await this.periodScope(tx, params);
         const payments = await tx.payment.findMany({
           where: { deletedAt: null, ...scope.where },
+          include: PAYMENT_INCLUDE,
           orderBy: { paidAt: 'desc' },
         });
         return payments.map((payment) =>

@@ -128,6 +128,18 @@ const FIXTURE_LOGINS = [
      (gen_random_uuid(),'${T_B}','${U_C}','DENTIST','LOGIN_FAILED','SESSION','2026-06-01 10:00')`,
 ];
 
+/**
+ * Esquema de 20261017233200 (DX-136): más sedes, con nombres que chocan, para
+ * el relleno de la serie de recibos ("receiptPrefix") por orden de alta.
+ */
+// Después de la "Sede principal" de cada clínica, que add_locations creó con now().
+const FIXTURE_LOCATIONS = [
+  `INSERT INTO "locations" ("id","tenantId","name","createdAt","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','Sede Norte',now() + interval '1 day',now()),
+     (gen_random_uuid(),'${T_A}','Sede Nórte',now() + interval '2 days',now()),
+     (gen_random_uuid(),'${T_B}','Sede Norte',now() + interval '1 day',now())`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -156,7 +168,10 @@ const STEPS: Step[] = [
   { until: '20261017233000', fixture: FIXTURE_LOGINS },
   // dx155_patient_ledgers (FORCE fuera de las tablas que lee y escribe
   // durante el backfill).
-  { until: '99999999999999' },
+  { until: '20261017233050' },
+  // dx136_receipt_enums, dx136_audit_events_receipt_idx y
+  // dx136_payment_receipts (FORCE fuera de locations durante el relleno).
+  { until: '99999999999999', fixture: FIXTURE_LOCATIONS },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -413,6 +428,16 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
            FROM "patient_ledgers"`,
       ),
     ).toBe(`${P_A}:false:50000.00:true,${P_B}:false:80000.00:true`);
+  }, 180_000);
+
+  it('serie de recibos (DX-136): cada sede previa recibe la suya, desambiguada dentro de su clínica', async () => {
+    await run(STEPS[9]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("tenantId"::text || ':' || "receiptPrefix", ',' ORDER BY "tenantId", "createdAt") AS v
+           FROM "locations"`,
+      ),
+    ).toBe(`${T_A}:PRI,${T_A}:NOR,${T_A}:NOR2,${T_B}:PRI,${T_B}:NOR`);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

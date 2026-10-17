@@ -1,0 +1,119 @@
+import { Prisma } from '@prisma/client';
+import {
+  buildReceiptSnapshot,
+  type ReceiptPlanBalance,
+} from '../../domain/receipt-snapshot';
+import { formatReceiptNumber } from '../../domain/receipt-number';
+
+/** El abono recién insertado, en la misma transacción. */
+export interface ReceiptPaymentRow {
+  id: string;
+  tenantId: string;
+  locationId: string;
+  treatmentPlanId: string;
+  patientId: string;
+  amount: number;
+  currency: string;
+  method: Prisma.PaymentGetPayload<Record<string, never>>['method'];
+  paidAt: Date;
+  paidOn: string;
+  createdById: string | null;
+}
+
+/**
+ * Emite el recibo de caja de un abono (DX-136) DENTRO de la transacción que
+ * lo inserta:
+ *   1. lee clínica, sede (y su serie), paciente, plan y quién cobró;
+ *   2. avanza el contador de la serie con un UPSERT: la fila del contador
+ *      queda bloqueada hasta el COMMIT, así que dos abonos simultáneos de la
+ *      misma sede se ordenan (sin duplicados) y un rollback deshace el
+ *      incremento (sin huecos);
+ *   3. guarda el recibo con su foto inmutable.
+ * Devuelve el número visible (`NOR-000123`). Los triggers de la BD repiten
+ * las reglas (número = contador, serie = la de la sede, inmutable).
+ */
+export async function issuePaymentReceipt(
+  tx: Prisma.TransactionClient,
+  payment: ReceiptPaymentRow,
+  planBalance: ReceiptPlanBalance | null,
+): Promise<string> {
+  const [location, tenant, patient, plan, cashier] = await Promise.all([
+    tx.location.findFirstOrThrow({
+      where: { id: payment.locationId },
+      select: { id: true, name: true, address: true, receiptPrefix: true },
+    }),
+    tx.tenant.findUniqueOrThrow({
+      where: { id: payment.tenantId },
+      select: { name: true },
+    }),
+    tx.patient.findFirstOrThrow({
+      where: { id: payment.patientId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        docType: true,
+        docNumber: true,
+      },
+    }),
+    tx.treatmentPlan.findFirstOrThrow({
+      where: { id: payment.treatmentPlanId },
+      select: { id: true, optionLabel: true, createdAt: true },
+    }),
+    payment.createdById
+      ? tx.user.findUnique({
+          where: { id: payment.createdById },
+          select: { id: true, fullName: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  if (!location.receiptPrefix) {
+    // El trigger de `locations` la pone al crear la sede y la migración la
+    // rellenó en las existentes: llegar aquí es un fallo de despliegue.
+    throw new Error('La sede del abono no tiene serie de recibos');
+  }
+  const seriesPrefix = location.receiptPrefix;
+
+  const [{ lastNumber }] = await tx.$queryRaw<{ lastNumber: number }[]>`
+    INSERT INTO "payment_receipt_counters" ("tenantId", "seriesPrefix", "lastNumber")
+    VALUES (${payment.tenantId}::uuid, ${seriesPrefix}, 1)
+    ON CONFLICT ("tenantId", "seriesPrefix")
+    DO UPDATE SET "lastNumber" = "payment_receipt_counters"."lastNumber" + 1
+    RETURNING "lastNumber"`;
+
+  const snapshot = buildReceiptSnapshot({
+    // DX-019 añadirá razón social, NIT/NIF y dirección fiscal de la clínica;
+    // hoy no existen y el recibo dice «Datos fiscales pendientes».
+    clinic: { name: tenant.name, legalName: null, taxId: null, address: null },
+    location: {
+      id: location.id,
+      name: location.name,
+      address: location.address,
+    },
+    patient,
+    payment: {
+      id: payment.id,
+      amount: payment.amount,
+      currency: payment.currency,
+      method: payment.method,
+      paidAt: payment.paidAt,
+      paidOn: payment.paidOn,
+    },
+    plan,
+    planBalance,
+    cashier,
+  });
+
+  await tx.paymentReceipt.create({
+    data: {
+      tenantId: payment.tenantId,
+      locationId: payment.locationId,
+      paymentId: payment.id,
+      seriesPrefix,
+      number: lastNumber,
+      issuedById: payment.createdById,
+      snapshot: snapshot as unknown as Prisma.InputJsonObject,
+    },
+  });
+  return formatReceiptNumber(seriesPrefix, lastNumber);
+}

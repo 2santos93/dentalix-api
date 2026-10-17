@@ -125,12 +125,14 @@ export class PaymentsController {
     resource: 'PAYMENT',
     resourceId: { response: 'id' },
     patient: { lookup: 'treatmentPlan', param: 'id' },
+    // DX-136: el recibo numerado nace con el abono (misma transacción).
+    reason: 'RECEIPT_ISSUED',
   })
   @Post('treatment-plans/:id/payments')
   @ApiCreatedResponse({
     type: PaymentDto,
     description:
-      'Abono registrado. Repetir la MISMA petición (mismo plan y cuerpo) con la misma Idempotency-Key devuelve el abono original.',
+      'Abono registrado, con su recibo de caja numerado (`receiptNumber`, DX-136). Repetir la MISMA petición (mismo plan y cuerpo) con la misma Idempotency-Key devuelve el abono original.',
   })
   @ApiConflictResponse({
     description:

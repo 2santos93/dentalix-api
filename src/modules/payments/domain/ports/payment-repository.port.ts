@@ -3,6 +3,7 @@ import { PaymentMethod } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
+import type { ReceiptPlanBalance } from '../receipt-snapshot';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
 // guarded request context (never the client), same convention as
@@ -42,6 +43,12 @@ export interface CreatePaymentRepoInput {
    * solo devuelve el original cuando la huella coincide (si no, 422).
    */
   requestFingerprint?: string;
+  /**
+   * Saldo del plan tras este abono (DX-136), en la moneda del plan, para la
+   * foto del recibo que se emite en la MISMA transacción. `null` si no se
+   * pudo calcular (p. ej. sin tasa de cambio): el recibo se emite igual.
+   */
+  receiptPlanBalance: ReceiptPlanBalance | null;
 }
 
 /**
@@ -122,6 +129,13 @@ export interface PaymentRepository {
    * devuelve el abono ORIGINAL en vez de fallar.
    */
   create(input: CreatePaymentRepoInput): Promise<Payment>;
+
+  /**
+   * El día civil (YYYY-MM-DD) que tendrá un abono con este `paidAt` en la sede
+   * donde se va a registrar (la del request o la principal, DX-097): la fecha
+   * de la tasa con que el recibo convierte el abono a la moneda del plan.
+   */
+  resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string>;
 
   /**
    * The payment, or `null` if it is absent, soft-deleted (voided), or

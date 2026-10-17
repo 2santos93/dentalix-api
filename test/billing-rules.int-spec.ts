@@ -18,6 +18,7 @@ import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
+import { ReceiptPlanBalanceCalculator } from '../src/modules/payments/application/receipts/receipt-plan-balance';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
 import { GetPlanBalanceUseCase } from '../src/modules/payments/application/use-cases/get-plan-balance.use-case';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
@@ -54,7 +55,6 @@ const updateItem = new UpdateTreatmentPlanItemUseCase(planRepo, noCatalog);
 const getPlan = new GetTreatmentPlanUseCase(planRepo);
 const getQuote = new GetPlanQuoteUseCase(quoteRepo, () => NOW);
 const acceptSigned = new AcceptTreatmentPlanUseCase(quoteRepo, () => NOW);
-const recordPayment = new RecordPaymentUseCase(paymentRepo, getPlan, whitelist);
 const identityConvert = {
   execute: (input: { amount: number }) =>
     Promise.resolve({ ...input, result: input.amount, rateUsed: 1 }),
@@ -63,6 +63,12 @@ const balance = new GetPlanBalanceUseCase(
   paymentRepo,
   getPlan,
   identityConvert,
+);
+const recordPayment = new RecordPaymentUseCase(
+  paymentRepo,
+  getPlan,
+  whitelist,
+  new ReceiptPlanBalanceCalculator(balance, identityConvert),
 );
 
 const PNG =
@@ -235,6 +241,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
             amount: 10,
             currency: 'USD',
             paidAt: NOW,
+            receiptPlanBalance: null,
           }),
         ),
       ).rejects.toMatchObject({ status: 409 });
