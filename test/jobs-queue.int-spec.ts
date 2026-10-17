@@ -37,6 +37,8 @@ function config(overrides: Partial<JobsConfig> = {}): JobsConfig {
     shutdownGraceMs: 5_000,
     heartbeatMs: 50,
     retentionDays: 14,
+    healthPort: null,
+    version: null,
     ...overrides,
   };
 }
@@ -70,6 +72,9 @@ function node(id: string, overrides: Partial<JobsConfig> = {}): Node {
 async function purge(): Promise<void> {
   await owner.$executeRawUnsafe(
     `DELETE FROM "jobs" WHERE "name" LIKE '${PREFIX}.%'`,
+  );
+  await owner.$executeRawUnsafe(
+    `DELETE FROM "job_workers" WHERE "id" LIKE 'int:%'`,
   );
   await owner.$executeRawUnsafe(
     `DELETE FROM "job_schedules" WHERE "name" LIKE '${PREFIX}.%'`,
@@ -654,7 +659,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       expect(runs).toBe(3);
 
       // Visible en la cola de fallidos.
-      const admin = new JobsAdmin(a.repo);
+      const admin = new JobsAdmin(a.repo, a.registry);
       const list = await admin.listFailed(100);
       expect(list.find((j) => j.id === id)).toMatchObject({
         name,
@@ -704,11 +709,13 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       expect(
         await owner.job.findUniqueOrThrow({ where: { id: retaken.id } }),
       ).toMatchObject({ state: 'COMPLETED', attempts: 2 });
+      // DX-220: lo cierra failExhausted SIN sumar intento (antes, el reclamo
+      // lo subía a maxAttempts + 1).
       expect(
         await owner.job.findUniqueOrThrow({ where: { id: exhausted.id } }),
       ).toMatchObject({
         state: 'FAILED',
-        attempts: 3,
+        attempts: 2,
         lastError: 'LeaseExpired',
       });
     });
@@ -758,5 +765,367 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
     expect(purged).toBeGreaterThanOrEqual(2);
     const left = (await jobsNamed(name)).map((j) => j.id).sort();
     expect(left).toEqual([ids[2], ids[3]].sort());
+  });
+
+  describe('DX-220 · sin fila envenenada, latido, stats y reintento', () => {
+    /** Un trabajo que un worker reclamó y abandonó (arriendo vencido). */
+    async function abandoned(
+      name: string,
+      data: { attempts: number; maxAttempts: number; runAt?: Date },
+    ): Promise<string> {
+      const { id } = await a.queue.enqueue(name, {});
+      await owner.job.update({
+        where: { id },
+        data: {
+          state: 'RUNNING',
+          lockedBy: 'muerto:1:00000000',
+          runAt: data.runAt ?? new Date(Date.now() - 60_000),
+          attempts: data.attempts,
+          maxAttempts: data.maxAttempts,
+        },
+      });
+      return id;
+    }
+
+    it('OPS-030: una RUNNING vencida con attempts = maxAttempts + 1, la PRIMERA por runAt, no para la cola: en la misma vuelta queda FAILED LeaseExpired y el resto se ejecuta', async () => {
+      const name = `${PREFIX}.poison`;
+      const runs: string[] = [];
+      onBoth(name, (_p, ctx) => {
+        runs.push(ctx.jobId);
+        return Promise.resolve();
+      });
+      // La envenenada, la más antigua: el reclamo la vería la primera.
+      const poison = await abandoned(name, {
+        attempts: 3,
+        maxAttempts: 2,
+        runAt: new Date(Date.now() - 3_600_000),
+      });
+      const healthy = await Promise.all(
+        [1, 2, 3].map(async (n) => (await a.queue.enqueue(name, { n })).id),
+      );
+
+      // Antes de DX-220 el reclamo (una sola sentencia para el lote) violaba
+      // jobs_attempts_check aquí y fallaba en cada vuelta.
+      await expect(
+        a.repo.claim([name], 10, 300, 'int:a:00000000'),
+      ).resolves.toHaveLength(3);
+      await owner.job.updateMany({
+        where: { id: { in: healthy } },
+        data: { state: 'PENDING', attempts: 0, runAt: new Date(0) },
+      });
+
+      expect(await a.worker.runOnce()).toBe(3);
+
+      expect(runs.sort()).toEqual([...healthy].sort());
+      expect(
+        await owner.job.findUniqueOrThrow({ where: { id: poison } }),
+      ).toMatchObject({
+        state: 'FAILED',
+        attempts: 3,
+        lastError: 'LeaseExpired',
+        lockedBy: null,
+      });
+    });
+
+    it('claim() nunca escribe attempts > maxAttempts + 1: ignora las filas con attempts > maxAttempts aunque vayan primero por runAt', async () => {
+      const name = `${PREFIX}.claim-bound`;
+      onBoth(name, () => Promise.resolve());
+      const poison = await abandoned(name, {
+        attempts: 3,
+        maxAttempts: 2,
+        runAt: new Date(Date.now() - 3_600_000),
+      });
+      const last = await abandoned(name, { attempts: 2, maxAttempts: 2 });
+      const { id: fresh } = await a.queue.enqueue(name, {});
+
+      const claimed = await a.repo.claim([name], 10, 300, 'int:a:00000000');
+
+      // La envenenada no se toca; la del último intento sí se puede reclamar
+      // (llega a maxAttempts + 1, el máximo del CHECK) y el worker la cierra.
+      expect(claimed.map((c) => c.id).sort()).toEqual([last, fresh].sort());
+      expect(claimed.every((c) => c.attempts <= c.maxAttempts + 1)).toBe(true);
+      expect(
+        await owner.job.findUniqueOrThrow({ where: { id: poison } }),
+      ).toMatchObject({ state: 'RUNNING', attempts: 3 });
+    });
+
+    it('failExhausted cierra SIN sumar intento solo las RUNNING vencidas con attempts >= maxAttempts', async () => {
+      const name = `${PREFIX}.exhausted`;
+      onBoth(name, () => Promise.resolve());
+      const last = await abandoned(name, { attempts: 2, maxAttempts: 2 });
+      const poison = await abandoned(name, { attempts: 3, maxAttempts: 2 });
+      const retakable = await abandoned(name, { attempts: 1, maxAttempts: 2 });
+      const alive = await abandoned(name, {
+        attempts: 2,
+        maxAttempts: 2,
+        runAt: new Date(Date.now() + 300_000),
+      });
+
+      const closed = await a.repo.failExhausted(100);
+
+      expect(
+        closed
+          .filter((c) => c.name === name)
+          .map((c) => c.id)
+          .sort(),
+      ).toEqual([last, poison].sort());
+      const rows = new Map(
+        (await jobsNamed(name)).map((r) => [r.id, r] as const),
+      );
+      expect(rows.get(last)).toMatchObject({
+        state: 'FAILED',
+        attempts: 2,
+        lastError: 'LeaseExpired',
+      });
+      expect(rows.get(last)?.finishedAt).toBeInstanceOf(Date);
+      expect(rows.get(poison)).toMatchObject({ state: 'FAILED', attempts: 3 });
+      expect(rows.get(retakable)).toMatchObject({ state: 'RUNNING' });
+      // Arriendo vigente: su worker sigue con él.
+      expect(rows.get(alive)).toMatchObject({ state: 'RUNNING', attempts: 2 });
+    });
+
+    it('el bucle del worker late en job_workers (id, papel, versión) y la purga borra los que llevan 7 días sin latir', async () => {
+      const c = node('beat', {
+        role: 'all',
+        version: 'int-1.2.3',
+        pollIntervalMs: 50,
+      });
+      await c.prisma.onModuleInit();
+      try {
+        c.worker.start();
+        await waitFor(
+          async () =>
+            (await owner.jobWorker.count({
+              where: { id: 'int:beat:00000000' },
+            })) === 1,
+          'el worker late',
+        );
+        const first = await owner.jobWorker.findUniqueOrThrow({
+          where: { id: 'int:beat:00000000' },
+        });
+        expect(first).toMatchObject({ role: 'all', version: 'int-1.2.3' });
+        await waitFor(async () => {
+          const row = await owner.jobWorker.findUniqueOrThrow({
+            where: { id: 'int:beat:00000000' },
+          });
+          return row.lastBeatAt > first.lastBeatAt;
+        }, 'el latido avanza en cada vuelta');
+        expect(c.worker.liveness.report().alive).toBe(true);
+      } finally {
+        await c.worker.stop();
+        await c.prisma.onModuleDestroy();
+      }
+
+      await owner.jobWorker.create({
+        data: {
+          id: 'int:viejo:00000000',
+          role: 'worker',
+          lastBeatAt: new Date(Date.now() - 8 * 86_400_000),
+        },
+      });
+      const purged = await a.repo.purgeStaleWorkers(
+        new Date(Date.now() - 7 * 86_400_000),
+      );
+      expect(purged).toBeGreaterThanOrEqual(1);
+      const left = await owner.jobWorker.findMany({
+        where: { id: { startsWith: 'int:' } },
+        select: { id: true },
+      });
+      expect(left.map((w) => w.id)).toEqual(['int:beat:00000000']);
+    });
+
+    it('statementTimeoutMs lee el statement_timeout efectivo de la conexión', async () => {
+      await expect(a.repo.statementTimeoutMs()).resolves.toBe(0);
+      const [{ ms }] = await owner.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL statement_timeout = '45s'`;
+        return tx.$queryRaw<{ ms: number }[]>`
+          SELECT (EXTRACT(EPOCH FROM current_setting('statement_timeout')::interval)
+                  * 1000)::float8 AS "ms"`;
+      });
+      expect(ms).toBe(45_000);
+    });
+
+    it('snapshot: PENDING vencidos y su retraso, RUNNING vencidos, FAILED de 24 h y workers vivos', async () => {
+      const name = `${PREFIX}.stats`;
+      onBoth(name, () => Promise.resolve());
+      const before = await a.repo.snapshot();
+      const { id: due } = await a.queue.enqueue(name, {});
+      await owner.job.update({
+        where: { id: due },
+        data: { runAt: new Date(Date.now() - 10 * 60_000) },
+      });
+      await a.queue.enqueue(
+        name,
+        {},
+        { runAt: new Date(Date.now() + 3_600_000) },
+      );
+      await abandoned(name, { attempts: 1, maxAttempts: 3 });
+      const { id: failed } = await a.queue.enqueue(name, {});
+      await owner.job.update({
+        where: { id: failed },
+        data: { state: 'FAILED', finishedAt: new Date(), attempts: 3 },
+      });
+      await owner.jobWorker.createMany({
+        data: [
+          { id: 'int:vivo:00000000', role: 'worker' },
+          {
+            id: 'int:caido:00000000',
+            role: 'worker',
+            lastBeatAt: new Date(Date.now() - 120_000),
+          },
+        ],
+      });
+
+      const snap = await a.repo.snapshot();
+
+      expect(snap.pendingDue - before.pendingDue).toBe(1);
+      expect(snap.pendingScheduled - before.pendingScheduled).toBe(1);
+      expect(snap.runningExpired - before.runningExpired).toBe(1);
+      expect(snap.failedLast24h - before.failedLast24h).toBe(1);
+      expect(
+        snap.now.getTime() - (snap.oldestDueRunAt as Date).getTime(),
+      ).toBeGreaterThanOrEqual(10 * 60_000 - 2000);
+      const workers = new Map(snap.workers.map((w) => [w.id, w.alive]));
+      expect(workers.get('int:vivo:00000000')).toBe(true);
+      expect(workers.get('int:caido:00000000')).toBe(false);
+      // Sin payloads en ninguna parte.
+      expect(JSON.stringify(snap)).not.toContain('payload');
+    });
+
+    describe('reintento de un FAILED', () => {
+      let actorId: string;
+
+      beforeAll(async () => {
+        const user = await owner.user.create({
+          data: {
+            email: `superadmin-${Date.now()}@jobs-int.test`,
+            passwordHash: 'x',
+            fullName: 'Super Admin',
+            isPlatformAdmin: true,
+          },
+        });
+        actorId = user.id;
+      });
+
+      afterAll(async () => {
+        // Base de test: el owner local es superusuario y el trigger
+        // append-only le deja borrar.
+        await owner.$executeRaw`
+          DELETE FROM "platform_audit_events" WHERE "actorUserId" = ${actorId}::uuid`;
+        await owner.user.delete({ where: { id: actorId } });
+      });
+
+      const actor = () => ({
+        userId: actorId,
+        requestId: 'req-int-1',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
+
+      it('lo devuelve a PENDING con attempts 0 UNA vez (también con dos a la vez), se ejecuta y queda auditado sin el payload', async () => {
+        const name = `${PREFIX}.retry`;
+        let runs = 0;
+        let fail = true;
+        onBoth(
+          name,
+          () => {
+            runs += 1;
+            return fail
+              ? Promise.reject(new TypeError('x'))
+              : Promise.resolve();
+          },
+          { maxAttempts: 1 },
+        );
+        const { id } = await a.queue.enqueue(
+          name,
+          { appointmentId: tenantA },
+          { tenantId: tenantA, idempotencyKey: `${PREFIX}:retry:1` },
+        );
+        await a.worker.runOnce();
+        expect(
+          await owner.job.findUniqueOrThrow({ where: { id } }),
+        ).toMatchObject({ state: 'FAILED', attempts: 1 });
+
+        const [first, second] = await Promise.all([
+          a.repo.retryFailed(id, actor()),
+          b.repo.retryFailed(id, actor()),
+        ]);
+        const results = [first, second].map((r) => r.status).sort();
+        expect(results).toEqual(['not_failed', 'retried']);
+        const retried = [first, second].find((r) => r.status === 'retried');
+        expect(retried).toEqual({
+          status: 'retried',
+          job: {
+            id,
+            name,
+            tenantId: tenantA,
+            previousAttempts: 1,
+            lastError: 'TypeError',
+          },
+        });
+        const row = await owner.job.findUniqueOrThrow({ where: { id } });
+        expect(row).toMatchObject({
+          state: 'PENDING',
+          attempts: 0,
+          finishedAt: null,
+          lockedBy: null,
+          idempotencyKey: `${PREFIX}:retry:1`,
+        });
+        expect(row.runAt.getTime()).toBeLessThanOrEqual(Date.now() + 2000);
+
+        fail = false;
+        await a.worker.runOnce();
+        expect(runs).toBe(2);
+        expect(
+          await owner.job.findUniqueOrThrow({ where: { id } }),
+        ).toMatchObject({ state: 'COMPLETED', attempts: 1 });
+        // Ya no está FAILED: otro reintento no hace nada.
+        await expect(a.repo.retryFailed(id, actor())).resolves.toEqual({
+          status: 'not_failed',
+          state: 'COMPLETED',
+        });
+
+        const audit = await owner.platformAuditEvent.findMany({
+          where: { resourceId: id },
+        });
+        expect(audit).toHaveLength(1);
+        expect(audit[0]).toMatchObject({
+          actorUserId: actorId,
+          action: 'JOB_RETRIED',
+          resourceType: 'JOB',
+          requestId: 'req-int-1',
+          ip: '10.0.0.1',
+          userAgent: 'jest',
+          metadata: {
+            jobName: name,
+            tenantId: tenantA,
+            previousAttempts: 1,
+            lastError: 'TypeError',
+          },
+        });
+        expect(JSON.stringify(audit)).not.toContain('appointmentId');
+      });
+
+      it('un id que no existe da not_found y no audita nada', async () => {
+        const missing = '00000000-0000-4000-8000-00000000dead';
+        await expect(a.repo.retryFailed(missing, actor())).resolves.toEqual({
+          status: 'not_found',
+        });
+        expect(
+          await owner.platformAuditEvent.count({
+            where: { resourceId: missing },
+          }),
+        ).toBe(0);
+      });
+
+      it('platform_audit_events es append-only para el rol de la app', async () => {
+        await expect(
+          a.prisma.$executeRaw`UPDATE "platform_audit_events" SET "ip" = NULL`,
+        ).rejects.toThrow();
+        await expect(
+          a.prisma.$executeRaw`DELETE FROM "platform_audit_events"`,
+        ).rejects.toThrow();
+      });
+    });
   });
 });

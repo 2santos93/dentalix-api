@@ -48,6 +48,8 @@ describe('DX-085 · apagado ordenado del worker (int)', () => {
           shutdownGraceMs: 30_000,
           heartbeatMs: 100,
           retentionDays: 14,
+          healthPort: null,
+          version: null,
         }),
       })
       .compile();

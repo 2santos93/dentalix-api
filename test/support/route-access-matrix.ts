@@ -118,6 +118,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /platform/tenants': PLATFORM,
   // Cola de fallidos de los trabajos en segundo plano: loop/informes/DX-085.md.
   'GET /platform/jobs/failed': PLATFORM,
+  // Estado de la cola y reencolado de fallidos: loop/informes/DX-220.md.
+  'GET /platform/jobs/stats': PLATFORM,
+  'POST /platform/jobs/:id/retry': PLATFORM,
   // MFA del superadmin, exigido para el break-glass: loop/informes/SEC-008.md.
   'GET /platform/mfa': PLATFORM,
   'POST /platform/mfa/enrollment': PLATFORM,

@@ -9,11 +9,13 @@ import { JOB_REPOSITORY } from './domain/job-repository.port';
 import { JOBS_CONFIG, loadJobsConfig } from './infrastructure/jobs-config';
 import type { JobsConfig } from './infrastructure/jobs-config';
 import { PrismaJobRepository } from './infrastructure/prisma-job.repository';
+import { JobsHealthServer } from './infrastructure/jobs-health-server';
 
 /**
  * Trabajos en segundo plano sobre Postgres (DX-085): cola con outbox,
  * reintentos con backoff, cola de fallidos y tareas programadas con un solo
- * ejecutor por tick. Los módulos que encolan o registran handlers importan
+ * ejecutor por tick. DX-220: latido de los workers, estado de la cola para la
+ * plataforma, reencolado de fallidos y sonda de liveness del worker. Los módulos que encolan o registran handlers importan
  * este módulo y usan `JobQueue.enqueue` / `JobRegistry.register|schedule` (en
  * su `onModuleInit`).
  *
@@ -35,6 +37,7 @@ import { PrismaJobRepository } from './infrastructure/prisma-job.repository';
     JobWorker,
     JobsAdmin,
     JobsMaintenance,
+    JobsHealthServer,
   ],
   exports: [JobRegistry, JobQueue, JobWorker, JobsAdmin, JOBS_CONFIG],
 })

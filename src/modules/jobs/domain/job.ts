@@ -118,6 +118,83 @@ export interface FailedJob {
   finishedAt: Date | null;
 }
 
+/** Trabajo que `failExhausted` cerró como FAILED `LeaseExpired` (DX-220). */
+export interface ExhaustedJob {
+  id: string;
+  name: string;
+  tenantId: string | null;
+  attempts: number;
+}
+
+/** Latido de un proceso worker (`job_workers`, DX-220). */
+export interface WorkerBeat {
+  id: string;
+  role: 'worker' | 'all';
+  /** APP_VERSION del proceso, o null. */
+  version: string | null;
+}
+
+/** Fila de `job_workers` tal como la ve `GET /platform/jobs/stats`. */
+export interface WorkerRow extends WorkerBeat {
+  startedAt: Date;
+  lastBeatAt: Date;
+  /** Latió hace menos de WORKER_ALIVE_SECONDS. */
+  alive: boolean;
+}
+
+/** Lo que `stats` lee de la BD; JobsAdmin le añade el estado de cada tarea. */
+export interface QueueSnapshot {
+  /** Hora de la BD (UTC) a la que se tomó. */
+  now: Date;
+  /** PENDING cuya hora ya llegó: lo que espera a un worker. */
+  pendingDue: number;
+  /** PENDING programados para más adelante (recordatorios, reintentos). */
+  pendingScheduled: number;
+  /** `min(runAt)` de los PENDING vencidos, o null si no hay. */
+  oldestDueRunAt: Date | null;
+  running: number;
+  /** RUNNING con el arriendo vencido (su worker murió o no late). */
+  runningExpired: number;
+  failedLast24h: number;
+  workers: WorkerRow[];
+  schedules: {
+    name: string;
+    cron: string;
+    lastRunAt: Date | null;
+    nextRunAt: Date;
+  }[];
+}
+
+/** Quién reencola un trabajo y desde dónde (auditoría de plataforma). */
+export interface PlatformActor {
+  userId: string;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+/** Resultado de reencolar un FAILED (sin el payload). */
+export type RetryResult =
+  | {
+      status: 'retried';
+      job: {
+        id: string;
+        name: string;
+        tenantId: string | null;
+        /** Intentos que llevaba al fallar (ahora vuelve a 0). */
+        previousAttempts: number;
+        lastError: string | null;
+      };
+    }
+  | { status: 'not_found' }
+  /** Ya no está FAILED: se reencoló antes (o nunca falló). */
+  | { status: 'not_failed'; state: JobState };
+
+/** Un worker cuenta como vivo si latió hace menos de esto. */
+export const WORKER_ALIVE_SECONDS = 60;
+/** Días sin latir tras los que la purga diaria borra la fila del worker. */
+export const WORKER_RETENTION_DAYS = 7;
+
 export const JOB_NAME_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
 export const JOB_NAME_MAX_LENGTH = 80;
 export const MAX_ATTEMPTS_LIMIT = 25;

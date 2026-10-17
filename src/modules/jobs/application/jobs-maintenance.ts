@@ -3,6 +3,7 @@ import { JOB_REPOSITORY } from '../domain/job-repository.port';
 import type { JobRepository } from '../domain/job-repository.port';
 import { JOBS_CONFIG } from '../infrastructure/jobs-config';
 import type { JobsConfig } from '../infrastructure/jobs-config';
+import { WORKER_RETENTION_DAYS } from '../domain/job';
 import { JobRegistry } from './job-registry';
 
 export const PURGE_FINISHED_JOB = 'jobs.purge-finished';
@@ -11,7 +12,8 @@ export const PURGE_FINISHED_SCHEDULE = 'jobs.purge-finished.daily';
 /**
  * Mantenimiento de la propia cola: cada día borra los trabajos terminados
  * (COMPLETED y FAILED) de hace más de JOBS_RETENTION_DAYS. Mientras exista la
- * fila, su idempotencyKey sigue bloqueando un segundo enqueue.
+ * fila, su idempotencyKey sigue bloqueando un segundo enqueue. DX-220: y los
+ * workers de job_workers que llevan más de 7 días sin latir.
  */
 @Injectable()
 export class JobsMaintenance implements OnModuleInit {
@@ -32,7 +34,10 @@ export class JobsMaintenance implements OnModuleInit {
           Date.now() - this.config.retentionDays * 86_400_000,
         );
         const purged = await this.repo.purgeFinished(before);
-        this.logger.log({ event: 'jobs.purged', purged });
+        const purgedWorkers = await this.repo.purgeStaleWorkers(
+          new Date(Date.now() - WORKER_RETENTION_DAYS * 86_400_000),
+        );
+        this.logger.log({ event: 'jobs.purged', purged, purgedWorkers });
       },
     });
     this.registry.schedule({

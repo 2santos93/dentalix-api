@@ -18,6 +18,8 @@ const config: JobsConfig = {
   shutdownGraceMs: 5000,
   heartbeatMs: 10,
   retentionDays: 14,
+  healthPort: null,
+  version: null,
 };
 
 function fakeRepo(queue: ClaimedJob[]) {
@@ -49,6 +51,12 @@ function fakeRepo(queue: ClaimedJob[]) {
     fireDueSchedules: jest.fn(() => Promise.resolve(0)),
     listFailed: jest.fn(),
     purgeFinished: jest.fn(),
+    failExhausted: jest.fn(() => Promise.resolve([])),
+    beat: jest.fn(() => Promise.resolve()),
+    purgeStaleWorkers: jest.fn(),
+    statementTimeoutMs: jest.fn(() => Promise.resolve(0)),
+    snapshot: jest.fn(),
+    retryFailed: jest.fn(),
   };
   return { repo, calls };
 }
@@ -258,5 +266,130 @@ describe('JobWorker (unit)', () => {
 
     expect(order).toEqual(['release', 'stopped']);
     expect(calls).toEqual(['complete j1 1']);
+  });
+
+  describe('DX-220: fila envenenada, latido y liveness', () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('cada vuelta cierra los RUNNING agotados (failExhausted) ANTES de reclamar', async () => {
+      const { repo } = fakeRepo([]);
+      const worker = new JobWorker(
+        new JobRegistry(),
+        repo,
+        new TenantContextService(),
+        config,
+      );
+      await worker.runOnce();
+      const exhausted = (repo.failExhausted as jest.Mock).mock
+        .invocationCallOrder[0];
+      const claim = (repo.claim as jest.Mock).mock.invocationCallOrder[0];
+      expect(exhausted).toBeLessThan(claim);
+    });
+
+    it('el bucle late en job_workers con su id, papel y versión (runOnce no: lo usan los tests con role api)', async () => {
+      jest.useFakeTimers();
+      const { repo } = fakeRepo([]);
+      const beat = jest.fn(() => Promise.resolve());
+      repo.beat = beat;
+      const worker = new JobWorker(
+        new JobRegistry(),
+        repo,
+        new TenantContextService(),
+        { ...config, role: 'all', version: 'a1b2c3d' },
+      );
+      await worker.runOnce();
+      expect(beat).not.toHaveBeenCalled();
+
+      worker.start();
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(config.pollIntervalMs);
+      await worker.stop();
+      expect(beat).toHaveBeenCalledWith({
+        id: config.workerId,
+        role: 'all',
+        version: 'a1b2c3d',
+      });
+      expect(beat.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('un latido que falla no impide reclamar en esa vuelta', async () => {
+      jest.useFakeTimers();
+      const { repo, calls } = fakeRepo([job({})]);
+      (repo.beat as jest.Mock).mockRejectedValue(new Error('db down'));
+      const registry = new JobRegistry();
+      registry.register({ name: 'unit.job', handle: () => Promise.resolve() });
+      const worker = new JobWorker(
+        registry,
+        repo,
+        new TenantContextService(),
+        config,
+      );
+      worker.start();
+      await jest.advanceTimersByTimeAsync(0);
+      await worker.stop();
+      expect(calls).toEqual(['complete j1 1']);
+    });
+
+    it('la liveness falla en ≤ 3 vueltas si el bucle se bloquea (repositorio que no responde)', async () => {
+      jest.useFakeTimers();
+      const { repo } = fakeRepo([]);
+      let hang = false;
+      // A partir de la 3.ª vuelta el reclamo no vuelve nunca.
+      (repo.claim as jest.Mock).mockImplementation(() =>
+        hang ? new Promise(() => {}) : Promise.resolve([]),
+      );
+      const worker = new JobWorker(
+        new JobRegistry(),
+        repo,
+        new TenantContextService(),
+        config,
+      );
+      worker.start();
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(config.pollIntervalMs);
+      expect(worker.liveness.report()).toMatchObject({
+        alive: true,
+        staleAfterMs: 3 * config.pollIntervalMs,
+      });
+
+      hang = true;
+      await jest.advanceTimersByTimeAsync(config.pollIntervalMs);
+      // Bloqueado: nadie apunta más vueltas. Sigue vivo hasta 3 periodos…
+      await jest.advanceTimersByTimeAsync(2 * config.pollIntervalMs);
+      expect(worker.liveness.report().alive).toBe(true);
+      // …y a la 3.ª vuelta perdida la sonda ya falla.
+      await jest.advanceTimersByTimeAsync(config.pollIntervalMs + 1);
+      expect(worker.liveness.report()).toMatchObject({
+        alive: false,
+        stopping: false,
+      });
+
+      // El apagado no se queda colgado esperando a la vuelta bloqueada.
+      const stopped = worker.stop();
+      await jest.advanceTimersByTimeAsync(config.shutdownGraceMs);
+      await stopped;
+      // Durante el apagado la sonda no lo da por muerto.
+      expect(worker.liveness.report()).toMatchObject({
+        alive: true,
+        stopping: true,
+      });
+    });
+
+    it('el umbral suma el statement_timeout de la conexión', async () => {
+      const { repo } = fakeRepo([]);
+      (repo.statementTimeoutMs as jest.Mock).mockResolvedValue(30_000);
+      const worker = new JobWorker(
+        new JobRegistry(),
+        repo,
+        new TenantContextService(),
+        config,
+      );
+      worker.start();
+      await new Promise((r) => setImmediate(r));
+      await worker.stop();
+      expect(worker.liveness.staleAfterMs).toBe(
+        3 * config.pollIntervalMs + 30_000,
+      );
+    });
   });
 });
