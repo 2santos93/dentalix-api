@@ -25,6 +25,7 @@ import { PlanFollowUpController } from '../treatment-plans/presentation/plan-fol
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
+import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 
@@ -379,6 +380,18 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN',
     patient: P,
   },
+  // DX-145: la cartera (lista de muchos pacientes, sin paciente en el evento)
+  // y su descarga en CSV.
+  'GET /receivables/aging': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING',
+  },
+  'GET /receivables/aging.csv': {
+    action: 'EXPORT',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING',
+  },
 
   // DX-122: bloqueos de agenda (sin paciente). Las altas y bajas de
   // «Pendientes por agendar» las audita el caso de uso, con el paciente.
@@ -424,6 +437,7 @@ const CONTROLLERS: Type[] = [
   PaymentsController,
   PaymentPlansController,
   AccountStatementController,
+  ReceivablesController,
   ScheduleBlocksController,
   StaffController,
 ];

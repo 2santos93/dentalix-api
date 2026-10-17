@@ -268,6 +268,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /treatment-plans/:id/payment-plan': BILLING,
   'GET /patients/:patientId/account-statement': BILLING,
   'GET /patients/:patientId/billable-plans': BILLING,
+  // Cartera por antigüedad: loop/informes/DX-145.md. El CSV es un dato
+  // personal de muchos pacientes: solo ADMIN.
+  'GET /receivables/aging': BILLING,
+  'GET /receivables/aging.csv': ADMIN_ONLY,
 
   // --- Inventario ----------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-inventory.md (INVENTORY_ROLES).
