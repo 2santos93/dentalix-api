@@ -80,6 +80,8 @@ export interface AppointmentReminderEmailVars {
   providerName: string | null;
   /** Enlace de confirmación (DX-005), si se emitió uno. */
   confirmUrl: string | null;
+  /** Enlace de baja de los recordatorios (DX-128), si se emitió uno. */
+  unsubscribeUrl: string | null;
 }
 
 /**

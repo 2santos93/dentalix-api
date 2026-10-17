@@ -147,6 +147,13 @@ function appointmentReminder(
     action: vars.confirmUrl
       ? { label: 'Confirmar o cancelar', url: vars.confirmUrl }
       : null,
+    footerLink: vars.unsubscribeUrl
+      ? {
+          lead: '¿No quieres recibir más recordatorios?',
+          label: 'Dejar de recibir recordatorios',
+          url: vars.unsubscribeUrl,
+        }
+      : null,
   });
 }
 

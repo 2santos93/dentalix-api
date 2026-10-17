@@ -69,9 +69,17 @@ describe('decideReminder (DX-026)', () => {
     expectedStart: start,
     leadHours: 2,
     settings: { enabled: true, leadHours: [48, 2] },
-    patientEmail: 'ana@example.com',
+    contact: {
+      contactChannel: 'EMAIL',
+      reminderOptOutAt: null,
+      email: 'ana@example.com',
+    },
     now: NOW,
   };
+  const contact = (over: Partial<ReminderDecisionInput['contact']>) => ({
+    ...base.contact,
+    ...over,
+  });
 
   it('envía a una cita agendada o confirmada, a su hora y con email', () => {
     expect(decideReminder(base)).toEqual({ action: 'SEND' });
@@ -151,11 +159,15 @@ describe('decideReminder (DX-026)', () => {
   });
 
   it('omite si el paciente no tiene email (o es solo espacios)', () => {
-    expect(decideReminder({ ...base, patientEmail: null })).toEqual({
+    expect(
+      decideReminder({ ...base, contact: contact({ email: null }) }),
+    ).toEqual({
       action: 'SKIP',
       reason: 'NO_EMAIL',
     });
-    expect(decideReminder({ ...base, patientEmail: '   ' })).toEqual({
+    expect(
+      decideReminder({ ...base, contact: contact({ email: '   ' }) }),
+    ).toEqual({
       action: 'SKIP',
       reason: 'NO_EMAIL',
     });
@@ -166,8 +178,37 @@ describe('decideReminder (DX-026)', () => {
       decideReminder({
         ...base,
         appointment: { ...base.appointment, status: 'CANCELLED' },
-        patientEmail: null,
+        contact: contact({ email: null }),
       }),
     ).toEqual({ action: 'SKIP', reason: 'CANCELLED' });
+  });
+
+  // DX-128: la preferencia del paciente se relee al enviar.
+  it('omite si el paciente se dio de baja después de encolarse', () => {
+    expect(
+      decideReminder({
+        ...base,
+        contact: contact({ reminderOptOutAt: at(-HOUR) }),
+      }),
+    ).toEqual({ action: 'SKIP', reason: 'OPTED_OUT' });
+  });
+
+  it.each([
+    ['NONE', 'CHANNEL_NONE'],
+    ['WHATSAPP', 'CHANNEL_WHATSAPP'],
+  ] as const)('omite el email si el canal es %s', (contactChannel, reason) => {
+    expect(
+      decideReminder({ ...base, contact: contact({ contactChannel }) }),
+    ).toEqual({ action: 'SKIP', reason });
+  });
+
+  it('el estado de la cita manda también sobre la baja', () => {
+    expect(
+      decideReminder({
+        ...base,
+        appointment: { ...base.appointment, status: 'NO_SHOW' },
+        contact: contact({ reminderOptOutAt: at(-HOUR) }),
+      }),
+    ).toEqual({ action: 'SKIP', reason: 'NO_SHOW' });
   });
 });

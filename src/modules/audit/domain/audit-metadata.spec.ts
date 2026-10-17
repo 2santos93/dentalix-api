@@ -122,4 +122,19 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
       ).toEqual({ move: { from, to } });
     });
   });
+
+  describe('origin (DX-128: de dónde salió un cambio de comunicación)', () => {
+    it.each(['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF'])(
+      'guarda %s',
+      (origin) => {
+        expect(sanitizeAuditMetadata({ origin })).toEqual({ origin });
+      },
+    );
+
+    it('descarta cualquier otro valor', () => {
+      expect(sanitizeAuditMetadata({ origin: 'WEBHOOK' })).toEqual({});
+      expect(sanitizeAuditMetadata({ origin: '+573101234567' })).toEqual({});
+      expect(sanitizeAuditMetadata({ origin: 1 })).toEqual({});
+    });
+  });
 });

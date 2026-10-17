@@ -36,7 +36,7 @@ export class AppointmentReminderItemDto {
     enumName: 'AppointmentReminderSkipReason',
     nullable: true,
     description:
-      'NO_EMAIL sin email · CANCELLED/COMPLETED/NO_SHOW estado de la cita · RESCHEDULED a otra hora · DELETED retirada · DISABLED la sede los desactivó · TOO_LATE fuera de plazo (la cita ya había empezado o su hora pasó hace más de 1 h)',
+      'NO_EMAIL sin email · OPTED_OUT el paciente se dio de baja · CHANNEL_NONE / CHANNEL_WHATSAPP su canal no es el email (DX-128) · CANCELLED/COMPLETED/NO_SHOW estado de la cita · RESCHEDULED a otra hora · DELETED retirada · DISABLED la sede los desactivó · TOO_LATE fuera de plazo (la cita ya había empezado o su hora pasó hace más de 1 h)',
   })
   skipReason!: AppointmentReminderSkipReason | null;
 
@@ -62,6 +62,15 @@ export class AppointmentRemindersDto {
 
   @ApiProperty({ type: [Number], example: [48, 2] })
   leadHours!: number[];
+
+  @ApiProperty({
+    enum: ['OPTED_OUT', 'CHANNEL_NONE', 'CHANNEL_WHATSAPP'],
+    enumName: 'PatientReminderBlocker',
+    nullable: true,
+    description:
+      'DX-128: por qué el paciente no recibe el email automático (se dio de baja, o su canal es NONE o WHATSAPP). Con él no hay recordatorios pendientes.',
+  })
+  patientBlocker!: 'OPTED_OUT' | 'CHANNEL_NONE' | 'CHANNEL_WHATSAPP' | null;
 
   @ApiProperty({ type: [AppointmentReminderItemDto] })
   items!: AppointmentReminderItemDto[];

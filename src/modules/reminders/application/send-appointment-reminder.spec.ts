@@ -8,6 +8,7 @@ const NOW = new Date('2026-10-20T12:00:00.000Z');
 const APPT = '5a1c7d2e-0000-4000-8000-000000000001';
 const TENANT = '9f3a1b2c-0000-4000-8000-0000000000aa';
 const START = new Date(NOW.getTime() + 2 * HOUR);
+const PATIENT = '5a1c7d2e-0000-4000-8000-000000000101';
 
 function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
   return {
@@ -19,7 +20,12 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     },
     locationCountry: 'CO',
     locationTimeZone: 'America/Bogota',
-    patientEmail: 'ana@example.com',
+    patientId: PATIENT,
+    contact: {
+      contactChannel: 'EMAIL',
+      reminderOptOutAt: null,
+      email: 'ana@example.com',
+    },
     settings: { enabled: true, leadHours: [48, 2] },
     ...over,
   };
@@ -31,6 +37,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
   let outbound: { record: jest.Mock; settle: jest.Mock };
   let email: { enqueue: jest.Mock };
   let links: { forTenant: jest.Mock };
+  let optOutLinks: { issue: jest.Mock };
   let handler: SendAppointmentReminder;
   const payload = {
     appointmentId: APPT,
@@ -67,6 +74,8 @@ describe('SendAppointmentReminder (DX-026)', () => {
     links = {
       forTenant: jest.fn().mockResolvedValue('https://demo.dentalix.app'),
     };
+    // DX-128: enlace de baja propio de cada email.
+    optOutLinks = { issue: jest.fn().mockResolvedValue('opt_tok') };
     const clock: ReminderClock = { now: () => NOW };
     const tenantContext = { getTenantId: () => TENANT };
     handler = new SendAppointmentReminder(
@@ -77,6 +86,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       links as never,
       clock,
       tenantContext as never,
+      optOutLinks as never,
     );
   });
 
@@ -106,8 +116,10 @@ describe('SendAppointmentReminder (DX-026)', () => {
         locationAddress: 'Cra 15 # 93-60',
         providerName: 'Dra. Gómez',
         confirmUrl: 'https://demo.dentalix.app/confirmar/tok_123',
+        unsubscribeUrl: 'https://demo.dentalix.app/baja/opt_tok',
       },
     });
+    expect(optOutLinks.issue).toHaveBeenCalledWith(PATIENT);
     expect(outbound.settle).toHaveBeenCalledWith('out-1', { status: 'QUEUED' });
     expect(repo.reminders).toEqual([
       expect.objectContaining({
@@ -124,14 +136,16 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(links.forTenant).toHaveBeenCalledWith(TENANT);
   });
 
-  it('sin host seguro para la clínica, el email sale sin enlace', async () => {
+  it('sin host seguro para la clínica, el email sale sin enlaces', async () => {
     repo.contexts.set(APPT, context());
     links.forTenant.mockResolvedValue(null);
     await handler.handle(payload);
     const [input] = email.enqueue.mock.calls[0] as [
-      { vars: { confirmUrl: string | null } },
+      { vars: { confirmUrl: string | null; unsubscribeUrl: string | null } },
     ];
     expect(input.vars.confirmUrl).toBeNull();
+    expect(input.vars.unsubscribeUrl).toBeNull();
+    expect(optOutLinks.issue).not.toHaveBeenCalled();
   });
 
   it('ejecutarse dos veces no manda dos emails', async () => {
@@ -155,7 +169,51 @@ describe('SendAppointmentReminder (DX-026)', () => {
   });
 
   it.each([
-    ['sin email', context({ patientEmail: null }), 'NO_EMAIL'],
+    [
+      'sin email',
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: null,
+        },
+      }),
+      'NO_EMAIL',
+    ],
+    // DX-128: se dio de baja (o cambió de canal) después de encolarse.
+    [
+      'con baja',
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: new Date(NOW.getTime() - 60_000),
+          email: 'ana@example.com',
+        },
+      }),
+      'OPTED_OUT',
+    ],
+    [
+      'canal NONE',
+      context({
+        contact: {
+          contactChannel: 'NONE',
+          reminderOptOutAt: null,
+          email: 'ana@example.com',
+        },
+      }),
+      'CHANNEL_NONE',
+    ],
+    [
+      'canal WHATSAPP',
+      context({
+        contact: {
+          contactChannel: 'WHATSAPP',
+          reminderOptOutAt: null,
+          email: 'ana@example.com',
+        },
+      }),
+      'CHANNEL_WHATSAPP',
+    ],
     [
       'cancelada',
       context({
@@ -192,6 +250,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       await handler.handle(payload);
       expect(email.enqueue).not.toHaveBeenCalled();
       expect(createLink.execute).not.toHaveBeenCalled();
+      expect(optOutLinks.issue).not.toHaveBeenCalled();
       expect(repo.reminders).toEqual([
         expect.objectContaining({ status: 'SKIPPED', skipReason: reason }),
       ]);

@@ -18,6 +18,11 @@ export interface EmailLayoutInput {
   blocks: EmailBlock[];
   /** Botón principal (enlace http(s)); sin él, el email no lleva botón. */
   action: { label: string; url: string } | null;
+  /**
+   * Enlace secundario al pie (p. ej. la baja de los recordatorios, DX-128):
+   * una frase y el enlace, discretos, debajo de la tarjeta.
+   */
+  footerLink?: { lead: string; label: string; url: string } | null;
 }
 
 /**
@@ -35,6 +40,10 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   const logoUrl = safeUrl(input.brand?.logoUrl);
   const actionUrl = input.action ? safeUrl(input.action.url) : null;
   if (input.action && !actionUrl) {
+    throw new Error('El enlace del email no es una URL http(s) válida');
+  }
+  const footerUrl = input.footerLink ? safeUrl(input.footerLink.url) : null;
+  if (input.footerLink && !footerUrl) {
     throw new Error('El enlace del email no es una URL http(s) válida');
   }
 
@@ -59,6 +68,10 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   const footer = input.brand
     ? `Enviado por ${escapeHtml(senderName)} a través de ${PRODUCT_NAME}.`
     : `Enviado por ${PRODUCT_NAME}.`;
+  const footerLink =
+    input.footerLink && footerUrl
+      ? `<p style="margin:8px 0 0;font-size:12px;color:#7b8794">${escapeHtml(input.footerLink.lead)} <a href="${escapeHtml(footerUrl)}" style="color:#5b6472">${escapeHtml(input.footerLink.label)}</a></p>`
+      : '';
 
   const html = `<!doctype html>
 <html lang="es">
@@ -75,6 +88,7 @@ ${button}
 </td></tr>
 </table>
 <p style="margin:16px 0 0;font-size:12px;color:#7b8794">${footer}</p>
+${footerLink}
 </td></tr>
 </table>
 </body>
@@ -97,6 +111,11 @@ ${button}
       ? `Enviado por ${senderName} a través de ${PRODUCT_NAME}.`
       : `Enviado por ${PRODUCT_NAME}.`,
   );
+  if (input.footerLink && footerUrl) {
+    textParts.push(
+      `${singleLine(input.footerLink.lead)} ${singleLine(input.footerLink.label)}: ${footerUrl}`,
+    );
+  }
 
   return {
     subject: singleLine(input.subject),

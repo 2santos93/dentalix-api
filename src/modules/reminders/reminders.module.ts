@@ -19,12 +19,26 @@ import { RemindersJobs } from './application/reminders-jobs';
 import { ReminderClock } from './application/reminder-clock';
 import { REMINDER_REPOSITORY } from './domain/ports/reminder-repository.port';
 import { PrismaReminderRepository } from './infrastructure/prisma-reminder.repository';
+import { PublicReminderOptOutsController } from './presentation/public-reminder-opt-outs.controller';
+import { ReminderOptOutLinks } from './application/reminder-opt-out-links';
+import {
+  ConfirmPublicOptOutUseCase,
+  GetPublicOptOutUseCase,
+  OptOutByMessageUseCase,
+} from './application/use-cases/reminder-opt-out.use-cases';
+import { REMINDER_OPT_OUT_REPOSITORY } from './domain/ports/reminder-opt-out-repository.port';
+import { PrismaReminderOptOutRepository } from './infrastructure/prisma-reminder-opt-out.repository';
+import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
 
 /**
  * Recordatorio automático de cita por email, por sede (DX-026). Reutiliza la
  * cola y el cron con candado de DX-085, el registro de salientes
  * (outbound_messages), el email transaccional con outbox de DX-088 y el
  * enlace de confirmación firmado de DX-005.
+ *
+ * DX-128: el barrido y el envío respetan el canal y la baja del paciente;
+ * cada email lleva su enlace de baja (página pública `/baja/[token]`), y
+ * `OptOutByMessageUseCase` queda listo para el webhook de WhatsApp de DX-126.
  */
 @Module({
   imports: [
@@ -34,7 +48,11 @@ import { PrismaReminderRepository } from './infrastructure/prisma-reminder.repos
     OutboundMessagesModule,
     AppointmentConfirmationsModule,
   ],
-  controllers: [ReminderSettingsController, AppointmentRemindersController],
+  controllers: [
+    ReminderSettingsController,
+    AppointmentRemindersController,
+    PublicReminderOptOutsController,
+  ],
   providers: [
     ListReminderSettingsUseCase,
     UpdateReminderSettingsUseCase,
@@ -45,7 +63,18 @@ import { PrismaReminderRepository } from './infrastructure/prisma-reminder.repos
     ReminderClock,
     TokenService,
     TenantContextInterceptor,
+    PublicTenantContextInterceptor,
+    ReminderOptOutLinks,
+    GetPublicOptOutUseCase,
+    ConfirmPublicOptOutUseCase,
+    OptOutByMessageUseCase,
     { provide: REMINDER_REPOSITORY, useClass: PrismaReminderRepository },
+    {
+      provide: REMINDER_OPT_OUT_REPOSITORY,
+      useClass: PrismaReminderOptOutRepository,
+    },
   ],
+  // El webhook de WhatsApp de DX-126 registrará la baja con este caso de uso.
+  exports: [OptOutByMessageUseCase],
 })
 export class RemindersModule {}

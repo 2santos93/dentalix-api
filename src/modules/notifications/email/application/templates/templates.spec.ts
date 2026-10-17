@@ -160,6 +160,7 @@ describe('plantillas reservadas para otras tareas', () => {
       locationAddress: 'Cra 15 # 93-60',
       providerName: 'Dra. Laura Gómez',
       confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
+      unsubscribeUrl: null,
     };
     const withLink = renderEmail('appointment-reminder', base, brand);
     expect(withLink.subject).toBe(
@@ -184,7 +185,7 @@ describe('plantillas reservadas para otras tareas', () => {
       { ...base, confirmUrl: null, locationAddress: null, providerName: null },
       brand,
     );
-    expect(noLink.html).not.toContain('<a href');
+    expect(noLink.html).not.toContain('<a ');
     expect(noLink.text).toContain('Sede: Sede Norte');
     expect(noLink.text).not.toContain('Profesional');
   });
@@ -199,6 +200,7 @@ describe('plantillas reservadas para otras tareas', () => {
         locationAddress: null,
         providerName: 'Dr. "X"',
         confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
+        unsubscribeUrl: null,
       },
       brand,
     );
@@ -283,6 +285,46 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).not.toContain('Saldo del plan');
       expect(email.html).not.toContain('<b>Ana</b>');
     });
+  });
+
+  // DX-128: baja de los recordatorios desde el propio email.
+  it('appointment-reminder lleva el enlace de baja al pie (HTML y texto)', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      {
+        patientName: 'Carolina',
+        startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+        locationName: 'Sede Norte',
+        locationAddress: null,
+        providerName: null,
+        confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
+        unsubscribeUrl: 'https://demo.dentalix.app/baja/xyz',
+      },
+      brand,
+    );
+    expect(email.html).toContain('href="https://demo.dentalix.app/baja/xyz"');
+    expect(email.html).toContain('Dejar de recibir recordatorios');
+    expect(email.text).toContain(
+      '¿No quieres recibir más recordatorios? Dejar de recibir recordatorios: https://demo.dentalix.app/baja/xyz',
+    );
+  });
+
+  it('un enlace de baja que no es http(s) no sale en el email', () => {
+    expect(() =>
+      renderEmail(
+        'appointment-reminder',
+        {
+          patientName: 'Carolina',
+          startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+          locationName: 'Sede Norte',
+          locationAddress: null,
+          providerName: null,
+          confirmUrl: null,
+          unsubscribeUrl: 'javascript:alert(1)',
+        },
+        brand,
+      ),
+    ).toThrow('URL http(s) válida');
   });
 
   it('rechaza un idioma sin plantilla', () => {

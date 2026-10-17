@@ -16,7 +16,16 @@ export interface AuditMetadata {
    * ISO y uuids: ni paciente, ni motivo, ni notas.
    */
   move?: { from: AuditAppointmentSlot; to: AuditAppointmentSlot };
+  /**
+   * DX-128: de dónde salió un cambio de canal, de opt-in de WhatsApp o una
+   * baja de recordatorios: en persona, enlace, mensaje del paciente, o
+   * anotado por el personal.
+   */
+  origin?: AuditOrigin;
 }
+
+export const AUDIT_ORIGINS = ['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF'] as const;
+export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 
 /** Hueco de una cita en un movimiento auditado (DX-121). */
 export interface AuditAppointmentSlot {
@@ -98,5 +107,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   }
   const move = appointmentMove(input.move);
   if (move) out.move = move;
+  const origin = AUDIT_ORIGINS.find((o) => o === input.origin);
+  if (origin) out.origin = origin;
   return out;
 }

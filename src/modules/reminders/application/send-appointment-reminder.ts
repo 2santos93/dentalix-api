@@ -14,6 +14,7 @@ import { MAX_LEAD_HOURS, MIN_LEAD_HOURS } from '../domain/reminder-lead-hours';
 import { CONFIRMATION_PATH } from '../../appointment-confirmations/presentation/confirmation-url';
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { ReminderClock } from './reminder-clock';
+import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
 
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,6 +66,7 @@ export class SendAppointmentReminder {
     private readonly links: TenantLinkBaseService,
     private readonly clock: ReminderClock,
     private readonly tenantContext: TenantContextService,
+    private readonly optOutLinks: ReminderOptOutLinks,
   ) {}
 
   async handle(payload: JobPayload): Promise<void> {
@@ -82,7 +84,7 @@ export class SendAppointmentReminder {
       expectedStart: start,
       leadHours,
       settings: ctx.settings,
-      patientEmail: ctx.patientEmail,
+      contact: ctx.contact,
       now: this.clock.now(),
     });
     if (decision.action === 'SKIP') {
@@ -117,7 +119,7 @@ export class SendAppointmentReminder {
       return;
     }
 
-    const to = (ctx.patientEmail ?? '').trim();
+    const to = (ctx.contact.email ?? '').trim();
     const tenantId = this.tenantContext.getTenantId();
     // El trabajo corre bajo su clínica (su repositorio ya lo exige); el email
     // es de la clínica, nunca de plataforma (DX-144: EmailOutbox.enqueue la
@@ -130,6 +132,11 @@ export class SendAppointmentReminder {
       appointmentId,
       automatic: true,
     });
+    // DX-128: cada email lleva su enlace de baja (sin host seguro no hay
+    // enlaces: tampoco el de confirmar).
+    const optOutToken = linkBase
+      ? await this.optOutLinks.issue(ctx.patientId)
+      : null;
     const outboundId =
       claim.outboundMessageId ??
       (
@@ -161,6 +168,10 @@ export class SendAppointmentReminder {
         confirmUrl: linkBase
           ? `${linkBase}${CONFIRMATION_PATH}/${link.token}`
           : null,
+        unsubscribeUrl:
+          linkBase && optOutToken
+            ? `${linkBase}${OPT_OUT_PATH}/${optOutToken}`
+            : null,
       },
     });
     await this.finish(claim.id, outboundId, appointmentId, leadHours);
