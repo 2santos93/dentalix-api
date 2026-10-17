@@ -12,6 +12,12 @@ import type {
 import { REFERENCE_LOOKUP } from '../../domain/ports/reference-lookup.port';
 import type { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { Patient } from '../../domain/entities/patient.entity';
+import {
+  PATIENT_COMMUNICATION_REPOSITORY,
+  type PatientCommunicationRepository,
+} from '../../domain/ports/patient-communication-repository.port';
+import { normalizeMobile } from '../../domain/communication/mobile-number';
+import { whatsappMobileRequiredError } from './patient-communication.use-cases';
 
 export type UpdatePatientInput = UpdatePatientRepoInput;
 
@@ -20,6 +26,8 @@ export class UpdatePatientUseCase {
   constructor(
     @Inject(PATIENT_REPOSITORY) private readonly repo: PatientRepository,
     @Inject(REFERENCE_LOOKUP) private readonly reference: ReferenceLookup,
+    @Inject(PATIENT_COMMUNICATION_REPOSITORY)
+    private readonly communication: PatientCommunicationRepository,
   ) {}
 
   async execute(id: string, patch: UpdatePatientInput): Promise<Patient> {
@@ -43,6 +51,16 @@ export class UpdatePatientUseCase {
       );
       if (!ok) {
         throw new BadRequestException('cityId does not belong to countryCode');
+      }
+    }
+
+    // DX-128: un paciente con canal WhatsApp no puede quedarse con un móvil
+    // inválido (el cambio de canal vive en el bloque «Comunicaciones»).
+    if (patch.phone !== undefined && existing.contactChannel === 'WHATSAPP') {
+      const country =
+        (await this.communication.locationCountry()) ?? existing.countryCode;
+      if (normalizeMobile(patch.phone, country).status !== 'VALID') {
+        throw whatsappMobileRequiredError();
       }
     }
 

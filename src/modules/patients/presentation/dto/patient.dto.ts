@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { DocType, RetentionExtension, Sex } from '@prisma/client';
+import {
+  ContactChannel,
+  DocType,
+  ReminderOptOutSource,
+  RetentionExtension,
+  Sex,
+  WhatsappOptInSource,
+} from '@prisma/client';
 
 // Response shape for Patient endpoints — documents the Patient entity
 // contract for Swagger (same convention as BrandingDto / StaffMemberDto).
@@ -154,6 +161,42 @@ export class PatientDto {
       'DX-039: cuándo se vaciaron sus datos no clínicos (supresión parcial).',
   })
   partiallySuppressedAt!: Date | null;
+
+  @ApiProperty({
+    enum: ContactChannel,
+    enumName: 'ContactChannel',
+    description:
+      'DX-128: canal de los avisos automáticos (EMAIL, WHATSAPP o NONE). Detalle en GET /patients/:id/communication.',
+  })
+  contactChannel!: ContactChannel;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  whatsappOptInAt!: Date | null;
+
+  @ApiProperty({
+    enum: WhatsappOptInSource,
+    enumName: 'WhatsappOptInSource',
+    nullable: true,
+  })
+  whatsappOptInSource!: WhatsappOptInSource | null;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  whatsappOptInById!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-128: baja de los recordatorios automáticos.',
+  })
+  reminderOptOutAt!: Date | null;
+
+  @ApiProperty({
+    enum: ReminderOptOutSource,
+    enumName: 'ReminderOptOutSource',
+    nullable: true,
+  })
+  reminderOptOutSource!: ReminderOptOutSource | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

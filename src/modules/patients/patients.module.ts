@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PatientsController } from './presentation/patients.controller';
+import { PatientCommunicationController } from './presentation/patient-communication.controller';
+import {
+  COMMUNICATION_CLOCK,
+  GetPatientCommunicationUseCase,
+  UpdatePatientCommunicationUseCase,
+} from './application/use-cases/patient-communication.use-cases';
+import { PATIENT_COMMUNICATION_REPOSITORY } from './domain/ports/patient-communication-repository.port';
+import { PrismaPatientCommunicationRepository } from './infrastructure/repositories/prisma-patient-communication.repository';
 import { CreatePatientUseCase } from './application/use-cases/create-patient.use-case';
 import { ListPatientsUseCase } from './application/use-cases/list-patients.use-case';
 import { CountPatientsUseCase } from './application/use-cases/count-patients.use-case';
@@ -25,7 +33,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   // TokenService, which depends on JwtService — must be available here since
   // the guard is applied on this module's controller.
   imports: [JwtModule.register({})],
-  controllers: [PatientsController],
+  controllers: [PatientsController, PatientCommunicationController],
   providers: [
     CreatePatientUseCase,
     ListPatientsUseCase,
@@ -37,6 +45,14 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     PartiallySuppressPatientUseCase,
     ListRetentionExpiringUseCase,
     { provide: RETENTION_CLOCK, useValue: () => new Date() },
+    // DX-128: bloque «Comunicaciones» de la ficha.
+    GetPatientCommunicationUseCase,
+    UpdatePatientCommunicationUseCase,
+    { provide: COMMUNICATION_CLOCK, useValue: () => new Date() },
+    {
+      provide: PATIENT_COMMUNICATION_REPOSITORY,
+      useClass: PrismaPatientCommunicationRepository,
+    },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PatientsController.

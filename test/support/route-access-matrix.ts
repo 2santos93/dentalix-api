@@ -95,6 +95,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/invitations/:token/accept': PUBLIC_TENANT,
   'GET /public/appointment-confirmations/:token': PUBLIC_TENANT,
   'POST /public/appointment-confirmations/:token': PUBLIC_TENANT,
+  // DX-128: baja de los recordatorios desde el enlace del email (el paciente).
+  'GET /public/reminder-opt-outs/:token': PUBLIC_TENANT,
+  'POST /public/reminder-opt-outs/:token': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -122,6 +125,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients': EVERY_ROLE,
   'GET /patients/:id': EVERY_ROLE,
   'PATCH /patients/:id': EVERY_ROLE,
+  // DX-128: bloque «Comunicaciones». Lo ven todos (el profesional en solo
+  // lectura); el canal lo cambian recepción y ADMIN.
+  'GET /patients/:id/communication': EVERY_ROLE,
+  'PATCH /patients/:id/communication': roles('ADMIN', 'RECEPTION'),
   // Retención legal de la HC (loop/informes/DX-039.md): archivar, cambiar la
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.

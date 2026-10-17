@@ -449,6 +449,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       }),
       status: 404,
     },
+    // DX-128: bloque «Comunicaciones» de la ficha.
+    {
+      name: 'GET /patients/:id/communication',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/communication`,
+      status: 404,
+    },
+    {
+      name: 'PATCH /patients/:id/communication',
+      verb: 'patch',
+      path: () => `/patients/${a.patientId}/communication`,
+      body: () => ({ contactChannel: 'NONE', reminderOptOut: true }),
+      status: 404,
+    },
     {
       name: 'POST /patients/:id/partial-suppression',
       verb: 'post',
