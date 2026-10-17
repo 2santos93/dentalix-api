@@ -713,6 +713,50 @@ en la MISMA transacción que el abono (`issuePaymentReceipt`):
   sin saldo y el cobro no se bloquea. Con dos abonos simultáneos al MISMO plan,
   la foto de cada uno no incluye el otro.
 
+## Registro de implantes (DX-191)
+
+Ficha de cada implante, pilar, injerto o membrana colocado (Res. 4816/2008
+art. 31 en CO; Reglamento (UE) 2017/745 art. 18 y RD 192/2023 art. 36 en ES),
+módulo `src/modules/implants`, tabla `patient_implants`.
+
+- **Alta** `POST /patients/:id/implants` (DENTIST y ADMIN; el resto 403 en
+  español): diente FDI (el mismo validador que el odontograma, con
+  temporales), tipo `IMPLANT|ABUTMENT|GRAFT|MEMBRANE|OTHER`, fabricante,
+  sistema, referencia (REF), lote, UDI, diámetro × longitud, registro
+  sanitario (INVIMA/CE), notas, fecha de colocación (por defecto hoy en la
+  sede, nunca futura) e ítem del plan opcional (de un plan del mismo
+  paciente). Falta de fabricante, REF o lote o diente inválido: 400 con todos
+  los errores en un mensaje. Profesional del token y sede del request (o la
+  principal).
+- **Inalterable**: sin PATCH/PUT/DELETE. Se corrige anulando con motivo
+  (`POST /implants/:id/void`, autor o ADMIN; 409 la segunda vez) y
+  registrando otro. Trigger `dx_patient_implants_immutable` (`search_path`
+  fijo): solo deja anular una vez y marcar la entrega de la tarjeta una vez;
+  DELETE/TRUNCATE solo un superusuario. RLS FORCE y FK compuestas por tenant a
+  paciente, sede e ítem del plan.
+- **Retención (DX-039)**: insertar un implante adelanta
+  `patients.last_attention_at` (mediodía UTC del día de colocación, con tope
+  en hoy), así que el bloqueo de archivo y borrado de la HC cuenta con él.
+- **Tarjeta de implante** (los 4 roles: recepción la entrega):
+  `GET /patients/:id/implant-card?date=YYYY-MM-DD` compone la intervención del
+  día (identidad y documento del paciente, clínica y sede, profesional(es) y
+  cada componente; los anulados marcados; sin notas, motivo ni diagnóstico).
+  `POST /patients/:id/implant-card/print` registra la fecha de entrega en los
+  implantes vivos del día (la primera; reimprimir no la mueve) y deja `PRINT`
+  en la auditoría. La API no genera PDF (no hay librería de PDF): la web
+  imprime la vista A4/carta y el navegador guarda como PDF.
+- **Búsqueda por lote/REF** (solo ADMIN): `GET /implants/search?lot=&reference=`
+  y `GET /implants/search.csv` (UTF-8 con BOM, anti fórmulas), coincidencia
+  exacta sin mayúsculas sobre los índices de expresión
+  `patient_implants_tenant_lot_idx`/`_reference_idx`, en la sede activa o en
+  toda la clínica. Cada consulta deja `VIEW`/`EXPORT` sobre `PATIENT_IMPLANT`
+  con `metadata.search = { lot, reference, rows }` (el nº de filas sale de la
+  cabecera `X-Result-Count`); nada en los logs.
+- **Autocompletar**: `GET /implants/catalog` (DENTIST y ADMIN), fabricantes y
+  sistemas ya usados por la clínica.
+- **Demo**: implante y pilar del 36 del paciente del plan de implante y otro
+  paciente con el mismo lote `DEMO-LOT-2026A`.
+
 ## Trabajos en segundo plano (DX-085)
 
 Cola y tareas programadas sobre la Postgres que ya existe (módulo
