@@ -991,11 +991,18 @@ de 30 días; ahora ese acceso es **break-glass**:
   el apex). Sin MFA el login en una clínica responde `401` con
   `code: "MFA_NOT_ENROLLED"` (plan de transición: los superadmins existentes
   nacen sin MFA y no pueden entrar a clínicas hasta enrolarlo).
+- **Espera de seguridad tras el alta**: el MFA recién activado no abre
+  clínicas hasta pasados `BREAK_GLASS_MFA_COOLDOWN_MINUTES` (default 1440 =
+  24 h; `0` en local para probar). Mientras, el login responde `401` con
+  `code: "MFA_COOLDOWN"` y `availableAt`, sin mirar el código.
 - **Código + motivo** en el mismo `POST /auth/login`: `mfaCode` (6 dígitos,
   ventana ±30 s, un código no vale dos veces) y `breakGlassReason` (10–500
   caracteres). Tras una contraseña correcta, si faltan → `401` con
   `code: "BREAK_GLASS_REQUIRED"`; código erróneo o reutilizado → el `401`
-  genérico («Invalid credentials»), que suma al bloqueo por intentos (DX-048).
+  genérico («Invalid credentials»), que suma al bloqueo por intentos (DX-048)
+  y a un contador propio del código MFA por superadmin (mismo backoff; solo
+  lo reinicia un código correcto, no un login correcto en el apex). En
+  espera → `429` con `Retry-After`.
   Quien no conoce la contraseña recibe siempre el `401` genérico: no se
   revela si el email existe ni si es superadmin.
 - **Token corto y sin refresh**: solo un access token ADMIN con
@@ -1036,9 +1043,13 @@ Con el MFA activo no se puede volver a enrolar (`409`): perder el móvil exige
 borrar a mano `mfaTotpSecretEnc`, `mfaEnabledAt` y `mfaLastUsedStep` del
 usuario en la BD (y re-enrolar). **Riesgo de la transición**: mientras un
 superadmin no haya enrolado, quien robe su contraseña podría enrolar su propio
-MFA; enrolad a todos los superadmins en cuanto se despliegue.
+MFA desde el apex (que solo pide contraseña). Mitigación: la espera de
+seguridad de arriba (24 h sin break-glass tras el alta), el evento de log
+`platform_mfa.enabled` (conviene alertar sobre él) y el `409` que recibe el
+dueño real al intentar su alta, que le pide avisar. Enrolad a todos los
+superadmins en cuanto se despliegue.
 
-**Probar en local**: convierte en superadmin a un usuario que NO sea miembro
+**Probar en local** (con `BREAK_GLASS_MFA_COOLDOWN_MINUTES=0` en `.env`): convierte en superadmin a un usuario que NO sea miembro
 de la demo (`UPDATE users SET "isPlatformAdmin" = true WHERE email = '…'`),
 enrola el MFA en http://localhost:3001/admin y entra en
 http://demo.localhost:3001/login con su email: la web pide el código y el

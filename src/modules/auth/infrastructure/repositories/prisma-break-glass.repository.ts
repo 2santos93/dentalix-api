@@ -14,11 +14,16 @@ export class PrismaBreakGlassRepository implements BreakGlassRepository {
   async findMfa(userId: string): Promise<UserMfaRecord | null> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: { mfaTotpSecretEnc: true, mfaLastUsedStep: true },
+      select: {
+        mfaTotpSecretEnc: true,
+        mfaEnabledAt: true,
+        mfaLastUsedStep: true,
+      },
     });
     if (!user) return null;
     return {
       secretEnc: user.mfaTotpSecretEnc,
+      enabledAt: user.mfaEnabledAt,
       lastUsedStep: user.mfaLastUsedStep,
     };
   }

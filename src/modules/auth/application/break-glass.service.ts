@@ -18,8 +18,10 @@ import {
 } from '../domain/ports/break-glass-repository.port';
 import {
   breakGlassChallenge,
+  breakGlassMfaCooldownMinutes,
   breakGlassTtlMinutes,
 } from '../domain/break-glass';
+import { LoginLockoutService } from './login-lockout.service';
 
 const MAX_USER_AGENT = 512;
 const MAX_IP = 64;
@@ -49,26 +51,45 @@ export interface BreakGlassSession {
 export class BreakGlassService {
   private readonly logger = new Logger('BreakGlass');
   private readonly ttlSeconds: number;
+  private readonly cooldownMs: number;
 
   constructor(
     @Inject(BREAK_GLASS_REPOSITORY) private readonly repo: BreakGlassRepository,
     @Inject(MFA_SECRET_CIPHER) private readonly cipher: MfaSecretCipher,
     private readonly tokens: TokenService,
+    private readonly lockout: LoginLockoutService,
     config: ConfigService,
   ) {
     this.ttlSeconds =
       breakGlassTtlMinutes(config.get<string>('BREAK_GLASS_TTL_MINUTES')) * 60;
+    this.cooldownMs =
+      breakGlassMfaCooldownMinutes(
+        config.get<string>('BREAK_GLASS_MFA_COOLDOWN_MINUTES'),
+      ) * 60_000;
   }
 
   async open(input: BreakGlassInput): Promise<BreakGlassSession> {
     const mfa = await this.repo.findMfa(input.user.id);
-    if (!mfa?.secretEnc) throw breakGlassChallenge('MFA_NOT_ENROLLED');
+    if (!mfa?.secretEnc || !mfa.enabledAt) {
+      throw breakGlassChallenge('MFA_NOT_ENROLLED');
+    }
+    const now = Date.now();
+    // Espera de seguridad tras el alta (ver domain/break-glass.ts): ni
+    // siquiera se miran códigos hasta que pase.
+    const availableAt = mfa.enabledAt.getTime() + this.cooldownMs;
+    if (now < availableAt) {
+      throw breakGlassChallenge('MFA_COOLDOWN', {
+        availableAt: new Date(availableAt).toISOString(),
+      });
+    }
 
     const reason = input.reason?.trim();
     const code = input.mfaCode?.trim();
     if (!code || !reason) throw breakGlassChallenge('BREAK_GLASS_REQUIRED');
 
-    const now = Date.now();
+    // Fuerza bruta del código: contador propio por superadmin, que un login
+    // correcto (apex) no borra. En espera → LoginLockedError (429).
+    await this.lockout.claimMfaAttempt(input.user.id);
     const secret = decodeBase32(
       this.cipher.decrypt(mfa.secretEnc, input.user.id),
     );
@@ -81,6 +102,7 @@ export class BreakGlassService {
     ) {
       throw new UnauthorizedException('Invalid credentials');
     }
+    await this.lockout.clearMfa(input.user.id);
 
     const { accessToken, expiresAt } = await this.tokens.issueAccessOnly(
       {

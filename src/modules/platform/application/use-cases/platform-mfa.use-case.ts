@@ -4,7 +4,10 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { breakGlassMfaCooldownMinutes } from '../../../auth/domain/break-glass';
 import {
   MFA_SECRET_CIPHER,
   MfaSecretCipher,
@@ -25,6 +28,11 @@ export const TOTP_ISSUER = 'Dentalix';
 export interface PlatformMfaStatus {
   enabled: boolean;
   enabledAt: Date | null;
+  /**
+   * Desde cuándo sirve para el break-glass: `enabledAt` + la espera de
+   * seguridad (BREAK_GLASS_MFA_COOLDOWN_MINUTES). `null` sin MFA.
+   */
+  breakGlassAvailableAt: Date | null;
 }
 
 export interface PlatformMfaEnrollment {
@@ -44,15 +52,34 @@ export interface PlatformMfaEnrollment {
  */
 @Injectable()
 export class PlatformMfaUseCase {
+  private readonly logger = new Logger('PlatformMfa');
+  private readonly cooldownMs: number;
+
   constructor(
     @Inject(PLATFORM_MFA_REPOSITORY)
     private readonly repo: PlatformMfaRepository,
     @Inject(MFA_SECRET_CIPHER) private readonly cipher: MfaSecretCipher,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.cooldownMs =
+      breakGlassMfaCooldownMinutes(
+        config.get<string>('BREAK_GLASS_MFA_COOLDOWN_MINUTES'),
+      ) * 60_000;
+  }
 
   async status(userId: string): Promise<PlatformMfaStatus> {
     const state = await this.require(userId);
-    return { enabled: state.enabledAt !== null, enabledAt: state.enabledAt };
+    return this.statusOf(state.enabledAt);
+  }
+
+  private statusOf(enabledAt: Date | null): PlatformMfaStatus {
+    return {
+      enabled: enabledAt !== null,
+      enabledAt,
+      breakGlassAvailableAt: enabledAt
+        ? new Date(enabledAt.getTime() + this.cooldownMs)
+        : null,
+    };
   }
 
   async start(userId: string): Promise<PlatformMfaEnrollment> {
@@ -93,7 +120,11 @@ export class PlatformMfaUseCase {
       step,
     );
     if (!enabledAt) throw alreadyEnabled();
-    return { enabled: true, enabledAt };
+    // SEC-008: evento para alertas de seguridad. Un alta que su dueño no hizo
+    // es una contraseña robada; el break-glass sigue cerrado durante la
+    // espera de seguridad (BREAK_GLASS_MFA_COOLDOWN_MINUTES).
+    this.logger.warn({ event: 'platform_mfa.enabled', userId });
+    return this.statusOf(enabledAt);
   }
 
   private async require(userId: string) {
@@ -105,6 +136,6 @@ export class PlatformMfaUseCase {
 
 function alreadyEnabled(): ConflictException {
   return new ConflictException(
-    'La verificación en dos pasos ya está activa en esta cuenta.',
+    'La verificación en dos pasos ya está activa en esta cuenta. Si no la activaste tú, cambia tu contraseña y avisa al equipo de seguridad de Dentalix.',
   );
 }

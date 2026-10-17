@@ -64,6 +64,23 @@ interface BreakGlassResponse {
   expiresAt: string;
 }
 
+/**
+ * 429 con `Retry-After` si `err` es un bloqueo del login (DX-048) o del código
+ * MFA (SEC-008); el mismo mensaje en ambos casos. Cualquier otro error, tal cual.
+ */
+function lockedOr(err: unknown, res: Response): unknown {
+  if (!(err instanceof LoginLockedError)) return err;
+  res.setHeader('Retry-After', String(err.retryAfterSeconds));
+  return new HttpException(
+    {
+      statusCode: HttpStatus.TOO_MANY_REQUESTS,
+      error: 'Too Many Requests',
+      message: loginLockedMessage(err.retryAfterSeconds),
+    },
+    HttpStatus.TOO_MANY_REQUESTS,
+  );
+}
+
 function userAgentOf(req: TenantHostRequest): string | null {
   const value = req.headers['user-agent'];
   return (Array.isArray(value) ? value[0] : value) || null;
@@ -194,7 +211,7 @@ export class AuthController {
   @ApiUnauthorizedResponse({
     description:
       'Credenciales inválidas (mismo error exista o no el email). Solo tras una contraseña correcta de superadmin sin membresía: ' +
-      '`code: "MFA_NOT_ENROLLED"` (debe activar el MFA en plataforma) o `code: "BREAK_GLASS_REQUIRED"` (faltan código y motivo).',
+      '`code: "MFA_NOT_ENROLLED"` (debe activar el MFA en plataforma), `code: "MFA_COOLDOWN"` (MFA recién activado: espera de seguridad hasta `availableAt`) o `code: "BREAK_GLASS_REQUIRED"` (faltan código y motivo).',
   })
   @ApiBadRequestResponse({
     description:
@@ -203,7 +220,7 @@ export class AuthController {
   // Encima de @RateLimit: completa su 429 genérico con el caso del bloqueo.
   @ApiTooManyRequestsResponse({
     description:
-      'Demasiados intentos fallidos de esta cuenta o desde esta IP, o avalancha de peticiones. `Retry-After` lleva los segundos de espera; el mensaje es el mismo exista o no el email.',
+      'Demasiados intentos fallidos de esta cuenta, desde esta IP o del código MFA de un superadmin, o avalancha de peticiones. `Retry-After` lleva los segundos de espera; el mensaje es el mismo exista o no el email.',
     headers: {
       'Retry-After': {
         description: 'Segundos que faltan para poder reintentar',
@@ -222,16 +239,7 @@ export class AuthController {
     try {
       await this.lockout.assertCanAttempt(dto.email, req.ip);
     } catch (err) {
-      if (!(err instanceof LoginLockedError)) throw err;
-      res.setHeader('Retry-After', String(err.retryAfterSeconds));
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: 'Too Many Requests',
-          message: loginLockedMessage(err.retryAfterSeconds),
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      throw lockedOr(err, res);
     }
     // Host SIN clínica (el apex): es la puerta del área de plataforma. Solo la
     // resuelve un superadmin, y recibe un token de plataforma (sin tenant ni
@@ -258,7 +266,8 @@ export class AuthController {
       if (err instanceof UnauthorizedException) {
         await this.lockout.recordFailure(dto.email, req.ip);
       }
-      throw err;
+      // SEC-008: el código MFA del break-glass tiene su propio bloqueo.
+      throw lockedOr(err, res);
     }
     await this.lockout.recordSuccess(dto.email);
     if (isBreakGlassSession(result)) {

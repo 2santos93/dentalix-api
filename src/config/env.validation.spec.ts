@@ -91,6 +91,19 @@ describe('validateEnv', () => {
         ).not.toThrow();
       }
     });
+
+    it('BREAK_GLASS_MFA_COOLDOWN_MINUTES es un entero entre 0 y 10080', () => {
+      for (const bad of ['-1', '10081', '24h', '1.5']) {
+        expect(
+          errorOf(baseEnv({ BREAK_GLASS_MFA_COOLDOWN_MINUTES: bad })),
+        ).toContain('BREAK_GLASS_MFA_COOLDOWN_MINUTES');
+      }
+      for (const good of ['0', '1440', '10080']) {
+        expect(() =>
+          validateEnv(baseEnv({ BREAK_GLASS_MFA_COOLDOWN_MINUTES: good })),
+        ).not.toThrow();
+      }
+    });
   });
 
   describe('caso válido', () => {

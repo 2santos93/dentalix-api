@@ -4,6 +4,8 @@ export const BREAK_GLASS_REPOSITORY = Symbol('BREAK_GLASS_REPOSITORY');
 export interface UserMfaRecord {
   /** `null` = sin MFA confirmado (plan de transición: no hay break-glass). */
   secretEnc: string | null;
+  /** Cuándo se confirmó el alta (cuenta para la espera de seguridad). */
+  enabledAt: Date | null;
   lastUsedStep: number | null;
 }
 

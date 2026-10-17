@@ -19,8 +19,10 @@
  * SEC-009: `DOMAIN_RECHECK_MAX_FAILURES`, re-verificaciones fallidas seguidas
  * antes de desactivar un dominio personalizado.
  * SEC-008: `MFA_ENCRYPTION_KEY` (cifra los secretos TOTP del MFA de los
- * superadmins; obligatoria en producción) y `BREAK_GLASS_TTL_MINUTES`
- * (duración del acceso de soporte a una clínica, 5–60).
+ * superadmins; obligatoria en producción), `BREAK_GLASS_TTL_MINUTES`
+ * (duración del acceso de soporte a una clínica, 5–60) y
+ * `BREAK_GLASS_MFA_COOLDOWN_MINUTES` (espera tras activar el MFA antes de
+ * poder usarlo, 0–10080; por defecto 1440).
  */
 
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
@@ -34,6 +36,7 @@ import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tena
 import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
 import {
   BREAK_GLASS_MAX_TTL_MINUTES,
+  BREAK_GLASS_MFA_COOLDOWN_MAX_MINUTES,
   BREAK_GLASS_MIN_TTL_MINUTES,
 } from '../modules/auth/domain/break-glass';
 
@@ -467,6 +470,18 @@ function breakGlassProblems(env: Env, isProd: boolean): string[] {
     ) {
       problems.push(
         `BREAK_GLASS_TTL_MINUTES debe ser un entero entre ${BREAK_GLASS_MIN_TTL_MINUTES} y ${BREAK_GLASS_MAX_TTL_MINUTES} (minutos que dura el acceso de soporte a una clínica).`,
+      );
+    }
+  }
+  const cooldown = str(env, 'BREAK_GLASS_MFA_COOLDOWN_MINUTES');
+  if (cooldown != null) {
+    const value = Number(cooldown.trim());
+    if (
+      !/^\d{1,5}$/.test(cooldown.trim()) ||
+      value > BREAK_GLASS_MFA_COOLDOWN_MAX_MINUTES
+    ) {
+      problems.push(
+        `BREAK_GLASS_MFA_COOLDOWN_MINUTES debe ser un entero entre 0 y ${BREAK_GLASS_MFA_COOLDOWN_MAX_MINUTES} (minutos de espera tras activar el MFA antes del primer acceso de soporte).`,
       );
     }
   }

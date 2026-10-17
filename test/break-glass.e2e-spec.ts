@@ -12,6 +12,11 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { createE2eApp as createAppWith } from './support/create-e2e-app';
+import {
+  DEFAULT_LOGIN_LOCKOUT,
+  LOGIN_LOCKOUT_CONFIG,
+} from '../src/modules/auth/domain/login-lockout';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
 
@@ -122,7 +127,11 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         .set('X-Tenant-Host', 'localhost')
         .set('Authorization', `Bearer ${platformToken}`)
         .expect(200);
-      expect(res.body).toEqual({ enabled: false, enabledAt: null });
+      expect(res.body).toEqual({
+        enabled: false,
+        enabledAt: null,
+        breakGlassAvailableAt: null,
+      });
     });
   });
 
@@ -185,6 +194,36 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
       expect(row.mfaEnabledAt).not.toBeNull();
       expect(row.mfaTotpPendingSecretEnc).toBeNull();
       expect(row.mfaTotpSecretEnc).not.toContain(secret);
+    });
+
+    it('recién activado: el break-glass espera el periodo de seguridad (401 MFA_COOLDOWN)', async () => {
+      // Riesgo de transición: quien robe la contraseña de un superadmin sin
+      // MFA podría enrolar el suyo desde el apex. El periodo de espera da
+      // margen para detectarlo (el dueño real recibe 409 al intentar el alta).
+      const res = await tenantLogin(clinic.host, {
+        email: SUPER_EMAIL,
+        password: SEEDED_PASSWORD,
+        mfaCode: codeAt(secret, 1),
+        breakGlassReason: REASON,
+      }).expect(401);
+      const body = res.body as Body & { availableAt?: string };
+      expect(body.code).toBe('MFA_COOLDOWN');
+      expect(body.accessToken).toBeUndefined();
+      const { mfaEnabledAt } = await raw.user.findUniqueOrThrow({
+        where: { id: superId },
+        select: { mfaEnabledAt: true },
+      });
+      // Por defecto, 24 h desde el alta.
+      expect(new Date(body.availableAt!).getTime()).toBe(
+        mfaEnabledAt!.getTime() + 24 * 60 * 60 * 1000,
+      );
+      expect(await raw.platformAccessAudit.count()).toBe(0);
+
+      // El resto de la suite simula que el periodo ya pasó.
+      await raw.user.update({
+        where: { id: superId },
+        data: { mfaEnabledAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
+      });
     });
 
     it('con el MFA activo, otra alta → 409 (no se pisa el secreto)', async () => {
@@ -503,6 +542,67 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         .set('X-Tenant-Host', clinic.host)
         .set('Authorization', `Bearer ${token}`)
         .expect(403);
+    });
+  });
+
+  describe('fuerza bruta del código', () => {
+    // Política de bloqueo REAL (el resto de suites la suben, setup-e2e.ts).
+    let strict: INestApplication<App>;
+    beforeAll(async () => {
+      strict = await createAppWith({
+        override: (builder) => {
+          builder
+            .overrideProvider(LOGIN_LOCKOUT_CONFIG)
+            .useValue(DEFAULT_LOGIN_LOCKOUT);
+        },
+      });
+    });
+    afterAll(() => strict.close());
+
+    const strictLogin = (host: string, body: Record<string, unknown>) =>
+      request(strict.getHttpServer())
+        .post('/api/v1/auth/login')
+        .set('X-Tenant-Host', host)
+        .set('User-Agent', UA)
+        .send(body);
+
+    it('un login correcto en plataforma NO reinicia los fallos del código: tras 5, ni el bueno entra (429)', async () => {
+      await raw.user.update({
+        where: { id: superId },
+        data: { mfaLastUsedStep: null },
+      });
+      const before = await raw.platformAccessAudit.count();
+      const valid = new Set([-1, 0, 1].map((o) => codeAt(secret, o)));
+      const wrongs = [
+        '123456',
+        '654321',
+        '000001',
+        '111111',
+        '222222',
+        '333333',
+      ]
+        .filter((c) => !valid.has(c))
+        .slice(0, 5);
+      for (const mfaCode of wrongs) {
+        await strictLogin(clinic.host, {
+          email: SUPER_EMAIL,
+          password: SEEDED_PASSWORD,
+          mfaCode,
+          breakGlassReason: REASON,
+        }).expect(401);
+        // Quien tiene la contraseña entra al apex: el bloqueo de la CUENTA
+        // vuelve a empezar, el del código no.
+        await loginAs(strict, 'localhost', SUPER_EMAIL);
+      }
+      const res = await strictLogin(clinic.host, {
+        email: SUPER_EMAIL,
+        password: SEEDED_PASSWORD,
+        mfaCode: codeAt(secret),
+        breakGlassReason: REASON,
+      }).expect(429);
+      expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+      expect((res.body as Body).message).toMatch(/Demasiados intentos/);
+      expect(await raw.platformAccessAudit.count()).toBe(before);
     });
   });
 

@@ -16,6 +16,14 @@ import type {
   UserMfaRecord,
 } from '../domain/ports/break-glass-repository.port';
 import { BreakGlassService } from './break-glass.service';
+import { LoginLockoutService } from './login-lockout.service';
+import { InMemoryLoginThrottleRepository } from './__fixtures__/in-memory-login-throttle';
+import {
+  DEFAULT_LOGIN_LOCKOUT,
+  LoginLockedError,
+} from '../domain/login-lockout';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const USER = { id: '6f0c3f9e-7d1b-4c2a-9e1f-0a1b2c3d4e5f', tokenVersion: 3 };
 const TENANT = '0b9d1c2e-3f4a-4b5c-8d6e-7f8091a2b3c4';
@@ -57,17 +65,21 @@ function setup(env: Record<string, string> = {}) {
   });
   const tokens = new TokenService(new JwtService({}), config);
   const repo = new InMemoryBreakGlassRepo();
-  const service = new BreakGlassService(repo, cipher, tokens, config);
+  const throttle = new InMemoryLoginThrottleRepository();
+  const lockout = new LoginLockoutService(throttle, DEFAULT_LOGIN_LOCKOUT);
+  const service = new BreakGlassService(repo, cipher, tokens, lockout, config);
   const secret = generateTotpSecret();
-  const enroll = () => {
+  /** Por defecto, enrolado hace 2 días (ya pasó la espera de seguridad). */
+  const enroll = (enabledAt = new Date(Date.now() - 2 * DAY_MS)) => {
     repo.mfa = {
       secretEnc: cipher.encrypt(secret, USER.id),
+      enabledAt,
       lastUsedStep: null,
     };
   };
   const code = (offset = 0) =>
     totpCode(decodeBase32(secret), totpStep(Date.now()) + offset);
-  return { service, repo, tokens, enroll, code };
+  return { service, repo, tokens, enroll, code, throttle };
 }
 
 function claimsOf(jwt: string): Record<string, unknown> {
@@ -220,5 +232,100 @@ describe('BreakGlassService (SEC-008)', () => {
         reason: REASON,
       }),
     ).rejects.toThrow('db down');
+  });
+
+  describe('espera de seguridad tras el alta del MFA (riesgo de transición)', () => {
+    it('recién activado → MFA_COOLDOWN con availableAt, sin mirar el código ni dejar fila', async () => {
+      const { service, repo, enroll, code } = setup();
+      const enabledAt = new Date(Date.now() - 60_000);
+      enroll(enabledAt);
+      let body: Record<string, unknown> = {};
+      try {
+        await service.open({
+          tenantId: TENANT,
+          user: USER,
+          mfaCode: code(),
+          reason: REASON,
+        });
+      } catch (err) {
+        body = (err as UnauthorizedException).getResponse() as Record<
+          string,
+          unknown
+        >;
+      }
+      expect(body.code).toBe('MFA_COOLDOWN');
+      expect(body.availableAt).toBe(
+        new Date(enabledAt.getTime() + DAY_MS).toISOString(),
+      );
+      expect(repo.mfa?.lastUsedStep).toBeNull();
+      expect(repo.accesses).toEqual([]);
+    });
+
+    it('la espera es configurable (0 = sin espera)', async () => {
+      const { service, repo, enroll, code } = setup({
+        BREAK_GLASS_MFA_COOLDOWN_MINUTES: '0',
+      });
+      enroll(new Date());
+      await service.open({
+        tenantId: TENANT,
+        user: USER,
+        mfaCode: code(),
+        reason: REASON,
+      });
+      expect(repo.accesses).toHaveLength(1);
+    });
+  });
+
+  describe('fuerza bruta del código', () => {
+    const wrongFor = (valid: string): string =>
+      ['000000', '111111', '222222'].find((c) => c !== valid)!;
+
+    it('tras 5 códigos erróneos queda en espera (LoginLockedError) aunque el siguiente sea bueno', async () => {
+      const { service, repo, enroll, code } = setup();
+      enroll();
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          codeOf(
+            service.open({
+              tenantId: TENANT,
+              user: USER,
+              mfaCode: wrongFor(code()),
+              reason: REASON,
+            }),
+          ),
+        ).resolves.toBeUndefined();
+      }
+      await expect(
+        service.open({
+          tenantId: TENANT,
+          user: USER,
+          mfaCode: code(),
+          reason: REASON,
+        }),
+      ).rejects.toBeInstanceOf(LoginLockedError);
+      expect(repo.accesses).toEqual([]);
+    });
+
+    it('un código bueno reinicia el contador', async () => {
+      const { service, enroll, code, throttle } = setup();
+      enroll();
+      for (let i = 0; i < 4; i++) {
+        await codeOf(
+          service.open({
+            tenantId: TENANT,
+            user: USER,
+            mfaCode: wrongFor(code()),
+            reason: REASON,
+          }),
+        );
+      }
+      await service.open({
+        tenantId: TENANT,
+        user: USER,
+        mfaCode: code(),
+        reason: REASON,
+      });
+      expect(throttle.size()).toBe(0);
+    });
   });
 });

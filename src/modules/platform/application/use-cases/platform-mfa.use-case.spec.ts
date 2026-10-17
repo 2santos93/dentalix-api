@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MfaSecretCipher } from '../../../../shared/crypto/mfa-secret-cipher';
 import {
   decodeBase32,
@@ -58,10 +59,11 @@ class InMemoryMfaRepo implements PlatformMfaRepository {
   }
 }
 
-function setup() {
+function setup(env: Record<string, string> = {}) {
   const repo = new InMemoryMfaRepo();
   const cipher = new MfaSecretCipher(randomBytes(32));
-  return { repo, cipher, uc: new PlatformMfaUseCase(repo, cipher) };
+  const config = new ConfigService(env);
+  return { repo, cipher, uc: new PlatformMfaUseCase(repo, cipher, config) };
 }
 
 describe('PlatformMfaUseCase (SEC-008)', () => {
@@ -70,6 +72,7 @@ describe('PlatformMfaUseCase (SEC-008)', () => {
     await expect(uc.status(USER)).resolves.toEqual({
       enabled: false,
       enabledAt: null,
+      breakGlassAvailableAt: null,
     });
 
     const { secret, otpauthUri } = await uc.start(USER);
@@ -81,6 +84,10 @@ describe('PlatformMfaUseCase (SEC-008)', () => {
     const step = totpStep(Date.now());
     const status = await uc.confirm(USER, totpCode(decodeBase32(secret), step));
     expect(status.enabled).toBe(true);
+    // Espera de seguridad (SEC-008): por defecto 24 h tras el alta.
+    expect(status.breakGlassAvailableAt!.getTime()).toBe(
+      status.enabledAt!.getTime() + 24 * 60 * 60 * 1000,
+    );
     expect(repo.state!.secretEnc).not.toBeNull();
     expect(repo.state!.step).toBe(step);
   });
@@ -119,5 +126,15 @@ describe('PlatformMfaUseCase (SEC-008)', () => {
     const { repo, uc } = setup();
     repo.state = null;
     await expect(uc.status(USER)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('breakGlassAvailableAt sigue BREAK_GLASS_MFA_COOLDOWN_MINUTES', async () => {
+    const { repo, uc } = setup({ BREAK_GLASS_MFA_COOLDOWN_MINUTES: '90' });
+    const enabledAt = new Date('2026-10-17T10:00:00.000Z');
+    repo.state!.enabledAt = enabledAt;
+    const status = await uc.status(USER);
+    expect(status.breakGlassAvailableAt).toEqual(
+      new Date('2026-10-17T11:30:00.000Z'),
+    );
   });
 });
