@@ -230,6 +230,34 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
       expect(event.resourceId).toBe(resin.id);
     });
 
+    it('ADMIN edita las preguntas: se sustituyen en la misma transacción', async () => {
+      const edited = await as(
+        api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
+        clinic.adminToken,
+      )
+        .send({
+          body: 'Resina en {{Superficie}}.',
+          prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
+        })
+        .expect(200);
+      expect((edited.body as TemplateBody).prompts).toMatchObject([
+        { label: 'Superficie', options: ['O', 'M'], position: 0 },
+      ]);
+
+      // Vuelve a la versión original (las pruebas siguientes la usan).
+      const restored = await as(
+        api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
+        clinic.adminToken,
+      )
+        .send({ body: RESIN.body, prompts: RESIN.prompts })
+        .expect(200);
+      expect(
+        (restored.body as TemplateBody).prompts.map((p) => p.label),
+      ).toEqual(['Superficie', 'Material', 'Observaciones']);
+      resin = restored.body as TemplateBody;
+      expect(await auditCount('UPDATE')).toBe(2);
+    });
+
     it('DENTIST y ASSISTANT las leen; RECEPTION, 403', async () => {
       for (const token of [dentist.token, assistant]) {
         const res = await as(
@@ -416,7 +444,8 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         .send({ active: false })
         .expect(200);
       expect((off.body as TemplateBody).active).toBe(false);
-      expect(await auditCount('UPDATE')).toBe(2);
+      // + las 2 ediciones de preguntas de «CRUD por rol».
+      expect(await auditCount('UPDATE')).toBe(4);
 
       const after = await raw.clinicalEntry.findUniqueOrThrow({
         where: { id: entry.id },

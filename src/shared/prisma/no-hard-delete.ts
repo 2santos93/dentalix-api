@@ -22,11 +22,17 @@ import { Prisma } from '@prisma/client';
 /**
  * Modelos donde un borrado duro es legítimo dentro de una transacción de tenant.
  *
- * Está vacío a propósito. Cada entrada aquí es una decisión de diseño explícita
- * (dato derivado, caché, o housekeeping con TTL), nunca un atajo para no añadir
- * la columna `deletedAt`.
+ * Cada entrada aquí es una decisión de diseño explícita (dato derivado, caché,
+ * o housekeeping con TTL), nunca un atajo para no añadir la columna
+ * `deletedAt`.
  */
-const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>();
+const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // DX-170: las preguntas son configuración de la plantilla, sin datos de
+  // pacientes y sin nada que las referencie (la evolución guarda su texto
+  // compuesto). Editar la plantilla las sustituye en la misma transacción y
+  // el cambio queda en audit_events.
+  'clinicalNoteTemplatePrompt',
+]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([
   'delete',
