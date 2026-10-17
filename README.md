@@ -406,6 +406,48 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   MAIL_FILE_DIR=./.mail` deja cada email como JSON en esa carpeta (prohibido en
   producción; lo usa el Playwright de la web).
 
+## Bloqueo del login por intentos fallidos (DX-048)
+
+Sustituye a los baldes `login` (IP+email, 5/15 min) y `login-account` (email,
+50/h) del rate limiter, que contaban también los logins correctos y dejaban a
+una clínica tras NAT, o a una doctora atacada desde varias IPs, sin entrar
+hasta 1 h (SEC-028).
+
+- **Por cuenta** (hash SHA-256 del email normalizado; nunca el email en claro):
+  solo cuentan los **fallos** (401) y un login correcto borra el contador. Sin
+  espera hasta 5 fallos; después 1, 2, 4, 8 min con **tope de 15 min**. Los
+  fallos se olvidan tras 1 h sin fallar. Durante la espera se responde 429
+  **sin mirar la contraseña** (ni un acierto pasa ni se paga argon2).
+- **Por IP** (hash): solo fallos, 100 por ventana fija de 15 min; al llegar, la
+  IP espera a que acabe la ventana. Un acierto no la reinicia (un atacante la
+  limpiaría entrando con su propia cuenta). La IP es `req.ip`: depende de
+  `TRUST_PROXY` (ver SEC-031).
+- **429**: cabecera `Retry-After` (segundos) y `message` «Demasiados intentos.
+  Vuelve a intentarlo en N min.», idénticos exista o no el email (el contador
+  existe para cualquier email escrito) y por el mismo camino, sin tiempo
+  distinto. El 401 sigue siendo el genérico de SEC-017.
+- **Entre réplicas**: los contadores viven en `login_throttles` (tabla de
+  plataforma sin `tenantId` ni RLS, como `revoked_tokens`: solo hashes,
+  `CHECK` de SHA-256 en hex), con escrituras atómicas `INSERT … ON CONFLICT` y
+  la hora de la BD. La purga va en el trabajo horario
+  `auth.purge-expired-tokens` (filas sin fallos en más de 1 h y sin espera).
+- **Rate limiter**: el login conserva solo `login-burst` (60/min por IP, en
+  memoria de cada réplica) contra avalanchas; holgado para una clínica entera.
+- **Desbloqueo por un ADMIN**: `GET /staff/:userId` trae `loginBlockedUntil`
+  (`null` = sin bloqueo) y `POST /staff/:userId/login-unlock` (204, solo
+  ADMIN; 404 si no es miembro de su clínica, 403 otros roles) borra la espera
+  y los fallos. Deja un evento `UPDATE` / `STAFF_MEMBER` con
+  `reason: LOGIN_UNLOCKED` en la auditoría.
+- Variables (defaults seguros; valor inválido = no arranca):
+  `LOGIN_LOCKOUT_FREE_FAILURES` (5), `LOGIN_LOCKOUT_BASE_DELAY_MS` (60000),
+  `LOGIN_LOCKOUT_MAX_DELAY_MS` (900000), `LOGIN_LOCKOUT_RESET_MS` (3600000,
+  debe ser mayor que el tope), `LOGIN_IP_FAILURE_LIMIT` (100),
+  `LOGIN_IP_FAILURE_WINDOW_MS` (900000), `RATE_LIMIT_LOGIN_BURST_LIMIT` (60) y
+  `RATE_LIMIT_LOGIN_BURST_TTL_MS` (60000). `RATE_LIMIT_LOGIN_*` y
+  `RATE_LIMIT_LOGIN_ACCOUNT_*` ya no se leen: quítalas del despliegue.
+- En local, para salir de una espera sin esperar: `DELETE FROM login_throttles;`
+  (o el botón «Desbloquear inicio de sesión» del perfil del miembro).
+
 ## Odontograma: dentición, origen y anulación (DX-120)
 
 - **Dentición por posición**: cada una de las 32 posiciones (código FDI
