@@ -35,6 +35,15 @@ const today = (): string => civilDateIn(new Date(), BOGOTA);
 const noonDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
 
+interface Body {
+  items: Record<string, unknown>[];
+  promises: Record<string, unknown>[];
+  notes: { id: string }[];
+  balance: Balance;
+}
+
+const bodyOf = (res: { body: unknown }): Body => res.body as Body;
+
 interface Balance {
   hasOverdue: boolean;
   overdueDays: number | null;
@@ -223,8 +232,8 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       '/receivables/aging?hasPromise=true',
       receptionToken,
     ).expect(200);
-    expect(aging.body.items).toHaveLength(1);
-    expect(aging.body.items[0]).toMatchObject({
+    expect(bodyOf(aging).items).toHaveLength(1);
+    expect(bodyOf(aging).items[0]).toMatchObject({
       patient: { id: deudor },
       lastNote: { channel: 'CALL', outcome: 'PROMISED_PAYMENT' },
       promise: { id: promiseId, status: 'OPEN', dueDate },
@@ -253,12 +262,12 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       `/patients/${deudor}/collections`,
       receptionToken,
     ).expect(200);
-    expect(collections.body.promises[0]).toMatchObject({
+    expect(bodyOf(collections).promises[0]).toMatchObject({
       id: promiseId,
       status: 'KEPT',
       covered: 200000,
     });
-    expect(collections.body.notes).toHaveLength(1);
+    expect(bodyOf(collections).notes).toHaveLength(1);
 
     aging = await api(
       clinicA,
@@ -268,7 +277,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
     ).expect(200);
     expect(
       (
-        aging.body.items as { patient: { id: string }; promise: unknown }[]
+        bodyOf(aging).items as { patient: { id: string }; promise: unknown }[]
       ).find((r) => r.patient.id === deudor),
     ).toMatchObject({ promise: { id: promiseId, status: 'KEPT' } });
     const withPromise = await api(
@@ -277,7 +286,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       '/receivables/aging?hasPromise=true',
       receptionToken,
     ).expect(200);
-    expect(withPromise.body.items).toEqual([]);
+    expect(bodyOf(withPromise).items).toEqual([]);
 
     // Auditoría: crear y cerrar, con el usuario que registró el abono; nunca
     // el texto de la nota.
@@ -385,7 +394,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       `/patients/${deudor}/collections`,
       receptionToken,
     ).expect(200);
-    const noteId = (list.body.notes as { id: string }[])[0].id;
+    const noteId = (bodyOf(list).notes as { id: string }[])[0].id;
     for (const verb of ['patch', 'delete'] as const) {
       await request(server())
         [verb](`/api/v1/patients/${deudor}/collection-notes/${noteId}`)
@@ -425,7 +434,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       .send({ amount: 1000, currency: 'COP', dueDate: today() })
       .expect(404);
     const aging = await api(clinicB, 'get', '/receivables/aging').expect(200);
-    expect(aging.body.items).toEqual([]);
+    expect(bodyOf(aging).items).toEqual([]);
   });
 
   describe('chip «Saldo vencido»', () => {
@@ -469,7 +478,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
         `/patients/${deudor}`,
         receptionToken,
       ).expect(200);
-      expect(asReception.body.balance).toMatchObject({
+      expect(bodyOf(asReception).balance).toMatchObject({
         hasOverdue: true,
         overdueDays: 40,
         amounts: [{ currency: 'COP', amount: 300000 }],
@@ -480,7 +489,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
         `/patients/${deudor}`,
         dentistToken,
       ).expect(200);
-      expect(asDentist.body.balance).toEqual({
+      expect(bodyOf(asDentist).balance).toEqual({
         hasOverdue: true,
         overdueDays: 40,
       });

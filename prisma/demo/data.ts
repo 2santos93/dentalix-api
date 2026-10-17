@@ -11,6 +11,8 @@ import {
   ToothSurface,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
+  CollectionChannel,
+  CollectionOutcome,
 } from '@prisma/client';
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
@@ -1899,3 +1901,40 @@ export const DEMO_IMPLANTS: readonly DemoImplant[] = [
     sanitaryRegistration: 'INVIMA 2019DM-0019876',
   },
 ];
+
+// ---------------------------------------------------------------------------
+// DX-150: cobranza. Gestiones de cobro y un compromiso de pago abierto sobre
+// dos deudores de la cartera (planes abiertos hace 100 y 75 días), para ver la
+// última gestión y el compromiso en /caja/cartera, el bloque «Cobranza» en la
+// ficha y el chip «Saldo vencido» en sus citas. Sin datos clínicos en el texto.
+// ---------------------------------------------------------------------------
+export interface DemoCollectionNote {
+  patientIndex: number;
+  channel: CollectionChannel;
+  outcome: CollectionOutcome;
+  text?: string;
+}
+
+export const DEMO_COLLECTION_NOTES: readonly DemoCollectionNote[] = [
+  { patientIndex: 8, channel: CollectionChannel.CALL, outcome: CollectionOutcome.NO_ANSWER },
+  {
+    patientIndex: 8,
+    channel: CollectionChannel.WHATSAPP_LINK,
+    outcome: CollectionOutcome.PROMISED_PAYMENT,
+    text: 'La mamá abona en la sede principal antes de la próxima cita.',
+  },
+  {
+    patientIndex: 6,
+    channel: CollectionChannel.CALL,
+    outcome: CollectionOutcome.WILL_PAY_AT_APPOINTMENT,
+    text: 'Pagará en su próxima cita.',
+  },
+];
+
+/** Compromiso abierto: importe en COP y días desde hoy (día de la sede). */
+export const DEMO_PAYMENT_PROMISE = {
+  patientIndex: 8,
+  amount: 100000,
+  dueInDays: 5,
+  location: 'principal' as DemoLocationKey,
+};
