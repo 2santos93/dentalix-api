@@ -1086,25 +1086,45 @@ model City {
 enum TenantDomainStatus {
   PENDING
   VERIFIED
+  // SEC-009: estuvo verificado, pero la re-verificación periódica no encontró
+  // su TXT en DOMAIN_RECHECK_MAX_FAILURES comprobaciones seguidas. No enruta;
+  // el ADMIN puede volver a verificarlo (mismo token) o eliminarlo.
+  DISABLED
 }
 
 model TenantDomain {
   id          String             @id @default(uuid()) @db.Uuid
   tenantId    String             @db.Uuid
-  // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted host must be
-  // re-registerable. Predicate lives in migration
-  // 20260731164000_tenant_domain_partial_unique (Prisma can't express it); the
-  // name (tenant_domains_host_key) keeps migrate-status drift-free.
-  host        String             @unique
+  // SEC-009: el host solo es único entre los VERIFIED vivos (índice PARCIAL
+  // `WHERE status = 'VERIFIED' AND "deletedAt" IS NULL`, migración
+  // 20261017233300_sec009_tenant_domain_verified_unique; Prisma no expresa el
+  // predicado). Varias clínicas pueden tenerlo en PENDING: lo gana la primera
+  // que verifica el TXT. NO uses findUnique por host: puede haber varias filas.
+  host        String             @unique(map: "tenant_domains_verified_host_key")
   status      TenantDomainStatus @default(PENDING)
   verifyToken String
   verifiedAt  DateTime?
+  // SEC-009: hasta cuándo se puede verificar un PENDING (72 h desde el alta).
+  // Pasado ese momento está EXPIRADO: no se verifica ni bloquea a nadie. null
+  // en VERIFIED/DISABLED. El default de la BD cubre a quien inserte sin darlo.
+  expiresAt   DateTime?          @default(dbgenerated("(CURRENT_TIMESTAMP + '72:00:00'::interval)"))
+  // SEC-009: re-verificación periódica de los VERIFIED (tarea programada).
+  // `lastCheckedAt` es el instante de la ronda que lo comprobó por última vez.
+  lastCheckedAt DateTime?
+  failedChecks  Int              @default(0)
+  disabledAt    DateTime?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   deletedAt   DateTime?
   tenant      Tenant             @relation(fields: [tenantId], references: [id])
 
+  // SEC-009: un host una sola vez por clínica entre los vivos (PARCIAL
+  // `WHERE "deletedAt" IS NULL`, mismo patrón que tooth_records).
+  @@unique([tenantId, host], map: "tenant_domains_tenant_host_key")
   @@index([tenantId])
+  // SEC-009: filas vivas de un host en todas las clínicas (invalidar los
+  // PENDING ajenos al verificar). PARCIAL `WHERE "deletedAt" IS NULL`.
+  @@index([host], map: "tenant_domains_host_idx")
   @@map("tenant_domains")
 }
 
@@ -1732,6 +1752,8 @@ enum AuditResourceType {
   STAFF_MEMBER
   // DX-136: recibo de caja de un abono (ver, reimprimir, enviar).
   PAYMENT_RECEIPT
+  // SEC-009: verificar o eliminar un dominio personalizado.
+  TENANT_DOMAIN
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
