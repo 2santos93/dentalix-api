@@ -52,6 +52,8 @@ async function seed(): Promise<Seeded> {
     data: { name: SUBDOMAIN, subdomain: SUBDOMAIN },
   });
   const tenantId = tenant.id;
+  // A la vez a propósito: la serie de recibos de las dos sale "SED" y el
+  // trigger las ordena con un candado por clínica (DX-216).
   const [locationA, locationB] = await Promise.all(
     ['Sede A', 'Sede B'].map((name) =>
       raw.location.create({ data: { tenantId, name } }),
@@ -72,7 +74,16 @@ async function seed(): Promise<Seeded> {
   };
 }
 
-async function cleanup(tenantId: string): Promise<void> {
+// Por subdominio, no por el id sembrado: si una corrida anterior se cortó a
+// medias (p. ej. falló el seed), sus filas no dejan la clínica tomada y no
+// tumban todos los tests de las corridas siguientes (DX-216).
+async function cleanup(): Promise<void> {
+  const tenants = await raw.tenant.findMany({
+    where: { subdomain: SUBDOMAIN },
+    select: { id: true },
+  });
+  if (tenants.length === 0) return;
+  const tenantId = tenants[0].id;
   const where = { tenantId };
   await raw.inventoryMovement.deleteMany({ where });
   await raw.inventoryItem.deleteMany({ where });
@@ -93,11 +104,12 @@ describe('Reglas de dominio en la BD (DX-042, int)', () => {
 
   beforeAll(async () => {
     await prisma.onModuleInit();
+    await cleanup();
     s = await seed();
   });
 
   afterAll(async () => {
-    await cleanup(s.tenantId);
+    await cleanup();
     await raw.$disconnect();
     await prisma.onModuleDestroy();
   });

@@ -744,7 +744,13 @@ en la MISMA transacción que el abono (`issuePaymentReceipt`):
   tildes ni palabras genéricas ("Sede Norte" → `NOR`, "Sede principal" → `PRI`)
   y, si ya la usa otra sede de la clínica, con un número detrás (`NOR2`). La
   migración la rellenó en las sedes existentes. DX-019 dará la pantalla para
-  cambiarla.
+  cambiarla. Las altas simultáneas de sedes de la misma clínica no chocan
+  (DX-216): el trigger toma un candado consultivo de transacción por clínica
+  (`pg_advisory_xact_lock(hashtext('dx_location_receipt_prefix'),
+  hashtext(tenantId))`) y la segunda alta, al seguir, ya ve la serie de la
+  primera y toma la siguiente. Otras clínicas no esperan. Vale en READ
+  COMMITTED (como crea sedes la API); en una transacción REPEATABLE READ que ya
+  leyó antes, el índice único sigue rechazando el duplicado.
 - **Contador**: `payment_receipt_counters` (una fila por serie) se incrementa
   con un UPSERT en la transacción del abono: el bloqueo de la fila ordena los
   cobros simultáneos (sin duplicados) y un rollback deshace el incremento (sin
