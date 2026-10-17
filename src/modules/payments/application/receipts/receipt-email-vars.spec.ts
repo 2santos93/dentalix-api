@@ -87,6 +87,19 @@ describe('receiptEmailVars (DX-136)', () => {
     });
   });
 
+  it('las fechas son días civiles de la zona de la sede del recibo', () => {
+    const vars = receiptEmailVars(
+      view({
+        voided: true,
+        voidedAt: new Date('2026-10-18T02:00:00.000Z'),
+        voidReason: 'Cobro duplicado',
+      }),
+      'Europe/Madrid',
+    );
+    // 02:00 UTC del 18 es el 17 en Bogotá, pero ya el 18 en Madrid.
+    expect(vars.voided?.dateLabel).toBe('18/10/2026');
+  });
+
   it('con razón social y NIT, la línea fiscal; sin método, «Sin especificar»', () => {
     const vars = receiptEmailVars(
       view({

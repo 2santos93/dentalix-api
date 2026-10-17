@@ -129,7 +129,7 @@ const FIXTURE_LOGINS = [
 ];
 
 /**
- * Esquema de 20261018090200 (DX-136): más sedes, con nombres que chocan, para
+ * Esquema de 20261017233200 (DX-136): más sedes, con nombres que chocan, para
  * el relleno de la serie de recibos ("receiptPrefix") por orden de alta.
  */
 // Después de la "Sede principal" de cada clínica, que add_locations creó con now().
@@ -165,7 +165,7 @@ const STEPS: Step[] = [
   { until: '20261017231100', dropped: ['audit_events_dx009'] },
   // dx143_verify_active_accounts (FORCE fuera de audit_events y
   // clinic_memberships durante el backfill).
-  { until: '20261018090200', fixture: FIXTURE_LOGINS },
+  { until: '20261017233200', fixture: FIXTURE_LOGINS },
   // dx136_payment_receipts (FORCE fuera de locations durante el relleno).
   { until: '99999999999999', fixture: FIXTURE_LOCATIONS },
 ];

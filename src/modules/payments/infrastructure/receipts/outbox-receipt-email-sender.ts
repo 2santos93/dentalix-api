@@ -2,6 +2,8 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { EmailOutbox } from '../../../notifications/email/application/email-outbox.service';
 import { EmailQuotaExceededError } from '../../../notifications/email/domain/email-quota-exceeded.error';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import type { ReceiptEmailSender } from '../../domain/ports/receipt-email-sender.port';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import { receiptEmailVars } from '../../application/receipts/receipt-email-vars';
@@ -16,6 +18,7 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
   constructor(
     private readonly outbox: EmailOutbox,
     private readonly tenantContext: TenantContextService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async send(to: string, receipt: PaymentReceiptView): Promise<void> {
@@ -39,11 +42,16 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
       }
       throw err;
     }
+    // Las fechas del email, en días civiles de la sede del recibo (DX-097).
+    const locationId = receipt.snapshot.location.id;
+    const zoneOf = await this.prisma.runWithTenant((tx) =>
+      resolveLocationTimeZones(tx, tenantId, [locationId]),
+    );
     await this.outbox.enqueue({
       tenantId,
       to,
       template: 'payment-receipt',
-      vars: receiptEmailVars(receipt),
+      vars: receiptEmailVars(receipt, zoneOf(locationId)),
       referenceId: receipt.paymentId,
     });
   }

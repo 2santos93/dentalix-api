@@ -239,6 +239,34 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
       expect(await numbersOf(a.tenantId, 'PRI')).toHaveLength(21);
     });
 
+    it('si falla la emisión del recibo, el abono tampoco se guarda y el contador no avanza', async () => {
+      // La sede pierde su serie (fallo de despliegue simulado): el abono se
+      // inserta y la emisión falla DESPUÉS, dentro de la misma transacción.
+      await raw.location.update({
+        where: { id: northId },
+        data: { receiptPrefix: null },
+      });
+      const paymentsBefore = await raw.payment.count({
+        where: { tenantId: a.tenantId, locationId: northId },
+      });
+      try {
+        await expect(pay(a, {}, northId)).rejects.toThrow(/serie de recibos/);
+      } finally {
+        await raw.location.update({
+          where: { id: northId },
+          data: { receiptPrefix: 'NOR' },
+        });
+      }
+      expect(
+        await raw.payment.count({
+          where: { tenantId: a.tenantId, locationId: northId },
+        }),
+      ).toBe(paymentsBefore);
+      const next = await pay(a, {}, northId);
+      expect(next.receiptNumber).toBe('NOR-000002');
+      expect(await numbersOf(a.tenantId, 'NOR')).toEqual([1, 2]);
+    });
+
     it('dos reintentos simultáneos con la misma Idempotency-Key: un abono, un recibo, sin hueco', async () => {
       const key = '0b5f3c1e-2d4a-4f6b-8c9d-0e1f2a3b4c5d';
       const [first, second] = await Promise.all([

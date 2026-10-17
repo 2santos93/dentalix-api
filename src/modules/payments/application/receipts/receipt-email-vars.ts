@@ -39,17 +39,17 @@ function money(amount: number, currency: string): string {
  * Variables del email del recibo (DX-136), sacadas SOLO de la foto del
  * recibo: el email dice lo mismo que la pantalla y el papel. El documento va
  * enmascarado (la foto nunca lo tiene en claro) y nada clínico: ni notas, ni
- * tratamientos, solo el nombre del plan.
+ * tratamientos, solo el nombre del plan. `timeZone` es la de la sede del
+ * recibo: el día del plan y el de la anulación son días civiles de esa sede
+ * (una sede de España no puede decir «anulado el 18» si allí aún es el 17).
  */
 export function receiptEmailVars(
   receipt: PaymentReceiptView,
+  timeZone: string = DEFAULT_BUSINESS_HOURS_TIMEZONE,
 ): PaymentReceiptEmailVars {
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;
-  const planDay = civilDateIn(
-    new Date(plan.createdAt),
-    DEFAULT_BUSINESS_HOURS_TIMEZONE,
-  );
+  const planDay = civilDateIn(new Date(plan.createdAt), timeZone);
   return {
     patientName: patient.fullName,
     reference: receipt.reference,
@@ -77,9 +77,7 @@ export function receiptEmailVars(
     voided:
       receipt.voidedAt && receipt.voidReason
         ? {
-            dateLabel: civilLabel(
-              civilDateIn(receipt.voidedAt, DEFAULT_BUSINESS_HOURS_TIMEZONE),
-            ),
+            dateLabel: civilLabel(civilDateIn(receipt.voidedAt, timeZone)),
             reason: receipt.voidReason,
           }
         : null,

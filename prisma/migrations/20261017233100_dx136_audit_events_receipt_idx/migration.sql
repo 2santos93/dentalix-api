@@ -5,7 +5,7 @@
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType" y
 -- "audit_events_action_<valor>_idx" por cada valor nuevo de "AuditAction". Va
 -- en su PROPIA migración: los valores se añadieron en
--- 20261018090000_dx136_receipt_enums y Postgres no deja usar un valor de enum
+-- 20261017233050_dx136_receipt_enums y Postgres no deja usar un valor de enum
 -- nuevo en la misma transacción que lo crea.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.
