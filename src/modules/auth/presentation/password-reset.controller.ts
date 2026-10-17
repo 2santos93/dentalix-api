@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   HttpCode,
-  Inject,
   NotFoundException,
   Post,
   Req,
@@ -16,15 +15,10 @@ import {
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { ConfigService } from '@nestjs/config';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
-import {
-  PublicWebProtocol,
-  resolvePublicWebProtocol,
-  safeLinkHost,
-} from '../../../shared/tenancy/public-link';
+import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { currentRequestId } from '../../../shared/observability/request-context';
 import { RequestPasswordResetUseCase } from '../application/use-cases/request-password-reset.use-case';
 import {
@@ -63,33 +57,36 @@ export class PasswordResetController {
   constructor(
     private readonly requestReset: RequestPasswordResetUseCase,
     private readonly resetPassword: ResetPasswordUseCase,
-    @Inject(ConfigService) config: ConfigService,
-  ) {
-    this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
-  }
-
-  private readonly protocol: PublicWebProtocol;
+    private readonly links: TenantLinkBaseService,
+  ) {}
 
   /**
    * Siempre 202 con el mismo cuerpo, exista o no el email, esté o no activo,
    * y sin esperar a nada que dependa de ello: la búsqueda, el token y el
    * encolado del email corren en segundo plano.
+   *
+   * SEC-033: el token restablece la contraseña GLOBAL, así que el enlace va
+   * siempre al host de plataforma de la clínica (`<subdominio>.<dominio
+   * base>`), también si la petición llegó por su dominio personalizado (cuyo
+   * DNS controla la clínica). Lo que se espera aquí depende solo del host,
+   * nunca del email.
    */
   @Post('forgot-password')
   @HttpCode(202)
   @ApiAcceptedResponse({ type: ForgotPasswordResponseDto })
-  forgotPassword(
+  async forgotPassword(
     @Req() req: PublicRequest,
     @Body() dto: ForgotPasswordDto,
-  ): ForgotPasswordResponseDto {
+  ): Promise<ForgotPasswordResponseDto> {
     const tenantId = req.tenantHost?.tenantId;
-    const host = safeLinkHost(req.tenantHost?.host);
-    if (tenantId && host) {
-      this.requestReset.accept({
+    if (tenantId) {
+      const linkBase = await this.links.forTenant(
         tenantId,
-        email: dto.email,
-        linkBase: `${this.protocol}://${host}`,
-      });
+        req.tenantHost?.host,
+      );
+      if (linkBase) {
+        this.requestReset.accept({ tenantId, email: dto.email, linkBase });
+      }
     }
     return { message: FORGOT_PASSWORD_MESSAGE };
   }

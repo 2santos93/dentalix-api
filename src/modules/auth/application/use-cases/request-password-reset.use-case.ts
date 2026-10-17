@@ -19,7 +19,7 @@ export interface RequestPasswordResetInput {
   /** Clínica del HOST de la petición (la resuelve el servidor). */
   tenantId: string;
   email: string;
-  /** `<protocolo>://<host de la clínica>` validado (safeLinkHost). */
+  /** `<protocolo>://<host de PLATAFORMA de la clínica>` (SEC-033: TenantLinkBaseService). */
   linkBase: string;
 }
 

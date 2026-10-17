@@ -12,7 +12,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -38,11 +37,7 @@ import { JwtPayload } from '../../../shared/crypto/token.service';
 import { invitationStatus } from '../application/invitation-token';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
-import {
-  PublicWebProtocol,
-  resolvePublicWebProtocol,
-  safeLinkHost,
-} from '../../../shared/tenancy/public-link';
+import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 
 type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
 
@@ -56,29 +51,32 @@ type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
 @Roles(...STAFF_WRITE_ROLES)
 @Controller('staff/invitations')
 export class StaffInvitationsController {
-  private readonly protocol: PublicWebProtocol;
-
   constructor(
     private readonly createInvitation: CreateInvitationUseCase,
     private readonly listInvitations: ListInvitationsUseCase,
     private readonly revokeInvitation: RevokeInvitationUseCase,
     private readonly resendInvitation: ResendInvitationUseCase,
-    config: ConfigService,
-  ) {
-    this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
-  }
+    private readonly links: TenantLinkBaseService,
+  ) {}
 
   /**
-   * Origen de la web de la clínica para el enlace del email: el host con el
-   * que llegó esta petición (TenantContextInterceptor ya lo cruzó con el JWT),
-   * validado ENTERO antes de tocar nada (ver safeLinkHost).
+   * Origen de la web de la clínica para el enlace del email. SEC-033: la
+   * invitación puede reclamar una cuenta GLOBAL sin verificar (DX-029), así
+   * que el enlace va siempre a un host de plataforma: el de la petición si ya
+   * lo es (TenantContextInterceptor lo cruzó con el JWT) o, si llegó por el
+   * dominio personalizado de la clínica (DNS de un tercero),
+   * `<subdominio>.<dominio base>`. Se resuelve ANTES de tocar nada.
    */
-  private linkBase(req: AuthenticatedRequest): string {
-    const host = safeLinkHost(req.tenantHost?.host);
-    if (!host) {
+  private async linkBase(req: AuthenticatedRequest): Promise<string> {
+    // El del host: TenantContextInterceptor ya exigió que sea el del JWT.
+    const tenantId = req.tenantHost?.tenantId;
+    const linkBase = tenantId
+      ? await this.links.forTenant(tenantId, req.tenantHost?.host)
+      : null;
+    if (!linkBase) {
       throw new BadRequestException('Host inválido');
     }
-    return `${this.protocol}://${host}`;
+    return linkBase;
   }
 
   private toCreatedDto(result: CreateInvitationResult): CreatedInvitationDto {
@@ -103,7 +101,7 @@ export class StaffInvitationsController {
     @Body() dto: CreateInvitationDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<CreatedInvitationDto> {
-    const linkBase = this.linkBase(req);
+    const linkBase = await this.linkBase(req);
     const result = await this.createInvitation.execute({
       ...dto,
       invitedById: req.user.sub,
@@ -127,7 +125,7 @@ export class StaffInvitationsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<CreatedInvitationDto> {
-    const linkBase = this.linkBase(req);
+    const linkBase = await this.linkBase(req);
     const result = await this.resendInvitation.execute({ id, linkBase });
     return this.toCreatedDto(result);
   }

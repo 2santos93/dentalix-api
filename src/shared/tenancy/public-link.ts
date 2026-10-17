@@ -1,6 +1,7 @@
 /**
  * Enlaces públicos que la API arma hacia la web de una clínica (confirmación
- * de cita, DX-005; invitación de personal por email, DX-088).
+ * de cita, DX-005; invitación de personal por email, DX-088; restablecer la
+ * contraseña, DX-010; verificar el registro, DX-029).
  */
 
 /**
@@ -42,6 +43,44 @@ export function platformLinkHost(
     (base) => hostname === base || hostname.endsWith(`.${base}`),
   );
   return isPlatform ? safe : null;
+}
+
+/** Un solo label DNS: la forma de `tenants.subdomain` (ver host-parser). */
+const SUBDOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * Host para un enlace con un token que sirve para la cuenta GLOBAL o para una
+ * membresía (restablecer la contraseña, DX-010; invitación de personal, que
+ * puede reclamar una cuenta sin verificar, DX-088/DX-029). SEC-033: nunca el
+ * dominio personalizado de la clínica —verificado solo por TXT, su A/CNAME lo
+ * controla la clínica y podría recibir el token—, siempre un host cuyo DNS es
+ * de Dentalix:
+ * - si la petición ya llegó por un host de plataforma, ese mismo host (con su
+ *   puerto, para el desarrollo con `<sub>.localhost:3000`);
+ * - si no (dominio personalizado, host malformado o sin petición, p. ej. un
+ *   trabajo en segundo plano), `<subdominio>.<TENANT_BASE_DOMAINS[0]>`, sin
+ *   puerto.
+ * `null` si no hay forma segura de armarlo: entonces no se envía el enlace.
+ */
+export function tenantLinkHost(
+  requestHost: string | undefined,
+  tenantSubdomain: string | null | undefined,
+  baseDomains: readonly string[],
+): string | null {
+  const platform = platformLinkHost(requestHost, baseDomains);
+  if (platform) return platform;
+  const subdomain = tenantSubdomain?.trim().toLowerCase();
+  const base = baseDomains[0];
+  if (!subdomain || !SUBDOMAIN_LABEL.test(subdomain) || !base) return null;
+  return safeLinkHost(`${subdomain}.${base}`);
+}
+
+/** `TENANT_BASE_DOMAINS` normalizado (mismo default que la resolución). */
+export function parseBaseDomains(value: string | undefined): string[] {
+  return (value ?? 'localhost')
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export type PublicWebProtocol = 'http' | 'https';

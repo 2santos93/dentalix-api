@@ -1,4 +1,8 @@
-import { platformLinkHost, resolvePublicWebProtocol } from './public-link';
+import {
+  platformLinkHost,
+  resolvePublicWebProtocol,
+  tenantLinkHost,
+} from './public-link';
 
 describe('resolvePublicWebProtocol', () => {
   const env =
@@ -52,5 +56,47 @@ describe('platformLinkHost (DX-029: enlace del registro)', () => {
       platformLinkHost('demo.dentalix.app:443@evil.com', BASES),
     ).toBeNull();
     expect(platformLinkHost(undefined, BASES)).toBeNull();
+  });
+});
+
+describe('tenantLinkHost (SEC-033: enlaces con token de la cuenta global)', () => {
+  const BASES = ['dentalix.app', 'localhost'];
+
+  it('petición por un host de plataforma: se usa ese mismo host (con puerto)', () => {
+    expect(tenantLinkHost('demo.dentalix.app', 'demo', BASES)).toBe(
+      'demo.dentalix.app',
+    );
+    expect(tenantLinkHost('Demo.Localhost:3001', 'demo', BASES)).toBe(
+      'demo.localhost:3001',
+    );
+  });
+
+  it('petición por un dominio personalizado: el subdominio de plataforma con el PRIMER dominio base, nunca el dominio propio ni su puerto', () => {
+    expect(tenantLinkHost('clinica-propia.com', 'demo', BASES)).toBe(
+      'demo.dentalix.app',
+    );
+    expect(tenantLinkHost('www.clinica-propia.com:8443', 'demo', BASES)).toBe(
+      'demo.dentalix.app',
+    );
+    expect(tenantLinkHost('clinica-propia.com', 'demo', ['localhost'])).toBe(
+      'demo.localhost',
+    );
+  });
+
+  it('un host malformado o ausente tampoco se copia: va al subdominio de plataforma', () => {
+    expect(
+      tenantLinkHost('demo.dentalix.app:443@evil.com', 'demo', BASES),
+    ).toBe('demo.dentalix.app');
+    expect(tenantLinkHost(undefined, 'demo', BASES)).toBe('demo.dentalix.app');
+  });
+
+  it('sin subdominio válido o sin dominios base: null (no se envía el enlace)', () => {
+    expect(tenantLinkHost('clinica-propia.com', null, BASES)).toBeNull();
+    expect(tenantLinkHost('clinica-propia.com', '', BASES)).toBeNull();
+    expect(
+      tenantLinkHost('clinica-propia.com', 'a@evil.com', BASES),
+    ).toBeNull();
+    expect(tenantLinkHost('clinica-propia.com', 'x/y', BASES)).toBeNull();
+    expect(tenantLinkHost('clinica-propia.com', 'demo', [])).toBeNull();
   });
 });

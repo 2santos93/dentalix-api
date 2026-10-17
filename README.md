@@ -315,8 +315,9 @@ Módulo `src/modules/notifications/email` (hexagonal, como el resto):
 
 **Invitaciones**: `POST /staff/invitations` encola el email `invitation` con
 el enlace `<protocolo>://<host de la clínica>/invitacion/<token>` (el host con
-el que llegó la petición, validado; el protocolo sale de
-`PUBLIC_WEB_PROTOCOL`). Desde DX-029 **el token ya no se devuelve al ADMIN**:
+el que llegó la petición si es de plataforma; si llegó por un dominio
+personalizado, `<subdominio>.<primer TENANT_BASE_DOMAINS>`, ver SEC-033 más
+abajo; el protocolo sale de `PUBLIC_WEB_PROTOCOL`). Desde DX-029 **el token ya no se devuelve al ADMIN**:
 solo viaja en el email, así quien lo abre demuestra que controla ese correo.
 `POST /staff/invitations/:id/resend` (solo ADMIN) regenera
 el token —el anterior deja de servir— y reinicia los 7 días; revocar o
@@ -375,6 +376,13 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   encolado del email corren en segundo plano, así que ni el cuerpo ni el tiempo
   de respuesta delatan nada. Solo se envía a un **miembro activo de la clínica
   del host**, con su marca y un enlace `<PUBLIC_WEB_PROTOCOL>://<host>/restablecer/<token>`.
+  **SEC-033:** los enlaces con un token de la cuenta global (este y el de la
+  invitación) nunca apuntan a un dominio personalizado (su DNS lo controla la
+  clínica): `<host>` es el de la petición solo si es de plataforma
+  (`TENANT_BASE_DOMAINS`); si no, `<subdominio de la clínica>.<primer dominio
+  base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
+  confirmación de cita (DX-005) sí puede usar el dominio de la clínica: solo
+  confirma esa cita.
   Si se superan los topes `MAIL_*` no se envía (y tampoco se dice).
 - `POST /auth/reset-password/check` `{ token }` → `{ status: VALID | EXPIRED | USED | INVALID }`.
 - `POST /auth/reset-password` `{ token, password }` → 204. Exige la política de
