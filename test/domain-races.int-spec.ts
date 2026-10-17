@@ -88,7 +88,7 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
   }
 
   describe('último ADMIN (DB-012)', () => {
-    const staff = new PrismaStaffRepository(prisma);
+    const staff = new PrismaStaffRepository(prisma, tenantContext);
     const update = new UpdateStaffUseCase(staff);
     const deactivate = new DeactivateStaffUseCase(staff);
 

@@ -355,6 +355,195 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
       await unlock(adminA, 'no-es-uuid').expect(400);
     });
   });
+
+  /**
+   * DX-213 (SEC-038): el contador es por CUENTA, no por clínica. El ADMIN de
+   * A solo puede borrarlo si la cuenta da acceso únicamente a A y su
+   * membresía en A está activa. Matriz con el contador leído en la BD antes
+   * y después de cada intento.
+   */
+  describe('desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213)', () => {
+    const OTHER_CLINIC =
+      'Esta cuenta da acceso a otra clínica: pide a la persona que espere unos minutos o que restablezca su contraseña';
+    let desactivada: { userId: string; email: string };
+    let compartida: { userId: string; email: string };
+    let soloA: { userId: string; email: string };
+
+    async function newMember(
+      name: string,
+      memberships: { tenantId: string; deletedAt?: Date }[],
+    ): Promise<{ userId: string; email: string }> {
+      const email = `${name}-${RUN}@dx213.test`;
+      const template = await raw.user.findUniqueOrThrow({
+        where: { id: doctora.userId },
+        select: { passwordHash: true },
+      });
+      const user = await raw.user.create({
+        data: {
+          email,
+          passwordHash: template.passwordHash,
+          fullName: `Miembro ${name}`,
+          emailVerifiedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      for (const m of memberships) {
+        await raw.clinicMembership.create({
+          data: {
+            tenantId: m.tenantId,
+            userId: user.id,
+            role: ClinicRole.DENTIST,
+            deletedAt: m.deletedAt ?? null,
+          },
+        });
+      }
+      return { userId: user.id, email };
+    }
+
+    /** El contador de la cuenta tal como está en la BD. */
+    const counter = (email: string) =>
+      raw.loginThrottle.findUnique({
+        where: {
+          scope_keyHash: { scope: 'ACCOUNT', keyHash: accountKeyHash(email) },
+        },
+        select: { failures: true, blockedUntil: true },
+      });
+
+    /** 5 fallos (en la clínica donde aún puede entrar): queda en espera. */
+    async function lock(email: string, host: string): Promise<void> {
+      for (let i = 0; i < 5; i++) {
+        expect((await login(email, WRONG, CLINIC_IP, host)).status).toBe(401);
+      }
+      const row = await counter(email);
+      expect(row?.failures).toBe(5);
+      expect(row?.blockedUntil?.getTime()).toBeGreaterThan(Date.now());
+    }
+
+    const unlockInA = (userId: string) =>
+      request(app.getHttpServer())
+        .post(`/api/v1/staff/${userId}/login-unlock`)
+        .set('X-Tenant-Host', clinicA.host)
+        .set('Authorization', `Bearer ${clinicA.adminToken}`);
+
+    const detailInA = (userId: string) =>
+      request(app.getHttpServer())
+        .get(`/api/v1/staff/${userId}`)
+        .set('X-Tenant-Host', clinicA.host)
+        .set('Authorization', `Bearer ${clinicA.adminToken}`);
+
+    const auditOf = (userId: string) =>
+      raw.auditEvent.findMany({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceType: 'STAFF_MEMBER',
+          resourceId: userId,
+        },
+        orderBy: { occurredAt: 'asc' },
+      });
+
+    beforeAll(async () => {
+      // Desactivada en A, activa en B: en B sigue pudiendo entrar (y fallar).
+      desactivada = await newMember('desactivada', [
+        { tenantId: clinicA.tenantId, deletedAt: new Date() },
+        { tenantId: clinicB.tenantId },
+      ]);
+      compartida = await newMember('compartida', [
+        { tenantId: clinicA.tenantId },
+        { tenantId: clinicB.tenantId },
+      ]);
+      // Tuvo acceso a B, pero esa membresía está borrada: ya no cuenta.
+      soloA = await newMember('solo-a', [
+        { tenantId: clinicA.tenantId },
+        { tenantId: clinicB.tenantId, deletedAt: new Date() },
+      ]);
+    });
+
+    it('miembro DESACTIVADO en esta clínica: 404 y el contador sigue igual; el perfil no muestra la espera', async () => {
+      await lock(desactivada.email, clinicB.host);
+      const before = await counter(desactivada.email);
+
+      const res = await unlockInA(desactivada.userId).expect(404);
+      expect(JSON.stringify(res.body)).not.toContain(desactivada.email);
+      expect(await counter(desactivada.email)).toEqual(before);
+      expectLocked(
+        await login(
+          desactivada.email,
+          SEEDED_PASSWORD,
+          CLINIC_IP,
+          clinicB.host,
+        ),
+        60,
+      );
+
+      const detail = await detailInA(desactivada.userId).expect(200);
+      expect(detail.body).toMatchObject({
+        status: 'INACTIVE',
+        loginBlockedUntil: null,
+      });
+
+      const events = await auditOf(desactivada.userId);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        action: 'UPDATE',
+        actorUserId: clinicA.adminUserId,
+        actorRole: 'ADMIN',
+        metadata: { reason: 'LOGIN_UNLOCK_REFUSED' },
+      });
+      expect(JSON.stringify(events)).not.toContain(desactivada.email);
+    });
+
+    it('miembro activo con membresía ACTIVA en otra clínica: 409 en español, sin decir cuál ni cuántas, y el contador sigue igual', async () => {
+      await lock(compartida.email, clinicA.host);
+      const before = await counter(compartida.email);
+
+      const res = await unlockInA(compartida.userId).expect(409);
+      expect(res.body).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message: OTHER_CLINIC,
+      });
+      const body = JSON.stringify(res.body);
+      expect(body).not.toContain(clinicB.tenantId);
+      expect(body).not.toContain(clinicB.subdomain);
+      expect(body).not.toContain(compartida.email);
+      expect(await counter(compartida.email)).toEqual(before);
+      expectLocked(await login(compartida.email, SEEDED_PASSWORD), 60);
+
+      // El perfil (activo) sigue mostrando la espera.
+      const detail = await detailInA(compartida.userId).expect(200);
+      expect(
+        new Date(
+          (detail.body as { loginBlockedUntil: string }).loginBlockedUntil,
+        ).getTime(),
+      ).toBeGreaterThan(Date.now());
+
+      const events = await auditOf(compartida.userId);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        action: 'UPDATE',
+        actorUserId: clinicA.adminUserId,
+        metadata: { reason: 'LOGIN_UNLOCK_REFUSED' },
+      });
+      expect(JSON.stringify(events)).not.toContain(compartida.email);
+    });
+
+    it('miembro activo que solo pertenece a esta clínica: 204, el contador desaparece y queda auditado como LOGIN_UNLOCKED', async () => {
+      await lock(soloA.email, clinicA.host);
+
+      await unlockInA(soloA.userId).expect(204);
+      expect(await counter(soloA.email)).toBeNull();
+      expect((await login(soloA.email, SEEDED_PASSWORD)).status).toBe(201);
+
+      const events = await auditOf(soloA.userId);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        action: 'UPDATE',
+        actorUserId: clinicA.adminUserId,
+        actorRole: 'ADMIN',
+        metadata: { reason: 'LOGIN_UNLOCKED' },
+      });
+    });
+  });
 });
 
 describe('Balde por IP del login (DX-048, e2e)', () => {

@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import {
   ClinicRole,
-  Prisma,
   ClinicInvitation as PrismaClinicInvitation,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { otherActiveMemberships } from '../../../../shared/tenancy/other-active-memberships';
 import {
   InvitationRepository,
   AcceptOutcome,
@@ -29,21 +29,6 @@ function mapToEntity(row: PrismaClinicInvitation): ClinicInvitation {
     invitedById: row.invitedById,
     createdAt: row.createdAt,
   };
-}
-
-/**
- * DX-143 (SEC-033): `clinic_memberships` está bajo RLS por clínica; la
- * función SECURITY DEFINER (migración 20261017231000) mira todas y devuelve
- * solo si hay alguna activa fuera de `tenantId`.
- */
-async function otherActiveMemberships(
-  db: Pick<Prisma.TransactionClient, '$queryRaw'>,
-  userId: string,
-  tenantId: string,
-): Promise<boolean> {
-  const [row] = await db.$queryRaw<{ other: boolean }[]>`
-    SELECT public.dx_user_has_other_active_memberships(${userId}::uuid, ${tenantId}::uuid) AS other`;
-  return row?.other === true;
 }
 
 @Injectable()

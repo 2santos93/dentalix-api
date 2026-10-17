@@ -25,6 +25,7 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     deactivateById: (): Promise<DeactivateStaffOutcome> =>
       Promise.resolve('NOT_FOUND'),
     reactivateById: (): Promise<StaffMember | null> => Promise.resolve(null),
+    hasOtherActiveMemberships: (): Promise<boolean> => Promise.resolve(false),
     ...overrides,
   };
 }
