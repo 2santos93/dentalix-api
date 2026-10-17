@@ -1127,9 +1127,6 @@ model Payment {
   // numeración: conservan su referencia antigua REC-xxxxxxxx.
   receipt PaymentReceipt?
 
-  // Destino de la FK compuesta del recibo (DX-136): el recibo es del abono,
-  // de su clínica y de SU sede.
-  @@unique([tenantId, id, locationId], map: "payments_tenant_id_location_key")
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
   // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
@@ -2132,11 +2129,11 @@ model PaymentReceipt {
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
-  payment  Payment  @relation(fields: [tenantId, paymentId, locationId], references: [tenantId, id, locationId], onDelete: Cascade, map: "payment_receipts_payment_fkey")
+  // Por la clave primaria del abono; que sea de la misma clínica y sede lo
+  // exige el trigger de inserción (ver la migración).
+  payment  Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, seriesPrefix, number], map: "payment_receipts_tenant_series_number_key")
-  // Lado hijo de la FK compuesta al abono (único: paymentId ya lo es).
-  @@unique([tenantId, paymentId, locationId], map: "payment_receipts_tenant_payment_location_key")
   @@index([tenantId, locationId, issuedAt(sort: Desc)])
   @@map("payment_receipts")
 }

@@ -683,6 +683,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ reason: 'Hackeado' }),
       status: 404,
     },
+    // DX-136: el recibo de caja del abono de A.
+    {
+      name: 'GET /payments/:id/receipt',
+      verb: 'get',
+      path: () => `/payments/${a.paymentId}/receipt`,
+      status: 404,
+    },
+    {
+      name: 'POST /payments/:id/receipt/print',
+      verb: 'post',
+      path: () => `/payments/${a.paymentId}/receipt/print`,
+      status: 404,
+    },
+    {
+      name: 'POST /payments/:id/receipt/email',
+      verb: 'post',
+      path: () => `/payments/${a.paymentId}/receipt/email`,
+      status: 404,
+    },
     // --- consents (plantillas) ---
     {
       name: 'PATCH /consent-templates/:id',

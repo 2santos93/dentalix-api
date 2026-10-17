@@ -9,9 +9,6 @@
 --       número detrás ("NOR2"). Única por clínica e incluye las sedes
 --       retiradas: una serie nunca se reutiliza. Las sedes existentes se
 --       rellenan aquí, por orden de alta (DX-019 dará la pantalla para fijarla).
---   payments (tenantId, id, locationId) único
---       destino de la FK compuesta del recibo: el recibo es del abono, de su
---       clínica y de SU sede.
 --   payment_receipt_counters
 --       último número emitido por serie. La API lo incrementa con un UPSERT
 --       en la MISMA transacción que el abono: el bloqueo de la fila ordena las
@@ -24,7 +21,8 @@
 --       nunca DELETE ni TRUNCATE salvo un superusuario (limpieza de las bases
 --       de test, como audit_events y la historia clínica). El número tiene que
 --       ser el del contador de su serie en ese momento y la serie, la de la
---       sede: nada puede saltarse el contador.
+--       sede: nada puede saltarse el contador. El abono tiene que ser de la
+--       misma clínica y de esa sede (trigger, bajo la RLS de quien inserta).
 --
 -- Los abonos anteriores no tienen recibo y NO se renumeran: la API los
 -- muestra con su referencia antigua (REC-xxxxxxxx) y «sin serie».
@@ -35,6 +33,7 @@
 -- transacción y devuelto al final (regla de DX-113 para un owner sin
 -- superusuario ni BYPASSRLS). Las FK nuevas salen de tablas creadas aquí
 -- (vacías), así que no hace falta quitar FORCE a las referenciadas (DX-134).
+-- No se toca `payments` (ni índices nuevos ni bloqueos sobre ella).
 --
 -- Grants: ALTER DEFAULT PRIVILEGES ya cubre a dentalix_app en las tablas
 -- nuevas (igual que 20261017210100_dx122_schedule_blocks_waitlist).
@@ -154,13 +153,7 @@ CREATE TRIGGER "locations_default_receipt_prefix"
   FOR EACH ROW EXECUTE FUNCTION public.dx_location_default_receipt_prefix();
 
 -- ---------------------------------------------------------------------------
--- 2. Destino de la FK compuesta del recibo
--- ---------------------------------------------------------------------------
-CREATE UNIQUE INDEX "payments_tenant_id_location_key"
-  ON "payments"("tenantId", "id", "locationId");
-
--- ---------------------------------------------------------------------------
--- 3. Contador por serie
+-- 2. Contador por serie
 -- ---------------------------------------------------------------------------
 CREATE TABLE "payment_receipt_counters" (
     "tenantId" UUID NOT NULL,
@@ -177,7 +170,7 @@ ALTER TABLE "payment_receipt_counters" ADD CONSTRAINT "payment_receipt_counters_
   FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- ---------------------------------------------------------------------------
--- 4. Recibos
+-- 3. Recibos
 -- ---------------------------------------------------------------------------
 CREATE TABLE "payment_receipts" (
     "id" UUID NOT NULL,
@@ -211,28 +204,28 @@ CREATE UNIQUE INDEX "payment_receipts_tenant_series_number_key"
 -- Recibos de una sede por fecha de emisión; también lado hijo de la FK a la sede.
 CREATE INDEX "payment_receipts_tenantId_locationId_issuedAt_idx"
   ON "payment_receipts"("tenantId", "locationId", "issuedAt" DESC);
--- Lado hijo de la FK compuesta al abono (único: paymentId ya lo es; Prisma lo
--- exige único para la relación 1 a 1).
-CREATE UNIQUE INDEX "payment_receipts_tenant_payment_location_key"
-  ON "payment_receipts"("tenantId", "paymentId", "locationId");
 
 -- DB-028: FK de tenantId explícita en la tabla nueva.
 ALTER TABLE "payment_receipts" ADD CONSTRAINT "payment_receipts_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
--- FK COMPUESTAS (SEC-004): la sede y el abono, de la MISMA clínica, y el abono
--- de ESA sede. CASCADE al abono: el producto nunca borra abonos (se anulan);
--- el borrado en duro solo existe en la limpieza de las bases de test, y el
--- trigger de abajo rechaza el borrado del recibo a cualquiera que no sea
--- superusuario (la acción referencial corre como el dueño de la tabla).
+-- FK COMPUESTA (SEC-004): la sede, de la MISMA clínica.
 ALTER TABLE "payment_receipts" ADD CONSTRAINT "payment_receipts_tenantId_locationId_fkey"
   FOREIGN KEY ("tenantId", "locationId") REFERENCES "locations"("tenantId", "id")
   ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "payment_receipts" ADD CONSTRAINT "payment_receipts_payment_fkey"
-  FOREIGN KEY ("tenantId", "paymentId", "locationId") REFERENCES "payments"("tenantId", "id", "locationId")
+-- El abono, por su clave primaria. Que sea de la MISMA clínica y de ESA sede lo
+-- exige el trigger de inserción (abajo), que lo lee bajo la RLS de quien
+-- inserta: así no hace falta un índice único nuevo (tenantId, id, locationId)
+-- sobre `payments`, que bloquearía la tabla al crearlo y competiría con los
+-- índices parciales de la caja en el planificador. CASCADE: el producto nunca
+-- borra abonos (se anulan); el borrado en duro solo existe en la limpieza de
+-- las bases de test, y el trigger rechaza el borrado del recibo a cualquiera
+-- que no sea superusuario (la acción referencial corre como el dueño).
+ALTER TABLE "payment_receipts" ADD CONSTRAINT "payment_receipts_paymentId_fkey"
+  FOREIGN KEY ("paymentId") REFERENCES "payments"("id")
   ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- ---------------------------------------------------------------------------
--- 5. Inmutabilidad y coherencia con el contador (triggers)
+-- 4. Inmutabilidad y coherencia con el abono y el contador (triggers)
 --    search_path fijo con pg_temp AL FINAL y pg_catalog.pg_roles calificado:
 --    una tabla temporal "pg_roles" del rol de la app no puede declararlo
 --    superusuario (SEC-032).
@@ -257,6 +250,14 @@ BEGIN
     NEW."issuedAt" := CURRENT_TIMESTAMP;
     IF NEW."voidedAt" IS NOT NULL THEN
       RAISE EXCEPTION 'Un recibo no se emite ya anulado (DX-136)'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM public.payments p
+       WHERE p."id" = NEW."paymentId" AND p."tenantId" = NEW."tenantId"
+         AND p."locationId" = NEW."locationId"
+    ) THEN
+      RAISE EXCEPTION 'El recibo tiene que ser de un abono de la misma clínica y sede (DX-136)'
         USING ERRCODE = 'check_violation';
     END IF;
     IF NOT EXISTS (
@@ -344,7 +345,7 @@ CREATE TRIGGER "payment_receipt_counters_no_truncate"
   FOR EACH STATEMENT EXECUTE FUNCTION public.dx_payment_receipt_counter_guard();
 
 -- ---------------------------------------------------------------------------
--- 6. RLS forzada por clínica (mismo patrón que el resto de tablas de clínica)
+-- 5. RLS forzada por clínica (mismo patrón que el resto de tablas de clínica)
 -- ---------------------------------------------------------------------------
 ALTER TABLE "payment_receipt_counters" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "payment_receipt_counters" FORCE ROW LEVEL SECURITY;

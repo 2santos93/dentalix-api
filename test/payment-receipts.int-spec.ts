@@ -315,6 +315,46 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
       await raw.payment.delete({ where: { id: payment.id } });
     });
 
+    it('el recibo tiene que ser de un abono de la misma clínica y de la misma sede', async () => {
+      const [receiptB] = await raw.paymentReceipt.findMany({
+        where: { tenantId: b.tenantId },
+        take: 1,
+      });
+      const insertFor = (paymentId: string, locationId: string) =>
+        asApp(a.tenantId, (tx) =>
+          tx.paymentReceipt.create({
+            data: {
+              tenantId: a.tenantId,
+              locationId,
+              paymentId,
+              seriesPrefix: 'PRI',
+              number: 23,
+              snapshot: { version: 1 },
+            },
+          }),
+        );
+      // Abono de otra clínica (la RLS no lo deja ver).
+      await expect(insertFor(receiptB.paymentId, a.locationId)).rejects.toThrow(
+        /misma clínica y sede/,
+      );
+      // Abono de la clínica, pero de otra sede.
+      const north = await raw.payment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: northId,
+          treatmentPlanId: a.planId,
+          patientId: a.patientId,
+          amount: 1,
+          currency: 'COP',
+          paidAt: new Date(),
+        },
+      });
+      await expect(insertFor(north.id, a.locationId)).rejects.toThrow(
+        /misma clínica y sede/,
+      );
+      await raw.payment.delete({ where: { id: north.id } });
+    });
+
     it('un abono tiene como mucho un recibo', async () => {
       const [receipt] = await raw.paymentReceipt.findMany({
         where: { tenantId: a.tenantId },

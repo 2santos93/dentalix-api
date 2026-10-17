@@ -663,7 +663,9 @@ en la MISMA transacción que el abono (`issuePaymentReceipt`):
   ser el del contador y la serie la de la sede; solo se puede marcar ANULADO
   una vez (al anular el abono, con su fecha, autor y motivo); nunca DELETE ni
   TRUNCATE salvo un superusuario (limpieza de las bases de test). RLS FORCE y
-  FK compuestas por clínica (y por sede, hacia el abono).
+  FK compuesta por clínica a la sede; el abono va por su clave primaria y el
+  trigger exige que sea de la misma clínica y sede (sin índice nuevo sobre
+  `payments`).
 - **Abonos anteriores** a la migración: no se renumeran. Salen con su
   referencia antigua `REC-xxxxxxxx` y marcados «sin serie» (`legacy: true`),
   con los datos de hoy.
