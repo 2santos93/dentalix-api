@@ -58,12 +58,12 @@ export class ReminderOptOutDto {
 
 export class CommunicationRecipientDto {
   @ApiProperty({
-    enum: ['PATIENT', 'GUARDIAN', 'CONTACT'],
+    enum: ['PATIENT', 'RESPONSIBLE', 'GUARDIAN', 'CONTACT'],
     enumName: 'CommunicationRecipientKind',
     description:
-      'PATIENT: el propio paciente. Un menor: GUARDIAN (su tutor) o, sin tutor, CONTACT (su contacto principal).',
+      'PATIENT: el propio paciente. RESPONSIBLE (DX-203): un menor (CO < 18, ES < 16) o un paciente sin email; los avisos van al email de su responsable que recibe avisos (primero el pagador). GUARDIAN: menor cuyo responsable no tiene email; va al email de la ficha saludándolo. CONTACT: menor sin responsables; se saluda a su contacto principal.',
   })
-  kind!: 'PATIENT' | 'GUARDIAN' | 'CONTACT';
+  kind!: 'PATIENT' | 'RESPONSIBLE' | 'GUARDIAN' | 'CONTACT';
 
   @ApiProperty({
     type: String,
@@ -72,8 +72,26 @@ export class CommunicationRecipientDto {
   })
   name!: string | null;
 
-  @ApiProperty({ description: 'Menor de edad (menos de 18 años).' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Email al que salen los avisos; null = no hay a quién.',
+  })
+  email!: string | null;
+
+  @ApiProperty({
+    description:
+      'Menor según el país de la sede (CO: menos de 18; ES: menos de 16).',
+  })
   minor!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Responsable que recibe los avisos (RESPONSIBLE y GUARDIAN).',
+  })
+  responsiblePartyId!: string | null;
 }
 
 /** Bloque «Comunicaciones» de la ficha (DX-128). */

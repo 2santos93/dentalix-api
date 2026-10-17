@@ -17,9 +17,10 @@ import {
   type MobileStatus,
 } from '../../domain/communication/mobile-number';
 import {
-  reminderRecipient,
-  type ReminderRecipient,
-} from '../../domain/communication/reminder-recipient';
+  noticeRecipient,
+  type NoticeRecipient,
+} from '../../domain/communication/notice-recipient';
+import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
@@ -54,8 +55,12 @@ export interface PatientCommunicationView {
     recordedBy: { id: string; fullName: string | null } | null;
   } | null;
   reminderOptOut: { at: Date; source: ReminderOptOutSource } | null;
-  /** A quién se dirigen los avisos: un menor, a su tutor o contacto principal. */
-  recipient: ReminderRecipient;
+  /**
+   * A quién van los avisos (DX-203): un menor o un paciente sin email, a su
+   * responsable; un menor sin responsable con email, saludando al responsable
+   * o al contacto principal (DX-128).
+   */
+  recipient: NoticeRecipient;
 }
 
 export interface UpdatePatientCommunicationInput {
@@ -95,7 +100,12 @@ function toView(
       state.reminderOptOutAt && state.reminderOptOutSource
         ? { at: state.reminderOptOutAt, source: state.reminderOptOutSource }
         : null,
-    recipient: reminderRecipient(state, now),
+    recipient: noticeRecipient({
+      patient: state,
+      responsibles: state.responsibles,
+      country: state.noticeLocation.country,
+      today: civilDateIn(now, state.noticeLocation.timeZone),
+    }),
   };
 }
 

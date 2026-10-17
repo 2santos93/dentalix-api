@@ -29,9 +29,10 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     recipient: {
       firstName: 'Ana',
       birthDate: new Date('1990-05-01'),
-      guardianName: null,
+      email: 'ana@example.com',
       emergencyContactName: null,
     },
+    responsibles: [],
     settings: { enabled: true, leadHours: [48, 2] },
     ...over,
   };
@@ -108,6 +109,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       channel: 'EMAIL',
       template: 'appointment-reminder',
       recipient: 'ana@example.com',
+      recipientKind: 'PATIENT',
       appointmentId: APPT,
     });
     expect(email.enqueue).toHaveBeenCalledWith({
@@ -137,24 +139,123 @@ describe('SendAppointmentReminder (DX-026)', () => {
     ]);
   });
 
-  it('un menor con tutor: el email saluda al tutor y nombra al paciente (DX-128)', async () => {
+  const mother = {
+    id: 'resp-1',
+    name: 'María José Pérez',
+    email: 'maria@example.com',
+    isPayer: true,
+    receivesNotices: true,
+    optedOut: false,
+  };
+  const minorWithoutEmail = {
+    firstName: 'Ana',
+    birthDate: new Date('2016-02-01'),
+    email: null,
+    emergencyContactName: null,
+  };
+
+  it('un menor sin email con responsable que recibe avisos: sale al email del responsable y queda «enviado al responsable» (DX-203)', async () => {
     repo.contexts.set(
       APPT,
       context({
-        recipient: {
-          firstName: 'Ana',
-          birthDate: new Date('2016-02-01'),
-          guardianName: 'María José Pérez',
-          emergencyContactName: null,
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: null,
         },
+        recipient: minorWithoutEmail,
+        responsibles: [mother],
+      }),
+    );
+    await handler.handle(payload);
+    expect(outbound.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient: 'maria@example.com',
+        recipientKind: 'RESPONSIBLE',
+      }),
+    );
+    const [input] = email.enqueue.mock.calls[0] as [
+      {
+        to: string;
+        vars: { patientName: string; guardianName: string | null };
+      },
+    ];
+    expect(input.to).toBe('maria@example.com');
+    // Saluda al responsable y nombra al paciente.
+    expect(input.vars.patientName).toBe('Ana');
+    expect(input.vars.guardianName).toBe('María');
+    // La baja del email es la del PACIENTE de la cita.
+    expect(optOutLinks.issue).toHaveBeenCalledWith(PATIENT);
+    expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
+  });
+
+  it('un menor sin email cuyo responsable no recibe avisos (o se dio de baja): NO_EMAIL', async () => {
+    for (const responsible of [
+      { ...mother, receivesNotices: false },
+      { ...mother, optedOut: true },
+    ]) {
+      repo.reminders.length = 0;
+      repo.contexts.set(
+        APPT,
+        context({
+          contact: {
+            contactChannel: 'EMAIL',
+            reminderOptOutAt: null,
+            email: null,
+          },
+          recipient: minorWithoutEmail,
+          responsibles: [responsible],
+        }),
+      );
+      await handler.handle(payload);
+      expect(repo.reminders[0]).toMatchObject({
+        status: 'SKIPPED',
+        skipReason: 'NO_EMAIL',
+      });
+    }
+    expect(email.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('la baja del propio paciente gana aunque tenga responsable (DX-128)', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: new Date(NOW.getTime() - 60_000),
+          email: null,
+        },
+        recipient: minorWithoutEmail,
+        responsibles: [mother],
+      }),
+    );
+    await handler.handle(payload);
+    expect(repo.reminders[0]).toMatchObject({ skipReason: 'OPTED_OUT' });
+    expect(email.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('un menor con email y responsable sin email: va al email de la ficha saludando al responsable (DX-128)', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        recipient: { ...minorWithoutEmail, email: 'familia@example.com' },
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: 'familia@example.com',
+        },
+        responsibles: [{ ...mother, email: null }],
       }),
     );
     await handler.handle(payload);
     const [input] = email.enqueue.mock.calls[0] as [
-      { vars: { patientName: string; guardianName: string | null } },
+      { to: string; vars: { guardianName: string | null } },
     ];
-    expect(input.vars.patientName).toBe('Ana');
+    expect(input.to).toBe('familia@example.com');
     expect(input.vars.guardianName).toBe('María');
+    expect(outbound.record).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientKind: 'PATIENT' }),
+    );
   });
 
   it('arma el enlace con el host de plataforma de la clínica del trabajo (SEC-033)', async () => {

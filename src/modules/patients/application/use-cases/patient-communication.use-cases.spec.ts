@@ -54,17 +54,46 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
         email: 'ana@example.com',
         whatsappOptIn: null,
         reminderOptOut: null,
-        recipient: { kind: 'PATIENT', name: 'Ana', minor: false },
+        recipient: {
+          kind: 'PATIENT',
+          name: 'Ana',
+          email: 'ana@example.com',
+          minor: false,
+          responsiblePartyId: null,
+        },
       });
     });
 
-    it('para un menor, el destinatario de los avisos es su tutor (o su contacto principal)', async () => {
+    it('para un menor, los avisos van a su responsable (DX-203) o se saluda a su contacto principal', async () => {
+      const mother = {
+        id: 'r1',
+        name: 'María José Pérez',
+        email: 'maria@example.com',
+        isPayer: true,
+        receivesNotices: true,
+        optedOut: false,
+      };
       repo.add(ANA, {
         birthDate: new Date('2015-06-01'),
-        guardianName: 'María José Pérez',
+        responsibles: [mother],
       });
       await expect(get.execute(ANA)).resolves.toMatchObject({
-        recipient: { kind: 'GUARDIAN', name: 'María', minor: true },
+        recipient: {
+          kind: 'RESPONSIBLE',
+          name: 'María',
+          email: 'maria@example.com',
+          minor: true,
+          responsiblePartyId: 'r1',
+        },
+      });
+      // En España, a los 16 ya recibe los suyos.
+      repo.add(ANA, {
+        birthDate: new Date('2009-06-01'),
+        responsibles: [mother],
+        noticeLocation: { country: 'ES', timeZone: 'Europe/Madrid' },
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: { kind: 'PATIENT', minor: false },
       });
       repo.add(ANA, {
         birthDate: new Date('2015-06-01'),
