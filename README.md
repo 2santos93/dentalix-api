@@ -778,6 +778,7 @@ de esquemas propios de una librería).
   | `email.purge-outbox.daily` | `23 4 * * *` | Borra de `email_outbox` los SENT/FAILED de más de `MAIL_OUTBOX_RETENTION_DAYS` (90), clínica a clínica bajo su RLS, y los de plataforma por `email_outbox_purge_platform` (DX-144) |
   | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`); la petición conserva el `fetch` como respaldo |
   | `jobs.purge-finished.daily` | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS` |
+  | `domains.recheck-sweep.hourly` | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (un trabajo `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009) |
 - **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
   documentada en `test/rls-catalog.int-spec.ts`): un worker reclama trabajos de
   todas las clínicas. `outbound_messages` es por clínica con RLS forzada: el
@@ -834,6 +835,48 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
   `SENDING`, `PENDING` (con `dueAt`) o `MISSED`.
 - **Demo**: `seed:demo` deja la «Sede principal» con `[48, 2]`. Hace falta un
   worker (`npm run start:dev:all`) para que salgan.
+
+## Dominios personalizados (SEC-009)
+
+Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio
+(`POST /domains`), publica el TXT `_dentalix-verify.<host>` con el token y lo
+verifica (`POST /domains/:id/verify`); desde ese momento
+`TenantResolverService` enruta ese host a la clínica. Solo enruta un dominio
+**VERIFIED, vivo y de una clínica viva**; sin caché (cada petición lo lee),
+así que desactivar o borrar surte efecto al momento.
+
+- **Sin squatting**: el host solo es único entre los VERIFIED vivos (índice
+  parcial `tenant_domains_verified_host_key`). Varias clínicas pueden tenerlo
+  en PENDING; lo gana la **primera que verifica** el TXT y los PENDING de las
+  demás quedan invalidados (`expiresAt = ahora`, los ven «EXPIRED»). Dos
+  verificaciones a la vez del mismo host se ponen en fila (`FOR UPDATE` de sus
+  filas): una gana y la otra recibe 409. Registrar un host que otra clínica
+  tiene VERIFIED: 409. Dentro de una clínica, un host una sola vez entre los
+  vivos (`tenant_domains_tenant_host_key`).
+- **Caducidad**: un PENDING se puede verificar durante **72 h**
+  (`expiresAt`); después es `EXPIRED`: no bloquea a nadie, verificarlo da 410
+  y volver a registrarlo lo sustituye (token nuevo). `GET /domains` devuelve
+  el estado efectivo: `PENDING`, `EXPIRED`, `VERIFIED` o `DISABLED`.
+- **Eliminar**: `DELETE /domains/:id` (204; soft delete; id no UUID → 400;
+  de otra clínica → 404), en cualquier estado. Deja de enrutar y libera el
+  host. Verificar y eliminar quedan en `audit_events` (recurso
+  `TENANT_DOMAIN`).
+- **Re-verificación periódica** (cola de DX-085): cada hora
+  `domains.recheck-sweep.hourly` encola un `domains.recheck` por dominio
+  VERIFIED, en la clínica del dominio, con clave por (dominio, ronda). Si el
+  TXT con el token sigue publicado, `failedChecks` vuelve a 0; si no, suma uno
+  y al llegar a `DOMAIN_RECHECK_MAX_FAILURES` (default **3**, 1..20) seguidos
+  pasa a **DISABLED**: deja de enrutar y queda `disabledAt`. Un DNS que no
+  responde (SERVFAIL, timeout) se reintenta con el backoff de la cola y, si
+  sigue sin responder en el último intento, **cuenta como fallo** (fail-closed:
+  quien compre el dominio no puede esquivar la desactivación haciendo fallar
+  su DNS). Un DISABLED se puede volver a verificar (mismo token) o eliminar.
+  La desactivación la hace el sistema, sin usuario: `audit_events` exige un
+  actor (CHECK `audit_events_actor_check`), así que queda en el log
+  (`domains.disabled`, con ids, sin el host) y en la propia fila
+  (`disabledAt`, `failedChecks`, `lastCheckedAt`).
+- **DNS inyectable**: puerto `DNS_RESOLVER` (`NodeDnsResolver` en producción);
+  los tests lo sustituyen por `FakeDns` (y el reloj por `DomainClock`).
 
 ## Despliegue: roles de la BD (DX-113)
 
