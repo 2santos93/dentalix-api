@@ -124,7 +124,12 @@ export class InMemoryDomains implements DomainRecheckSource {
         )
         .sort((a, b) => (a.host < b.host ? -1 : 1))
         .slice(0, limit)
-        .map((r) => ({ id: r.id, tenantId: r.tenantId, host: r.host })),
+        .map((r) => ({
+          id: r.id,
+          tenantId: r.tenantId,
+          host: r.host,
+          verifyToken: r.verifyToken,
+        })),
     );
   }
 }

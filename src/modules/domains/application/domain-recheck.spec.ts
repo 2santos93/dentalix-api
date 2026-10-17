@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { DomainRecheckSweep, RecheckDomain } from './domain-recheck';
 import type { JobQueue } from '../../jobs/application/job-queue.service';
 import {
@@ -42,7 +43,7 @@ function setup(maxFailures = 3) {
       },
     ),
   } as unknown as JobQueue;
-  const sweep = new DomainRecheckSweep(store, jobs, clock);
+  const sweep = new DomainRecheckSweep(store, jobs, clock, dns);
   const handlerFor = (tenantId: string) =>
     new RecheckDomain(store.as(tenantId), dns, {
       recheckMaxFailures: maxFailures,
@@ -97,7 +98,7 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
         .sort((x, y) => (x.id < y.id ? -1 : 1))
         .map((d) => ({
           name: 'domains.recheck',
-          payload: { domainId: d.id, round },
+          payload: { domainId: d.id, round, result: 'found' },
           options: {
             tenantId: d.tenantId,
             idempotencyKey: `domains.recheck:${d.id}:${round}`,
@@ -107,12 +108,9 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
   });
 
   it('el barrido pagina por host: más de un lote (500) sin repetir ni saltarse ninguno', async () => {
-    const { store, sweep, queued } = setup();
+    const { sweep, queued, verified } = setup();
     for (let i = 0; i < 1203; i += 1) {
-      store.seed(i % 2 ? A : B, {
-        host: `c${String(i).padStart(4, '0')}.x.com`,
-        status: 'VERIFIED',
-      });
+      verified(i % 2 ? A : B, `c${String(i).padStart(4, '0')}.x.com`);
     }
     await expect(sweep.run()).resolves.toBe(1203);
     expect(new Set(queued.map((q) => q.payload.domainId)).size).toBe(1203);
@@ -264,7 +262,8 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
       status: 'VERIFIED',
       failedChecks: 0,
     });
-    expect(dns.lookups).toEqual([]);
+    // Solo la consulta del barrido: la comprobación ni lo mira.
+    expect(dns.lookups).toEqual([txt(row.host)]);
   });
 
   it('la comprobación corre en la clínica del trabajo: el id de un dominio de otra clínica no se toca', async () => {
@@ -311,5 +310,102 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
         { tenantId: A, attempt: 1, maxAttempts: 3 },
       ),
     ).rejects.toThrow('payload inválido');
+  });
+
+  describe('freno del barrido (DX-220, OPS-033)', () => {
+    /** `n` dominios VERIFIED repartidos entre las dos clínicas. */
+    function fleet(n: number) {
+      const ctx = setup(1);
+      const rows = Array.from({ length: n }, (_, i) =>
+        ctx.verified(i % 2 ? A : B, `c${i}.x.com`),
+      );
+      return { ...ctx, rows };
+    }
+
+    it('si más del 50 % de los dominios (y hay ≥ 4) dan fallo definitivo, la ronda no cuenta: no suma fallos a ninguno y deja domains.recheck_suspect', async () => {
+      const { store, dns, sweep, queued, rows } = fleet(5);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      // El DNS propio contesta NXDOMAIN para casi todo (3 de 5).
+      for (const row of rows.slice(0, 3)) dns.records.delete(txt(row.host));
+
+      await expect(sweep.run()).resolves.toBe(0);
+
+      expect(queued).toEqual([]);
+      expect(store.rows.map((r) => [r.status, r.failedChecks])).toEqual(
+        rows.map(() => ['VERIFIED', 0]),
+      );
+      expect(warn).toHaveBeenCalledWith({
+        event: 'domains.recheck_suspect',
+        round: expect.any(String) as string,
+        domains: 5,
+        missing: 3,
+        inconclusive: 0,
+      });
+      // Sin hosts ni tokens en el log.
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('.x.com');
+      warn.mockRestore();
+    });
+
+    it('con N=1 (desactivar a la primera), una ronda sospechosa tampoco desactiva a nadie', async () => {
+      const { store, dns, round, rows } = fleet(4);
+      for (const row of rows) dns.records.delete(txt(row.host));
+      await round();
+      await round();
+      expect(store.rows.every((r) => r.status === 'VERIFIED')).toBe(true);
+      expect(store.rows.every((r) => r.failedChecks === 0)).toBe(true);
+    });
+
+    it('justo el 50 % no frena: los que fallan suman y los demás reinician', async () => {
+      const { store, dns, round, rows } = fleet(4);
+      for (const row of rows.slice(0, 2)) dns.records.delete(txt(row.host));
+      await round();
+      expect(store.rows.map((r) => r.status).sort()).toEqual([
+        'DISABLED',
+        'DISABLED',
+        'VERIFIED',
+        'VERIFIED',
+      ]);
+    });
+
+    it('con menos de 4 dominios no frena (una mayoría de fallos es normal)', async () => {
+      const { store, dns, round, rows } = fleet(3);
+      for (const row of rows) dns.records.delete(txt(row.host));
+      await round();
+      expect(store.rows.every((r) => r.status === 'DISABLED')).toBe(true);
+    });
+
+    it('los que no responden (timeout) no cuentan como fallo definitivo ni para el freno: van sin resultado y su trabajo consulta el DNS', async () => {
+      const { dns, sweep, queued, rows } = fleet(4);
+      dns.failing.add(txt(rows[0].host));
+      dns.failing.add(txt(rows[1].host));
+      dns.failing.add(txt(rows[2].host));
+      dns.records.delete(txt(rows[3].host));
+
+      await expect(sweep.run()).resolves.toBe(4);
+
+      const byId = new Map(queued.map((q) => [q.payload.domainId, q.payload]));
+      expect(byId.get(rows[0].id)?.result).toBeUndefined();
+      expect(byId.get(rows[3].id)?.result).toBe('missing');
+    });
+
+    it('cada dominio se consulta UNA vez por ronda (el barrido), no dos', async () => {
+      const { dns, round, rows } = fleet(6);
+      await round();
+      expect(dns.lookups.sort()).toEqual(rows.map((r) => txt(r.host)).sort());
+    });
+
+    it('rechaza un resultado que no es found/missing', async () => {
+      const { handlerFor, rows } = fleet(1);
+      await expect(
+        handlerFor(rows[0].tenantId).handle(
+          {
+            domainId: rows[0].id,
+            round: new Date().toISOString(),
+            result: 'quizá',
+          },
+          { tenantId: rows[0].tenantId, attempt: 1, maxAttempts: 3 },
+        ),
+      ).rejects.toThrow('payload inválido');
+    });
   });
 });

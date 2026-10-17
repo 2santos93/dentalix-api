@@ -293,10 +293,20 @@ describe('SEC-009 · dominios personalizados (int)', () => {
         return Promise.resolve({ id: 'x', created: true });
       },
     } as unknown as JobQueue;
+    // Solo los dominios de las clínicas del spec: la base de int la
+    // comparten otros specs, y sus VERIFIED (sin TXT en este DNS simulado)
+    // contarían para el freno de la ronda (DX-220).
+    const realSource = new PrismaDomainRecheckSource(prisma);
     const sweep = new DomainRecheckSweep(
-      new PrismaDomainRecheckSource(prisma),
+      {
+        listVerified: async (afterHost, limit) =>
+          (await realSource.listVerified(afterHost, limit)).filter((d) =>
+            [A, B].includes(d.tenantId),
+          ),
+      },
       jobs,
       clock,
+      dns,
     );
     const recheck = new RecheckDomain(repo, dns, { recheckMaxFailures: 3 });
 

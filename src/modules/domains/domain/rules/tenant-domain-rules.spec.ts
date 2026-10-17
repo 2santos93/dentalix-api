@@ -3,6 +3,7 @@ import {
   domainState,
   hasVerificationToken,
   isExpired,
+  isSuspectRound,
   nextCheckState,
   pendingExpiresAt,
   recheckRound,
@@ -78,5 +79,22 @@ describe('reglas de dominios personalizados (SEC-009)', () => {
       recheckRound(new Date('2026-10-17T12:59:59.999Z')).toISOString(),
     ).toBe('2026-10-17T12:00:00.000Z');
     expect(recheckRound(NOW).toISOString()).toBe('2026-10-17T12:00:00.000Z');
+  });
+
+  describe('freno del barrido (DX-220, OPS-033)', () => {
+    it.each([
+      [4, 3, true],
+      [10, 6, true],
+      [4, 2, false],
+      [10, 5, false],
+      [3, 3, false],
+      [2, 2, false],
+      [0, 0, false],
+    ])(
+      'con %i dominios y %i fallos definitivos: sospechosa = %s',
+      (domains, failed, suspect) => {
+        expect(isSuspectRound(domains, failed)).toBe(suspect);
+      },
+    );
   });
 });

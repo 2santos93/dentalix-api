@@ -82,3 +82,18 @@ export function nextCheckState(
   const failed = failedChecks + 1;
   return { failedChecks: failed, disable: failed >= maxFailures };
 }
+
+/** DX-220 (OPS-033): rondas con menos dominios que esto no activan el freno. */
+export const SUSPECT_ROUND_MIN_DOMAINS = 4;
+
+/**
+ * Freno del barrido (DX-220, OPS-033): si en una ronda dan fallo DEFINITIVO
+ * (sin el TXT con el token) más de la mitad de los dominios, y son al menos
+ * SUSPECT_ROUND_MIN_DOMAINS, lo probable es que falle el DNS propio (o la
+ * red de salida), no que medio parque de clínicas haya perdido su dominio a
+ * la vez: la ronda no cuenta para ninguno. Con pocos dominios una mayoría de
+ * fallos es normal (dos de tres, por ejemplo) y no frena.
+ */
+export function isSuspectRound(domains: number, failed: number): boolean {
+  return domains >= SUSPECT_ROUND_MIN_DOMAINS && failed * 2 > domains;
+}
