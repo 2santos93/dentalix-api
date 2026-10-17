@@ -20,7 +20,7 @@ const SUBDOMAINS = ['dx203-int-a', 'dx203-int-b'];
 const BACKFILL = readFileSync(
   join(
     __dirname,
-    '../prisma/migrations/20261018010100_dx203_guardian_to_responsible/migration.sql',
+    '../prisma/migrations/20261018120100_dx203_guardian_to_responsible/migration.sql',
   ),
   'utf8',
 );

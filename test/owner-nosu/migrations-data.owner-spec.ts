@@ -149,7 +149,7 @@ const FIXTURE_CONTACT = [
 ];
 
 /**
- * Esquema de 20261018010000 (DX-203): el acudiente en texto libre de un
+ * Esquema de 20261018120000 (DX-203): el acudiente en texto libre de un
  * paciente de cada clínica; la migración lo copia a un contacto responsable.
  */
 const FIXTURE_GUARDIAN = [
@@ -191,7 +191,7 @@ const STEPS: Step[] = [
   { until: '20261017233300', fixture: FIXTURE_LOCATIONS },
   // dx128_contact_channel (FORCE fuera de patients durante el backfill del
   // canal por defecto de la clínica) y las siguientes hasta DX-203.
-  { until: '20261018010100', fixture: FIXTURE_CONTACT },
+  { until: '20261018120100', fixture: FIXTURE_CONTACT },
   // dx203_guardian_to_responsible (FORCE fuera de patients y de
   // patient_responsible_parties durante la copia).
   { until: '99999999999999', fixture: FIXTURE_GUARDIAN },

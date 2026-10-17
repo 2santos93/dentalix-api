@@ -1094,8 +1094,8 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
 Quién paga y quién recibe los avisos de un paciente (el acudiente de un
 menor, la madre que paga a sus hijos), como el garante de Open Dental o
 Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
-`20261018010000_dx203_patient_responsible_parties` y
-`20261018010100_dx203_guardian_to_responsible`.
+`20261018120000_dx203_patient_responsible_parties` y
+`20261018120100_dx203_guardian_to_responsible`.
 
 - **Datos**: el responsable es OTRO paciente de la clínica
   (`responsiblePatientId`; nombre, documento, email y teléfono salen de su

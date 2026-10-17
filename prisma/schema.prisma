@@ -274,7 +274,7 @@ model Patient {
   emergencyContactRelationship String?
   emergencyContactPhone        String?
   // DEPRECADO (DX-203): solo lectura. El acudiente vive ahora en
-  // `patient_responsible_parties` (la migración 20261018010100 copió cada
+  // `patient_responsible_parties` (la migración 20261018120100 copió cada
   // valor a un contacto responsable con `migratedFromGuardian`). La API ya no
   // los escribe; se conservan para no perder el dato ni romper a quien los lee.
   guardianName                 String?
