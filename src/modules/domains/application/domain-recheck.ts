@@ -17,6 +17,7 @@ import {
 import {
   hasVerificationToken,
   nextCheckState,
+  recheckRound,
   verificationRecordName,
 } from '../domain/rules/tenant-domain-rules';
 import {
@@ -35,7 +36,7 @@ const SWEEP_BATCH = 500;
 export interface RecheckDomainPayload {
   [key: string]: string;
   domainId: string;
-  /** Instante ISO de la ronda (el del barrido que la encoló). */
+  /** Instante ISO de la ronda: la hora UTC (truncada) del barrido que la encoló. */
   round: string;
 }
 
@@ -44,7 +45,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * Barrido de la re-verificación (SEC-009; tarea programada horaria de DX-085,
  * un ejecutor por tick): encola una comprobación por dominio VERIFIED vivo,
- * en la clínica de ese dominio, con `idempotencyKey` por (dominio, ronda).
+ * en la clínica de ese dominio, con `idempotencyKey` por (dominio, ronda). La
+ * ronda es la hora UTC del barrido (`recheckRound`): repetirlo en la misma
+ * hora no encola otra comprobación.
  */
 @Injectable()
 export class DomainRecheckSweep {
@@ -58,7 +61,7 @@ export class DomainRecheckSweep {
 
   /** Devuelve cuántas comprobaciones encoló (nuevas o ya existentes). */
   async run(): Promise<number> {
-    const round = this.clock.now().toISOString();
+    const round = recheckRound(this.clock.now()).toISOString();
     let afterHost: string | null = null;
     let planned = 0;
     for (;;) {

@@ -56,6 +56,18 @@ export function toDomainRecord(
   return { ...row, status: domainState(row, now) };
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Ronda de la re-verificación periódica: la hora UTC en curso (truncada). Un
+ * barrido repetido en la misma hora (reintento del trabajo, arriendo perdido,
+ * tick atrasado) produce la misma ronda, así que la idempotencyKey lo
+ * deduplica y no se cuenta dos veces el mismo fallo en una hora.
+ */
+export function recheckRound(now: Date): Date {
+  return new Date(Math.floor(now.getTime() / HOUR_MS) * HOUR_MS);
+}
+
 /**
  * Resultado de una comprobación periódica (domains.recheck): con el TXT se
  * reinicia la cuenta; sin él, suma un fallo y al llegar a `maxFailures` el

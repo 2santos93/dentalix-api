@@ -266,6 +266,29 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
     expect(store.rows[0].status).toBe('VERIFIED');
   });
 
+  it('la ronda es la hora del barrido: repetirlo en la misma hora (reintento, arriendo perdido) no suma otro fallo', async () => {
+    const { store, dns, sweep, queued, clock, handlerFor, verified } = setup(3);
+    const row = verified(A, 'citas.a.com');
+    dns.records.delete(txt(row.host));
+    clock.advance(29 * 60_000);
+    await sweep.run();
+    clock.advance(4 * 60_000);
+    await sweep.run();
+    expect(queued).toHaveLength(2);
+    expect(queued[0].options.idempotencyKey).toBe(
+      queued[1].options.idempotencyKey,
+    );
+    expect(queued[0].payload.round).toBe('2026-10-17T12:00:00.000Z');
+    for (const job of queued) {
+      await handlerFor(A).handle(job.payload, {
+        tenantId: A,
+        attempt: 1,
+        maxAttempts: 3,
+      });
+    }
+    expect(store.rows[0].failedChecks).toBe(1);
+  });
+
   it('rechaza un payload inválido', async () => {
     const { handlerFor } = setup();
     await expect(

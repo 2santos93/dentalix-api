@@ -863,7 +863,9 @@ así que desactivar o borrar surte efecto al momento.
   `TENANT_DOMAIN`).
 - **Re-verificación periódica** (cola de DX-085): cada hora
   `domains.recheck-sweep.hourly` encola un `domains.recheck` por dominio
-  VERIFIED, en la clínica del dominio, con clave por (dominio, ronda). Si el
+  VERIFIED, en la clínica del dominio, con clave por (dominio, ronda); la
+  ronda es la hora UTC truncada, así que repetir el barrido en la misma hora
+  (reintento, arriendo perdido) no cuenta dos veces el mismo fallo. Si el
   TXT con el token sigue publicado, `failedChecks` vuelve a 0; si no, suma uno
   y al llegar a `DOMAIN_RECHECK_MAX_FAILURES` (default **3**, 1..20) seguidos
   pasa a **DISABLED**: deja de enrutar y queda `disabledAt`. Un DNS que no

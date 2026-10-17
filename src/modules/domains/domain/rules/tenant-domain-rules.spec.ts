@@ -5,6 +5,7 @@ import {
   isExpired,
   nextCheckState,
   pendingExpiresAt,
+  recheckRound,
   verificationRecordName,
 } from './tenant-domain-rules';
 
@@ -70,5 +71,12 @@ describe('reglas de dominios personalizados (SEC-009)', () => {
       failedChecks: 1,
       disable: true,
     });
+  });
+
+  it('la ronda de re-verificación es la hora UTC truncada', () => {
+    expect(
+      recheckRound(new Date('2026-10-17T12:59:59.999Z')).toISOString(),
+    ).toBe('2026-10-17T12:00:00.000Z');
+    expect(recheckRound(NOW).toISOString()).toBe('2026-10-17T12:00:00.000Z');
   });
 });
