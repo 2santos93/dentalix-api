@@ -384,10 +384,15 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
     });
 
     it('un abono tiene como mucho un recibo', async () => {
+      // Un recibo de la sede principal: la clínica A también tiene recibos de
+      // la sede norte y, sin filtrar ni ordenar, Postgres puede devolver uno
+      // de esos; entonces salta antes el CHECK de sede y no el UNIQUE.
       const [receipt] = await raw.paymentReceipt.findMany({
-        where: { tenantId: a.tenantId },
+        where: { tenantId: a.tenantId, locationId: a.locationId },
+        orderBy: { number: 'asc' },
         take: 1,
       });
+      expect(receipt).toBeDefined();
       await expect(
         asApp(a.tenantId, async (tx) => {
           await tx.$executeRaw`
