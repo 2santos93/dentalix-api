@@ -1788,3 +1788,21 @@ export const DEMO_WAITLIST = {
     note: 'Dolor en el 46: darle el primer hueco que haya.',
   },
 } as const;
+
+// DX-128: bloque «Comunicaciones» de la ficha. Todos nacen con el canal de la
+// clínica (EMAIL); recepción deja a unos pocos en los otros estados para
+// verlos en la ficha y en los recordatorios: WhatsApp con opt-in en persona,
+// ninguno, baja anotada por recepción y un teléfono fijo (móvil no válido).
+export const DEMO_COMMUNICATION = [
+  {
+    patientIndex: 0,
+    input: {
+      contactChannel: 'WHATSAPP',
+      whatsappOptIn: true,
+      whatsappOptInSource: 'IN_PERSON',
+    },
+  },
+  { patientIndex: 2, input: { contactChannel: 'NONE' } },
+  { patientIndex: 3, input: { reminderOptOut: true } },
+  { patientIndex: 4, input: { phone: '601 555 0105' } },
+] as const;
