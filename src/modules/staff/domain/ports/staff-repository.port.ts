@@ -52,6 +52,14 @@ export interface StaffRepository {
   reactivateById(userId: string): Promise<StaffMember | null>;
 
   /**
+   * DX-213 (SEC-038): ¿`userId` tiene alguna membresía ACTIVA en otra clínica
+   * distinta de la del contexto? Solo un booleano, nunca cuál ni cuántas: lo
+   * responde la función SECURITY DEFINER de DX-143, porque la RLS de
+   * `clinic_memberships` no deja verlas desde aquí.
+   */
+  hasOtherActiveMemberships(userId: string): Promise<boolean>;
+
+  /**
    * Active clinic staff — non-deleted `ClinicMembership` rows joined to their
    * `User`, tenant-scoped (via RLS / `runWithTenant`), ordered by full name.
    */

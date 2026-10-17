@@ -84,7 +84,7 @@ export class StaffMemberDetailDto {
     format: 'date-time',
     nullable: true,
     description:
-      'DX-048: hasta cuándo no puede iniciar sesión por intentos fallidos (null = sin bloqueo). Se quita con POST /staff/:userId/login-unlock.',
+      'DX-048: hasta cuándo no puede iniciar sesión por intentos fallidos (null = sin bloqueo). Siempre null para un miembro desactivado (DX-213). Se quita con POST /staff/:userId/login-unlock.',
   })
   loginBlockedUntil!: Date | null;
 }

@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
@@ -30,6 +31,11 @@ import {
 } from '../application/use-cases/get-staff-detail.use-case';
 import { UnlockStaffLoginUseCase } from '../application/use-cases/unlock-staff-login.use-case';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { ReactivateStaffUseCase } from '../application/use-cases/reactivate-staff.use-case';
 import { UpdateStaffUseCase } from '../application/use-cases/update-staff.use-case';
 import { DeactivateStaffUseCase } from '../application/use-cases/deactivate-staff.use-case';
@@ -80,6 +86,7 @@ export class StaffController {
     private readonly deactivateStaff: DeactivateStaffUseCase,
     private readonly reactivateStaff: ReactivateStaffUseCase,
     private readonly unlockLogin: UnlockStaffLoginUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   // Sigue SIN paginar a propósito: alimenta selectores (profesional de la
@@ -142,6 +149,8 @@ export class StaffController {
 
   // DX-048: quitar el bloqueo por intentos fallidos de un miembro de ESTA
   // clínica (otra clínica → 404 bajo RLS; otro rol → 403). Auditado.
+  // DX-213: solo miembros activos (desactivado → 404) cuya cuenta no dé
+  // acceso a otra clínica (→ 409); el rechazo lo audita el caso de uso.
   @Audit({
     action: 'UPDATE',
     resource: 'STAFF_MEMBER',
@@ -154,14 +163,26 @@ export class StaffController {
   @ApiOperation({
     summary:
       'Desbloquea el inicio de sesión de un miembro (borra la espera y los intentos fallidos)',
+    description:
+      'Solo para miembros activos de esta clínica cuya cuenta no da acceso a ninguna otra: el bloqueo es por cuenta, no por clínica. Un rechazo queda auditado (LOGIN_UNLOCK_REFUSED) sin tocar el contador.',
   })
   @ApiNoContentResponse({ description: 'Desbloqueado (o no estaba bloqueado)' })
-  @ApiNotFoundResponse({ description: 'No es miembro de esta clínica' })
+  @ApiNotFoundResponse({
+    description:
+      'No es miembro de esta clínica o su membresía está desactivada; el contador no cambia',
+  })
+  @ApiConflictResponse({
+    description:
+      'La cuenta da acceso a otra clínica (sin decir cuál ni cuántas); el contador no cambia. Mensaje: «Esta cuenta da acceso a otra clínica: pide a la persona que espere unos minutos o que restablezca su contraseña»',
+  })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   async unlockLoginHandler(
     @Param('userId', ParseUUIDPipe) userId: string,
+    @Req() req: AuditableRequest,
   ): Promise<void> {
-    await this.unlockLogin.execute(userId);
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    await this.unlockLogin.execute(userId, ctx);
   }
 
   @Delete(':userId')

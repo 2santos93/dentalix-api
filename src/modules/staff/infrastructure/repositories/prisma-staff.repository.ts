@@ -6,6 +6,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { otherActiveMemberships } from '../../../../shared/tenancy/other-active-memberships';
 import {
   DeactivateStaffOutcome,
   StaffPatch,
@@ -29,7 +31,10 @@ const DELIVERY: Record<EmailOutboxStatus, StaffInvitationEmailDelivery> = {
 
 @Injectable()
 export class PrismaStaffRepository implements StaffRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   /**
    * El directorio mezcla dos tablas, así que la página no se puede pedir con
@@ -195,6 +200,14 @@ export class PrismaStaffRepository implements StaffRepository {
           }
         : null;
     });
+  }
+
+  async hasOtherActiveMemberships(userId: string): Promise<boolean> {
+    // La clínica sale del contexto de la petición, nunca del cliente (misma
+    // convención que PrismaInvitationRepository).
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return otherActiveMemberships(this.prisma, userId, tenantId);
   }
 
   async reactivateById(userId: string): Promise<StaffMember | null> {
