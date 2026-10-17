@@ -90,7 +90,7 @@ CREATE INDEX "platform_access_audit_userId_createdAt_idx"
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION "dx_forbid_platform_access_audit_mutation"() RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
   IF TG_OP IN ('DELETE', 'TRUNCATE') AND EXISTS (
