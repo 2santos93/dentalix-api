@@ -13,6 +13,8 @@ import { TreatmentPlanItem } from '../../../domain/entities/treatment-plan-item.
 import {
   AddTreatmentPlanItemRepoInput,
   CreateTreatmentPlanRepoInput,
+  DecideBulkDiscount,
+  DiscountStamp,
   DecidePlanChange,
   PaymentPlanCancellation,
   TreatmentPlanRepository,
@@ -111,6 +113,11 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: overrides.catalogItemId ?? 'catalog-1',
       price: overrides.price ?? 100,
       discount: overrides.discount ?? 0,
+      discountReason: overrides.discountReason ?? null,
+      discountReasonNote: overrides.discountReasonNote ?? null,
+      discountById: overrides.discountById ?? null,
+      discountAt: overrides.discountAt ?? null,
+      discountLocationId: overrides.discountLocationId ?? null,
       status: overrides.status ?? TreatmentPlanItemStatus.PROPOSED,
       notes: overrides.notes ?? null,
       createdAt: overrides.createdAt ?? NOW,
@@ -155,6 +162,11 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: row.catalogItemId,
       price: row.price,
       discount: row.discount,
+      discountReason: row.discountReason,
+      discountReasonNote: row.discountReasonNote,
+      discountById: row.discountById,
+      discountAt: row.discountAt,
+      discountLocationId: row.discountLocationId,
       status: row.status,
       notes: row.notes,
       createdAt: row.createdAt,
@@ -381,6 +393,9 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: input.catalogItemId,
       price: input.price,
       discount: input.discount ?? 0,
+      discountReason: input.discountReason ?? null,
+      discountReasonNote: input.discountReasonNote ?? null,
+      ...this.stampColumns(input.discountStamp ?? null),
       status: TreatmentPlanItemStatus.PROPOSED,
       notes: input.notes ?? null,
       createdAt: NOW,
@@ -408,11 +423,65 @@ export class InMemoryTreatmentPlanRepository
         ),
       );
     }
+    const { discountStamp, ...fields } = patch;
     const definedPatch = Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => value !== undefined),
+      Object.entries(fields).filter(([, value]) => value !== undefined),
     );
     Object.assign(row, definedPatch, { updatedAt: NOW });
+    if (discountStamp !== undefined) {
+      Object.assign(row, this.stampColumns(discountStamp));
+    }
     return Promise.resolve(this.toItemEntity(row));
+  }
+
+  /** Igual que el repositorio real: la sede es la del request (o la principal). */
+  private stampColumns(stamp: DiscountStamp | null) {
+    return stamp
+      ? {
+          discountById: stamp.byId,
+          discountAt: stamp.at,
+          discountLocationId: this.locationId,
+        }
+      : { discountById: null, discountAt: null, discountLocationId: null };
+  }
+
+  applyBulkDiscount(
+    planId: string,
+    itemIds: string[],
+    decide: DecideBulkDiscount,
+  ): Promise<TreatmentPlanItem[]> {
+    const ids = [...new Set(itemIds)];
+    const rows = this.items.filter(
+      (i) => ids.includes(i.id) && i.planId === planId && i.deletedAt === null,
+    );
+    if (rows.length !== ids.length) {
+      return Promise.reject(
+        new NotFoundException(
+          'Algún ítem no existe o no es de este plan de tratamiento.',
+        ),
+      );
+    }
+    let changes: ReturnType<DecideBulkDiscount>;
+    try {
+      changes = decide(rows.map((r) => this.toItemEntity(r)));
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+    return Promise.resolve(
+      changes.map((change) => {
+        const row = rows.find((r) => r.id === change.itemId)!;
+        Object.assign(row, {
+          discount: change.discount,
+          discountReason: change.discountReason,
+          discountReasonNote: change.discountReasonNote,
+          ...this.stampColumns(change.discountStamp),
+          updatedAt: NOW,
+        });
+        return this.toItemEntity(row);
+      }),
+    );
   }
 
   softDeleteItem(id: string): Promise<void> {

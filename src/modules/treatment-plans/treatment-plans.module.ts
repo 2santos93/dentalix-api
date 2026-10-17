@@ -32,6 +32,8 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
+import { DiscountsModule } from '../discounts/discounts.module';
+import { ApplyBulkDiscountUseCase } from './application/use-cases/apply-bulk-discount.use-case';
 
 @Module({
   // JwtModule.register({}) mirrors AppointmentsModule/OdontogramModule:
@@ -45,7 +47,14 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
   // status change (DX-042, DB-013), so no odontogram provider is injected.
   // PatientsModule exporta PATIENT_REPOSITORY: el use-case de alta valida que el
   // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
-  imports: [JwtModule.register({}), DentalCatalogModule, PatientsModule],
+  // DiscountsModule exporta la política de descuentos (DX-204), que los casos
+  // de uso de los ítems aplican en el servidor.
+  imports: [
+    JwtModule.register({}),
+    DentalCatalogModule,
+    PatientsModule,
+    DiscountsModule,
+  ],
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
   controllers: [
@@ -61,6 +70,8 @@ import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
     AddTreatmentPlanItemUseCase,
     UpdateTreatmentPlanItemUseCase,
     RemoveTreatmentPlanItemUseCase,
+    // Acción «Descuento %» sobre varios ítems (DX-204).
+    ApplyBulkDiscountUseCase,
     // Alternativas, presentación, rechazo y seguimiento (DX-040).
     PresentTreatmentPlanUseCase,
     RejectTreatmentPlanUseCase,

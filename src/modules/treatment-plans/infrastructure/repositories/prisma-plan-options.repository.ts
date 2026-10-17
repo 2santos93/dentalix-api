@@ -119,6 +119,12 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             catalogItemId: item.catalogItemId,
             price: item.price,
             discount: item.discount,
+            // DX-204: la alternativa copia el descuento tal como se dio.
+            discountReason: item.discountReason,
+            discountReasonNote: item.discountReasonNote,
+            discountById: item.discountById,
+            discountAt: item.discountAt,
+            discountLocationId: item.discountLocationId,
             notes: item.notes,
             status: TreatmentPlanItemStatus.PROPOSED,
           })),

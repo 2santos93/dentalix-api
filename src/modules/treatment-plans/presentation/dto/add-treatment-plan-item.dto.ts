@@ -15,6 +15,7 @@ import {
   IsMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
+import { DiscountReasonFieldsDto } from './discount-reason.dto';
 
 // NOTE: deliberately NO `tenantId`/`planId`/`status` field — tenant comes
 // from the guarded request context, `planId` from the route param, and a
@@ -25,7 +26,7 @@ import {
 // CreateToothRecordDto for the identical convention). `price` is optional:
 // when omitted, the use case resolves it from the catalog item's
 // `defaultPrice` (400 if neither is available).
-export class AddTreatmentPlanItemDto {
+export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @ApiProperty({
     description:
       'FDI/ISO-3950 tooth code: permanent 11-18/21-28/31-38/41-48, primary 51-55/61-65/71-75/81-85',
@@ -66,7 +67,7 @@ export class AddTreatmentPlanItemDto {
 
   @ApiPropertyOptional({
     description:
-      'Descuento en la moneda del plan (máx. 2 decimales, default 0); nunca mayor que el precio (400)',
+      'Descuento en la moneda del plan (máx. 2 decimales, default 0); nunca mayor que el precio (400). DX-204: por encima del tope del rol, 403; en un plan aceptado, 409',
     maximum: MONEY_MAX,
   })
   @IsOptional()

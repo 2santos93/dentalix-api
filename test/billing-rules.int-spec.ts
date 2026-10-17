@@ -14,6 +14,7 @@ import { RejectTreatmentPlanUseCase } from '../src/modules/treatment-plans/appli
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
 import type { DentalCatalogRepository } from '../src/modules/dental-catalog/domain/ports/dental-catalog-repository.port';
 import { GetTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import type { GetDiscountPolicyUseCase } from '../src/modules/discounts/application/use-cases/discount-policy.use-cases';
 import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
@@ -51,7 +52,16 @@ const rejectPlan = new RejectTreatmentPlanUseCase(planRepo, () => NOW);
 const noCatalog = {
   findById: () => Promise.resolve(null),
 } as unknown as DentalCatalogRepository;
-const updateItem = new UpdateTreatmentPlanItemUseCase(planRepo, noCatalog);
+// Sin descuentos en esta suite: la política no se consulta (DX-204).
+const noDiscountPolicy = {
+  execute: () => Promise.reject(new Error('no se consulta sin descuento')),
+} as unknown as GetDiscountPolicyUseCase;
+const updateItem = new UpdateTreatmentPlanItemUseCase(
+  planRepo,
+  noCatalog,
+  noDiscountPolicy,
+  () => NOW,
+);
 const getPlan = new GetTreatmentPlanUseCase(planRepo);
 const getQuote = new GetPlanQuoteUseCase(quoteRepo, () => NOW);
 const acceptSigned = new AcceptTreatmentPlanUseCase(quoteRepo, () => NOW);
@@ -536,7 +546,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
         updateItem.execute(
           first.id,
           { status: TreatmentPlanItemStatus.DONE },
-          userId,
+          { userId: userId, role: ClinicRole.ADMIN },
         ),
       );
       expect(done.status).toBe(TreatmentPlanItemStatus.DONE);
