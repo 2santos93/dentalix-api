@@ -711,6 +711,32 @@ export const DEMO_CLINICAL_ADDENDA: readonly DemoClinicalAddendum[] = [
   },
 ];
 
+/**
+ * DX-170: evoluciones redactadas con las plantillas de ejemplo y ligadas a las
+ * últimas citas atendidas (la más reciente primero). Respuestas por etiqueta;
+ * las preguntas sin respuesta toman su valor por defecto.
+ */
+export const DEMO_TEMPLATE_EVOLUTIONS: readonly {
+  template: string;
+  answers: Readonly<Record<string, readonly string[]>>;
+}[] = [
+  {
+    template: 'Resina',
+    answers: {
+      Diente: ['36'],
+      Superficie: ['O'],
+      Material: ['Resina A2', 'Resina fluida'],
+    },
+  },
+  {
+    template: 'Profilaxis',
+    answers: {
+      Técnica: ['Ultrasonido', 'Pasta profiláctica'],
+      Placa: ['Moderada'],
+    },
+  },
+];
+
 interface DemoClinicalEntry {
   patientIndex: number;
   dentistIndex: number;
