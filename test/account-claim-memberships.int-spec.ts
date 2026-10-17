@@ -348,6 +348,15 @@ describe('DX-143 · reclamo de cuenta y membresías en otras clínicas (int)', (
         emailVerifiedAt: verifiedBefore,
       });
       const deleted = await newUser('borrada');
+      // Revisión DX-143: sin ninguna membresía ACTIVA (en una clínica no
+      // borrada) la cuenta no da acceso a nada; verificarla solo impediría
+      // reclamarla a quien controla el buzón (y no puede restablecer: DX-010
+      // exige membresía). Pasa con cuentas pre-secuestradas (SEC-007) cuya
+      // clínica ya no existe o cuyo acceso se dio de baja.
+      const loginOrphan = await newUser('login-sin-clinica');
+      await member(loginOrphan, tenantA, new Date());
+      const ownerGone = await newUser('duena-clinica-borrada');
+      await member(loggedIn, tenantA);
       await raw.user.update({
         where: { id: deleted },
         data: { deletedAt: new Date() },
@@ -382,6 +391,26 @@ describe('DX-143 · reclamo de cuenta y membresías en otras clínicas (int)', (
         },
       });
       SUBDOMAINS.push('dx143-int-late');
+      const ownerGoneUser = await raw.user.findUniqueOrThrow({
+        where: { id: ownerGone },
+      });
+      const goneTenant = await raw.tenant.create({
+        data: {
+          name: 'Clínica borrada',
+          subdomain: 'dx143-int-gone',
+          createdAt: ownerGoneUser.createdAt,
+          deletedAt: new Date(),
+        },
+      });
+      SUBDOMAINS.push('dx143-int-gone');
+      await raw.clinicMembership.create({
+        data: {
+          tenantId: goneTenant.id,
+          userId: ownerGone,
+          role: ClinicRole.ADMIN,
+          createdAt: ownerGoneUser.createdAt,
+        },
+      });
       await raw.clinicMembership.create({
         data: {
           tenantId: lateTenant.id,
@@ -397,6 +426,7 @@ describe('DX-143 · reclamo de cuenta y membresías en otras clínicas (int)', (
             [loggedIn, new Date()],
             [already, firstLogin],
             [deleted, firstLogin],
+            [loginOrphan, firstLogin],
           ] as const) {
             await tx.auditEvent.create({
               data: {
@@ -428,7 +458,19 @@ describe('DX-143 · reclamo de cuenta y membresías en otras clínicas (int)', (
             }
           }
           const users = await tx.user.findMany({
-            where: { id: { in: [loggedIn, owner, nothing, already, deleted] } },
+            where: {
+              id: {
+                in: [
+                  loggedIn,
+                  owner,
+                  nothing,
+                  already,
+                  deleted,
+                  loginOrphan,
+                  ownerGone,
+                ],
+              },
+            },
             select: { id: true, emailVerifiedAt: true },
           });
           const forced = await tx.$queryRaw<
@@ -470,6 +512,8 @@ describe('DX-143 · reclamo de cuenta y membresías en otras clínicas (int)', (
       expect(result.users[nothing]).toBeNull();
       expect(result.users[already]).toBe(verifiedBefore.toISOString());
       expect(result.users[deleted]).toBeNull();
+      expect(result.users[loginOrphan]).toBeNull();
+      expect(result.users[ownerGone]).toBeNull();
       expect(result.forced).toEqual([
         { table: 'audit_events', forced: true },
         { table: 'clinic_memberships', forced: true },

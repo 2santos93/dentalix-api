@@ -9,7 +9,12 @@
 --      clínica cuya membresía, el usuario y la clínica nacieron juntos (a
 --      menos de 60 s; el registro los creaba en una misma transacción).
 --      Fecha: la del alta del usuario.
--- Si cumple las dos, la más antigua. Solo cuentas no borradas.
+-- Si cumple las dos, la más antigua. Solo cuentas no borradas y que HOY
+-- tienen al menos una membresía activa en una clínica no borrada: una cuenta
+-- sin acceso a ninguna clínica no gana nada con quedar verificada y, si lo
+-- quedara, quien controla el buzón ya no podría reclamarla con una invitación
+-- ni restablecerla (DX-010 exige membresía). Eso afectaría sobre todo a
+-- cuentas pre-secuestradas (SEC-007) cuya clínica ya no existe.
 --
 -- Idempotente: solo toca filas con "emailVerifiedAt" NULL, y una segunda
 -- ejecución no encuentra ninguna que cumpla el criterio sin fecha. No cambia
@@ -49,7 +54,15 @@ UPDATE "users" u
   ) v
  WHERE u."id" = v."userId"
    AND u."emailVerifiedAt" IS NULL
-   AND u."deletedAt" IS NULL;
+   AND u."deletedAt" IS NULL
+   AND EXISTS (
+     SELECT 1
+       FROM "clinic_memberships" am
+       JOIN "tenants" ta ON ta."id" = am."tenantId"
+      WHERE am."userId" = u."id"
+        AND am."deletedAt" IS NULL
+        AND ta."deletedAt" IS NULL
+   );
 
 ALTER TABLE "clinic_memberships" FORCE ROW LEVEL SECURITY;
 ALTER TABLE "audit_events" FORCE ROW LEVEL SECURITY;

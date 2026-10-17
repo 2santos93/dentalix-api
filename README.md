@@ -388,6 +388,17 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
      que nació a la vez (usuario, clínica y membresía a menos de 60 s; el
      registro los creaba en una transacción). Fecha: el alta del usuario.
 
+  Además, la cuenta tiene que tener **hoy al menos una membresía activa** en
+  una clínica no borrada. Una cuenta sin acceso a ninguna clínica no gana nada
+  con quedar verificada y, si lo quedara, quien controla el buzón ya no
+  podría reclamarla con una invitación ni restablecerla (DX-010 exige
+  membresía): es el caso de una cuenta pre-secuestrada (SEC-007) cuya clínica
+  ya no existe. Ojo: los dos criterios también verifican una cuenta
+  pre-secuestrada con su clínica activa (el atacante inició sesión o registró
+  la clínica). No empeora nada: esa cuenta ya no se puede reclamar porque da
+  acceso a otra clínica, y quien controla el buzón la recupera con
+  «¿Olvidaste tu contraseña?» en esa clínica (el enlace llega a su buzón).
+
   Si cumple las dos, la fecha más antigua. Quien inició sesión ya demostró
   conocer la contraseña, y la dueña controla su clínica; las dos quedan fuera
   del reclamo de ahora en adelante. Los eventos `LOGIN` existen desde DX-009
@@ -396,6 +407,12 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   Con un owner sin superusuario funciona porque quita FORCE a `audit_events`
   y `clinic_memberships` solo durante su transacción
   (`test/owner-nosu/migrations-data.owner-spec.ts`).
+  **En producción:** `ALTER TABLE … NO FORCE` toma un `ACCESS EXCLUSIVE` sobre
+  `audit_events` (el padre) y `clinic_memberships` hasta el final de la
+  transacción, que recorre todos los eventos `LOGIN` (no hay índice por
+  `action`). Mientras dura se bloquean las peticiones autenticadas y las que
+  auditan: despliégala en una ventana de poco tráfico. `lock_timeout = 5s`
+  solo limita la espera por el bloqueo, no lo que dura el `UPDATE`.
 - **Tope diario** de invitaciones NUEVAS por clínica:
   `INVITATION_TENANT_DAILY_LIMIT` (default 30/24 h) → 429 en español.
 - El login sigue sin enumeración por tiempo (DX-049, hash ficticio).
