@@ -226,3 +226,13 @@ export const DISCOUNT_POLICY_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Informe «Descuentos» y su CSV (DX-204): lo que se regala, por profesional y
 // sede, con nombres de pacientes. Solo gestión, y queda auditado.
 export const DISCOUNT_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Caja por turno (DX-027): abrir, cerrar y consultar las cajas es del
+// mostrador y de la gestión (mismo dato financiero que PAYMENT_ROLES). ADMIN
+// ve todas; RECEPTION solo abre, cierra y ve las suyas (lo aplica el caso de
+// uso). Reabrir un cierre, corregirlo con un ajuste y cambiar los ajustes de
+// caja de la clínica: solo ADMIN.
+export const CASH_SESSION_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+export const CASH_SESSION_ADMIN_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
