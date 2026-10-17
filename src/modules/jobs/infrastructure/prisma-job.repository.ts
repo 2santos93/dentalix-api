@@ -284,7 +284,11 @@ export class PrismaJobRepository implements JobRepository {
 
   async purgeFinished(before: Date): Promise<number> {
     // Borrado duro legítimo (housekeeping con TTL): un trabajo terminado no
-    // es dato de negocio. Por tandas para no bloquear la tabla.
+    // es dato de negocio. Por tandas para no bloquear la tabla. DX-220: la
+    // condición se repite FUERA de la subconsulta. Con READ COMMITTED, si la
+    // fila cambió mientras la purga esperaba su candado (un retry la acaba
+    // de devolver a PENDING), Postgres solo re-evalúa la WHERE de la tabla
+    // que borra, no la subconsulta: sin repetirla borraría el reintento.
     let total = 0;
     for (;;) {
       const n = await this.prisma.$executeRaw`
@@ -294,7 +298,9 @@ export class PrismaJobRepository implements JobRepository {
             WHERE "state" IN ('COMPLETED', 'FAILED')
               AND "finishedAt" < ${utc(before)}
             LIMIT ${PURGE_BATCH}
-         )`;
+         )
+           AND "state" IN ('COMPLETED', 'FAILED')
+           AND "finishedAt" < ${utc(before)}`;
       total += n;
       if (n < PURGE_BATCH) return total;
     }

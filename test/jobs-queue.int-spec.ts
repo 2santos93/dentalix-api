@@ -1118,6 +1118,40 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         ).toBe(0);
       });
 
+      it('la purga de terminados no borra un FAILED que un reintento acaba de devolver a PENDING (carrera con el candado de retry)', async () => {
+        const name = `${PREFIX}.retry-purge`;
+        onBoth(name, () => Promise.resolve());
+        const { id } = await a.queue.enqueue(name, {});
+        await owner.job.update({
+          where: { id },
+          data: { state: 'FAILED', finishedAt: new Date(), attempts: 5 },
+        });
+        const purges: Promise<number>[] = [];
+        // Lo mismo que hace retryFailed: FOR UPDATE y a PENDING, sin confirmar
+        // aún, mientras la purga diaria arranca con su foto de antes.
+        await owner.$transaction(
+          async (tx) => {
+            await tx.$queryRaw`SELECT 1 FROM "jobs" WHERE "id" = ${id}::uuid FOR UPDATE`;
+            await tx.$executeRaw`
+              UPDATE "jobs" SET "state" = 'PENDING', "attempts" = 0, "finishedAt" = NULL
+               WHERE "id" = ${id}::uuid`;
+            purges.push(a.repo.purgeFinished(new Date(Date.now() + 60_000)));
+            await waitFor(async () => {
+              const [{ n }] = await b.prisma.$queryRaw<{ n: number }[]>`
+                SELECT count(*)::int AS "n" FROM pg_stat_activity
+                 WHERE "wait_event_type" = 'Lock' AND "query" LIKE '%DELETE FROM "jobs"%'`;
+              return n > 0;
+            }, 'la purga espera al candado del reintento');
+          },
+          { timeout: 10_000 },
+        );
+        await Promise.all(purges);
+        expect(await owner.job.findUnique({ where: { id } })).toMatchObject({
+          state: 'PENDING',
+          attempts: 0,
+        });
+      });
+
       it('platform_audit_events es append-only para el rol de la app', async () => {
         await expect(
           a.prisma.$executeRaw`UPDATE "platform_audit_events" SET "ip" = NULL`,
