@@ -338,6 +338,18 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
   });
 
+  // DX-150: una gestión de cobro y un compromiso de pago de A.
+  await create(app, a, `/patients/${patientId}/collection-notes`, {
+    channel: 'CALL',
+    outcome: 'PROMISED_PAYMENT',
+    text: 'Llamada de A',
+  });
+  await create(app, a, `/patients/${patientId}/payment-promises`, {
+    amount: 1000,
+    currency: 'COP',
+    dueDate: futureAt(10, 15).slice(0, 10),
+  });
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -417,6 +429,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
+      // DX-150: cobranza.
+      'collection_notes',
+      'payment_promises',
       'location_reminder_settings',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
@@ -762,6 +777,31 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- cobranza (DX-150) ---
+    {
+      name: 'GET /patients/:id/collections',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/collections`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:id/collection-notes',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/collection-notes`,
+      body: () => ({ channel: 'CALL', outcome: 'NO_ANSWER', text: 'Intrusa' }),
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:id/payment-promises',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/payment-promises`,
+      body: () => ({
+        amount: 1000,
+        currency: 'COP',
+        dueDate: futureAt(10, 15).slice(0, 10),
+      }),
       status: 404,
     },
     // --- clinical-note-templates (DX-170) ---
