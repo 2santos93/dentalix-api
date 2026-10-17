@@ -372,7 +372,8 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
           'Resina en superficie O con Resina A2 y Adhesivo universal. Observaciones: Sin sensibilidad postoperatoria.',
         templateId: resin.id,
         appointmentId,
-        entryDate: daysBefore(at('14:00'), 5),
+        // El DÍA de la cita (fecha civil, medianoche UTC), no su instante.
+        entryDate: daysBefore(at('00:00'), 5),
         appointment: {
           id: appointmentId,
           providerId: dentist.userId,

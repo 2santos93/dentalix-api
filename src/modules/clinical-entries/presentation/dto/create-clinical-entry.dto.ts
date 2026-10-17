@@ -56,7 +56,7 @@ export class CreateClinicalEntryDto {
     type: String,
     format: 'date-time',
     description:
-      'Fecha de atención. Si falta: la de la cita ligada o, sin cita, ahora.',
+      'Fecha de atención (fecha civil). Si falta: el día de la cita ligada en la zona de su sede o, sin cita, ahora.',
   })
   @IsOptional()
   @IsDateString()

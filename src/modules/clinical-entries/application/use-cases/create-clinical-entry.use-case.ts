@@ -90,7 +90,7 @@ export class CreateClinicalEntryUseCase {
    * DX-170: con plantilla, el texto compuesto queda en `notes` (lo que se
    * guarda es TEXTO: editar o desactivar la plantilla después no lo cambia).
    * Con cita, la evolución queda ligada a ella y, si no trae fecha de
-   * atención, toma la de la cita.
+   * atención, toma el día de la cita en la zona de su sede.
    */
   async execute(
     patientId: string,
@@ -129,8 +129,10 @@ export class CreateClinicalEntryUseCase {
     // repository.
     return this.repo.create({
       patientId,
-      // Fecha de atención: la indicada, la de la cita o "ahora".
-      entryDate: input.entryDate ?? appointment?.start ?? new Date(),
+      // Fecha de atención: la indicada, el día de la cita o "ahora".
+      entryDate:
+        input.entryDate ??
+        (appointment ? appointmentDay(appointment) : new Date()),
       reason: input.reason,
       notes,
       performedById: author,
@@ -179,6 +181,18 @@ export class CreateClinicalEntryUseCase {
     if (input.notes !== undefined) return input.notes;
     return compose(template, input.answers ?? []);
   }
+}
+
+/**
+ * Día de la cita en la zona de su sede, como fecha civil (medianoche UTC): la
+ * misma convención que la fecha de atención elegida a mano en la web, que la
+ * ficha lee en UTC. Su instante (`start`) daría el día siguiente en una cita de
+ * la tarde-noche de Bogotá.
+ */
+function appointmentDay(appointment: ClinicalEntryAppointmentRef): Date {
+  return new Date(
+    `${civilDateIn(appointment.start, appointment.timeZone)}T00:00:00.000Z`,
+  );
 }
 
 function compose(

@@ -216,7 +216,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     expect(entries.rows).toHaveLength(0);
   });
 
-  it('liga la evolución a la cita y toma su fecha como fecha de atención', async () => {
+  it('liga la evolución a la cita y toma su DÍA como fecha de atención (fecha civil)', async () => {
     const { uc, entries } = setup();
     entries.appointments.push({
       id: 'a1',
@@ -230,7 +230,47 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       { notes: 'Control', appointmentId: 'a1' },
       'd',
     );
-    expect(entry).toMatchObject({ appointmentId: 'a1', entryDate: start });
+    // Misma convención que la fecha elegida a mano: medianoche UTC del día.
+    expect(entry).toMatchObject({
+      appointmentId: 'a1',
+      entryDate: new Date('2026-10-17T00:00:00.000Z'),
+    });
+  });
+
+  it('el día de la cita es el de la zona de su sede, no el de UTC', async () => {
+    const { uc, entries } = setup();
+    // 21:30 del 16/10 en Bogotá = 02:30 UTC del 17/10.
+    entries.appointments.push({
+      id: 'a-noche',
+      patientId: 'p1',
+      status: 'COMPLETED',
+      start: new Date('2026-10-17T02:30:00.000Z'),
+      timeZone,
+    });
+    const entry = await uc.execute(
+      'p1',
+      { notes: 'Control', appointmentId: 'a-noche' },
+      'd',
+    );
+    expect(entry.entryDate).toEqual(new Date('2026-10-16T00:00:00.000Z'));
+  });
+
+  it('una fecha de atención enviada manda sobre la de la cita', async () => {
+    const { uc, entries } = setup();
+    entries.appointments.push({
+      id: 'a1',
+      patientId: 'p1',
+      status: 'COMPLETED',
+      start,
+      timeZone,
+    });
+    const entryDate = new Date('2026-10-15T00:00:00.000Z');
+    const entry = await uc.execute(
+      'p1',
+      { notes: 'Control', appointmentId: 'a1', entryDate },
+      'd',
+    );
+    expect(entry.entryDate).toEqual(entryDate);
   });
 
   it('404 en español si la cita no es de la clínica', async () => {
