@@ -554,14 +554,18 @@ hasta 1 h (SEC-028).
   con `providerId` = él mismo; ASSISTANT 403.
 - `POST /appointments/openings/:locationId/offers` registra una oferta
   (`WA_ME` o `PHONE`) en `waitlist_offers` (RLS FORCE, FK compuestas) y la
-  audita (`WAITLIST_OFFER`). Por WhatsApp solo si el paciente no tiene baja de
-  avisos ni canal «Ninguno» (DX-128) y tiene móvil válido. Tope de
+  audita (`WAITLIST_OFFER`). Por WhatsApp solo si el paciente dio el permiso
+  de WhatsApp (`whatsappOptInAt`, con fecha y origen), no tiene baja de avisos
+  ni canal «Ninguno» (DX-128) y tiene móvil válido; si no, se le llama (el
+  candidato trae `whatsappBlockedReason`). Tope de
   `WAITLIST_OFFERS_PER_PATIENT_PER_DAY` (2) por paciente y día civil de la
   sede, contado bajo un candado por paciente: la tercera da 409 «Ya se le
   ofrecieron 2 huecos hoy». `PATCH /appointments/openings/offers/:id` anota la
-  respuesta una vez.
+  respuesta una vez; el candidato trae `pendingOfferId` (la última oferta de
+  ese hueco sin respuesta) para anotarla desde el panel.
 - Asignar: un pendiente con `POST /waitlist/:id/schedule`; una cita marcada
-  con `PATCH /appointments/:id/opening` (reglas de reagendar: pasado, horario,
+  con `PATCH /appointments/:id/opening` (solo a un hueco anterior a la cita;
+  reglas de reagendar: pasado, horario,
   bloqueos y solapes; la marca se apaga en la misma sentencia condicional, así
   que dos movimientos a la vez dan uno y un 409). Dos asignaciones al mismo
   hueco: la EXCLUDE por profesional deja una y la otra recibe 409.

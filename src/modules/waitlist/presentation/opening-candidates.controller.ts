@@ -136,7 +136,7 @@ export class OpeningCandidatesController {
   })
   @ApiConflictResponse({
     description:
-      'Tope de ofertas del día («Ya se le ofrecieron 2 huecos hoy»), paciente sin WhatsApp (DX-128) o pendiente/cita que ya no está vigente',
+      'Tope de ofertas del día («Ya se le ofrecieron 2 huecos hoy»), por WhatsApp a un paciente con baja, canal «Ninguno» o sin el permiso de WhatsApp (DX-128), o pendiente/cita que ya no está vigente',
   })
   offer(
     @Param('locationId', ParseUUIDPipe) locationId: string,

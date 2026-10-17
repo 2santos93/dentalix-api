@@ -39,35 +39,44 @@ describe('ofertas de huecos (DX-210)', () => {
     });
   });
 
-  describe('WhatsApp según el canal y la baja del paciente (DX-128)', () => {
+  describe('WhatsApp según el permiso, el canal y la baja del paciente (DX-128)', () => {
     const base = {
       phone: '310 123 4567',
       contactChannel: 'EMAIL' as const,
       reminderOptOutAt: null,
+      whatsappOptInAt: new Date('2026-01-10T15:00:00Z'),
     };
 
-    it('móvil válido y sin baja: el número para wa.me', () => {
+    it('con permiso de WhatsApp, móvil válido y sin baja: el número para wa.me', () => {
       expect(whatsappOfferPhone(base, 'CO')).toEqual({
         blocked: false,
+        reason: null,
         phone: '573101234567',
       });
     });
 
-    it('con baja de los avisos o sin canal: bloqueado (se le llama)', () => {
+    it('sin el permiso de WhatsApp registrado: bloqueado (se le llama)', () => {
+      expect(
+        whatsappOfferPhone({ ...base, whatsappOptInAt: null }, 'CO'),
+      ).toEqual({ blocked: true, reason: 'NO_OPT_IN', phone: null });
+    });
+
+    it('con baja de los avisos o sin canal: bloqueado aunque tenga el permiso', () => {
       expect(
         whatsappOfferPhone({ ...base, reminderOptOutAt: new Date() }, 'CO'),
-      ).toEqual({ blocked: true, phone: null });
+      ).toEqual({ blocked: true, reason: 'OPTED_OUT', phone: null });
       expect(
         whatsappOfferPhone({ ...base, contactChannel: 'NONE' }, 'CO'),
-      ).toEqual({ blocked: true, phone: null });
+      ).toEqual({ blocked: true, reason: 'CHANNEL_NONE', phone: null });
     });
 
     it('un fijo o un número inválido no recibe WhatsApp', () => {
       expect(
         whatsappOfferPhone({ ...base, phone: '601 555 1234' }, 'CO'),
-      ).toEqual({ blocked: false, phone: null });
+      ).toEqual({ blocked: false, reason: null, phone: null });
       expect(whatsappOfferPhone({ ...base, phone: null }, 'CO')).toEqual({
         blocked: false,
+        reason: null,
         phone: null,
       });
     });

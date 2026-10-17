@@ -90,9 +90,18 @@ export class OpeningCandidateDto {
 
   @ApiProperty({
     description:
-      'DX-128: el paciente se dio de baja de los avisos o eligió «Ninguno». No se le escribe: se le llama.',
+      'DX-128: el paciente se dio de baja de los avisos, eligió «Ninguno» o no dio el permiso de WhatsApp. No se le escribe: se le llama.',
   })
   whatsappBlocked!: boolean;
+
+  @ApiProperty({
+    enum: ['OPTED_OUT', 'CHANNEL_NONE', 'NO_OPT_IN'],
+    enumName: 'WhatsappOfferBlock',
+    nullable: true,
+    description:
+      'Por qué no se le escribe por WhatsApp: baja de los avisos, canal «Ninguno» o sin el permiso de WhatsApp (fecha y origen) de DX-128. null si se le puede escribir.',
+  })
+  whatsappBlockedReason!: 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_OPT_IN' | null;
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   waitlistEntryId!: string | null;
@@ -141,6 +150,15 @@ export class OpeningCandidateDto {
     description: 'Ya se le ofreció este hueco («aviso enviado»).',
   })
   offeredForSlot!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'La última oferta de ESTE hueco aún sin respuesta (p. ej. el WhatsApp enviado): su id para anotar la respuesta con `PATCH /appointments/openings/offers/:id`.',
+  })
+  pendingOfferId!: string | null;
 }
 
 export class OpeningCandidatesDto {

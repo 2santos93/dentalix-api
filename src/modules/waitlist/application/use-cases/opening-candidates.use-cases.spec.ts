@@ -209,6 +209,38 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       });
     });
 
+    it('sin el permiso de WhatsApp (DX-128) sale bloqueado, con el motivo', async () => {
+      repo.addPatient({ id: 'p-sin-permiso', whatsappOptInAt: null });
+      addEntry('e', 'p-sin-permiso');
+      const [item] = (await list.execute(SLOT, RECEPTION)).items;
+      expect(item).toMatchObject({
+        whatsappBlocked: true,
+        whatsappBlockedReason: 'NO_OPT_IN',
+        whatsappPhone: null,
+      });
+    });
+
+    it('la oferta por WhatsApp sin respuesta del hueco viaja como `pendingOfferId`', async () => {
+      addEntry('e1', 'p1');
+      const wa = await offer.execute(
+        {
+          locationId: 'loc1',
+          slotStart: SLOT.start,
+          slotEnd: SLOT.end,
+          patientId: 'p1',
+          providerId: 'drx',
+          waitlistEntryId: 'e1',
+          channel: 'WA_ME',
+        },
+        CTX,
+      );
+      let [item] = (await list.execute(SLOT, RECEPTION)).items;
+      expect(item.pendingOfferId).toBe(wa.id);
+      await outcome.execute(wa.id, 'DECLINED', CTX);
+      [item] = (await list.execute(SLOT, RECEPTION)).items;
+      expect(item.pendingOfferId).toBeNull();
+    });
+
     it('DENTIST: solo su propia columna (403 en la de otro o sin columna)', async () => {
       const dentist = { userId: 'drx', role: 'DENTIST' as const };
       await expect(list.execute(SLOT, dentist)).resolves.toBeDefined();
@@ -321,6 +353,18 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       await expect(
         offer.execute({ ...base, channel: 'PHONE', outcome: 'ACCEPTED' }, CTX),
       ).resolves.toMatchObject({ outcome: 'ACCEPTED', outcomeById: 'u-rec' });
+    });
+
+    it('por WhatsApp sin el permiso de WhatsApp registrado (DX-128): 409, se le llama', async () => {
+      repo.addPatient({ id: 'p1', whatsappOptInAt: null });
+      await expect(
+        offer.execute({ ...base, channel: 'WA_ME' }, CTX),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Este paciente no ha dado permiso para escribirle por WhatsApp. Llámalo.',
+        ),
+      );
+      expect(repo.offers).toHaveLength(0);
     });
 
     it('por WhatsApp sin móvil válido: 409; por WhatsApp no se anota resultado al ofrecer: 400', async () => {

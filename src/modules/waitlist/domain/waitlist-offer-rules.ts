@@ -45,6 +45,8 @@ export const OFFER_SLOT_INVALID_MESSAGE =
   'El hueco tiene que terminar después de empezar y durar como mucho 8 horas';
 export const OFFER_WHATSAPP_BLOCKED_MESSAGE =
   'Este paciente no recibe WhatsApp de la clínica (se dio de baja o no quiere avisos). Llámalo.';
+export const OFFER_WHATSAPP_NO_OPT_IN_MESSAGE =
+  'Este paciente no ha dado permiso para escribirle por WhatsApp. Llámalo.';
 export const OFFER_WHATSAPP_NO_MOBILE_MESSAGE =
   'Este paciente no tiene un móvil válido para WhatsApp. Llámalo o corrige su número.';
 export const OFFER_WHATSAPP_OUTCOME_MESSAGE =
@@ -68,23 +70,41 @@ export interface PatientContactFields {
   phone: string | null;
   contactChannel: ContactChannel;
   reminderOptOutAt: Date | null;
+  /** DX-128: cuándo dio el permiso de WhatsApp (con su origen); `null` = no lo dio. */
+  whatsappOptInAt: Date | null;
 }
 
+/** Por qué no se le escribe por WhatsApp (DX-128). */
+export type WhatsappOfferBlock = 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_OPT_IN';
+
 /**
- * ¿Se le puede ofrecer el hueco por WhatsApp? (DX-128) Con la baja de los
- * avisos o el canal «Ninguno», no: el paciente pidió que no le escriban, así
- * que se le llama. Si no, hace falta un móvil válido (E.164 sin `+`, como
+ * ¿Se le puede ofrecer el hueco por WhatsApp? (DX-128, Ley 1581 / RGPD:
+ * minimización y finalidad) Con la baja de los avisos o el canal «Ninguno»,
+ * no: el paciente pidió que no le escriban. Tampoco sin el permiso de WhatsApp
+ * registrado (fecha y origen): escribirle por un canal que no autorizó no es
+ * un aviso operativo de su cita, es ofrecerle algo nuevo. En los tres casos se
+ * le llama. Si no, hace falta un móvil válido (E.164 sin `+`, como
  * `wa.me/<número>`).
  */
 export function whatsappOfferPhone(
   patient: PatientContactFields,
   countryCode: string | null,
-): { blocked: boolean; phone: string | null } {
-  if (patient.reminderOptOutAt !== null || patient.contactChannel === 'NONE') {
-    return { blocked: true, phone: null };
-  }
+): {
+  blocked: boolean;
+  reason: WhatsappOfferBlock | null;
+  phone: string | null;
+} {
+  const reason: WhatsappOfferBlock | null =
+    patient.reminderOptOutAt !== null
+      ? 'OPTED_OUT'
+      : patient.contactChannel === 'NONE'
+        ? 'CHANNEL_NONE'
+        : patient.whatsappOptInAt === null
+          ? 'NO_OPT_IN'
+          : null;
+  if (reason) return { blocked: true, reason, phone: null };
   const mobile = normalizeMobile(patient.phone, countryCode);
-  return { blocked: false, phone: mobile.e164?.slice(1) ?? null };
+  return { blocked: false, reason: null, phone: mobile.e164?.slice(1) ?? null };
 }
 
 /** 403 de ofrecer y asignar huecos (DENTIST y ASSISTANT). */

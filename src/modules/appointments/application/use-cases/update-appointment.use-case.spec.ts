@@ -1303,6 +1303,28 @@ describe('UpdateAppointmentUseCase', () => {
       }
     });
 
+    it('«Adelantar» solo a un hueco ANTERIOR a la cita: uno igual o posterior da 409 y la cita no cambia', async () => {
+      const { repo, uc } = setup();
+      const a = repo.seed({
+        start: at('15:00'),
+        end: at('15:30'),
+        wantsEarlier: true,
+      });
+      for (const start of [at('15:00'), far('10:00')]) {
+        await expect(
+          uc.moveToOpening(a.id, { start }, ctx('RECEPTION')),
+        ).rejects.toThrow(
+          new ConflictException(
+            'El hueco tiene que ser anterior a la cita: «Adelantar si hay hueco» no la retrasa.',
+          ),
+        );
+      }
+      expect(await repo.findById(a.id)).toMatchObject({
+        start: at('15:00'),
+        wantsEarlier: true,
+      });
+    });
+
     it('mover al hueco respeta el anti-solape: si otro ya lo ocupó, 409 y la cita conserva su hora y su marca', async () => {
       const { repo, uc } = setup();
       repo.seed({ patientId: 'p9', start: at('15:00'), end: at('15:30') });

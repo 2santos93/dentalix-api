@@ -31,6 +31,7 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
       phone: '3101234567',
       contactChannel: 'WHATSAPP',
       reminderOptOutAt: null,
+      whatsappOptInAt: new Date('2026-01-10T15:00:00Z'),
       ...over,
     };
     this.patients.push(patient);
@@ -75,9 +76,17 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
     slotEnd: Date;
   }): Promise<Map<string, OfferSummary>> {
     const out = new Map<string, OfferSummary>();
-    for (const o of this.offers) {
+    // Como el de Prisma: la oferta pendiente que se anota es la más reciente.
+    const newestFirst = [...this.offers].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    for (const o of newestFirst) {
       if (!params.patientIds.includes(o.patientId)) continue;
-      const s = out.get(o.patientId) ?? { today: 0, forSlot: false };
+      const s = out.get(o.patientId) ?? {
+        today: 0,
+        forSlot: false,
+        pendingOfferId: null,
+      };
       if (o.offerDay === params.offerDay) s.today += 1;
       if (
         o.locationId === params.locationId &&
@@ -85,6 +94,9 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
         o.slotEnd > params.slotStart
       ) {
         s.forSlot = true;
+        if (s.pendingOfferId === null && o.outcome === 'PENDING') {
+          s.pendingOfferId = o.id;
+        }
       }
       out.set(o.patientId, s);
     }

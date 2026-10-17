@@ -288,7 +288,7 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'La cita ya no está marcada (otra persona la movió), el hueco ya está ocupado o bloqueado',
+      'La cita ya no está marcada (otra persona la movió), el hueco no es anterior a la cita, o ya está ocupado o bloqueado',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',

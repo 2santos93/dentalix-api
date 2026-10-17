@@ -50,12 +50,14 @@ import {
   OFFER_SLOT_PAST_MESSAGE,
   OFFER_WHATSAPP_BLOCKED_MESSAGE,
   OFFER_WHATSAPP_NO_MOBILE_MESSAGE,
+  OFFER_WHATSAPP_NO_OPT_IN_MESSAGE,
   OFFER_WHATSAPP_OUTCOME_MESSAGE,
   WAITLIST_OFFER_CONFIG,
   offerCapMessage,
   offerDayFor,
   whatsappOfferPhone,
   type WaitlistOfferConfig,
+  type WhatsappOfferBlock,
 } from '../../domain/waitlist-offer-rules';
 import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 
@@ -75,8 +77,9 @@ export interface OpeningCandidate {
   phone: string | null;
   /** E.164 sin `+` para `wa.me`; `null` si no se le puede escribir. */
   whatsappPhone: string | null;
-  /** Baja de los avisos o canal «Ninguno» (DX-128): no se le escribe. */
+  /** Baja, canal «Ninguno» o sin permiso de WhatsApp (DX-128): no se le escribe. */
   whatsappBlocked: boolean;
+  whatsappBlockedReason: WhatsappOfferBlock | null;
   waitlistEntryId: string | null;
   appointmentId: string | null;
   priority: WaitlistPriority;
@@ -99,6 +102,8 @@ export interface OpeningCandidate {
   waitingSince: Date;
   offersToday: number;
   offeredForSlot: boolean;
+  /** La última oferta de este hueco aún sin respuesta («Anotar respuesta»). */
+  pendingOfferId: string | null;
 }
 
 export interface OpeningCandidatesView {
@@ -162,6 +167,7 @@ function contactOf(patient: CandidatePatient, country: string) {
     phone: patient.phone,
     whatsappPhone: wa.phone,
     whatsappBlocked: wa.blocked,
+    whatsappBlockedReason: wa.reason,
   };
 }
 
@@ -235,6 +241,7 @@ export class ListOpeningCandidatesUseCase {
         appointmentType: item.source.appointmentType,
         offersToday: offers?.today ?? 0,
         offeredForSlot: offers?.forSlot ?? false,
+        pendingOfferId: offers?.pendingOfferId ?? null,
         waitingSince: item.source.createdAt,
       };
       if (item.kind === 'WAITLIST') {
@@ -394,6 +401,9 @@ export class CreateWaitlistOfferUseCase {
     }
     if (input.channel === 'WA_ME') {
       const wa = whatsappOfferPhone(patient, location.country);
+      if (wa.reason === 'NO_OPT_IN') {
+        throw new ConflictException(OFFER_WHATSAPP_NO_OPT_IN_MESSAGE);
+      }
       if (wa.blocked) {
         throw new ConflictException(OFFER_WHATSAPP_BLOCKED_MESSAGE);
       }
