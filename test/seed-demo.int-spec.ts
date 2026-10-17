@@ -374,6 +374,17 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ]);
   });
 
+  it('la sede principal tiene recordatorios por email activos a 48 h y 2 h (DX-026)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const settings = await raw.locationReminderSettings.findMany({
+      where: { tenantId },
+      include: { location: { select: { name: true } } },
+    });
+    expect(
+      settings.map((s) => [s.location.name, s.enabled, s.leadHours]),
+    ).toEqual([['Sede principal', true, [48, 2]]]);
+  });
+
   it('deja una cita futura con confirmación pendiente y otra que pide llamada (DX-005)', async () => {
     const tenantId = await liveDemoTenantId();
     const confirmations = await raw.appointmentConfirmation.findMany({

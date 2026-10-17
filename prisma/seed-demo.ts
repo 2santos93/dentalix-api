@@ -42,6 +42,7 @@ import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/us
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
+import { UpdateReminderSettingsUseCase } from '../src/modules/reminders/application/use-cases/reminder-settings.use-cases';
 import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
 import { CreateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/create-treatment-plan.use-case';
@@ -647,6 +648,12 @@ class DemoSeeder {
         ranges: NORTE_SCHEDULE,
       }),
     );
+    // DX-026: la principal manda recordatorios por email 48 h y 2 h antes; la
+    // Norte se queda como cualquier sede nueva (desactivados).
+    await this.use(UpdateReminderSettingsUseCase).execute(principal.id, {
+      enabled: true,
+      leadHours: [48, 2],
+    });
     return { principal: principal.id, norte: norte.id };
   }
 
