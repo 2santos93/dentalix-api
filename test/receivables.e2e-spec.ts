@@ -528,6 +528,231 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     expect(bySede.items.map((r) => r.patient.id)).toEqual([mixto]);
   });
 
+  it('DX-155: sigue cuadrando con el estado de cuenta tras abonos, anulaciones y cambios del plan (por la API)', async () => {
+    const clinicD = await registerClinic(app, 'cartera-d');
+    const sedeD = (
+      (await get(clinicD, '/locations').expect(200)).body as { id: string }[]
+    )[0].id;
+    const send = (
+      method: 'post' | 'patch' | 'delete',
+      path: string,
+      body: object,
+      status: number,
+    ) =>
+      request(server())
+        [method](`/api/v1${path}`)
+        .set('X-Tenant-Host', clinicD.host)
+        .set('Authorization', `Bearer ${clinicD.adminToken}`)
+        .set('X-Location-Id', sedeD)
+        .send(body)
+        .expect(status)
+        .then((res) => res.body as { id: string });
+    const catalogD = await send(
+      'post',
+      '/catalog/items',
+      {
+        code: 'CARTERA-D',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Resina',
+        color: '#2A2B3C',
+        defaultPrice: 100000,
+      },
+      201,
+    );
+    const ana = await patient(clinicD, 'Cuadre', 'CAR-D1');
+
+    /**
+     * La fila de Ana en la cartera (toda la clínica y su sede) frente a su
+     * estado de cuenta: mismo saldo por moneda y la deuda esperada.
+     */
+    const expectSquares = async (debt: number | null): Promise<void> => {
+      const statement = (
+        await get(clinicD, `/patients/${ana}/account-statement`).expect(200)
+      ).body as StatementBody;
+      for (const path of [
+        '/receivables/aging',
+        `/receivables/aging?locationId=${sedeD}`,
+      ]) {
+        const page = (await get(clinicD, path).expect(200)).body as AgingPage;
+        const row = page.items.find((r) => r.patient.id === ana);
+        if (debt === null) {
+          expect(row).toBeUndefined();
+          expect(page.totals).toEqual([]);
+          continue;
+        }
+        expect(row?.currencies.map((c) => [c.currency, c.balance])).toEqual(
+          statement.summary.map((s) => [s.currency, s.balance]),
+        );
+        expect(row?.currencies[0].debt).toBe(debt);
+        expect(page.totals[0]).toMatchObject({ patients: 1, debt });
+      }
+    };
+
+    // Plan aceptado con dos ítems de 100.000 (uno con 20.000 de descuento).
+    const plan = await send(
+      'post',
+      `/patients/${ana}/treatment-plans`,
+      { currency: 'COP' },
+      201,
+    );
+    const item1 = await send(
+      'post',
+      `/treatment-plans/${plan.id}/items`,
+      { toothNumber: '11', catalogItemId: catalogD.id },
+      201,
+    );
+    const item2 = await send(
+      'post',
+      `/treatment-plans/${plan.id}/items`,
+      { toothNumber: '21', catalogItemId: catalogD.id },
+      201,
+    );
+    await expectSquares(null); // PROPOSED: aún no se factura.
+    for (const item of [item1, item2]) {
+      await send(
+        'patch',
+        `/treatment-plans/${plan.id}/items/${item.id}`,
+        { status: 'ACCEPTED' },
+        200,
+      );
+    }
+    await send(
+      'patch',
+      `/treatment-plans/${plan.id}/items/${item2.id}`,
+      { discount: 20000 },
+      200,
+    );
+    await send(
+      'patch',
+      `/treatment-plans/${plan.id}`,
+      { status: 'ACCEPTED' },
+      200,
+    );
+    await attended(clinicD, ana, sedeD, 1);
+    await expectSquares(180000);
+
+    // Abono y anulación.
+    const abono = await send(
+      'post',
+      `/treatment-plans/${plan.id}/payments`,
+      {
+        amount: 50000,
+        currency: 'COP',
+        paidAt: new Date().toISOString(),
+        method: 'CASH',
+      },
+      201,
+    );
+    await expectSquares(130000);
+    await send(
+      'delete',
+      `/payments/${abono.id}`,
+      { reason: 'Registrado por error' },
+      200,
+    );
+    await expectSquares(180000);
+
+    // Cambios del plan: un ítem más, realizado, otro retirado, y un plan de
+    // cuotas sobre el saldo.
+    const item3 = await send(
+      'post',
+      `/treatment-plans/${plan.id}/items`,
+      { toothNumber: '31', catalogItemId: catalogD.id, price: 40000 },
+      201,
+    );
+    await send(
+      'patch',
+      `/treatment-plans/${plan.id}/items/${item3.id}`,
+      { status: 'DONE' },
+      200,
+    );
+    await expectSquares(220000);
+    await send(
+      'delete',
+      `/treatment-plans/${plan.id}/items/${item1.id}`,
+      {},
+      200,
+    );
+    await expectSquares(120000);
+    await send(
+      'post',
+      `/treatment-plans/${plan.id}/payment-plan`,
+      {
+        installmentsCount: 3,
+        periodicity: 'MONTHLY',
+        startDate: new Date(Date.now() + 30 * 86400000).toISOString(),
+      },
+      201,
+    );
+    await expectSquares(120000);
+
+    // Lo paga entero: sale de la cartera.
+    await send(
+      'post',
+      `/treatment-plans/${plan.id}/payments`,
+      {
+        amount: 120000,
+        currency: 'COP',
+        paidAt: new Date().toISOString(),
+        method: 'TRANSFER',
+      },
+      201,
+    );
+    await expectSquares(null);
+
+    // Otro plan con un abono que luego se cancela: solo saldo a favor, no es
+    // cartera; el estado de cuenta lo muestra como saldo negativo.
+    const second = await send(
+      'post',
+      `/patients/${ana}/treatment-plans`,
+      { currency: 'COP' },
+      201,
+    );
+    const item4 = await send(
+      'post',
+      `/treatment-plans/${second.id}/items`,
+      { toothNumber: '41', catalogItemId: catalogD.id },
+      201,
+    );
+    await send(
+      'patch',
+      `/treatment-plans/${second.id}/items/${item4.id}`,
+      { status: 'ACCEPTED' },
+      200,
+    );
+    await send(
+      'patch',
+      `/treatment-plans/${second.id}`,
+      { status: 'ACCEPTED' },
+      200,
+    );
+    await send(
+      'post',
+      `/treatment-plans/${second.id}/payments`,
+      {
+        amount: 30000,
+        currency: 'COP',
+        paidAt: new Date().toISOString(),
+        method: 'CASH',
+      },
+      201,
+    );
+    await expectSquares(70000);
+    await send(
+      'patch',
+      `/treatment-plans/${second.id}`,
+      { status: 'CANCELLED' },
+      200,
+    );
+    await expectSquares(null);
+    const statement = (
+      await get(clinicD, `/patients/${ana}/account-statement`).expect(200)
+    ).body as StatementBody;
+    expect(statement.summary).toMatchObject([
+      { currency: 'COP', balance: -30000 },
+    ]);
+  });
+
   it('la sede de la deuda es la de la última cita atendida y se puede pedir por locationId', async () => {
     const res = await get(
       clinicA,
