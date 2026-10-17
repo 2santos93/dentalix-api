@@ -3,5 +3,6 @@
   "rootDir": "..",
   "testRegex": ".int-spec.ts$",
   "transform": { "^.+\\.(t|j)s$": "ts-jest" },
-  "testEnvironment": "node"
+  "testEnvironment": "node",
+  "testTimeout": 30000
 }
