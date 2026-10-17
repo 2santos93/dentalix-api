@@ -4,7 +4,7 @@
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType"
 -- (la igualdad de enums no sirve de condición de índice bajo RLS; el predicado
 -- parcial sí). Va en su PROPIA migración: el valor se añadió en
--- 20261017210100_dx048_audit_resource_staff_member y Postgres no deja usar un
+-- 20261017220100_dx048_audit_resource_staff_member y Postgres no deja usar un
 -- valor de enum nuevo en la misma transacción que lo crea.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.

@@ -418,6 +418,12 @@ hasta 1 h (SEC-028).
   espera hasta 5 fallos; después 1, 2, 4, 8 min con **tope de 15 min**. Los
   fallos se olvidan tras 1 h sin fallar. Durante la espera se responde 429
   **sin mirar la contraseña** (ni un acierto pasa ni se paga argon2).
+- **El intento se cobra antes de verificar**: cada intento fuera de espera suma
+  un fallo a la cuenta en UNA sentencia atómica (`INSERT … ON CONFLICT DO
+  UPDATE … WHERE` no en espera) y el login correcto lo borra después. Si se
+  contara al recibir el 401, N peticiones simultáneas en cuanto acaba una
+  espera probarían N contraseñas; así solo pasa una por espera. Un error que
+  no es 401 (p. ej. un 500) deja ese intento contado.
 - **Por IP** (hash): solo fallos, 100 por ventana fija de 15 min; al llegar, la
   IP espera a que acabe la ventana. Un acierto no la reinicia (un atacante la
   limpiaría entrando con su propia cuenta). La IP es `req.ip`: depende de
@@ -438,6 +444,19 @@ hasta 1 h (SEC-028).
   ADMIN; 404 si no es miembro de su clínica, 403 otros roles) borra la espera
   y los fallos. Deja un evento `UPDATE` / `STAFF_MEMBER` con
   `reason: LOGIN_UNLOCKED` en la auditoría.
+- **Cuenta global, varias clínicas**: el contador es de la cuenta (el email),
+  no de la membresía, así que un ADMIN de **cualquiera** de las clínicas del
+  usuario le desbloquea en todas. Se acepta: solo borra una espera de como
+  mucho 15 min que se iría sola, no da acceso a nada (sigue haciendo falta la
+  contraseña), exige ser ADMIN de una clínica de la que el usuario es miembro
+  (bajo RLS: de otra clínica, 404) y queda auditado en la clínica del ADMIN.
+  El perfil de un miembro también revela al ADMIN que alguien falló con ese
+  email (en cualquier clínica), lo que es justo lo que necesita para decidir.
+- **Riesgo residual**: un atacante que manda un intento malo cada vez que
+  acaba la espera mantiene la cuenta en esperas de 15 min (no la deja fuera
+  1 h, pero la doctora solo entra si llega antes que él). El ADMIN puede
+  desbloquear; si ocurre, la mitigación siguiente sería no aplicar la espera
+  de la cuenta a IPs/dispositivos donde ya entró (fuera de DX-048).
 - Variables (defaults seguros; valor inválido = no arranca):
   `LOGIN_LOCKOUT_FREE_FAILURES` (5), `LOGIN_LOCKOUT_BASE_DELAY_MS` (60000),
   `LOGIN_LOCKOUT_MAX_DELAY_MS` (900000), `LOGIN_LOCKOUT_RESET_MS` (3600000,

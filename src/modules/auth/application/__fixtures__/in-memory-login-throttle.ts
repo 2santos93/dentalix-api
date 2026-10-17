@@ -1,4 +1,6 @@
+import { accountBackoffMs } from '../../domain/login-lockout';
 import type {
+  AccountBackoffPolicy,
   LoginThrottleKeys,
   LoginThrottleRepository,
 } from '../../domain/ports/login-throttle-repository.port';
@@ -43,26 +45,27 @@ export class InMemoryLoginThrottleRepository implements LoginThrottleRepository 
     );
   }
 
-  recordAccountFailure(key: string, memoryMs: number): Promise<number> {
+  claimAccountAttempt(
+    key: string,
+    policy: AccountBackoffPolicy,
+  ): Promise<number> {
     const id = `ACCOUNT:${key}`;
+    const blocked = this.remaining(id);
+    if (blocked > 0) return Promise.resolve(blocked);
     const row = this.rows.get(id);
-    const fresh = !row || row.lastFailureAt <= this.now - memoryMs;
-    const next: Row = {
-      failures: fresh ? 1 : row.failures + 1,
+    const fresh =
+      !row || row.lastFailureAt <= this.now - policy.failureMemoryMs;
+    const failures = fresh ? 1 : row.failures + 1;
+    const delay = accountBackoffMs(failures, policy);
+    const previous = fresh ? null : row.blockedUntil;
+    this.rows.set(id, {
+      failures,
       windowStartedAt: fresh ? this.now : row.windowStartedAt,
       lastFailureAt: this.now,
-      blockedUntil: fresh ? null : row.blockedUntil,
-    };
-    this.rows.set(id, next);
-    return Promise.resolve(next.failures);
-  }
-
-  blockAccount(key: string, delayMs: number): Promise<void> {
-    const row = this.rows.get(`ACCOUNT:${key}`);
-    if (row) {
-      row.blockedUntil = Math.max(row.blockedUntil ?? 0, this.now + delayMs);
-    }
-    return Promise.resolve();
+      blockedUntil:
+        delay > 0 ? Math.max(previous ?? 0, this.now + delay) : previous,
+    });
+    return Promise.resolve(0);
   }
 
   recordIpFailure(key: string, limit: number, windowMs: number): Promise<void> {

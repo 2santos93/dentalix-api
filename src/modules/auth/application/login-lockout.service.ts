@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   LOGIN_LOCKOUT_CONFIG,
   LoginLockedError,
-  accountBackoffMs,
   accountKeyHash,
   ipKeyHash,
   type LoginLockoutConfig,
@@ -20,9 +19,13 @@ const UNKNOWN_IP = 'unknown';
  *
  * Uso desde el login: `assertCanAttempt` ANTES de mirar la contraseña (en
  * espera se responde 429 sin verificar, así ni un acierto pasa ni se paga
- * argon2), y después `recordFailure` (401) o `recordSuccess`. Las dos ramas
- * del 401 (email inexistente o contraseña mala) escriben lo mismo, así que ni
- * el contador ni el tiempo distinguen si la cuenta existe.
+ * argon2), y después `recordFailure` (401) o `recordSuccess`. El intento se
+ * COBRA a la cuenta en `assertCanAttempt` (atómico en la BD): si se contara
+ * al recibir el 401, N intentos simultáneos al acabar una espera probarían N
+ * contraseñas antes de que ninguno la renovara. El login correcto borra
+ * después el contador. Las dos ramas del 401 (email inexistente o contraseña
+ * mala) escriben lo mismo, así que ni el contador ni el tiempo distinguen si
+ * la cuenta existe.
  */
 @Injectable()
 export class LoginLockoutService {
@@ -32,27 +35,30 @@ export class LoginLockoutService {
     @Inject(LOGIN_LOCKOUT_CONFIG) private readonly cfg: LoginLockoutConfig,
   ) {}
 
-  /** Lanza `LoginLockedError` si la cuenta o la IP están en espera. */
+  /**
+   * Lanza `LoginLockedError` si la cuenta o la IP están en espera; si no,
+   * cobra el intento a la cuenta (cuenta como fallo hasta `recordSuccess`).
+   */
   async assertCanAttempt(email: string, ip: string | undefined): Promise<void> {
+    const account = accountKeyHash(email);
+    // La IP (y una cuenta ya en espera) se miran primero: un intento
+    // rechazado no se cobra a la cuenta.
     const seconds = await this.repo.retryAfterSeconds({
-      accountKeyHash: accountKeyHash(email),
+      accountKeyHash: account,
       ipKeyHash: ipKeyHash(ip || UNKNOWN_IP),
     });
     if (seconds > 0) throw new LoginLockedError(seconds);
+    const raced = await this.repo.claimAccountAttempt(account, this.cfg);
+    if (raced > 0) throw new LoginLockedError(raced);
   }
 
-  async recordFailure(email: string, ip: string | undefined): Promise<void> {
-    const account = accountKeyHash(email);
-    const [failures] = await Promise.all([
-      this.repo.recordAccountFailure(account, this.cfg.failureMemoryMs),
-      this.repo.recordIpFailure(
-        ipKeyHash(ip || UNKNOWN_IP),
-        this.cfg.ipFailureLimit,
-        this.cfg.ipWindowMs,
-      ),
-    ]);
-    const delayMs = accountBackoffMs(failures, this.cfg);
-    if (delayMs > 0) await this.repo.blockAccount(account, delayMs);
+  /** 401: el fallo de la cuenta ya se cobró; suma el de la IP. */
+  async recordFailure(_email: string, ip: string | undefined): Promise<void> {
+    await this.repo.recordIpFailure(
+      ipKeyHash(ip || UNKNOWN_IP),
+      this.cfg.ipFailureLimit,
+      this.cfg.ipWindowMs,
+    );
   }
 
   /** Login correcto: la cuenta vuelve a empezar (la IP, no). */

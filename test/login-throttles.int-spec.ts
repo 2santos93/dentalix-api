@@ -54,54 +54,96 @@ describe('PrismaLoginThrottleRepository (int)', () => {
     ]);
   });
 
-  it('suma TODOS los fallos concurrentes de dos "réplicas" (sin pérdidas)', async () => {
-    await Promise.all(
+  const POLICY = {
+    freeFailures: 5,
+    baseDelayMs: MIN,
+    maxDelayMs: 15 * MIN,
+    failureMemoryMs: 60 * MIN,
+  };
+  const keys = () => ({ accountKeyHash: account, ipKeyHash: ip });
+
+  it('cobra TODOS los intentos concurrentes de dos "réplicas" hasta la espera, y ni uno más', async () => {
+    const results = await Promise.all(
       Array.from({ length: 20 }, (_, i) =>
-        (i % 2 ? repo : repoB).recordAccountFailure(account, 60 * MIN),
+        (i % 2 ? repo : repoB).claimAccountAttempt(account, POLICY),
       ),
     );
+    // 5 intentos pasan (el 5.º deja 1 min de espera); los otros 15, en espera.
+    expect(results.filter((s) => s === 0)).toHaveLength(5);
+    expect(results.filter((s) => s > 0)).toHaveLength(15);
     const row = await raw.loginThrottle.findUniqueOrThrow({
       where: { scope_keyHash: { scope: 'ACCOUNT', keyHash: account } },
     });
-    expect(row.failures).toBe(20);
+    expect(row.failures).toBe(5);
+    expect(row.blockedUntil).not.toBeNull();
   });
 
-  it('bloquea con la hora de la BD y devuelve los segundos redondeados hacia arriba', async () => {
-    await repo.recordAccountFailure(account, 60 * MIN);
-    await repo.blockAccount(account, 90_000);
-    const seconds = await repoB.retryAfterSeconds({
-      accountKeyHash: account,
-      ipKeyHash: ip,
-    });
-    expect(seconds).toBeGreaterThanOrEqual(89);
-    expect(seconds).toBeLessThanOrEqual(90);
+  it('con la espera recién acabada, de 20 intentos simultáneos solo pasa uno', async () => {
+    for (let i = 0; i < 5; i++) await repo.claimAccountAttempt(account, POLICY);
+    await raw.$executeRaw`
+      UPDATE "login_throttles" SET "blockedUntil" = timezone('utc', now()) - interval '1 second'
+       WHERE "scope" = 'ACCOUNT' AND "keyHash" = ${account}`;
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        (i % 2 ? repo : repoB).claimAccountAttempt(account, POLICY),
+      ),
+    );
+    expect(results.filter((s) => s === 0)).toHaveLength(1);
+    // El 6.º fallo deja 2 min.
+    const seconds = await repoB.retryAfterSeconds(keys());
+    expect(seconds).toBeGreaterThan(115);
+    expect(seconds).toBeLessThanOrEqual(120);
+  });
+
+  it('backoff con la hora de la BD, segundos redondeados hacia arriba y tope', async () => {
+    for (let i = 0; i < 5; i++) {
+      expect(await repo.claimAccountAttempt(account, POLICY)).toBe(0);
+    }
+    const seconds = await repoB.retryAfterSeconds(keys());
+    expect(seconds).toBeGreaterThanOrEqual(59);
+    expect(seconds).toBeLessThanOrEqual(60);
     const until = await repoB.accountBlockedUntil(account);
     expect(until).toBeInstanceOf(Date);
     const [{ now }] = await raw.$queryRaw<{ now: Date }[]>`
       SELECT timezone('utc', now())::timestamp(3) AS now`;
-    expect((until as Date).getTime() - now.getTime()).toBeGreaterThan(85_000);
+    expect((until as Date).getTime() - now.getTime()).toBeGreaterThan(55_000);
     expect((until as Date).getTime() - now.getTime()).toBeLessThanOrEqual(
-      90_000,
+      60_000,
     );
+    // Muchos fallos: nunca más del tope (15 min), nunca un bloqueo de 1 h.
+    await raw.$executeRaw`
+      UPDATE "login_throttles" SET "failures" = 500, "blockedUntil" = NULL
+       WHERE "scope" = 'ACCOUNT' AND "keyHash" = ${account}`;
+    expect(await repo.claimAccountAttempt(account, POLICY)).toBe(0);
+    const capped = await repo.retryAfterSeconds(keys());
+    expect(capped).toBeGreaterThan(14 * 60);
+    expect(capped).toBeLessThanOrEqual(15 * 60);
   });
 
-  it('blockAccount nunca acorta una espera más larga', async () => {
-    await repo.recordAccountFailure(account, 60 * MIN);
-    await repo.blockAccount(account, 10 * MIN);
-    await repo.blockAccount(account, MIN);
-    expect(
-      await repo.retryAfterSeconds({ accountKeyHash: account, ipKeyHash: ip }),
-    ).toBeGreaterThan(9 * 60);
+  it('en espera, el intento no se cobra y devuelve los segundos que faltan', async () => {
+    for (let i = 0; i < 5; i++) await repo.claimAccountAttempt(account, POLICY);
+    const waiting = await repoB.claimAccountAttempt(account, POLICY);
+    expect(waiting).toBeGreaterThanOrEqual(59);
+    expect(waiting).toBeLessThanOrEqual(60);
+    const row = await raw.loginThrottle.findUniqueOrThrow({
+      where: { scope_keyHash: { scope: 'ACCOUNT', keyHash: account } },
+    });
+    expect(row.failures).toBe(5);
   });
 
   it('olvida los fallos tras failureMemoryMs sin fallar y quita la espera vieja', async () => {
-    await repo.recordAccountFailure(account, 60 * MIN);
-    await repo.recordAccountFailure(account, 60 * MIN);
+    await repo.claimAccountAttempt(account, POLICY);
+    await repo.claimAccountAttempt(account, POLICY);
     await raw.loginThrottle.update({
       where: { scope_keyHash: { scope: 'ACCOUNT', keyHash: account } },
       data: { lastFailureAt: new Date(Date.now() - 61 * MIN) },
     });
-    expect(await repo.recordAccountFailure(account, 60 * MIN)).toBe(1);
+    expect(await repo.claimAccountAttempt(account, POLICY)).toBe(0);
+    const row = await raw.loginThrottle.findUniqueOrThrow({
+      where: { scope_keyHash: { scope: 'ACCOUNT', keyHash: account } },
+    });
+    expect(row.failures).toBe(1);
+    expect(row.blockedUntil).toBeNull();
   });
 
   it('IP: ventana fija; al llegar al límite queda en espera hasta su final', async () => {
@@ -129,7 +171,7 @@ describe('PrismaLoginThrottleRepository (int)', () => {
   });
 
   it('clearAccount borra la cuenta y no toca la IP', async () => {
-    await repo.recordAccountFailure(account, 60 * MIN);
+    await repo.claimAccountAttempt(account, POLICY);
     await repo.recordIpFailure(ip, 100, MIN);
     await repo.clearAccount(account);
     expect(
@@ -161,7 +203,7 @@ describe('PrismaLoginThrottleRepository (int)', () => {
   });
 
   it('la purga horaria borra lo olvidado y conserva lo reciente o en espera', async () => {
-    await repo.recordAccountFailure(account, 60 * MIN);
+    await repo.claimAccountAttempt(account, POLICY);
     await repo.recordIpFailure(ip, 100, MIN);
     await raw.loginThrottle.update({
       where: { scope_keyHash: { scope: 'ACCOUNT', keyHash: account } },

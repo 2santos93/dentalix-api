@@ -93,6 +93,32 @@ describe('LoginLockoutService (DX-048)', () => {
     ).toBe(15 * 60);
   });
 
+  it('intentos simultáneos no esquivan el backoff: cada intento se cobra ANTES de mirar la contraseña', async () => {
+    const { service, repo } = setup();
+    await failTimes(service, 5);
+    repo.advance(MIN);
+    // La espera acaba y llegan 20 intentos a la vez (varias IPs/réplicas):
+    // solo el primero llega a verificar la contraseña; el resto, 429.
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        retryAfterOf(service.assertCanAttempt(DOCTORA, `198.51.100.${i}`)),
+      ),
+    );
+    expect(results.filter((s) => s === 0)).toHaveLength(1);
+    expect(results.filter((s) => s > 0)).toHaveLength(19);
+  });
+
+  it('antes del 5.º fallo, los 5 primeros intentos simultáneos pasan y el 6.º espera', async () => {
+    const { service } = setup();
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        retryAfterOf(service.assertCanAttempt(DOCTORA, CLINIC_IP)),
+      ),
+    );
+    expect(results.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
+    expect(results[5]).toBe(60);
+  });
+
   it('un login correcto reinicia el contador de la cuenta', async () => {
     const { service, repo } = setup();
     await failTimes(service, 5);

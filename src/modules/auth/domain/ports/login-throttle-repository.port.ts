@@ -1,3 +1,10 @@
+import type { LoginLockoutConfig } from '../login-lockout';
+
+export type AccountBackoffPolicy = Pick<
+  LoginLockoutConfig,
+  'freeFailures' | 'baseDelayMs' | 'maxDelayMs' | 'failureMemoryMs'
+>;
+
 export const LOGIN_THROTTLE_REPOSITORY = Symbol('LOGIN_THROTTLE_REPOSITORY');
 
 /** Las dos filas que mira un intento de login (DX-048). */
@@ -19,16 +26,18 @@ export interface LoginThrottleRepository {
   retryAfterSeconds(keys: LoginThrottleKeys): Promise<number>;
 
   /**
-   * Suma un fallo a la cuenta, o empieza de 1 si el último fue hace más de
-   * `failureMemoryMs`. Devuelve los fallos seguidos tras sumar.
+   * Cobra un intento a la cuenta ANTES de mirar la contraseña, en UNA
+   * sentencia atómica (DX-048): si la cuenta está en espera no cambia nada y
+   * devuelve los segundos que faltan; si no, suma un fallo (o empieza de 1 si
+   * el último fue hace más de `failureMemoryMs`), deja la espera del backoff
+   * que toque (nunca la acorta) y devuelve 0. Así, N intentos simultáneos en
+   * cuanto acaba una espera no prueban N contraseñas: solo pasa el primero que
+   * llega a la espera. Un login correcto borra después la fila.
    */
-  recordAccountFailure(
+  claimAccountAttempt(
     accountKeyHash: string,
-    failureMemoryMs: number,
+    policy: AccountBackoffPolicy,
   ): Promise<number>;
-
-  /** Deja la cuenta en espera `delayMs` desde ahora (nunca la acorta). */
-  blockAccount(accountKeyHash: string, delayMs: number): Promise<void>;
 
   /**
    * Suma un fallo a la IP en su ventana fija (una nueva si la anterior acabó)

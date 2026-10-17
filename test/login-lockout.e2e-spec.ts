@@ -167,6 +167,19 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
     expect(minutes).toEqual([1, 2, 4, 8, 15, 15, 15]);
   });
 
+  it('intentos simultáneos al acabar la espera no esquivan el backoff: solo uno llega a probar la contraseña', async () => {
+    for (let i = 0; i < 5; i++) await login(doctora.email, WRONG);
+    await expireAccountWait(doctora.email);
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        login(doctora.email, WRONG, `203.0.113.${100 + i}`),
+      ),
+    );
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses.filter((s) => s === 401)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(9);
+  });
+
   it('sin enumeración: mismo 401 y mismo 429 (cuerpo y Retry-After) exista o no el email, sin diferencia de tiempo apreciable', async () => {
     const ghost = `nadie-${RUN}@lock-a.test`;
     for (let i = 0; i < 5; i++) {
