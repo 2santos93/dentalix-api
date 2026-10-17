@@ -162,3 +162,15 @@ export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
 // de retención. Solo gestión: quien responde ante la Res. 839/2017 es el
 // titular de la clínica.
 export const PATIENT_RETENTION_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Cartera por antigüedad (DX-145): la lista de cobro con importes y teléfonos
+// de muchos pacientes. Mismo dato financiero que PAYMENT_ROLES: la ven y la
+// trabajan la administración y recepción; DENTIST/ASSISTANT, no.
+export const RECEIVABLES_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+
+// Exportar la cartera a CSV (DX-145): un dato personal de muchos pacientes
+// fuera del sistema. Solo gestión, y queda auditado.
+export const RECEIVABLES_EXPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

@@ -4,13 +4,15 @@ import {
   ScheduleTramo,
 } from '../../payment-plans/application/schedule/derive-statuses';
 import {
+  BalancePaymentRow,
+  BalanceSnapshot,
   ComputedAccountStatement,
+  ComputedBalances,
   StatementCurrencySummary,
   StatementInstallment,
   StatementMovement,
   StatementNextInstallment,
   StatementPaymentPlanRow,
-  StatementPaymentRow,
   StatementPlanLine,
   StatementSnapshot,
 } from '../domain/entities/account-statement.entity';
@@ -72,7 +74,7 @@ function countsTowardsBalance(status: TreatmentPlanStatus): boolean {
   return isPlanBillable(status);
 }
 
-function isActive(payment: StatementPaymentRow): boolean {
+function isActive(payment: BalancePaymentRow): boolean {
   return payment.voidedAt === null;
 }
 
@@ -121,7 +123,7 @@ function buildTramos(paymentPlan: StatementPaymentPlanRow): ScheduleTramo[] {
 
 /** Abonado vivo de un plan, en centavos, agrupado por moneda. */
 function paidByPlanAndCurrency(
-  payments: StatementPaymentRow[],
+  payments: readonly BalancePaymentRow[],
 ): Map<string, Map<string, number>> {
   const out = new Map<string, Map<string, number>>();
   for (const p of payments) {
@@ -147,10 +149,17 @@ function inRange(
   );
 }
 
-export function computeAccountStatement(
-  snapshot: StatementSnapshot,
-  options: ComputeAccountStatementOptions,
-): ComputedAccountStatement {
+/**
+ * El núcleo del saldo: resumen por moneda, saldo por plan y cuotas con su
+ * estado. Es EL cálculo del saldo del paciente: el estado de cuenta (DX-011) lo
+ * usa tal cual y la cartera por antigüedad (DX-145) lo reparte en tramos, así
+ * que las dos cifras no pueden divergir. `payments` puede traer abonos sueltos
+ * o ya sumados por plan y moneda: solo se suman los vivos.
+ */
+export function computeBalances(
+  snapshot: BalanceSnapshot,
+  today: Date,
+): ComputedBalances {
   const currencies = new Map<string, CurrencyAccumulator>();
   const acc = (currency: string): CurrencyAccumulator => {
     const existing = currencies.get(currency);
@@ -208,7 +217,7 @@ export function computeAccountStatement(
     const derived = deriveStatuses(
       buildTramos(paymentPlan),
       fromCents(paidCents),
-      options.today,
+      today,
     );
     const currencyAcc = acc(paymentPlan.currency);
     currencyAcc.hasInstallments ||= derived.length > 0;
@@ -255,6 +264,35 @@ export function computeAccountStatement(
       (a.sequence ?? 0) - (b.sequence ?? 0),
   );
 
+  // --- Resumen ----------------------------------------------------------------
+  const summary: StatementCurrencySummary[] = [...currencies.entries()]
+    .filter(
+      ([, a]) =>
+        a.budgetedCents !== 0 || a.paidCents !== 0 || a.hasInstallments,
+    )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, a]) => ({
+      currency,
+      budgeted: fromCents(a.budgetedCents),
+      paid: fromCents(a.paidCents),
+      balance: fromCents(a.budgetedCents - a.paidCents),
+      overdueCount: a.overdueCount,
+      overdueAmount: fromCents(a.overdueCents),
+      nextInstallment: a.next,
+    }));
+
+  return { summary, plans, installments };
+}
+
+export function computeAccountStatement(
+  snapshot: StatementSnapshot,
+  options: ComputeAccountStatementOptions,
+): ComputedAccountStatement {
+  const { summary, plans, installments } = computeBalances(
+    snapshot,
+    options.today,
+  );
+
   // --- Movimientos ----------------------------------------------------------
   // DX-097: el día de cada abono es el de SU sede, no el día UTC.
   const movements: StatementMovement[] = snapshot.payments
@@ -285,23 +323,6 @@ export function computeAccountStatement(
       (a, b) =>
         b.paidAt.getTime() - a.paidAt.getTime() || b.id.localeCompare(a.id),
     );
-
-  // --- Resumen ----------------------------------------------------------------
-  const summary: StatementCurrencySummary[] = [...currencies.entries()]
-    .filter(
-      ([, a]) =>
-        a.budgetedCents !== 0 || a.paidCents !== 0 || a.hasInstallments,
-    )
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([currency, a]) => ({
-      currency,
-      budgeted: fromCents(a.budgetedCents),
-      paid: fromCents(a.paidCents),
-      balance: fromCents(a.budgetedCents - a.paidCents),
-      overdueCount: a.overdueCount,
-      overdueAmount: fromCents(a.overdueCents),
-      nextInstallment: a.next,
-    }));
 
   return { summary, plans, movements, installments };
 }

@@ -157,6 +157,32 @@ export function civilDateIn(instant: Date, timeZone: string): string {
 }
 
 /**
+ * `civilDateIn` para MUCHOS instantes en la misma zona (la cartera, DX-145,
+ * fecha miles de planes por petición). `Intl` cuesta ~10 µs por llamada; aquí
+ * se mide el desfase de la zona al principio y al final de cada día UTC (dos
+ * llamadas por día distinto) y, si coincide, el día civil sale de sumarlo. El
+ * día UTC en que la zona cambia de hora vuelve a `civilDateIn`, exacto.
+ */
+export function civilDateResolver(timeZone: string): (instant: Date) => string {
+  assertTimeZone(timeZone);
+  const offsetByUtcDay = new Map<number, number | null>();
+  return (instant) => {
+    const ms = instant.getTime();
+    const utcDay = Math.floor(ms / DAY_MS);
+    let offset = offsetByUtcDay.get(utcDay);
+    if (offset === undefined) {
+      const first = offsetAt(utcDay * DAY_MS, timeZone);
+      const last = offsetAt((utcDay + 1) * DAY_MS - 1000, timeZone);
+      offset = first === last ? first : null;
+      offsetByUtcDay.set(utcDay, offset);
+    }
+    if (offset === null) return civilDateIn(instant, timeZone);
+    const wall = new Date(ms + offset);
+    return `${pad(wall.getUTCFullYear(), 4)}-${pad(wall.getUTCMonth() + 1)}-${pad(wall.getUTCDate())}`;
+  };
+}
+
+/**
  * Primer instante del día civil `day` en `timeZone`.
  *
  * Se prueban los desfases que la zona tiene alrededor de ese día (antes,

@@ -565,6 +565,9 @@ model Appointment {
   // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:
   //   appointments_tenant_start_live_idx ("tenantId", start)
   //     -> agenda consolidada y «próximas citas» del dashboard.
+  //   appointments_tenant_patient_completed_idx ("tenantId", "patientId",
+  //     start DESC, id DESC) INCLUDE ("locationId") WHERE status = 'COMPLETED'
+  //     -> DX-145: sede de la deuda = la de la última cita atendida.
   @@map("appointments")
 }
 
@@ -936,6 +939,10 @@ model TreatmentPlanItem {
   plan TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, planId])
+  // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:
+  //   treatment_plan_items_tenant_plan_billable_idx ("tenantId", "planId")
+  //     INCLUDE (price, discount, status)
+  //     -> DX-145: facturable de todos los planes de la clínica (cartera).
   @@map("treatment_plan_items")
 }
 
