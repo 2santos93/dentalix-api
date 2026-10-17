@@ -1,5 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import {
+  cpSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
@@ -28,6 +34,13 @@ import {
 // owner sin superusuario y un admin que cree bases.
 
 const ROOT = join(__dirname, '..', '..');
+
+/** psql no acepta el `?schema=public` de las URL de Prisma. */
+const psqlUrl = (url: string): string => {
+  const u = new URL(url);
+  u.search = '';
+  return u.toString();
+};
 const MIGRATIONS = join(ROOT, 'prisma/migrations');
 
 const T_A = '00000000-0000-4000-8000-0000000000a1';
@@ -98,6 +111,23 @@ const FIXTURE_AUDIT = [
      FROM generate_series(1, 40) AS g`,
 ];
 
+const U_C = '00000000-0000-4000-8000-0000000000c2';
+
+/**
+ * Esquema de 20261017231000 (DX-143): U_B (DENTIST, no dueña) inició sesión;
+ * U_C no hizo nada. U_A es la dueña registrada con su clínica (FIXTURE_INITIAL).
+ */
+const FIXTURE_LOGINS = [
+  `INSERT INTO "users" ("id","email","passwordHash","fullName","createdAt","updatedAt") VALUES
+     ('${U_C}','c@mig.test','x','Ceci C','2025-01-01 00:00',now())`,
+  `INSERT INTO "audit_events"
+     ("id","tenantId","actorUserId","actorRole","action","resourceType","occurredAt")
+   VALUES
+     (gen_random_uuid(),'${T_B}','${U_B}','DENTIST','LOGIN','SESSION','2026-05-01 10:00'),
+     (gen_random_uuid(),'${T_B}','${U_B}','DENTIST','LOGIN','SESSION','2026-06-01 10:00'),
+     (gen_random_uuid(),'${T_B}','${U_C}','DENTIST','LOGIN_FAILED','SESSION','2026-06-01 10:00')`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -120,7 +150,10 @@ const STEPS: Step[] = [
   // payments_civil_day_noon (editada: FORCE fuera durante el backfill).
   { until: '20261017130000', fixture: FIXTURE_AUDIT },
   // audit_events_partitioned (DX-102) y dx039_clinical_record_retention.
-  { until: '99999999999999', dropped: ['audit_events_dx009'] },
+  { until: '20261017231100', dropped: ['audit_events_dx009'] },
+  // dx143_verify_active_accounts (FORCE fuera de audit_events y
+  // clinic_memberships durante el backfill).
+  { until: '99999999999999', fixture: FIXTURE_LOGINS },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -324,6 +357,44 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         `SELECT string_agg(to_char("last_attention_at", 'YYYY-MM-DD HH24:MI'), ',' ORDER BY "tenantId") AS v FROM "patients"`,
       ),
     ).toBe('2026-03-10 14:00,2026-04-01 16:00');
+  }, 180_000);
+
+  it('emailVerifiedAt (DX-143): verifica a quien inició sesión y a la dueña del registro, no al resto, y es idempotente', async () => {
+    await run(STEPS[7]);
+    const verified = (): Promise<string> =>
+      scalar<string>(
+        `SELECT string_agg("email" || ':' || coalesce(to_char("emailVerifiedAt", 'YYYY-MM-DD HH24:MI'), '-'), ',' ORDER BY "email") AS v FROM "users"`,
+      );
+    const createdA = await scalar<string>(
+      `SELECT to_char("createdAt", 'YYYY-MM-DD HH24:MI') AS v FROM "users" WHERE "id" = '${U_A}'`,
+    );
+    const expected = `a@mig.test:${createdA},b@mig.test:2026-05-01 10:00,c@mig.test:-`;
+    expect(await verified()).toBe(expected);
+    // Idempotente: repetirla (como hace el owner al reintentar) no cambia nada.
+    const sql = readFileSync(
+      join(
+        MIGRATIONS,
+        '20261017231100_dx143_verify_active_accounts/migration.sql',
+      ),
+      'utf8',
+    );
+    execFileSync(
+      'psql',
+      [
+        psqlUrl(ownerUrlFor(env, db)),
+        '-X',
+        '-q',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-1',
+        '-c',
+        sql,
+      ],
+      {
+        stdio: 'pipe',
+      },
+    );
+    expect(await verified()).toBe(expected);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {
