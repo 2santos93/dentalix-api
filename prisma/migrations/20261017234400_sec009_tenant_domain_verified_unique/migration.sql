@@ -67,7 +67,7 @@ BEGIN
 
   IF bad <> '' THEN
     RAISE EXCEPTION 'SEC-009: hay dominios duplicados que romperían los índices únicos nuevos. No se crea ningún índice ni se toca ningún dato. Grupos duplicados:%', bad
-      USING HINT = 'Revisa esas filas de tenant_domains a mano (soft-delete con "deletedAt" de las sobrantes), marca la migración con prisma migrate resolve --rolled-back 20261017233300_sec009_tenant_domain_verified_unique y vuelve a ejecutar prisma migrate deploy.';
+      USING HINT = 'Revisa esas filas de tenant_domains a mano (soft-delete con "deletedAt" de las sobrantes), marca la migración con prisma migrate resolve --rolled-back 20261017234400_sec009_tenant_domain_verified_unique y vuelve a ejecutar prisma migrate deploy.';
   END IF;
 END $$;
 

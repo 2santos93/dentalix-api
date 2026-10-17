@@ -7,7 +7,7 @@ import type {
 /**
  * SEC-009: un PENDING se puede verificar durante 72 h desde el alta. Después
  * está EXPIRED. La BD tiene el mismo default para `expiresAt` (migración
- * 20261017233300_sec009_tenant_domain_verified_unique).
+ * 20261017234400_sec009_tenant_domain_verified_unique).
  */
 export const PENDING_DOMAIN_TTL_MS = 72 * 60 * 60 * 1000;
 

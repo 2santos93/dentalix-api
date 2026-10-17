@@ -12,7 +12,7 @@ import { PrismaClient } from '@prisma/client';
 // duplicados que rompieran los índices nuevos, la migración aborta con el
 // desglose sin crear nada ni tocar datos.
 
-const MIGRATION = '20261017233300_sec009_tenant_domain_verified_unique';
+const MIGRATION = '20261017234400_sec009_tenant_domain_verified_unique';
 const ROOT = join(__dirname, '..');
 
 function urlFor(db: string): string {

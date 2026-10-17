@@ -1097,7 +1097,7 @@ model TenantDomain {
   tenantId    String             @db.Uuid
   // SEC-009: el host solo es único entre los VERIFIED vivos (índice PARCIAL
   // `WHERE status = 'VERIFIED' AND "deletedAt" IS NULL`, migración
-  // 20261017233300_sec009_tenant_domain_verified_unique; Prisma no expresa el
+  // 20261017234400_sec009_tenant_domain_verified_unique; Prisma no expresa el
   // predicado). Varias clínicas pueden tenerlo en PENDING: lo gana la primera
   // que verifica el TXT. NO uses findUnique por host: puede haber varias filas.
   host        String             @unique(map: "tenant_domains_verified_host_key")
