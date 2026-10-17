@@ -26,6 +26,12 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
       reminderOptOutAt: null,
       email: 'ana@example.com',
     },
+    recipient: {
+      firstName: 'Ana',
+      birthDate: new Date('1990-05-01'),
+      guardianName: null,
+      emergencyContactName: null,
+    },
     settings: { enabled: true, leadHours: [48, 2] },
     ...over,
   };
@@ -111,6 +117,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       referenceId: 'out-1',
       vars: {
         patientName: 'Ana',
+        guardianName: null,
         startsAtLabel: 'martes 20 de octubre de 2026 a las 9:00 a. m.',
         locationName: 'Sede Norte',
         locationAddress: 'Cra 15 # 93-60',
@@ -128,6 +135,26 @@ describe('SendAppointmentReminder (DX-026)', () => {
         sentAt: NOW,
       }),
     ]);
+  });
+
+  it('un menor con tutor: el email saluda al tutor y nombra al paciente (DX-128)', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        recipient: {
+          firstName: 'Ana',
+          birthDate: new Date('2016-02-01'),
+          guardianName: 'María José Pérez',
+          emergencyContactName: null,
+        },
+      }),
+    );
+    await handler.handle(payload);
+    const [input] = email.enqueue.mock.calls[0] as [
+      { vars: { patientName: string; guardianName: string | null } },
+    ];
+    expect(input.vars.patientName).toBe('Ana');
+    expect(input.vars.guardianName).toBe('María');
   });
 
   it('arma el enlace con el host de plataforma de la clínica del trabajo (SEC-033)', async () => {

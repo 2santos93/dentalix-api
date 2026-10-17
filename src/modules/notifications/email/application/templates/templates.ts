@@ -119,8 +119,11 @@ function appointmentReminder(
   const where = vars.locationAddress
     ? `${vars.locationName} (${vars.locationAddress})`
     : vars.locationName;
+  // DX-128: la de un menor va a su tutor: se le saluda y se nombra al paciente.
+  const guardian = vars.guardianName?.trim() || null;
+  const whose = guardian ? `la cita de ${vars.patientName}` : 'tu cita';
   const blocks: EmailBlock[] = [
-    { kind: 'paragraph', text: `Te recordamos tu cita en ${clinic}.` },
+    { kind: 'paragraph', text: `Te recordamos ${whose} en ${clinic}.` },
     {
       kind: 'paragraph',
       text: `Fecha y hora: ${vars.startsAtLabel} (hora de la sede)`,
@@ -141,8 +144,8 @@ function appointmentReminder(
   });
   return renderLayout({
     brand,
-    subject: `Recordatorio de tu cita en ${clinic}`,
-    heading: `Hola, ${vars.patientName}`,
+    subject: `Recordatorio de ${whose} en ${clinic}`,
+    heading: `Hola, ${guardian ?? vars.patientName}`,
     blocks,
     action: vars.confirmUrl
       ? { label: 'Confirmar o cancelar', url: vars.confirmUrl }

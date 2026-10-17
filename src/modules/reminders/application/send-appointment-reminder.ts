@@ -15,6 +15,7 @@ import { CONFIRMATION_PATH } from '../../appointment-confirmations/presentation/
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { ReminderClock } from './reminder-clock';
 import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
+import { reminderRecipient } from '../../patients/domain/communication/reminder-recipient';
 
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -150,6 +151,8 @@ export class SendAppointmentReminder {
     if (!claim.outboundMessageId) {
       await this.repo.attachOutbound(claim.id, outboundId);
     }
+    // DX-128: la de un menor se dirige a su tutor (o contacto principal).
+    const recipient = reminderRecipient(ctx.recipient, this.clock.now());
     await this.email.enqueue({
       tenantId,
       to,
@@ -157,6 +160,7 @@ export class SendAppointmentReminder {
       referenceId: outboundId,
       vars: {
         patientName: link.appointment.patientFirstName ?? '',
+        guardianName: recipient.kind === 'PATIENT' ? null : recipient.name,
         startsAtLabel: startsAtLabel(
           ctx.appointment.start,
           ctx.locationTimeZone,

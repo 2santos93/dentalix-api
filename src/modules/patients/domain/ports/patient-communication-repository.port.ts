@@ -9,6 +9,11 @@ export const PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado';
 /** Bloque «Comunicaciones» de la ficha (DX-128), tal como está guardado. */
 export interface PatientCommunicationState {
   patientId: string;
+  /** Para saber a quién se dirigen los avisos (un menor: su tutor). */
+  firstName: string;
+  birthDate: Date | null;
+  guardianName: string | null;
+  emergencyContactName: string | null;
   /** País de residencia del paciente (respaldo si la clínica no tiene sede). */
   countryCode: string | null;
   phone: string | null;

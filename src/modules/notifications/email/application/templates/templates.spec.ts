@@ -190,6 +190,31 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(noLink.text).not.toContain('Profesional');
   });
 
+  it('appointment-reminder de un menor saluda a su tutor y nombra al paciente (DX-128)', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      {
+        patientName: 'Mateo',
+        guardianName: 'María',
+        startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+        locationName: 'Sede Norte',
+        locationAddress: null,
+        providerName: null,
+        confirmUrl: null,
+        unsubscribeUrl: null,
+      },
+      brand,
+    );
+    expect(email.subject).toBe(
+      'Recordatorio de la cita de Mateo en Sonrisas del Norte',
+    );
+    expect(email.text).toContain('Hola, María');
+    expect(email.text).toContain(
+      'Te recordamos la cita de Mateo en Sonrisas del Norte.',
+    );
+    expect(email.text).not.toContain('tu cita');
+  });
+
   it('appointment-reminder escapa lo variable y no lleva nada clínico', () => {
     const email = renderEmail(
       'appointment-reminder',

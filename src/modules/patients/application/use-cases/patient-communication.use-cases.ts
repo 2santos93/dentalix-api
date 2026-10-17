@@ -17,6 +17,10 @@ import {
   type MobileStatus,
 } from '../../domain/communication/mobile-number';
 import {
+  reminderRecipient,
+  type ReminderRecipient,
+} from '../../domain/communication/reminder-recipient';
+import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
   type PatientCommunicationPatch,
@@ -50,6 +54,8 @@ export interface PatientCommunicationView {
     recordedBy: { id: string; fullName: string | null } | null;
   } | null;
   reminderOptOut: { at: Date; source: ReminderOptOutSource } | null;
+  /** A quién se dirigen los avisos: un menor, a su tutor o contacto principal. */
+  recipient: ReminderRecipient;
 }
 
 export interface UpdatePatientCommunicationInput {
@@ -65,6 +71,7 @@ function toView(
   state: PatientCommunicationState,
   country: string | null,
   clinicDefaultChannel: ContactChannel,
+  now: Date,
 ): PatientCommunicationView {
   const mobile = normalizeMobile(state.phone, country);
   return {
@@ -88,6 +95,7 @@ function toView(
       state.reminderOptOutAt && state.reminderOptOutSource
         ? { at: state.reminderOptOutAt, source: state.reminderOptOutSource }
         : null,
+    recipient: reminderRecipient(state, now),
   };
 }
 
@@ -114,6 +122,7 @@ export class GetPatientCommunicationUseCase {
   constructor(
     @Inject(PATIENT_COMMUNICATION_REPOSITORY)
     private readonly repo: PatientCommunicationRepository,
+    @Inject(COMMUNICATION_CLOCK) private readonly clock: () => Date,
   ) {}
 
   async execute(patientId: string): Promise<PatientCommunicationView> {
@@ -123,7 +132,7 @@ export class GetPatientCommunicationUseCase {
       phoneCountry(this.repo, state),
       this.repo.clinicDefaultChannel(),
     ]);
-    return toView(state, country, clinicDefault);
+    return toView(state, country, clinicDefault, this.clock());
   }
 }
 
@@ -219,7 +228,9 @@ export class UpdatePatientCommunicationUseCase {
       changed.push('reminderOptOutAt');
     }
 
-    if (changed.length === 0) return toView(state, country, clinicDefault);
+    if (changed.length === 0) {
+      return toView(state, country, clinicDefault, now);
+    }
 
     const saved = await this.repo.update(patientId, patch);
     await this.audit.record({
@@ -239,6 +250,6 @@ export class UpdatePatientCommunicationUseCase {
         changedFields: [...changed].sort(),
       },
     });
-    return toView(saved, country, clinicDefault);
+    return toView(saved, country, clinicDefault, now);
   }
 }

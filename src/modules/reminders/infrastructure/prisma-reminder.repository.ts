@@ -176,7 +176,15 @@ export class PrismaReminderRepository implements ReminderRepository {
           status: true,
           deletedAt: true,
           locationId: true,
-          patient: { select: CONTACT_SELECT },
+          patient: {
+            select: {
+              ...CONTACT_SELECT,
+              firstName: true,
+              birthDate: true,
+              guardianName: true,
+              emergencyContactName: true,
+            },
+          },
           location: { select: { country: true } },
         },
       });
@@ -200,6 +208,12 @@ export class PrismaReminderRepository implements ReminderRepository {
           zones.get(appointment.locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
         patientId: appointment.patient.id,
         contact: toContact(appointment.patient),
+        recipient: {
+          firstName: appointment.patient.firstName,
+          birthDate: appointment.patient.birthDate,
+          guardianName: appointment.patient.guardianName,
+          emergencyContactName: appointment.patient.emergencyContactName,
+        },
         settings,
       };
     });

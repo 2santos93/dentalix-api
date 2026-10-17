@@ -39,6 +39,7 @@ interface CommunicationBody {
     recordedBy: { id: string; fullName: string | null } | null;
   } | null;
   reminderOptOut: { at: string; source: string } | null;
+  recipient: { kind: string; name: string | null; minor: boolean };
 }
 
 describe('Comunicaciones del paciente (e2e, DX-128)', () => {
@@ -114,7 +115,31 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       email: 'carolina@example.com',
       whatsappOptIn: null,
       reminderOptOut: null,
+      recipient: { kind: 'PATIENT', name: 'Carolina', minor: false },
     } satisfies CommunicationBody);
+  });
+
+  it('un menor: los avisos se dirigen a su tutor', async () => {
+    const minor = await as(api().post('/api/v1/patients'), clinic.adminToken)
+      .send({
+        firstName: 'Mateo',
+        lastName: 'Duque',
+        docType: 'TI',
+        docNumber: '128002',
+        sex: 'M',
+        birthDate: '2016-04-10',
+        guardianName: 'Carolina Duque',
+      })
+      .expect(201);
+    const res = await as(
+      api().get(comms((minor.body as { id: string }).id)),
+      tokens[ClinicRole.RECEPTION],
+    ).expect(200);
+    expect((res.body as CommunicationBody).recipient).toEqual({
+      kind: 'GUARDIAN',
+      name: 'Carolina',
+      minor: true,
+    });
   });
 
   it('un móvil inválido no se puede marcar como canal WhatsApp: 400 en español y nada cambia', async () => {

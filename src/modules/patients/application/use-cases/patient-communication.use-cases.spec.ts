@@ -34,7 +34,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     const clock = () => NOW;
     update = new UpdatePatientCommunicationUseCase(repo, audit as never, clock);
-    get = new GetPatientCommunicationUseCase(repo);
+    get = new GetPatientCommunicationUseCase(repo, clock);
   });
 
   const lastAudit = () =>
@@ -54,6 +54,24 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
         email: 'ana@example.com',
         whatsappOptIn: null,
         reminderOptOut: null,
+        recipient: { kind: 'PATIENT', name: 'Ana', minor: false },
+      });
+    });
+
+    it('para un menor, el destinatario de los avisos es su tutor (o su contacto principal)', async () => {
+      repo.add(ANA, {
+        birthDate: new Date('2015-06-01'),
+        guardianName: 'María José Pérez',
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: { kind: 'GUARDIAN', name: 'María', minor: true },
+      });
+      repo.add(ANA, {
+        birthDate: new Date('2015-06-01'),
+        emergencyContactName: 'Luis Gómez',
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: { kind: 'CONTACT', name: 'Luis', minor: true },
       });
     });
 

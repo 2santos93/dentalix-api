@@ -20,6 +20,10 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
   ): PatientCommunicationState {
     const state: PatientCommunicationState = {
       patientId,
+      firstName: 'Ana',
+      birthDate: null,
+      guardianName: null,
+      emergencyContactName: null,
       countryCode: null,
       phone: null,
       email: 'ana@example.com',

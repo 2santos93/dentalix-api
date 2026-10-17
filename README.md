@@ -873,9 +873,17 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
   mayúsculas, mensaje entero) y da de baja a todos los pacientes vivos de la
   clínica con ese móvil (prefiltro indexado `dx_phone_tail`), con origen
   MESSAGE. Lo invocará el webhook de WhatsApp de DX-126, que aún no existe.
+- **Menores** (`patients/domain/communication/reminder-recipient.ts`): los
+  avisos de un menor de 18 años se dirigen a su tutor (`guardianName`) o, sin
+  tutor, a su contacto principal (`emergencyContactName`), como Dentrix
+  Ascend: el email de recordatorio lo saluda a él y nombra al paciente («Te
+  recordamos la cita de Mateo»), y la ficha lo muestra (`recipient` en `GET
+  /patients/:id/communication`). Se usan el correo y el móvil de la ficha:
+  no hay campos de contacto propios del tutor.
 - **Demo**: `seed:demo` deja a Laura con WhatsApp y opt-in en persona, al
   tercer paciente con canal ninguno, al cuarto dado de baja y al quinto con un
-  fijo (móvil no válido).
+  fijo (móvil no válido). Sofía Ortiz (menor, tutora Claudia) muestra el
+  destinatario tutor.
 
 ## Despliegue: roles de la BD (DX-113)
 

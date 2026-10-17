@@ -11,6 +11,10 @@ import {
 
 const SELECT = {
   id: true,
+  firstName: true,
+  birthDate: true,
+  guardianName: true,
+  emergencyContactName: true,
   countryCode: true,
   phone: true,
   email: true,

@@ -56,6 +56,26 @@ export class ReminderOptOutDto {
   source!: ReminderOptOutSource;
 }
 
+export class CommunicationRecipientDto {
+  @ApiProperty({
+    enum: ['PATIENT', 'GUARDIAN', 'CONTACT'],
+    enumName: 'CommunicationRecipientKind',
+    description:
+      'PATIENT: el propio paciente. Un menor: GUARDIAN (su tutor) o, sin tutor, CONTACT (su contacto principal).',
+  })
+  kind!: 'PATIENT' | 'GUARDIAN' | 'CONTACT';
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Nombre de pila de a quien se dirigen los avisos.',
+  })
+  name!: string | null;
+
+  @ApiProperty({ description: 'Menor de edad (menos de 18 años).' })
+  minor!: boolean;
+}
+
 /** Bloque «Comunicaciones» de la ficha (DX-128). */
 export class PatientCommunicationDto {
   @ApiProperty({ format: 'uuid' })
@@ -116,6 +136,13 @@ export class PatientCommunicationDto {
 
   @ApiProperty({ type: ReminderOptOutDto, nullable: true })
   reminderOptOut!: ReminderOptOutDto | null;
+
+  @ApiProperty({
+    type: CommunicationRecipientDto,
+    description:
+      'A quién se dirigen los avisos (como Dentrix Ascend: un menor, a su tutor o contacto principal). Usan el correo y el móvil de la ficha.',
+  })
+  recipient!: CommunicationRecipientDto;
 }
 
 /**
