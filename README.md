@@ -354,8 +354,9 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   aviso) queda como JSON en esa carpeta y de ahí se copia el enlace. Con
   `console` (el default) el enlace NO se ve: el log no lleva el cuerpo.
 - **Invitaciones**: el token solo va por email; `GET /public/invitations/:token`
-  ya no trae `userExists` sino `requiresCurrentPassword` (true solo para una
-  cuenta **verificada**), que solo ve quien recibió el correo. Aceptar:
+  ya no trae `userExists` sino `requiresCurrentPassword` (true para una
+  cuenta **verificada** o una sin verificar que no se puede reclamar, ver
+  abajo), que solo ve quien recibió el correo. Aceptar:
   - sin cuenta → se crea con `emailVerifiedAt`;
   - cuenta verificada → exige su contraseña (401 en español; si la olvidó,
     «¿Olvidaste tu contraseña?», DX-010);
@@ -365,6 +366,36 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
     sesiones y refresh anteriores), se invalidan sus enlaces de
     restablecimiento y se audita `PASSWORD_RESET` con
     `metadata.reason = INVITATION_ACCOUNT_CLAIM`.
+  - **DX-143 (SEC-033):** nunca se reclama una cuenta que ya da acceso a
+    **otra clínica** (alguna membresía activa, es decir, sin `deletedAt`, en
+    un tenant distinto del de la invitación) ni la de un **administrador de
+    plataforma**: con otra contraseña, 401 en español que remite a «¿Olvidaste
+    tu contraseña?» en la clínica donde ya trabaja, sin tocar `passwordHash`,
+    `tokenVersion` ni `emailVerifiedAt` (y sin consumir la invitación: con su
+    contraseña actual se une como siempre). Se comprueba en el caso de uso y
+    otra vez dentro de la transacción, con la fila del usuario bloqueada
+    (`FOR UPDATE`). Las membresías de otras clínicas no se ven bajo la RLS:
+    lo responde `dx_user_has_other_active_memberships(user, tenant)`, SECURITY
+    DEFINER del rol NOLOGIN `dentalix_membership_lookup` (solo un booleano;
+    ver «Despliegue: roles de la BD»).
+- **Cuentas anteriores a DX-029 ya verificadas** (migración
+  `20261017231100_dx143_verify_active_accounts`, idempotente, solo filas con
+  `emailVerifiedAt` NULL y no borradas). Criterio:
+  1. la cuenta **inició sesión con éxito** alguna vez: un evento `LOGIN` de
+     `audit_events` con ella como actor, en cualquier clínica (un
+     `LOGIN_FAILED` no cuenta). Fecha: la del primer `LOGIN`;
+  2. o es la **dueña creada por el registro**: `ADMIN` de una clínica con la
+     que nació a la vez (usuario, clínica y membresía a menos de 60 s; el
+     registro los creaba en una transacción). Fecha: el alta del usuario.
+
+  Si cumple las dos, la fecha más antigua. Quien inició sesión ya demostró
+  conocer la contraseña, y la dueña controla su clínica; las dos quedan fuera
+  del reclamo de ahora en adelante. Los eventos `LOGIN` existen desde DX-009
+  (antes, solo cuenta el criterio 2). Una cuenta verificada que olvida su
+  contraseña la restablece desde una clínica donde sea miembro (DX-010).
+  Con un owner sin superusuario funciona porque quita FORCE a `audit_events`
+  y `clinic_memberships` solo durante su transacción
+  (`test/owner-nosu/migrations-data.owner-spec.ts`).
 - **Tope diario** de invitaciones NUEVAS por clínica:
   `INVITATION_TENANT_DAILY_LIMIT` (default 30/24 h) → 429 en español.
 - El login sigue sin enumeración por tiempo (DX-049, hash ficticio).
@@ -382,12 +413,8 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   (`TENANT_BASE_DOMAINS`); si no, `<subdominio de la clínica>.<primer dominio
   base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   confirmación de cita (DX-005) sí puede usar el dominio de la clínica: solo
-  confirma esa cita.
-  Pendiente (DX-143): el reclamo de una cuenta sin verificar al aceptar una
-  invitación todavía no comprueba si la cuenta tiene membresías activas en
-  otras clínicas (hace falta una lectura entre clínicas, con su propio rol
-  SECURITY DEFINER); hoy lo cubre que el token solo viaja al buzón de la
-  persona y a un host de Dentalix.
+  confirma esa cita. Además (DX-143), aceptar una invitación no reclama una
+  cuenta sin verificar con acceso a otra clínica (ver DX-029 arriba).
   Si se superan los topes `MAIL_*` no se envía (y tampoco se dice).
 - `POST /auth/reset-password/check` `{ token }` → `{ status: VALID | EXPIRED | USED | INVALID }`.
 - `POST /auth/reset-password` `{ token, password }` → 204. Exige la política de
@@ -646,7 +673,7 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y
 las comprobaciones, `pg_auth_members.set_option`). En un Postgres gestionado
-(RDS, Cloud SQL…) nadie de la aplicación es superusuario ni tiene BYPASSRLS. Hay dos roles con login y dos NOLOGIN que
+(RDS, Cloud SQL…) nadie de la aplicación es superusuario ni tiene BYPASSRLS. Hay dos roles con login y tres NOLOGIN que
 crean las migraciones; el job `owner-nosu` de la CI despliega así desde cero
 en cada PR (migraciones, seed de referencia, `seed:demo`, comprobación de
 FORCE y `npm run test:owner-nosu`).
@@ -654,9 +681,10 @@ FORCE y `npm run test:owner-nosu`).
 | Rol | Conexión | Privilegios mínimos | Nunca |
 |-----|----------|---------------------|-------|
 | owner (p. ej. `dentalix_owner`) | `DIRECT_URL`: solo `prisma migrate deploy`, `prisma db seed` y `audit:purge` | `LOGIN`, `CREATEROLE` (crea `dentalix_app` y los roles NOLOGIN de abajo), dueño de la base (`CREATE` para las extensiones *trusted* `unaccent`, `btree_gist`, `pg_trgm`, `btree_gin`) y del esquema `public` (lo es por `pg_database_owner`) | `SUPERUSER`, `BYPASSRLS`, `CREATEDB`, `REPLICATION`; ni lo usa la API |
-| `dentalix_app` (nombre fijo: lo citan las migraciones) | `DATABASE_URL`: la API y `seed:demo` | `LOGIN`, `CONNECT`, `USAGE` en `public`, `SELECT/INSERT/UPDATE/DELETE` en tablas y `USAGE/SELECT` en secuencias (privilegios por defecto del owner) y `EXECUTE` en las funciones que le conceden las migraciones (búsqueda de pacientes, despachador de email, particiones de auditoría) | dueño de tablas, `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` |
+| `dentalix_app` (nombre fijo: lo citan las migraciones) | `DATABASE_URL`: la API y `seed:demo` | `LOGIN`, `CONNECT`, `USAGE` en `public`, `SELECT/INSERT/UPDATE/DELETE` en tablas y `USAGE/SELECT` en secuencias (privilegios por defecto del owner) y `EXECUTE` en las funciones que le conceden las migraciones (búsqueda de pacientes, despachador de email, particiones de auditoría, membresías en otras clínicas) | dueño de tablas, `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` |
 | `dentalix_patient_search` (DX-043) | NOLOGIN | dueño de `dx_patient_search_*`; `SELECT` de 5 columnas de `patients` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
 | `dentalix_email_dispatcher` (DX-113) | NOLOGIN | dueño de `email_outbox_claim/_settle/_enqueue_platform`; `SELECT/INSERT/UPDATE` de `email_outbox` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
+| `dentalix_membership_lookup` (DX-143) | NOLOGIN | dueño de `dx_user_has_other_active_memberships`; `SELECT` de 3 columnas (`userId`, `tenantId`, `deletedAt`) de `clinic_memberships` y su política de solo `SELECT` | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
 
 Pasos (el `psql` no acepta el `?schema=public` de las URL de Prisma:
 `"${DIRECT_URL%%\?*}"` lo quita):
@@ -708,7 +736,7 @@ partición fuera de las migraciones (o una migración olvidó la RLS):
 `ENABLE` + `FORCE ROW LEVEL SECURITY` y su política, o una migración que lo
 haga. Con `members`, alguien añadió un miembro a un rol del clúster: retíralo
 como admin (`REVOKE <rol> FROM <miembro>`) y averigua por qué; mientras
-estuvo, pudo leer `patients`/`email_outbox` de todas las bases del clúster. La CI la ejecuta en los jobs de integración y
+estuvo, pudo leer `patients`/`email_outbox`/`clinic_memberships` de todas las bases del clúster. La CI la ejecuta en los jobs de integración y
 `owner-nosu`, y `test/rls-catalog.int-spec.ts` la cubre también.
 
 - **FORCE y el owner**: todas las tablas con `tenantId` tienen RLS ENABLE +
@@ -771,10 +799,11 @@ estuvo, pudo leer `patients`/`email_outbox` de todas las bases del clúster. La 
   --rolled-back …` y `ALTER ROLE … BYPASSRLS` / `NOBYPASSRLS`). Un despliegue
   nuevo la aplica vacía y no lo necesita.
 - **Roles del clúster: un owner por clúster** (DX-134). `dentalix_app`,
-  `dentalix_patient_search` y `dentalix_email_dispatcher` son del clúster, no
-  de la base, y **ADMIN OPTION sobre un rol equivale a poder darse SET**: con
+  `dentalix_patient_search`, `dentalix_email_dispatcher` y
+  `dentalix_membership_lookup` son del clúster, no de la base, y **ADMIN OPTION sobre un rol equivale a poder darse SET**: con
   ella, un owner puede hacer `SET ROLE dentalix_patient_search` en cualquier
-  base del clúster y leer `patients` (o `email_outbox`) de todas las clínicas
+  base del clúster y leer `patients` (o `email_outbox`, o
+  `clinic_memberships`) de todas las clínicas
   por la política `USING (true)` de ese rol. Por eso:
   - **Un owner por clúster** (o un clúster por despliegue). El mismo owner
     puede tener varias bases en él; para aislar entornos (producción frente a
@@ -791,7 +820,7 @@ estuvo, pudo leer `patients`/`email_outbox` de todas las bases del clúster. La 
   - Si los roles los creó un superusuario (p. ej. el `dentalix` del docker
     local) y el clúster es solo de este owner, `create-app-role.sql` pide que
     el admin ejecute antes `GRANT dentalix_patient_search,
-    dentalix_email_dispatcher TO <owner> WITH ADMIN OPTION, INHERIT FALSE, SET
+    dentalix_email_dispatcher, dentalix_membership_lookup TO <owner> WITH ADMIN OPTION, INHERIT FALSE, SET
     FALSE`.
   - `db:check-force` (paso 4) vuelve a comprobar las membresías en cada
     despliegue: un miembro añadido después sale en `members`.
