@@ -50,4 +50,15 @@ export class PaymentDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'NOR-000123',
+    description:
+      'Número del recibo de caja (DX-136): serie de la sede y consecutivo. ' +
+      'null en los abonos anteriores a la numeración («sin serie»; su ' +
+      'recibo conserva la referencia antigua REC-xxxxxxxx).',
+  })
+  receiptNumber!: string | null;
 }

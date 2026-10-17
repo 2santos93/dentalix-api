@@ -17,6 +17,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'email-verify': EmailTemplate.EMAIL_VERIFY,
   'appointment-reminder': EmailTemplate.APPOINTMENT_REMINDER,
   'registration-notice': EmailTemplate.REGISTRATION_NOTICE,
+  'payment-receipt': EmailTemplate.PAYMENT_RECEIPT,
 };
 
 /**

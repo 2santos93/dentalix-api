@@ -128,6 +128,18 @@ const FIXTURE_LOGINS = [
      (gen_random_uuid(),'${T_B}','${U_C}','DENTIST','LOGIN_FAILED','SESSION','2026-06-01 10:00')`,
 ];
 
+/**
+ * Esquema de 20261018090200 (DX-136): más sedes, con nombres que chocan, para
+ * el relleno de la serie de recibos ("receiptPrefix") por orden de alta.
+ */
+// Después de la "Sede principal" de cada clínica, que add_locations creó con now().
+const FIXTURE_LOCATIONS = [
+  `INSERT INTO "locations" ("id","tenantId","name","createdAt","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','Sede Norte',now() + interval '1 day',now()),
+     (gen_random_uuid(),'${T_A}','Sede Nórte',now() + interval '2 days',now()),
+     (gen_random_uuid(),'${T_B}','Sede Norte',now() + interval '1 day',now())`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -153,7 +165,9 @@ const STEPS: Step[] = [
   { until: '20261017231100', dropped: ['audit_events_dx009'] },
   // dx143_verify_active_accounts (FORCE fuera de audit_events y
   // clinic_memberships durante el backfill).
-  { until: '99999999999999', fixture: FIXTURE_LOGINS },
+  { until: '20261018090200', fixture: FIXTURE_LOGINS },
+  // dx136_payment_receipts (FORCE fuera de locations durante el relleno).
+  { until: '99999999999999', fixture: FIXTURE_LOCATIONS },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -395,6 +409,16 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
       },
     );
     expect(await verified()).toBe(expected);
+  }, 180_000);
+
+  it('serie de recibos (DX-136): cada sede previa recibe la suya, desambiguada dentro de su clínica', async () => {
+    await run(STEPS[8]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("tenantId"::text || ':' || "receiptPrefix", ',' ORDER BY "tenantId", "createdAt") AS v
+           FROM "locations"`,
+      ),
+    ).toBe(`${T_A}:PRI,${T_A}:NOR,${T_A}:NOR2,${T_B}:PRI,${T_B}:NOR`);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

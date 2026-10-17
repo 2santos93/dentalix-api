@@ -2,6 +2,7 @@ import { Payment } from '../../../domain/entities/payment.entity';
 import type { IdempotentPayment } from '../../../domain/idempotency';
 import {
   CashRegisterPage,
+  CivilPaidDay,
   CreatePaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
@@ -17,7 +18,7 @@ import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 // "non-deleted only" like the real Prisma repo, so it tracks `deletedAt` on
 // the stored row and strips it via `toEntity` (mirrors `mapToEntity` in
 // prisma-payment.repository.ts).
-type StoredPayment = Omit<Payment, 'paidOn'> & {
+type StoredPayment = Omit<Payment, 'paidOn' | 'receiptNumber'> & {
   deletedAt: Date | null;
   idempotencyKey: string | null;
   requestFingerprint: string | null;
@@ -35,6 +36,9 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
  */
 export class InMemoryPaymentRepository implements PaymentRepository {
   private readonly payments: StoredPayment[] = [];
+
+  /** Test helper: lo último que recibió `create` (DX-136: el saldo del recibo). */
+  lastCreateInput: CreatePaymentRepoInput | null = null;
 
   /**
    * @param timeZone zona de la sede de TODOS los abonos de este fake (el real
@@ -89,10 +93,20 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       createdById: row.createdById,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      receiptNumber: null,
     };
   }
 
+  resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string> {
+    return Promise.resolve(
+      paidAt instanceof Date
+        ? civilDateIn(paidAt, this.timeZone)
+        : paidAt.civilDate,
+    );
+  }
+
   create(input: CreatePaymentRepoInput): Promise<Payment> {
+    this.lastCreateInput = input;
     const row: StoredPayment = {
       id: `payment-${++seq}`,
       tenantId: 't1',

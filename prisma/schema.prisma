@@ -35,6 +35,8 @@ model Tenant {
   waitlistEntries          AppointmentWaitlistEntry[]
   reminderSettings         LocationReminderSettings[]
   appointmentReminders     AppointmentReminder[]
+  paymentReceipts          PaymentReceipt[]
+  paymentReceiptCounters   PaymentReceiptCounter[]
 
   @@map("tenants")
 }
@@ -93,17 +95,22 @@ enum ClinicCountry {
 }
 
 model Location {
-  id        String        @id @default(uuid()) @db.Uuid
-  tenantId  String        @db.Uuid
-  name      String
-  address   String?
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId      String        @db.Uuid
+  name          String
+  address       String?
   // País de la sede (DX-013): la receta se emite con las reglas del país donde
   // se atiende. Por defecto CO, que es lo que eran todas las sedes hasta hoy.
-  country   ClinicCountry @default(CO)
-  isActive  Boolean       @default(true)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  deletedAt DateTime?
+  country       ClinicCountry @default(CO)
+  // Serie de los recibos de caja de la sede (DX-136), p. ej. "NOR". Si no
+  // viene al crearla, el trigger `locations_default_receipt_prefix` la deriva
+  // del nombre (3 letras, con número si ya la usa otra sede de la clínica).
+  // Única por clínica, también entre sedes retiradas: nunca se reutiliza.
+  receiptPrefix String?
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
 
   appointments       Appointment[]
   payments           Payment[]
@@ -116,10 +123,12 @@ model Location {
   scheduleBlocks     ScheduleBlock[]
   waitlistEntries    AppointmentWaitlistEntry[]
   reminderSettings   LocationReminderSettings[]
+  paymentReceipts    PaymentReceipt[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
   @@unique([tenantId, id], map: "locations_tenant_id_key")
+  @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
   // locations_tenant_id_key (tenantId, id) y se retiró en 20261017114000_patient_search_and_list_indexes.
   @@map("locations")
@@ -1114,6 +1123,13 @@ model Payment {
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
 
+  // Recibo de caja numerado (DX-136). Null en los abonos anteriores a la
+  // numeración: conservan su referencia antigua REC-xxxxxxxx.
+  receipt PaymentReceipt?
+
+  // Destino de la FK compuesta del recibo (DX-136): el recibo es del abono,
+  // de su clínica y de SU sede.
+  @@unique([tenantId, id, locationId], map: "payments_tenant_id_location_key")
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
   // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
@@ -1655,6 +1671,8 @@ enum AuditAction {
   PASSWORD_RESET
   EXPORT
   PRINT
+  // DX-136: enviar un documento por email (el recibo de caja).
+  SEND
 }
 
 // DX-009: sobre qué tipo de recurso.
@@ -1681,6 +1699,8 @@ enum AuditResourceType {
   WAITLIST_ENTRY
   // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
   STAFF_MEMBER
+  // DX-136: recibo de caja de un abono (ver, reimprimir, enviar).
+  PAYMENT_RECEIPT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -1742,6 +1762,7 @@ enum EmailTemplate {
   EMAIL_VERIFY         @map("email-verify")
   REGISTRATION_NOTICE  @map("registration-notice")
   APPOINTMENT_REMINDER @map("appointment-reminder")
+  PAYMENT_RECEIPT      @map("payment-receipt")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -2066,4 +2087,56 @@ model LoginThrottle {
   @@id([scope, keyHash])
   @@index([lastFailureAt])
   @@map("login_throttles")
+}
+
+// ---------------------------------------------------------------------------
+// Recibo de caja por abono (DX-136)
+// ---------------------------------------------------------------------------
+
+/// Último número emitido por serie de recibos. La API lo incrementa con un
+/// UPSERT en la MISMA transacción que el abono: sin duplicados (bloqueo de la
+/// fila) y sin huecos (un rollback deshace el incremento). Un trigger solo lo
+/// deja avanzar de uno en uno y nunca borrarlo. RLS forzada por clínica.
+model PaymentReceiptCounter {
+  tenantId     String @db.Uuid
+  seriesPrefix String
+  lastNumber   Int
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, seriesPrefix])
+  @@map("payment_receipt_counters")
+}
+
+/// Recibo de caja de un abono: serie de la sede + número consecutivo y la foto
+/// (`snapshot`) de lo que se imprime, congelada al emitir. Append-only en la
+/// BD: un trigger solo deja marcarlo anulado una vez y nunca borrarlo; el
+/// número tiene que ser el que acaba de dar el contador de su serie. Ver la
+/// migración 20261018090200_dx136_payment_receipts.
+model PaymentReceipt {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @db.Uuid
+  locationId   String    @db.Uuid
+  paymentId    String    @unique @db.Uuid
+  seriesPrefix String
+  number       Int
+  /// La pone el servidor de BD (trigger).
+  issuedAt     DateTime  @default(now())
+  /// Puntero suave a User, como `Payment.createdById`.
+  issuedById   String?   @db.Uuid
+  /// `ReceiptSnapshot` (src/modules/payments/domain/receipt-snapshot.ts).
+  snapshot     Json
+  voidedAt     DateTime?
+  voidedById   String?   @db.Uuid
+  voidReason   String?
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  payment  Payment  @relation(fields: [tenantId, paymentId, locationId], references: [tenantId, id, locationId], onDelete: Cascade, map: "payment_receipts_payment_fkey")
+
+  @@unique([tenantId, seriesPrefix, number], map: "payment_receipts_tenant_series_number_key")
+  // Lado hijo de la FK compuesta al abono (único: paymentId ya lo es).
+  @@unique([tenantId, paymentId, locationId], map: "payment_receipts_tenant_payment_location_key")
+  @@index([tenantId, locationId, issuedAt(sort: Desc)])
+  @@map("payment_receipts")
 }

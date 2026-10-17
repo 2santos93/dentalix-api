@@ -108,7 +108,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    evoluciones (una corregida con una adenda — DX-038) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos, listo para
-   presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, un plan de
+   presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
    pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes.
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
@@ -637,6 +637,51 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
   compartida; el objetivo de 500 ms no se alcanza con esa siembra).
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
+
+## Recibo de caja por abono (DX-136)
+
+Cada abono nuevo nace con su **recibo de caja numerado por sede** (`NOR-000123`),
+en la MISMA transacción que el abono (`issuePaymentReceipt`):
+
+- **Serie de la sede**: `locations."receiptPrefix"` (2–6 caracteres, única por
+  clínica, también entre sedes retiradas). Si no viene al crear la sede, el
+  trigger `locations_default_receipt_prefix` la deriva del nombre: 3 letras sin
+  tildes ni palabras genéricas ("Sede Norte" → `NOR`, "Sede principal" → `PRI`)
+  y, si ya la usa otra sede de la clínica, con un número detrás (`NOR2`). La
+  migración la rellenó en las sedes existentes. DX-019 dará la pantalla para
+  cambiarla.
+- **Contador**: `payment_receipt_counters` (una fila por serie) se incrementa
+  con un UPSERT en la transacción del abono: el bloqueo de la fila ordena los
+  cobros simultáneos (sin duplicados) y un rollback deshace el incremento (sin
+  huecos). Un trigger solo lo deja avanzar de uno en uno y nunca borrarlo.
+- **Recibo**: `payment_receipts` (uno por abono) guarda serie, número, quién y
+  cuándo lo emitió y una **foto inmutable** (`snapshot` jsonb): clínica y sede
+  (con sus datos fiscales; hoy solo existe el nombre y el recibo dice «Datos
+  fiscales pendientes»), paciente con el documento **enmascarado**, importe,
+  moneda, método, plan, saldo del plan tras el abono y quién cobró, y el pie
+  «Este documento no es factura». Append-only por trigger: el número tiene que
+  ser el del contador y la serie la de la sede; solo se puede marcar ANULADO
+  una vez (al anular el abono, con su fecha, autor y motivo); nunca DELETE ni
+  TRUNCATE salvo un superusuario (limpieza de las bases de test). RLS FORCE y
+  FK compuestas por clínica (y por sede, hacia el abono).
+- **Abonos anteriores** a la migración: no se renumeran. Salen con su
+  referencia antigua `REC-xxxxxxxx` y marcados «sin serie» (`legacy: true`),
+  con los datos de hoy.
+- **Endpoints** (`PAYMENT_ROLES`: ADMIN y RECEPTION; el resto, 403 en
+  español): `GET /payments/:id/receipt` (ver), `POST /payments/:id/receipt/print`
+  (reimprimir: devuelve lo mismo y deja `PRINT` en la auditoría) y
+  `POST /payments/:id/receipt/email` (202; encola en el outbox de DX-088 el
+  mismo recibo al email de la ficha del paciente, con el documento
+  enmascarado; 422 si no tiene email, 429 con los topes de la clínica). `GET
+  /treatment-plans/:id/payments` devuelve `receiptNumber` en cada abono.
+- **Auditoría**: la emisión va en el `CREATE PAYMENT` (`metadata.reason =
+  RECEIPT_ISSUED`); ver, reimprimir y enviar son `VIEW`, `PRINT` y `SEND` sobre
+  `PAYMENT_RECEIPT`.
+- **Saldo en la foto**: se calcula antes de la transacción (la tasa de cambio
+  puede pedir un proveedor externo) como el saldo previo más este abono
+  convertido con la tasa de su día. Si no se puede calcular, el recibo sale
+  sin saldo y el cobro no se bloquea. Con dos abonos simultáneos al MISMO plan,
+  la foto de cada uno no incluye el otro.
 
 ## Trabajos en segundo plano (DX-085)
 

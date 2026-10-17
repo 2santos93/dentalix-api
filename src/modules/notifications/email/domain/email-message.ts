@@ -16,6 +16,7 @@ export const EMAIL_TEMPLATES = [
   'email-verify',
   'appointment-reminder',
   'registration-notice',
+  'payment-receipt',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -81,12 +82,40 @@ export interface AppointmentReminderEmailVars {
   confirmUrl: string | null;
 }
 
+/**
+ * DX-136: recibo de caja de un abono, sacado de la foto del recibo. El
+ * documento del paciente va enmascarado; nada clínico (solo el nombre del
+ * plan). Sin enlaces: el recibo va en el propio email.
+ */
+export interface PaymentReceiptEmailVars {
+  patientName: string;
+  /** `NOR-000123`, o `REC-xxxxxxxx` si es un abono «sin serie». */
+  reference: string;
+  legacy: boolean;
+  locationName: string;
+  locationAddress: string | null;
+  /** «Razón social · NIT/NIF …», o null si los datos fiscales están pendientes. */
+  fiscalLine: string | null;
+  /** «CC ******5678», o null si el paciente no tiene documento. */
+  patientDocLabel: string | null;
+  amountLabel: string;
+  paidOnLabel: string;
+  methodLabel: string;
+  planLabel: string;
+  /** Saldo del plan tras el abono, ya formateado; null si no se conoce. */
+  balanceLabel: string | null;
+  cashierName: string | null;
+  voided: { dateLabel: string; reason: string } | null;
+  legalNotice: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
   'email-verify': EmailVerifyEmailVars;
   'appointment-reminder': AppointmentReminderEmailVars;
   'registration-notice': RegistrationNoticeEmailVars;
+  'payment-receipt': PaymentReceiptEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

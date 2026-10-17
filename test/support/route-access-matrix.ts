@@ -263,6 +263,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
+  // Recibo de caja (DX-136): loop/informes/DX-136.md.
+  'GET /payments/:id/receipt': BILLING,
+  'POST /payments/:id/receipt/print': BILLING,
+  'POST /payments/:id/receipt/email': BILLING,
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,

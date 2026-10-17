@@ -26,6 +26,7 @@ import {
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -113,6 +114,9 @@ export class RecordPaymentUseCase {
     private readonly getTreatmentPlan: GetTreatmentPlanUseCase,
     @Inject(CURRENCY_WHITELIST)
     private readonly whitelist: CurrencyWhitelist,
+    // DX-136: saldo del plan tras el abono, para la foto del recibo que el
+    // repositorio emite en la misma transacción.
+    private readonly receiptBalance: ReceiptPlanBalanceCalculator,
   ) {}
 
   /**
@@ -175,6 +179,15 @@ export class RecordPaymentUseCase {
       throw new ConflictException(notBillableMessage(plan.status));
     }
 
+    // DX-136: fuera de la transacción del abono (la tasa puede pedir un
+    // proveedor externo). Nunca falla: sin saldo, el recibo sale sin él.
+    const receiptPlanBalance = await this.receiptBalance.afterPayment({
+      treatmentPlanId,
+      amount: input.amount,
+      currency,
+      paidOn: await this.repo.resolvePaidOn(paidAt),
+    });
+
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
       patientId: plan.patientId,
@@ -186,6 +199,7 @@ export class RecordPaymentUseCase {
       createdById,
       idempotencyKey: key,
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
+      receiptPlanBalance,
     };
 
     return this.repo.create(repoInput);

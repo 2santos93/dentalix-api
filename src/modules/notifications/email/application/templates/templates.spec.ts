@@ -210,6 +210,81 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(email.text).not.toMatch(/motivo|tratamiento|diagn/i);
   });
 
+  describe('payment-receipt (DX-136)', () => {
+    const base = {
+      patientName: 'Carolina Duque',
+      reference: 'NOR-000123',
+      legacy: false,
+      locationName: 'Sede Norte',
+      locationAddress: 'Cra 15 # 93-60',
+      fiscalLine: null,
+      patientDocLabel: 'CC ******5678',
+      amountLabel: '$ 150.000',
+      paidOnLabel: '17/10/2026',
+      methodLabel: 'Efectivo',
+      planLabel: 'Plan del 01/09/2026 · Opción A: implante',
+      balanceLabel: '$ 450.000',
+      cashierName: 'Recepción Demo',
+      voided: null,
+      legalNotice: 'Este documento no es factura',
+    };
+
+    it('lleva el número, el importe, el documento enmascarado, el aviso fiscal y el pie legal', () => {
+      const email = renderEmail('payment-receipt', base, brand);
+      expect(email.subject).toBe(
+        'Recibo de caja NOR-000123 · Sonrisas del Norte',
+      );
+      expect(email.text).toContain('Hola, Carolina Duque');
+      expect(email.text).toContain('Recibo de caja N.º NOR-000123');
+      expect(email.text).toContain('Documento: CC ******5678');
+      expect(email.text).toContain('Valor: $ 150.000 · Efectivo · 17/10/2026');
+      expect(email.text).toContain('Saldo del plan tras el abono: $ 450.000');
+      expect(email.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');
+      expect(email.text).toContain('Datos fiscales pendientes');
+      expect(email.text).toContain('Este documento no es factura');
+      expect(email.html).not.toContain('<a href');
+    });
+
+    it('un recibo anulado lo dice en el asunto y en el cuerpo, con fecha y motivo', () => {
+      const email = renderEmail(
+        'payment-receipt',
+        {
+          ...base,
+          voided: { dateLabel: '18/10/2026', reason: 'Cobro duplicado' },
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Recibo de caja NOR-000123 (ANULADO) · Sonrisas del Norte',
+      );
+      expect(email.text).toContain(
+        'ANULADO el 18/10/2026. Motivo: Cobro duplicado',
+      );
+    });
+
+    it('uno sin serie lo indica; con datos fiscales los muestra; escapa lo variable', () => {
+      const email = renderEmail(
+        'payment-receipt',
+        {
+          ...base,
+          reference: 'REC-3f1c2b9e',
+          legacy: true,
+          fiscalLine: 'Sonrisas S.A.S. · NIT 900123456-7',
+          patientName: '<b>Ana</b>',
+          patientDocLabel: null,
+          balanceLabel: null,
+        },
+        brand,
+      );
+      expect(email.text).toContain('sin serie');
+      expect(email.text).toContain('Sonrisas S.A.S. · NIT 900123456-7');
+      expect(email.text).not.toContain('Datos fiscales pendientes');
+      expect(email.text).not.toContain('Documento:');
+      expect(email.text).not.toContain('Saldo del plan');
+      expect(email.html).not.toContain('<b>Ana</b>');
+    });
+  });
+
   it('rechaza un idioma sin plantilla', () => {
     expect(() =>
       renderEmail(

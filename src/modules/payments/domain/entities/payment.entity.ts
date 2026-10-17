@@ -24,4 +24,9 @@ export interface Payment {
   createdById: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Número del recibo de caja (DX-136), p. ej. `NOR-000123`; `null` en los
+   * abonos anteriores a la numeración consecutiva («sin serie»).
+   */
+  receiptNumber: string | null;
 }

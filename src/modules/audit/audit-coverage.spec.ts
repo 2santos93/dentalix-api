@@ -23,6 +23,7 @@ import { TreatmentPlansController } from '../treatment-plans/presentation/treatm
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
+import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
@@ -330,11 +331,13 @@ const EXPECTED: Record<string, AuditOptions> = {
   },
 
   'GET /payments': { action: 'VIEW', resource: 'PAYMENT' },
+  // DX-136: el recibo numerado se emite en la misma transacción que el abono.
   'POST /treatment-plans/:id/payments': {
     action: 'CREATE',
     resource: 'PAYMENT',
     resourceId: RES,
     patient: plan(),
+    reason: 'RECEIPT_ISSUED',
   },
   'GET /treatment-plans/:id/payments': {
     action: 'VIEW',
@@ -349,6 +352,25 @@ const EXPECTED: Record<string, AuditOptions> = {
   'DELETE /payments/:id': {
     action: 'VOID',
     resource: 'PAYMENT',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'payment', param: 'id' },
+  },
+  // DX-136: ver, reimprimir y enviar el recibo de caja.
+  'GET /payments/:id/receipt': {
+    action: 'VIEW',
+    resource: 'PAYMENT_RECEIPT',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'payment', param: 'id' },
+  },
+  'POST /payments/:id/receipt/print': {
+    action: 'PRINT',
+    resource: 'PAYMENT_RECEIPT',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'payment', param: 'id' },
+  },
+  'POST /payments/:id/receipt/email': {
+    action: 'SEND',
+    resource: 'PAYMENT_RECEIPT',
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
   },
@@ -435,6 +457,7 @@ const CONTROLLERS: Type[] = [
   TreatmentPlansController,
   PlanQuoteController,
   PaymentsController,
+  PaymentReceiptsController,
   PaymentPlansController,
   AccountStatementController,
   ReceivablesController,
