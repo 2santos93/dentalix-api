@@ -58,7 +58,7 @@ const PLATFORM_TABLES: Record<string, string> = {
   // DX-220 (OPS-029): latido de cada proceso worker (id técnico, papel,
   // versión y fechas). La escribe el worker de todas las clínicas y la lee
   // GET /platform/jobs/stats (solo superadmin). Ver la migración
-  // 20261018000000_dx220_job_workers_platform_audit.
+  // 20261018110000_dx220_job_workers_platform_audit.
   job_workers: 'latido de los workers de la cola de plataforma',
   // DX-220: acciones de un superadmin sobre la plataforma (reencolar un
   // trabajo), append-only y sin el payload del trabajo. Las acciones sobre
