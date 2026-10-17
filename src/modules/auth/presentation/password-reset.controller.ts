@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   HttpCode,
+  Logger,
   NotFoundException,
   Post,
   Req,
@@ -54,6 +55,8 @@ function header(req: PublicRequest, name: string): string | null {
 @RateLimit('password-reset')
 @Controller('auth')
 export class PasswordResetController {
+  private readonly logger = new Logger('PasswordReset');
+
   constructor(
     private readonly requestReset: RequestPasswordResetUseCase,
     private readonly resetPassword: ResetPasswordUseCase,
@@ -80,10 +83,18 @@ export class PasswordResetController {
   ): Promise<ForgotPasswordResponseDto> {
     const tenantId = req.tenantHost?.tenantId;
     if (tenantId) {
-      const linkBase = await this.links.forTenant(
-        tenantId,
-        req.tenantHost?.host,
-      );
+      // Un fallo leyendo el subdominio no puede cambiar la respuesta (ni
+      // volverla un 500): sin enlace seguro, no se envía nada.
+      const linkBase = await this.links
+        .forTenant(tenantId, req.tenantHost?.host)
+        .catch((err: unknown) => {
+          this.logger.warn({
+            event: 'password_reset.link_base_failed',
+            tenantId,
+            error: err instanceof Error ? err.constructor.name : typeof err,
+          });
+          return null;
+        });
       if (linkBase) {
         this.requestReset.accept({ tenantId, email: dto.email, linkBase });
       }

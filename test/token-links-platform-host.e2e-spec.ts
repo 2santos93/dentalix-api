@@ -26,6 +26,8 @@ const SUB = 'sec033-e2e';
 const PLATFORM_HOST = hostFor(SUB); // sec033-e2e.localhost
 const CANONICAL_HOST = `${SUB}.dentalix.app`; // primer dominio base
 const CUSTOM_HOST = 'odonto-sec033.test';
+// Dominio personalizado aún sin verificar: no resuelve a ninguna clínica.
+const PENDING_HOST = 'pendiente-sec033.test';
 const DOMAIN = '@sec033-e2e.test';
 const ADMIN_EMAIL = `admin${DOMAIN}`;
 const PASSWORD = 'Clave-Sec033-2026!';
@@ -45,7 +47,9 @@ async function cleanup(): Promise<void> {
   await raw.clinicMembership.deleteMany({
     where: { tenant: { subdomain: SUB } },
   });
-  await raw.tenantDomain.deleteMany({ where: { host: CUSTOM_HOST } });
+  await raw.tenantDomain.deleteMany({
+    where: { host: { in: [CUSTOM_HOST, PENDING_HOST] } },
+  });
   await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await raw.tenant.deleteMany({ where: { subdomain: SUB } });
 }
@@ -100,6 +104,14 @@ describe('Enlaces con token hacia el host de plataforma (e2e, SEC-033)', () => {
         status: 'VERIFIED',
         verifyToken: 'sec033-e2e',
         verifiedAt: new Date(),
+      },
+    });
+    await raw.tenantDomain.create({
+      data: {
+        tenantId,
+        host: PENDING_HOST,
+        status: 'PENDING',
+        verifyToken: 'sec033-e2e-pendiente',
       },
     });
     const login = await request(app.getHttpServer())
@@ -211,5 +223,63 @@ describe('Enlaces con token hacia el host de plataforma (e2e, SEC-033)', () => {
       new RegExp(`http://${CANONICAL_HOST}/invitacion/[0-9a-f]{64}`),
     );
     expect(`${email.text}${email.html}`).not.toContain(CUSTOM_HOST);
+  });
+  /** 202 idéntico y, tras dar tiempo al segundo plano, ningún email. */
+  async function forgotPasswordSendsNothing(host: string): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/forgot-password')
+      .set('X-Tenant-Host', host)
+      .send({ email: ADMIN_EMAIL })
+      .expect(202);
+    expect(res.body).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await dispatcher.whenIdle();
+    expect(mailer.sent).toHaveLength(0);
+  }
+
+  it('restablecer pedido por un host no reconocido o un dominio sin verificar: mismo 202 y no sale ningún enlace', async () => {
+    await forgotPasswordSendsNothing('clinica-ajena.example');
+    await forgotPasswordSendsNothing(PENDING_HOST);
+  });
+
+  it('restablecer con un host inyectado (`<sub>.localhost:443@evil`): el enlace va al subdominio de plataforma, nunca al host inyectado', async () => {
+    const email = await forgotPassword(`${PLATFORM_HOST}:443@evil.example`);
+    expect(email.text).toMatch(
+      new RegExp(`http://${CANONICAL_HOST}/restablecer/[A-Za-z0-9_-]{43}`),
+    );
+    expect(`${email.text}${email.html}`).not.toContain('evil.example');
+  });
+
+  it('invitar desde un host no reconocido o un dominio sin verificar: rechazado y sin email', async () => {
+    for (const host of ['clinica-ajena.example', PENDING_HOST]) {
+      seq += 1;
+      const res = await staff('post', '', host).send({
+        fullName: `Persona ${seq}`,
+        email: `persona${seq}${DOMAIN}`,
+        role: 'DENTIST',
+      });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await dispatcher.whenIdle();
+    expect(mailer.sent).toHaveLength(0);
+  });
+
+  it('el enlace de invitación llevado al subdominio sirve: se abre y se acepta en el host de plataforma', async () => {
+    const { to } = await invite(CUSTOM_HOST);
+    await dispatcher.whenIdle();
+    const match = /\/invitacion\/([0-9a-f]{64})/.exec(lastEmailTo(to).text);
+    expect(match).not.toBeNull();
+    const token = match![1];
+    await request(app.getHttpServer())
+      .get(`/api/v1/public/invitations/${token}`)
+      .set('X-Tenant-Host', CANONICAL_HOST)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/v1/public/invitations/${token}/accept`)
+      .set('X-Tenant-Host', CANONICAL_HOST)
+      .send({ password: 'Otra-Clave-Sec033-2026!' })
+      .expect(201);
   });
 });
