@@ -546,4 +546,49 @@ describe('validateEnv', () => {
       );
     });
   });
+
+  describe('cola vigilable y DNS acotado (DX-220)', () => {
+    it('acepta JOBS_HEALTH_PORT, APP_VERSION y el resolver DNS dentro de rango', () => {
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            APP_ROLE: 'worker',
+            JOBS_HEALTH_PORT: '9464',
+            APP_VERSION: 'v1.4.2+a1b2c3d',
+            DNS_RESOLVER_TIMEOUT_MS: '3000',
+            DNS_RESOLVER_TRIES: '2',
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('rechaza valores fuera de rango o con forma inválida', () => {
+      for (const [key, value] of [
+        ['JOBS_HEALTH_PORT', '0'],
+        ['JOBS_HEALTH_PORT', '70000'],
+        ['APP_VERSION', 'v 1; rm -rf'],
+        ['APP_VERSION', 'x'.repeat(65)],
+        ['DNS_RESOLVER_TIMEOUT_MS', '50'],
+        ['DNS_RESOLVER_TIMEOUT_MS', '60000'],
+        ['DNS_RESOLVER_TRIES', '0'],
+        ['DNS_RESOLVER_TRIES', '6'],
+      ]) {
+        expect(errorOf(baseEnv({ [key]: value }))).toContain(key);
+      }
+    });
+
+    it('con APP_ROLE=all la sonda del worker no puede usar el puerto de la API', () => {
+      expect(
+        errorOf(baseEnv({ APP_ROLE: 'all', JOBS_HEALTH_PORT: '3000' })),
+      ).toContain('JOBS_HEALTH_PORT no puede ser el puerto de la API');
+      expect(
+        errorOf(
+          baseEnv({ APP_ROLE: 'all', PORT: '8080', JOBS_HEALTH_PORT: '8080' }),
+        ),
+      ).toContain('JOBS_HEALTH_PORT no puede ser el puerto de la API');
+      expect(() =>
+        validateEnv(baseEnv({ APP_ROLE: 'worker', JOBS_HEALTH_PORT: '3000' })),
+      ).not.toThrow();
+    });
+  });
 });

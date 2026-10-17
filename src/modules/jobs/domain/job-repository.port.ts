@@ -1,5 +1,15 @@
 import type { Prisma } from '@prisma/client';
-import type { ClaimedJob, EnqueueResult, FailedJob, JobPayload } from './job';
+import type {
+  ClaimedJob,
+  EnqueueResult,
+  ExhaustedJob,
+  FailedJob,
+  JobPayload,
+  PlatformActor,
+  QueueSnapshot,
+  RetryResult,
+  WorkerBeat,
+} from './job';
 
 export const JOB_REPOSITORY = Symbol('JOB_REPOSITORY');
 
@@ -51,7 +61,9 @@ export interface JobRepository {
   ): Promise<boolean>;
   /**
    * Reclama hasta `limit` trabajos vencidos con esos nombres (FOR UPDATE SKIP
-   * LOCKED): RUNNING, intento + 1 y arriendo de `leaseSeconds`.
+   * LOCKED): RUNNING, intento + 1 y arriendo de `leaseSeconds`. Ignora las
+   * filas con `attempts > maxAttempts` (DX-220, OPS-030): sumarles uno
+   * violaría `jobs_attempts_check` y tumbaría el lote entero.
    */
   claim(
     names: string[],
@@ -59,6 +71,13 @@ export interface JobRepository {
     leaseSeconds: number,
     workerId: string,
   ): Promise<ClaimedJob[]>;
+  /**
+   * DX-220 (OPS-030): pasa a FAILED `LeaseExpired`, SIN sumar intento, hasta
+   * `limit` RUNNING con el arriendo vencido que ya gastaron sus intentos
+   * (`attempts >= maxAttempts`): su último intento se quedó a medias y no se
+   * repite. Corre en cada vuelta del worker antes del reclamo.
+   */
+  failExhausted(limit: number): Promise<ExhaustedJob[]>;
   /** Cierres con fencing: solo si sigue RUNNING en ESE intento. */
   complete(id: string, attempts: number): Promise<boolean>;
   reschedule(
@@ -81,4 +100,21 @@ export interface JobRepository {
   listFailed(limit: number): Promise<FailedJob[]>;
   /** Borra COMPLETED y FAILED terminados antes de `before`. */
   purgeFinished(before: Date): Promise<number>;
+  /** DX-220: latido del worker en `job_workers` (upsert, hora de la BD). */
+  beat(worker: WorkerBeat): Promise<void>;
+  /** DX-220: borra los workers sin latido desde antes de `before`. */
+  purgeStaleWorkers(before: Date): Promise<number>;
+  /**
+   * DX-220: `statement_timeout` efectivo de la conexión de la app, en ms (0 =
+   * sin tope). Entra en el umbral de la sonda del worker.
+   */
+  statementTimeoutMs(): Promise<number>;
+  /** DX-220: profundidad, retraso, workers y tareas (solo ids y fechas). */
+  snapshot(): Promise<QueueSnapshot>;
+  /**
+   * DX-220: devuelve un FAILED a PENDING (attempts 0, ya) y deja su fila en
+   * `platform_audit_events`, en una transacción. Solo si sigue FAILED (un
+   * segundo reintento, o dos a la vez, dan `not_failed`).
+   */
+  retryFailed(id: string, actor: PlatformActor): Promise<RetryResult>;
 }

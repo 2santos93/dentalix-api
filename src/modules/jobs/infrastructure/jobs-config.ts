@@ -40,7 +40,17 @@ export interface JobsConfig {
   heartbeatMs: number;
   /** Días que se conservan los trabajos terminados (COMPLETED y FAILED). */
   retentionDays: number;
+  /**
+   * DX-220: puerto de la sonda de liveness del worker (`GET /health`, sin
+   * rutas de negocio), o null para no abrirla. `JOBS_HEALTH_PORT`.
+   */
+  healthPort: number | null;
+  /** DX-220: versión que el worker apunta en su latido (`APP_VERSION`). */
+  version: string | null;
 }
+
+/** `APP_VERSION`: lo que cabe en job_workers.version (CHECK). */
+export const APP_VERSION_PATTERN = /^[A-Za-z0-9._+-]{1,64}$/;
 
 export function parseAppRole(raw: string | undefined): AppRole | null {
   const value = (raw ?? '').trim().toLowerCase();
@@ -53,6 +63,18 @@ export function parseAppRole(raw: string | undefined): AppRole | null {
 function intOr(raw: string | undefined, fallback: number): number {
   const value = raw?.trim();
   return value && /^\d{1,9}$/.test(value) ? Number(value) : fallback;
+}
+
+function portOrNull(raw: string | undefined): number | null {
+  const value = raw?.trim();
+  if (!value || !/^\d{1,5}$/.test(value)) return null;
+  const port = Number(value);
+  return port >= 1 && port <= 65_535 ? port : null;
+}
+
+function versionOrNull(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  return value && APP_VERSION_PATTERN.test(value) ? value : null;
 }
 
 /** A partir del entorno ya validado por `validateEnv` (env.validation.ts). */
@@ -88,5 +110,7 @@ export function loadJobsConfig(
     ),
     heartbeatMs: Math.floor((leaseSeconds * 1000) / 3),
     retentionDays: Math.max(1, intOr(get('JOBS_RETENTION_DAYS'), 14)),
+    healthPort: portOrNull(get('JOBS_HEALTH_PORT')),
+    version: versionOrNull(get('APP_VERSION')),
   };
 }

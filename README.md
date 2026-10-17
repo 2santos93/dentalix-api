@@ -852,6 +852,89 @@ de esquemas propios de una librería).
   de cierre. Sin worker
   nada se ejecuta (los trabajos esperan en `jobs`). Ajustes `JOBS_*`: ver
   `.env.example`.
+
+  **Sondas (DX-220).** El proceso `worker` no tiene HTTP de negocio. Con
+  `JOBS_HEALTH_PORT` abre un servidor mínimo (Node `http`, sin Nest ni
+  rutas) con **una** ruta, `GET /health`: `200 {"status":"ok"}` si la última
+  vuelta del bucle terminó hace menos de **3 × `JOBS_POLL_INTERVAL_MS` +
+  `statement_timeout`** (el de la conexión, leído al arrancar; 0 si no hay),
+  `503 {"status":"stale"}` si no, y `200 {"status":"stopping"}` durante el
+  apagado. Cualquier otra ruta, 404. Detecta un bucle **bloqueado** (una
+  sentencia que nunca vuelve); una BD caída no la tumba (reiniciar el worker
+  no arregla la BD: eso se ve en `stats`, sin latido). Decisión: httpGet
+  frente a un fichero de latido en `/tmp` leído con `exec`, porque no
+  necesita shell en la imagen ni escribir en disco y se prueba con `curl`.
+  Sin `JOBS_HEALTH_PORT` no se abre nada. Con `APP_ROLE=all` la API conserva
+  sus sondas (`/api/v1/health`, `/api/v1/health/ready`), que **no** dependen
+  del worker, y `JOBS_HEALTH_PORT` tiene que ser otro puerto. En Kubernetes:
+
+  ```yaml
+  # Deployment del worker (APP_ROLE=worker, JOBS_HEALTH_PORT=9464)
+  livenessProbe:
+    httpGet: { path: /health, port: 9464 }
+    periodSeconds: 10
+    failureThreshold: 3
+  ```
+
+  **Latido y `stats`.** En cada vuelta el worker hace upsert de su fila en
+  `job_workers` (id = `lockedBy` de sus trabajos, papel, `APP_VERSION` y
+  `lastBeatAt`); la purga diaria borra los que llevan 7 días sin latir. `GET
+  /api/v1/platform/jobs/stats` (solo superadmin con token de plataforma; 403
+  a cualquier rol de clínica) devuelve, sin payloads ni datos de pacientes:
+
+  | Campo | Qué es |
+  |-------|--------|
+  | `queue.pendingDue` / `pendingScheduled` | PENDING cuya hora llegó / programados para después |
+  | `queue.lagMs`, `oldestDueRunAt` | Retraso: ahora − `min(runAt)` de los PENDING vencidos |
+  | `queue.running`, `runningExpired` | RUNNING y los que tienen el arriendo vencido |
+  | `queue.failedLast24h` | FAILED en las últimas 24 h |
+  | `workers.alive`, `lastBeatAt`, `recent[]` | Workers con latido de menos de 60 s; los 50 más recientes |
+  | `schedules[]` | Por tarea: `cron`, `lastRunAt`, `nextRunAt`, `periodMs`, `delayMs` y `overdue` (más de **2 periodos** sin correr, o sin sincronizar: `nextRunAt` null) |
+
+  ```bash
+  curl -s -H "Authorization: Bearer $PLATFORM_TOKEN" \
+    http://localhost:3000/api/v1/platform/jobs/stats | jq
+  ```
+
+  **Reencolar un fallido.** `POST /api/v1/platform/jobs/:id/retry` (solo
+  superadmin) devuelve un FAILED a PENDING con `attempts = 0` para ya.
+  Conserva su `idempotencyKey`, que el índice único `(tenantId,
+  idempotencyKey)` garantiza que no tiene ninguna otra fila: no duplica el
+  trabajo. Una sola vez: si ya no está FAILED (otro reintento, o dos a la vez)
+  da **409**; 404 si no existe (o ya se purgó). Queda en
+  `platform_audit_events` (`JOB_RETRIED`: actor, id del trabajo, nombre,
+  clínica, intentos y tipo de error; **sin el payload**). La respuesta
+  tampoco lo lleva.
+
+  **Fila envenenada (OPS-030).** Un trabajo RUNNING con el arriendo vencido
+  que ya gastó sus intentos (`attempts >= maxAttempts`: su worker murió o su
+  cierre falló por un corte de BD) lo cierra `failExhausted` en cada vuelta,
+  **antes** del reclamo, como FAILED `LeaseExpired` sin sumar intento; y el
+  reclamo ignora cualquier fila con `attempts > maxAttempts`. Antes, una sola
+  de esas filas hacía que el reclamo (una sentencia para todo el lote)
+  violara `jobs_attempts_check` en cada vuelta y en cada worker.
+
+  **No salen recordatorios: qué mirar**, en orden:
+
+  1. `stats` → `workers.alive`. Si es 0, no hay worker vivo: ¿está
+     desplegado con `APP_ROLE=worker`? ¿Lo reinicia el orquestador en bucle
+     (sonda `/health` en 503, `kubectl describe pod`)? ¿Llega a la BD (logs
+     `jobs.poll_failed`, `jobs.worker_beat_failed`)? Un recordatorio que sale
+     más de 1 h tarde se descarta (`TOO_LATE`, DX-026).
+  2. `schedules[]` → `reminders.plan.every-5-min`. `overdue: true` con
+     workers vivos: ninguno la dispara. ¿El worker vivo es de una versión que
+     no la conoce (`workers.recent[].version`) o con otro cron (despliegue a
+     medias: solo dispara la réplica cuyo cron coincide con la fila)?
+     `nextRunAt: null`: ningún worker la ha sincronizado.
+  3. `queue.pendingDue` y `lagMs` creciendo con workers vivos: el worker no
+     da abasto (`JOBS_CONCURRENCY`, más réplicas) o está atascado en
+     trabajos largos (`queue.running`, `runningExpired`).
+  4. `queue.failedLast24h` > 0: `GET /platform/jobs/failed` (`lastError`
+     con tipo y código, p. ej. el SMTP caído) y, arreglada la causa, `POST
+     /platform/jobs/:id/retry`.
+  5. Todo sano y aun así no llega: el recordatorio se planificó pero el
+     email no salió. Mira `outbound_messages` de la cita y `email_outbox`
+     (DX-088), o si el paciente se dio de baja (DX-128).
 - **Encolar** (outbox): `JobQueue.enqueue(name, payload, { tx, runAt,
   idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
   solo existe si el negocio hace commit. Su clínica es la del contexto de la
@@ -891,10 +974,12 @@ de esquemas propios de una librería).
   | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`); la petición conserva el `fetch` como respaldo |
   | `jobs.purge-finished.daily` | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS` |
   | `collections.settle-promises.hourly` | `7 * * * *` | Cierra los compromisos de pago (DX-150): `KEPT` si los abonos registrados desde el compromiso y fechados hasta su día (zona de su sede) cubren el importe; `BROKEN` desde el día siguiente. Regla diaria, barrida cada hora para respetar la medianoche de cada sede; idempotente y auditada sin usuario (`origin: JOB`). El abono que cubre un compromiso lo cierra además en el acto |
-  | `domains.recheck-sweep.hourly` | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (un trabajo `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009) |
+  | `domains.recheck-sweep.hourly` | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (consulta el DNS de toda la ronda y encola un `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009). Si falla más de la mitad (y son ≥ 4), la ronda no cuenta (`domains.recheck_suspect`, DX-220) |
 - **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
   documentada en `test/rls-catalog.int-spec.ts`): un worker reclama trabajos de
-  todas las clínicas. `outbound_messages` es por clínica con RLS forzada: el
+  todas las clínicas. `job_workers` (latido) y `platform_audit_events`
+  (acciones de plataforma del superadmin, append-only) también, y sin columna
+  de tenant (lista `PLATFORM_TABLES` del mismo spec; DX-220). `outbound_messages` es por clínica con RLS forzada: el
   registro de mensajes al paciente (EMAIL, WHATSAPP_LINK, SMS) con el
   destinatario **enmascarado**, plantilla, estado, intentos, error y la cita
   (FK compuesta por tenant). Para EMAIL el transporte sigue siendo
@@ -1044,6 +1129,22 @@ así que desactivar o borrar surte efecto al momento.
   actor (CHECK `audit_events_actor_check`), así que queda en el log
   (`domains.disabled`, con ids, sin el host) y en la propia fila
   (`disabledAt`, `failedChecks`, `lastCheckedAt`).
+- **Freno del barrido (DX-220, OPS-033)**: el barrido consulta primero el TXT
+  de **todos** los dominios de la ronda (16 a la vez). Si más del **50 %**
+  falla (sin el TXT con el token **o** sin respuesta del DNS: un DNS medio
+  roto mezcla timeouts con NXDOMAIN falsos) y son al menos **4**, lo probable es que falle el DNS
+  propio (o la salida a internet), no que media flota de clínicas pierda su
+  dominio a la vez: la ronda **no cuenta para ninguno** (no encola nada) y
+  queda `domains.recheck_suspect` en el log (ronda y contadores, sin hosts).
+  Si no, encola cada comprobación con el resultado ya consultado (`result`:
+  `found`/`missing`); los que no respondieron van sin él y su trabajo
+  consulta el DNS con los reintentos de la cola, como antes.
+- **DNS acotado (DX-220)**: `NodeDnsResolver` crea un `Resolver` propio por
+  consulta con `timeout` `DNS_RESOLVER_TIMEOUT_MS` (3000) y `tries`
+  `DNS_RESOLVER_TRIES` (2), más un plazo duro de timeout × tries (unos 6 s):
+  c-ares alarga el timeout en cada reintento y por cada servidor, y antes se
+  usaba el resolver global sin tope. Al vencer cancela SU consulta y da
+  `ETIMEOUT` («no se sabe», nunca «no hay registro»).
 - **DNS inyectable**: puerto `DNS_RESOLVER` (`NodeDnsResolver` en producción);
   los tests lo sustituyen por `FakeDns` (y el reloj por `DomainClock`).
 

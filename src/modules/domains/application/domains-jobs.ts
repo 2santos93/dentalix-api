@@ -33,8 +33,8 @@ export class DomainsJobs implements OnModuleInit {
     this.registry.register({
       name: RECHECK_SWEEP_JOB,
       maxAttempts: 3,
-      handle: async () => {
-        await this.sweep.run();
+      handle: async (_payload, context) => {
+        await this.sweep.run(context.signal);
       },
     });
     this.registry.schedule({

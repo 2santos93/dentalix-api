@@ -19,6 +19,8 @@ describe('loadJobsConfig', () => {
       shutdownGraceMs: 20_000,
       heartbeatMs: 100_000,
       retentionDays: 14,
+      healthPort: null,
+      version: null,
     });
     expect(config.workerId).toMatch(/^[\w.-]+:\d+:[0-9a-f]{8}$/);
   });
@@ -76,5 +78,22 @@ describe('loadJobsConfig', () => {
       shutdownGraceMs: 0,
       retentionDays: 14,
     });
+  });
+
+  it('DX-220: JOBS_HEALTH_PORT abre la sonda del worker y APP_VERSION va al latido; sin ellos, null', () => {
+    expect(
+      loadJobsConfig(
+        from({ JOBS_HEALTH_PORT: '9464', APP_VERSION: 'a1b2c3d' }),
+      ),
+    ).toMatchObject({ healthPort: 9464, version: 'a1b2c3d' });
+    expect(
+      loadJobsConfig(from({ JOBS_HEALTH_PORT: ' ', APP_VERSION: '' })),
+    ).toMatchObject({ healthPort: null, version: null });
+    // Valores raros (ya los rechaza validateEnv): sin sonda y sin versión.
+    expect(
+      loadJobsConfig(
+        from({ JOBS_HEALTH_PORT: '70000', APP_VERSION: 'v 1; DROP' }),
+      ),
+    ).toMatchObject({ healthPort: null, version: null });
   });
 });

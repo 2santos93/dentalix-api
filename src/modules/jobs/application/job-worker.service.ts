@@ -14,15 +14,25 @@ import type { JobRepository } from '../domain/job-repository.port';
 import { JOBS_CONFIG } from '../infrastructure/jobs-config';
 import type { JobsConfig } from '../infrastructure/jobs-config';
 import { JobRegistry } from './job-registry';
+import { WorkerLiveness } from './worker-liveness';
+
+/** Tope de filas que failExhausted cierra por vuelta. */
+const EXHAUSTED_BATCH = 100;
 
 /**
  * Worker de la cola (DX-085). Arranca solo con `APP_ROLE=worker|all`
  * (`config.workerEnabled`); en la API (`api`) no hace nada.
  *
  * Cada vuelta (cada JOBS_POLL_INTERVAL_MS):
+ * 0. late en `job_workers` (DX-220; solo el bucle, no `runOnce`);
  * 1. sincroniza las tareas programadas nuevas o con otro cron;
  * 2. dispara las que vencieron (un solo worker por tick, ver el repositorio);
- * 3. reclama hasta JOBS_CONCURRENCY trabajos (SKIP LOCKED) y los ejecuta.
+ * 3. cierra como FAILED `LeaseExpired` los RUNNING vencidos sin intentos
+ *    (DX-220, OPS-030: `failExhausted`), para que no envenenen el reclamo;
+ * 4. reclama hasta JOBS_CONCURRENCY trabajos (SKIP LOCKED) y los ejecuta.
+ *
+ * Al final de cada vuelta apunta su liveness (`WorkerLiveness`), que lee la
+ * sonda `GET /health` de JOBS_HEALTH_PORT (JobsHealthServer).
  *
  * Un trabajo con `tenantId` corre dentro de `TenantContextService.run`, así
  * que el handler usa `runWithTenant(fn)` y la RLS lo ata a esa clínica. Un
@@ -53,13 +63,17 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private loop: Promise<void> | null = null;
   private started = false;
   private stopping = false;
+  /** Liveness del bucle (DX-220): la lee la sonda del worker. */
+  readonly liveness: WorkerLiveness;
 
   constructor(
     private readonly registry: JobRegistry,
     @Inject(JOB_REPOSITORY) private readonly repo: JobRepository,
     private readonly tenantContext: TenantContextService,
     @Inject(JOBS_CONFIG) private readonly config: JobsConfig,
-  ) {}
+  ) {
+    this.liveness = new WorkerLiveness(config.pollIntervalMs);
+  }
 
   onApplicationBootstrap(): void {
     if (this.config.workerEnabled) {
@@ -81,6 +95,17 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
       handlers: this.registry.names(),
       schedules: this.registry.schedules().map((s) => s.name),
     });
+    this.liveness.started();
+    // Umbral de la sonda: lo más que puede tardar una sentencia legítima.
+    // Sin esperar: si la BD no responde, el umbral se queda sin ese margen.
+    this.repo.statementTimeoutMs().then(
+      (ms) => this.liveness.setStatementTimeoutMs(ms),
+      (err: unknown) =>
+        this.logger.warn({
+          event: 'jobs.statement_timeout_unknown',
+          error: describeJobError(err),
+        }),
+    );
     this.scheduleNext(0);
   }
 
@@ -92,12 +117,22 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
   async stop(): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;
+    this.liveness.stopped();
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
     if (this.loop) {
-      await this.loop;
+      // Con tope (DX-220): una vuelta bloqueada (la BD no contesta) no puede
+      // retener el apagado más que la gracia.
+      let grace: NodeJS.Timeout | undefined;
+      await Promise.race([
+        this.loop,
+        new Promise<void>((resolve) => {
+          grace = setTimeout(resolve, this.config.shutdownGraceMs);
+        }),
+      ]);
+      clearTimeout(grace);
     }
     if (this.inFlight.size > 0) {
       await this.drainInFlight();
@@ -192,6 +227,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
   /** Una vuelta del bucle sin esperar a los trabajos; devuelve la próxima espera. */
   private async poll(): Promise<number> {
     try {
+      await this.beatWorker();
       await this.prepare();
       const free = this.config.concurrency - this.inFlight.size;
       if (free <= 0) return this.config.pollIntervalMs;
@@ -213,10 +249,52 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
         error: describeJobError(err),
       });
       return this.config.pollIntervalMs;
+    } finally {
+      this.liveness.loopFinished();
     }
   }
 
+  /** Latido del proceso en job_workers; si falla, la vuelta sigue. */
+  private async beatWorker(): Promise<void> {
+    if (this.config.role === 'api') return;
+    try {
+      await this.repo.beat({
+        id: this.config.workerId,
+        role: this.config.role,
+        version: this.config.version,
+      });
+    } catch (err) {
+      this.logger.warn({
+        event: 'jobs.worker_beat_failed',
+        workerId: this.config.workerId,
+        error: describeJobError(err),
+      });
+    }
+  }
+
+  /** Tareas programadas y cierre de los agotados: antes de cada reclamo. */
   private async prepare(): Promise<void> {
+    await this.runSchedules();
+    await this.failExhausted();
+  }
+
+  private async failExhausted(): Promise<void> {
+    const exhausted = await this.repo.failExhausted(EXHAUSTED_BATCH);
+    for (const job of exhausted) {
+      // Su último intento se quedó a medias (el worker murió o su cierre
+      // falló): no se repite.
+      this.logger.warn({
+        event: 'jobs.failed',
+        jobId: job.id,
+        job: job.name,
+        tenantId: job.tenantId,
+        attempt: job.attempts,
+        error: 'LeaseExpired',
+      });
+    }
+  }
+
+  private async runSchedules(): Promise<void> {
     const schedules = this.registry.schedules();
     const pending = schedules.filter((s) => !this.synced.has(s.name));
     if (pending.length > 0) {

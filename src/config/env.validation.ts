@@ -18,6 +18,9 @@
  * de trabajos en segundo plano.
  * SEC-009: `DOMAIN_RECHECK_MAX_FAILURES`, re-verificaciones fallidas seguidas
  * antes de desactivar un dominio personalizado.
+ * DX-220: `JOBS_HEALTH_PORT` (sonda de liveness del worker) y `APP_VERSION`
+ * (versión en el latido del worker); `DNS_RESOLVER_TIMEOUT_MS` y
+ * `DNS_RESOLVER_TRIES` (resolver propio de la re-verificación de dominios).
  * SEC-008: `MFA_ENCRYPTION_KEY` (cifra los secretos TOTP del MFA de los
  * superadmins; obligatoria en producción), `BREAK_GLASS_TTL_MINUTES`
  * (duración del acceso de soporte a una clínica, 5–60) y
@@ -30,8 +33,13 @@ import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audi
 import {
   DEFAULT_LEASE_SECONDS,
   DEFAULT_SHUTDOWN_GRACE_MS,
+  APP_VERSION_PATTERN,
   parseAppRole,
 } from '../modules/jobs/infrastructure/jobs-config';
+import {
+  DNS_TIMEOUT_MS_RANGE,
+  DNS_TRIES_RANGE,
+} from '../modules/domains/infrastructure/domains-config';
 import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
 import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
 import {
@@ -393,6 +401,7 @@ function jobsProblems(env: Env): string[] {
     ['JOBS_SHUTDOWN_GRACE_MS', 0, 600_000],
     ['JOBS_RETENTION_DAYS', 1, 365],
     ['MAIL_OUTBOX_RETENTION_DAYS', 7, 3650],
+    ['JOBS_HEALTH_PORT', 1, 65_535],
   ];
   for (const [key, min, max] of checks) {
     const raw = str(env, key);
@@ -415,24 +424,61 @@ function jobsProblems(env: Env): string[] {
       `JOBS_SHUTDOWN_GRACE_MS debe ser menor que JOBS_LEASE_SECONDS (en ms): ${graceMs} ≥ ${leaseMs}; si no, otro worker retoma trabajos aún en curso durante el apagado.`,
     );
   }
+  // DX-220: con APP_ROLE=all la API ya escucha en PORT; la sonda del worker
+  // necesita otro puerto.
+  const healthPort = str(env, 'JOBS_HEALTH_PORT')?.trim();
+  const httpPort = str(env, 'PORT')?.trim() ?? '3000';
+  if (
+    healthPort != null &&
+    parseAppRole(role) === 'all' &&
+    Number(healthPort) === Number(httpPort)
+  ) {
+    problems.push(
+      `JOBS_HEALTH_PORT no puede ser el puerto de la API (PORT=${httpPort}) con APP_ROLE=all.`,
+    );
+  }
+  const version = str(env, 'APP_VERSION')?.trim();
+  if (version != null && !APP_VERSION_PATTERN.test(version)) {
+    problems.push(
+      'APP_VERSION debe tener de 1 a 64 caracteres entre letras, dígitos y . _ + - (p. ej. el SHA corto de la imagen).',
+    );
+  }
   return problems;
 }
 
-/** SEC-009: re-verificación periódica de los dominios personalizados. */
+/**
+ * SEC-009: re-verificación periódica de los dominios personalizados. DX-220
+ * (OPS-033): timeout e intentos del resolver DNS propio.
+ */
 function domainProblems(env: Env): string[] {
+  const problems: string[] = [];
   const raw = str(env, 'DOMAIN_RECHECK_MAX_FAILURES')?.trim();
-  if (raw == null) return [];
-  const value = Number(raw);
-  if (
-    !/^\d{1,2}$/.test(raw) ||
-    value < 1 ||
-    value > RECHECK_MAX_FAILURES_LIMIT
-  ) {
-    return [
-      `DOMAIN_RECHECK_MAX_FAILURES debe ser un entero entre 1 y ${RECHECK_MAX_FAILURES_LIMIT} (comprobaciones horarias fallidas seguidas antes de desactivar un dominio).`,
-    ];
+  if (raw != null) {
+    const value = Number(raw);
+    if (
+      !/^\d{1,2}$/.test(raw) ||
+      value < 1 ||
+      value > RECHECK_MAX_FAILURES_LIMIT
+    ) {
+      problems.push(
+        `DOMAIN_RECHECK_MAX_FAILURES debe ser un entero entre 1 y ${RECHECK_MAX_FAILURES_LIMIT} (comprobaciones horarias fallidas seguidas antes de desactivar un dominio).`,
+      );
+    }
   }
-  return [];
+  const dns: [string, readonly [number, number], string][] = [
+    ['DNS_RESOLVER_TIMEOUT_MS', DNS_TIMEOUT_MS_RANGE, 'ms por intento'],
+    ['DNS_RESOLVER_TRIES', DNS_TRIES_RANGE, 'intentos por consulta'],
+  ];
+  for (const [key, [min, max], what] of dns) {
+    const value = str(env, key)?.trim();
+    if (value == null) continue;
+    if (!/^\d{1,6}$/.test(value) || +value < min || +value > max) {
+      problems.push(
+        `${key} debe ser un entero entre ${min} y ${max} (${what} del resolver DNS de la re-verificación de dominios).`,
+      );
+    }
+  }
+  return problems;
 }
 
 /** SEC-008: MFA de los superadmins y duración del acceso break-glass. */

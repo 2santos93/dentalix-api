@@ -5,7 +5,7 @@ import type {
   VerifiedDomainRef,
 } from '../../domain/ports/domain-recheck-source.port';
 
-/** Ver DomainRecheckSource: lectura de plataforma, solo ids. */
+/** Ver DomainRecheckSource: lectura de plataforma (ids, host y token). */
 @Injectable()
 export class PrismaDomainRecheckSource implements DomainRecheckSource {
   constructor(private readonly prisma: PrismaService) {}
@@ -23,7 +23,7 @@ export class PrismaDomainRecheckSource implements DomainRecheckSource {
         tenant: { deletedAt: null },
         ...(afterHost ? { host: { gt: afterHost } } : {}),
       },
-      select: { id: true, tenantId: true, host: true },
+      select: { id: true, tenantId: true, host: true, verifyToken: true },
       orderBy: { host: 'asc' },
       take: limit,
     });

@@ -22,4 +22,16 @@ describe('loadDomainsConfig (SEC-009)', () => {
     expect(load('21')).toBe(3);
     expect(load('x')).toBe(3);
   });
+
+  it('DX-220: resolver DNS con timeout 3000 ms y 2 intentos por defecto, configurables', () => {
+    const env = (vars: Record<string, string>) =>
+      loadDomainsConfig((key) => vars[key]);
+    expect(env({})).toMatchObject({ dnsTimeoutMs: 3000, dnsTries: 2 });
+    expect(
+      env({ DNS_RESOLVER_TIMEOUT_MS: '1500', DNS_RESOLVER_TRIES: '3' }),
+    ).toMatchObject({ dnsTimeoutMs: 1500, dnsTries: 3 });
+    expect(
+      env({ DNS_RESOLVER_TIMEOUT_MS: '50', DNS_RESOLVER_TRIES: '9' }),
+    ).toMatchObject({ dnsTimeoutMs: 3000, dnsTries: 2 });
+  });
 });
