@@ -70,6 +70,23 @@ export interface StatementPaymentPlanRow {
   installments: { sequence: number; dueDate: Date; amount: number }[];
 }
 
+/**
+ * Lo que necesita el CÁLCULO del saldo de un abono (`computeBalances`): plan,
+ * importe, moneda y si está anulado. Vale un abono suelto o la suma de los
+ * abonos vivos de un plan en una moneda (la cartera, DX-145, lee sumas).
+ */
+export type BalancePaymentRow = Pick<
+  StatementPaymentRow,
+  'treatmentPlanId' | 'amount' | 'currency' | 'voidedAt'
+>;
+
+/** Entrada mínima de `computeBalances`; `StatementSnapshot` la cumple. */
+export interface BalanceSnapshot {
+  plans: StatementPlanRow[];
+  payments: readonly BalancePaymentRow[];
+  paymentPlans: StatementPaymentPlanRow[];
+}
+
 export interface StatementSnapshot {
   plans: StatementPlanRow[];
   /** TODOS los abonos del paciente, anulados incluidos. */
@@ -156,11 +173,14 @@ export interface StatementInstallment {
   status: InstallmentStatus;
 }
 
-export interface ComputedAccountStatement {
+export interface ComputedBalances {
   summary: StatementCurrencySummary[];
   plans: StatementPlanLine[];
-  movements: StatementMovement[];
   installments: StatementInstallment[];
+}
+
+export interface ComputedAccountStatement extends ComputedBalances {
+  movements: StatementMovement[];
 }
 
 // ---------------------------------------------------------------------------
