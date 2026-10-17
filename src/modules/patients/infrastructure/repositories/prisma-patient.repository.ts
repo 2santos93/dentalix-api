@@ -166,8 +166,6 @@ export class PrismaPatientRepository implements PatientRepository {
           emergencyContactName: input.emergencyContactName,
           emergencyContactRelationship: input.emergencyContactRelationship,
           emergencyContactPhone: input.emergencyContactPhone,
-          guardianName: input.guardianName,
-          guardianDocNumber: input.guardianDocNumber,
           createdById: input.createdById,
         },
       });

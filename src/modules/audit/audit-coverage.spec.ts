@@ -9,6 +9,7 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
+import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
@@ -71,6 +72,29 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PATIENT',
     resourceId: { param: 'id' },
     patient: { param: 'id' },
+  },
+  // DX-203: responsables de pago y avisos, con el motivo y los nombres de los
+  // campos (nunca los datos del tercero).
+  'POST /patients/:patientId/responsible-parties': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'RESPONSIBLE_PARTY_ADDED',
+  },
+  'PATCH /patients/:patientId/responsible-parties/:partyId': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'RESPONSIBLE_PARTY_CHANGED',
+  },
+  'DELETE /patients/:patientId/responsible-parties/:partyId': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'RESPONSIBLE_PARTY_REMOVED',
   },
   // DX-039: archivar y retención legal de la HC.
   'DELETE /patients/:id': {
@@ -568,6 +592,7 @@ const EXPECTED: Record<string, AuditOptions> = {
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
+  PatientResponsiblePartiesController,
   MedicalHistoryController,
   ClinicalEntriesController,
   OdontogramController,

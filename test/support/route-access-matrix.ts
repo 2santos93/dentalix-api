@@ -136,6 +136,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // lectura); el canal lo cambian recepción y ADMIN.
   'GET /patients/:id/communication': EVERY_ROLE,
   'PATCH /patients/:id/communication': roles('ADMIN', 'RECEPTION'),
+  // DX-203: bloque «Responsable y familia» (dato demográfico y de cobro, no
+  // clínico): como «Editar» de la ficha, los 4 roles (loop/informes/DX-203).
+  'GET /patients/:patientId/responsible-parties': EVERY_ROLE,
+  'POST /patients/:patientId/responsible-parties': EVERY_ROLE,
+  'PATCH /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
+  'DELETE /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
   // Retención legal de la HC (loop/informes/DX-039.md): archivar, cambiar la
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.

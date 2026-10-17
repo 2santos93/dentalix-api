@@ -147,15 +147,9 @@ export class CreatePatientDto {
   @IsString()
   emergencyContactPhone?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  guardianName?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  guardianDocNumber?: string;
+  // DX-203: sin guardianName/guardianDocNumber. El acudiente es ahora un
+  // responsable (POST /patients/:id/responsible-parties); si un cliente
+  // antiguo los manda, la ValidationPipe (whitelist) los descarta.
 
   @ApiPropertyOptional({
     type: SaveMedicalHistoryDto,

@@ -21,6 +21,12 @@ export interface NoticeResponsible {
   optedOut: boolean;
 }
 
+/** País y zona de la sede con que se cuenta la edad del paciente (DX-203). */
+export interface NoticeLocation {
+  country: ClinicCountry;
+  timeZone: string;
+}
+
 export interface NoticePatientFields {
   firstName: string;
   birthDate: Date | null;

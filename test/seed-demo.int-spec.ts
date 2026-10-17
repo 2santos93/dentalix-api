@@ -34,6 +34,8 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-203: responsables (hijos de patients).
+  'patient_responsible_parties',
   'patient_implants',
   // DX-150: cobranza (hijas de patients y locations).
   'collection_notes',

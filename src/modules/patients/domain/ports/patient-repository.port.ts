@@ -52,8 +52,6 @@ export interface CreatePatientRepoInput {
   emergencyContactName?: string;
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
-  guardianName?: string;
-  guardianDocNumber?: string;
   createdById?: string;
   medicalHistory?: {
     data: MedicalHistoryVersionData;
@@ -83,8 +81,6 @@ export interface UpdatePatientRepoInput {
   emergencyContactName?: string | null;
   emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string | null;
-  guardianName?: string | null;
-  guardianDocNumber?: string | null;
 }
 
 export interface ListPatientsParams {

@@ -148,6 +148,8 @@ interface SeedA {
   waitlistEntryId: string;
   noteTemplateId: string;
   waitlistOfferId: string;
+  /** DX-203: un responsable (contacto) del paciente de A. */
+  responsiblePartyId: string;
 }
 
 interface SeedB {
@@ -365,6 +367,19 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     dueDate: futureAt(10, 15).slice(0, 10),
   });
 
+  // DX-203: un responsable (contacto pagador) del paciente de A.
+  const responsibleParty = await create(
+    app,
+    a,
+    `/patients/${patientId}/responsible-parties`,
+    {
+      fullName: 'Responsable de A',
+      email: 'responsable-a@example.com',
+      relationship: 'MOTHER',
+      isPayer: true,
+    },
+  );
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -387,6 +402,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
     waitlistOfferId: waitlistOffer.id,
+    responsiblePartyId: responsibleParty.id,
   };
 }
 
@@ -448,6 +464,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-150: cobranza.
       'collection_notes',
       'payment_promises',
+      // DX-203: responsables de pago y avisos.
+      'patient_responsible_parties',
       'location_reminder_settings',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
@@ -801,6 +819,35 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- responsables de pago y avisos (DX-203) ---
+    {
+      name: 'GET /patients/:patientId/responsible-parties',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/responsible-parties`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/responsible-parties',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/responsible-parties`,
+      body: () => ({ fullName: 'Intrusa', relationship: 'OTHER' }),
+      status: 404,
+    },
+    {
+      name: 'PATCH /patients/:patientId/responsible-parties/:partyId',
+      verb: 'patch',
+      path: () =>
+        `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
+      body: () => ({ isPayer: false, receivesNotices: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /patients/:patientId/responsible-parties/:partyId',
+      verb: 'delete',
+      path: () =>
+        `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
       status: 404,
     },
     // --- cobranza (DX-150) ---

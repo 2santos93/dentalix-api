@@ -39,7 +39,13 @@ interface CommunicationBody {
     recordedBy: { id: string; fullName: string | null } | null;
   } | null;
   reminderOptOut: { at: string; source: string } | null;
-  recipient: { kind: string; name: string | null; minor: boolean };
+  recipient: {
+    kind: string;
+    name: string | null;
+    email?: string | null;
+    minor: boolean;
+    responsiblePartyId?: string | null;
+  };
 }
 
 describe('Comunicaciones del paciente (e2e, DX-128)', () => {
@@ -115,11 +121,17 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       email: 'carolina@example.com',
       whatsappOptIn: null,
       reminderOptOut: null,
-      recipient: { kind: 'PATIENT', name: 'Carolina', minor: false },
+      recipient: {
+        kind: 'PATIENT',
+        name: 'Carolina',
+        email: 'carolina@example.com',
+        minor: false,
+        responsiblePartyId: null,
+      },
     } satisfies CommunicationBody);
   });
 
-  it('un menor: los avisos se dirigen a su tutor', async () => {
+  it('un menor: los avisos van a su responsable (DX-203)', async () => {
     const minor = await as(api().post('/api/v1/patients'), clinic.adminToken)
       .send({
         firstName: 'Mateo',
@@ -128,17 +140,29 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         docNumber: '128002',
         sex: 'M',
         birthDate: '2016-04-10',
-        guardianName: 'Carolina Duque',
+      })
+      .expect(201);
+    const minorId = (minor.body as { id: string }).id;
+    const party = await as(
+      api().post(`/api/v1/patients/${minorId}/responsible-parties`),
+      tokens[ClinicRole.RECEPTION],
+    )
+      .send({
+        fullName: 'Carolina Duque',
+        email: 'carolina.duque@example.com',
+        relationship: 'MOTHER',
       })
       .expect(201);
     const res = await as(
-      api().get(comms((minor.body as { id: string }).id)),
+      api().get(comms(minorId)),
       tokens[ClinicRole.RECEPTION],
     ).expect(200);
     expect((res.body as CommunicationBody).recipient).toEqual({
-      kind: 'GUARDIAN',
+      kind: 'RESPONSIBLE',
       name: 'Carolina',
+      email: 'carolina.duque@example.com',
       minor: true,
+      responsiblePartyId: (party.body as { id: string }).id,
     });
   });
 

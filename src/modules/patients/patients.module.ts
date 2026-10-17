@@ -3,6 +3,16 @@ import { JwtModule } from '@nestjs/jwt';
 import { CollectionsModule } from '../collections/collections.module';
 import { PatientsController } from './presentation/patients.controller';
 import { PatientCommunicationController } from './presentation/patient-communication.controller';
+import { PatientResponsiblePartiesController } from './presentation/patient-responsible-parties.controller';
+import {
+  CreateResponsiblePartyUseCase,
+  ListResponsiblePartiesUseCase,
+  RemoveResponsiblePartyUseCase,
+  RESPONSIBLES_CLOCK,
+  UpdateResponsiblePartyUseCase,
+} from './application/use-cases/responsible-parties.use-cases';
+import { RESPONSIBLE_PARTY_REPOSITORY } from './domain/ports/responsible-party-repository.port';
+import { PrismaResponsiblePartyRepository } from './infrastructure/repositories/prisma-responsible-party.repository';
 import {
   COMMUNICATION_CLOCK,
   GetPatientCommunicationUseCase,
@@ -35,7 +45,11 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   // the guard is applied on this module's controller.
   // DX-150: CollectionsModule da la marca «Saldo vencido» de la ficha.
   imports: [JwtModule.register({}), CollectionsModule],
-  controllers: [PatientsController, PatientCommunicationController],
+  controllers: [
+    PatientsController,
+    PatientCommunicationController,
+    PatientResponsiblePartiesController,
+  ],
   providers: [
     CreatePatientUseCase,
     ListPatientsUseCase,
@@ -51,6 +65,16 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     GetPatientCommunicationUseCase,
     UpdatePatientCommunicationUseCase,
     { provide: COMMUNICATION_CLOCK, useValue: () => new Date() },
+    // DX-203: bloque «Responsable y familia».
+    ListResponsiblePartiesUseCase,
+    CreateResponsiblePartyUseCase,
+    UpdateResponsiblePartyUseCase,
+    RemoveResponsiblePartyUseCase,
+    { provide: RESPONSIBLES_CLOCK, useValue: () => new Date() },
+    {
+      provide: RESPONSIBLE_PARTY_REPOSITORY,
+      useClass: PrismaResponsiblePartyRepository,
+    },
     {
       provide: PATIENT_COMMUNICATION_REPOSITORY,
       useClass: PrismaPatientCommunicationRepository,

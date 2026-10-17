@@ -51,6 +51,7 @@ interface RemindersBody {
     sentAt: string | null;
     skipReason: string | null;
     emailDelivery: string | null;
+    sentToResponsible: boolean;
     current: boolean;
   }[];
 }
@@ -382,6 +383,64 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       });
       expect(row.outboundMessageId).not.toBeNull();
       expect(JSON.stringify(row)).not.toContain('carolina');
+    });
+
+    it('DX-203: un menor sin email con responsable que recibe avisos recibe el recordatorio en el email del responsable, y la cita lo dice', async () => {
+      const minor = await as(api().post('/api/v1/patients'), clinic.adminToken)
+        .send({
+          firstName: 'Tomás',
+          lastName: 'Ortiz',
+          docType: 'TI',
+          docNumber: '26010',
+          sex: 'M',
+          birthDate: '2016-04-10',
+        })
+        .expect(201);
+      const minorId = (minor.body as { id: string }).id;
+      await as(
+        api().post(`/api/v1/patients/${minorId}/responsible-parties`),
+        tokens[ClinicRole.RECEPTION],
+      )
+        .send({
+          fullName: 'Claudia Navarro',
+          email: 'claudia.navarro@example.com',
+          relationship: 'MOTHER',
+          isPayer: true,
+        })
+        .expect(201);
+      // Sin pisar las citas de 30 min del test anterior: su recordatorio de
+      // 2 h se recupera dentro del margen de 1 h (DX-026).
+      const id = await book(minorId, new Date(Date.now() + 90 * MIN));
+
+      await runReminders();
+      const toResponsible = () =>
+        mailer.sent.filter(
+          (e) =>
+            e.subject.startsWith('Recordatorio') &&
+            e.to === 'claudia.navarro@example.com',
+        );
+      await waitFor(
+        () => toResponsible().length === 1,
+        'el despachador entrega el recordatorio al responsable',
+      );
+      const [email] = toResponsible();
+      // Saluda a la responsable y nombra al paciente.
+      expect(email.text).toContain('Hola, Claudia');
+      expect(email.text).toContain('la cita de Tomás');
+
+      const r = await reminders(id);
+      expect(r.items[1]).toMatchObject({
+        leadHours: 2,
+        state: 'SENT',
+        sentToResponsible: true,
+      });
+      // El registro de envíos lo dice (y guarda el destino enmascarado).
+      const outbound = await raw.outboundMessage.findFirstOrThrow({
+        where: { appointmentId: id },
+        select: { recipientKind: true, recipientMasked: true },
+      });
+      expect(outbound.recipientKind).toBe('RESPONSIBLE');
+      expect(outbound.recipientMasked).not.toContain('claudia.navarro');
     });
 
     it('cualquier rol de la agenda lo ve; otra clínica recibe 404', async () => {

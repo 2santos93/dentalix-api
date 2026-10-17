@@ -1,13 +1,10 @@
 import { ClinicCountry, type Prisma } from '@prisma/client';
 import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
-import type { NoticeResponsible } from '../../domain/communication/notice-recipient';
-
-/** País y zona con que se cuenta la edad del paciente (DX-203). */
-export interface NoticeLocation {
-  country: ClinicCountry;
-  timeZone: string;
-}
+import type {
+  NoticeLocation,
+  NoticeResponsible,
+} from '../../domain/communication/notice-recipient';
 
 /**
  * Los responsables VIVOS del paciente para la regla de destinatario
