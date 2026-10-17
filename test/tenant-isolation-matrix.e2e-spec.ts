@@ -944,6 +944,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({}),
       status: 404,
     },
+    // SEC-009: B no puede borrar el dominio de A.
+    {
+      name: 'DELETE /domains/:id',
+      verb: 'delete',
+      path: () => `/domains/${a.domainId}`,
+      status: 404,
+    },
   ];
 
   /**

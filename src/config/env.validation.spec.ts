@@ -422,6 +422,26 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('dominios personalizados (SEC-009)', () => {
+    it('acepta DOMAIN_RECHECK_MAX_FAILURES entre 1 y 20 (y sin definir)', () => {
+      for (const value of [undefined, '1', '3', '20']) {
+        expect(() =>
+          validateEnv(baseEnv({ DOMAIN_RECHECK_MAX_FAILURES: value })),
+        ).not.toThrow();
+      }
+    });
+
+    it('rechaza DOMAIN_RECHECK_MAX_FAILURES fuera de 1..20', () => {
+      for (const value of ['0', '21', 'tres', '-1']) {
+        expect(
+          errorOf(baseEnv({ DOMAIN_RECHECK_MAX_FAILURES: value })),
+        ).toContain(
+          'DOMAIN_RECHECK_MAX_FAILURES debe ser un entero entre 1 y 20',
+        );
+      }
+    });
+  });
+
   describe('trabajos en segundo plano (DX-085)', () => {
     it('acepta APP_ROLE api, worker y all (y sin definir)', () => {
       for (const role of [undefined, 'api', 'worker', 'all', 'WORKER']) {

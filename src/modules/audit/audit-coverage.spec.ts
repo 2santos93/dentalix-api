@@ -30,6 +30,7 @@ import { ReceivablesController } from '../receivables/presentation/receivables.c
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
+import { DomainsController } from '../domains/presentation/domains.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -459,6 +460,18 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CLINICAL_NOTE_TEMPLATE',
     resourceId: { param: 'id' },
   },
+  // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
+  'POST /domains/:id/verify': {
+    action: 'UPDATE',
+    resource: 'TENANT_DOMAIN',
+    resourceId: { param: 'id' },
+    reason: 'DOMAIN_VERIFICATION',
+  },
+  'DELETE /domains/:id': {
+    action: 'DELETE',
+    resource: 'TENANT_DOMAIN',
+    resourceId: { param: 'id' },
+  },
 };
 
 const CONTROLLERS: Type[] = [
@@ -483,6 +496,7 @@ const CONTROLLERS: Type[] = [
   ScheduleBlocksController,
   StaffController,
   ClinicalNoteTemplatesController,
+  DomainsController,
 ];
 
 function joinPath(...parts: string[]): string {

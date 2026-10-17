@@ -45,10 +45,13 @@ describe('TenantResolverService', () => {
     const svc = makeService(prisma);
     await expect(svc.resolve('citas.miclinica.com')).resolves.toBe('t-2');
     expect(prisma.tenantDomain.findFirst).toHaveBeenCalledWith({
+      // SEC-009: solo VERIFIED (ni PENDING, ni caducado, ni DISABLED por la
+      // re-verificación), vivo y de una clínica viva.
       where: {
         host: 'citas.miclinica.com',
         status: 'VERIFIED',
         deletedAt: null,
+        tenant: { deletedAt: null },
       },
       select: { tenantId: true },
     });
