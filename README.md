@@ -410,8 +410,9 @@ arbitrario tiene cuenta, ni dejar que alguien se apropie de un email ajeno.
   **En producción:** `ALTER TABLE … NO FORCE` toma un `ACCESS EXCLUSIVE` sobre
   `audit_events` (el padre) y `clinic_memberships` hasta el final de la
   transacción, que recorre todos los eventos `LOGIN` (no hay índice por
-  `action`). Mientras dura se bloquean las peticiones autenticadas y las que
-  auditan: despliégala en una ventana de poco tráfico. `lock_timeout = 5s`
+  `action`). Mientras dura esperan el inicio de sesión y todo lo que lee
+  membresías o escribe auditoría: despliégala en una ventana de poco
+  tráfico. `lock_timeout = 5s`
   solo limita la espera por el bloqueo, no lo que dura el `UPDATE`.
 - **Tope diario** de invitaciones NUEVAS por clínica:
   `INVITATION_TENANT_DAILY_LIMIT` (default 30/24 h) → 429 en español.
