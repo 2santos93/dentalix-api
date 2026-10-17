@@ -31,10 +31,10 @@ export interface ReceivablesRepository {
   locationTimeZones(): Promise<Map<string, string>>;
 
   /**
-   * Lo financiero de cada paciente vivo de la clínica con algún plan vivo, de
-   * la sede pedida: planes con su facturable, abonos vivos sumados por plan y
-   * moneda, y planes de pago con sus cuotas. Número FIJO de consultas (sin
-   * N+1), en UNA transacción REPEATABLE READ con RLS.
+   * Lo financiero de cada DEUDOR vivo de la clínica (de la sede pedida):
+   * planes vivos con su facturable, abonos vivos sumados por plan y moneda, y
+   * planes de pago con sus cuotas. Lo lee del resumen por paciente que
+   * mantiene la BD (DX-155) en UNA consulta con RLS, sin N+1.
    */
   loadLedgers(query: LedgersQuery): Promise<PatientLedger[]>;
 
