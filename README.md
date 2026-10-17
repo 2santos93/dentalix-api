@@ -748,8 +748,9 @@ módulo `src/modules/implants`, tabla `patient_implants`.
 - **Búsqueda por lote/REF** (solo ADMIN): `GET /implants/search?lot=&reference=`
   y `GET /implants/search.csv` (UTF-8 con BOM, anti fórmulas), coincidencia
   exacta sin mayúsculas sobre los índices de expresión
-  `patient_implants_tenant_lot_idx`/`_reference_idx`, en la sede activa o en
-  toda la clínica. Cada consulta deja `VIEW`/`EXPORT` sobre `PATIENT_IMPLANT`
+  `patient_implants_tenant_lot_idx`/`_reference_idx`, SIEMPRE en toda la
+  clínica (la sede activa no la acota: una retirada de lote no puede dejar
+  fuera a un paciente operado en otra sede; la columna «Sede» lo dice). Cada consulta deja `VIEW`/`EXPORT` sobre `PATIENT_IMPLANT`
   con `metadata.search = { lot, reference, rows }` (el nº de filas sale de la
   cabecera `X-Result-Count`); nada en los logs.
 - **Autocompletar**: `GET /implants/catalog` (DENTIST y ADMIN), fabricantes y

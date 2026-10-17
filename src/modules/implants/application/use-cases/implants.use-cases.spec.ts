@@ -191,11 +191,7 @@ describe('Implantes (DX-191, casos de uso)', () => {
     await expect(search.execute({ lot: ' ', reference: '' })).rejects.toThrow(
       'Indica el lote o la referencia (REF) a buscar',
     );
-    await search.execute({ lot: ' LOT-1 ', locationId: 'loc-1' });
-    expect(repo.lastQuery).toEqual({
-      lot: 'LOT-1',
-      reference: undefined,
-      locationId: 'loc-1',
-    });
+    await search.execute({ lot: ' LOT-1 ' });
+    expect(repo.lastQuery).toEqual({ lot: 'LOT-1', reference: undefined });
   });
 });

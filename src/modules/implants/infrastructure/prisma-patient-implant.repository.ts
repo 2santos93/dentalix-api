@@ -310,9 +310,6 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
         Prisma.sql`upper(btrim(i."reference")) = upper(${query.reference})`,
       );
     }
-    if (query.locationId) {
-      conditions.push(Prisma.sql`i."locationId" = ${query.locationId}::uuid`);
-    }
     const rows = await this.prisma.runWithTenant(
       (tx) =>
         tx.$queryRaw<LotRow[]>`

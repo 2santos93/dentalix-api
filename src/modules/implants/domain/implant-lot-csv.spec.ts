@@ -30,6 +30,31 @@ describe('toImplantLotCsv (DX-191)', () => {
     expect(end).toBe('');
   });
 
+  it('neutraliza también la fórmula tras espacios o un salto de línea inicial', () => {
+    const base = {
+      implantId: 'i1',
+      patientId: 'p1',
+      patientDocument: null,
+      phone: null,
+      placedOn: '2026-10-10',
+      toothNumber: '36',
+      kind: 'IMPLANT' as const,
+      manufacturer: ' =cmd|"/c calc"!A1',
+      system: '\n@SUM(1+1)',
+      reference: '\t-2+3',
+      lot: 'LOT-1',
+      professionalName: 'Dra. Ruiz',
+      locationName: 'Sede',
+      voided: false,
+    };
+    const line = toImplantLotCsv([{ ...base, patientName: 'Ana' }]).split(
+      '\r\n',
+    )[1];
+    expect(line).toContain(`"' =cmd|""/c calc""!A1"`);
+    expect(line).toContain(`"' @SUM(1+1)"`);
+    expect(line).toContain(`"'\t-2+3"`);
+  });
+
   it('sin filas, solo la cabecera', () => {
     expect(toImplantLotCsv([]).split('\r\n')).toHaveLength(2);
   });

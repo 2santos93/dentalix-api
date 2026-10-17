@@ -245,7 +245,9 @@ export class SearchImplantsByLotUseCase {
 
   /**
    * «¿Quién recibió este lote / esta referencia?»: coincidencia exacta sin
-   * distinguir mayúsculas. Con los dos, ambos deben coincidir.
+   * distinguir mayúsculas. Con los dos, ambos deben coincidir. SIEMPRE en
+   * toda la clínica: una retirada de lote no se acota a la sede activa (un
+   * paciente operado en otra sede quedaría sin avisar).
    */
   async execute(query: ImplantLotQuery): Promise<ImplantLotMatch[]> {
     const lot = searchTerm(query.lot);
@@ -255,10 +257,6 @@ export class SearchImplantsByLotUseCase {
         'Indica el lote o la referencia (REF) a buscar',
       );
     }
-    return this.repo.searchByLot({
-      lot,
-      reference,
-      locationId: query.locationId,
-    });
+    return this.repo.searchByLot({ lot, reference });
   }
 }

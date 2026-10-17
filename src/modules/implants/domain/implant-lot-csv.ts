@@ -5,7 +5,7 @@ import type { ImplantLotMatch } from './entities/patient-implant.entity';
  * CSV de «¿quién recibió este lote / esta referencia?» (DX-191). Datos
  * personales de varios pacientes: solo ADMIN y cada descarga queda auditada.
  * Mismo formato que la cartera (DX-145): UTF-8 con BOM, CRLF, texto entre
- * comillas y celdas que empiezan por = + - @ prefijadas con «'» (inyección
+ * comillas y celdas que empiezan (tras blancos) por = + - @ prefijadas con «'» (inyección
  * CSV).
  */
 export const IMPLANT_LOT_CSV_HEADER = [
@@ -24,7 +24,9 @@ export const IMPLANT_LOT_CSV_HEADER = [
   'Anulado',
 ] as const;
 
-const FORMULA_START = /^[=+\-@\t\r]/;
+// Tras espacios en blanco iniciales también: un valor «\n=…» queda « =…» al
+// aplanar el salto de línea, y algunas hojas de cálculo recortan el espacio.
+const FORMULA_START = /^[\s]*[=+\-@]|^[\t\r]/;
 
 function text(value: string | null): string {
   const raw = (value ?? '').replace(/[\r\n]+/g, ' ');

@@ -25,8 +25,6 @@ export type VoidImplantOutcome =
 export interface ImplantLotQuery {
   lot?: string;
   reference?: string;
-  /** Sede activa; sin ella, toda la clínica. */
-  locationId?: string;
 }
 
 /**

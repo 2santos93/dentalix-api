@@ -548,4 +548,114 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       expect(still.voidedAt).toBeNull();
     });
   });
+  describe('revisión: sede activa e ítem del plan', () => {
+    async function planItemOf(
+      clinic: Clinic,
+      patientId: string,
+      code: string,
+    ): Promise<string> {
+      const catalog = await call(
+        clinic,
+        clinic.adminToken,
+        'post',
+        '/catalog/items',
+        {
+          code,
+          kind: 'PROCEDURE',
+          labelEs: 'Implante',
+          color: '#2A2B3C',
+          defaultPrice: 1,
+        },
+      ).expect(201);
+      const plan = await call(
+        clinic,
+        clinic.adminToken,
+        'post',
+        `/patients/${patientId}/treatment-plans`,
+        { currency: 'COP' },
+      ).expect(201);
+      const item = await call(
+        clinic,
+        clinic.adminToken,
+        'post',
+        `/treatment-plans/${(plan.body as { id: string }).id}/items`,
+        {
+          toothNumber: '36',
+          catalogItemId: (catalog.body as { id: string }).id,
+          price: 1,
+        },
+      ).expect(201);
+      return (item.body as { id: string }).id;
+    }
+
+    it('la búsqueda por lote abarca toda la clínica aunque llegue una sede activa', async () => {
+      const norte = (
+        (
+          await call(a, a.adminToken, 'post', '/locations', {
+            name: 'Sede Norte',
+            address: 'Cra 15',
+          }).expect(201)
+        ).body as { id: string }
+      ).id;
+      await call(a, dentist.token, 'post', `/patients/${patient1}/implants`, {
+        ...IMPLANT,
+        lot: 'LOT-SEDES-01',
+      }).expect(201);
+      await call(a, dentist2, 'post', `/patients/${patient2}/implants`, {
+        ...IMPLANT,
+        toothNumber: '46',
+        lot: 'LOT-SEDES-01',
+      })
+        .set('X-Location-Id', norte)
+        .expect(201);
+
+      const res = await call(
+        a,
+        a.adminToken,
+        'get',
+        '/implants/search?lot=LOT-SEDES-01',
+      )
+        .set('X-Location-Id', norte)
+        .expect(200);
+      const rows = res.body as LotRow[];
+      expect(rows.map((r) => r.patientId).sort()).toEqual(
+        [patient1, patient2].sort(),
+      );
+      const csv = await call(
+        a,
+        a.adminToken,
+        'get',
+        '/implants/search.csv?lot=LOT-SEDES-01',
+      )
+        .set('X-Location-Id', norte)
+        .expect(200);
+      expect(csv.text.trim().split('\r\n')).toHaveLength(3);
+    });
+
+    it('el ítem del plan tiene que ser de un plan del MISMO paciente y clínica', async () => {
+      const own = await planItemOf(a, patient1, 'IMPL-REV-A1');
+      const otherPatient = await planItemOf(a, patient2, 'IMPL-REV-A2');
+      const otherClinic = await planItemOf(b, patientB, 'IMPL-REV-B1');
+      for (const itemId of [otherPatient, otherClinic]) {
+        const res = await call(
+          a,
+          dentist.token,
+          'post',
+          `/patients/${patient1}/implants`,
+          { ...IMPLANT, lot: 'LOT-PLAN-01', treatmentPlanItemId: itemId },
+        ).expect(400);
+        expect((res.body as { message: string }).message).toMatch(
+          /ítem del plan/,
+        );
+      }
+      const ok = await call(
+        a,
+        dentist.token,
+        'post',
+        `/patients/${patient1}/implants`,
+        { ...IMPLANT, lot: 'LOT-PLAN-01', treatmentPlanItemId: own },
+      ).expect(201);
+      expect(ok.body).toMatchObject({ treatmentPlanItemId: own });
+    });
+  });
 });

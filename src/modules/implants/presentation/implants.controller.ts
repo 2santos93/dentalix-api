@@ -40,7 +40,6 @@ import {
 } from '../../auth/presentation/guards/clinic-role-sets';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   GetImplantCardUseCase,
@@ -81,8 +80,7 @@ export const IMPLANT_LOT_SEARCH_FORBIDDEN_MESSAGE =
 const LOCATION_HEADER = {
   name: 'X-Location-Id',
   required: false,
-  description:
-    'Sede activa. Sin ella, la sede principal (alta) o toda la clínica (búsqueda).',
+  description: 'Sede activa. Sin ella, la sede principal.',
 };
 
 /** Cabecera que lee la auditoría de la búsqueda (nº de filas, DX-191). */
@@ -214,7 +212,6 @@ export class ImplantsController {
     private readonly catalogUseCase: ImplantCatalogUseCase,
     private readonly voidImplant: VoidImplantUseCase,
     private readonly searchByLot: SearchImplantsByLotUseCase,
-    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get('catalog')
@@ -239,9 +236,8 @@ export class ImplantsController {
   @ApiOperation({
     summary: '¿Quién recibió este lote / esta referencia?',
     description:
-      'Coincidencia exacta sin distinguir mayúsculas; con lote y REF, ambos. Incluye anulados (marcados). Solo ADMIN; queda auditada con el lote buscado y el nº de filas.',
+      'Coincidencia exacta sin distinguir mayúsculas; con lote y REF, ambos. Siempre en toda la clínica (X-Location-Id no la acota). Incluye anulados (marcados). Solo ADMIN; queda auditada con el lote buscado y el nº de filas.',
   })
-  @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: [ImplantLotMatchDto] })
   @ApiBadRequestResponse({ description: 'Sin lote ni referencia' })
   @ApiForbiddenResponse({ description: IMPLANT_LOT_SEARCH_FORBIDDEN_MESSAGE })
@@ -249,10 +245,7 @@ export class ImplantsController {
     @Query() query: ImplantLotQueryDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<ImplantLotMatch[]> {
-    const rows = await this.searchByLot.execute({
-      ...query,
-      locationId: this.tenantContext.getLocationId(),
-    });
+    const rows = await this.searchByLot.execute(query);
     res.setHeader(RESULT_COUNT_HEADER, String(rows.length));
     res.setHeader('Cache-Control', 'no-store');
     return rows;
@@ -272,7 +265,6 @@ export class ImplantsController {
     description:
       'UTF-8 con BOM. Solo ADMIN; cada descarga deja un evento EXPORT con el lote buscado y el nº de filas.',
   })
-  @ApiHeader(LOCATION_HEADER)
   @ApiProduces('text/csv')
   @ApiOkResponse({
     description: 'Fichero CSV',
@@ -284,10 +276,7 @@ export class ImplantsController {
     @Query() query: ImplantLotQueryDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<string> {
-    const rows = await this.searchByLot.execute({
-      ...query,
-      locationId: this.tenantContext.getLocationId(),
-    });
+    const rows = await this.searchByLot.execute(query);
     res.setHeader(RESULT_COUNT_HEADER, String(rows.length));
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
