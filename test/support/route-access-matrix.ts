@@ -329,4 +329,6 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /domains': ADMIN_ONLY,
   'GET /domains': ADMIN_ONLY,
   'POST /domains/:id/verify': ADMIN_ONLY,
+  // SEC-009: eliminar (soft) un dominio propio: loop/informes/SEC-009.md.
+  'DELETE /domains/:id': ADMIN_ONLY,
 };

@@ -101,9 +101,15 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
     match: 'clinic_memberships',
     message: 'Esa persona ya pertenece a la clínica.',
   },
+  // SEC-009: el host solo es único entre los VERIFIED (de todas las
+  // clínicas) y, dentro de una clínica, entre sus dominios vivos.
   {
-    match: 'tenant_domains_host_key',
-    message: 'Ese dominio ya está registrado.',
+    match: 'tenant_domains_verified_host_key',
+    message: 'Otra cuenta ya verificó ese dominio.',
+  },
+  {
+    match: 'tenant_domains_tenant_host_key',
+    message: 'Ese dominio ya está registrado en tu clínica.',
   },
   { match: 'host', message: 'Ese dominio ya está registrado.' },
 ];

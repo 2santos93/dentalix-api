@@ -42,6 +42,18 @@ describe('conflictMessageForTarget', () => {
     ).toBe('Ya existe un insumo con ese nombre en esta sede.');
   });
 
+  it('maps the custom-domain unique indexes (SEC-009)', () => {
+    expect(conflictMessageForTarget('tenant_domains_verified_host_key')).toBe(
+      'Otra cuenta ya verificó ese dominio.',
+    );
+    expect(conflictMessageForTarget('tenant_domains_tenant_host_key')).toBe(
+      'Ese dominio ya está registrado en tu clínica.',
+    );
+    expect(conflictMessageForTarget(['tenantId', 'host'])).toBe(
+      'Ese dominio ya está registrado.',
+    );
+  });
+
   it('maps the odontogram mirror index (DX-042)', () => {
     expect(conflictMessageForTarget('tooth_records_source_plan_item_key')).toBe(
       'Ese procedimiento ya está registrado en el odontograma.',

@@ -31,8 +31,17 @@ export class TenantResolverService {
       return tenant?.id ?? null;
     }
 
+    // Solo un dominio VERIFIED vivo de una clínica viva (SEC-009): un PENDING
+    // (caducado o no) o uno DISABLED por la re-verificación periódica no
+    // enrutan. Índice tenant_domains_verified_host_key. Sin caché: cada
+    // petición lo lee, así que desactivar o borrar surte efecto al momento.
     const domain = await this.prisma.tenantDomain.findFirst({
-      where: { host: parsed.host, status: 'VERIFIED', deletedAt: null },
+      where: {
+        host: parsed.host,
+        status: 'VERIFIED',
+        deletedAt: null,
+        tenant: { deletedAt: null },
+      },
       select: { tenantId: true },
     });
     return domain?.tenantId ?? null;

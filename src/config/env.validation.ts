@@ -16,6 +16,8 @@
  * emails van al ConsoleMailer.
  * DX-085: `APP_ROLE` (api | worker | all) y los ajustes `JOBS_*` de la cola
  * de trabajos en segundo plano.
+ * SEC-009: `DOMAIN_RECHECK_MAX_FAILURES`, re-verificaciones fallidas seguidas
+ * antes de desactivar un dominio personalizado.
  */
 
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
@@ -25,6 +27,7 @@ import {
   DEFAULT_SHUTDOWN_GRACE_MS,
   parseAppRole,
 } from '../modules/jobs/infrastructure/jobs-config';
+import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -404,6 +407,23 @@ function jobsProblems(env: Env): string[] {
   return problems;
 }
 
+/** SEC-009: re-verificación periódica de los dominios personalizados. */
+function domainProblems(env: Env): string[] {
+  const raw = str(env, 'DOMAIN_RECHECK_MAX_FAILURES')?.trim();
+  if (raw == null) return [];
+  const value = Number(raw);
+  if (
+    !/^\d{1,2}$/.test(raw) ||
+    value < 1 ||
+    value > RECHECK_MAX_FAILURES_LIMIT
+  ) {
+    return [
+      `DOMAIN_RECHECK_MAX_FAILURES debe ser un entero entre 1 y ${RECHECK_MAX_FAILURES_LIMIT} (comprobaciones horarias fallidas seguidas antes de desactivar un dominio).`,
+    ];
+  }
+  return [];
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -422,6 +442,7 @@ export function validateEnv(env: Env): Env {
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
   problems.push(...jobsProblems(env));
+  problems.push(...domainProblems(env));
 
   if (problems.length > 0) {
     throw new Error(

@@ -29,6 +29,7 @@ import { AccountStatementController } from '../account-statement/presentation/ac
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
+import { DomainsController } from '../domains/presentation/domains.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -440,6 +441,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'userId' },
     reason: 'LOGIN_UNLOCKED',
   },
+
+  // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
+  'POST /domains/:id/verify': {
+    action: 'UPDATE',
+    resource: 'TENANT_DOMAIN',
+    resourceId: { param: 'id' },
+    reason: 'DOMAIN_VERIFICATION',
+  },
+  'DELETE /domains/:id': {
+    action: 'DELETE',
+    resource: 'TENANT_DOMAIN',
+    resourceId: { param: 'id' },
+  },
 };
 
 const CONTROLLERS: Type[] = [
@@ -463,6 +477,7 @@ const CONTROLLERS: Type[] = [
   ReceivablesController,
   ScheduleBlocksController,
   StaffController,
+  DomainsController,
 ];
 
 function joinPath(...parts: string[]): string {

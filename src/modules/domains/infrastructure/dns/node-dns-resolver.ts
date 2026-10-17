@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { resolveTxt } from 'node:dns/promises';
-import type { DnsResolver } from '../../domain/ports/dns-resolver.port';
+import {
+  DnsLookupError,
+  type DnsResolver,
+} from '../../domain/ports/dns-resolver.port';
+
+/** Respuestas definitivas: el nombre no existe o no tiene TXT. */
+const NO_RECORD = new Set(['ENOTFOUND', 'ENODATA']);
 
 @Injectable()
 export class NodeDnsResolver implements DnsResolver {
@@ -9,9 +15,15 @@ export class NodeDnsResolver implements DnsResolver {
       // resolveTxt returns string[][] (each record can be chunked); join chunks.
       const records = await resolveTxt(name);
       return records.map((chunks) => chunks.join(''));
-    } catch {
-      // ENOTFOUND / ENODATA / SERVFAIL -> treat as "no record yet".
-      return [];
+    } catch (error) {
+      const code =
+        error instanceof Error &&
+        typeof (error as { code?: unknown }).code === 'string'
+          ? (error as Error & { code: string }).code
+          : 'UNKNOWN';
+      if (NO_RECORD.has(code)) return [];
+      // SERVFAIL / ETIMEOUT / ECONNREFUSED…: no se sabe; quien llama decide.
+      throw new DnsLookupError(code);
     }
   }
 }
