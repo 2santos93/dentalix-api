@@ -276,6 +276,11 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     body: 'Yo, {{paciente}}, autorizo el procedimiento.',
   });
   const location = await create(app, a, '/locations', { name: 'Sede Norte A' });
+  // Recordatorios por sede (DX-026): A los activa en su sede nueva.
+  await api(app, a, 'put', `/reminder-settings/${location.id}`, {
+    enabled: true,
+    leadHours: [48, 2],
+  }).expect(200);
   const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
   const assistant = await seedMember(raw, a, ClinicRole.ASSISTANT);
   await api(app, a, 'delete', `/staff/${assistant.userId}`).expect((res) =>
@@ -400,6 +405,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'email_outbox',
       'tenant_domains',
       'prescription_templates',
+      'location_reminder_settings',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -489,6 +495,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'post',
       path: () => `/appointments/${a.appointmentId}/confirmation-link`,
       body: () => ({}),
+      status: 404,
+    },
+    {
+      name: 'GET /appointments/:id/reminders',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/reminders`,
+      status: 404,
+    },
+    // --- reminders (DX-026) ---
+    {
+      name: 'PUT /reminder-settings/:locationId',
+      verb: 'put',
+      path: () => `/reminder-settings/${a.locationId}`,
+      body: () => ({ enabled: false, leadHours: [] }),
       status: 404,
     },
     // --- dental-catalog ---
