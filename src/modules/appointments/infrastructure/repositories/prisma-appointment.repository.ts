@@ -126,6 +126,16 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const tenantId = this.requireTenantId();
     const appointment = await this.prisma.runWithTenant(async (tx) => {
+      if (input.waitlistEntryId !== undefined) {
+        // Dos INSERT simultáneos pueden esperarse mutuamente dentro de EXCLUDE
+        // (40P01), antes de producir el solape 23P01. Ordenar las asignaciones
+        // del mismo profesional evita ese ciclo; la constraint sigue arbitrando
+        // el horario y el caso de uso conserva su 409 específico.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+          hashtext('dx_waitlist_assignment:' || ${tenantId}),
+          hashtext(${input.providerId})
+        )`;
+      }
       const created = await tx.appointment.create({
         data: {
           // Sede explícita del caso de uso (DX-122: la de la entrada de
