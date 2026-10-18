@@ -1,0 +1,63 @@
+[Nest] 85316  - 10/18/2026, 11:07:43 PM     LOG [Collections] Object(4) {
+  event: 'collections.settled',
+  kept: 1,
+  broken: 1,
+  failed: 0
+}
+[Nest] 85316  - 10/18/2026, 11:07:43 PM     LOG [Collections] Object(4) {
+  event: 'collections.settled',
+  kept: 0,
+  broken: 0,
+  failed: 0
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM     LOG [Domains] Object(4) {
+  event: 'domains.recheck_planned',
+  planned: 1,
+  missing: 0,
+  inconclusive: 0
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM     LOG [Domains] Object(4) {
+  event: 'domains.recheck_planned',
+  planned: 1,
+  missing: 1,
+  inconclusive: 0
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM    WARN [Domains] Object(5) {
+  event: 'domains.recheck_failed',
+  domainId: '1a3baf65-e93d-4f1e-9d75-51b0ad0969ad',
+  tenantId: '6a502a56-d5c4-41d0-be4e-77248429143f',
+  failedChecks: 1,
+  maxFailures: 3
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM     LOG [Domains] Object(4) {
+  event: 'domains.recheck_planned',
+  planned: 1,
+  missing: 1,
+  inconclusive: 0
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM    WARN [Domains] Object(5) {
+  event: 'domains.recheck_failed',
+  domainId: '1a3baf65-e93d-4f1e-9d75-51b0ad0969ad',
+  tenantId: '6a502a56-d5c4-41d0-be4e-77248429143f',
+  failedChecks: 2,
+  maxFailures: 3
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM     LOG [Domains] Object(4) {
+  event: 'domains.recheck_planned',
+  planned: 1,
+  missing: 1,
+  inconclusive: 0
+}
+[Nest] 85316  - 10/18/2026, 11:07:51 PM    WARN [Domains] Object(5) {
+  event: 'domains.disabled',
+  domainId: '1a3baf65-e93d-4f1e-9d75-51b0ad0969ad',
+  tenantId: '6a502a56-d5c4-41d0-be4e-77248429143f',
+  failedChecks: 3,
+  maxFailures: 3
+}
+
+Test Suites: 59 passed, 59 total
+Tests:       642 passed, 642 total
+Snapshots:   0 total
+Time:        93.409 s
+Ran all test suites.

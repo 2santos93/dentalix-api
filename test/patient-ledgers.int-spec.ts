@@ -1,3 +1,9 @@
+import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -230,7 +236,6 @@ async function expectInSync(s: Seeded): Promise<void> {
   expect(await ledgersOf(s.tenantId)).toEqual(await expectedOf(s.tenantId));
 }
 
-const sleep = (n: number) => new Promise((r) => setTimeout(r, n));
 const GUARD = /restrict_violation|23001|lo mantiene la base de datos/;
 
 describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int)', () => {
@@ -642,17 +647,28 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
     // El primero abona y se queda con la transacción abierta; el segundo
     // abona mientras tanto y espera el bloqueo de la fila del resumen. Al
     // seguir, recalcula con una foto que ya ve el primero.
-    const slow = as(a, async (tx) => {
-      await pay(a, planId, ana, 100000, { tx });
-      await sleep(400);
-    });
-    await sleep(100);
-    const fast = pay(a, planId, ana, 70000);
-    const items = Promise.all([
-      addItem(a, planId, 1000),
-      addItem(a, planId, 2000),
-    ]);
-    await Promise.all([slow, fast, items]);
+    const locked = gate<string>();
+    const release = gate();
+    const slow = settle(
+      as(a, async (tx) => {
+        await pay(a, planId, ana, 100000, { tx });
+        locked.open(await transactionId(tx));
+        await release.wait;
+      }),
+    );
+    const xid = await locked.wait;
+    const fast = settle(pay(a, planId, ana, 70000));
+    const items = settle(
+      Promise.all([addItem(a, planId, 1000), addItem(a, planId, 2000)]),
+    );
+    try {
+      await waitForTransactionWaiters(raw, xid);
+    } finally {
+      release.open();
+      for (const result of await Promise.all([slow, fast, items])) {
+        expect(result.status).toBe('fulfilled');
+      }
+    }
     expect((await rowOf(a, ana))?.ledger.plans[0].slice(5, 7)).toEqual([
       503000, 170000,
     ]);
@@ -667,7 +683,10 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
     // no esperaran, el primero confirmaría una fila calculada sin ellos.
     const ana = await newPatient(a);
     const bea = await newPatient(a);
-    const slow = (patientId: string) =>
+    const release = gate();
+    const anaLocked = gate<string>();
+    const beaLocked = gate<string>();
+    const slow = (patientId: string, locked: ReturnType<typeof gate<string>>) =>
       as(a, async (tx) => {
         const plan = await tx.treatmentPlan.create({
           data: { tenantId: a.tenantId, patientId, currency: 'COP' },
@@ -683,20 +702,37 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
             status: 'ACCEPTED',
           },
         });
-        await sleep(400);
+        locked.open(await transactionId(tx));
+        await release.wait;
       });
-    const first = Promise.all([slow(ana), slow(bea)]);
-    await sleep(150);
-    await Promise.all([
-      visit(a, ana, a.sede2, 1),
-      as(a, (tx) =>
-        tx.patient.update({
-          where: { id: bea },
-          data: { deletedAt: new Date() },
-        }),
-      ),
+    const first = settle(
+      Promise.all([slow(ana, anaLocked), slow(bea, beaLocked)]),
+    );
+    const [anaXid, beaXid] = await Promise.all([
+      anaLocked.wait,
+      beaLocked.wait,
     ]);
-    await first;
+    const following = settle(
+      Promise.all([
+        visit(a, ana, a.sede2, 1),
+        as(a, (tx) =>
+          tx.patient.update({
+            where: { id: bea },
+            data: { deletedAt: new Date() },
+          }),
+        ),
+      ]),
+    );
+    try {
+      await Promise.all([
+        waitForTransactionWaiters(raw, anaXid),
+        waitForTransactionWaiters(raw, beaXid),
+      ]);
+    } finally {
+      release.open();
+      expect((await first).status).toBe('fulfilled');
+      expect((await following).status).toBe('fulfilled');
+    }
     expect((await rowOf(a, ana))?.locationId).toBe(a.sede2);
     expect((await rowOf(a, bea))?.owing).toBe(false);
     await expectInSync(a);
