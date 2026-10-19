@@ -118,8 +118,9 @@ CREATE TRIGGER "clinical_entry_diagnoses_server_timestamp"
   FOR EACH ROW EXECUTE FUNCTION "dx_clinical_record_server_timestamp"();
 
 -- Solo con su evolución: el diagnóstico se inserta en la MISMA transacción que
--- la evolución (su createdAt, que pone el servidor, es CURRENT_TIMESTAMP: el
--- inicio de la transacción). Añadir un diagnóstico a una evolución ya guardada
+-- la evolución (su createdAt lo pone el servidor en UTC, DX-226:
+-- timezone('UTC', now()), el inicio de la transacción, sea cual sea la zona
+-- de la sesión). Añadir un diagnóstico a una evolución ya guardada
 -- la cambiaría a posteriori. SECURITY INVOKER: lee la evolución bajo la RLS
 -- del rol que inserta. search_path fijo y tabla calificada (SEC-032).
 CREATE FUNCTION "dx_clinical_entry_diagnosis_with_entry"() RETURNS trigger
@@ -132,7 +133,7 @@ BEGIN
      WHERE e."tenantId" = NEW."tenantId"
        AND e."patientId" = NEW."patientId"
        AND e."id" = NEW."clinicalEntryId"
-       AND e."createdAt" = CURRENT_TIMESTAMP::timestamp(3)
+       AND e."createdAt" = pg_catalog.timezone('UTC', pg_catalog.now())::timestamp(3)
   ) THEN
     RAISE EXCEPTION 'clinical_entry_diagnoses es inalterable: un diagnóstico solo se registra junto con su evolución; para corregir se añade una adenda y una evolución nueva (DX-212)'
       USING ERRCODE = 'insufficient_privilege';
