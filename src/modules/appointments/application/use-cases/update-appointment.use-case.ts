@@ -216,6 +216,16 @@ export class UpdateAppointmentUseCase {
         throw new BadRequestException('End must be after start');
       }
 
+      // DX-200: con el paciente en la clínica la cita sigue siendo de HOY:
+      // moverla a otro día la dejaría «en curso» fuera de cualquier panel.
+      // Cambiar de profesional o de hora dentro del día sí se puede.
+      if (
+        isInClinic(existing.status) &&
+        !(await this.sameCivilDay(existing, nextStart))
+      ) {
+        throw new ConflictException(PATIENT_FLOW_MESSAGES.moveInClinic);
+      }
+
       // No re-agendar hacia el pasado. Deliberadamente SOLO dentro de la rama
       // de reschedule: una cita que ya pasó se sigue pudiendo completar,
       // cancelar o editarle notas/motivo (patch sin start/end) — bloquear eso
@@ -438,6 +448,7 @@ export class UpdateAppointmentUseCase {
       to,
       role: auditContext?.actor.role ?? null,
       isToday,
+      arrived: existing.arrivedAt !== null,
     });
     if (!verdict.ok) {
       throw verdict.kind === 'FORBIDDEN'
@@ -454,9 +465,16 @@ export class UpdateAppointmentUseCase {
         existing.arrivedAt !== null ||
         existing.seatedAt !== null ||
         existing.readyForCheckoutAt !== null;
+      // También condicionado al estado leído: si mientras tanto alguien marcó
+      // «Llegó», cancelar o marcar no-show sobre lo leído no lo pisa (409).
       return pending && hasTimes
-        ? { arrivedAt: null, seatedAt: null, readyForCheckoutAt: null }
-        : {};
+        ? {
+            expectStatus: from,
+            arrivedAt: null,
+            seatedAt: null,
+            readyForCheckoutAt: null,
+          }
+        : { expectStatus: from };
     }
     const now = new Date();
     return {
@@ -468,12 +486,20 @@ export class UpdateAppointmentUseCase {
   }
 
   /** ¿La cita es de hoy en la zona de su sede (reloj del servidor)? */
-  private async isToday(appointment: Appointment): Promise<boolean> {
+  private isToday(appointment: Appointment): Promise<boolean> {
+    return this.sameCivilDay(appointment, new Date());
+  }
+
+  /** ¿`instant` cae en el mismo día civil que la cita, en la zona de su sede? */
+  private async sameCivilDay(
+    appointment: Appointment,
+    instant: Date,
+  ): Promise<boolean> {
     const location = await this.locations.findById(appointment.locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
     return (
       civilDateIn(appointment.start, location.timeZone) ===
-      civilDateIn(new Date(), location.timeZone)
+      civilDateIn(instant, location.timeZone)
     );
   }
 

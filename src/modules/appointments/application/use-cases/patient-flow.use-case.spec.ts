@@ -277,6 +277,97 @@ describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
     expect(again.arrivedAt).toBeNull();
   });
 
+  it('cualquier cambio de estado es condicional: si llegó mientras tanto, el no-show es 409', async () => {
+    const { repo, uc } = setup();
+    const a = todayAppointment(repo, AppointmentStatus.SCHEDULED);
+    // Recepción abrió la cita en SCHEDULED; entre la lectura y la escritura
+    // otra persona marcó «Llegó».
+    const original = repo.findById.bind(repo);
+    let calls = 0;
+    jest.spyOn(repo, 'findById').mockImplementation(async (id) => {
+      const found = await original(id);
+      if (calls++ === 0) {
+        await repo.update(id, {
+          status: AppointmentStatus.ARRIVED,
+          arrivedAt: new Date(),
+          preArrivalStatus: AppointmentStatus.SCHEDULED,
+        });
+      }
+      return found;
+    });
+    await expect(
+      uc.execute(
+        a.id,
+        { status: AppointmentStatus.NO_SHOW },
+        ctx(ClinicRole.RECEPTION),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect((await original(a.id))?.status).toBe(AppointmentStatus.ARRIVED);
+  });
+
+  it('una cita a la que el paciente llegó nunca pasa a no-show (ni tras cancelarla o completarla)', async () => {
+    const { repo, uc } = setup();
+    const left = todayAppointment(repo);
+    await uc.execute(
+      left.id,
+      { status: AppointmentStatus.ARRIVED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    await uc.execute(
+      left.id,
+      { status: AppointmentStatus.CANCELLED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    await expect(
+      uc.execute(
+        left.id,
+        { status: AppointmentStatus.NO_SHOW },
+        ctx(ClinicRole.RECEPTION),
+      ),
+    ).rejects.toThrow(/no es una inasistencia/);
+
+    const done = todayAppointment(repo);
+    await uc.execute(
+      done.id,
+      { status: AppointmentStatus.ARRIVED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    await uc.execute(
+      done.id,
+      { status: AppointmentStatus.COMPLETED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    await expect(
+      uc.execute(
+        done.id,
+        { status: AppointmentStatus.NO_SHOW },
+        ctx(ClinicRole.ADMIN),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect((await repo.findById(done.id))?.status).toBe(
+      AppointmentStatus.COMPLETED,
+    );
+  });
+
+  it('con el paciente en la clínica la cita no se mueve a otro día', async () => {
+    const { repo, uc } = setup();
+    const a = todayAppointment(repo);
+    await uc.execute(
+      a.id,
+      { status: AppointmentStatus.ARRIVED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    const start = new Date(a.start.getTime() + 24 * HOUR);
+    await expect(
+      uc.execute(
+        a.id,
+        { start, end: new Date(start.getTime() + 30 * 60 * 1000) },
+        ctx(ClinicRole.RECEPTION),
+      ),
+    ).rejects.toThrow(/en la clínica/);
+    expect((await repo.findById(a.id))?.start).toEqual(a.start);
+  });
+
   describe('«Deshacer llegada»', () => {
     it('vuelve al estado anterior, borra la hora y queda en auditoría', async () => {
       const { repo, uc, drafts } = setup();

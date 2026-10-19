@@ -60,6 +60,8 @@ export const PATIENT_FLOW_MESSAGES = {
   backToScheduled:
     'Para volver a agendada usa «Deshacer llegada» (solo antes de pasar al sillón).',
   undoNotArrived: 'Solo se deshace la llegada de un paciente en espera.',
+  moveInClinic:
+    'El paciente está en la clínica: completa la cita o deshaz la llegada antes de moverla a otro día.',
   stale: 'La cita cambió mientras tanto. Recarga la agenda.',
 } as const;
 
@@ -89,6 +91,12 @@ export interface TransitionInput {
   role: ClinicRole | null;
   /** La cita es de hoy en la zona de su sede. */
   isToday: boolean;
+  /**
+   * El paciente llegó en esta cita (`arrivedAt`), aunque ya haya salido del
+   * flujo (completada, o cancelada tras irse sin pasar al sillón): nunca es
+   * una inasistencia.
+   */
+  arrived?: boolean;
 }
 
 /**
@@ -125,6 +133,11 @@ export function checkStatusTransition(input: TransitionInput): TransitionCheck {
       return allowed(role, CHAIRSIDE_ROLES)
         ? OK
         : forbidden(PATIENT_FLOW_MESSAGES.chairsideForbidden);
+  }
+
+  // Llegó (aunque luego se completara o se cancelara): nunca un no-show.
+  if (to === AppointmentStatus.NO_SHOW && input.arrived) {
+    return conflict(PATIENT_FLOW_MESSAGES.notNoShow);
   }
 
   if (!isInClinic(from)) return OK;

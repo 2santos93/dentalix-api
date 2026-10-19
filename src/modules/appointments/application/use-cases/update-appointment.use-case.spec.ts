@@ -212,6 +212,8 @@ describe('UpdateAppointmentUseCase', () => {
       status: AppointmentStatus.CONFIRMED,
       confirmationSentAt: null,
       callbackRequestedAt: null,
+      // DX-200: el cambio va condicionado al estado leído.
+      expectStatus: AppointmentStatus.SCHEDULED,
     });
     expect(overlapChecked).toBe(false);
   });
@@ -596,6 +598,7 @@ describe('UpdateAppointmentUseCase', () => {
         status: AppointmentStatus.COMPLETED,
         confirmationSentAt: null,
         callbackRequestedAt: null,
+        expectStatus: AppointmentStatus.SCHEDULED,
       });
     });
 

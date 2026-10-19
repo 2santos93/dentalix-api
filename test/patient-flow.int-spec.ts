@@ -9,6 +9,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
 import { ListInClinicUseCase } from '../src/modules/appointments/application/use-cases/list-in-clinic.use-case';
+import { overlapExclusionScope } from '../src/modules/appointments/application/appointment-overlap-error';
 
 // DX-200, capa DB del flujo del paciente en la clínica:
 //  1. las migraciones sobre una BD con citas en todos los estados de antes:
@@ -398,5 +399,69 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const rejected = results.find((r) => r.status === 'rejected');
     expect(String(rejected?.reason)).toMatch(/cambió mientras tanto/);
+  });
+  it('un no-show a la vez que «Llegó»: gana uno y el otro es 409 (no un 500 de la CHECK)', async () => {
+    const start = new Date(`${DAY}T15:00:00.000-05:00`);
+    const appt = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.main,
+        patientId: a.patientId,
+        providerId: DOCTOR,
+        start,
+        end: new Date(start.getTime() + 20 * 60_000),
+        status: AppointmentStatus.SCHEDULED,
+      },
+    });
+    const arrive = () =>
+      tenantContext.run(a.tenantId, a.main, () =>
+        repo.update(appt.id, {
+          status: AppointmentStatus.ARRIVED,
+          arrivedAt: start,
+          preArrivalStatus: AppointmentStatus.SCHEDULED,
+          expectStatus: AppointmentStatus.SCHEDULED,
+        }),
+      );
+    const noShow = () =>
+      tenantContext.run(a.tenantId, a.main, () =>
+        repo.update(appt.id, {
+          status: AppointmentStatus.NO_SHOW,
+          expectStatus: AppointmentStatus.SCHEDULED,
+        }),
+      );
+    const results = await Promise.allSettled([arrive(), noShow()]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected');
+    expect(String(rejected?.reason)).toMatch(/cambió mientras tanto/);
+  });
+
+  it('reactivar una cita cancelada en un hueco ya ocupado sigue siendo un solape (23P01 → 409)', async () => {
+    const start = new Date(`${DAY}T16:00:00.000-05:00`);
+    const base = {
+      tenantId: a.tenantId,
+      locationId: a.main,
+      patientId: a.patientId,
+      providerId: OTHER_DOCTOR,
+      start,
+      end: new Date(start.getTime() + 20 * 60_000),
+    };
+    const cancelled = await raw.appointment.create({
+      data: { ...base, status: AppointmentStatus.CANCELLED },
+    });
+    await raw.appointment.create({
+      data: { ...base, status: AppointmentStatus.SCHEDULED },
+    });
+    const error = await tenantContext
+      .run(a.tenantId, a.main, () =>
+        repo.update(cancelled.id, {
+          status: AppointmentStatus.SCHEDULED,
+          expectStatus: AppointmentStatus.CANCELLED,
+        }),
+      )
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(overlapExclusionScope(error)).not.toBeNull();
   });
 });
