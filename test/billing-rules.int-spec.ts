@@ -1,4 +1,10 @@
 import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
+import {
   ClinicRole,
   PrismaClient,
   TreatmentPlanItemStatus,
@@ -259,28 +265,44 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
 
     it('el abono bloquea el plan: una cancelación concurrente espera a su COMMIT', async () => {
       const planId = await seedPlan(TreatmentPlanStatus.ACCEPTED);
-      // Transacción que toma el plan FOR UPDATE como el PATCH de cancelar y
-      // lo cancela; el INSERT del abono, que pide FOR SHARE, espera y luego
-      // ve CANCELLED → 409.
-      let release!: () => void;
-      const held = new Promise<void>((resolve) => (release = resolve));
-      const locker = owner.$transaction(
-        async (tx) => {
-          await tx.$queryRaw`SELECT "id" FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR UPDATE`;
-          await tx.treatmentPlan.update({
-            where: { id: planId },
-            data: { status: TreatmentPlanStatus.CANCELLED },
-          });
-          await held;
-        },
-        { timeout: 20_000 },
+      // NO KEY UPDATE choca con FOR SHARE, pero no con la FK (KEY SHARE).
+      // Así la prueba no puede pasar por el bloqueo implícito de la FK si
+      // desaparece el FOR SHARE del repositorio (prueba mutante DX-227).
+      const locked = gate<string>();
+      const release = gate();
+      const locker = settle(
+        owner.$transaction(
+          async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR NO KEY UPDATE`;
+            locked.open(await transactionId(tx));
+            await release.wait;
+            await tx.treatmentPlan.update({
+              where: { id: planId },
+              data: { status: TreatmentPlanStatus.CANCELLED },
+            });
+          },
+          { timeout: 20_000 },
+        ),
       );
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      const attempt = inTenant(() => recordPayment.execute(planId, body));
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      release();
-      await locker;
-      await expect(attempt).rejects.toMatchObject({ status: 409 });
+      let attempt: ReturnType<typeof settle> | undefined;
+      try {
+        const xid = await locked.wait;
+        attempt = settle(inTenant(() => recordPayment.execute(planId, body)));
+        await waitForTransactionWaiters(owner, xid);
+      } finally {
+        // Se libera incluso si el sondeo falla; no quedan transacciones vivas.
+        release.open();
+        expect(await locker).toEqual({ status: 'fulfilled', value: undefined });
+        if (attempt) {
+          expect(await attempt).toMatchObject({
+            status: 'rejected',
+            reason: { status: 409 },
+          });
+        }
+      }
+      expect(
+        await owner.payment.count({ where: { treatmentPlanId: planId } }),
+      ).toBe(0);
     });
   });
 

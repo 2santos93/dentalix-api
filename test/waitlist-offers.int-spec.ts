@@ -137,6 +137,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
   });
 
   afterEach(async () => {
+    jest.restoreAllMocks();
     const where = { tenantId: { in: [a.tenantId, b.tenantId] } };
     await raw.waitlistOffer.deleteMany({ where });
     await raw.appointmentWaitlistEntry.deleteMany({ where });
@@ -352,6 +353,19 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
           ),
         ),
       );
+      // Las dos asignaciones superan los pre-checks antes de escribir: la
+      // constraint, y no el orden del scheduler, tiene que resolver la carrera.
+      const originalCreate = appointments.create.bind(appointments);
+      let arrived = 0;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => (release = resolve));
+      const createSpy = jest
+        .spyOn(appointments, 'create')
+        .mockImplementation(async (input) => {
+          if (++arrived === 2) release();
+          await ready;
+          return originalCreate(input);
+        });
       const results = await Promise.allSettled(
         entries.map((e) =>
           inA(() =>
@@ -363,6 +377,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
           ),
         ),
       );
+      createSpy.mockRestore();
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
       const rejected = results.find((r) => r.status === 'rejected');
       expect(rejected?.reason).toBeInstanceOf(ConflictException);
@@ -378,6 +393,50 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
         'OPEN',
         'SCHEDULED',
       ]);
+      expect(
+        await raw.appointment.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(1);
+    });
+
+    it('dos pendientes del mismo profesional en horarios contiguos: se confirman ambas citas', async () => {
+      const entries = await Promise.all(
+        [0, 1].map((i) =>
+          inA(() =>
+            waitlist.create({
+              patientId: a.patientIds[i],
+              providerId: null,
+              appointmentTypeId: null,
+              durationMinutes: 30,
+              priority: 'NORMAL',
+              preferredWindow: null,
+              note: null,
+              createdById: DOCTOR,
+            }),
+          ),
+        ),
+      );
+      await Promise.all(
+        entries.map((entry, i) =>
+          inA(() =>
+            schedule.execute(
+              entry.id,
+              { providerId: DOCTOR, start: at(i === 0 ? '10:00' : '10:30') },
+              ctx(),
+            ),
+          ),
+        ),
+      );
+      expect(
+        await raw.appointment.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(2);
+      expect(
+        await raw.appointmentWaitlistEntry.count({
+          where: {
+            id: { in: entries.map((entry) => entry.id) },
+            status: 'SCHEDULED',
+          },
+        }),
+      ).toBe(2);
     });
 
     it('un pendiente y una cita marcada al mismo hueco a la vez: gana uno, la cita perdedora conserva hora y marca', async () => {

@@ -41,7 +41,10 @@ import type {
   OpenCashSessionData,
   ReopenOutcome,
 } from '../domain/ports/cash-session-repository.port';
-import { lockOpenSessionOf } from './payment-cash-session';
+import {
+  lockCashAdjustmentAssignment,
+  lockOpenSessionOf,
+} from './payment-cash-session';
 
 type Tx = Prisma.TransactionClient;
 
@@ -253,6 +256,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     const tenantId = this.tenantId();
     try {
       return await this.prisma.runWithTenant(async (tx) => {
+        await lockCashAdjustmentAssignment(tx, tenantId, data.locationId);
         const session = await tx.cashSession.create({
           data: {
             tenantId,

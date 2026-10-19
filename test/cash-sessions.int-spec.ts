@@ -2,6 +2,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 
+import { recordVoidAdjustment } from '../src/modules/cash-sessions/infrastructure/payment-cash-session';
+import { PrismaCashSessionRepository } from '../src/modules/cash-sessions/infrastructure/prisma-cash-session.repository';
+import { deferred, waitFor } from './support/wait-for';
+
 // DX-027, capa DB: caja por turno. RLS FORCE en las seis tablas, FK compuestas
 // por clínica, una caja abierta por (sede, usuario), importes con CHECK y la
 // inmutabilidad por trigger: la apertura no se edita, el fondo y el arqueo
@@ -604,5 +608,165 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       ),
     ).rejects.toThrow(IMMUTABLE);
     await close(session.id);
+  });
+  it('abrir mientras se anula un abono tardío pendiente recoge juntos el positivo y su compensación', async () => {
+    const location = await raw.location.create({
+      data: { tenantId: a.tenantId, name: 'Sede carrera de ajustes' },
+    });
+    const paid = await raw.payment.create({
+      data: payment(a, { locationId: location.id }),
+    });
+    await raw.cashSessionAdjustment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: location.id,
+        paymentId: paid.id,
+        kind: 'LATE_PAYMENT',
+        currency: 'COP',
+        method: 'CASH',
+        amount: paid.amount,
+        createdById: userId,
+      },
+    });
+    // Barrera dentro de Postgres, justo antes de insertar VOID: la lectura
+    // de LATE_PAYMENT ya ocurrió, pero la anulación todavía no hizo COMMIT.
+    await raw.$executeRawUnsafe(`CREATE FUNCTION public.dx027_test_void_gate() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW."paymentId" = '${paid.id}'::uuid AND NEW."kind" = 'VOID' THEN
+          PERFORM pg_advisory_xact_lock(27027);
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await raw.$executeRawUnsafe(`CREATE TRIGGER dx027_test_void_gate
+      BEFORE INSERT ON cash_session_adjustments FOR EACH ROW
+      EXECUTE FUNCTION public.dx027_test_void_gate()`);
+    const ready = deferred();
+    const release = deferred();
+    const gate = raw.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(27027)`;
+        ready.resolve();
+        await release.promise;
+      },
+      { timeout: 10000 },
+    );
+    await ready.promise;
+    let voidPid: number | undefined;
+    const voiding = asA(async (tx) => {
+      const [backend] = await tx.$queryRaw<{ pid: number }[]>`
+        SELECT pg_backend_pid() AS pid`;
+      voidPid = backend.pid;
+      await tx.payment.update({
+        where: { id: paid.id },
+        data: {
+          deletedAt: new Date(),
+          voidedAt: new Date(),
+          voidedById: userId,
+          voidReason: 'Abono tardío duplicado',
+        },
+      });
+      await recordVoidAdjustment(tx, {
+        tenantId: a.tenantId,
+        paymentId: paid.id,
+        voidedById: userId,
+      });
+    });
+    // Adjuntar rechazo al crear cada tarea: una barrera fallida no debe
+    // producir un unhandled rejection mientras se libera la otra transacción.
+    const voidSettled = Promise.allSettled([voiding]);
+    const repo = new PrismaCashSessionRepository(prisma, tenantContext);
+    let opening: ReturnType<typeof repo.open> | undefined;
+    let openingSettled: Promise<unknown> | undefined;
+    try {
+      await waitFor(async () => {
+        const rows = await raw.$queryRaw<{ waiting: boolean }[]>`
+          SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+            WHERE pid = ${voidPid ?? 0} AND wait_event = 'advisory') AS waiting`;
+        return rows[0].waiting;
+      }, 'la anulación llega a la barrera de inserción');
+      let opened = false;
+      opening = tenantContext
+        .run(a.tenantId, () =>
+          repo.open({
+            locationId: location.id,
+            openedById: otherUserId,
+            floats: [],
+            notes: null,
+          }),
+        )
+        .then((result) => {
+          opened = true;
+          return result;
+        });
+      openingSettled = Promise.allSettled([opening]);
+      await waitFor(async () => {
+        if (opened) return true;
+        const rows = await raw.$queryRaw<{ waiting: boolean }[]>`
+          SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+            WHERE ${voidPid ?? 0} = ANY(pg_blocking_pids(pid))
+              AND wait_event_type = 'Lock'
+              AND query LIKE '%locations%' AND query NOT LIKE '%pg_stat_activity%') AS waiting`;
+        return rows[0].waiting;
+      }, 'la apertura termina o espera el bloqueo de la sede');
+      release.resolve();
+      await gate;
+      const [session] = await Promise.all([opening, voiding]);
+      expect(session).not.toBe('ALREADY_OPEN');
+      if (session === 'ALREADY_OPEN')
+        throw new Error('No había una caja abierta');
+      const adjustments = await raw.cashSessionAdjustment.findMany({
+        where: { paymentId: paid.id },
+        orderBy: { kind: 'asc' },
+      });
+      expect(adjustments).toHaveLength(2);
+      expect(adjustments.map((row) => row.sessionId)).toEqual([
+        session.id,
+        session.id,
+      ]);
+      expect(
+        adjustments.reduce((sum, row) => sum + row.amount.toNumber(), 0),
+      ).toBe(0);
+      const outcome = await tenantContext.run(a.tenantId, () =>
+        repo.close(session.id, {}, otherUserId, ({ expected, blind }) => {
+          expect(expected).toEqual([
+            expect.objectContaining({
+              currency: 'COP',
+              method: 'CASH',
+              expectedCents: 0,
+              adjustmentsCents: 0,
+            }),
+          ]);
+          return {
+            lines: expected.map((line) => ({
+              ...line,
+              countedCents: 0,
+              differenceCents: 0,
+            })),
+            hasDifference: false,
+            differenceReason: null,
+            notes: null,
+            blind,
+            suggestedLockDate: '2026-10-19',
+          };
+        }),
+      );
+      expect(outcome).toBe('CLOSED');
+      const lines = await raw.cashSessionClosingLine.findMany({
+        where: { closing: { sessionId: session.id } },
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].expected.toNumber()).toBe(0);
+      expect(lines[0].counted.toNumber()).toBe(0);
+      expect(lines[0].difference.toNumber()).toBe(0);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([gate, voidSettled, openingSettled]);
+      await raw.$executeRawUnsafe(
+        'DROP TRIGGER dx027_test_void_gate ON cash_session_adjustments',
+      );
+      await raw.$executeRawUnsafe(
+        'DROP FUNCTION public.dx027_test_void_gate()',
+      );
+    }
   });
 });

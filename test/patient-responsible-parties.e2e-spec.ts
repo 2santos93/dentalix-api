@@ -402,6 +402,51 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     expect(JSON.stringify(events)).not.toContain('claudia');
   });
 
+  it('rechaza null en los campos obligatorios del PATCH y conserva la edición parcial', async () => {
+    const created = await as(api().post(parties(daughter)), tokens.RECEPTION)
+      .send({
+        fullName: 'Contacto PATCH null',
+        relationship: 'OTHER',
+        isPayer: true,
+        receivesNotices: true,
+      })
+      .expect(201);
+    const id = (created.body as { id: string }).id;
+    const patchUrl = `${parties(daughter)}/${id}`;
+
+    for (const [field, message] of [
+      ['relationship', 'relationship debe ser'],
+      ['isPayer', 'isPayer debe ser true o false.'],
+      ['receivesNotices', 'receivesNotices debe ser true o false.'],
+    ]) {
+      const response = await as(api().patch(patchUrl), tokens.RECEPTION)
+        .send({ [field]: null })
+        .expect(400);
+      expect((response.body as { message: string[] }).message).toEqual(
+        expect.arrayContaining([expect.stringContaining(message)]),
+      );
+      const persisted = (await list(daughter)).parties.find(
+        (party) => party.id === id,
+      );
+      expect(persisted).toMatchObject({
+        relationship: 'OTHER',
+        isPayer: true,
+        receivesNotices: true,
+      });
+    }
+
+    await as(api().patch(patchUrl), tokens.RECEPTION)
+      .send({ receivesNotices: false })
+      .expect(200);
+    expect(
+      (await list(daughter)).parties.find((party) => party.id === id),
+    ).toMatchObject({
+      relationship: 'OTHER',
+      isPayer: true,
+      receivesNotices: false,
+    });
+  });
+
   it('el acudiente antiguo ya no se escribe desde la ficha (DEPRECADO, solo lectura)', async () => {
     const res = await as(
       api().patch(`/api/v1/patients/${son}`),

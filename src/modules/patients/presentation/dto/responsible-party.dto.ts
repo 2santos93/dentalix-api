@@ -123,17 +123,17 @@ export class UpdateResponsiblePartyDto extends ResponsibleContactPatchDto {
     enum: ResponsibleRelationship,
     enumName: 'ResponsibleRelationship',
   })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsEnum(ResponsibleRelationship, { message: RELATIONSHIP_MESSAGE })
   relationship?: ResponsibleRelationship;
 
   @ApiPropertyOptional()
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsBoolean({ message: 'isPayer debe ser true o false.' })
   isPayer?: boolean;
 
   @ApiPropertyOptional()
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsBoolean({ message: 'receivesNotices debe ser true o false.' })
   receivesNotices?: boolean;
 }

@@ -1,0 +1,55 @@
+  console.log
+    [
+      {
+        status: 'rejected',
+        reason: PrismaClientUnknownRequestError:
+        Invalid `tx.appointment.create()` invocation in
+        /Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/src/modules/appointments/infrastructure/repositories/prisma-appointment.repository.ts:120:44
+
+          117 async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
+          118   const tenantId = this.requireTenantId();
+          119   const appointment = await this.prisma.runWithTenant(async (tx) => {
+        → 120     const created = await tx.appointment.create(
+        Error occurred during query execution:
+        ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "40P01", message: "deadlock detected", severity: "ERROR", detail: Some("Process 66348 waits for ShareLock on transaction 2016; blocked by process 66347.\nProcess 66347 waits for ShareLock on transaction 2015; blocked by process 66348."), column: None, hint: Some("See server log for query details.") }), transient: false })
+            at ei.handleRequestError (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/node_modules/@prisma/client/src/runtime/RequestHandler.ts:237:13)
+            at ei.handleAndLogRequestError (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/node_modules/@prisma/client/src/runtime/RequestHandler.ts:174:12)
+            at ei.request (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/node_modules/@prisma/client/src/runtime/RequestHandler.ts:143:12)
+            at a (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/node_modules/@prisma/client/src/runtime/getPrismaClient.ts:833:24)
+            at /Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/src/modules/appointments/infrastructure/repositories/prisma-appointment.repository.ts:120:23
+            at Proxy._transactionWithCallback (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/node_modules/@prisma/client/src/runtime/getPrismaClient.ts:722:18)
+            at PrismaAppointmentRepository.create (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/src/modules/appointments/infrastructure/repositories/prisma-appointment.repository.ts:119:25)
+            at CreateAppointmentUseCase.createChecked (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/src/modules/appointments/application/use-cases/create-appointment.use-case.ts:228:23)
+            at ScheduleFromWaitlistUseCase.execute (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/src/modules/waitlist/application/use-cases/waitlist.use-cases.ts:285:25)
+            at async Promise.allSettled (index 0)
+            at Object.<anonymous> (/Users/ncaicedo/orca/workspaces/dentalix-api/resume-quality-api/test/waitlist-offers.int-spec.ts:364:23) {
+          clientVersion: '6.19.3'
+        }
+      }
+    ]
+
+      at Object.<anonymous> (test/waitlist-offers.int-spec.ts:376:15)
+
+FAIL test/waitlist-offers.int-spec.ts
+  ● huecos libres → candidatos y ofertas (int, DX-210) › asignar el hueco › dos pendientes asignados a la vez al mismo hueco: exactamente una cita y una 409 en español
+
+    expect(received).toBeInstanceOf(expected)
+
+    Expected constructor: ConflictException
+    Received constructor: PrismaClientUnknownRequestError
+
+      377 |       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      378 |       const rejected = results.find((r) => r.status === 'rejected');
+    > 379 |       expect(rejected?.reason).toBeInstanceOf(ConflictException);
+          |                                ^
+      380 |       expect((rejected?.reason as ConflictException).message).toBe(
+      381 |         'El profesional ya tiene una cita en ese horario',
+      382 |       );
+
+      at Object.<anonymous> (test/waitlist-offers.int-spec.ts:379:32)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 10 passed, 11 total
+Snapshots:   0 total
+Time:        2.17 s
+Ran all test suites matching test/waitlist-offers.int-spec.ts.

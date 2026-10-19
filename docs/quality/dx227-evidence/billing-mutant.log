@@ -1,0 +1,31 @@
+FAIL test/billing-rules.int-spec.ts
+  ● DX-109 · reglas de cobro contra Postgres (int) › criterio 1: abonos solo sobre planes cobrables › el abono bloquea el plan: una cancelación concurrente espera a su COMMIT
+
+    expect(received).toMatchObject(expected)
+
+    - Expected  - 4
+    + Received  + 1
+
+      Object {
+    -   "reason": Object {
+    -     "status": 409,
+    -   },
+    -   "status": "rejected",
+    +   "status": "fulfilled",
+      }
+
+      295 |         expect(await locker).toEqual({ status: 'fulfilled', value: undefined });
+      296 |         if (attempt) {
+    > 297 |           expect(await attempt).toMatchObject({
+          |                                 ^
+      298 |             status: 'rejected',
+      299 |             reason: { status: 409 },
+      300 |           });
+
+      at Object.<anonymous> (test/billing-rules.int-spec.ts:297:33)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 18 skipped, 19 total
+Snapshots:   0 total
+Time:        3.578 s
+Ran all test suites matching test/billing-rules.int-spec.ts with tests matching "el abono bloquea el plan".

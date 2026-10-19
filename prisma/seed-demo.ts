@@ -1457,7 +1457,7 @@ class DemoSeeder {
           {
             amount,
             currency: DEMO_CURRENCY,
-            paidAt: civilDateIn(this.now, DEMO_TIMEZONE),
+            paidAt: this.now,
             method,
             notes: 'Cobro en caja (turno demo).',
           },

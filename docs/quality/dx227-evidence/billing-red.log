@@ -1,0 +1,23 @@
+FAIL test/billing-rules.int-spec.ts
+  ● DX-109 · reglas de cobro contra Postgres (int) › criterio 1: abonos solo sobre planes cobrables › el abono bloquea el plan: una cancelación concurrente espera a su COMMIT
+
+    ConflictException: El plan está «Cancelado»: no admite abonos ni planes de cuotas.
+
+      339 |       }
+      340 |       if (!isPlanBillable(plan.status)) {
+    > 341 |         throw new ConflictException(notBillableMessage(plan.status));
+          |               ^
+      342 |       }
+      343 |       // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+      344 |       // contra esta clínica); si no, la sede por defecto — que es lo que
+
+      at src/modules/payments/infrastructure/repositories/prisma-payment.repository.ts:341:15
+      at Proxy._transactionWithCallback (node_modules/@prisma/client/src/runtime/getPrismaClient.ts:722:18)
+      at PrismaPaymentRepository.insert (src/modules/payments/infrastructure/repositories/prisma-payment.repository.ts:320:21)
+      at PrismaPaymentRepository.create (src/modules/payments/infrastructure/repositories/prisma-payment.repository.ts:289:14)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 18 passed, 19 total
+Snapshots:   0 total
+Time:        2.865 s, estimated 4 s
+Ran all test suites matching test/billing-rules.int-spec.ts.
