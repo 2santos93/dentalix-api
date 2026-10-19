@@ -112,7 +112,7 @@ async function settle(patientId: string, skew: number): Promise<string> {
   const context: AuditRequestContext = {
     tenantId,
     locationId,
-    actor: { userId, role: 'RECEPTIONIST' },
+    actor: { userId, role: 'RECEPTION' },
     requestId: null,
     ip: null,
     userAgent: null,
