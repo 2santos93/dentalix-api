@@ -55,6 +55,7 @@ interface Created {
   whatsapp: { phone: string; text: string } | null;
   sentTo: string | null;
   sentToResponsible: boolean;
+  emailQueued: boolean;
 }
 
 interface Suggestions {
@@ -281,6 +282,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       whatsapp: null,
       sentTo: null,
       sentToResponsible: false,
+      emailQueued: false,
       delivery: {
         patientId,
         appointmentId,
@@ -321,6 +323,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     const created = res.body as Created;
     expect(created.sentTo).toBe('ca***@example.com');
     expect(created.sentToResponsible).toBe(false);
+    expect(created.emailQueued).toBe(true);
     expect(created.delivery.recipientMasked).toBe('ca***@example.com');
     expect(created.publicUrl).toMatch(
       /^https?:\/\/dx222-entregas-a\.[^/]+\/indicaciones\/[A-Za-z0-9_-]{43}$/,
@@ -359,6 +362,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     expect(created.whatsapp?.text).toContain(created.publicUrl);
     expect(created.whatsapp?.text).toContain('Hola Carolina');
     expect(created.whatsapp?.text).not.toContain('Exodoncia');
+    expect(created.emailQueued).toBe(false);
     expect(created.delivery.recipientMasked).toBe('********4567');
     expect(created.delivery.linkExpiresAt).not.toBeNull();
   });
@@ -411,6 +415,27 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     expect(
       (suggestions.body as Suggestions).deliveries.map((d) => d.id),
     ).toEqual(rows.map((r) => r.id));
+  });
+
+  it('host manipulado: imprimir sigue funcionando; EMAIL y WhatsApp dan 400 «Host no válido» sin registrar nada', async () => {
+    const evil = `${clinicA.host}:3001@evil.com`;
+    const post = (channel: Summary['channel']) =>
+      request(app.getHttpServer())
+        .post(
+          `/api/v1/appointments/${appointmentId}/post-op-instructions/deliveries`,
+        )
+        .set('X-Tenant-Host', evil)
+        .set('Authorization', `Bearer ${reception}`)
+        .send({ templateId: exoId, channel });
+    const before = await raw.postOpInstructionDelivery.count();
+    for (const channel of ['EMAIL', 'WHATSAPP_LINK'] as const) {
+      const res = await post(channel).expect(400);
+      expect((res.body as { message: string }).message).toBe('Host no válido');
+      expect(JSON.stringify(res.body)).not.toContain('evil.com/');
+    }
+    expect(await raw.postOpInstructionDelivery.count()).toBe(before);
+    const printed = await post('PRINT').expect(201);
+    expect((printed.body as Created).publicUrl).toBeNull();
   });
 
   it('EMAIL a un paciente sin email ni responsable: 422', async () => {

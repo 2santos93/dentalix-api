@@ -144,9 +144,19 @@ export class PostOpDeliveryCreatedDto {
   publicUrl!: string | null;
   @ApiProperty({ type: PostOpWhatsAppMessageDto, nullable: true })
   whatsapp!: PostOpWhatsAppMessageDto | null;
-  @ApiProperty({ type: String, nullable: true, example: 'ca***@example.com' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'ca***@example.com',
+    description: 'Email enmascarado al que se encoló; null si no se encoló',
+  })
   sentTo!: string | null;
   @ApiProperty() sentToResponsible!: boolean;
+  @ApiProperty({
+    description:
+      'true: el email quedó encolado. false en PRINT y WHATSAPP_LINK, y en un EMAIL cuyo encolado falló (la entrega queda registrada; ofrecer el enlace o WhatsApp).',
+  })
+  emailQueued!: boolean;
 }
 
 export class PostOpClinicBrandingDto {

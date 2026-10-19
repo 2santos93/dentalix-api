@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { describeDeliveryError } from '../../../notifications/email/application/retry-policy';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
@@ -53,6 +55,7 @@ export const POSTOP_NO_EMAIL_MESSAGE =
 export const POSTOP_OPTED_OUT_MESSAGE = 'El paciente dio de baja los envíos';
 export const POSTOP_NO_WHATSAPP_MESSAGE =
   'El paciente no tiene un teléfono con indicativo de país';
+export const POSTOP_INVALID_HOST_MESSAGE = 'Host no válido';
 export const POSTOP_DELIVERY_NOT_FOUND_MESSAGE =
   'Entrega de indicaciones no encontrada';
 
@@ -115,9 +118,15 @@ export interface PostOpDeliveryCreated {
   /** Enlace público (EMAIL y WHATSAPP_LINK); su token solo viaja aquí. */
   publicUrl: string | null;
   whatsapp: { phone: string; text: string } | null;
-  /** Email enmascarado al que se envió (EMAIL). */
+  /** Email enmascarado al que se encoló (EMAIL); null si no se encoló. */
   sentTo: string | null;
   sentToResponsible: boolean;
+  /**
+   * true: el email quedó en el outbox. false en PRINT y WHATSAPP_LINK, y en
+   * un EMAIL cuyo encolado falló (la entrega queda registrada: la web avisa y
+   * ofrece el enlace o WhatsApp).
+   */
+  emailQueued: boolean;
 }
 
 export function toPostOpDeliverySummary(
@@ -293,6 +302,8 @@ interface ChannelPlan {
 
 @Injectable()
 export class DeliverPostOpInstructionsUseCase {
+  private readonly logger = new Logger('PostOpInstructions');
+
   constructor(
     @Inject(POST_OP_DELIVERY_REPOSITORY)
     private readonly deliveries: PostOpDeliveryRepository,
@@ -315,7 +326,8 @@ export class DeliverPostOpInstructionsUseCase {
     appointmentId: string,
     input: DeliverPostOpInput,
     request: AuditRequestContext,
-    link: { protocol: string; host: string },
+    /** `host` null: el de la petición no es seguro para armar un enlace. */
+    link: { protocol: string; host: string | null },
   ): Promise<PostOpDeliveryCreated> {
     const ctx = await loadAppointment(this.deliveries, appointmentId);
     const template = await this.templates.findById(input.templateId);
@@ -325,12 +337,16 @@ export class DeliverPostOpInstructionsUseCase {
     if (!template.active) {
       throw new BadRequestException(POSTOP_TEMPLATE_INACTIVE_MESSAGE);
     }
+    // Solo los canales con enlace dependen del host (lo impreso no).
+    const linkHost = input.channel === 'PRINT' ? null : link.host;
+    if (input.channel !== 'PRINT' && !linkHost) {
+      throw new BadRequestException(POSTOP_INVALID_HOST_MESSAGE);
+    }
     const plan = await this.planChannel(input.channel, ctx);
 
     const token = plan.withLink ? generatePostOpToken() : null;
-    const publicUrl = token
-      ? buildPostOpUrl(link.protocol, link.host, token)
-      : null;
+    const publicUrl =
+      token && linkHost ? buildPostOpUrl(link.protocol, linkHost, token) : null;
     const { appointment, patient, location } = ctx;
     const renderedText = renderInstructions(template.body, {
       paciente: `${patient.firstName} ${patient.lastName}`,
@@ -361,19 +377,6 @@ export class DeliverPostOpInstructionsUseCase {
     });
 
     const firstName = firstNameOnly(patient.firstName) ?? patient.firstName;
-    if (plan.email && publicUrl) {
-      await this.email.send({
-        to: plan.email.to,
-        referenceId: delivery.id,
-        vars: {
-          patientFirstName: firstName,
-          clinicName: ctx.clinicName,
-          locationPhone: location.phone,
-          url: publicUrl,
-          responsibleName: plan.email.responsibleName,
-        },
-      });
-    }
     await this.audit.record({
       tenantId: request.tenantId,
       locationId: appointment.locationId,
@@ -387,6 +390,33 @@ export class DeliverPostOpInstructionsUseCase {
       userAgent: request.userAgent,
       metadata: { reason: input.channel },
     });
+
+    // La entrega ya está guardada: se audita antes de encolar y un fallo del
+    // outbox no la convierte en un 500 (se perdería el enlace y un reintento
+    // duplicaría la fila). Nunca se registra la URL ni el destinatario.
+    let emailQueued = false;
+    if (plan.email && publicUrl) {
+      try {
+        await this.email.send({
+          to: plan.email.to,
+          referenceId: delivery.id,
+          vars: {
+            patientFirstName: firstName,
+            clinicName: ctx.clinicName,
+            locationPhone: location.phone,
+            url: publicUrl,
+            responsibleName: plan.email.responsibleName,
+          },
+        });
+        emailQueued = true;
+      } catch (err) {
+        this.logger.warn({
+          event: 'postop.email_not_enqueued',
+          deliveryId: delivery.id,
+          error: describeDeliveryError(err),
+        });
+      }
+    }
 
     return {
       delivery: toPostOpDeliverySummary(delivery),
@@ -402,8 +432,9 @@ export class DeliverPostOpInstructionsUseCase {
               }),
             }
           : null,
-      sentTo: plan.email ? maskEmail(plan.email.to) : null,
+      sentTo: plan.email && emailQueued ? maskEmail(plan.email.to) : null,
       sentToResponsible: plan.sentToResponsible,
+      emailQueued,
     };
   }
 

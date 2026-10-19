@@ -703,6 +703,19 @@ const EXPECTED: Record<string, AuditOptions> = {
   },
 };
 
+/**
+ * Rutas que auditan desde el CASO DE USO (RecordAuditEventUseCase), no con
+ * `@Audit`: el decorador no sabe leer lo que necesitan. Cada una cita qué
+ * spec prueba su evento. Tienen que existir y no llevar además `@Audit`
+ * (sería un evento doble).
+ */
+const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-222: CREATE POSTOP_DELIVERY con el id de `delivery` y el canal como
+  // `reason`; queda auditada aunque el email no se pueda encolar.
+  'POST /appointments/:appointmentId/post-op-instructions/deliveries':
+    'post-op-deliveries.use-cases.spec.ts y post-op-deliveries.e2e-spec.ts',
+};
+
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
@@ -749,6 +762,24 @@ function joinPath(...parts: string[]): string {
   return `/${path}`;
 }
 
+/** `MÉTODO /ruta` de todos los handlers del controlador, auditados o no. */
+function routeKeys(controller: Type): string[] {
+  const base = (Reflect.getMetadata(PATH_METADATA, controller) as string) ?? '';
+  const proto = controller.prototype as Record<string, unknown>;
+  return Object.getOwnPropertyNames(proto).flatMap((name) => {
+    const handler = proto[name];
+    if (typeof handler !== 'function' || name === 'constructor') return [];
+    const path = Reflect.getMetadata(PATH_METADATA, handler) as
+      string | undefined;
+    if (path === undefined) return [];
+    const method =
+      RequestMethod[
+        Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod
+      ];
+    return [`${method} ${joinPath(base, path)}`];
+  });
+}
+
 interface AuditedRoute {
   key: string;
   options: AuditOptions;
@@ -793,6 +824,16 @@ describe('cobertura de la auditoría (DX-009)', () => {
     expect(Object.fromEntries(routes.map((r) => [r.key, r.options]))).toEqual(
       EXPECTED,
     );
+  });
+
+  it('las rutas auditadas en el caso de uso existen y no llevan además @Audit', () => {
+    const all = new Set(CONTROLLERS.flatMap(routeKeys));
+    const decorated = new Set(routes.map((r) => r.key));
+    expect(
+      Object.keys(AUDITED_IN_USE_CASE).filter(
+        (key) => !all.has(key) || decorated.has(key),
+      ),
+    ).toEqual([]);
   });
 
   it('el AuditInterceptor va en el MÉTODO: corre dentro del contexto de tenant de la clase', () => {

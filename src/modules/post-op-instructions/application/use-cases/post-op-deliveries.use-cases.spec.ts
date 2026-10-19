@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   HttpException,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -24,6 +25,7 @@ import {
   ListPatientPostOpDeliveriesUseCase,
   POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE,
   POSTOP_DELIVERY_NOT_FOUND_MESSAGE,
+  POSTOP_INVALID_HOST_MESSAGE,
   POSTOP_NO_EMAIL_MESSAGE,
   POSTOP_NO_WHATSAPP_MESSAGE,
   POSTOP_OPTED_OUT_MESSAGE,
@@ -115,6 +117,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
       whatsapp: null,
       sentTo: null,
       sentToResponsible: false,
+      emailQueued: false,
     });
     const [row] = deliveries.rows;
     expect(row).toMatchObject({
@@ -183,6 +186,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
       whatsapp: null,
       sentTo: 'ca***@example.com',
       sentToResponsible: false,
+      emailQueued: true,
     });
     const [row] = deliveries.rows;
     expect(row.tokenHash).toBe(hashPostOpToken(token));
@@ -323,6 +327,67 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
     expect(email.sent).toEqual([]);
   });
 
+  it('EMAIL con el outbox caído: la entrega queda registrada y auditada, 201 con el enlace y emailQueued false', async () => {
+    const { deliver, exo, deliveries, email, audits } = setup();
+    email.send = () => Promise.reject(new Error('outbox caído'));
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const result = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+
+    expect(result.emailQueued).toBe(false);
+    expect(result.sentTo).toBeNull();
+    expect(result.publicUrl).toMatch(/\/indicaciones\//);
+    expect(deliveries.rows).toHaveLength(1);
+    expect(audits).toEqual([
+      expect.objectContaining({
+        action: 'CREATE',
+        resourceId: deliveries.rows[0].id,
+        metadata: { reason: 'EMAIL' },
+      }),
+    ]);
+    // El log lleva solo el id de la entrega: ni la URL ni el destinatario.
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'postop.email_not_enqueued',
+        deliveryId: deliveries.rows[0].id,
+      }),
+    );
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).not.toContain(tokenOf(result.publicUrl));
+    expect(logged).not.toContain('carolina.duque');
+    warn.mockRestore();
+  });
+
+  it('un host inseguro no impide imprimir, pero EMAIL y WHATSAPP_LINK dan 400 sin registrar nada', async () => {
+    const { deliver, exo, deliveries } = setup();
+    const noHost = { protocol: 'https', host: null };
+    for (const channel of ['EMAIL', 'WHATSAPP_LINK'] as const) {
+      const call = deliver.execute(
+        APPOINTMENT_ID,
+        { templateId: exo.id, channel },
+        CTX,
+        noHost,
+      );
+      await expect(call).rejects.toThrow(BadRequestException);
+      await expect(call).rejects.toThrow(POSTOP_INVALID_HOST_MESSAGE);
+    }
+    expect(deliveries.rows).toEqual([]);
+    const printed = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'PRINT' },
+      CTX,
+      noHost,
+    );
+    expect(printed.publicUrl).toBeNull();
+    expect(deliveries.rows).toHaveLength(1);
+  });
+
   it('WHATSAPP_LINK: número wa.me y texto con el enlace, sin el título ni el texto de la plantilla', async () => {
     const { deliver, exo, deliveries, email } = setup();
     const result = await deliver.execute(
@@ -339,6 +404,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
     });
     expect(result.whatsapp?.text).not.toMatch(/Exodoncia|gasa/);
     expect(result.sentTo).toBeNull();
+    expect(result.emailQueued).toBe(false);
     const [row] = deliveries.rows;
     expect(row.channel).toBe('WHATSAPP_LINK');
     expect(row.tokenHash).toBe(hashPostOpToken(token));

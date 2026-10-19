@@ -1,9 +1,7 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
-  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -43,7 +41,6 @@ import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-requ
 import {
   DeliverPostOpInstructionsUseCase,
   GetPostOpSuggestionsUseCase,
-  POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE,
 } from '../application/use-cases/post-op-deliveries.use-cases';
 import {
   DeliverPostOpDto,
@@ -102,7 +99,10 @@ export class AppointmentPostOpController {
       'Registra la entrega con el texto ya renderizado (no cambia aunque se edite la plantilla). EMAIL y WHATSAPP_LINK crean un enlace público de 30 días.',
   })
   @ApiCreatedResponse({ type: PostOpDeliveryCreatedDto })
-  @ApiBadRequestResponse({ description: 'La plantilla está inactiva' })
+  @ApiBadRequestResponse({
+    description:
+      'La plantilla está inactiva, o el host de la petición no sirve para armar el enlace (EMAIL y WHATSAPP_LINK)',
+  })
   @ApiUnprocessableEntityResponse({
     description:
       'Sin email ni responsable que reciba avisos, sin teléfono con indicativo, o el paciente dio de baja los envíos',
@@ -115,13 +115,10 @@ export class AppointmentPostOpController {
     @Body() dto: DeliverPostOpDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<PostOpDeliveryCreatedDto> {
-    // Como el enlace de confirmación (DX-005): el host entero se valida antes
-    // de registrar nada; uno manipulado no arma un enlace hacia otro sitio.
-    if (!req.tenantHost?.host) {
-      throw new NotFoundException(POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE);
-    }
-    const host = safeLinkHost(req.tenantHost.host);
-    if (!host) throw new BadRequestException('Invalid host');
+    // Como el enlace de confirmación (DX-005): el host entero se valida
+    // antes de registrar nada; uno manipulado no arma un enlace hacia otro
+    // sitio. Solo lo usan EMAIL y WHATSAPP_LINK (el caso de uso da 400).
+    const host = safeLinkHost(req.tenantHost?.host);
     const ctx = auditRequestContext(req, this.tenantContext);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
     return this.deliver.execute(
