@@ -69,6 +69,10 @@ import {
   CreatePaymentPromiseUseCase,
 } from '../src/modules/collections/application/use-cases/collections.use-cases';
 import { VoidPaymentUseCase } from '../src/modules/payments/application/use-cases/void-payment.use-case';
+import {
+  CloseCashSessionUseCase,
+  OpenCashSessionUseCase,
+} from '../src/modules/cash-sessions/application/use-cases/cash-sessions.use-cases';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
@@ -565,6 +569,8 @@ class DemoSeeder {
     );
 
     await this.createCollections(tenantId, locations, patientIds, receptionId);
+
+    await this.createCashSessions(tenantId, locations, receptionId);
 
     await this.createInventory(tenantId, locations, userIds[4]);
 
@@ -1248,6 +1254,94 @@ class DemoSeeder {
         });
       }
     }
+  }
+
+  /**
+   * DX-027: la caja por turno de recepción en la sede principal, por los
+   * mismos casos de uso que la API: el turno de la mañana, cerrado con una
+   * diferencia de 2.000 en efectivo explicada, y el de la tarde abierto con su
+   * fondo y un cobro. Va DESPUÉS de los abonos históricos, que quedan sin caja
+   * (como los de antes de DX-027). Los ajustes de caja de la clínica quedan
+   * como por defecto (sin «exigir caja abierta» ni «arqueo ciego»).
+   */
+  private async createCashSessions(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    receptionId: string,
+  ): Promise<void> {
+    const actor = { userId: receptionId, isAdmin: false };
+    await this.inTenant(tenantId, locations.principal, async () => {
+      // El plan aceptado con más saldo pendiente: los cobros del turno nunca
+      // dejan un plan pagado de más.
+      const plans = await this.prisma.runWithTenant((tx) =>
+        tx.treatmentPlan.findMany({
+          where: { status: TreatmentPlanStatus.ACCEPTED, deletedAt: null },
+          select: {
+            id: true,
+            items: { select: { price: true, discount: true, status: true } },
+            payments: {
+              where: { deletedAt: null },
+              select: { amount: true },
+            },
+          },
+        }),
+      );
+      const pending = (p: (typeof plans)[number]) =>
+        p.items
+          .filter((i) => i.status !== 'PROPOSED')
+          .reduce(
+            (sum, i) => sum + i.price.toNumber() - i.discount.toNumber(),
+            0,
+          ) - p.payments.reduce((sum, pay) => sum + pay.amount.toNumber(), 0);
+      const plan = [...plans].sort((a, b) => pending(b) - pending(a))[0];
+      if (!plan || pending(plan) < 80_000) {
+        throw new Error(
+          'La demo no tiene un plan aceptado con saldo para la caja',
+        );
+      }
+      const charge = (amount: number, method: 'CASH' | 'CARD') =>
+        this.use(RecordPaymentUseCase).execute(
+          plan.id,
+          {
+            amount,
+            currency: DEMO_CURRENCY,
+            paidAt: civilDateIn(this.now, DEMO_TIMEZONE),
+            method,
+            notes: 'Cobro en caja (turno demo).',
+          },
+          receptionId,
+        );
+
+      const morning = await this.use(OpenCashSessionUseCase).execute(
+        {
+          floats: [{ currency: DEMO_CURRENCY, amount: 200_000 }],
+          notes: 'Turno de mañana',
+        },
+        actor,
+      );
+      await charge(40_000, 'CASH');
+      await charge(25_000, 'CARD');
+      await this.use(CloseCashSessionUseCase).execute(
+        morning.id,
+        {
+          counts: [
+            { currency: DEMO_CURRENCY, method: 'CASH', counted: 238_000 },
+            { currency: DEMO_CURRENCY, method: 'CARD', counted: 25_000 },
+          ],
+          differenceReason: 'Se entregó cambio de más a un paciente.',
+        },
+        actor,
+      );
+
+      await this.use(OpenCashSessionUseCase).execute(
+        {
+          floats: [{ currency: DEMO_CURRENCY, amount: 150_000 }],
+          notes: 'Turno de tarde',
+        },
+        actor,
+      );
+      await charge(15_000, 'CASH');
+    });
   }
 
   /**

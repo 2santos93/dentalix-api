@@ -35,6 +35,12 @@ const raw = new PrismaClient({
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
   'patient_implants',
+  // DX-027: caja por turno (hijas de cash_sessions y de payments).
+  'cash_session_adjustments',
+  'cash_session_reopenings',
+  'cash_session_closing_lines',
+  'cash_session_closings',
+  'cash_session_floats',
   // DX-150: cobranza (hijas de patients y locations).
   'collection_notes',
   'payment_promises',
@@ -49,6 +55,8 @@ const TENANT_TABLES = [
   'installments',
   'payment_plans',
   'payments',
+  // Después de payments (payments."cashSessionId").
+  'cash_sessions',
   'treatment_plan_acceptances',
   'treatment_plan_items',
   'treatment_plans',
@@ -334,6 +342,11 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-150: tres gestiones de cobro y un compromiso abierto.
     expect(firstCounts.collection_notes).toBe(3);
     expect(firstCounts.payment_promises).toBe(1);
+    // DX-027: un turno cerrado con arqueo (2 líneas) y otro abierto.
+    expect(firstCounts.cash_sessions).toBe(2);
+    expect(firstCounts.cash_session_floats).toBe(2);
+    expect(firstCounts.cash_session_closings).toBe(1);
+    expect(firstCounts.cash_session_closing_lines).toBe(2);
     // DX-121: 5 tipos de cita con color.
     expect(firstCounts.appointment_types).toBe(5);
     // DX-122: vacaciones y almuerzo; pendientes del calendario + uno manual.

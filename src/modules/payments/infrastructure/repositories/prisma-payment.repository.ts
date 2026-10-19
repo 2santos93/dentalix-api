@@ -44,6 +44,11 @@ import { Payment } from '../../domain/entities/payment.entity';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 import { formatReceiptNumber } from '../../domain/receipt-number';
 import { issuePaymentReceipt } from '../receipts/issue-payment-receipt';
+import {
+  assignPaymentToCashSession,
+  recordLatePaymentAdjustment,
+  recordVoidAdjustment,
+} from '../../../cash-sessions/infrastructure/payment-cash-session';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -356,10 +361,22 @@ export class PrismaPaymentRepository implements PaymentRepository {
         input.paidAt instanceof Date
           ? input.paidAt
           : civilNoonIn(input.paidAt.civilDate, timeZone);
+      // DX-027: la caja abierta de quien cobra en esta sede (bloqueada hasta
+      // el COMMIT); sin caja, 409 si la clínica exige caja para el efectivo.
+      const cash = await assignPaymentToCashSession(tx, {
+        tenantId,
+        locationId,
+        userId: input.createdById,
+        method: input.method,
+        paidAt,
+        timeZone,
+        now: new Date(),
+      });
       const created = await tx.payment.create({
         data: {
           locationId,
           tenantId,
+          cashSessionId: cash.cashSessionId,
           treatmentPlanId: input.treatmentPlanId,
           patientId: input.patientId,
           amount: input.amount,
@@ -372,6 +389,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
           createdById: input.createdById,
         },
       });
+      // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
+      // caja abierta (o pendiente), con enlace a la cerrada.
+      if (cash.late && created.createdById) {
+        await recordLatePaymentAdjustment(
+          tx,
+          { ...created, createdById: created.createdById },
+          cash.late,
+        );
+      }
       const entity = mapToEntity({ ...created, receipt: null }, timeZone);
       // DX-136: el recibo numerado nace en la MISMA transacción que el abono.
       const receiptNumber = await issuePaymentReceipt(
@@ -517,6 +543,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
         },
       });
       if (result.count === 0) return false;
+      // DX-027: si contaba en una caja ya cerrada, la anulación es un ajuste
+      // en la caja abierta de quien anula (la cerrada no cambia).
+      await recordVoidAdjustment(tx, {
+        tenantId: this.requireTenantId(),
+        paymentId: id,
+        voidedById: audit.voidedById,
+      });
       // DX-136: el recibo conserva su número y queda marcado ANULADO con la
       // misma fecha, autor y motivo, en la misma transacción. Los abonos
       // anteriores a la numeración no tienen recibo (0 filas).
