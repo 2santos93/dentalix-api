@@ -1222,6 +1222,11 @@ model TreatmentPlanItem {
   toothNumber   String
   surfaces      ToothSurface[]
   catalogItemId String                  @db.Uuid
+  // SEC-041: precio de catálogo al dar de alta el ítem (NULL = ítem libre: el
+  // catálogo no tenía precio). Un precio por debajo cuenta como descuento
+  // (rebaja = catalogPrice − price) y se firma como él. CHECK
+  // treatment_plan_items_catalog_price_nonneg (>= 0).
+  catalogPrice  Decimal?                @db.Decimal(12, 2)
   price         Decimal                 @db.Decimal(12, 2)
   // Descuento del ítem en la moneda del plan (DX-012). CHECK 0 <= discount <= price
   // (treatment_plan_items_discount_nonneg / _subtotal_nonneg).
@@ -1256,10 +1261,11 @@ model TreatmentPlanItem {
   //     INCLUDE (price, discount, status)
   //     -> DX-145: facturable de todos los planes de la clínica (cartera).
   // PARCIAL y de EXPRESIÓN, no declarable en Prisma:
-  //   treatment_plan_items_tenant_discounted_at_idx
+  //   treatment_plan_items_tenant_effective_discount_at_idx
   //     ("tenantId", COALESCE("discountAt", "createdAt"))
-  //     WHERE "discount" > 0 AND "deletedAt" IS NULL
-  //     -> DX-204: informe de descuentos por periodo.
+  //     WHERE ("discount" > 0 OR "price" < "catalogPrice") AND "deletedAt" IS NULL
+  //     -> DX-204/SEC-041: informe de descuentos por periodo (descuento o
+  //        rebaja de precio).
   @@map("treatment_plan_items")
 }
 

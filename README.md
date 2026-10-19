@@ -732,6 +732,28 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
   anteriores a DX-204 se fechan por el alta del ítem, con la sede de
   presentación del plan y sin autor. El CSV protege las celdas contra fórmulas
   como el de la cartera.
+- **Precio por debajo del de catálogo = descuento (SEC-041)**. Cada ítem guarda
+  `catalogPrice`: el `defaultPrice` del catálogo al darlo de alta (NULL en un
+  ítem libre, cuyo catálogo no tiene precio; la migración
+  `20261019194000_sec041_plan_item_catalog_price` rellenó los existentes con el
+  precio de catálogo ACTUAL). El descuento que se compara con el tope del rol y
+  con el umbral del motivo es el **efectivo**: `max(0, catalogPrice − price) +
+  discount`, en % del precio de referencia (el de catálogo si el precio está
+  por debajo). En el alta, la edición y el bloque. 403 «Precio por debajo del
+  de catálogo: cuenta como descuento. Tu rol permite hasta un X %…»; 422 «…
+  Indica el motivo del descuento.». La rebaja se firma con las columnas del
+  descuento (quién, cuándo, sede, motivo). Subir el precio es libre (no
+  re-firma; si el ítem vuelve a no tener descuento efectivo, se borra la
+  firma); quitar el `discount` de un ítem cuyo precio sigue rebajado también,
+  y conserva la firma de la rebaja. En un plan aceptado el precio no baja (409).
+  El informe y su CSV muestran precio de catálogo, rebaja de precio, descuento
+  del ítem y el total (bruto = precio de referencia); el índice parcial pasa a
+  `treatment_plan_items_tenant_effective_discount_at_idx`.
+- **Estado del plan en la transacción (BE-036)**: alta, edición y bloque
+  bloquean la fila del plan (FOR SHARE; el ítem, FOR UPDATE), la releen y solo
+  entonces validan si está aceptado, firmado o cerrado. Una aceptación sin
+  firma que confirma mientras una edición espera ya no deja cambiar el plan
+  aceptado (`test/plan-item-accept-race.int-spec.ts`).
 
 ## Recibo de caja por abono (DX-136)
 

@@ -7,14 +7,14 @@ import {
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
-  AddTreatmentPlanItemRepoInput,
   DecideBulkDiscount,
+  DecideItemChange,
+  DecideNewItem,
   DecidePlanChange,
   DiscountStamp,
   DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
-  UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
 import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import {
@@ -74,6 +74,7 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
     toothNumber: item.toothNumber,
     surfaces: item.surfaces.map((surface) => surface),
     catalogItemId: item.catalogItemId,
+    catalogPrice: item.catalogPrice?.toNumber() ?? null,
     price: item.price.toNumber(),
     discount: item.discount.toNumber(),
     discountReason: item.discountReason,
@@ -269,18 +270,24 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   }
 
   async addItem(
-    input: AddTreatmentPlanItemRepoInput,
+    planId: string,
+    decide: DecideNewItem,
   ): Promise<TreatmentPlanItem> {
     const tenantId = this.requireTenantId();
     const item = await this.prisma.runWithTenant(async (tx) => {
-      await lockPlan(tx, input.planId);
+      const plan = await lockedPlan(tx, planId);
+      if (!plan) {
+        throw new NotFoundException('Treatment plan not found');
+      }
+      const input = decide(plan);
       return tx.treatmentPlanItem.create({
         data: {
           tenantId,
-          planId: input.planId,
+          planId,
           toothNumber: input.toothNumber,
           surfaces: input.surfaces ?? [],
           catalogItemId: input.catalogItemId,
+          catalogPrice: input.catalogPrice,
           price: input.price,
           discount: input.discount ?? 0,
           notes: input.notes,
@@ -308,24 +315,32 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
 
   async updateItem(
     id: string,
-    patch: UpdateTreatmentPlanItemRepoInput,
-    mirror?: DoneMirrorInput,
+    decide: DecideItemChange,
   ): Promise<TreatmentPlanItem> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      await lockPlanOfItem(tx, id);
+      const planId = await lockPlanOfItem(tx, id);
       // FOR UPDATE: un segundo PATCH concurrente sobre el mismo ítem espera
       // aquí al COMMIT del primero y lee el estado ya cambiado (DB-013).
-      const [previous] = await tx.$queryRaw<
-        { status: TreatmentPlanItemStatus }[]
-      >`
-        SELECT "status" FROM "treatment_plan_items"
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "treatment_plan_items"
          WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
          FOR UPDATE`;
-      if (!previous) {
+      // BE-036: plan e ítem releídos con sus filas bloqueadas; lo que decide
+      // `decide` es lo que hay al escribir (una aceptación que entró antes
+      // ya está aquí; una posterior espera a este COMMIT).
+      const plan = planId ? await lockedPlan(tx, planId) : null;
+      const previous = locked
+        ? await tx.treatmentPlanItem.findUniqueOrThrow({ where: { id } })
+        : null;
+      if (!plan || !previous) {
         throw new NotFoundException('Treatment plan item not found');
       }
 
+      const { patch, mirror } = decide({
+        plan,
+        item: mapItemToEntity(previous),
+      });
       const { discountStamp, ...fields } = patch;
       const item = await tx.treatmentPlanItem.update({
         where: { id },
@@ -374,7 +389,10 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   ): Promise<TreatmentPlanItem[]> {
     const ids = [...new Set(itemIds)];
     return this.prisma.runWithTenant(async (tx) => {
-      await lockPlan(tx, planId);
+      const plan = await lockedPlan(tx, planId);
+      if (!plan) {
+        throw new NotFoundException('Plan de tratamiento no encontrado');
+      }
       const locked = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "treatment_plan_items"
          WHERE "id" = ANY(${ids}::uuid[])
@@ -391,7 +409,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         where: { id: { in: ids } },
         orderBy: { id: 'asc' },
       });
-      const changes = decide(current.map(mapItemToEntity));
+      const changes = decide({ plan, items: current.map(mapItemToEntity) });
       const requestLocationId = this.tenantContext.getLocationId();
       const updated: TreatmentPlanItem[] = [];
       for (const change of changes) {
@@ -431,16 +449,41 @@ async function lockPlan(
     SELECT "id" FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR SHARE`;
 }
 
-/** Igual que `lockPlan`, para el plan del ítem `itemId` (si existe). */
+/**
+ * Igual que `lockPlan`, para el plan del ítem `itemId`. Devuelve su id (o
+ * undefined si el ítem no existe).
+ */
 async function lockPlanOfItem(
   tx: Prisma.TransactionClient,
   itemId: string,
-): Promise<void> {
-  await tx.$queryRaw`
+): Promise<string | undefined> {
+  const [plan] = await tx.$queryRaw<{ id: string }[]>`
     SELECT p."id" FROM "treatment_plans" p
       JOIN "treatment_plan_items" i ON i."planId" = p."id"
      WHERE i."id" = ${itemId}::uuid
        FOR SHARE OF p`;
+  return plan?.id;
+}
+
+/**
+ * BE-036: bloquea el plan (`lockPlan`) y lo RELEE en la misma transacción,
+ * con sus ítems vivos y su aceptación firmada: en READ COMMITTED la lectura
+ * posterior al bloqueo ve lo que confirmó quien lo tenía (p. ej. una
+ * aceptación). null si no existe, está retirado o es de otra clínica.
+ */
+async function lockedPlan(
+  tx: Prisma.TransactionClient,
+  planId: string,
+): Promise<TreatmentPlanWithItems | null> {
+  await lockPlan(tx, planId);
+  const plan = await tx.treatmentPlan.findFirst({
+    where: { id: planId, deletedAt: null },
+    include: {
+      items: { where: { deletedAt: null } },
+      acceptance: ACCEPTANCE_SUMMARY,
+    },
+  });
+  return plan ? mapToEntityWithItems(plan) : null;
 }
 
 /**

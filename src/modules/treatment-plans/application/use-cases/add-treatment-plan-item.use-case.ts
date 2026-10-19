@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { effectiveDiscount } from '../../../discounts/domain/effective-discount';
 import { DiscountReason, ToothSurface } from '@prisma/client';
 import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-repository.port';
 import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
@@ -58,12 +59,6 @@ export class AddTreatmentPlanItemUseCase {
     input: AddTreatmentPlanItemInput,
     actor: DiscountActor,
   ): Promise<TreatmentPlanItem> {
-    const plan = await this.repo.findPlanById(planId);
-    if (!plan) {
-      throw new NotFoundException('Treatment plan not found');
-    }
-    assertItemsEditable(plan);
-
     // `catalogItemId` must resolve to a real, active-tenant catalog item —
     // a cross-tenant or made-up id must never silently succeed (that would
     // let an item reference a procedure the tenant can't see/bill).
@@ -81,31 +76,38 @@ export class AddTreatmentPlanItemUseCase {
     }
     const discount = input.discount ?? 0;
     assertDiscountWithinPrice(price, discount);
-    let decision = NO_DISCOUNT;
-    if (discount > 0) {
-      assertPlanDiscountable(plan);
-      decision = decideDiscount(
-        await this.discountPolicy.execute(),
-        actor,
-        {
-          price,
-          discount,
-          reason: input.discountReason ?? null,
-          reasonNote: input.discountReasonNote ?? null,
-        },
-        this.now(),
-      );
-    }
-
-    return this.repo.addItem({
-      planId,
-      toothNumber: input.toothNumber,
-      surfaces: input.surfaces,
-      catalogItemId: input.catalogItemId,
+    // SEC-041: el precio de catálogo queda en el ítem; un precio por debajo
+    // cuenta como descuento (tope del rol y motivo). Ítem libre: null.
+    const discountInput = {
+      catalogPrice: catalogItem.defaultPrice,
       price,
       discount,
-      notes: input.notes,
-      ...decision,
+      reason: input.discountReason ?? null,
+      reasonNote: input.discountReasonNote ?? null,
+    };
+    const discounted = effectiveDiscount(discountInput).total > 0;
+    const policy = discounted ? await this.discountPolicy.execute() : null;
+    const at = this.now();
+
+    // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
+    // la transacción del alta.
+    return this.repo.addItem(planId, (plan) => {
+      assertItemsEditable(plan);
+      let decision = NO_DISCOUNT;
+      if (policy) {
+        assertPlanDiscountable(plan);
+        decision = decideDiscount(policy, actor, discountInput, at);
+      }
+      return {
+        toothNumber: input.toothNumber,
+        surfaces: input.surfaces,
+        catalogItemId: input.catalogItemId,
+        catalogPrice: catalogItem.defaultPrice,
+        price,
+        discount,
+        notes: input.notes,
+        ...decision,
+      };
     });
   }
 }

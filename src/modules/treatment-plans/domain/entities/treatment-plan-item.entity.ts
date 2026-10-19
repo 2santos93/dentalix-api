@@ -19,6 +19,11 @@ export interface TreatmentPlanItem {
   toothNumber: string;
   surfaces: ToothSurface[];
   catalogItemId: string;
+  /**
+   * SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre: el
+   * catálogo no tenía precio). Un precio por debajo cuenta como descuento.
+   */
+  catalogPrice: number | null;
   price: number;
   /** Descuento del ítem en la moneda del plan (DX-012); 0 ≤ discount ≤ price. */
   discount: number;

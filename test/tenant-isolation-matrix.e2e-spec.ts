@@ -1303,7 +1303,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         create(app, clinicA, `/treatment-plans/${owner.id}/items`, {
           toothNumber,
           catalogItemId: a.catalogItemId,
-          price: 80,
+          // El precio de catálogo (100): sin rebaja, no es un descuento
+          // (SEC-041).
+          price: 100,
         });
       itemForPatch = (await addItem('36')).id;
       itemForDelete = (await addItem('46')).id;

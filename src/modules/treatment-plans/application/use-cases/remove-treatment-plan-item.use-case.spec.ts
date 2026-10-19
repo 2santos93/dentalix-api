@@ -20,6 +20,7 @@ function fakeItem(
     toothNumber: '11',
     surfaces: [],
     catalogItemId: 'cat1',
+    catalogPrice: null,
     price: 200,
     discount: 0,
     discountReason: null,

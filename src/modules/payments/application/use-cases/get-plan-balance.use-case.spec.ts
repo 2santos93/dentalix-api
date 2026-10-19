@@ -110,6 +110,7 @@ function makeItem(
     toothNumber: '11',
     surfaces: [],
     catalogItemId: 'cat-1',
+    catalogPrice: null,
     price: 100,
     discount: 0,
     discountReason: null,

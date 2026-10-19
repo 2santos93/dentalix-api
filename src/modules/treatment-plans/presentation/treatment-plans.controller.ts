@@ -71,11 +71,11 @@ const SIGNED_PLAN_CONFLICT =
 /** DX-109: además de la firma, un plan cerrado congela sus ítems. */
 const ITEMS_LOCKED_CONFLICT = `${SIGNED_PLAN_CONFLICT}; o el plan está cancelado, rechazado o completado (DX-109)`;
 /** DX-204: un presupuesto aceptado (con o sin firma) no se vuelve a descontar. */
-const DISCOUNT_LOCKED_CONFLICT = `${ITEMS_LOCKED_CONFLICT}; o el descuento cambia en un plan ya aceptado (DX-204)`;
+const DISCOUNT_LOCKED_CONFLICT = `${ITEMS_LOCKED_CONFLICT}; o el descuento (también una rebaja del precio frente al de catálogo) cambia en un plan ya aceptado (DX-204, SEC-041). El estado del plan se comprueba con su fila bloqueada, dentro de la transacción (BE-036)`;
 const DISCOUNT_FORBIDDEN =
-  'DX-204: el descuento supera el tope del rol de quien lo da («Tu rol permite hasta un X % de descuento por ítem.»)';
+  'DX-204: el descuento EFECTIVO (SEC-041: rebaja del precio frente al de catálogo + descuento) supera el tope del rol de quien lo da («Tu rol permite hasta un X % de descuento por ítem.»; con rebaja de precio, precedido de «Precio por debajo del de catálogo: cuenta como descuento.»). Subir el precio es libre';
 const DISCOUNT_UNPROCESSABLE =
-  'DX-204: por encima del umbral de la política falta el motivo, o «Otro» sin nota, o nota sin motivo';
+  'DX-204: por encima del umbral de la política falta el motivo (con rebaja de precio: «… Indica el motivo del descuento.»), o «Otro» sin nota, o nota sin motivo';
 
 interface AuthenticatedRequest {
   user: JwtPayload;

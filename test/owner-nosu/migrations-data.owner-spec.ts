@@ -157,6 +157,20 @@ const FIXTURE_GUARDIAN = [
   `UPDATE "patients" SET "guardianName" = 'Óscar Cifuentes' WHERE "id" = '${P_B}'`,
 ];
 
+/**
+ * Esquema de 20261019194000 (SEC-041): un ítem de plan por clínica; el de A
+ * con un catálogo con precio (rebajado en el ítem), el de B con un catálogo
+ * sin precio (ítem libre). La migración copia el precio de catálogo al ítem.
+ */
+const FIXTURE_CATALOG_PRICE = [
+  `INSERT INTO "dental_catalog_items" ("id","tenantId","code","kind","labelEs","color","defaultPrice","updatedAt") VALUES
+     ('00000000-0000-4000-8000-0000000000a5','${T_A}','COR','PROCEDURE','Corona','#111111',1000000,now()),
+     ('00000000-0000-4000-8000-0000000000b5','${T_B}','LIB','PROCEDURE','Libre','#111111',NULL,now())`,
+  `INSERT INTO "treatment_plan_items" ("id","tenantId","planId","toothNumber","catalogItemId","price","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','${TP_A}','11','00000000-0000-4000-8000-0000000000a5',500000,now()),
+     (gen_random_uuid(),'${T_B}','${TP_B}','11','00000000-0000-4000-8000-0000000000b5',10,now())`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -193,8 +207,12 @@ const STEPS: Step[] = [
   // canal por defecto de la clínica) y las siguientes hasta DX-203.
   { until: '20261018150100', fixture: FIXTURE_CONTACT },
   // dx203_guardian_to_responsible (FORCE fuera de patients y de
-  // patient_responsible_parties durante la copia).
-  { until: '99999999999999', fixture: FIXTURE_GUARDIAN },
+  // patient_responsible_parties durante la copia) y las siguientes hasta
+  // SEC-041.
+  { until: '20261019194000', fixture: FIXTURE_GUARDIAN },
+  // sec041_plan_item_catalog_price (FORCE fuera de treatment_plan_items y de
+  // dental_catalog_items durante el backfill).
+  { until: '99999999999999', fixture: FIXTURE_CATALOG_PRICE },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -504,6 +522,16 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         `SELECT string_agg(coalesce("guardianName", '-'), ',' ORDER BY "tenantId") AS v FROM "patients"`,
       ),
     ).toBe('Claudia Navarro,Óscar Cifuentes');
+  }, 180_000);
+
+  it('precio de catálogo en el ítem (SEC-041): el backfill ve los ítems de las dos clínicas y deja NULL el ítem libre', async () => {
+    await run(STEPS[12]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("tenantId"::text || ':' || coalesce("catalogPrice"::text, '-'), ',' ORDER BY "tenantId") AS v
+           FROM "treatment_plan_items"`,
+      ),
+    ).toBe(`${T_A}:1000000.00,${T_B}:-`);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

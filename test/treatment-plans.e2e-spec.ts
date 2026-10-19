@@ -281,6 +281,9 @@ describe('Treatment plans (e2e)', () => {
         toothNumber: '21',
         catalogItemId: catalogItem.id,
         price: 50,
+        // SEC-041: 50 frente a 100 de catálogo es una rebaja del 50 %: cuenta
+        // como descuento y, por encima del umbral, pide el motivo.
+        discountReason: 'PROMOTION',
       })
       .expect(201);
     const item2 = addItem2.body as TreatmentPlanItemResponseBody;

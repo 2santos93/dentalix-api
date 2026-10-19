@@ -19,7 +19,8 @@ import { DiscountReasonFieldsDto } from './discount-reason.dto';
 // `surfaces` reuses the odontogram's ToothSurface enum, not a new one.
 export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @ApiPropertyOptional({
-    description: 'At most 2 decimal places',
+    description:
+      'At most 2 decimal places. SEC-041: bajarlo por debajo del precio de catálogo del ítem cuenta como descuento (tope del rol y motivo); subirlo es libre',
     maximum: MONEY_MAX,
   })
   @IsOptional()

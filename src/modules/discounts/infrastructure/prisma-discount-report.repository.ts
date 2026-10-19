@@ -27,8 +27,10 @@ interface RawRow {
   toothNumber: string;
   procedure: string | null;
   currency: string;
+  catalogPrice: Prisma.Decimal | null;
   price: Prisma.Decimal;
-  discount: Prisma.Decimal;
+  priceReduction: Prisma.Decimal;
+  itemDiscount: Prisma.Decimal;
   reason: DiscountReason | null;
   reasonNote: string | null;
   discountById: string | null;
@@ -47,11 +49,14 @@ interface RawTotal {
 
 /**
  * Informe de descuentos (DX-204). Una línea por ítem VIVO (sin `deletedAt`, de
- * un plan vivo y no anulado: ni rechazado ni cancelado) con descuento > 0, fechado por su descuento (`discountAt`; en
+ * un plan vivo y no anulado: ni rechazado ni cancelado) con descuento > 0 o con
+ * el precio por debajo del de catálogo (SEC-041: la rebaja cuenta como
+ * descuento y se firma igual), fechado por su descuento (`discountAt`; en
  * los anteriores a DX-204, el alta del ítem) y con la sede del descuento (o, si
  * no la tiene, la de presentación del plan). El periodo son días civiles de la
  * zona de CADA sede, como la caja (DX-097); sin sede, la zona por defecto.
- * Sirve el índice parcial `treatment_plan_items_tenant_discounted_at_idx`.
+ * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
+ * (mismo predicado).
  *
  * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
  * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
@@ -123,7 +128,10 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
-               i."price", i."discount", i."discountReason", i."discountReasonNote",
+               i."catalogPrice", i."price",
+               GREATEST(COALESCE(i."catalogPrice" - i."price", 0), 0) AS "priceReduction",
+               i."discount" AS "itemDiscount",
+               i."discountReason", i."discountReasonNote",
                i."discountById",
                COALESCE(i."discountAt", i."createdAt") AS "at",
                COALESCE(i."discountLocationId", p."presentedLocationId") AS "locationId",
@@ -133,7 +141,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
           JOIN "treatment_plans" p
             ON p."tenantId" = i."tenantId" AND p."id" = i."planId"
          WHERE i."tenantId" = ${tenantId}::uuid
-           AND i."discount" > 0
+           AND (i."discount" > 0 OR i."price" < i."catalogPrice")
            AND i."deletedAt" IS NULL
            AND p."deletedAt" IS NULL
            AND p."status" NOT IN ('REJECTED', 'CANCELLED')
@@ -154,7 +162,8 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
       const rows = await tx.$queryRaw<RawTotal[]>`
         ${cte}
         SELECT d."currency", count(*) AS "items",
-               sum(d."price") AS "gross", sum(d."discount") AS "discount"
+               sum(d."price" + d."priceReduction") AS "gross",
+               sum(d."priceReduction" + d."itemDiscount") AS "discount"
           FROM d
          GROUP BY d."currency"
          ORDER BY d."currency"`;
@@ -183,7 +192,8 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                d."planCreatedAt", d."patientId",
                concat_ws(' ', pa."firstName", pa."lastName") AS "patientName",
                d."toothNumber", c."labelEs" AS "procedure", d."currency",
-               d."price", d."discount", d."discountReason" AS "reason",
+               d."catalogPrice", d."price", d."priceReduction", d."itemDiscount",
+               d."discountReason" AS "reason",
                d."discountReasonNote" AS "reasonNote", d."discountById",
                u."fullName" AS "discountByName", d."at" AS "discountAt",
                d."locationId", l."name" AS "locationName"
@@ -201,8 +211,11 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
         planCreatedOn: civilDateIn(r.planCreatedAt, zoneOf(r.locationId)),
         discountOn: civilDateIn(r.discountAt, zoneOf(r.locationId)),
         procedure: r.procedure ?? '',
+        catalogPrice: r.catalogPrice?.toNumber() ?? null,
         price: r.price.toNumber(),
-        discount: r.discount.toNumber(),
+        priceReduction: r.priceReduction.toNumber(),
+        itemDiscount: r.itemDiscount.toNumber(),
+        discount: r.priceReduction.plus(r.itemDiscount).toNumber(),
       }));
     });
   }

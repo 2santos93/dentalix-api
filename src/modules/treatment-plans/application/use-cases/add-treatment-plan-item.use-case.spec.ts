@@ -18,6 +18,7 @@ import {
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import {
   AddTreatmentPlanItemRepoInput,
+  DecideNewItem,
   TreatmentPlanRepository,
 } from '../../domain/ports/treatment-plan-repository.port';
 import { DentalCatalogItem } from '../../../dental-catalog/domain/entities/dental-catalog-item.entity';
@@ -76,6 +77,7 @@ function fakeItem(
     toothNumber: '11',
     surfaces: [],
     catalogItemId: 'cat1',
+    catalogPrice: null,
     price: 200,
     discount: 0,
     discountReason: null,
@@ -91,10 +93,15 @@ function fakeItem(
   };
 }
 
+/**
+ * `addItem` del fake: como el real, relee el plan (aquí `findPlanById`) y deja
+ * que `decide` lo valide y calcule el ítem; `capture` recibe lo decidido.
+ */
 function makeRepo(
   overrides: Partial<TreatmentPlanRepository> = {},
+  capture?: (input: Omit<AddTreatmentPlanItemRepoInput, 'planId'>) => void,
 ): TreatmentPlanRepository {
-  return {
+  const repo: TreatmentPlanRepository = {
     createPlan: (): Promise<TreatmentPlan> =>
       Promise.reject(new Error('not implemented in this fake')),
     findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
@@ -102,19 +109,24 @@ function makeRepo(
     listPlansByPatient: (): Promise<TreatmentPlan[]> => Promise.resolve([]),
     updatePlan: (): Promise<TreatmentPlan> =>
       Promise.reject(new Error('not implemented in this fake')),
-    addItem: (
-      input: AddTreatmentPlanItemRepoInput,
-    ): Promise<TreatmentPlanItem> =>
-      Promise.resolve(
-        fakeItem({
-          planId: input.planId,
-          toothNumber: input.toothNumber,
-          surfaces: input.surfaces ?? [],
-          catalogItemId: input.catalogItemId,
-          price: input.price,
-          notes: input.notes ?? null,
-        }),
-      ),
+    addItem: async (
+      planId: string,
+      decide: DecideNewItem,
+    ): Promise<TreatmentPlanItem> => {
+      const plan = await repo.findPlanById(planId);
+      if (!plan) throw new NotFoundException('Treatment plan not found');
+      const input = decide(plan);
+      capture?.(input);
+      return fakeItem({
+        planId,
+        toothNumber: input.toothNumber,
+        surfaces: input.surfaces ?? [],
+        catalogItemId: input.catalogItemId,
+        catalogPrice: input.catalogPrice,
+        price: input.price,
+        notes: input.notes ?? null,
+      });
+    },
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
     updateItem: (): Promise<TreatmentPlanItem> =>
@@ -125,6 +137,7 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
+  return repo;
 }
 
 function makeCatalogRepo(
@@ -215,14 +228,9 @@ describe('AddTreatmentPlanItemUseCase', () => {
   });
 
   it('falls back to the catalog item defaultPrice when price is not provided', async () => {
-    let captured: AddTreatmentPlanItemRepoInput | undefined;
-    const repo = makeRepo({
-      addItem: (
-        input: AddTreatmentPlanItemRepoInput,
-      ): Promise<TreatmentPlanItem> => {
-        captured = input;
-        return Promise.resolve(fakeItem({ price: input.price }));
-      },
+    let captured: Omit<AddTreatmentPlanItemRepoInput, 'planId'> | undefined;
+    const repo = makeRepo({}, (input) => {
+      captured = input;
     });
     const catalogRepo = makeCatalogRepo({
       findById: (): Promise<DentalCatalogItem | null> =>
@@ -246,6 +254,8 @@ describe('AddTreatmentPlanItemUseCase', () => {
 
     expect(result.price).toBe(275);
     expect(captured?.price).toBe(275);
+    // SEC-041: el precio de catálogo queda en el ítem.
+    expect(captured?.catalogPrice).toBe(275);
   });
 
   it('throws BadRequestException when price is omitted AND the catalog item has no defaultPrice (null)', async () => {
@@ -285,7 +295,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
       {
         toothNumber: '11',
         catalogItemId: 'cat1',
-        price: 100,
+        price: 200,
       },
       ADMIN_ACTOR,
     );
@@ -294,14 +304,9 @@ describe('AddTreatmentPlanItemUseCase', () => {
   });
 
   it('passes surfaces and notes through untouched', async () => {
-    let captured: AddTreatmentPlanItemRepoInput | undefined;
-    const repo = makeRepo({
-      addItem: (
-        input: AddTreatmentPlanItemRepoInput,
-      ): Promise<TreatmentPlanItem> => {
-        captured = input;
-        return Promise.resolve(fakeItem());
-      },
+    let captured: Omit<AddTreatmentPlanItemRepoInput, 'planId'> | undefined;
+    const repo = makeRepo({}, (input) => {
+      captured = input;
     });
     const catalogRepo = makeCatalogRepo();
     const uc = new AddTreatmentPlanItemUseCase(
@@ -317,7 +322,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
         toothNumber: '26',
         surfaces: [ToothSurface.OCCLUSAL, ToothSurface.MESIAL],
         catalogItemId: 'cat1',
-        price: 100,
+        price: 200,
         notes: 'Caries profunda',
       },
       ADMIN_ACTOR,

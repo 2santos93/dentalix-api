@@ -1,9 +1,4 @@
-import {
-  ForbiddenException,
-  Inject,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { DiscountReason } from '@prisma/client';
 import {
   TREATMENT_PLAN_REPOSITORY,
@@ -20,7 +15,7 @@ import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { assertItemsEditable } from './signed-plan-lock';
 import {
   assertPlanDiscountable,
-  decideDiscount,
+  decideDiscountChange,
   type DiscountActor,
 } from './item-discount';
 
@@ -55,13 +50,6 @@ export class ApplyBulkDiscountUseCase {
     input: ApplyBulkDiscountInput,
     actor: DiscountActor,
   ): Promise<TreatmentPlanItem[]> {
-    const plan = await this.repo.findPlanById(planId);
-    if (!plan) {
-      throw new NotFoundException('Plan de tratamiento no encontrado');
-    }
-    assertItemsEditable(plan);
-    assertPlanDiscountable(plan);
-
     const policy = await this.discountPolicy.execute();
     const cap = policy.maxPercentByRole[actor.role] ?? 0;
     if (input.percent > cap) {
@@ -69,30 +57,47 @@ export class ApplyBulkDiscountUseCase {
     }
 
     const at = this.now();
-    return this.repo.applyBulkDiscount(planId, input.itemIds, (items) =>
-      items.map((item): BulkItemDiscount => {
-        const discount = discountForPercent(
-          item.price,
-          input.percent,
-          plan.currency,
-          cap,
-        );
-        return {
-          itemId: item.id,
-          discount,
-          ...decideDiscount(
+    const reasonChanged =
+      input.discountReason !== undefined ||
+      input.discountReasonNote !== undefined;
+    // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
+    // la transacción, junto a los ítems.
+    return this.repo.applyBulkDiscount(
+      planId,
+      input.itemIds,
+      ({ plan, items }) => {
+        assertItemsEditable(plan);
+        assertPlanDiscountable(plan);
+        return items.map((item): BulkItemDiscount => {
+          const discount = discountForPercent(
+            item.price,
+            input.percent,
+            plan.currency,
+            cap,
+          );
+          const before = {
+            catalogPrice: item.catalogPrice,
+            price: item.price,
+            discount: item.discount,
+          };
+          // SEC-041: el tope se mide sobre el descuento efectivo (la rebaja de
+          // precio del ítem + el % aplicado).
+          const decision = decideDiscountChange(
             policy,
             actor,
+            before,
             {
-              price: item.price,
+              ...before,
               discount,
               reason: input.discountReason ?? null,
               reasonNote: input.discountReasonNote ?? null,
             },
+            { discountSet: true, reasonChanged },
             at,
-          ),
-        };
-      }),
+          );
+          return { itemId: item.id, discount, ...decision };
+        });
+      },
     );
   }
 }
