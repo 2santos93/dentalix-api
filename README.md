@@ -105,7 +105,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
-   evoluciones (una corregida con una adenda — DX-038) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), ~90 citas desde el lunes de la semana pasada hasta
+   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
@@ -856,6 +856,51 @@ moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
 - **Informe de cierre**: la web imprime la vista A4 (`/print/cash-sessions/:id`)
   y el navegador la guarda como PDF (la API no genera PDF). El envío por email
   al ADMIN queda fuera de esta entrega.
+
+## Códigos para el RDA: CIE-10, CUPS y REPS (DX-212)
+
+Datos que pide el Resumen Digital de Atención (Res. 1888/2025, Colombia) y el
+RIPS. Esta tarea solo los guarda y COMPRUEBA: no genera el Bundle FHIR ni envía
+nada al Ministerio.
+
+- **CIE-10** (`icd10_codes`): tabla de referencia global, sin tenant ni RLS
+  (como `currencies`/`cities`), con las subcategorías de 4 caracteres del
+  capítulo oral (K00–K14) y Z01.2. La siembra `prisma db seed` (upsert por
+  código, idempotente, nunca borra). `GET /reference/icd10?q=` (cualquier
+  sesión) busca por código con o sin punto («K02», «k021») o por texto sin
+  tildes («caries»), con la columna generada `search_text`
+  (`dx_search_normalize`) y su índice trigram; como mucho 20, primero los que
+  empiezan por lo buscado.
+- **Diagnósticos de la evolución** (`clinical_entry_diagnoses`): `diagnoses`
+  en `POST /patients/:id/clinical-entries`, 1 `PRINCIPAL` y hasta 3
+  `RELACIONADO` con diente FDI opcional. Se insertan en la MISMA transacción
+  que la evolución (trigger `dx_clinical_entry_diagnosis_with_entry`: su
+  `createdAt` tiene que ser el de la transacción) y son inalterables como ella
+  (`dx_forbid_clinical_record_mutation`, `search_path` fijo — SEC-032). Un
+  segundo principal, más de 3 relacionados, un diente no FDI o un código que no
+  está en la tabla dan 400 en español («Código CIE-10 no válido: «K99.9»»).
+  Sin diagnóstico la evolución se sigue guardando. Una corrección es una adenda
+  en la evolución y una evolución nueva con el diagnóstico. RLS FORCE, FK
+  compuesta a la evolución (misma clínica y paciente) y RESTRICT al código.
+- **CUPS** (`dental_catalog_items.cupsCode`, 6 alfanuméricos) y **REPS**
+  (`locations.repsHabilitationCode`, 12 dígitos): en `PATCH /catalog/items/:id`
+  y `PATCH /locations/:id`, solo ADMIN, con CHECK en la BD y 400 que dice el
+  formato. Vacío o `null` lo quita. Altas y cambios del catálogo y cambios de
+  sede quedan en `audit_events` (`DENTAL_CATALOG_ITEM`, `LOCATION`, con los
+  campos cambiados, nunca los valores).
+- **`GET /clinical-entries/:id/rda-readiness`** (roles clínicos; recepción no
+  ve diagnósticos) → `{ notApplicable, ready, missing[], pending[] }`. Sede: la
+  de la cita ligada o, sin cita, la principal (la evolución no guarda sede).
+  Fuera de Colombia, `notApplicable: true`. Comprueba documento del paciente,
+  diagnóstico principal, CUPS de los procedimientos hechos en esa atención
+  (odontograma: `PROCEDURE` `COMPLETED` de esta clínica, ligados a la evolución
+  o del mismo día civil en la zona de la sede, sin los anulados), REPS de la
+  sede y registro profesional del autor. El NIT va en `pending` («pendiente de
+  DX-019») y no cuenta para `ready`. Evolución de otra clínica: 404. Queda
+  auditado (`VIEW`, `RDA_READINESS`, con el paciente).
+- **Demo**: CUPS en seis procedimientos (ejemplos: verifícalos contra la tabla
+  oficial), REPS en la sede principal (la Norte sin él) y diagnósticos en tres
+  evoluciones; la de Ana (hace 40 días) sale «RDA: listo».
 
 ## Registro de implantes (DX-191)
 
