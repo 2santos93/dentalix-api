@@ -28,6 +28,7 @@ function mapToEntity(item: PrismaDentalCatalogItem): DentalCatalogItem {
     labelPt: item.labelPt,
     color: item.color,
     defaultPrice: item.defaultPrice ? item.defaultPrice.toNumber() : null,
+    cupsCode: item.cupsCode,
     active: item.active,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -74,6 +75,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
           labelPt: input.labelPt,
           color: input.color,
           defaultPrice: input.defaultPrice,
+          cupsCode: input.cupsCode,
           active: input.active,
         },
       });

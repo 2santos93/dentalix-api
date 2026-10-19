@@ -7,6 +7,8 @@ export interface Location {
   address: string | null;
   /** País de la sede (DX-013): decide los campos legales de la receta. */
   country: ClinicCountry;
+  /** DX-212: código de habilitación REPS (12 dígitos) o null. */
+  repsHabilitationCode: string | null;
   isActive: boolean;
   /**
    * Zona IANA de la sede (DX-097): la de su horario, o la de su país si no
@@ -29,6 +31,8 @@ export interface UpdateLocationRepoInput {
   name?: string;
   address?: string;
   country?: ClinicCountry;
+  /** DX-212: ya normalizado y validado; null lo quita. */
+  repsHabilitationCode?: string | null;
   isActive?: boolean;
 }
 

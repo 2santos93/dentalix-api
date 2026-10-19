@@ -37,6 +37,7 @@ import {
   CATALOG_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 @ApiTags('catalog')
 @ApiBearerAuth()
@@ -52,6 +53,13 @@ export class DentalCatalogController {
     private readonly updateCatalogItem: UpdateCatalogItemUseCase,
   ) {}
 
+  // DX-212: el catálogo lleva el código CUPS que reporta el RDA/RIPS: altas y
+  // cambios quedan auditados (campos cambiados, nunca valores).
+  @Audit({
+    action: 'CREATE',
+    resource: 'DENTAL_CATALOG_ITEM',
+    resourceId: { response: 'id' },
+  })
   @Post()
   @Roles(...CATALOG_WRITE_ROLES)
   @ApiCreatedResponse({ type: DentalCatalogItemDto })
@@ -91,6 +99,11 @@ export class DentalCatalogController {
     });
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'DENTAL_CATALOG_ITEM',
+    resourceId: { param: 'id' },
+  })
   @Patch(':id')
   @Roles(...CATALOG_WRITE_ROLES)
   @ApiOkResponse({ type: DentalCatalogItemDto })

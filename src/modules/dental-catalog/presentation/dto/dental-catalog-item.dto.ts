@@ -38,6 +38,13 @@ export class DentalCatalogItemDto {
   @ApiProperty({ type: Number, nullable: true })
   defaultPrice!: number | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-212: código CUPS (6 alfanuméricos) o null.',
+  })
+  cupsCode!: string | null;
+
   @ApiProperty()
   active!: boolean;
 

@@ -50,6 +50,17 @@ export class UpdateLocationDto {
   country?: ClinicCountry;
 
   @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: '110010123401',
+    description:
+      'DX-212: código de habilitación REPS de la sede (Colombia), 12 dígitos (400 con el formato esperado si no). Vacío o null lo quita. Solo ADMIN; queda auditado.',
+  })
+  @IsOptional()
+  @IsString()
+  repsHabilitationCode?: string | null;
+
+  @ApiPropertyOptional({
     description:
       'Desactivar una sede la oculta para operar; no se puede desactivar la última activa.',
   })
@@ -64,6 +75,12 @@ export class LocationDto {
   @ApiProperty({ nullable: true, type: String }) address!: string | null;
   @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
   country!: ClinicCountry;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-212: código de habilitación REPS (12 dígitos) o null.',
+  })
+  repsHabilitationCode!: string | null;
   @ApiProperty() isActive!: boolean;
   @ApiProperty({
     example: 'America/Bogota',

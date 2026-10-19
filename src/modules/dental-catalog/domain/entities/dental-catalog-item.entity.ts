@@ -17,6 +17,8 @@ export interface DentalCatalogItem {
   labelPt: string | null;
   color: string;
   defaultPrice: number | null;
+  /** DX-212: código CUPS (6 alfanuméricos) o null si no se ha puesto. */
+  cupsCode: string | null;
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
