@@ -39,6 +39,7 @@ import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedu
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
+import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
 import {
   ImplantsController,
   PatientImplantsController,
@@ -650,6 +651,23 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CLINICAL_NOTE_TEMPLATE',
     resourceId: { param: 'id' },
   },
+  // DX-222: plantillas de indicaciones postoperatorias (sin paciente). Ni el
+  // texto ni los vínculos van a la auditoría; desactivar es un PATCH.
+  'POST /post-op-templates': {
+    action: 'CREATE',
+    resource: 'POSTOP_TEMPLATE',
+    resourceId: RES,
+  },
+  'POST /post-op-templates/samples': {
+    action: 'CREATE',
+    resource: 'POSTOP_TEMPLATE',
+    reason: 'SAMPLE_TEMPLATES',
+  },
+  'PATCH /post-op-templates/:id': {
+    action: 'UPDATE',
+    resource: 'POSTOP_TEMPLATE',
+    resourceId: { param: 'id' },
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',
@@ -697,6 +715,7 @@ const CONTROLLERS: Type[] = [
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,
+  PostOpTemplatesController,
 ];
 
 function joinPath(...parts: string[]): string {

@@ -16,6 +16,7 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     address: null,
     country: 'CO',
     repsHabilitationCode: null,
+    phone: null,
     isActive: true,
     timeZone: 'America/Bogota',
     createdAt: new Date('2026-01-01'),
@@ -169,5 +170,43 @@ describe('UpdateLocationUseCase · REPS (DX-212)', () => {
       'El código de habilitación REPS debe tener 12 dígitos (p. ej. 110010123401)',
     );
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('teléfono de la sede (DX-222)', () => {
+  it('se crea con el teléfono recortado; vacío no lo guarda', async () => {
+    const create = jest.fn((input: { name: string; phone?: string }) =>
+      Promise.resolve(makeLocation({ name: input.name, phone: input.phone })),
+    );
+    const uc = new CreateLocationUseCase(makeRepo({ create }));
+
+    await uc.execute({ name: 'Sede Sur', phone: ' 601 222 3333 ' });
+    await uc.execute({ name: 'Sede Este', phone: '   ' });
+
+    expect(create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ phone: '601 222 3333' }),
+    );
+    expect(create.mock.calls[1][0].phone).toBeUndefined();
+  });
+
+  it('al editar se recorta, vacío o null lo quitan y sin él no se toca', async () => {
+    const update = jest.fn((_id: string, patch: object) =>
+      Promise.resolve(makeLocation(patch)),
+    );
+    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+
+    const saved = await uc.execute('loc-1', { phone: ' +57 601 555 0101 ' });
+    await uc.execute('loc-1', { phone: '' });
+    await uc.execute('loc-1', { phone: null });
+    await uc.execute('loc-1', { name: 'Otra' });
+
+    expect(saved.phone).toBe('+57 601 555 0101');
+    expect(update.mock.calls.map(([, patch]) => patch)).toEqual([
+      expect.objectContaining({ phone: '+57 601 555 0101' }),
+      expect.objectContaining({ phone: null }),
+      expect.objectContaining({ phone: null }),
+      expect.objectContaining({ phone: undefined }),
+    ]);
   });
 });

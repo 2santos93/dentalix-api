@@ -173,6 +173,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /clinical-note-templates': ADMIN_ONLY,
   'POST /clinical-note-templates/samples': ADMIN_ONLY,
   'PATCH /clinical-note-templates/:id': ADMIN_ONLY,
+  // DX-222: plantillas de indicaciones postoperatorias. Leerlas, los cuatro
+  // roles (recepción las entrega en el mostrador); crear, editar, desactivar y
+  // cargar las de ejemplo, solo ADMIN. loop/informes/DX-222.md.
+  'GET /post-op-templates': EVERY_ROLE,
+  'POST /post-op-templates': ADMIN_ONLY,
+  'POST /post-op-templates/samples': ADMIN_ONLY,
+  'PATCH /post-op-templates/:id': ADMIN_ONLY,
   'POST /patients/:patientId/tooth-records': CLINICAL,
   'GET /patients/:patientId/odontogram': CLINICAL,
   'GET /patients/:patientId/teeth/:fdi/history': CLINICAL,
