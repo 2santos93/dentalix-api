@@ -146,6 +146,9 @@ model Location {
   // viene al crearla, el trigger `locations_default_receipt_prefix` la deriva
   // del nombre (3 letras, con número si ya la usa otra sede de la clínica).
   // Única por clínica, también entre sedes retiradas: nunca se reutiliza.
+  // DX-226: con recibos o contador ya no cambia (trigger
+  // `locations_receipt_prefix_guard`, check_violation) y ninguna sede toma
+  // una serie que ya numeró recibos en la clínica.
   receiptPrefix String?
   isActive      Boolean       @default(true)
   createdAt     DateTime      @default(now())
@@ -1440,6 +1443,8 @@ model Payment {
   // huella es 422. NULL en abonos anteriores a DX-109 o sin clave.
   idempotencyFingerprint String?
   createdById            String?        @db.Uuid
+  // DX-226: la pone la BD en UTC (trigger `payments_server_created_at`), la
+  // misma fuente de hora que el alta de un compromiso de pago.
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
   deletedAt              DateTime?

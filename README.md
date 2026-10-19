@@ -751,6 +751,19 @@ en la MISMA transacción que el abono (`issuePaymentReceipt`):
   primera y toma la siguiente. Otras clínicas no esperan. Vale en READ
   COMMITTED (como crea sedes la API); en una transacción REPEATABLE READ que ya
   leyó antes, el índice único sigue rechazando el duplicado.
+- **Serie inmutable una vez usada** (DX-226): es la numeración legal del
+  recibo. El trigger `locations_receipt_prefix_guard` (`BEFORE UPDATE OF
+  "receiptPrefix"`) rechaza con `check_violation` cambiar (o quitar) la serie
+  de una sede que tiene recibos o el contador de su serie, también al
+  superusuario; una sede sin recibos sí puede cambiarla. Ninguna sede (alta o
+  cambio) puede tomar una serie que ya numeró recibos o tiene contador en la
+  clínica, aunque la sede que la usó ya no la tenga, y la serie derivada de
+  una sede nueva salta esas series. Se comprueba contra los recibos y
+  contadores (inmutables), con la RLS de quien escribe y bajo el mismo
+  candado por clínica. Emitir un recibo retiene la fila de la sede (`FOR KEY
+  SHARE`) hasta el COMMIT, así que un cambio de serie simultáneo espera y se
+  rechaza al ver el recibo. La API no expone hoy el cambio de serie (lo dará
+  DX-019, que tendrá que traducir el `check_violation` a un 409 en español).
 - **Contador**: `payment_receipt_counters` (una fila por serie) se incrementa
   con un UPSERT en la transacción del abono: el bloqueo de la fila ordena los
   cobros simultáneos (sin duplicados) y un rollback deshace el incremento (sin
@@ -1386,7 +1399,9 @@ npx prisma migrate deploy && npx prisma db seed
 #      members       miembros de los roles NOLOGIN del clúster que no son el
 #                    owner de la base, o el owner con SET/INHERIT;
 #      dispatcher_delete  tablas donde dentalix_email_dispatcher tiene DELETE
-#                    sin la política restrictiva `"tenantId" IS NULL` (DX-144).
+#                    sin la política restrictiva `"tenantId" IS NULL` (DX-144);
+#      timezone      dentalix_app no arranca con TimeZone = UTC (DX-226), con
+#                    un `message` en español que dice cómo arreglarlo.
 npm run db:check-force
 ```
 
@@ -1419,6 +1434,33 @@ dentalix_email_dispatcher`) o repón la política como en
 `20261017231200_dx144_platform_email_quota`. La CI la ejecuta en los jobs de integración y
 `owner-nosu`, y `test/rls-catalog.int-spec.ts` la cubre también.
 
+- **Zona horaria: UTC** (DX-226). Las columnas de hora son `timestamp` sin
+  zona: Prisma graba en UTC desde la API y los triggers que ponen la hora del
+  servidor (historia clínica, implantes, gestiones y compromisos de cobro,
+  recibos, alta de los abonos, resumen de la cartera y, con
+  `20261019090100_dx226_cash_sessions_server_time_utc`, apertura, cierre,
+  reapertura y ajustes de la caja por turno) graban
+  `timezone('UTC', now())`; `test/server-time-utc.int-spec.ts` falla si una
+  función de `public` vuelve a usar `CURRENT_TIMESTAMP` o `now()` sin UTC. Aun así, `dentalix_app` (y el owner, y los roles
+  NOLOGIN) tiene que arrancar con `TimeZone = UTC`: cualquier hora que la BD
+  calcule con la zona de la sesión (`CURRENT_TIMESTAMP` en un `DEFAULT`, SQL
+  a mano, un trigger futuro) se desfasaría (con `America/Bogota`, 5 h). La
+  migración `20261019090000_dx226_server_time_utc_receipt_series` hace
+  `ALTER ROLE … SET timezone = 'UTC'` en `dentalix_app`, el dueño de la base,
+  `dentalix_owner` y los roles NOLOGIN, y `ALTER DATABASE <base> SET timezone
+  = 'UTC'`. El owner sin superusuario puede con la base (es su dueño) y con
+  los roles que creó (ADMIN); si no puede con alguno (p. ej. un rol
+  superusuario creado por el admin), la migración deja un `WARNING` y sigue:
+  la base ya queda en UTC y cubre a cualquier rol sin valor propio. Si un rol
+  tiene otra zona fijada (`ALTER ROLE … SET timezone` o `ALTER ROLE … IN
+  DATABASE`), gana sobre la de la base y `db:check-force` sale con 1 en
+  `timezone`; arréglalo como admin o como el owner
+  (`ALTER ROLE dentalix_app SET timezone = 'UTC'`, o `RESET timezone` en el
+  `IN DATABASE`). Solo afecta a sesiones nuevas: reinicia las réplicas de la
+  API tras cambiarlo. `db:check-force` mira el catálogo (rol + base, rol,
+  base, por ese orden; sin ninguna también falla) y, si `DATABASE_URL` es de
+  `dentalix_app`, el `SHOW TimeZone` de una sesión real. Las horas ya
+  grabadas no se reescriben; las columnas no pasan a `timestamptz`.
 - **FORCE y el owner**: todas las tablas con `tenantId` tienen RLS ENABLE +
   FORCE, así que el owner también está sujeto a la RLS y, sin
   `app.current_tenant`, no ve filas de clínica. Lo comprueba

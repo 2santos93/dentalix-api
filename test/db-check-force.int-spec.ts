@@ -10,7 +10,8 @@ import { PrismaClient } from '@prisma/client';
  * `public` con RLS activada y sin FORZAR, las de clínica (o particiones de
  * una tabla con RLS) sin RLS, y los miembros inesperados de los roles NOLOGIN
  * del clúster y los DELETE del rol despachador sin su política restrictiva
- * de plataforma (DX-144) (README, runbook de despliegue). Los miembros se prueban en
+ * de plataforma (DX-144), y la zona horaria de dentalix_app si no es UTC
+ * (DX-226) (README, runbook de despliegue). Los miembros se prueban en
  * test/owner-nosu/shared-cluster.owner-spec.ts: aquí el clúster es compartido.
  */
 
@@ -110,6 +111,30 @@ describe('db:check-force (DX-134)', () => {
     await raw.$executeRawUnsafe(
       `REVOKE DELETE ON public."${TABLE}" FROM dentalix_email_dispatcher`,
     );
+    expect(checkForce().status).toBe(0);
+  }, 60_000);
+
+  it('dentalix_app con una zona horaria que no es UTC: sale con 1 y lo dice en español (DX-226)', async () => {
+    // Solo en esta base (IN DATABASE): el rol es del clúster y gana sobre el
+    // valor del rol y el de la base.
+    const [{ db }] = await raw.$queryRaw<{ db: string }[]>`
+      SELECT current_database()::text AS db`;
+    await raw.$executeRawUnsafe(
+      `ALTER ROLE dentalix_app IN DATABASE "${db}" SET timezone = 'America/Bogota'`,
+    );
+    try {
+      const { status, out } = checkForce();
+      expect(out).toContain('"event":"db.check_force_failed"');
+      expect(out).toContain(
+        '"timezone":["dentalix_app: TimeZone = America/Bogota (tiene que ser UTC)"]',
+      );
+      expect(out).toContain('la hora del servidor tiene que ser UTC');
+      expect(status).toBe(1);
+    } finally {
+      await raw.$executeRawUnsafe(
+        `ALTER ROLE dentalix_app IN DATABASE "${db}" RESET timezone`,
+      );
+    }
     expect(checkForce().status).toBe(0);
   }, 60_000);
 

@@ -11,6 +11,16 @@ import { fromCents, toCents } from '../../receivables/domain/aging';
  *   del compromiso: un abono anterior ya estaba en el saldo con el que se
  *   pactó) y fechados (`paidAt`) hasta el día del compromiso INCLUSIVE, en
  *   días civiles de la zona de la sede del compromiso (DX-097).
+ * - Las dos altas (`createdAt` del abono y del compromiso) vienen de la MISMA
+ *   fuente de hora (DX-226): las pone el servidor de BD en UTC con un trigger
+ *   BEFORE INSERT (`timezone('UTC', now())`), ignorando lo que mande la API.
+ *   Así ni la zona de la sesión ni un reloj de la API desfasado unos segundos
+ *   respecto de la BD hacen pasar por posterior un abono registrado antes del
+ *   compromiso (ni al revés). Se eligió esto y no comparar por día civil
+ *   (`paidAt` ≥ día de alta del compromiso) porque el día civil daría por
+ *   bueno un abono registrado horas antes del compromiso el mismo día, que ya
+ *   estaba en el saldo con el que se pactó. `now` (el reloj del barrido) solo
+ *   decide el día en que se incumple, que es de grano diario.
  * - KEPT (cumplido) si esos abonos suman al menos el importe (en centavos).
  * - BROKEN (incumplido) si no, desde el día SIGUIENTE al del compromiso en esa
  *   zona (un compromiso «para el 15/11» se incumple el 16/11 a las 00:00 de la
