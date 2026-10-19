@@ -36,6 +36,11 @@ async function cleanup(): Promise<void> {
   });
   const where = { tenantId: { in: tenants.map((t) => t.id) } };
   // Superusuario: los triggers append-only dejan la purga administrativa.
+  await raw.cashSessionAdjustment.deleteMany({ where });
+  await raw.cashSessionReopening.deleteMany({ where });
+  await raw.cashSessionClosingLine.deleteMany({ where });
+  await raw.cashSessionClosing.deleteMany({ where });
+  await raw.cashSessionFloat.deleteMany({ where });
   await raw.clinicalEntryAddendum.deleteMany({ where });
   await raw.clinicalEntry.deleteMany({ where });
   await raw.patientImplant.deleteMany({ where });
@@ -44,6 +49,7 @@ async function cleanup(): Promise<void> {
   await raw.paymentReceipt.deleteMany({ where });
   await raw.paymentReceiptCounter.deleteMany({ where });
   await raw.payment.deleteMany({ where });
+  await raw.cashSession.deleteMany({ where });
   await raw.treatmentPlan.deleteMany({ where });
   await raw.patientLedger.deleteMany({ where });
   await raw.patient.deleteMany({ where });
@@ -72,6 +78,20 @@ function inBogota<T>(
       ...params,
     );
     return rows[0];
+  });
+}
+
+/**
+ * Corre `fn` como dentalix_app (Prisma, como la API), con la clínica fijada y
+ * la sesión en Bogotá.
+ */
+function txInBogota<T>(
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return appRole.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.current_tenant', ${s.tenantId}, true)`;
+    await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${ZONE}'`);
+    return fn(tx);
   });
 }
 
@@ -226,5 +246,131 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
     expect(row.payment.drift).toBeLessThan(1);
     expect(row.receipt.drift).toBeLessThan(1);
     expect(row.ledger.drift).toBeLessThan(1);
+  });
+
+  it('caja por turno (DX-027): apertura, cierre, reapertura y ajuste con la hora del servidor en UTC', async () => {
+    const utcDrift = async (
+      tx: Prisma.TransactionClient,
+      table: string,
+      column: string,
+      id: string,
+    ) => {
+      const [row] = await tx.$queryRawUnsafe<{ drift: number }[]>(
+        `SELECT ${drift(`"${column}"`)} FROM "${table}" WHERE "id" = $1::uuid`,
+        id,
+      );
+      return row.drift;
+    };
+    // Apertura con su fondo (el trigger del fondo compara con la hora de la
+    // apertura: si la fuente de hora no fuera la misma, fallaría).
+    const session = await txInBogota(async (tx) => {
+      const created = await tx.cashSession.create({
+        data: {
+          tenantId: s.tenantId,
+          locationId: s.locationId,
+          openedById: s.userId,
+        },
+      });
+      await tx.cashSessionFloat.create({
+        data: {
+          tenantId: s.tenantId,
+          sessionId: created.id,
+          currency: 'COP',
+          amount: 50_000,
+        },
+      });
+      expect(
+        await utcDrift(tx, 'cash_sessions', 'openedAt', created.id),
+      ).toBeLessThan(1);
+      return created;
+    });
+    // Cierre con su arqueo y el cambio de estado.
+    const closing = await txInBogota(async (tx) => {
+      const created = await tx.cashSessionClosing.create({
+        data: {
+          tenantId: s.tenantId,
+          sessionId: session.id,
+          sequence: 1,
+          closedById: s.userId,
+          blind: false,
+          hasDifference: false,
+          suggestedLockDate: new Date('2026-10-17T00:00:00.000Z'),
+        },
+      });
+      await tx.cashSessionClosingLine.create({
+        data: {
+          tenantId: s.tenantId,
+          closingId: created.id,
+          currency: 'COP',
+          method: 'CASH',
+          opening: 50_000,
+          expected: 50_000,
+          counted: 50_000,
+          difference: 0,
+        },
+      });
+      await tx.cashSession.update({
+        where: { id: session.id },
+        data: { status: 'CLOSED', closedById: s.userId },
+      });
+      expect(
+        await utcDrift(tx, 'cash_session_closings', 'closedAt', created.id),
+      ).toBeLessThan(1);
+      expect(
+        await utcDrift(tx, 'cash_sessions', 'closedAt', session.id),
+      ).toBeLessThan(1);
+      return created;
+    });
+    // Reapertura y un ajuste pendiente.
+    await txInBogota(async (tx) => {
+      const reopening = await tx.cashSessionReopening.create({
+        data: {
+          tenantId: s.tenantId,
+          sessionId: session.id,
+          sequence: 1,
+          closingId: closing.id,
+          reason: 'Faltó un abono',
+          reopenedById: s.userId,
+        },
+      });
+      await tx.cashSession.update({
+        where: { id: session.id },
+        data: {
+          status: 'OPEN',
+          closedAt: null,
+          closedById: null,
+          reopenCount: 1,
+        },
+      });
+      expect(
+        await utcDrift(
+          tx,
+          'cash_session_reopenings',
+          'reopenedAt',
+          reopening.id,
+        ),
+      ).toBeLessThan(1);
+      const adjustment = await tx.cashSessionAdjustment.create({
+        data: {
+          tenantId: s.tenantId,
+          locationId: s.locationId,
+          kind: 'CORRECTION',
+          originalSessionId: session.id,
+          currency: 'COP',
+          method: 'CASH',
+          amount: 100,
+          reason: 'Corrección de prueba',
+          createdById: s.userId,
+        },
+      });
+      expect(
+        await utcDrift(
+          tx,
+          'cash_session_adjustments',
+          'createdAt',
+          adjustment.id,
+        ),
+      ).toBeLessThan(1);
+    });
   });
 });
