@@ -95,6 +95,10 @@ describe('decideReminder (DX-026)', () => {
     ['CANCELLED', 'CANCELLED'],
     ['COMPLETED', 'COMPLETED'],
     ['NO_SHOW', 'NO_SHOW'],
+    // DX-200: el paciente ya llegó (aunque llegue horas antes de la cita).
+    ['ARRIVED', 'IN_CLINIC'],
+    ['IN_CHAIR', 'IN_CLINIC'],
+    ['READY_FOR_CHECKOUT', 'IN_CLINIC'],
   ] as const)('omite una cita %s', (status, reason) => {
     expect(
       decideReminder({ ...base, appointment: { ...base.appointment, status } }),

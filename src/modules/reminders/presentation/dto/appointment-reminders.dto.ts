@@ -36,7 +36,7 @@ export class AppointmentReminderItemDto {
     enumName: 'AppointmentReminderSkipReason',
     nullable: true,
     description:
-      'NO_EMAIL sin email · OPTED_OUT el paciente se dio de baja · CHANNEL_NONE / CHANNEL_WHATSAPP su canal no es el email (DX-128) · CANCELLED/COMPLETED/NO_SHOW estado de la cita · RESCHEDULED a otra hora · DELETED retirada · DISABLED la sede los desactivó · TOO_LATE fuera de plazo (la cita ya había empezado o su hora pasó hace más de 1 h)',
+      'NO_EMAIL sin email · OPTED_OUT el paciente se dio de baja · CHANNEL_NONE / CHANNEL_WHATSAPP su canal no es el email (DX-128) · CANCELLED/COMPLETED/NO_SHOW estado de la cita · IN_CLINIC el paciente ya llegó (DX-200) · RESCHEDULED a otra hora · DELETED retirada · DISABLED la sede los desactivó · TOO_LATE fuera de plazo (la cita ya había empezado o su hora pasó hace más de 1 h)',
   })
   skipReason!: AppointmentReminderSkipReason | null;
 

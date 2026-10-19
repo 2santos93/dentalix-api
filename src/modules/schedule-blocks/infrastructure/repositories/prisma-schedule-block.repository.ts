@@ -6,6 +6,7 @@ import { resolveDefaultLocationId } from '../../../../shared/locations/default-l
 import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
+import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import type {
   AffectingBlocks,
   AffectingBlocksQuery,
@@ -204,8 +205,13 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
     const where: Prisma.AppointmentWhereInput = {
       ...affectedAppointmentsWhere(scope),
       deletedAt: null,
+      // DX-200: una cita en curso (paciente en la clínica) también se ve afectada.
       status: {
-        in: [AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED],
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          ...IN_CLINIC_STATUSES,
+        ],
       },
       start: { lt: scope.end },
       end: { gt: scope.start },
