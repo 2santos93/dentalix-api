@@ -15,31 +15,31 @@ model Tenant {
   primaryColor              String                     @default("#0F5E9C")
   logoUrl                   String?
   // DX-128: canal de los avisos automáticos con el que nace cada paciente.
-  defaultContactChannel    ContactChannel             @default(EMAIL)
+  defaultContactChannel     ContactChannel             @default(EMAIL)
   // DX-027: ajustes de caja de la clínica. Por defecto, el comportamiento de
   // antes de la caja por turno: se cobra en efectivo sin caja abierta y el
   // cierre enseña el esperado mientras se cuenta.
-  cashRequireOpenSession   Boolean                    @default(false)
-  cashBlindClose           Boolean                    @default(false)
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
-  deletedAt                DateTime?
-  memberships              ClinicMembership[]
-  domains                  TenantDomain[]
-  invitations              ClinicInvitation[]
-  appointmentConfirmations AppointmentConfirmation[]
-  privacyPolicyVersions    PrivacyPolicyVersion[]
-  dataProcessingConsents   DataProcessingConsent[]
-  consentTemplates         ConsentTemplate[]
-  prescriptionTemplates    PrescriptionTemplate[]
-  emailOutbox              EmailOutbox[]
-  clinicalEntryAddenda     ClinicalEntryAddendum[]
-  dentitionEvents          PatientDentitionEvent[]
-  appointmentTypes         AppointmentType[]
-  jobs                     Job[]
-  outboundMessages         OutboundMessage[]
-  scheduleBlocks           ScheduleBlock[]
-  waitlistEntries          AppointmentWaitlistEntry[]
+  cashRequireOpenSession    Boolean                    @default(false)
+  cashBlindClose            Boolean                    @default(false)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  deletedAt                 DateTime?
+  memberships               ClinicMembership[]
+  domains                   TenantDomain[]
+  invitations               ClinicInvitation[]
+  appointmentConfirmations  AppointmentConfirmation[]
+  privacyPolicyVersions     PrivacyPolicyVersion[]
+  dataProcessingConsents    DataProcessingConsent[]
+  consentTemplates          ConsentTemplate[]
+  prescriptionTemplates     PrescriptionTemplate[]
+  emailOutbox               EmailOutbox[]
+  clinicalEntryAddenda      ClinicalEntryAddendum[]
+  dentitionEvents           PatientDentitionEvent[]
+  appointmentTypes          AppointmentType[]
+  jobs                      Job[]
+  outboundMessages          OutboundMessage[]
+  scheduleBlocks            ScheduleBlock[]
+  waitlistEntries           AppointmentWaitlistEntry[]
   // DX-210: ofertas de huecos libres a candidatos.
   waitlistOffers            WaitlistOffer[]
   reminderSettings          LocationReminderSettings[]
@@ -56,9 +56,8 @@ model Tenant {
   platformAccesses          PlatformAccessAudit[]
   // DX-204: topes de descuento por rol (una fila; sin ella, los de por defecto).
   discountPolicy            DiscountPolicy?
-  discountPolicy           DiscountPolicy?
   // DX-027: cajas por turno.
-  cashSessions             CashSession[]
+  cashSessions              CashSession[]
 
   @@map("tenants")
 }
@@ -2828,6 +2827,8 @@ model PatientResponsibleParty {
   //   patient_responsible_parties_migrated_key    UNIQUE ("tenantId", "patientId") WHERE "migratedFromGuardian"
   //   patient_responsible_parties_responsible_idx ("tenantId", "responsiblePatientId") WHERE "responsiblePatientId" IS NOT NULL
   @@map("patient_responsible_parties")
+}
+
 // ---------------------------------------------------------------------------
 // Caja por turno (DX-027)
 // ---------------------------------------------------------------------------
