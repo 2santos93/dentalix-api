@@ -5,6 +5,7 @@ import type {
   PostOpAppointmentContext,
   PostOpDeliveryDocumentView,
   PostOpDeliveryRepository,
+  PostOpPublicDeliveryView,
 } from '../../domain/ports/post-op-delivery-repository.port';
 import type { PostOpEmailSender, PostOpEmailSendInput } from '../postop-email';
 
@@ -66,6 +67,9 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
   readonly performed = new Map<string, string[]>();
   readonly performedQueries: Array<{ day: string; timeZone: string }> = [];
   readonly users = new Map<string, string>([['user-1', 'Recepción Demo']]);
+  /** Búsquedas por token y aperturas marcadas, para afirmar qué se tocó. */
+  tokenLookups = 0;
+  openedMarks = 0;
   private clock = Date.parse('2026-10-20T15:00:00.000Z');
 
   loadAppointmentContext(
@@ -129,6 +133,26 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
       locationPhone: ctx.location.phone,
       patientName: `${ctx.patient.firstName} ${ctx.patient.lastName}`,
     });
+  }
+
+  findByTokenHash(tokenHash: string): Promise<PostOpPublicDeliveryView | null> {
+    this.tokenLookups++;
+    const row = this.rows.find((r) => r.tokenHash === tokenHash);
+    const ctx = row ? this.contexts.get(row.appointmentId) : undefined;
+    if (!row || !ctx) return Promise.resolve(null);
+    return Promise.resolve({
+      ...row,
+      clinic: { name: ctx.clinicName, logoUrl: null, primaryColor: '#0F5E9C' },
+      locationPhone: ctx.location.phone,
+    });
+  }
+
+  markFirstOpened(id: string): Promise<boolean> {
+    const row = this.rows.find((r) => r.id === id && r.firstOpenedAt === null);
+    if (!row) return Promise.resolve(false);
+    row.firstOpenedAt = new Date((this.clock += 1000));
+    this.openedMarks++;
+    return Promise.resolve(true);
   }
 
   private newestFirst(): PostOpDelivery[] {

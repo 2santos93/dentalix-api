@@ -98,6 +98,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-128: baja de los recordatorios desde el enlace del email (el paciente).
   'GET /public/reminder-opt-outs/:token': PUBLIC_TENANT,
   'POST /public/reminder-opt-outs/:token': PUBLIC_TENANT,
+  // DX-222: indicaciones postoperatorias desde el enlace del email/WhatsApp.
+  'GET /public/post-op-instructions/:token': PUBLIC_TENANT,
+  'POST /public/post-op-instructions/:token/opened': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y

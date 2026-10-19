@@ -14,6 +14,7 @@ import type {
   PostOpAppointmentContext,
   PostOpDeliveryDocumentView,
   PostOpDeliveryRepository,
+  PostOpPublicDeliveryView,
 } from '../../domain/ports/post-op-delivery-repository.port';
 
 // Más recientes primero; `id` desempata para que el orden sea estable.
@@ -50,8 +51,8 @@ function toEntity(row: PostOpInstructionDelivery): PostOpDelivery {
 /**
  * Entregas de indicaciones postoperatorias (DX-222). Todo bajo RLS
  * (`runWithTenant`): una cita, un paciente o una entrega de otra clínica no
- * existen. Sin update ni delete: la entrega es inalterable (trigger
- * `post_op_deliveries_immutable`).
+ * existen. Sin delete y sin más update que la primera apertura: la entrega es
+ * inalterable (trigger `post_op_deliveries_immutable`).
  */
 @Injectable()
 export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository {
@@ -244,6 +245,35 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         locationPhone: location.phone,
         patientName: `${patient.firstName} ${patient.lastName}`,
       };
+    });
+  }
+
+  findByTokenHash(tokenHash: string): Promise<PostOpPublicDeliveryView | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.postOpInstructionDelivery.findFirst({
+        where: { tokenHash },
+        include: { location: { select: { phone: true } } },
+      });
+      if (!row) return null;
+      const clinic = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { name: true, logoUrl: true, primaryColor: true },
+      });
+      const { location, ...delivery } = row;
+      return { ...toEntity(delivery), clinic, locationPhone: location.phone };
+    });
+  }
+
+  markFirstOpened(id: string): Promise<boolean> {
+    // `firstOpenedAt: null` en el where: dos aperturas a la vez solo marcan
+    // una, y la segunda no llega al trigger (no actualiza ninguna fila).
+    return this.prisma.runWithTenant(async (tx) => {
+      const { count } = await tx.postOpInstructionDelivery.updateMany({
+        where: { id, firstOpenedAt: null },
+        data: { firstOpenedAt: new Date() },
+      });
+      return count > 0;
     });
   }
 }

@@ -71,6 +71,12 @@ export interface PostOpDeliveryDocumentView extends PostOpDelivery {
   patientName: string;
 }
 
+/** Una entrega tal como la abre el paciente desde el enlace público. */
+export interface PostOpPublicDeliveryView extends PostOpDelivery {
+  clinic: { name: string; logoUrl: string | null; primaryColor: string | null };
+  locationPhone: string | null;
+}
+
 export const POST_OP_DELIVERY_REPOSITORY = Symbol(
   'POST_OP_DELIVERY_REPOSITORY',
 );
@@ -106,4 +112,11 @@ export interface PostOpDeliveryRepository {
     patientId: string,
     id: string,
   ): Promise<PostOpDeliveryDocumentView | null>;
+  /** Entrega del enlace público; `null` si no existe o es de otra clínica. */
+  findByTokenHash(tokenHash: string): Promise<PostOpPublicDeliveryView | null>;
+  /**
+   * Fija `firstOpenedAt` con la hora de la BD solo si seguía vacío (lo único
+   * que la BD deja cambiar de una entrega, y una sola vez). `true` si la marcó.
+   */
+  markFirstOpened(id: string): Promise<boolean>;
 }
