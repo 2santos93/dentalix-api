@@ -72,7 +72,8 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    sin mostrar su valor. Con `NODE_ENV=production` además exige
    `CORS_ROOT_DOMAIN`, `TENANT_BASE_DOMAINS` y `FILES_PUBLIC_BASE_URL` (https,
    sin dominios locales), rechaza los secretos ficticios de CI (`solo-test…`) y
-   las contraseñas de base de datos de ejemplo (`changeme`, `dentalix_app`…).
+   las contraseñas de base de datos de ejemplo (`changeme`, `dentalix_app`…),
+   y exige `STORAGE_DRIVER=s3` con su bucket (ver «Ficheros en un bucket S3»).
 3. Aplicar las migraciones:
    ```bash
    npx prisma migrate deploy
@@ -1575,6 +1576,110 @@ de la demo (`UPDATE users SET "isPlatformAdmin" = true WHERE email = '…'`),
 enrola el MFA en http://localhost:3001/admin y entra en
 http://demo.localhost:3001/login con su email: la web pide el código y el
 motivo. Luego, como `admin@demo.dentalix.app`, Ajustes → «Accesos de soporte».
+
+## Ficheros en un bucket S3 (DX-084)
+
+Los ficheros (hoy los avatares; DX-008 añadirá radiografías y PDFs) pasan por
+el puerto `FileStoragePort` (`src/shared/storage`), con dos adaptadores que se
+eligen con `STORAGE_DRIVER`:
+
+| `STORAGE_DRIVER` | Adaptador | Uso |
+|---|---|---|
+| `disk` (defecto) | `DiskFileStorage`, en `STORAGE_DIR` | Solo desarrollo y tests. **Con `NODE_ENV=production` la API no arranca** (el disco del contenedor es efímero, no se comparte entre réplicas y no tiene copia). |
+| `s3` | `S3FileStorage` (`@aws-sdk/client-s3`) | Producción: AWS S3, Cloudflare R2 o MinIO. |
+
+Variables de `s3` (las valida `validateEnv` al arrancar; los mensajes nunca
+muestran secretos):
+
+| Variable | |
+|---|---|
+| `S3_BUCKET` | Obligatoria. El bucket **privado** de los ficheros. |
+| `S3_REGION` | Defecto `us-east-1`. R2: `auto`. |
+| `S3_ENDPOINT` | Vacío = AWS. R2: `https://<cuenta>.r2.cloudflarestorage.com`. MinIO local: `http://localhost:9000`. En producción, https y no local. |
+| `S3_FORCE_PATH_STYLE` | `true` para MinIO; `false` (defecto) para AWS y R2. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Las dos o ninguna. Sin ellas el SDK usa su cadena por defecto (rol IAM de la tarea o instancia, lo preferible en AWS). En producción se rechazan las de ejemplo de MinIO. |
+| `S3_SSE` | `AES256` o `aws:kms` añade la cabecera de cifrado en cada subida; vacío = el cifrado por defecto del bucket. |
+
+**Claves, no URL.** En la BD se guarda la **clave** del fichero
+(`users.avatarUrl` = `avatars/<userId>.<ext>`; en Prisma el campo se llama
+`avatarKey`). La URL pública se calcula al responder con la
+`FILES_PUBLIC_BASE_URL` vigente, así que cambiar de dominio no rompe ningún
+avatar. La migración `20261019224000_dx084_avatar_keys` convierte las URL
+absolutas de antes a su clave, y la API reduce a clave cualquier URL de avatar
+que una réplica antigua escriba durante un despliegue escalonado. Las claves
+se arman con ids, nunca con datos del paciente o del usuario.
+
+**Público y privado.**
+- Lo público (avatares; logos en el futuro) tiene una URL estable:
+  `FILES_PUBLIC_BASE_URL/avatars/<nombre>`. La sirve la API leyendo del
+  almacén, así que cualquier réplica la sirve y el bucket no se abre al
+  público.
+- Lo privado (DX-008) se entrega con `getSignedUrl(key, ttlSeconds)`: con S3
+  es una URL SigV4 directa al bucket que caduca a los `ttlSeconds` (1 s – 7
+  días); con el disco, una URL de la API (`/files/signed`) firmada con HMAC
+  por una clave aleatoria del proceso. **Nada clínico con URL pública.**
+
+**El bucket en producción** (lo crea quien opera, no la API):
+1. **Privado**: bloqueo de acceso público activado (AWS «Block Public Access»;
+   en R2 sin dominio público ni `r2.dev`). Ninguna política anónima.
+2. **Cifrado del lado del servidor**: cifrado por defecto del bucket con SSE-S3
+   (AES256) o SSE-KMS con una clave propia; R2 cifra siempre en reposo. Si la
+   política del bucket exige la cabecera, pon `S3_SSE`.
+3. **Versionado** activado: un reemplazo o un borrado (el avatar anterior se
+   borra al subir uno nuevo) deja una versión anterior recuperable. Es la base
+   de la copia de ficheros de DX-082 (replicación a otra cuenta o región).
+4. **Ciclo de vida**: expirar las versiones no actuales a los 30 días y
+   abortar las subidas multiparte incompletas a los 7 días. Los ficheros
+   clínicos de DX-008 seguirán la retención de la historia clínica (DX-039),
+   así que **no** se expiran versiones actuales.
+5. **Credenciales mínimas**: un usuario o rol solo para la API con
+   `s3:GetObject`, `s3:PutObject` y `s3:DeleteObject` sobre
+   `arn:aws:s3:::<bucket>/*` y nada más (sin `s3:ListAllMyBuckets`, sin
+   permisos de bucket ni de otros buckets). En R2, un token de API «Object
+   Read & Write» limitado a ese bucket. Ejemplo de política de AWS:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+       "Resource": "arn:aws:s3:::dentalix-files/*"
+     }]
+   }
+   ```
+
+   Con SSE-KMS, el rol necesita además `kms:Encrypt`, `kms:Decrypt` y
+   `kms:GenerateDataKey` sobre esa clave.
+
+**En local** con MinIO (`docker compose up -d minio minio_init` crea los
+buckets privados `dentalix-local` y `dentalix-test` con versionado; consola en
+http://localhost:9001):
+
+```bash
+STORAGE_DRIVER=s3 S3_BUCKET=dentalix-local S3_ENDPOINT=http://localhost:9000 \
+S3_FORCE_PATH_STYLE=true S3_ACCESS_KEY_ID=dentalix-minio \
+S3_SECRET_ACCESS_KEY=dentalix-minio-local npm run start:dev
+```
+
+**Tests.** Los unitarios cubren el adaptador con un cliente simulado. Los de
+integración y e2e contra MinIO (`test/storage/s3-file-storage.int-spec.ts`,
+`test/storage/s3-avatar.e2e-spec.ts`: subir, servir, reemplazar y borrar el
+avatar con **dos réplicas** de la API, un avatar existente con URL absoluta y
+la caducidad de una URL firmada) leen `S3_TEST_ENDPOINT`, `S3_TEST_BUCKET`,
+`S3_TEST_ACCESS_KEY_ID` y `S3_TEST_SECRET_ACCESS_KEY` de `.env.test`. Sin
+`S3_TEST_ENDPOINT` se saltan **de forma visible** (el nombre de la suite dice
+`[SALTADO: falta S3_TEST_ENDPOINT]` y se avisa por consola); en la CI el job de
+integración levanta MinIO y fija `REQUIRE_S3_TESTS=1`, con lo que faltar la
+variable es un fallo. Para correrlos en local con el MinIO de docker-compose,
+añade a `.env.test`:
+
+```bash
+S3_TEST_ENDPOINT="http://localhost:9000"
+S3_TEST_BUCKET="dentalix-test"
+S3_TEST_ACCESS_KEY_ID="dentalix-minio"
+S3_TEST_SECRET_ACCESS_KEY="dentalix-minio-local"
+```
 
 ## Despliegue: roles de la BD (DX-113)
 
