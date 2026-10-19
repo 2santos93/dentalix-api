@@ -125,6 +125,53 @@ describe('evaluatePromise (DX-150)', () => {
     expect(result.status).toBe('KEPT');
   });
 
+  describe('borde de la hora de alta del compromiso (DX-226: las dos horas son de la BD)', () => {
+    const at = (ms: number) => new Date(promise.createdAt.getTime() + ms);
+    const now = { now: new Date('2026-11-05T16:00:00.000Z'), timeZone: BOGOTA };
+
+    it('un abono dado de alta en el MISMO instante que el compromiso cuenta', () => {
+      const result = evaluatePromise(
+        promise,
+        [payment('2026-11-01T15:00:00.000Z', 200_000, { createdAt: at(0) })],
+        now,
+      );
+      expect(result.status).toBe('KEPT');
+    });
+
+    it('un abono dado de alta 1 ms antes del compromiso no cuenta, aunque se feche el mismo día', () => {
+      const result = evaluatePromise(
+        promise,
+        [payment('2026-11-01T15:00:00.000Z', 200_000, { createdAt: at(-1) })],
+        now,
+      );
+      expect(result).toEqual({ status: 'OPEN', covered: 0 });
+    });
+
+    it('un abono dado de alta 1 ms después cuenta', () => {
+      const result = evaluatePromise(
+        promise,
+        [payment('2026-11-01T15:00:00.000Z', 200_000, { createdAt: at(1) })],
+        now,
+      );
+      expect(result.status).toBe('KEPT');
+    });
+
+    it('el reloj del barrido desfasado ±5 s no cambia qué abonos cuentan', () => {
+      const payments = [
+        payment('2026-11-01T15:00:00.000Z', 150_000, { createdAt: at(-1) }),
+        payment('2026-11-01T15:00:05.000Z', 50_000, { createdAt: at(1) }),
+      ];
+      for (const skew of [-5_000, 0, 5_000]) {
+        expect(
+          evaluatePromise(promise, payments, {
+            now: new Date(now.now.getTime() + skew),
+            timeZone: BOGOTA,
+          }),
+        ).toEqual({ status: 'OPEN', covered: 50_000 });
+      }
+    });
+  });
+
   it('suma en centavos (0,10 + 0,20 cubre 0,30)', () => {
     const result = evaluatePromise(
       { ...promise, amount: 0.3 },

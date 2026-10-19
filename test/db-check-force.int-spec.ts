@@ -113,6 +113,30 @@ describe('db:check-force (DX-134)', () => {
     expect(checkForce().status).toBe(0);
   }, 60_000);
 
+  it('dentalix_app con una zona horaria que no es UTC: sale con 1 y lo dice en español (DX-226)', async () => {
+    // Solo en esta base (IN DATABASE): el rol es del clúster y gana sobre el
+    // valor del rol y el de la base.
+    const [{ db }] = await raw.$queryRaw<{ db: string }[]>`
+      SELECT current_database()::text AS db`;
+    await raw.$executeRawUnsafe(
+      `ALTER ROLE dentalix_app IN DATABASE "${db}" SET timezone = 'America/Bogota'`,
+    );
+    try {
+      const { status, out } = checkForce();
+      expect(out).toContain('"event":"db.check_force_failed"');
+      expect(out).toContain(
+        '"timezone":["dentalix_app: TimeZone = America/Bogota (tiene que ser UTC)"]',
+      );
+      expect(out).toContain('la hora del servidor tiene que ser UTC');
+      expect(status).toBe(1);
+    } finally {
+      await raw.$executeRawUnsafe(
+        `ALTER ROLE dentalix_app IN DATABASE "${db}" RESET timezone`,
+      );
+    }
+    expect(checkForce().status).toBe(0);
+  }, 60_000);
+
   it('solo mira el esquema public', async () => {
     await raw.$executeRawUnsafe(`CREATE SCHEMA "${SCHEMA}"`);
     await raw.$executeRawUnsafe(

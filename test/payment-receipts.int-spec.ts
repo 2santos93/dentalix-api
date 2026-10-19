@@ -129,6 +129,21 @@ function asApp<T>(
   });
 }
 
+/**
+ * Cambia la serie de una sede saltándose sus triggers (`session_replication_role
+ * = replica`, solo superusuario): la guarda de DX-226 no deja cambiar la serie
+ * de una sede con recibos.
+ */
+async function setPrefixBypassingGuard(
+  locationId: string,
+  prefix: string | null,
+): Promise<void> {
+  await raw.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+    await tx.$executeRaw`UPDATE "locations" SET "receiptPrefix" = ${prefix} WHERE "id" = ${locationId}::uuid`;
+  });
+}
+
 async function numbersOf(tenantId: string, series: string): Promise<number[]> {
   const rows = await raw.paymentReceipt.findMany({
     where: { tenantId, seriesPrefix: series },
@@ -242,20 +257,16 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
     it('si falla la emisión del recibo, el abono tampoco se guarda y el contador no avanza', async () => {
       // La sede pierde su serie (fallo de despliegue simulado): el abono se
       // inserta y la emisión falla DESPUÉS, dentro de la misma transacción.
-      await raw.location.update({
-        where: { id: northId },
-        data: { receiptPrefix: null },
-      });
+      // Ya emitió NOR-000001 y la guarda de DX-226 no deja quitarle la serie:
+      // se simula con los triggers desactivados (solo el superusuario).
+      await setPrefixBypassingGuard(northId, null);
       const paymentsBefore = await raw.payment.count({
         where: { tenantId: a.tenantId, locationId: northId },
       });
       try {
         await expect(pay(a, {}, northId)).rejects.toThrow(/serie de recibos/);
       } finally {
-        await raw.location.update({
-          where: { id: northId },
-          data: { receiptPrefix: 'NOR' },
-        });
+        await setPrefixBypassingGuard(northId, 'NOR');
       }
       expect(
         await raw.payment.count({
