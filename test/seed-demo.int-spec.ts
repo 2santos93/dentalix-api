@@ -190,6 +190,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
   let firstCounts: Counts;
   let outsideBefore: Counts;
   let usersBefore: string[];
+  let seededBetween: { start: number; end: number };
 
   beforeAll(async () => {
     await purgeDemo();
@@ -287,7 +288,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
   }, 60000);
 
   it('la primera corrida crea la clínica demo completa', async () => {
+    const start = Date.now();
     const result = await seedDemo({ quiet: true });
+    seededBetween = { start, end: Date.now() };
     expect(result.status).toBe('created');
     expect(result.password).toBe(DEMO_PASSWORD);
     expect(result.users.map((u) => u.email)).toEqual(
@@ -556,6 +559,21 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       const hours = hoursByLocation.get(a.locationId);
       expect(hours).toBeDefined();
       expect(fitsBusinessHours(a.start, a.end, hours ?? null)).toBe(true);
+    }
+  });
+
+  it('los cobros de los turnos demo usan el instante de la siembra, también antes del mediodía', async () => {
+    const tenantId = await liveDemoTenantId();
+    const payments = await raw.payment.findMany({
+      where: { tenantId, cashSessionId: { not: null } },
+      select: { paidAt: true },
+    });
+    expect(payments).toHaveLength(3);
+    for (const payment of payments) {
+      expect(payment.paidAt.getTime()).toBeGreaterThanOrEqual(
+        seededBetween.start,
+      );
+      expect(payment.paidAt.getTime()).toBeLessThanOrEqual(seededBetween.end);
     }
   });
 
