@@ -1,5 +1,5 @@
 import type { IdempotentPayment } from '../idempotency';
-import { PaymentMethod } from '@prisma/client';
+import { ClinicRole, PaymentMethod } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
@@ -112,11 +112,23 @@ export interface PaymentVoidTarget extends VoidSubject {
   id: string;
 }
 
+/** Desde dónde se anula: para el `audit_event` de la reapertura (DX-215). */
+export interface PaymentVoidRequest {
+  locationId: string | null;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
 /** Rastro de la anulación (SEC-013). */
 export interface PaymentVoidAudit {
   voidedById: string;
+  /** Rol de quien anula (DX-215: actor del evento de la reapertura). */
+  voidedByRole: ClinicRole;
   voidedAt: Date;
   reason: string;
+  /** `null` fuera de una petición HTTP. */
+  request: PaymentVoidRequest | null;
 }
 
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
@@ -178,6 +190,11 @@ export interface PaymentRepository {
    * (TOCTOU race). Returns `true` if this call actually voided the payment,
    * `false` if it was already voided or doesn't exist (never throws for that
    * case -- the use case decides 404). Never a hard delete.
+   *
+   * DX-215: in the SAME transaction, re-evaluates the patient's latest KEPT
+   * payment promise in the payment's currency if this payment counted for it
+   * (back to OPEN, or BROKEN after its day), audited with `audit`'s actor and
+   * request.
    */
   softDelete(id: string, audit: PaymentVoidAudit): Promise<boolean>;
 

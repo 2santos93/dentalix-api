@@ -225,7 +225,10 @@ export class PaymentsController {
       'Borrado lógico: el abono deja de sumar pero se conserva con ' +
       '`voidedById`, `voidedAt` y `voidReason`. ADMIN anula cualquier abono; ' +
       'RECEPTION solo los que registró ella misma el mismo día (calendario ' +
-      'de la sede del abono).',
+      'de la sede del abono). Si el abono cumplía el último compromiso de ' +
+      'pago del paciente en su moneda y ya no queda cubierto, el compromiso ' +
+      'vuelve a OPEN (o BROKEN si su día ya pasó en la zona de su sede), en ' +
+      'la misma transacción y auditado (DX-215).',
   })
   @ApiOkResponse({ description: 'Abono anulado (cuerpo vacío)' })
   @ApiBadRequestResponse({
@@ -244,10 +247,19 @@ export class PaymentsController {
     @Body() dto: VoidPaymentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
+    // DX-215: la sede, el request id, la IP y el user agent van al evento del
+    // compromiso de pago que se reabre al anular el abono que lo cumplía.
+    const context = auditRequestContext(req, this.tenantContext);
     return this.voidPayment.execute({
       paymentId: id,
       reason: dto.reason,
       actor: { userId: req.user.sub, role: req.user.role },
+      request: context && {
+        locationId: context.locationId,
+        requestId: context.requestId,
+        ip: context.ip,
+        userAgent: context.userAgent,
+      },
     });
   }
 }

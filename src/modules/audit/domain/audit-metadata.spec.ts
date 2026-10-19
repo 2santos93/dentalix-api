@@ -161,4 +161,27 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
       ).toEqual({});
     });
   });
+  describe('statusChange (DX-215: compromiso reabierto al anular su abono)', () => {
+    it('guarda el estado anterior y el nuevo', () => {
+      expect(
+        sanitizeAuditMetadata({ statusChange: { from: 'KEPT', to: 'OPEN' } }),
+      ).toEqual({ statusChange: { from: 'KEPT', to: 'OPEN' } });
+    });
+
+    it('descarta el cambio entero si algún lado no es un código, y las claves de más', () => {
+      expect(
+        sanitizeAuditMetadata({
+          statusChange: { from: 'KEPT', to: 'Paga el viernes' },
+        }),
+      ).toEqual({});
+      expect(sanitizeAuditMetadata({ statusChange: { from: 'KEPT' } })).toEqual(
+        {},
+      );
+      expect(
+        sanitizeAuditMetadata({
+          statusChange: { from: 'KEPT', to: 'BROKEN', amount: 200000 },
+        }),
+      ).toEqual({ statusChange: { from: 'KEPT', to: 'BROKEN' } });
+    });
+  });
 });

@@ -309,6 +309,7 @@ describe('GetReceivablesAgingUseCase', () => {
           currency: 'COP',
           dueDate: '2026-11-15',
           status: 'OPEN',
+          reopenedAt: null,
         },
       });
       const out = await useCase.execute({ locationId: NORTE.id, pageSize: 2 });

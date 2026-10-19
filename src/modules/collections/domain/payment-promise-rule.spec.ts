@@ -1,4 +1,9 @@
-import { evaluatePromise, type PromisePayment } from './payment-promise-rule';
+import {
+  countsTowardPromise,
+  evaluatePromise,
+  statusAfterVoid,
+  type PromisePayment,
+} from './payment-promise-rule';
 
 // DX-150 · regla de cumplimiento de un compromiso de pago, con los bordes de
 // día en la zona de la sede.
@@ -191,5 +196,108 @@ describe('evaluatePromise (DX-150)', () => {
       { now: new Date('2026-11-16T12:00:00.000Z'), timeZone: BOGOTA },
     );
     expect(result.status).toBe('KEPT');
+  });
+});
+
+describe('countsTowardPromise (DX-215)', () => {
+  it('cuenta un abono de la moneda, registrado desde el compromiso y fechado hasta su día', () => {
+    expect(
+      countsTowardPromise(
+        promise,
+        payment('2026-11-15T20:00:00.000Z', 1),
+        BOGOTA,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      'otra moneda',
+      payment('2026-11-05T15:00:00.000Z', 1, { currency: 'USD' }),
+    ],
+    [
+      'registrado antes del compromiso',
+      payment('2026-11-05T15:00:00.000Z', 1, {
+        createdAt: new Date('2026-11-01T14:59:59.000Z'),
+      }),
+    ],
+    ['fechado después de su día', payment('2026-11-16T05:00:00.000Z', 1)],
+  ])('no cuenta un abono de %s', (_label, p) => {
+    expect(countsTowardPromise(promise, p, BOGOTA)).toBe(false);
+  });
+});
+
+describe('statusAfterVoid (DX-215)', () => {
+  const beforeDue = new Date('2026-11-10T16:00:00.000Z');
+  const afterDue = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en Bogotá
+
+  it('anular el abono que lo cumplió ANTES de la fecha: vuelve a ABIERTO', () => {
+    expect(
+      statusAfterVoid(promise, [], {
+        now: beforeDue,
+        timeZone: BOGOTA,
+        anotherOpen: false,
+      }),
+    ).toBe('OPEN');
+  });
+
+  it('el último día aún es ABIERTO (23:59 de Bogotá)', () => {
+    expect(
+      statusAfterVoid(promise, [], {
+        now: new Date('2026-11-16T04:59:00.000Z'),
+        timeZone: BOGOTA,
+        anotherOpen: false,
+      }),
+    ).toBe('OPEN');
+  });
+
+  it('DESPUÉS de la fecha (zona de la sede): pasa a INCUMPLIDO', () => {
+    expect(
+      statusAfterVoid(promise, [payment('2026-11-05T15:00:00.000Z', 50_000)], {
+        now: afterDue,
+        timeZone: BOGOTA,
+        anotherOpen: false,
+      }),
+    ).toBe('BROKEN');
+  });
+
+  it('el mismo instante en Madrid ya es el 16: INCUMPLIDO', () => {
+    expect(
+      statusAfterVoid(promise, [], {
+        now: new Date('2026-11-15T23:30:00.000Z'),
+        timeZone: MADRID,
+        anotherOpen: false,
+      }),
+    ).toBe('BROKEN');
+  });
+
+  it('si otro abono vigente sigue cubriendo el importe, sigue CUMPLIDO', () => {
+    expect(
+      statusAfterVoid(promise, [payment('2026-11-08T15:00:00.000Z', 200_000)], {
+        now: afterDue,
+        timeZone: BOGOTA,
+        anotherOpen: false,
+      }),
+    ).toBe('KEPT');
+  });
+
+  it('abonos restantes en otra moneda no lo cubren', () => {
+    expect(
+      statusAfterVoid(
+        promise,
+        [payment('2026-11-08T15:00:00.000Z', 200_000, { currency: 'USD' })],
+        { now: beforeDue, timeZone: BOGOTA, anotherOpen: false },
+      ),
+    ).toBe('OPEN');
+  });
+
+  it('con otro compromiso ya ABIERTO no puede reabrirse (uno abierto por paciente): INCUMPLIDO', () => {
+    expect(
+      statusAfterVoid(promise, [], {
+        now: beforeDue,
+        timeZone: BOGOTA,
+        anotherOpen: true,
+      }),
+    ).toBe('BROKEN');
   });
 });

@@ -42,6 +42,11 @@ export interface PaymentPromiseView {
   createdBy: StaffRef;
   createdAt: Date;
   settledAt: Date | null;
+  /**
+   * DX-215: última vez que se reabrió al anular el abono que lo cumplía
+   * (la pone la BD). `null` si nunca.
+   */
+  reopenedAt: Date | null;
   /** Lo cubierto por los abonos que cuentan (regla de payment-promise-rule.ts). */
   covered: number;
 }

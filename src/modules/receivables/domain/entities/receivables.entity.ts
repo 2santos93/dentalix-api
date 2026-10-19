@@ -111,6 +111,8 @@ export interface DebtorPromise {
   /** Día civil (YYYY-MM-DD) en la zona de la sede del compromiso. */
   dueDate: string;
   status: PaymentPromiseStatus;
+  /** DX-215: se reabrió al anular el abono que lo cumplía (última vez). */
+  reopenedAt: Date | null;
 }
 
 export interface DebtorCollections {

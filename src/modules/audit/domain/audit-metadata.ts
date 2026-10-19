@@ -29,6 +29,18 @@ export interface AuditMetadata {
    * fabricante, no datos del paciente) y cuántas filas salieron.
    */
   search?: AuditSearch;
+  /**
+   * DX-215: cambio de estado de un recurso que no lo dice el `reason` solo
+   * (un compromiso de pago CUMPLIDO que vuelve a ABIERTO o pasa a INCUMPLIDO al
+   * anular su abono). Solo códigos de estado.
+   */
+  statusChange?: AuditStatusChange;
+}
+
+/** Estado antes y después (códigos), DX-215. */
+export interface AuditStatusChange {
+  from: string;
+  to: string;
 }
 
 /** Lo buscado en una búsqueda auditada por lote/REF (DX-191). */
@@ -127,6 +139,21 @@ function search(value: unknown): AuditSearch | null {
   return out;
 }
 
+/** Los dos estados con formato de código, o nada. */
+function statusChange(value: unknown): AuditStatusChange | null {
+  if (!isRecord(value)) return null;
+  const { from, to } = value;
+  if (
+    typeof from !== 'string' ||
+    typeof to !== 'string' ||
+    !CODE.test(from) ||
+    !CODE.test(to)
+  ) {
+    return null;
+  }
+  return { from, to };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -148,5 +175,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (origin) out.origin = origin;
   const searched = search(input.search);
   if (searched) out.search = searched;
+  const change = statusChange(input.statusChange);
+  if (change) out.statusChange = change;
   return out;
 }

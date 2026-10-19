@@ -64,6 +64,14 @@ export class AuditSearchDto {
   rows!: number;
 }
 
+export class AuditStatusChangeDto {
+  @ApiProperty({ example: 'KEPT' })
+  from!: string;
+
+  @ApiProperty({ example: 'OPEN' })
+  to!: string;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -102,6 +110,13 @@ export class AuditMetadataDto {
       'DX-191: búsqueda de implantes por lote/REF — lo buscado y cuántas filas salieron.',
   })
   search?: AuditSearchDto;
+
+  @ApiPropertyOptional({
+    type: AuditStatusChangeDto,
+    description:
+      'DX-215: estado antes y después (p. ej. un compromiso de pago cumplido que vuelve a abierto al anular su abono). Solo códigos.',
+  })
+  statusChange?: AuditStatusChangeDto;
 }
 
 export class AuditEventDto {

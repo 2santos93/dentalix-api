@@ -4,12 +4,13 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
 import type { AuditEventRepository } from '../domain/ports/audit-event-repository.port';
-import type {
-  AuditActorRef,
-  AuditEventDraft,
-  AuditEventFilter,
-  AuditEventView,
-  AuditPatientRef,
+import {
+  MAX_AUDIT_USER_AGENT,
+  type AuditActorRef,
+  type AuditEventDraft,
+  type AuditEventFilter,
+  type AuditEventView,
+  type AuditPatientRef,
 } from '../domain/audit-event';
 import type { AuditCursor } from '../domain/audit-cursor';
 import { sanitizeAuditMetadata } from '../domain/audit-metadata';
@@ -106,39 +107,50 @@ async function resolveActor(
   return { userId: membership?.userId ?? null, role: null };
 }
 
+/**
+ * Escribe el evento DENTRO de la transacción `tx` (con el tenant del evento ya
+ * fijado): para una escritura que tiene que quedar auditada en la misma
+ * transacción que el cambio, o ninguna de las dos (DX-215, reapertura de un
+ * compromiso de pago al anular su abono). Mismo saneado que `insert`.
+ */
+export async function writeAuditEvent(
+  tx: Prisma.TransactionClient,
+  draft: AuditEventDraft,
+): Promise<void> {
+  const patientId = draft.patient
+    ? await resolvePatientId(tx, draft.patient)
+    : null;
+  const actor = await resolveActor(tx, draft.actor);
+  await tx.auditEvent.create({
+    data: {
+      tenantId: draft.tenantId,
+      locationId: draft.locationId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: draft.action,
+      resourceType: draft.resourceType,
+      resourceId:
+        draft.resourceId && UUID.test(draft.resourceId)
+          ? draft.resourceId
+          : null,
+      patientId,
+      requestId: draft.requestId,
+      ip: draft.ip,
+      userAgent: draft.userAgent?.slice(0, MAX_AUDIT_USER_AGENT) ?? null,
+      metadata: sanitizeAuditMetadata(draft.metadata) as Prisma.InputJsonObject,
+    },
+    select: { id: true },
+  });
+}
+
 @Injectable()
 export class PrismaAuditEventRepository implements AuditEventRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async insert(draft: AuditEventDraft): Promise<void> {
-    await this.prisma.runWithTenant(draft.tenantId, async (tx) => {
-      const patientId = draft.patient
-        ? await resolvePatientId(tx, draft.patient)
-        : null;
-      const actor = await resolveActor(tx, draft.actor);
-      await tx.auditEvent.create({
-        data: {
-          tenantId: draft.tenantId,
-          locationId: draft.locationId,
-          actorUserId: actor.userId,
-          actorRole: actor.role,
-          action: draft.action,
-          resourceType: draft.resourceType,
-          resourceId:
-            draft.resourceId && UUID.test(draft.resourceId)
-              ? draft.resourceId
-              : null,
-          patientId,
-          requestId: draft.requestId,
-          ip: draft.ip,
-          userAgent: draft.userAgent,
-          metadata: sanitizeAuditMetadata(
-            draft.metadata,
-          ) as Prisma.InputJsonObject,
-        },
-        select: { id: true },
-      });
-    });
+    await this.prisma.runWithTenant(draft.tenantId, (tx) =>
+      writeAuditEvent(tx, draft),
+    );
   }
 
   async list(

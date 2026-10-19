@@ -1,3 +1,4 @@
+import type { PaymentVoidAudit } from '../../../domain/ports/payment-repository.port';
 import { InMemoryPaymentRepository } from './in-memory-payment.repository';
 
 // No use case wraps `listByPatient` yet (future work) -- same reason
@@ -51,10 +52,12 @@ describe('InMemoryPaymentRepository#listByPatient', () => {
 // rather than throwing, so VoidPaymentUseCase can make the "already
 // voided/absent -> 404" decision from a single atomic call instead of a
 // separate find-then-update (the double-void TOCTOU race).
-const AUDIT = {
+const AUDIT: PaymentVoidAudit = {
   voidedById: 'u-admin',
+  voidedByRole: 'ADMIN',
   voidedAt: new Date('2026-01-02T15:00:00.000Z'),
   reason: 'Cobro duplicado',
+  request: null,
 };
 
 describe('InMemoryPaymentRepository#softDelete', () => {

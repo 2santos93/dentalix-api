@@ -174,6 +174,15 @@ export class PaymentPromiseDto {
   settledAt!: Date | null;
 
   @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-215: última vez que el compromiso, ya cumplido, se reabrió (a abierto o incumplido) porque se anuló el abono que lo cumplía. null si nunca.',
+  })
+  reopenedAt!: Date | null;
+
+  @ApiProperty({
     description:
       'Abonado en la moneda del compromiso desde que se hizo y hasta su día',
   })

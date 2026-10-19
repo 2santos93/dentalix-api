@@ -140,6 +140,15 @@ export class AgingPromiseDto {
 
   @ApiProperty({ enum: PaymentPromiseStatus, enumName: 'PaymentPromiseStatus' })
   status!: PaymentPromiseStatus;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-215: última vez que el compromiso, ya cumplido, se reabrió porque se anuló el abono que lo cumplía. null si nunca.',
+  })
+  reopenedAt!: Date | null;
 }
 
 export class AgingRowDto {

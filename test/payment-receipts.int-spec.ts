@@ -525,7 +525,9 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
         payments.softDelete(receipt.paymentId, {
           voidedAt,
           voidedById: a.userId,
+          voidedByRole: 'ADMIN',
           reason: 'Cobro duplicado',
+          request: null,
         }),
       );
       expect(voided).toBe(true);

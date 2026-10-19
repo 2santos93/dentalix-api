@@ -114,6 +114,7 @@ describe('toReceivablesCsv', () => {
           currency: 'COP',
           dueDate: '2026-11-15',
           status: 'BROKEN',
+          reopenedAt: null,
         },
       }),
     ]);

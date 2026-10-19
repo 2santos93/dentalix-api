@@ -3,10 +3,11 @@ import {
   AUDIT_EVENT_REPOSITORY,
   type AuditEventRepository,
 } from '../domain/ports/audit-event-repository.port';
-import type { AuditEventDraft } from '../domain/audit-event';
+import {
+  MAX_AUDIT_USER_AGENT,
+  type AuditEventDraft,
+} from '../domain/audit-event';
 import { sanitizeAuditMetadata } from '../domain/audit-metadata';
-
-const MAX_USER_AGENT = 512;
 
 /**
  * Escribe un evento de auditoría (DX-009) y NUNCA lanza.
@@ -32,7 +33,7 @@ export class RecordAuditEventUseCase {
     try {
       await this.repo.insert({
         ...draft,
-        userAgent: draft.userAgent?.slice(0, MAX_USER_AGENT) ?? null,
+        userAgent: draft.userAgent?.slice(0, MAX_AUDIT_USER_AGENT) ?? null,
         metadata: sanitizeAuditMetadata(draft.metadata),
       });
     } catch (err) {

@@ -38,6 +38,9 @@ export type AuditActorRef =
   | { kind: 'patient' }
   | { kind: 'system' };
 
+/** Tope del user agent guardado en un evento. */
+export const MAX_AUDIT_USER_AGENT = 512;
+
 /** Lo que el interceptor sabe de una petición auditada. */
 export interface AuditEventDraft {
   tenantId: string;
