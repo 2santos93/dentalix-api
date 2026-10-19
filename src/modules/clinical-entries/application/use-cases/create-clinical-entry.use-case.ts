@@ -24,6 +24,12 @@ import {
   type NoteAnswer,
 } from '../../../clinical-note-templates/domain/note-template-rules';
 import {
+  validateDiagnoses,
+  type DiagnosisInput,
+  type ValidDiagnosis,
+} from '../../domain/diagnosis-rules';
+import { ICD10_INVALID_MESSAGE } from '../../../../shared/validation/health-codes';
+import {
   INACTIVE_NOTE_TEMPLATE_MESSAGE,
   NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
 } from '../../../clinical-note-templates/application/note-template-errors';
@@ -63,6 +69,11 @@ export interface CreateClinicalEntryInput {
   templateId?: string;
   /** DX-170: respuestas a las preguntas de `templateId` (sin `notes`). */
   answers?: ClinicalEntryAnswerInput[];
+  /**
+   * DX-212: diagnósticos CIE-10 (1 principal y hasta 3 relacionados). Sin
+   * ellos la evolución se sigue guardando (el RDA lo marcará como faltante).
+   */
+  diagnoses?: DiagnosisInput[];
 }
 
 const NOT_ATTENDED = new Set(['CANCELLED', 'NO_SHOW']);
@@ -121,6 +132,7 @@ export class CreateClinicalEntryUseCase {
       ? await this.templateNotes(input.templateId, input)
       : (input.notes as string);
     if (notes.trim() === '') throw new BadRequestException(BLANK_NOTES_MESSAGE);
+    const diagnoses = await this.diagnosesFor(input.diagnoses);
 
     // Rebuild the payload from only the known fields — same defensive
     // convention as SaveMedicalHistoryUseCase / CreateCatalogItemUseCase:
@@ -138,7 +150,28 @@ export class CreateClinicalEntryUseCase {
       performedById: author,
       appointmentId: appointment?.id,
       templateId: input.templateId,
+      diagnoses,
     });
+  }
+
+  /**
+   * DX-212: forma (1 principal, ≤ 3 relacionados, códigos y dientes) y que
+   * cada código exista en la tabla CIE-10. Cualquier fallo es un 400 y no se
+   * guarda nada: los diagnósticos van en la misma transacción que la evolución.
+   */
+  private async diagnosesFor(
+    input: DiagnosisInput[] | undefined,
+  ): Promise<ValidDiagnosis[]> {
+    const result = validateDiagnoses(input);
+    if ('error' in result) throw new BadRequestException(result.error);
+    if (result.diagnoses.length === 0) return [];
+    const codes = result.diagnoses.map((d) => d.icd10Code);
+    const existing = await this.repo.existingIcd10Codes(codes);
+    const unknown = codes.find((code) => !existing.has(code));
+    if (unknown) {
+      throw new BadRequestException(`${ICD10_INVALID_MESSAGE}: «${unknown}»`);
+    }
+    return result.diagnoses;
   }
 
   /**

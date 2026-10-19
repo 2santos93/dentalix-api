@@ -1,4 +1,18 @@
+import type { ClinicalDiagnosisKind } from '@prisma/client';
 import { ClinicalEntryAddendum } from './clinical-entry-addendum.entity';
+
+/**
+ * DX-212: diagnóstico CIE-10 de la evolución, con el texto de la tabla de
+ * referencia. Inalterable como la evolución; orden: el principal primero.
+ */
+export interface ClinicalEntryDiagnosis {
+  id: string;
+  icd10Code: string;
+  labelEs: string;
+  kind: ClinicalDiagnosisKind;
+  toothFdi: string | null;
+  position: number;
+}
 
 /**
  * DX-170: la cita en la que se documentó la evolución, para que la ficha diga
@@ -40,4 +54,6 @@ export interface ClinicalEntry {
   appointment: ClinicalEntryAppointment | null;
   createdAt: Date;
   addenda: ClinicalEntryAddendum[];
+  /** DX-212: vacío en las evoluciones sin diagnóstico (todas las anteriores). */
+  diagnoses: ClinicalEntryDiagnosis[];
 }

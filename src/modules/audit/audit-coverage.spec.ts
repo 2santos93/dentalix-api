@@ -12,6 +12,9 @@ import { PatientsController } from '../patients/presentation/patients.controller
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
+import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
+import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
+import { LocationsController } from '../locations/presentation/locations.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
 import { PerioExamsController } from '../periodontal/presentation/perio-exams.controller';
 import { PatientConsentsController } from '../consents/presentation/patient-consents.controller';
@@ -153,6 +156,29 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'VIEW',
     resource: 'CLINICAL_ENTRY',
     patient: P,
+  },
+  // DX-212: datos del RDA de una atención, y los códigos CUPS y REPS.
+  'GET /clinical-entries/:id/rda-readiness': {
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'clinicalEntry', param: 'id' },
+    reason: 'RDA_READINESS',
+  },
+  'POST /catalog/items': {
+    action: 'CREATE',
+    resource: 'DENTAL_CATALOG_ITEM',
+    resourceId: RES,
+  },
+  'PATCH /catalog/items/:id': {
+    action: 'UPDATE',
+    resource: 'DENTAL_CATALOG_ITEM',
+    resourceId: { param: 'id' },
+  },
+  'PATCH /locations/:id': {
+    action: 'UPDATE',
+    resource: 'LOCATION',
+    resourceId: { param: 'id' },
   },
 
   'POST /patients/:patientId/tooth-records': {
@@ -644,6 +670,9 @@ const CONTROLLERS: Type[] = [
   PatientResponsiblePartiesController,
   MedicalHistoryController,
   ClinicalEntriesController,
+  ClinicalEntryRdaController,
+  DentalCatalogController,
+  LocationsController,
   OdontogramController,
   PerioExamsController,
   PatientConsentsController,

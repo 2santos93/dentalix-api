@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ClinicalDiagnosisKind } from '@prisma/client';
 import { ClinicalEntryAddendumDto } from './clinical-entry-addendum.dto';
 
 /** DX-170: la cita en la que se documentó la evolución. */
@@ -19,6 +20,30 @@ export class ClinicalEntryAppointmentDto {
       'Nombre del profesional de la cita (null si ya no es de la clínica)',
   })
   providerName!: string | null;
+}
+
+/** DX-212: diagnóstico CIE-10 guardado con la evolución. */
+export class ClinicalEntryDiagnosisDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'K02.1' })
+  icd10Code!: string;
+
+  @ApiProperty({ example: 'Caries de la dentina' })
+  labelEs!: string;
+
+  @ApiProperty({
+    enum: ClinicalDiagnosisKind,
+    enumName: 'ClinicalDiagnosisKind',
+  })
+  kind!: ClinicalDiagnosisKind;
+
+  @ApiProperty({ type: String, nullable: true, example: '36' })
+  toothFdi!: string | null;
+
+  @ApiProperty({ description: '0 = principal; 1..3 = relacionados' })
+  position!: number;
 }
 
 // Response shape for ClinicalEntry endpoints — documents the ClinicalEntry
@@ -80,4 +105,11 @@ export class ClinicalEntryDto {
     description: 'Adendas de corrección, en orden cronológico (DX-038)',
   })
   addenda!: ClinicalEntryAddendumDto[];
+
+  @ApiProperty({
+    type: [ClinicalEntryDiagnosisDto],
+    description:
+      'DX-212: diagnósticos CIE-10, el principal primero (vacío en las evoluciones sin diagnóstico)',
+  })
+  diagnoses!: ClinicalEntryDiagnosisDto[];
 }

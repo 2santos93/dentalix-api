@@ -16,7 +16,9 @@ export type AuditPatientRef = {
     | 'treatmentPlanItem'
     | 'payment'
     | 'prescription'
-    | 'patientImplant';
+    | 'patientImplant'
+    // DX-212: `GET /clinical-entries/:id/rda-readiness`.
+    | 'clinicalEntry';
   id: string;
 };
 

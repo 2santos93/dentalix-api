@@ -87,7 +87,7 @@ export class ClinicalEntriesController {
   @ApiCreatedResponse({ type: ClinicalEntryDto })
   @ApiBadRequestResponse({
     description:
-      'Texto vacío, respuesta inválida, plantilla desactivada, cita de otro paciente, cita cancelada / no-show o cita de un día futuro.',
+      'Texto vacío, respuesta inválida, plantilla desactivada, cita de otro paciente, cita cancelada / no-show, cita de un día futuro o diagnósticos inválidos (DX-212: código CIE-10 inexistente, segundo principal, más de 3 relacionados, diente no FDI).',
   })
   @ApiNotFoundResponse({
     description:
@@ -106,6 +106,11 @@ export class ClinicalEntriesController {
         notes: dto.notes,
         appointmentId: dto.appointmentId,
         templateId: dto.templateId,
+        diagnoses: dto.diagnoses?.map((d) => ({
+          icd10Code: d.icd10Code,
+          kind: d.kind,
+          toothFdi: d.toothFdi,
+        })),
         answers: dto.answers?.map((a) => ({
           promptId: a.promptId,
           values: a.values,
