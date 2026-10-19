@@ -1,4 +1,8 @@
-import { INestApplicationContext, Type } from '@nestjs/common';
+import {
+  ConflictException,
+  INestApplicationContext,
+  Type,
+} from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -42,6 +46,7 @@ import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/applicat
 import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/void-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import { OVERLAP_MESSAGES } from '../src/modules/appointments/application/appointment-overlap-error';
 import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
@@ -95,6 +100,7 @@ import {
   daysUntilMondayAfterNext,
   daysUntilNextWeekday,
   planAppointments,
+  planInClinicToday,
 } from './demo/calendar';
 import { CreateScheduleBlockUseCase } from '../src/modules/schedule-blocks/application/use-cases/schedule-blocks.use-cases';
 import {
@@ -549,6 +555,15 @@ class DemoSeeder {
     await this.createScheduleBlocksAndWaitlist(
       tenantId,
       locations,
+      patientIds,
+      dentists,
+      receptionId,
+    );
+
+    await this.createInClinicToday(
+      tenantId,
+      locations,
+      hours,
       patientIds,
       dentists,
       receptionId,
@@ -1142,6 +1157,112 @@ class DemoSeeder {
         );
       }
     });
+  }
+
+  /**
+   * DX-200: el panel «En clínica» de la sede principal con gente HOY: dos en
+   * espera (una llegó antes de su hora, otra 3 min tarde), una en el sillón y
+   * otra lista para cobrar, de la primera dentista (o de la segunda si la
+   * primera está ocupada a esa hora). Recepción marca la llegada y la
+   * dentista el resto, por el mismo caso de uso que la API (con auditoría).
+   * Mejor esfuerzo: un hueco sin profesional o paciente libre se salta; hoy
+   * cerrado, no hay nadie.
+   */
+  private async createInClinicToday(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+  ): Promise<void> {
+    const slots = planInClinicToday(this.now, hours.principal?.ranges ?? []);
+    const ctx = (userId: string, role: ClinicRole): AuditRequestContext => ({
+      tenantId,
+      locationId: locations.principal,
+      actor: { userId, role },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    });
+    // Sin la paciente de las opciones A/B: no tiene cita futura (DX-040).
+    const candidates = patientIds.filter(
+      (_, i) => i !== DEMO_PLAN_OPTIONS.patientIndex,
+    );
+    const used = new Set<string>();
+    await this.inTenant(tenantId, locations.principal, async () => {
+      const create = this.use(CreateAppointmentUseCase);
+      const update = this.use(UpdateAppointmentUseCase);
+      for (const slot of slots) {
+        const booked = await this.bookFirstFree(
+          create,
+          slot,
+          dentists,
+          candidates,
+          used,
+          receptionId,
+        );
+        if (!booked) continue;
+        used.add(booked.patientId);
+        await update.execute(
+          booked.id,
+          { status: AppointmentStatus.ARRIVED },
+          ctx(receptionId, ClinicRole.RECEPTION),
+        );
+        const dentist = ctx(booked.providerId, ClinicRole.DENTIST);
+        if (slot.stage !== 'ARRIVED') {
+          await update.execute(
+            booked.id,
+            { status: AppointmentStatus.IN_CHAIR },
+            dentist,
+          );
+        }
+        if (slot.stage === 'READY_FOR_CHECKOUT') {
+          await update.execute(
+            booked.id,
+            { status: AppointmentStatus.READY_FOR_CHECKOUT },
+            dentist,
+          );
+        }
+      }
+    });
+  }
+
+  /** La primera combinación profesional × paciente libre a esa hora, o null. */
+  private async bookFirstFree(
+    create: CreateAppointmentUseCase,
+    slot: { start: Date; end: Date },
+    dentists: string[],
+    patientIds: string[],
+    used: Set<string>,
+    createdById: string,
+  ): Promise<{ id: string; patientId: string; providerId: string } | null> {
+    const isFuture = slot.start.getTime() >= Date.now() + FUTURE_MARGIN_MS;
+    for (const providerId of dentists) {
+      for (const patientId of patientIds) {
+        if (used.has(patientId)) continue;
+        const input = {
+          patientId,
+          providerId,
+          start: slot.start,
+          end: slot.end,
+          reason: 'Control',
+          createdById,
+        };
+        try {
+          const created = isFuture
+            ? await create.execute(input)
+            : await create.registerHistorical(input);
+          return { id: created.id, patientId, providerId };
+        } catch (error) {
+          // El paciente ya tiene cita a esa hora: el siguiente. El profesional
+          // (cita o bloqueo): el otro profesional.
+          if (!(error instanceof ConflictException)) throw error;
+          if (error.message !== OVERLAP_MESSAGES.patient) break;
+        }
+      }
+    }
+    return null;
   }
 
   private async createPlansAndPayments(
