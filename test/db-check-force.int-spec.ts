@@ -10,7 +10,8 @@ import { PrismaClient } from '@prisma/client';
  * `public` con RLS activada y sin FORZAR, las de clínica (o particiones de
  * una tabla con RLS) sin RLS, y los miembros inesperados de los roles NOLOGIN
  * del clúster y los DELETE del rol despachador sin su política restrictiva
- * de plataforma (DX-144) (README, runbook de despliegue). Los miembros se prueban en
+ * de plataforma (DX-144), y la zona horaria de dentalix_app si no es UTC
+ * (DX-226) (README, runbook de despliegue). Los miembros se prueban en
  * test/owner-nosu/shared-cluster.owner-spec.ts: aquí el clúster es compartido.
  */
 
