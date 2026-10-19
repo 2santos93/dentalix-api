@@ -21,7 +21,7 @@ export interface AuditMetadata {
    * sillón, listo para cobrar, salida, «Deshacer llegada»): solo los códigos
    * del estado antes y después.
    */
-  status?: { from: string; to: string };
+  status?: AuditStatusChange;
   /**
    * DX-128: de dónde salió un cambio de canal, de opt-in de WhatsApp o una
    * baja de recordatorios: en persona, enlace, mensaje del paciente, o
@@ -128,21 +128,6 @@ function appointmentMove(value: unknown): AuditMetadata['move'] | null {
   const from = appointmentSlot(value.from);
   const to = appointmentSlot(value.to);
   return from && to ? { from, to } : null;
-}
-
-/** Los dos códigos de estado, o nada. */
-function statusChange(value: unknown): AuditMetadata['status'] | null {
-  if (!isRecord(value)) return null;
-  const { from, to } = value;
-  if (
-    typeof from !== 'string' ||
-    typeof to !== 'string' ||
-    !CODE.test(from) ||
-    !CODE.test(to)
-  ) {
-    return null;
-  }
-  return { from, to };
 }
 
 /** Lote/REF con formato de código y nº de filas; si no, nada. */
