@@ -944,6 +944,34 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
+    it('el cliente no puede mover la referencia: `catalogPrice` en el alta y `catalogItemId` en la edición se ignoran', async () => {
+      const planId = await newPlan();
+      // Un `catalogPrice` falso en el body no rebaja la referencia.
+      const denied = await addCrown(
+        planId,
+        { price: 500000, catalogPrice: 500000 },
+        tokens.DENTIST,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_10);
+
+      // Cambiar el ítem a un procedimiento sin precio (ítem libre) en la
+      // edición no le quita la referencia de catálogo.
+      const item = (await addCrown(planId, {}).expect(201)).body as Item;
+      await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, {
+          catalogItemId: catalogA,
+          catalogPrice: null,
+          price: 1,
+        })
+        .expect(403);
+      const [unchanged] = await planItems(planId);
+      expect(unchanged).toMatchObject({
+        catalogItemId: crownA,
+        catalogPrice: 1000000,
+        price: 1000000,
+      });
+    });
+
     it('un plan aceptado no admite bajar el precio de catálogo (409)', async () => {
       const planId = await newPlan();
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
