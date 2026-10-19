@@ -4,6 +4,7 @@ import { ReferenceRepository } from '../../domain/ports/reference-repository.por
 import { Currency } from '../../domain/entities/currency.entity';
 import { Country } from '../../domain/entities/country.entity';
 import { City } from '../../domain/entities/city.entity';
+import { Icd10Code } from '../../domain/entities/icd10-code.entity';
 
 @Injectable()
 export class PrismaReferenceRepository implements ReferenceRepository {
@@ -49,6 +50,32 @@ export class PrismaReferenceRepository implements ReferenceRepository {
         AND unaccent(name) ILIKE unaccent(${pattern})
       ORDER BY name ASC
       LIMIT ${limit}
+    `;
+  }
+
+  async searchIcd10(
+    q: string | undefined,
+    limit: number,
+  ): Promise<Icd10Code[]> {
+    const term = q?.trim();
+    if (!term) {
+      return this.prisma.icd10Code.findMany({
+        orderBy: { code: 'asc' },
+        take: limit,
+        select: { code: true, labelEs: true },
+      });
+    }
+    // `search_text` = dx_search_normalize(código, código sin punto, texto),
+    // columna generada con índice trigram (DX-212). El término se normaliza
+    // con la MISMA función y se escapan los comodines de LIKE.
+    const escaped = term.replace(/[\\%_]/g, (c) => `\\${c}`);
+    return this.prisma.$queryRaw<Icd10Code[]>`
+      WITH term AS (SELECT dx_search_normalize(${escaped}) AS t)
+      SELECT c.code, c.label_es AS "labelEs"
+        FROM icd10_codes c, term
+       WHERE c.search_text LIKE '%' || term.t || '%'
+       ORDER BY (c.search_text LIKE term.t || '%') DESC, c.code ASC
+       LIMIT ${limit}
     `;
   }
 }
