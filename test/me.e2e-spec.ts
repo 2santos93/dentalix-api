@@ -126,6 +126,15 @@ describe('Me (e2e)', () => {
       .expect(200);
     const avatarUrl = (up.body as { avatarUrl: string }).avatarUrl;
     expect(avatarUrl).toContain('/files/avatars/');
+    // DX-084: en la BD solo la clave; la URL se calcula al responder.
+    const stored = await raw.user.findFirstOrThrow({
+      where: { email: 'perfil@e2e.com' },
+      select: { id: true, avatarKey: true },
+    });
+    expect(stored.avatarKey).toBe(`avatars/${stored.id}.png`);
+    expect(avatarUrl).toBe(
+      `${process.env.FILES_PUBLIC_BASE_URL}/${stored.avatarKey}`,
+    );
 
     const me = await request(app.getHttpServer())
       .get('/api/v1/me')
@@ -137,6 +146,31 @@ describe('Me (e2e)', () => {
     const name = avatarUrl.split('/files/avatars/')[1];
     await request(app.getHttpServer())
       .get(`/api/v1/files/avatars/${name}`)
+      .expect(200);
+  });
+
+  it('DX-084: an existing avatar saved as an absolute URL of another domain is still served', async () => {
+    const token = await login('NewPass2!');
+    const user = await raw.user.findFirstOrThrow({
+      where: { email: 'perfil@e2e.com' },
+      select: { id: true },
+    });
+    await raw.user.update({
+      where: { id: user.id },
+      data: {
+        avatarKey: `https://api.dominio-viejo.app/api/v1/files/avatars/${user.id}.png`,
+      },
+    });
+    const me = await request(app.getHttpServer())
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const avatarUrl = (me.body as Profile).avatarUrl ?? '';
+    expect(avatarUrl).toBe(
+      `${process.env.FILES_PUBLIC_BASE_URL}/avatars/${user.id}.png`,
+    );
+    await request(app.getHttpServer())
+      .get(new URL(avatarUrl).pathname)
       .expect(200);
   });
 

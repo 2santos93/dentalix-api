@@ -171,6 +171,22 @@ const FIXTURE_CATALOG_PRICE = [
      (gen_random_uuid(),'${T_B}','${TP_B}','11','00000000-0000-4000-8000-0000000000b5',10,now())`,
 ];
 
+const U_D = '00000000-0000-4000-8000-0000000000d2';
+
+/**
+ * Esquema de 20261019224000 (DX-084): avatares con la URL absoluta de antes
+ * (dos bases distintas, como tras un cambio de dominio), uno ya con clave y
+ * uno irreconocible; la migración deja solo claves y no toca lo que no
+ * reconoce.
+ */
+const FIXTURE_AVATARS = [
+  `UPDATE "users" SET "avatarUrl" = 'http://localhost:3000/api/v1/files/avatars/${U_A}.png' WHERE "id" = '${U_A}'`,
+  `UPDATE "users" SET "avatarUrl" = 'https://api.viejo.app/api/v1/files/avatars/${U_B}.jpg' WHERE "id" = '${U_B}'`,
+  `UPDATE "users" SET "avatarUrl" = 'avatars/${U_C}.webp' WHERE "id" = '${U_C}'`,
+  `INSERT INTO "users" ("id","email","passwordHash","fullName","avatarUrl","updatedAt") VALUES
+     ('${U_D}','d@mig.test','x','Dani D','https://otro.cdn/foto.png',now())`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -211,8 +227,10 @@ const STEPS: Step[] = [
   // SEC-041.
   { until: '20261019194000', fixture: FIXTURE_GUARDIAN },
   // sec041_plan_item_catalog_price (FORCE fuera de treatment_plan_items y de
-  // dental_catalog_items durante el backfill).
-  { until: '99999999999999', fixture: FIXTURE_CATALOG_PRICE },
+  // dental_catalog_items durante el backfill) y las siguientes hasta DX-084.
+  { until: '20261019224000', fixture: FIXTURE_CATALOG_PRICE },
+  // dx084_avatar_keys (users es global, sin RLS).
+  { until: '99999999999999', fixture: FIXTURE_AVATARS },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -532,6 +550,22 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
            FROM "treatment_plan_items"`,
       ),
     ).toBe(`${T_A}:1000000.00,${T_B}:-`);
+  }, 180_000);
+
+  it('avatares (DX-084): las URL absolutas pasan a clave; lo ya convertido o irreconocible no cambia', async () => {
+    await run(STEPS[13]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("email" || '=' || coalesce("avatarUrl", '-'), ',' ORDER BY "email") AS v FROM "users"`,
+      ),
+    ).toBe(
+      [
+        `a@mig.test=avatars/${U_A}.png`,
+        `b@mig.test=avatars/${U_B}.jpg`,
+        `c@mig.test=avatars/${U_C}.webp`,
+        'd@mig.test=https://otro.cdn/foto.png',
+      ].join(','),
+    );
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

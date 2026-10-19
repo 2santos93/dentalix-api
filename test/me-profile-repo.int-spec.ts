@@ -46,23 +46,18 @@ describe('PrismaUserProfileRepository (int)', () => {
     expect(before).toMatchObject({
       email: 'perfil-repo@test.com',
       fullName: 'Antes',
-      avatarUrl: null,
+      avatarKey: null,
     });
 
     await repo.updateName(userId, 'Después');
     // Cada cambio de contraseña incrementa la versión de sesión (0 → 1 → 2).
     expect(await repo.updatePasswordAndRevokeSessions(userId, 'HASH0')).toBe(1);
     expect(await repo.updatePasswordAndRevokeSessions(userId, 'HASH1')).toBe(2);
-    await repo.updateAvatarUrl(
-      userId,
-      'http://files.test/api/v1/files/avatars/x.png',
-    );
+    await repo.updateAvatarKey(userId, 'avatars/x.png');
 
     const after = await repo.findUserById(userId);
     expect(after?.fullName).toBe('Después');
-    expect(after?.avatarUrl).toBe(
-      'http://files.test/api/v1/files/avatars/x.png',
-    );
+    expect(after?.avatarKey).toBe('avatars/x.png');
     expect(await repo.getPasswordHash(userId)).toBe('HASH1');
   });
 

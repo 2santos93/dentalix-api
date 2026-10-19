@@ -73,7 +73,10 @@ model User {
   email                   String             @unique
   passwordHash            String
   fullName                String
-  avatarUrl               String?
+  // DX-084: CLAVE del fichero en el almacén (`avatars/<id>.<ext>`), nunca
+  // una URL; la URL pública se calcula al responder. La columna conserva su
+  // nombre de antes (`avatarUrl`) para que la migración sea aditiva.
+  avatarKey               String?            @map("avatarUrl")
   emailVerifiedAt         DateTime?
   // Superadmin de PLATAFORMA: transversal a todos los tenants (por eso no es
   // un ClinicRole, que siempre es por-clínica vía ClinicMembership). Se otorga

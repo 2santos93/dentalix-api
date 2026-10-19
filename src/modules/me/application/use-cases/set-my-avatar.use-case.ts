@@ -3,7 +3,7 @@ import type { UserProfileRepository } from '../../domain/ports/user-profile-repo
 import { USER_PROFILE_REPOSITORY } from '../../domain/ports/user-profile-repository.port';
 import type { FileStoragePort } from '../../../../shared/storage/file-storage.port';
 import { FILE_STORAGE } from '../../../../shared/storage/file-storage.port';
-import { splitFileUrl } from '../avatar-url.util';
+import { avatarKeyOf } from '../avatar-url.util';
 
 const EXT_BY_MIME: Record<string, string> = {
   'image/png': 'png',
@@ -30,23 +30,24 @@ export class SetMyAvatarUseCase {
     if (!ext) {
       throw new BadRequestException('Unsupported image type');
     }
+    // DX-084: clave sin PII (el id del usuario) y es lo que va a la BD.
+    const key = `avatars/${input.userId}.${ext}`;
     const current = await this.repo.findUserById(input.userId);
-    if (current?.avatarUrl) {
-      const prev = splitFileUrl(current.avatarUrl);
+    const previous = avatarKeyOf(current?.avatarKey ?? null);
+
+    // Primero el nuevo y la columna; si algo falla, el avatar anterior sigue
+    // intacto y referenciado.
+    await this.storage.save(key, input.buffer, input.contentType);
+    await this.repo.updateAvatarKey(input.userId, key);
+
+    if (previous && previous !== key) {
       // Excepción justificada al borrado blando: borra el FICHERO anterior del
       // bucket al reemplazar el avatar, no una fila. Si la extensión cambia
-      // (jpg -> png) el `save` de abajo no lo pisaría y el blob viejo quedaría
-      // huérfano ocupando espacio.
+      // (jpg -> png) el `save` de arriba no lo pisa y el blob viejo quedaría
+      // huérfano ocupando espacio (el versionado del bucket guarda la copia).
       // eslint-disable-next-line no-restricted-syntax
-      if (prev) await this.storage.delete(prev.namespace, prev.filename);
+      await this.storage.delete(previous);
     }
-    const { url } = await this.storage.save(
-      'avatars',
-      `${input.userId}.${ext}`,
-      input.buffer,
-      input.contentType,
-    );
-    await this.repo.updateAvatarUrl(input.userId, url);
-    return { avatarUrl: url };
+    return { avatarUrl: this.storage.publicUrl(key) };
   }
 }
