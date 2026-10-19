@@ -200,6 +200,29 @@ describe('diagnósticos CIE-10 de la evolución (DX-212, int)', () => {
       ).rejects.toThrow(/junto con su evolución/);
     });
 
+    it('con la evolución entra aunque la sesión no esté en UTC (hora del servidor en UTC, DX-226)', async () => {
+      const entryId = await asA(async (tx) => {
+        await tx.$executeRaw`SET LOCAL TIME ZONE 'America/Bogota'`;
+        const entry = await tx.clinicalEntry.create({
+          data: {
+            tenantId: a.tenantId,
+            patientId: a.otherPatientId,
+            entryDate: new Date('2026-10-02T00:00:00Z'),
+            notes: 'Control con sesión en Bogotá',
+            performedById: authorId,
+            diagnoses: {
+              create: [{ icd10Code: 'K02.1', kind: 'PRINCIPAL', position: 0 }],
+            },
+          },
+        });
+        return entry.id;
+      });
+      const count = await raw.clinicalEntryDiagnosis.count({
+        where: { clinicalEntryId: entryId },
+      });
+      expect(count).toBe(1);
+    });
+
     it('las funciones de los triggers fijan search_path con pg_temp al final', async () => {
       const rows = await raw.$queryRaw<{ name: string; config: string[] }[]>`
         SELECT p.proname AS name, p.proconfig AS config
