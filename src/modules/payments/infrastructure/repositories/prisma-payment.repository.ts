@@ -49,6 +49,7 @@ import {
   recordLatePaymentAdjustment,
   recordVoidAdjustment,
 } from '../../../cash-sessions/infrastructure/payment-cash-session';
+import { reopenPromiseOnVoid } from '../../../collections/infrastructure/prisma-collections.repository';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -549,6 +550,19 @@ export class PrismaPaymentRepository implements PaymentRepository {
         tenantId: this.requireTenantId(),
         paymentId: id,
         voidedById: audit.voidedById,
+      });
+      // DX-215 (BE-032): cada compromiso de pago CUMPLIDO del paciente en
+      // su moneda para el que contaba este abono, si ya no queda cubierto, vuelve a OPEN (o
+      // BROKEN pasada su fecha), auditado, en esta misma transacción.
+      await reopenPromiseOnVoid(tx, {
+        tenantId: this.requireTenantId(),
+        paymentId: id,
+        now: audit.voidedAt,
+        actor: { userId: audit.voidedById, role: audit.voidedByRole },
+        locationId: audit.request?.locationId ?? null,
+        requestId: audit.request?.requestId ?? null,
+        ip: audit.request?.ip ?? null,
+        userAgent: audit.request?.userAgent ?? null,
       });
       // DX-136: el recibo conserva su número y queda marcado ANULADO con la
       // misma fecha, autor y motivo, en la misma transacción. Los abonos

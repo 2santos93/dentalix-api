@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PaymentPromiseStatus, Prisma } from '@prisma/client';
+import { ClinicRole, PaymentPromiseStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
@@ -9,7 +9,14 @@ import {
 import { resolveDefaultLocationId } from '../../../shared/locations/default-location';
 import { loadLedgersOf } from '../../receivables/infrastructure/prisma-receivables.repository';
 import type { PatientLedger } from '../../receivables/domain/entities/receivables.entity';
+import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import type { CollectionsRepository } from '../domain/ports/collections-repository.port';
+import {
+  countsTowardPromise,
+  statusAfterVoid,
+  type PromiseStatus,
+} from '../domain/payment-promise-rule';
+import { lockPatientPromises } from './payment-promise-lock';
 import type {
   CollectionNoteView,
   NewCollectionNote,
@@ -43,7 +50,16 @@ const PROMISE_SELECT = {
   createdById: true,
   createdAt: true,
   settledAt: true,
+  reopenedAt: true,
 } as const satisfies Prisma.PaymentPromiseSelect;
+
+const PAYMENT_SELECT = {
+  patientId: true,
+  amount: true,
+  currency: true,
+  paidAt: true,
+  createdAt: true,
+} as const satisfies Prisma.PaymentSelect;
 
 type NoteRow = Prisma.CollectionNoteGetPayload<{ select: typeof NOTE_SELECT }>;
 type PromiseDbRow = Prisma.PaymentPromiseGetPayload<{
@@ -52,6 +68,171 @@ type PromiseDbRow = Prisma.PaymentPromiseGetPayload<{
 
 /** DATE de Postgres -> día civil (Prisma lo trae a medianoche UTC). */
 const civilOf = (date: Date): string => date.toISOString().slice(0, 10);
+
+function toOpenPromise(
+  row: PromiseDbRow,
+  zoneOf: (locationId: string) => string,
+): OpenPromise {
+  return {
+    id: row.id,
+    patientId: row.patientId,
+    amount: row.amount.toNumber(),
+    currency: row.currency,
+    dueDate: civilOf(row.dueDate),
+    createdAt: row.createdAt,
+    timeZone: zoneOf(row.locationId),
+  };
+}
+
+/**
+ * Abonos VIVOS de estos pacientes registrados desde `since` (en una consulta,
+ * por payments (tenantId, patientId)); los anulados y borrados no cuentan.
+ */
+async function livePayments(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  patientIds: readonly string[],
+  since: Date,
+  currency?: string,
+): Promise<PatientPayment[]> {
+  const rows = await tx.payment.findMany({
+    where: {
+      tenantId,
+      patientId: { in: [...patientIds] },
+      deletedAt: null,
+      voidedAt: null,
+      createdAt: { gte: since },
+      ...(currency ? { currency } : {}),
+    },
+    select: PAYMENT_SELECT,
+  });
+  return rows.map((r) => ({ ...r, amount: r.amount.toNumber() }));
+}
+
+/** Quién anula el abono y desde dónde (para el `audit_event`). */
+export interface PromiseVoidContext {
+  tenantId: string;
+  paymentId: string;
+  /** Instante de la anulación: decide si el día del compromiso ya pasó. */
+  now: Date;
+  actor: { userId: string; role: ClinicRole | null };
+  locationId: string | null;
+  requestId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface PromiseReopening {
+  promiseId: string;
+  to: Exclude<PromiseStatus, 'KEPT'>;
+}
+
+/**
+ * DX-215 (BE-032): dentro de la transacción que ANULA un abono, vuelve a
+ * evaluar los compromisos CUMPLIDOS del paciente en la moneda del abono para
+ * los que ese abono contaba (normalmente uno: el último; pero un abono que
+ * cumplió un compromiso anterior sigue contando para él aunque después se
+ * cumpliera otro). Del más reciente al más antiguo. Ya no cubierto: OPEN si su
+ * día no ha pasado en la zona de su sede, BROKEN si pasó (o si el paciente ya
+ * tiene otro abierto: uno por paciente, y el vigente es el más reciente).
+ * Bajo el candado del paciente (lo comparte con el cierre del barrido y del
+ * abono) y con la transición condicional `WHERE status = 'KEPT'`: dos
+ * anulaciones, o una anulación y un barrido, no lo cambian ni lo auditan dos
+ * veces. El `audit_event` (UPDATE de PAYMENT_PROMISE, estado anterior y
+ * nuevo, el abono anulado; sin importes ni textos) va en la MISMA transacción.
+ * El trigger de payment_promises solo admite esta transición si la
+ * transacción anuló un abono que contaba para el compromiso.
+ */
+export async function reopenPromiseOnVoid(
+  tx: Prisma.TransactionClient,
+  input: PromiseVoidContext,
+): Promise<PromiseReopening[]> {
+  const { tenantId } = input;
+  const voided = await tx.payment.findFirst({
+    where: { id: input.paymentId, tenantId },
+    select: PAYMENT_SELECT,
+  });
+  if (!voided) return [];
+  await lockPatientPromises(tx, tenantId, voided.patientId);
+  // Solo los hechos hasta el alta del abono (si no, no contaba para ellos).
+  // Por payment_promises_tenant_patient_created_idx.
+  const kept = await tx.paymentPromise.findMany({
+    where: {
+      tenantId,
+      patientId: voided.patientId,
+      currency: voided.currency,
+      status: PaymentPromiseStatus.KEPT,
+      createdAt: { lte: voided.createdAt },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: PROMISE_SELECT,
+  });
+  if (kept.length === 0) return [];
+  const zoneOf = await resolveLocationTimeZones(
+    tx,
+    tenantId,
+    kept.map((k) => k.locationId),
+  );
+  const payment = { ...voided, amount: voided.amount.toNumber() };
+  const counted = kept
+    .map((row) => ({ row, terms: toOpenPromise(row, zoneOf) }))
+    .filter(({ terms }) => countsTowardPromise(terms, payment, terms.timeZone));
+  if (counted.length === 0) return [];
+  // Los vivos desde el más antiguo de ellos: cada uno filtra los suyos.
+  const remaining = await livePayments(
+    tx,
+    tenantId,
+    [voided.patientId],
+    counted[counted.length - 1].row.createdAt,
+    voided.currency,
+  );
+  let anotherOpen =
+    (await tx.paymentPromise.count({
+      where: {
+        tenantId,
+        patientId: voided.patientId,
+        status: PaymentPromiseStatus.OPEN,
+      },
+    })) > 0;
+  const reopened: PromiseReopening[] = [];
+  for (const { row, terms } of counted) {
+    const to = statusAfterVoid(terms, remaining, {
+      now: input.now,
+      timeZone: terms.timeZone,
+      anotherOpen,
+    });
+    if (to === 'KEPT') continue;
+    const updated = await tx.paymentPromise.updateMany({
+      where: { id: row.id, tenantId, status: PaymentPromiseStatus.KEPT },
+      data: { status: to, settledAt: to === 'OPEN' ? null : input.now },
+    });
+    if (updated.count !== 1) continue;
+    if (to === 'OPEN') anotherOpen = true;
+    await writeAuditEvent(tx, {
+      tenantId,
+      locationId: input.locationId,
+      actor: {
+        kind: 'user',
+        userId: input.actor.userId,
+        role: input.actor.role,
+      },
+      action: 'UPDATE',
+      resourceType: 'PAYMENT_PROMISE',
+      resourceId: row.id,
+      patient: { kind: 'patient', id: row.patientId },
+      requestId: input.requestId,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      metadata: {
+        reason: 'PAYMENT_VOIDED',
+        params: { paymentId: input.paymentId },
+        statusChange: { from: 'KEPT', to },
+      },
+    });
+    reopened.push({ promiseId: row.id, to });
+  }
+  return reopened;
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -152,6 +333,9 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
     const tenantId = this.tenantId();
     try {
       return await this.prisma.runWithTenant(async (tx) => {
+        // Con el candado del paciente: una reapertura simultánea (DX-215) ve
+        // este compromiso abierto, o este choca con el reabierto (409).
+        await lockPatientPromises(tx, tenantId, input.patientId);
         const row = await tx.paymentPromise.create({
           data: {
             tenantId,
@@ -232,15 +416,7 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
         tenantId,
         rows.map((r) => r.locationId),
       );
-      return rows.map((r) => ({
-        id: r.id,
-        patientId: r.patientId,
-        amount: r.amount.toNumber(),
-        currency: r.currency,
-        dueDate: civilOf(r.dueDate),
-        createdAt: r.createdAt,
-        timeZone: zoneOf(r.locationId),
-      }));
+      return rows.map((r) => toOpenPromise(r, zoneOf));
     });
   }
 
@@ -251,40 +427,43 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
   ): Promise<PatientPayment[]> {
     const ids = [...new Set(patientIds)];
     if (ids.length === 0) return [];
-    // Por payments (tenantId, patientId); los anulados y borrados no cuentan.
-    const rows = await this.prisma.runWithTenant(tenantId, (tx) =>
-      tx.payment.findMany({
-        where: {
-          tenantId,
-          patientId: { in: ids },
-          deletedAt: null,
-          voidedAt: null,
-          createdAt: { gte: since },
-        },
-        select: {
-          patientId: true,
-          amount: true,
-          currency: true,
-          paidAt: true,
-          createdAt: true,
-        },
-      }),
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      livePayments(tx, tenantId, ids, since),
     );
-    return rows.map((r) => ({ ...r, amount: r.amount.toNumber() }));
   }
 
-  async closePromise(
+  closePromise(
     tenantId: string,
     promiseId: string,
-    status: Exclude<PaymentPromiseStatus, 'OPEN'>,
-  ): Promise<boolean> {
-    const result = await this.prisma.runWithTenant(tenantId, (tx) =>
-      tx.paymentPromise.updateMany({
+    decide: (promise: OpenPromise, payments: PatientPayment[]) => PromiseStatus,
+  ): Promise<Exclude<PromiseStatus, 'OPEN'> | null> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const target = await tx.paymentPromise.findFirst({
+        where: { id: promiseId, tenantId },
+        select: { patientId: true },
+      });
+      if (!target) return null;
+      await lockPatientPromises(tx, tenantId, target.patientId);
+      // Releído con el candado: una anulación confirmada antes ya se ve.
+      const row = await tx.paymentPromise.findFirst({
+        where: { id: promiseId, tenantId, status: PaymentPromiseStatus.OPEN },
+        select: PROMISE_SELECT,
+      });
+      if (!row) return null;
+      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
+        row.locationId,
+      ]);
+      const status = decide(
+        toOpenPromise(row, zoneOf),
+        await livePayments(tx, tenantId, [row.patientId], row.createdAt),
+      );
+      if (status === 'OPEN') return null;
+      const result = await tx.paymentPromise.updateMany({
         where: { id: promiseId, tenantId, status: PaymentPromiseStatus.OPEN },
         data: { status, settledAt: new Date() },
-      }),
-    );
-    return result.count === 1;
+      });
+      return result.count === 1 ? status : null;
+    });
   }
 
   ledgersOf(patientIds: readonly string[]): Promise<PatientLedger[]> {
@@ -349,6 +528,7 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
       createdBy: this.staff(row.createdById, names),
       createdAt: row.createdAt,
       settledAt: row.settledAt,
+      reopenedAt: row.reopenedAt,
       timeZone: zoneOf(row.locationId),
     };
   }

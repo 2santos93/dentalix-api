@@ -48,6 +48,7 @@ function fakeRepo(overrides: Partial<CollectionsRepository> = {}) {
         createdBy: { id: input.createdById, fullName: 'Rita' },
         createdAt: NOW,
         settledAt: null,
+        reopenedAt: null,
         timeZone: 'America/Bogota',
       };
       return Promise.resolve(row);

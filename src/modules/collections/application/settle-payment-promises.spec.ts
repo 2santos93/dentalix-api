@@ -2,6 +2,7 @@ import type { RecordAuditEventUseCase } from '../../audit/application/record-aud
 import type { AuditEventDraft } from '../../audit/domain/audit-event';
 import type { CollectionsRepository } from '../domain/ports/collections-repository.port';
 import type { OpenPromise, PatientPayment } from '../domain/collections.entity';
+import type { PromiseStatus } from '../domain/payment-promise-rule';
 import { SettlePaymentPromises } from './settle-payment-promises';
 
 const BOGOTA = 'America/Bogota';
@@ -52,10 +53,26 @@ class FakeRepo {
       this.payments.filter((p) => ids.includes(p.patientId)),
     );
   };
-  closePromise = (_t: string, id: string, status: string) => {
-    if (this.closed.some((c) => c.id === id)) return Promise.resolve(false);
+  /** Abonos que ve el cierre (dentro del candado): por defecto, los mismos. */
+  freshPayments: PatientPayment[] | null = null;
+  closePromise = (
+    tenantId: string,
+    id: string,
+    decide: (p: OpenPromise, payments: PatientPayment[]) => PromiseStatus,
+  ) => {
+    const promise = (this.open.get(tenantId) ?? []).find((p) => p.id === id);
+    if (!promise || this.closed.some((c) => c.id === id)) {
+      return Promise.resolve(null);
+    }
+    const status = decide(
+      promise,
+      (this.freshPayments ?? this.payments).filter(
+        (p) => p.patientId === promise.patientId,
+      ),
+    );
+    if (status === 'OPEN') return Promise.resolve(null);
     this.closed.push({ id, status });
-    return Promise.resolve(true);
+    return Promise.resolve(status);
   };
 }
 
@@ -108,6 +125,14 @@ describe('SettlePaymentPromises (DX-150)', () => {
     await settle.run();
     events = [];
     await expect(settle.run()).resolves.toEqual({ kept: 0, broken: 0 });
+    expect(events).toEqual([]);
+  });
+
+  it('decide con los abonos releídos dentro del candado (DX-215): un abono anulado entretanto no lo cumple', async () => {
+    now = new Date('2026-11-10T16:00:00.000Z');
+    repo.freshPayments = [];
+    await expect(settle.run()).resolves.toEqual({ kept: 0, broken: 0 });
+    expect(repo.closed).toEqual([]);
     expect(events).toEqual([]);
   });
 

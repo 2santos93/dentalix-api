@@ -389,12 +389,13 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
           currency: string;
           dueDate: string;
           status: PaymentPromiseStatus;
+          reopenedAt: Date | null;
         }[]
       >`
         SELECT DISTINCT ON (pp."patientId")
                pp."id", pp."patientId", pp."amount"::float8 AS "amount",
                pp."currency", to_char(pp."dueDate", 'YYYY-MM-DD') AS "dueDate",
-               pp."status"
+               pp."status", pp."reopenedAt"
           FROM "payment_promises" pp
          WHERE pp."tenantId" = ${tenantId}::uuid
            AND pp."patientId" = ANY(${ids}::uuid[])
@@ -420,6 +421,7 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
           currency: p.currency,
           dueDate: p.dueDate,
           status: p.status,
+          reopenedAt: p.reopenedAt,
         };
       }
       return out;

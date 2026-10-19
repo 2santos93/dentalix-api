@@ -1,4 +1,3 @@
-import type { PaymentPromiseStatus } from '@prisma/client';
 import type { PatientLedger } from '../../../receivables/domain/entities/receivables.entity';
 import type {
   CollectionNoteView,
@@ -9,6 +8,7 @@ import type {
   PatientPayment,
   PaymentPromiseRow,
 } from '../collections.entity';
+import type { PromiseStatus } from '../payment-promise-rule';
 
 export const COLLECTIONS_REPOSITORY = Symbol('COLLECTIONS_REPOSITORY');
 
@@ -60,14 +60,19 @@ export interface CollectionsRepository {
   ): Promise<PatientPayment[]>;
 
   /**
-   * Cierra el compromiso si sigue OPEN (idempotente y a prueba de carreras:
-   * `UPDATE … WHERE status = 'OPEN'`). `true` si lo cerró esta llamada.
+   * Cierra el compromiso si sigue OPEN y `decide` lo da por cerrado. En UNA
+   * transacción con el candado de los compromisos del paciente (DX-215):
+   * relee el compromiso y sus abonos vivos DESPUÉS de obtenerlo, así una
+   * anulación simultánea no lo deja cumplido con un abono ya anulado. La
+   * escritura es condicional (`UPDATE … WHERE status = 'OPEN'`): idempotente y
+   * a prueba de carreras. Devuelve el estado al que lo pasó esta llamada, o
+   * `null` si no lo cambió.
    */
   closePromise(
     tenantId: string,
     promiseId: string,
-    status: Exclude<PaymentPromiseStatus, 'OPEN'>,
-  ): Promise<boolean>;
+    decide: (promise: OpenPromise, payments: PatientPayment[]) => PromiseStatus,
+  ): Promise<Exclude<PromiseStatus, 'OPEN'> | null>;
 
   /** Resumen financiero de estos pacientes con deuda (una consulta). */
   ledgersOf(patientIds: readonly string[]): Promise<PatientLedger[]>;

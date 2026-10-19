@@ -5,7 +5,12 @@ import {
   COLLECTIONS_REPOSITORY,
   type CollectionsRepository,
 } from '../domain/ports/collections-repository.port';
-import { evaluatePromise } from '../domain/payment-promise-rule';
+import type { OpenPromise } from '../domain/collections.entity';
+import {
+  evaluatePromise,
+  type PromisePayment,
+  type PromiseStatus,
+} from '../domain/payment-promise-rule';
 import { COLLECTIONS_CLOCK, type CollectionsClock } from './collections-clock';
 
 export const SETTLE_PROMISES_JOB = 'collections.settle-promises';
@@ -111,18 +116,23 @@ export class SettlePaymentPromises {
       byPatient.set(p.patientId, list);
     }
     const now = this.now();
+    const decide = (
+      terms: OpenPromise,
+      paid: readonly PromisePayment[],
+    ): PromiseStatus =>
+      evaluatePromise(terms, paid, { now, timeZone: terms.timeZone }).status;
     for (const promise of open) {
-      const { status } = evaluatePromise(
-        promise,
-        byPatient.get(promise.patientId) ?? [],
-        { now, timeZone: promise.timeZone },
-      );
-      if (status === 'OPEN') continue;
-      // Solo si sigue abierto: dos barridos (o un barrido y un abono) a la
-      // vez no lo cierran dos veces ni lo auditan dos veces.
-      if (!(await this.repo.closePromise(tenantId, promise.id, status))) {
+      // Primera pasada con una foto de toda la clínica (sin N+1): solo los
+      // que parece que cambian van a cerrarse.
+      if (decide(promise, byPatient.get(promise.patientId) ?? []) === 'OPEN') {
         continue;
       }
+      // El cierre vuelve a decidir con el candado del paciente y una foto
+      // nueva (DX-215: un abono anulado entretanto ya no cuenta), y solo si
+      // sigue abierto: dos barridos, un barrido y un abono, o un barrido y una
+      // anulación a la vez no lo cierran dos veces ni lo auditan dos veces.
+      const status = await this.repo.closePromise(tenantId, promise.id, decide);
+      if (!status) continue;
       if (status === 'KEPT') result.kept += 1;
       else result.broken += 1;
       await this.audit.record({

@@ -2810,6 +2810,9 @@ model PaymentPromise {
   /// La pone el servidor de BD (trigger).
   createdAt   DateTime             @default(now())
   settledAt   DateTime?
+  /// DX-215: última vez que se reabrió (KEPT -> OPEN | BROKEN al anular el
+  /// abono que lo cumplía). La pone el servidor de BD en UTC (trigger).
+  reopenedAt  DateTime?
 
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   patient     Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "payment_promises_patient_fkey")

@@ -27,6 +27,12 @@ import { fromCents, toCents } from '../../receivables/domain/aging';
  *   sede).
  * - Si no, sigue OPEN. Cumplido se evalúa antes: un barrido tardío del 16 con
  *   abonos del 15 lo da por cumplido.
+ * - DX-215: anular un abono que contaba para un compromiso CUMPLIDO del
+ *   paciente en su moneda (el último o uno anterior) lo vuelve a evaluar con los abonos que siguen vivos
+ *   (`statusAfterVoid`): sigue KEPT si aún lo cubren; si no, OPEN mientras no
+ *   pase su día o BROKEN desde el siguiente. Si el paciente ya tiene OTRO
+ *   compromiso abierto (uno solo por paciente), queda BROKEN: el vigente es el
+ *   nuevo.
  */
 
 export type PromiseStatus = 'OPEN' | 'KEPT' | 'BROKEN';
@@ -59,6 +65,19 @@ export interface EvaluateOptions {
   timeZone: string;
 }
 
+/** ¿Cuenta este abono (vivo) para el compromiso? Moneda, alta y día civil. */
+export function countsTowardPromise(
+  terms: PromiseTerms,
+  payment: PromisePayment,
+  timeZone: string,
+): boolean {
+  return (
+    payment.currency === terms.currency &&
+    payment.createdAt.getTime() >= terms.createdAt.getTime() &&
+    civilDateIn(payment.paidAt, timeZone) <= terms.dueDate
+  );
+}
+
 export function evaluatePromise(
   terms: PromiseTerms,
   payments: readonly PromisePayment[],
@@ -66,10 +85,9 @@ export function evaluatePromise(
 ): PromiseEvaluation {
   let coveredCents = 0;
   for (const p of payments) {
-    if (p.currency !== terms.currency) continue;
-    if (p.createdAt.getTime() < terms.createdAt.getTime()) continue;
-    if (civilDateIn(p.paidAt, options.timeZone) > terms.dueDate) continue;
-    coveredCents += toCents(p.amount);
+    if (countsTowardPromise(terms, p, options.timeZone)) {
+      coveredCents += toCents(p.amount);
+    }
   }
   const covered = fromCents(coveredCents);
   if (coveredCents >= toCents(terms.amount)) {
@@ -77,4 +95,22 @@ export function evaluatePromise(
   }
   const today = civilDateIn(options.now, options.timeZone);
   return { status: today > terms.dueDate ? 'BROKEN' : 'OPEN', covered };
+}
+
+export interface AfterVoidOptions extends EvaluateOptions {
+  /** El paciente ya tiene otro compromiso OPEN (índice único por paciente). */
+  anotherOpen: boolean;
+}
+
+/**
+ * Estado de un compromiso CUMPLIDO tras anular un abono que contaba para él
+ * (DX-215). `payments`: los abonos que siguen vivos.
+ */
+export function statusAfterVoid(
+  terms: PromiseTerms,
+  payments: readonly PromisePayment[],
+  options: AfterVoidOptions,
+): PromiseStatus {
+  const { status } = evaluatePromise(terms, payments, options);
+  return status === 'OPEN' && options.anotherOpen ? 'BROKEN' : status;
 }

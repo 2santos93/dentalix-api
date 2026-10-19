@@ -71,9 +71,32 @@ describe('VoidPaymentUseCase', () => {
 
     expect(repo.voidAuditOf(payment.id)).toEqual({
       voidedById: 'u-admin',
+      voidedByRole: ClinicRole.ADMIN,
       voidedAt: NOW,
       reason: REASON,
+      request: null,
     });
+  });
+
+  it('pasa al repositorio desde dónde se anula (DX-215: auditoría de la reapertura del compromiso)', async () => {
+    const repo = new InMemoryPaymentRepository();
+    const payment = repo.seedPayment({ amount: 100 });
+    const uc = new VoidPaymentUseCase(repo, clock);
+    const request = {
+      locationId: 'loc-1',
+      requestId: 'req-1',
+      ip: '10.0.0.1',
+      userAgent: 'jest',
+    };
+
+    await uc.execute({
+      paymentId: payment.id,
+      reason: REASON,
+      actor: ADMIN,
+      request,
+    });
+
+    expect(repo.voidAuditOf(payment.id)).toMatchObject({ request });
   });
 
   it('throws NotFoundException when the payment is absent', async () => {

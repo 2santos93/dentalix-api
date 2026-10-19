@@ -7,6 +7,7 @@ import {
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   PaymentRepository,
+  PaymentVoidRequest,
   PaymentVoidTarget,
 } from '../../domain/ports/payment-repository.port';
 import { voidDenial, type VoidActor } from '../../domain/void-window';
@@ -20,6 +21,11 @@ export interface VoidPaymentInput {
   reason: string;
   /** Quién anula: del token, nunca del cuerpo. */
   actor: VoidActor;
+  /**
+   * Desde dónde (sede activa, request id, IP, user agent): lo lleva el
+   * `audit_event` del compromiso de pago que se reabre (DX-215).
+   */
+  request?: PaymentVoidRequest;
 }
 
 @Injectable()
@@ -50,10 +56,15 @@ export class VoidPaymentUseCase {
     // loser gets `false` -> 404, same as a nonexistent payment. The read above
     // only feeds the permission rule, and what it reads (author, creation
     // time, sede) never changes after the payment is recorded.
+    //
+    // DX-215: the same transaction re-opens the payment promise this payment
+    // had kept, if it no longer is (see `softDelete`).
     const voided = await this.repo.softDelete(input.paymentId, {
       voidedById: input.actor.userId,
+      voidedByRole: input.actor.role,
       voidedAt: now,
       reason: input.reason,
+      request: input.request ?? null,
     });
     if (!voided) {
       throw new NotFoundException('Payment not found');
