@@ -133,6 +133,8 @@ import {
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
   DEMO_PRICES,
+  DEMO_CUPS,
+  DEMO_PRINCIPAL_REPS,
   DEMO_PRIMARY_COLOR,
   DEMO_PRIVACY_POLICY,
   DEMO_SIGNED_CONSENT,
@@ -676,6 +678,8 @@ class DemoSeeder {
     );
     await this.use(UpdateLocationUseCase).execute(principal.id, {
       address: DEMO_LOCATIONS.principal.address,
+      // DX-212: la sede principal (CO) tiene REPS; la Norte no, a propósito.
+      repsHabilitationCode: DEMO_PRINCIPAL_REPS,
     });
     // Nace con el horario por defecto (como cualquier sede nueva) y luego se
     // le pone el suyo con el caso de uso de /settings/horarios.
@@ -723,6 +727,13 @@ class DemoSeeder {
         {
           defaultPrice: price,
         },
+      );
+    }
+    // DX-212: CUPS de algunos procedimientos (el resto queda sin código).
+    for (const [code, cupsCode] of Object.entries(DEMO_CUPS)) {
+      await this.use(UpdateCatalogItemUseCase).execute(
+        catalogId(byCode, code),
+        { cupsCode },
       );
     }
     return byCode;
@@ -830,6 +841,7 @@ class DemoSeeder {
           entryDate: daysAgoAt(this.now, e.daysAgo, 10 * 60),
           reason: e.reason,
           notes: e.notes,
+          diagnoses: e.diagnoses?.map((d) => ({ ...d })),
         },
         dentists[e.dentistIndex],
       );

@@ -92,6 +92,24 @@ export const NORTE_SCHEDULE: ScheduleRange[] = [
 ];
 
 /** Tarifas (COP) que la clínica demo pone a los ítems del catálogo por defecto. */
+/**
+ * DX-212: códigos CUPS de algunos procedimientos del catálogo, para probar
+ * «RDA: listo» en local. Ejemplos de demo con el formato de la Res. CUPS
+ * vigente (6 caracteres): verifícalos contra la tabla oficial antes de usarlos
+ * en una clínica real. Los ítems sin CUPS salen como faltantes en el RDA.
+ */
+export const DEMO_CUPS: Record<string, string> = {
+  'IMG-CONSULTA': '890203',
+  'PREV-PROFILAXIS': '997002',
+  'OP-RESINA-1': '232101',
+  'OP-RESINA-2': '232102',
+  'ENDO-UNI': '237101',
+  'CX-EXO-SIMPLE': '230101',
+};
+
+/** DX-212: código de habilitación REPS (12 dígitos) de la sede principal. */
+export const DEMO_PRINCIPAL_REPS = '110010123401';
+
 export const DEMO_PRICES: Record<string, number> = {
   'IMG-CONSULTA': 80000,
   'IMG-RX-PERIAPICAL': 35000,
@@ -740,6 +758,12 @@ interface DemoClinicalEntry {
   daysAgo: number;
   reason: string;
   notes: string;
+  /** DX-212: diagnósticos CIE-10 (principal primero). Sin ellos: «RDA: faltan». */
+  diagnoses?: readonly {
+    icd10Code: string;
+    kind: 'PRINCIPAL' | 'RELACIONADO';
+    toothFdi?: string;
+  }[];
 }
 
 export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
@@ -750,6 +774,11 @@ export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
     reason: 'Valoración inicial',
     notes:
       'Paciente refiere sensibilidad al frío en 36. Se observa lesión cariosa oclusal. Se indica resina y profilaxis. Se refuerza técnica de cepillado.',
+    // DX-212: con REPS en la sede principal y registro de la Dra., «RDA: listo».
+    diagnoses: [
+      { icd10Code: 'K02.1', kind: 'PRINCIPAL', toothFdi: '36' },
+      { icd10Code: 'K05.1', kind: 'RELACIONADO' },
+    ],
   },
   {
     patientIndex: 1,
@@ -766,6 +795,7 @@ export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
     reason: 'Exodoncia de resto radicular',
     notes:
       'Se retira resto radicular en zona de 36 bajo anestesia local (lidocaína 2% con epinefrina, 1 cartucho). Sin complicaciones. Indicaciones post-operatorias por escrito.',
+    diagnoses: [{ icd10Code: 'K08.3', kind: 'PRINCIPAL', toothFdi: '36' }],
   },
   {
     patientIndex: 2,
@@ -782,6 +812,7 @@ export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
     reason: 'Urgencia: dolor en 46',
     notes:
       'Pulpitis irreversible en 46. Glucometría 142 mg/dL. Se realiza apertura cameral y medicación intraconducto.',
+    diagnoses: [{ icd10Code: 'K04.0', kind: 'PRINCIPAL', toothFdi: '46' }],
   },
   {
     patientIndex: 3,
