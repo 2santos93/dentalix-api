@@ -17,6 +17,12 @@ export interface AuditMetadata {
    */
   move?: { from: AuditAppointmentSlot; to: AuditAppointmentSlot };
   /**
+   * DX-200: cambio de estado de una cita en el flujo de la clínica (llegó, en
+   * sillón, listo para cobrar, salida, «Deshacer llegada»): solo los códigos
+   * del estado antes y después.
+   */
+  status?: AuditStatusChange;
+  /**
    * DX-128: de dónde salió un cambio de canal, de opt-in de WhatsApp o una
    * baja de recordatorios: en persona, enlace, mensaje del paciente, o
    * anotado por el personal. DX-150: `JOB` = lo hizo un trabajo programado
@@ -171,6 +177,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   }
   const move = appointmentMove(input.move);
   if (move) out.move = move;
+  const status = statusChange(input.status);
+  if (status) out.status = status;
   const origin = AUDIT_ORIGINS.find((o) => o === input.origin);
   if (origin) out.origin = origin;
   const searched = search(input.search);

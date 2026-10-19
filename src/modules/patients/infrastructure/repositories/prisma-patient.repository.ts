@@ -18,6 +18,7 @@ import {
   retentionUntil,
 } from '../../domain/retention/clinical-record-retention';
 import { Patient } from '../../domain/entities/patient.entity';
+import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import {
   recordConsentsInTx,
   recordLegacyConsentInTx,
@@ -346,7 +347,10 @@ export class PrismaPatientRepository implements PatientRepository {
         where: {
           patientId: id,
           deletedAt: null,
-          status: { in: ['SCHEDULED', 'CONFIRMED'] },
+          // DX-200: una cita en curso (el paciente en la clínica) también.
+          status: {
+            in: ['SCHEDULED', 'CONFIRMED', ...IN_CLINIC_STATUSES],
+          },
         },
       });
       assertCanArchive({ ...retention, pendingAppointments });

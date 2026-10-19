@@ -89,6 +89,31 @@ export class AppointmentDto {
   })
   wantsEarlier!: boolean;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-200: cuándo recepción marcó «Llegó» (reloj del servidor). null en las citas antiguas o si se deshizo la llegada.',
+  })
+  arrivedAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-200: cuándo pasó al sillón.',
+  })
+  seatedAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-200: cuándo quedó listo para cobrar.',
+  })
+  readyForCheckoutAt!: Date | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 

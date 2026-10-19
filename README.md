@@ -573,6 +573,46 @@ hasta 1 h (SEC-028).
 - El texto del `wa.me` lo arma la web solo con nombre de pila, fecha, hora,
   sede y profesional (nunca motivo ni tratamiento).
 
+## Flujo del paciente en la clínica (DX-200)
+
+- **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`
+  (en sillón) y `READY_FOR_CHECKOUT` (listo para cobrar), con sus horas
+  `arrivedAt`, `seatedAt` y `readyForCheckoutAt` (UTC, reloj del servidor;
+  null en las citas antiguas). Migraciones aditivas: `ADD VALUE` en su propio
+  fichero, columnas nullables y la CHECK `appointments_flow_times_check` (cada
+  estado lleva su hora y en orden). Cuentan como **en curso**: ocupan el hueco
+  (EXCLUDE), nunca son no-show, no reciben recordatorios (`IN_CLINIC` en el
+  motivo de omisión), impiden archivar al paciente, salen en las citas
+  afectadas por un bloqueo y sacan al paciente de «Presupuestos por seguir».
+- **Transiciones** (`PATCH /appointments/:id` con `status`,
+  `domain/patient-flow.ts`): `ARRIVED` solo desde `SCHEDULED`/`CONFIRMED` y el
+  día de la cita en la zona de la sede (RECEPTION, ASSISTANT, ADMIN);
+  `IN_CHAIR` solo desde `ARRIVED` y `READY_FOR_CHECKOUT` solo desde
+  `IN_CHAIR` (DENTIST, ASSISTANT, ADMIN); la salida a `COMPLETED` (o
+  `CANCELLED` si se fue sin pasar al sillón) desde el flujo, el mostrador
+  (RECEPTION, ASSISTANT, ADMIN). Desde el flujo nunca `NO_SHOW`. Un salto
+  imposible es 409 en español; un rol sin permiso, 403. Las transiciones
+  entre los estados de siempre no cambian (`COMPLETED` sigue disponible). El
+  cambio va condicionado al estado leído: dos a la vez, uno gana y el otro
+  recibe 409.
+- **«Deshacer llegada»**: `POST /appointments/:id/undo-arrival` (RECEPTION,
+  ASSISTANT, ADMIN), solo desde `ARRIVED`: vuelve al estado previo
+  (`preArrivalStatus`) y borra `arrivedAt` en una sentencia condicional.
+- **Auditoría**: cada paso deja un `audit_event` (`APPOINTMENT`, `UPDATE`) con
+  `reason` `PATIENT_FLOW` o `ARRIVAL_UNDONE` y `status: { from, to }`.
+- **Panel «En clínica»**: `GET /appointments/in-clinic?date=YYYY-MM-DD` de la
+  sede de `X-Location-Id` (sin sede, 400; sede ajena, 400). Día civil en la
+  zona de la sede (por defecto, hoy allí). Grupos `waiting`, `inChair` y
+  `readyForCheckout` con `minutesInStatus`, `waitedMinutes` y `punctuality`
+  (`ON_TIME` a la hora o antes, `LATE` hasta 5 min tarde, `VERY_LATE`
+  después), calculados con el reloj del servidor. Solo nombre, profesional y
+  horas (nada clínico). DENTIST: solo sus pacientes (`scope: MINE`); el
+  resto, toda la sede. Índice parcial
+  `appointments_tenant_location_in_clinic_idx`.
+- Seed demo: en la sede principal, hoy, dos pacientes en espera (una antes de
+  su hora, otra 3 min tarde), una en el sillón y otra lista para cobrar
+  (dentro del horario de hoy; con la sede cerrada, ninguna).
+
 ## Odontograma: dentición, origen y anulación (DX-120)
 
 - **Dentición por posición**: cada una de las 32 posiciones (código FDI

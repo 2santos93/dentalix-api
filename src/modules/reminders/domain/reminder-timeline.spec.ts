@@ -95,7 +95,15 @@ describe('buildReminderTimeline (DX-026)', () => {
   });
 
   it('sin pendientes si la cita no sigue en pie o la sede los tiene desactivados', () => {
-    for (const status of ['CANCELLED', 'COMPLETED', 'NO_SHOW'] as const) {
+    // DX-200: tampoco con el paciente ya en la clínica.
+    for (const status of [
+      'CANCELLED',
+      'COMPLETED',
+      'NO_SHOW',
+      'ARRIVED',
+      'IN_CHAIR',
+      'READY_FOR_CHECKOUT',
+    ] as const) {
       expect(
         buildReminderTimeline({
           appointment: { start, status, deleted: false },

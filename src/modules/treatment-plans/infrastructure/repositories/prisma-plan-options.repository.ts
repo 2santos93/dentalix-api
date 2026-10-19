@@ -145,7 +145,8 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
       ? Prisma.sql`AND p."presentedLocationId" = ${locationId}::uuid`
       : Prisma.empty;
     // Sin cita FUTURA y viva (agendada o confirmada) del paciente, en
-    // cualquier sede: si ya vuelve, no hace falta llamarlo.
+    // cualquier sede: si ya vuelve, no hace falta llamarlo. Ni una en curso
+    // (DX-200: está en la clínica ahora mismo, aunque su hora ya pasara).
     const where = Prisma.sql`
       p."status" = 'PRESENTED'
       AND p."deletedAt" IS NULL
@@ -156,8 +157,10 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
         SELECT 1 FROM "appointments" a
          WHERE a."patientId" = p."patientId"
            AND a."deletedAt" IS NULL
-           AND a."status" IN ('SCHEDULED', 'CONFIRMED')
-           AND a."start" > ${query.now}
+           AND (
+             (a."status" IN ('SCHEDULED', 'CONFIRMED') AND a."start" > ${query.now})
+             OR a."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+           )
       )`;
     const offset = (query.page - 1) * query.pageSize;
 

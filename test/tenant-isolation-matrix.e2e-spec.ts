@@ -1014,6 +1014,21 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ start: futureAt(62, 15) }),
       status: 404,
     },
+    // --- Flujo del paciente en la clínica (DX-200) ---
+    {
+      name: 'POST /appointments/:id/undo-arrival',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/undo-arrival`,
+      status: 404,
+    },
+    {
+      // El panel de la sede de A: la sede ajena se rechaza antes del handler.
+      name: 'GET /appointments/in-clinic con X-Location-Id de A',
+      verb: 'get',
+      path: () => '/appointments/in-clinic',
+      locationId: () => a.locationId,
+      status: 400,
+    },
     // --- data-consents (sobre un paciente de A) ---
     {
       name: 'GET /patients/:patientId/data-consents',

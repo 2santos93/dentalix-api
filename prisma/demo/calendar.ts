@@ -207,3 +207,79 @@ function statusFor(
   }
   return AppointmentStatus.SCHEDULED;
 }
+
+/** Paso del flujo en la clínica (DX-200) hasta el que se lleva una cita. */
+export type InClinicStage = 'ARRIVED' | 'IN_CHAIR' | 'READY_FOR_CHECKOUT';
+
+export interface PlannedInClinic {
+  start: Date;
+  end: Date;
+  stage: InClinicStage;
+}
+
+/** Tramos de hora de pared (minutos) de un día del horario de la sede. */
+interface WallRange {
+  weekday: number;
+  startMinute: number;
+  endMinute: number;
+}
+
+const IN_CLINIC_MINUTES = 30;
+/**
+ * Hoy, alrededor de la hora actual: una paciente que llegó antes de su hora
+ * (verde), otra que llegó 3 min tarde (naranja), una en el sillón y otra lista
+ * para cobrar. Minutos respecto de ahora.
+ */
+const IN_CLINIC_PLAN: readonly { offset: number; stage: InClinicStage }[] = [
+  { offset: 10, stage: 'ARRIVED' },
+  { offset: -3, stage: 'ARRIVED' },
+  { offset: -40, stage: 'IN_CHAIR' },
+  { offset: -90, stage: 'READY_FOR_CHECKOUT' },
+];
+
+/**
+ * DX-200: citas de HOY para el panel «En clínica» de la sede principal. La
+ * hora se acerca a la actual pero siempre dentro del horario de hoy (antes de
+ * abrir, a la apertura; después de cerrar, al final), sin solaparse entre sí.
+ * Hoy cerrado: ninguna. Quien llama prueba profesional y paciente libres.
+ */
+export function planInClinicToday(
+  now: Date,
+  ranges: readonly WallRange[],
+): PlannedInClinic[] {
+  const today = bogotaDay(now, 0);
+  const open = ranges
+    .filter((r) => r.weekday === today.weekday)
+    .sort((a, b) => a.startMinute - b.startMinute);
+  if (open.length === 0) return [];
+  const first = open[0].startMinute;
+  const last = Math.max(...open.map((r) => r.endMinute)) - IN_CLINIC_MINUTES;
+  const nowMinute = Math.floor(
+    (now.getTime() - today.utcMidnight) / MINUTE_MS - BOGOTA_OFFSET_MINUTES,
+  );
+  const fits = (m: number) =>
+    open.some(
+      (r) => m >= r.startMinute && m + IN_CLINIC_MINUTES <= r.endMinute,
+    );
+  const taken: number[] = [];
+  const planned: PlannedInClinic[] = [];
+  for (const { offset, stage } of IN_CLINIC_PLAN) {
+    let minute = Math.min(Math.max(nowMinute + offset, first), last);
+    // Sin pisar otra de la lista ni caer fuera de un tramo (p. ej. almuerzo).
+    while (
+      minute >= first &&
+      (!fits(minute) ||
+        taken.some((t) => Math.abs(t - minute) < IN_CLINIC_MINUTES))
+    ) {
+      minute -= 5;
+    }
+    if (minute < first) continue;
+    taken.push(minute);
+    planned.push({
+      start: at(today, minute),
+      end: at(today, minute + IN_CLINIC_MINUTES),
+      stage,
+    });
+  }
+  return planned;
+}

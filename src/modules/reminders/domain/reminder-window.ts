@@ -79,6 +79,10 @@ const STATUS_SKIP: Partial<Record<AppointmentStatus, ReminderSkipReason>> = {
   CANCELLED: 'CANCELLED',
   COMPLETED: 'COMPLETED',
   NO_SHOW: 'NO_SHOW',
+  // DX-200: el paciente ya está en la clínica; recordarle la cita sobra.
+  ARRIVED: 'IN_CLINIC',
+  IN_CHAIR: 'IN_CLINIC',
+  READY_FOR_CHECKOUT: 'IN_CLINIC',
 };
 
 /**

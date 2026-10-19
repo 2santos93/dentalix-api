@@ -65,10 +65,10 @@ export class AuditSearchDto {
 }
 
 export class AuditStatusChangeDto {
-  @ApiProperty({ example: 'KEPT' })
+  @ApiProperty({ example: 'CONFIRMED' })
   from!: string;
 
-  @ApiProperty({ example: 'OPEN' })
+  @ApiProperty({ example: 'ARRIVED' })
   to!: string;
 }
 
@@ -95,6 +95,13 @@ export class AuditMetadataDto {
       'DX-121: cita movida — hora y profesional antes y después (nunca datos del paciente).',
   })
   move?: AuditAppointmentMoveDto;
+
+  @ApiPropertyOptional({
+    type: AuditStatusChangeDto,
+    description:
+      'DX-200: paso del flujo en la clínica (`reason` PATIENT_FLOW o ARRIVAL_UNDONE): estado de la cita antes y después.',
+  })
+  status?: AuditStatusChangeDto;
 
   @ApiPropertyOptional({
     enum: AUDIT_ORIGINS,

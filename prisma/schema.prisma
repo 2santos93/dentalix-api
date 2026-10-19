@@ -731,6 +731,11 @@ enum AppointmentStatus {
   COMPLETED
   CANCELLED
   NO_SHOW
+  // DX-200: el paciente en la clínica. Cuentan como «en curso» (nunca como
+  // no-show): llegó (sala de espera), en el sillón y listo para cobrar.
+  ARRIVED
+  IN_CHAIR
+  READY_FOR_CHECKOUT
 }
 
 model Appointment {
@@ -757,6 +762,15 @@ model Appointment {
   // DX-210: «Adelantar si hay hueco». La cita es candidata para ocupar un
   // hueco libre anterior; al moverla a uno se apaga.
   wantsEarlier        Boolean           @default(false)
+  // DX-200: horas del flujo en la clínica (UTC, reloj del servidor). null en
+  // las citas anteriores y mientras no se marca el paso. CHECK en la
+  // migración: cada estado del flujo lleva su hora y en orden.
+  arrivedAt           DateTime?
+  seatedAt            DateTime?
+  readyForCheckoutAt  DateTime?
+  // DX-200: el estado (SCHEDULED o CONFIRMED) al que vuelve «Deshacer
+  // llegada». Solo con la cita en ARRIVED.
+  preArrivalStatus    AppointmentStatus?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   deletedAt           DateTime?
@@ -807,6 +821,10 @@ model Appointment {
   //     "locationId", start) WHERE "wantsEarlier" AND "deletedAt" IS NULL
   //     AND status IN ('SCHEDULED', 'CONFIRMED')
   //     -> DX-210: citas candidatas a adelantarse a un hueco de la sede.
+  //   appointments_tenant_location_in_clinic_idx ("tenantId", "locationId",
+  //     start) WHERE status IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+  //     AND "deletedAt" IS NULL
+  //     -> DX-200: panel «En clínica» de la sede.
   @@map("appointments")
 }
 
@@ -2520,6 +2538,8 @@ enum AppointmentReminderSkipReason {
   OPTED_OUT
   CHANNEL_NONE
   CHANNEL_WHATSAPP
+  // DX-200: el paciente ya está en la clínica (llegó, en sillón o listo).
+  IN_CLINIC
 }
 
 /// DX-026: un recordatorio de una cita por (antelación, hora de inicio). Guarda

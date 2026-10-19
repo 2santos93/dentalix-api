@@ -18,6 +18,7 @@ import { ScheduleBlocksModule } from '../schedule-blocks/schedule-blocks.module'
 import { LocationsModule } from '../locations/locations.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-case';
+import { ListInClinicUseCase } from './application/use-cases/list-in-clinic.use-case';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
@@ -47,6 +48,8 @@ import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-c
     GetAppointmentUseCase,
     UpdateAppointmentUseCase,
     FindOpeningsUseCase,
+    // DX-200: panel «En clínica».
+    ListInClinicUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on AppointmentsController.

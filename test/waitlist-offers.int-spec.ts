@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaScheduleBlockRepository } from '../src/modules/schedule-blocks/infrastructure/repositories/prisma-schedule-block.repository';
+import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { PrismaAppointmentTypeRepository } from '../src/modules/appointment-types/infrastructure/repositories/prisma-appointment-type.repository';
 import { PrismaWaitlistRepository } from '../src/modules/waitlist/infrastructure/repositories/prisma-waitlist.repository';
@@ -113,6 +114,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
     anyStaff,
     noAudit,
     blocks,
+    new PrismaLocationRepository(prisma, tenantContext),
   );
   const schedule = new ScheduleFromWaitlistUseCase(
     waitlist,

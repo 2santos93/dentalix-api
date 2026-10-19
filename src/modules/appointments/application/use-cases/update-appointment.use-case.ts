@@ -41,6 +41,16 @@ import {
   canChangeWantsEarlier,
 } from '../../domain/wants-earlier';
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
+import { LOCATION_REPOSITORY } from '../../../locations/domain/ports/location-repository.port';
+import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
+import { civilDateIn } from '../../../../shared/time/civil-day';
+import {
+  FLOW_TIMESTAMP_FIELD,
+  FRONT_DESK_ROLES,
+  PATIENT_FLOW_MESSAGES,
+  checkStatusTransition,
+  isInClinic,
+} from '../../domain/patient-flow';
 
 /**
  * Lo que el cliente puede cambiar. `revokeConfirmations` y los indicadores de
@@ -52,6 +62,11 @@ export type UpdateAppointmentInput = Omit<
   | 'enqueueWaitlist'
   | 'resolveWaitlist'
   | 'requireWantsEarlier'
+  | 'arrivedAt'
+  | 'seatedAt'
+  | 'readyForCheckoutAt'
+  | 'preArrivalStatus'
+  | 'expectStatus'
 >;
 
 /** DX-210: el hueco libre al que se adelanta una cita marcada. */
@@ -91,6 +106,9 @@ export class UpdateAppointmentUseCase {
     // DX-122: no mover encima de un bloqueo que no lo permite.
     @Inject(SCHEDULE_BLOCK_REPOSITORY)
     private readonly blocks: ScheduleBlockRepository,
+    // DX-200: la llegada solo se marca el día de la cita en la zona de su sede.
+    @Inject(LOCATION_REPOSITORY)
+    private readonly locations: LocationRepository,
   ) {}
 
   async execute(
@@ -165,6 +183,22 @@ export class UpdateAppointmentUseCase {
       throw new ForbiddenException(WANTS_EARLIER_FORBIDDEN_MESSAGE);
     }
 
+    // DX-200: flujo del paciente en la clínica. La máquina de transiciones
+    // decide (sin saltos imposibles, permisos por rol) y aquí se fijan las
+    // horas con el reloj del servidor; el cambio va condicionado al estado
+    // leído, así que dos personas a la vez no se pisan (la segunda, 409).
+    const nextStatus =
+      patch.status !== undefined && patch.status !== existing.status
+        ? patch.status
+        : null;
+    const flowChange =
+      nextStatus !== null &&
+      (isInClinic(existing.status) || isInClinic(nextStatus));
+    const flowPatch =
+      nextStatus !== null
+        ? await this.checkFlow(existing, nextStatus, auditContext)
+        : {};
+
     // Reagendar = cambiar la hora O el profesional (DX-121: «Mover a…» y el
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
     let warnings: string[] = [];
@@ -180,6 +214,16 @@ export class UpdateAppointmentUseCase {
 
       if (nextEnd <= nextStart) {
         throw new BadRequestException('End must be after start');
+      }
+
+      // DX-200: con el paciente en la clínica la cita sigue siendo de HOY:
+      // moverla a otro día la dejaría «en curso» fuera de cualquier panel.
+      // Cambiar de profesional o de hora dentro del día sí se puede.
+      if (
+        isInClinic(existing.status) &&
+        !(await this.sameCivilDay(existing, nextStart))
+      ) {
+        throw new ConflictException(PATIENT_FLOW_MESSAGES.moveInClinic);
       }
 
       // No re-agendar hacia el pasado. Deliberadamente SOLO dentro de la rama
@@ -276,6 +320,7 @@ export class UpdateAppointmentUseCase {
       !WAITLIST_STATUSES.has(patch.status);
     const effectivePatch: UpdateAppointmentRepoInput = {
       ...patch,
+      ...flowPatch,
       ...(clearsConfirmation
         ? { confirmationSentAt: null, callbackRequestedAt: null }
         : {}),
@@ -319,6 +364,14 @@ export class UpdateAppointmentUseCase {
     if (isReschedule && auditContext) {
       await this.recordMove(existing, updated, auditContext);
     }
+    if (flowChange && auditContext) {
+      await this.recordStatus(
+        updated,
+        existing.status,
+        'PATIENT_FLOW',
+        auditContext,
+      );
+    }
     // El movimiento a un hueco ya deja su evento (la marca se apaga con él).
     if (changesWantsEarlier && !fromOpening && auditContext) {
       await this.recordWantsEarlier(updated, auditContext);
@@ -345,6 +398,131 @@ export class UpdateAppointmentUseCase {
       );
     }
     return { ...updated, warnings };
+  }
+
+  /**
+   * DX-200 «Deshacer llegada»: el paciente marcado como llegado por error
+   * vuelve al estado que tenía (agendada o confirmada) y se borra la hora de
+   * llegada. Solo desde «En espera» (ARRIVED) y solo el mostrador; queda en
+   * auditoría. Condicional: si otra persona lo movió mientras tanto, 409.
+   */
+  async undoArrival(
+    id: string,
+    auditContext: AppointmentAuditContext,
+  ): Promise<AppointmentWriteResult> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new NotFoundException('Cita no encontrada');
+    const role = auditContext.actor.role;
+    if (role === null || !FRONT_DESK_ROLES.includes(role)) {
+      throw new ForbiddenException(PATIENT_FLOW_MESSAGES.arriveForbidden);
+    }
+    if (existing.status !== AppointmentStatus.ARRIVED) {
+      throw new ConflictException(PATIENT_FLOW_MESSAGES.undoNotArrived);
+    }
+    const updated = await this.repo.undoArrival(id);
+    if (!updated) throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+    await this.recordStatus(
+      updated,
+      AppointmentStatus.ARRIVED,
+      'ARRIVAL_UNDONE',
+      auditContext,
+    );
+    return { ...updated, warnings: [] };
+  }
+
+  /**
+   * Valida el cambio de estado con la máquina del flujo (DX-200) y devuelve lo
+   * que el repositorio tiene que escribir además del estado: la hora del paso,
+   * a qué vuelve «Deshacer llegada» y la condición sobre el estado leído.
+   */
+  private async checkFlow(
+    existing: Appointment,
+    to: AppointmentStatus,
+    auditContext: AppointmentAuditContext | undefined,
+  ): Promise<Partial<UpdateAppointmentRepoInput>> {
+    const from = existing.status;
+    const isToday =
+      to === AppointmentStatus.ARRIVED ? await this.isToday(existing) : true;
+    const verdict = checkStatusTransition({
+      from,
+      to,
+      role: auditContext?.actor.role ?? null,
+      isToday,
+      arrived: existing.arrivedAt !== null,
+    });
+    if (!verdict.ok) {
+      throw verdict.kind === 'FORBIDDEN'
+        ? new ForbiddenException(verdict.message)
+        : new ConflictException(verdict.message);
+    }
+    if (!isInClinic(from) && !isInClinic(to)) {
+      // Vuelve a estar pendiente (p. ej. se reactiva una cita que se canceló
+      // tras llegar): sin horas de una visita que ya no está en curso.
+      const pending =
+        to === AppointmentStatus.SCHEDULED ||
+        to === AppointmentStatus.CONFIRMED;
+      const hasTimes =
+        existing.arrivedAt !== null ||
+        existing.seatedAt !== null ||
+        existing.readyForCheckoutAt !== null;
+      // También condicionado al estado leído: si mientras tanto alguien marcó
+      // «Llegó», cancelar o marcar no-show sobre lo leído no lo pisa (409).
+      return pending && hasTimes
+        ? {
+            expectStatus: from,
+            arrivedAt: null,
+            seatedAt: null,
+            readyForCheckoutAt: null,
+          }
+        : { expectStatus: from };
+    }
+    const now = new Date();
+    return {
+      expectStatus: from,
+      ...(isInClinic(to) ? { [FLOW_TIMESTAMP_FIELD[to]]: now } : {}),
+      // La vuelta de «Deshacer llegada» solo existe mientras está en espera.
+      preArrivalStatus: to === AppointmentStatus.ARRIVED ? from : null,
+    };
+  }
+
+  /** ¿La cita es de hoy en la zona de su sede (reloj del servidor)? */
+  private isToday(appointment: Appointment): Promise<boolean> {
+    return this.sameCivilDay(appointment, new Date());
+  }
+
+  /** ¿`instant` cae en el mismo día civil que la cita, en la zona de su sede? */
+  private async sameCivilDay(
+    appointment: Appointment,
+    instant: Date,
+  ): Promise<boolean> {
+    const location = await this.locations.findById(appointment.locationId);
+    if (!location) throw new NotFoundException('Sede no encontrada');
+    return (
+      civilDateIn(appointment.start, location.timeZone) ===
+      civilDateIn(instant, location.timeZone)
+    );
+  }
+
+  /** `audit_event` de un paso del flujo en la clínica (DX-200). */
+  private recordStatus(
+    appointment: Appointment,
+    from: AppointmentStatus,
+    reason: 'PATIENT_FLOW' | 'ARRIVAL_UNDONE',
+    ctx: AppointmentAuditContext,
+  ): Promise<void> {
+    return this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: { reason, status: { from, to: appointment.status } },
+    });
   }
 
   /**

@@ -4,6 +4,7 @@ import { AppointmentStatus, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaScheduleBlockRepository } from '../src/modules/schedule-blocks/infrastructure/repositories/prisma-schedule-block.repository';
+import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { PrismaAppointmentTypeRepository } from '../src/modules/appointment-types/infrastructure/repositories/prisma-appointment-type.repository';
 import { PrismaWaitlistRepository } from '../src/modules/waitlist/infrastructure/repositories/prisma-waitlist.repository';
@@ -112,6 +113,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     anyStaff,
     noAudit,
     blocks,
+    new PrismaLocationRepository(prisma, tenantContext),
   );
 
   beforeAll(async () => {
@@ -448,7 +450,15 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
           update.execute(appt.id, { status: AppointmentStatus.NO_SHOW }),
         ),
       ]);
-      expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+      // DX-200: todo cambio de estado va condicionado al estado leído. Si las
+      // dos leen SCHEDULED a la vez, la segunda recibe 409 en vez de pisar a
+      // la primera; si se serializan, las dos pasan. Nunca falla de otra forma.
+      expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          expect(r.reason).toBeInstanceOf(ConflictException);
+        }
+      }
       await expect(
         raw.appointmentWaitlistEntry.count({
           where: { sourceAppointmentId: appt.id },

@@ -55,6 +55,9 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    arrivedAt: null,
+    seatedAt: null,
+    readyForCheckoutAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -83,6 +86,8 @@ function makeRepo(
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
+    undoArrival: () => Promise.resolve(null),
+    listInClinic: () => Promise.resolve([]),
     update: (): Promise<AppointmentUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
@@ -885,6 +890,8 @@ describe('CreateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        undoArrival: () => Promise.resolve(null),
+        listInClinic: () => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
       const uc = new CreateAppointmentUseCase(
@@ -915,6 +922,8 @@ describe('CreateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        undoArrival: () => Promise.resolve(null),
+        listInClinic: () => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(patientExclusion),
       });
       const uc = new CreateAppointmentUseCase(
@@ -936,6 +945,8 @@ describe('CreateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        undoArrival: () => Promise.resolve(null),
+        listInClinic: () => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(rawExclusionError()),
       });
       const uc = new CreateAppointmentUseCase(
@@ -963,6 +974,8 @@ describe('CreateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        undoArrival: () => Promise.resolve(null),
+        listInClinic: () => Promise.resolve([]),
         create: (): Promise<Appointment> => Promise.reject(boom),
       });
       const uc = new CreateAppointmentUseCase(

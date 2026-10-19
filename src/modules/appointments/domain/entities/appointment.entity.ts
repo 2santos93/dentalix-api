@@ -49,6 +49,14 @@ export interface Appointment {
    * huecos libres de días anteriores; al moverla a uno se apaga.
    */
   wantsEarlier: boolean;
+  /**
+   * DX-200: horas del flujo en la clínica (reloj del servidor): llegó, pasó al
+   * sillón y quedó listo para cobrar. null en las citas antiguas y mientras no
+   * se marca el paso; «Deshacer llegada» borra `arrivedAt`.
+   */
+  arrivedAt: Date | null;
+  seatedAt: Date | null;
+  readyForCheckoutAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
