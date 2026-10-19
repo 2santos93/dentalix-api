@@ -81,8 +81,11 @@ export class UpdateLocationDto {
     nullable: true,
     example: '+57 601 555 0101',
     maxLength: LOCATION_PHONE_MAX,
-    description: `${PHONE_DOC} Vacío o null lo quita.`,
+    description: `${PHONE_DOC} Vacío o null lo quita; sin el campo no cambia.`,
   })
+  // `@IsOptional` deja pasar `null` (la web lo envía al vaciar el campo) y la
+  // ausencia; el caso de uso convierte null/vacío en «quitar» y undefined en
+  // «no tocar». Solo un valor presente se valida como texto de hasta 40.
   @IsOptional()
   @IsString({ message: 'El teléfono debe ser un texto.' })
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })

@@ -283,4 +283,51 @@ describe('Locations / multi-sede (e2e)', () => {
     },
     30000,
   );
+
+  it('PATCH del teléfono de la sede (DX-222): texto lo guarda, null lo quita, sin él no cambia', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Telefono',
+      subdomain: 'telefono-sede',
+      email: 'owner@telefono-sede.com',
+    });
+    const host = hostFor(clinic.subdomain);
+    const auth = (r: request.Test) =>
+      r
+        .set('X-Tenant-Host', host)
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    const patch = (id: string, body: object) =>
+      auth(request(app.getHttpServer()).patch(`/api/v1/locations/${id}`)).send(
+        body,
+      );
+
+    const list = await auth(
+      request(app.getHttpServer()).get('/api/v1/locations'),
+    ).expect(200);
+    const sede = (list.body as Array<LocationBody & { phone: unknown }>)[0];
+    expect(sede.phone).toBeNull();
+
+    const saved = await patch(sede.id, { phone: '601 555 0101' }).expect(200);
+    expect((saved.body as { phone: unknown }).phone).toBe('601 555 0101');
+
+    // Sin `phone` en el cuerpo: el teléfono no cambia.
+    const renamed = await patch(sede.id, { name: 'Sede Centro' }).expect(200);
+    expect(renamed.body).toMatchObject({
+      name: 'Sede Centro',
+      phone: '601 555 0101',
+    });
+
+    // `null` (lo que envía la web al vaciar el campo) lo quita.
+    const cleared = await patch(sede.id, { phone: null }).expect(200);
+    expect((cleared.body as { phone: unknown }).phone).toBeNull();
+    const row = await raw.location.findUniqueOrThrow({
+      where: { id: sede.id },
+    });
+    expect(row.phone).toBeNull();
+
+    const tooLong = await patch(sede.id, { phone: '1'.repeat(41) }).expect(400);
+    expect(JSON.stringify(tooLong.body)).toContain(
+      'El teléfono admite hasta 40 caracteres.',
+    );
+    await patch(sede.id, { phone: 601 }).expect(400);
+  });
 });
