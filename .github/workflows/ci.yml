@@ -169,6 +169,17 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
 
+      # DX-226: el servidor arranca fuera de UTC (como un gestionado en otra
+      # región). La migración fija UTC en los roles y en la base, y
+      # db:check-force comprueba que dentalix_app arranca en UTC.
+      - name: Zona del servidor fuera de UTC
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres \
+            -c "ALTER SYSTEM SET timezone = 'America/Bogota'" -c "SELECT pg_reload_conf()"
+          test "$(psql -h localhost -U postgres -d postgres -tAc 'SHOW TimeZone')" = America/Bogota
+
       # Privilegios mínimos del owner (README): LOGIN, CREATEROLE (crea
       # dentalix_app y los roles NOLOGIN de las migraciones) y dueño de la base.
       - name: Crear el owner sin SUPERUSER ni BYPASSRLS
