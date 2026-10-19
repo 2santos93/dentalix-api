@@ -1437,8 +1437,11 @@ dentalix_email_dispatcher`) o repón la política como en
 - **Zona horaria: UTC** (DX-226). Las columnas de hora son `timestamp` sin
   zona: Prisma graba en UTC desde la API y los triggers que ponen la hora del
   servidor (historia clínica, implantes, gestiones y compromisos de cobro,
-  recibos, alta de los abonos, resumen de la cartera) graban
-  `timezone('UTC', now())`. Aun así, `dentalix_app` (y el owner, y los roles
+  recibos, alta de los abonos, resumen de la cartera y, con
+  `20261019090100_dx226_cash_sessions_server_time_utc`, apertura, cierre,
+  reapertura y ajustes de la caja por turno) graban
+  `timezone('UTC', now())`; `test/server-time-utc.int-spec.ts` falla si una
+  función de `public` vuelve a usar `CURRENT_TIMESTAMP` o `now()` sin UTC. Aun así, `dentalix_app` (y el owner, y los roles
   NOLOGIN) tiene que arrancar con `TimeZone = UTC`: cualquier hora que la BD
   calcule con la zona de la sesión (`CURRENT_TIMESTAMP` en un `DEFAULT`, SQL
   a mano, un trigger futuro) se desfasaría (con `America/Bogota`, 5 h). La

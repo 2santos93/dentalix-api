@@ -157,6 +157,24 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
     );
   });
 
+  it('ninguna función de public calcula la hora con la zona de la sesión (un trigger nuevo con CURRENT_TIMESTAMP falla aquí)', async () => {
+    // Se quitan las formas en UTC (`timezone('UTC', now())` y
+    // `now() AT TIME ZONE 'UTC'`) y se busca cualquier otra hora de la BD.
+    // String.raw: las barras del regex llegan tal cual a Postgres.
+    const offenders = await raw.$queryRawUnsafe<{ name: string }[]>(String.raw`
+      SELECT p.proname::text AS name
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public'
+         AND regexp_replace(
+               regexp_replace(p.prosrc,
+                 '(pg_catalog\.)?timezone\(''utc'',\s*(pg_catalog\.)?now\(\)\)', '', 'gi'),
+               '(pg_catalog\.)?now\(\)\s+AT\s+TIME\s+ZONE\s+''utc''', '', 'gi')
+             ~* '\mnow\(\)|current_timestamp|localtimestamp|\mlocaltime\M|current_date|current_time\M|statement_timestamp|clock_timestamp|transaction_timestamp'
+       ORDER BY 1`);
+    expect(offenders).toEqual([]);
+  });
+
   it('clinical_entries y clinical_entry_addenda: createdAt en UTC', async () => {
     const entry = await inBogota<{ id: string }>(
       `INSERT INTO "clinical_entries" ("id", "tenantId", "patientId", "entryDate", "notes", "performedById")
