@@ -15,26 +15,31 @@ model Tenant {
   primaryColor              String                     @default("#0F5E9C")
   logoUrl                   String?
   // DX-128: canal de los avisos automáticos con el que nace cada paciente.
-  defaultContactChannel     ContactChannel             @default(EMAIL)
-  createdAt                 DateTime                   @default(now())
-  updatedAt                 DateTime                   @updatedAt
-  deletedAt                 DateTime?
-  memberships               ClinicMembership[]
-  domains                   TenantDomain[]
-  invitations               ClinicInvitation[]
-  appointmentConfirmations  AppointmentConfirmation[]
-  privacyPolicyVersions     PrivacyPolicyVersion[]
-  dataProcessingConsents    DataProcessingConsent[]
-  consentTemplates          ConsentTemplate[]
-  prescriptionTemplates     PrescriptionTemplate[]
-  emailOutbox               EmailOutbox[]
-  clinicalEntryAddenda      ClinicalEntryAddendum[]
-  dentitionEvents           PatientDentitionEvent[]
-  appointmentTypes          AppointmentType[]
-  jobs                      Job[]
-  outboundMessages          OutboundMessage[]
-  scheduleBlocks            ScheduleBlock[]
-  waitlistEntries           AppointmentWaitlistEntry[]
+  defaultContactChannel    ContactChannel             @default(EMAIL)
+  // DX-027: ajustes de caja de la clínica. Por defecto, el comportamiento de
+  // antes de la caja por turno: se cobra en efectivo sin caja abierta y el
+  // cierre enseña el esperado mientras se cuenta.
+  cashRequireOpenSession   Boolean                    @default(false)
+  cashBlindClose           Boolean                    @default(false)
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  deletedAt                DateTime?
+  memberships              ClinicMembership[]
+  domains                  TenantDomain[]
+  invitations              ClinicInvitation[]
+  appointmentConfirmations AppointmentConfirmation[]
+  privacyPolicyVersions    PrivacyPolicyVersion[]
+  dataProcessingConsents   DataProcessingConsent[]
+  consentTemplates         ConsentTemplate[]
+  prescriptionTemplates    PrescriptionTemplate[]
+  emailOutbox              EmailOutbox[]
+  clinicalEntryAddenda     ClinicalEntryAddendum[]
+  dentitionEvents          PatientDentitionEvent[]
+  appointmentTypes         AppointmentType[]
+  jobs                     Job[]
+  outboundMessages         OutboundMessage[]
+  scheduleBlocks           ScheduleBlock[]
+  waitlistEntries          AppointmentWaitlistEntry[]
   // DX-210: ofertas de huecos libres a candidatos.
   waitlistOffers            WaitlistOffer[]
   reminderSettings          LocationReminderSettings[]
@@ -51,6 +56,9 @@ model Tenant {
   platformAccesses          PlatformAccessAudit[]
   // DX-204: topes de descuento por rol (una fila; sin ella, los de por defecto).
   discountPolicy            DiscountPolicy?
+  discountPolicy           DiscountPolicy?
+  // DX-027: cajas por turno.
+  cashSessions             CashSession[]
 
   @@map("tenants")
 }
@@ -164,6 +172,9 @@ model Location {
   paymentPromises    PaymentPromise[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
   planItemDiscounts  TreatmentPlanItem[]
+  // DX-027: cajas por turno de la sede y sus ajustes.
+  cashSessions       CashSession[]
+  cashAdjustments    CashSessionAdjustment[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1321,11 +1332,15 @@ model Currency {
   symbol String // "$"
 
   // FK de `currency` (DX-042, 20261016131000_currency_fks).
-  treatmentPlans  TreatmentPlan[]
-  payments        Payment[]
-  paymentPlans    PaymentPlan[]
+  treatmentPlans   TreatmentPlan[]
+  payments         Payment[]
+  paymentPlans     PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
-  paymentPromises PaymentPromise[]
+  paymentPromises  PaymentPromise[]
+  // DX-027: fondos, arqueos y ajustes de caja en esa moneda.
+  cashFloats       CashSessionFloat[]
+  cashClosingLines CashSessionClosingLine[]
+  cashAdjustments  CashSessionAdjustment[]
 
   @@map("currencies")
 }
@@ -1434,6 +1449,10 @@ model Payment {
   voidedById             String?        @db.Uuid
   voidedAt               DateTime?
   voidReason             String?
+  // DX-027: la caja (abierta) que recibió el abono: la de quien lo registra
+  // en su sede. NULL sin caja abierta (o anterior a DX-027). Un trigger impide
+  // asociarlo a una caja cerrada o de otra sede, y cambiarla después.
+  cashSessionId          String?        @db.Uuid
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -1448,6 +1467,9 @@ model Payment {
   // Recibo de caja numerado (DX-136). Null en los abonos anteriores a la
   // numeración: conservan su referencia antigua REC-xxxxxxxx.
   receipt PaymentReceipt?
+
+  cashSession     CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "payments_cash_session_fkey")
+  cashAdjustments CashSessionAdjustment[]
 
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
@@ -1479,6 +1501,10 @@ model Payment {
   // `prisma migrate dev` puede proponer "arreglarlo" a índice completo: NO
   // aceptes ese diff.
   @@index([tenantId, locationId, paidAt], map: "payments_tenantId_locationId_paidAt_active_idx")
+  // Parcial (WHERE "cashSessionId" IS NOT NULL): el WHERE vive solo en la
+  // migración 20261018140200_dx027_cash_sessions. NO aceptes un diff de
+  // migrate dev que lo vuelva completo.
+  @@index([tenantId, cashSessionId], map: "payments_tenant_cash_session_idx")
   @@map("payments")
 }
 
@@ -2034,6 +2060,9 @@ enum AuditResourceType {
   DISCOUNT_POLICY
   // DX-210: oferta de un hueco libre a un candidato (registrarla y su resultado).
   WAITLIST_OFFER
+  // DX-027: caja por turno (abrir, cerrar, reabrir, ajustar, ver) y los
+  // ajustes de caja de la clínica.
+  CASH_SESSION
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -2799,4 +2828,168 @@ model PatientResponsibleParty {
   //   patient_responsible_parties_migrated_key    UNIQUE ("tenantId", "patientId") WHERE "migratedFromGuardian"
   //   patient_responsible_parties_responsible_idx ("tenantId", "responsiblePatientId") WHERE "responsiblePatientId" IS NOT NULL
   @@map("patient_responsible_parties")
+// ---------------------------------------------------------------------------
+// Caja por turno (DX-027)
+// ---------------------------------------------------------------------------
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+/// VOID: anulación de un abono de una caja ya cerrada (resta). LATE_PAYMENT:
+/// abono con fecha de un día cuya caja ya se cerró (suma). CORRECTION: una
+/// corrección del ADMIN sobre un cierre, con motivo.
+enum CashAdjustmentKind {
+  VOID
+  LATE_PAYMENT
+  CORRECTION
+}
+
+/// Turno de caja de UN usuario en UNA sede. Una sola abierta por (sede,
+/// usuario) — índice único parcial `cash_sessions_open_key` (WHERE status =
+/// 'OPEN', solo en SQL). La apertura no se edita; el cierre deja una fila en
+/// `cash_session_closings` y solo un ADMIN la reabre (`cash_session_reopenings`).
+/// Triggers en la migración 20261018140200_dx027_cash_sessions.
+model CashSession {
+  id          String            @id @default(uuid()) @db.Uuid
+  tenantId    String            @db.Uuid
+  locationId  String            @db.Uuid
+  /// Puntero suave a User, como `Payment.createdById`.
+  openedById  String            @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  openedAt    DateTime          @default(now())
+  notes       String?
+  status      CashSessionStatus @default(OPEN)
+  /// La pone el servidor de BD (trigger) al cerrar.
+  closedAt    DateTime?
+  closedById  String?           @db.Uuid
+  reopenCount Int               @default(0)
+
+  tenant                Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location              Location                @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cash_sessions_location_fkey")
+  floats                CashSessionFloat[]
+  closings              CashSessionClosing[]
+  reopenings            CashSessionReopening[]
+  payments              Payment[]
+  adjustments           CashSessionAdjustment[] @relation("CashAdjustmentSession")
+  originatedAdjustments CashSessionAdjustment[] @relation("CashAdjustmentOriginal")
+
+  @@unique([tenantId, id], map: "cash_sessions_tenant_id_key")
+  @@index([tenantId, locationId, openedAt(sort: Desc), id(sort: Desc)], map: "cash_sessions_tenant_location_opened_idx")
+  @@index([tenantId, openedAt(sort: Desc), id(sort: Desc)], map: "cash_sessions_tenant_opened_idx")
+  @@index([tenantId, openedById, openedAt(sort: Desc), id(sort: Desc)], map: "cash_sessions_tenant_user_opened_idx")
+  @@map("cash_sessions")
+}
+
+/// Fondo inicial de la caja por moneda (>= 0). Solo en la apertura.
+model CashSessionFloat {
+  tenantId  String  @db.Uuid
+  sessionId String  @db.Uuid
+  currency  String
+  amount    Decimal @db.Decimal(14, 2)
+
+  session     CashSession @relation(fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_floats_session_fkey")
+  currencyRef Currency    @relation(fields: [currency], references: [code], map: "cash_session_floats_currency_fkey")
+
+  @@id([sessionId, currency])
+  @@index([tenantId, sessionId], map: "cash_session_floats_tenant_session_idx")
+  @@map("cash_session_floats")
+}
+
+/// Un cierre de la caja (1 el primero; 2, 3... tras cada reapertura).
+/// Inalterable. `suggestedLockDate`: el día civil del cierre en la sede, que
+/// DX-091 podrá usar como fecha de bloqueo contable.
+model CashSessionClosing {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @db.Uuid
+  sessionId         String   @db.Uuid
+  sequence          Int
+  closedById        String   @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  closedAt          DateTime @default(now())
+  blind             Boolean
+  hasDifference     Boolean
+  differenceReason  String?
+  notes             String?
+  suggestedLockDate DateTime @db.Date
+
+  session    CashSession              @relation(fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_closings_session_fkey")
+  lines      CashSessionClosingLine[]
+  reopenings CashSessionReopening[]
+
+  @@unique([tenantId, id], map: "cash_session_closings_tenant_id_key")
+  @@unique([tenantId, sessionId, sequence], map: "cash_session_closings_session_sequence_key")
+  @@map("cash_session_closings")
+}
+
+/// Arqueo por (moneda, método) de un cierre: fondo, esperado, contado y
+/// diferencia (= contado - esperado, CHECK). Inalterable.
+model CashSessionClosingLine {
+  tenantId   String        @db.Uuid
+  closingId  String        @db.Uuid
+  currency   String
+  method     PaymentMethod
+  opening    Decimal       @db.Decimal(14, 2)
+  expected   Decimal       @db.Decimal(14, 2)
+  counted    Decimal       @db.Decimal(14, 2)
+  difference Decimal       @db.Decimal(14, 2)
+
+  closing     CashSessionClosing @relation(fields: [tenantId, closingId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_closing_lines_closing_fkey")
+  currencyRef Currency           @relation(fields: [currency], references: [code], map: "cash_session_closing_lines_currency_fkey")
+
+  @@id([closingId, currency, method])
+  @@index([tenantId, closingId], map: "cash_session_closing_lines_tenant_closing_idx")
+  @@map("cash_session_closing_lines")
+}
+
+/// Lo que llega después de cerrar una caja y no puede tocarla. Va a la caja
+/// abierta de quien lo hace en la sede (`sessionId`) o queda pendiente (NULL)
+/// hasta la siguiente que se abra en la sede. `originalSessionId`: la caja
+/// cerrada de la que viene.
+model CashSessionAdjustment {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @db.Uuid
+  locationId        String             @db.Uuid
+  sessionId         String?            @db.Uuid
+  kind              CashAdjustmentKind
+  paymentId         String?            @db.Uuid
+  originalSessionId String?            @db.Uuid
+  currency          String
+  method            PaymentMethod
+  amount            Decimal            @db.Decimal(14, 2)
+  reason            String?
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById       String             @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  createdAt         DateTime           @default(now())
+
+  location        Location     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_location_fkey")
+  session         CashSession? @relation("CashAdjustmentSession", fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_session_fkey")
+  originalSession CashSession? @relation("CashAdjustmentOriginal", fields: [tenantId, originalSessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_original_fkey")
+  payment         Payment?     @relation(fields: [paymentId], references: [id], onDelete: Restrict, map: "cash_session_adjustments_payment_fkey")
+  currencyRef     Currency     @relation(fields: [currency], references: [code], map: "cash_session_adjustments_currency_fkey")
+
+  @@index([tenantId, locationId, createdAt], map: "cash_session_adjustments_tenant_location_idx")
+  @@map("cash_session_adjustments")
+}
+
+/// Reapertura de un cierre por un ADMIN, con motivo. Append-only.
+model CashSessionReopening {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  sessionId    String   @db.Uuid
+  sequence     Int
+  closingId    String   @db.Uuid
+  reason       String
+  reopenedById String   @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  reopenedAt   DateTime @default(now())
+
+  session CashSession        @relation(fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_reopenings_session_fkey")
+  closing CashSessionClosing @relation(fields: [tenantId, closingId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_reopenings_closing_fkey")
+
+  @@unique([tenantId, sessionId, sequence], map: "cash_session_reopenings_session_sequence_key")
+  @@index([tenantId, closingId], map: "cash_session_reopenings_tenant_closing_idx")
+  @@map("cash_session_reopenings")
 }

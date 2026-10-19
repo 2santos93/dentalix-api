@@ -150,6 +150,8 @@ interface SeedA {
   waitlistOfferId: string;
   /** DX-203: un responsable (contacto) del paciente de A. */
   responsiblePartyId: string;
+  /** Caja por turno cerrada de A (DX-027). */
+  cashSessionId: string;
 }
 
 interface SeedB {
@@ -234,11 +236,19 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     periodicity: 'MONTHLY',
     startDate: futureAt(30, 12).slice(0, 10),
   });
+  // DX-027: A abre su caja antes del abono (entra en ella) y la cierra con
+  // arqueo, para que la fotografía incluya la caja, su fondo y su cierre.
+  const cashSession = await create(app, a, '/cash-sessions/open', {
+    floats: [{ currency: 'USD', amount: 20 }],
+  });
   const payment = await create(app, a, `/treatment-plans/${plan.id}/payments`, {
     amount: 100,
     currency: 'USD',
     paidAt: new Date().toISOString(),
     method: 'CASH',
+  });
+  await create(app, a, `/cash-sessions/${cashSession.id}/close`, {
+    counts: [{ currency: 'USD', method: 'CASH', counted: 120 }],
   });
   const bareplan = await create(
     app,
@@ -403,6 +413,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     noteTemplateId: noteTemplate.id,
     waitlistOfferId: waitlistOffer.id,
     responsiblePartyId: responsibleParty.id,
+    cashSessionId: cashSession.id,
   };
 }
 
@@ -467,6 +478,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-203: responsables de pago y avisos.
       'patient_responsible_parties',
       'location_reminder_settings',
+      // DX-027: caja por turno.
+      'cash_sessions',
+      'cash_session_floats',
+      'cash_session_closings',
+      'cash_session_closing_lines',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -848,6 +864,39 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'delete',
       path: () =>
         `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
+      status: 404,
+    },
+    // --- caja por turno (DX-027) ---
+    {
+      name: 'GET /cash-sessions/:id',
+      verb: 'get',
+      path: () => `/cash-sessions/${a.cashSessionId}`,
+      status: 404,
+    },
+    {
+      name: 'POST /cash-sessions/:id/close',
+      verb: 'post',
+      path: () => `/cash-sessions/${a.cashSessionId}/close`,
+      body: () => ({ counts: [], differenceReason: 'Intrusa' }),
+      status: 404,
+    },
+    {
+      name: 'POST /cash-sessions/:id/reopen',
+      verb: 'post',
+      path: () => `/cash-sessions/${a.cashSessionId}/reopen`,
+      body: () => ({ reason: 'Intrusa' }),
+      status: 404,
+    },
+    {
+      name: 'POST /cash-sessions/:id/adjustments',
+      verb: 'post',
+      path: () => `/cash-sessions/${a.cashSessionId}/adjustments`,
+      body: () => ({
+        currency: 'USD',
+        method: 'CASH',
+        amount: -10,
+        reason: 'Intrusa',
+      }),
       status: 404,
     },
     // --- cobranza (DX-150) ---

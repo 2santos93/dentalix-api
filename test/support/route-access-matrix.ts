@@ -340,6 +340,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,
   'GET /patients/:id/collections': BILLING,
+  // DX-027: caja por turno (loop/informes/DX-027.md). RECEPTION solo ve, abre
+  // y cierra las suyas (lo decide el caso de uso); reabrir, corregir y los
+  // ajustes de caja de la clínica, solo ADMIN.
+  'GET /cash-sessions/settings': BILLING,
+  'PUT /cash-sessions/settings': ADMIN_ONLY,
+  'GET /cash-sessions/current': BILLING,
+  'POST /cash-sessions/open': BILLING,
+  'GET /cash-sessions': BILLING,
+  'GET /cash-sessions/:id': BILLING,
+  'POST /cash-sessions/:id/close': BILLING,
+  'POST /cash-sessions/:id/reopen': ADMIN_ONLY,
+  'POST /cash-sessions/:id/adjustments': ADMIN_ONLY,
 
   // --- Inventario ----------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-inventory.md (INVENTORY_ROLES).

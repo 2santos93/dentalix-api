@@ -31,6 +31,7 @@ import { ReceivablesController } from '../receivables/presentation/receivables.c
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
+import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
@@ -538,6 +539,48 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'PATIENT_COLLECTIONS',
   },
 
+  // DX-027: caja por turno (sin paciente: el turno es de un usuario y una
+  // sede). Los ajustes de caja de la clínica van como UPDATE con su motivo.
+  'PUT /cash-sessions/settings': {
+    action: 'UPDATE',
+    resource: 'CASH_SESSION',
+    reason: 'CASH_SETTINGS',
+  },
+  'GET /cash-sessions/current': {
+    action: 'VIEW',
+    resource: 'CASH_SESSION',
+    reason: 'CASH_SESSION_CURRENT',
+  },
+  'POST /cash-sessions/open': {
+    action: 'CREATE',
+    resource: 'CASH_SESSION',
+    resourceId: RES,
+  },
+  'GET /cash-sessions': { action: 'VIEW', resource: 'CASH_SESSION' },
+  'GET /cash-sessions/:id': {
+    action: 'VIEW',
+    resource: 'CASH_SESSION',
+    resourceId: { param: 'id' },
+  },
+  'POST /cash-sessions/:id/close': {
+    action: 'UPDATE',
+    resource: 'CASH_SESSION',
+    resourceId: { param: 'id' },
+    reason: 'CASH_SESSION_CLOSED',
+  },
+  'POST /cash-sessions/:id/reopen': {
+    action: 'UPDATE',
+    resource: 'CASH_SESSION',
+    resourceId: { param: 'id' },
+    reason: 'CASH_SESSION_REOPENED',
+  },
+  'POST /cash-sessions/:id/adjustments': {
+    action: 'CREATE',
+    resource: 'CASH_SESSION',
+    resourceId: { param: 'id' },
+    reason: 'CASH_SESSION_ADJUSTMENT',
+  },
+
   // DX-122: bloqueos de agenda (sin paciente). Las altas y bajas de
   // «Pendientes por agendar» las audita el caso de uso, con el paciente.
   'POST /schedule-blocks': {
@@ -620,6 +663,7 @@ const CONTROLLERS: Type[] = [
   DiscountPolicyController,
   DiscountReportController,
   CollectionsController,
+  CashSessionsController,
   ScheduleBlocksController,
   StaffController,
   ClinicalNoteTemplatesController,
