@@ -191,8 +191,8 @@ export interface PaymentRepository {
    * `false` if it was already voided or doesn't exist (never throws for that
    * case -- the use case decides 404). Never a hard delete.
    *
-   * DX-215: in the SAME transaction, re-evaluates the patient's latest KEPT
-   * payment promise in the payment's currency if this payment counted for it
+   * DX-215: in the SAME transaction, re-evaluates every KEPT payment promise
+   * of the patient in the payment's currency that this payment counted for
    * (back to OPEN, or BROKEN after its day), audited with `audit`'s actor and
    * request.
    */

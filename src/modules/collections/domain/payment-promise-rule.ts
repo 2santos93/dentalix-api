@@ -27,8 +27,8 @@ import { fromCents, toCents } from '../../receivables/domain/aging';
  *   sede).
  * - Si no, sigue OPEN. Cumplido se evalúa antes: un barrido tardío del 16 con
  *   abonos del 15 lo da por cumplido.
- * - DX-215: anular un abono que contaba para el último compromiso CUMPLIDO del
- *   paciente en su moneda lo vuelve a evaluar con los abonos que siguen vivos
+ * - DX-215: anular un abono que contaba para un compromiso CUMPLIDO del
+ *   paciente en su moneda (el último o uno anterior) lo vuelve a evaluar con los abonos que siguen vivos
  *   (`statusAfterVoid`): sigue KEPT si aún lo cubren; si no, OPEN mientras no
  *   pase su día o BROKEN desde el siguiente. Si el paciente ya tiene OTRO
  *   compromiso abierto (uno solo por paciente), queda BROKEN: el vigente es el

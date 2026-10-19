@@ -225,8 +225,8 @@ export class PaymentsController {
       'Borrado lógico: el abono deja de sumar pero se conserva con ' +
       '`voidedById`, `voidedAt` y `voidReason`. ADMIN anula cualquier abono; ' +
       'RECEPTION solo los que registró ella misma el mismo día (calendario ' +
-      'de la sede del abono). Si el abono cumplía el último compromiso de ' +
-      'pago del paciente en su moneda y ya no queda cubierto, el compromiso ' +
+      'de la sede del abono). Si el abono contaba para un compromiso de ' +
+      'pago cumplido del paciente en su moneda y ya no queda cubierto, el compromiso ' +
       'vuelve a OPEN (o BROKEN si su día ya pasó en la zona de su sede), en ' +
       'la misma transacción y auditado (DX-215).',
   })

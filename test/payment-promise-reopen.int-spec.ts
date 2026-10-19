@@ -473,6 +473,72 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
       expect(await statusOf(newer)).toBe('OPEN');
     });
 
+    it('el abono cumplía un compromiso ANTERIOR que otro abono vivo sigue cubriendo: los dos siguen CUMPLIDOS', async () => {
+      const d = await debtor('Anterior');
+      const older = await promiseFor(d, addCivilDays(today(), 7));
+      const olderPayment = await pay(d);
+      await raw.paymentPromise.update({
+        where: { id: older },
+        data: { status: 'KEPT', settledAt: new Date() },
+      });
+      const newer = await promiseFor(d, addCivilDays(today(), 10));
+      await pay(d);
+      await raw.paymentPromise.update({
+        where: { id: newer },
+        data: { status: 'KEPT', settledAt: new Date() },
+      });
+
+      await voidPayment(olderPayment);
+
+      // El abono del posterior es de después del anterior y fechado antes de
+      // su día: también cuenta para el anterior, que sigue cubierto.
+      expect(await statusOf(newer)).toBe('KEPT');
+      expect(await statusOf(older)).toBe('KEPT');
+    });
+
+    it('el abono cumplía un compromiso ANTERIOR que nadie más cubre: se reabre aunque haya otro cumplido después', async () => {
+      const d = await debtor('AnteriorSolo');
+      const older = await promiseFor(d, addCivilDays(today(), 3));
+      const olderPayment = await pay(d);
+      await raw.paymentPromise.update({
+        where: { id: older },
+        data: { status: 'KEPT', settledAt: new Date() },
+      });
+      // El posterior vence DESPUÉS y lo cumple un abono fechado después del
+      // día del anterior: no cuenta para el anterior.
+      const newerDue = addCivilDays(today(), 10);
+      const newer = await promiseFor(d, newerDue);
+      const late = await raw.payment.create({
+        data: {
+          tenantId,
+          locationId,
+          treatmentPlanId: d.planId,
+          patientId: d.patientId,
+          amount: 200_000,
+          currency: 'COP',
+          paidAt: new Date(`${addCivilDays(today(), 5)}T17:00:00.000Z`),
+          createdById: userId,
+        },
+      });
+      expect(late.id).toBeTruthy();
+      await raw.paymentPromise.update({
+        where: { id: newer },
+        data: { status: 'KEPT', settledAt: new Date() },
+      });
+
+      await voidPayment(olderPayment);
+
+      expect(await statusOf(newer)).toBe('KEPT');
+      expect(await statusOf(older)).toBe('OPEN');
+      expect((await eventsOf(older)).map((e) => e.metadata)).toEqual([
+        {
+          reason: 'PAYMENT_VOIDED',
+          params: { paymentId: olderPayment },
+          statusChange: { from: 'KEPT', to: 'OPEN' },
+        },
+      ]);
+    });
+
     it('un abono en otra moneda no toca el compromiso', async () => {
       const d = await debtor('OtraMoneda');
       const id = await promiseFor(d, addCivilDays(today(), 7));

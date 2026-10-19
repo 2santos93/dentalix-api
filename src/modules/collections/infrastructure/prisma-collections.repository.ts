@@ -129,9 +129,12 @@ export interface PromiseReopening {
 
 /**
  * DX-215 (BE-032): dentro de la transacción que ANULA un abono, vuelve a
- * evaluar el último compromiso CUMPLIDO del paciente en la moneda del abono,
- * si ese abono contaba para él. Ya no cubierto: OPEN si su día no ha pasado en
- * la zona de su sede, BROKEN si pasó (o si el paciente ya tiene otro abierto).
+ * evaluar los compromisos CUMPLIDOS del paciente en la moneda del abono para
+ * los que ese abono contaba (normalmente uno: el último; pero un abono que
+ * cumplió un compromiso anterior sigue contando para él aunque después se
+ * cumpliera otro). Del más reciente al más antiguo. Ya no cubierto: OPEN si su
+ * día no ha pasado en la zona de su sede, BROKEN si pasó (o si el paciente ya
+ * tiene otro abierto: uno por paciente, y el vigente es el más reciente).
  * Bajo el candado del paciente (lo comparte con el cierre del barrido y del
  * abono) y con la transición condicional `WHERE status = 'KEPT'`: dos
  * anulaciones, o una anulación y un barrido, no lo cambian ni lo auditan dos
@@ -143,44 +146,47 @@ export interface PromiseReopening {
 export async function reopenPromiseOnVoid(
   tx: Prisma.TransactionClient,
   input: PromiseVoidContext,
-): Promise<PromiseReopening | null> {
+): Promise<PromiseReopening[]> {
   const { tenantId } = input;
   const voided = await tx.payment.findFirst({
     where: { id: input.paymentId, tenantId },
     select: PAYMENT_SELECT,
   });
-  if (!voided) return null;
+  if (!voided) return [];
   await lockPatientPromises(tx, tenantId, voided.patientId);
+  // Solo los hechos hasta el alta del abono (si no, no contaba para ellos).
   // Por payment_promises_tenant_patient_created_idx.
-  const kept = await tx.paymentPromise.findFirst({
+  const kept = await tx.paymentPromise.findMany({
     where: {
       tenantId,
       patientId: voided.patientId,
       currency: voided.currency,
       status: PaymentPromiseStatus.KEPT,
+      createdAt: { lte: voided.createdAt },
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: PROMISE_SELECT,
   });
-  if (!kept) return null;
-  const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
-    kept.locationId,
-  ]);
-  const terms = toOpenPromise(kept, zoneOf);
-  const counted = countsTowardPromise(
-    terms,
-    { ...voided, amount: voided.amount.toNumber() },
-    terms.timeZone,
+  if (kept.length === 0) return [];
+  const zoneOf = await resolveLocationTimeZones(
+    tx,
+    tenantId,
+    kept.map((k) => k.locationId),
   );
-  if (!counted) return null;
+  const payment = { ...voided, amount: voided.amount.toNumber() };
+  const counted = kept
+    .map((row) => ({ row, terms: toOpenPromise(row, zoneOf) }))
+    .filter(({ terms }) => countsTowardPromise(terms, payment, terms.timeZone));
+  if (counted.length === 0) return [];
+  // Los vivos desde el más antiguo de ellos: cada uno filtra los suyos.
   const remaining = await livePayments(
     tx,
     tenantId,
     [voided.patientId],
-    kept.createdAt,
+    counted[counted.length - 1].row.createdAt,
     voided.currency,
   );
-  const anotherOpen =
+  let anotherOpen =
     (await tx.paymentPromise.count({
       where: {
         tenantId,
@@ -188,35 +194,44 @@ export async function reopenPromiseOnVoid(
         status: PaymentPromiseStatus.OPEN,
       },
     })) > 0;
-  const to = statusAfterVoid(terms, remaining, {
-    now: input.now,
-    timeZone: terms.timeZone,
-    anotherOpen,
-  });
-  if (to === 'KEPT') return null;
-  const updated = await tx.paymentPromise.updateMany({
-    where: { id: kept.id, tenantId, status: PaymentPromiseStatus.KEPT },
-    data: { status: to, settledAt: to === 'OPEN' ? null : input.now },
-  });
-  if (updated.count !== 1) return null;
-  await writeAuditEvent(tx, {
-    tenantId,
-    locationId: input.locationId,
-    actor: { kind: 'user', userId: input.actor.userId, role: input.actor.role },
-    action: 'UPDATE',
-    resourceType: 'PAYMENT_PROMISE',
-    resourceId: kept.id,
-    patient: { kind: 'patient', id: kept.patientId },
-    requestId: input.requestId,
-    ip: input.ip,
-    userAgent: input.userAgent,
-    metadata: {
-      reason: 'PAYMENT_VOIDED',
-      params: { paymentId: input.paymentId },
-      statusChange: { from: 'KEPT', to },
-    },
-  });
-  return { promiseId: kept.id, to };
+  const reopened: PromiseReopening[] = [];
+  for (const { row, terms } of counted) {
+    const to = statusAfterVoid(terms, remaining, {
+      now: input.now,
+      timeZone: terms.timeZone,
+      anotherOpen,
+    });
+    if (to === 'KEPT') continue;
+    const updated = await tx.paymentPromise.updateMany({
+      where: { id: row.id, tenantId, status: PaymentPromiseStatus.KEPT },
+      data: { status: to, settledAt: to === 'OPEN' ? null : input.now },
+    });
+    if (updated.count !== 1) continue;
+    if (to === 'OPEN') anotherOpen = true;
+    await writeAuditEvent(tx, {
+      tenantId,
+      locationId: input.locationId,
+      actor: {
+        kind: 'user',
+        userId: input.actor.userId,
+        role: input.actor.role,
+      },
+      action: 'UPDATE',
+      resourceType: 'PAYMENT_PROMISE',
+      resourceId: row.id,
+      patient: { kind: 'patient', id: row.patientId },
+      requestId: input.requestId,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      metadata: {
+        reason: 'PAYMENT_VOIDED',
+        params: { paymentId: input.paymentId },
+        statusChange: { from: 'KEPT', to },
+      },
+    });
+    reopened.push({ promiseId: row.id, to });
+  }
+  return reopened;
 }
 
 function isUniqueViolation(error: unknown): boolean {

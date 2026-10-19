@@ -551,8 +551,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
         paymentId: id,
         voidedById: audit.voidedById,
       });
-      // DX-215 (BE-032): si este abono cumplía el último compromiso de pago
-      // del paciente en su moneda y ya no queda cubierto, vuelve a OPEN (o
+      // DX-215 (BE-032): cada compromiso de pago CUMPLIDO del paciente en
+      // su moneda para el que contaba este abono, si ya no queda cubierto, vuelve a OPEN (o
       // BROKEN pasada su fecha), auditado, en esta misma transacción.
       await reopenPromiseOnVoid(tx, {
         tenantId: this.requireTenantId(),

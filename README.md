@@ -703,15 +703,17 @@ Un compromiso de pago (DX-150) pasa a `KEPT` cuando los abonos lo cubren. Si
 después se anula (`DELETE /api/v1/payments/:id`, solo ADMIN/RECEPTION con la
 regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
 
-- **En la misma transacción que la anulación** se vuelve a evaluar el ÚLTIMO
-  compromiso `KEPT` del paciente en la moneda del abono, si ese abono contaba
-  para él (misma moneda, registrado desde el compromiso y fechado hasta su
-  día). Con los abonos que siguen vivos: si aún lo cubren, sigue `KEPT`; si no,
+- **En la misma transacción que la anulación** se vuelve a evaluar cada
+  compromiso `KEPT` del paciente en la moneda del abono para el que ese abono
+  contaba (misma moneda, registrado desde el compromiso y fechado hasta su
+  día), del más reciente al más antiguo: normalmente el último, pero también
+  uno anterior que ese abono cumplió aunque después se cumpliera otro. Con los
+  abonos que siguen vivos: si aún lo cubren, sigue `KEPT`; si no,
   vuelve a `OPEN` mientras no haya pasado su día en la zona de su sede, o pasa
   a `BROKEN` desde el día siguiente (`statusAfterVoid` en
   `payment-promise-rule.ts`, con el reloj de la anulación). Si el paciente ya
-  tiene otro compromiso `OPEN` (uno solo por paciente), queda `BROKEN`: el
-  vigente es el nuevo.
+  tiene otro compromiso `OPEN` (uno solo por paciente, o uno más reciente que
+  se acaba de reabrir), queda `BROKEN`: el vigente es el nuevo.
 - **Auditoría**: un `UPDATE` de `PAYMENT_PROMISE` con quien anula, su sede y su
   petición, `reason: PAYMENT_VOIDED`, `params.paymentId` y `statusChange`
   (`from: KEPT`, `to: OPEN | BROKEN`). Ni importes ni el texto de las notas.
