@@ -20,6 +20,23 @@ interface SessionRow {
 }
 
 /**
+ * Serializa la recogida de pendientes de una sede con su compensación VOID.
+ * Se toma ANTES de leer el destino o reclamar pendientes: bloquear solamente
+ * LATE_PAYMENT no evita que el UPDATE de apertura conserve una foto anterior
+ * a la inserción del VOID. NO KEY UPDATE permite las FK concurrentes de sede.
+ */
+export async function lockCashAdjustmentAssignment(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  locationId: string,
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT "id" FROM "locations"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${locationId}::uuid
+     FOR NO KEY UPDATE`;
+}
+
+/**
  * La caja abierta del usuario en la sede, bloqueada en modo compartido hasta
  * el COMMIT: un cierre simultáneo (FOR UPDATE) espera a que el abono entre, o
  * el abono ve la caja ya cerrada.
@@ -181,6 +198,7 @@ export async function recordVoidAdjustment(
     originalSessionId = payment.cashSessionId;
     targetSessionId = await actorSession();
   } else {
+    await lockCashAdjustmentAssignment(tx, input.tenantId, payment.locationId);
     const late = await tx.cashSessionAdjustment.findFirst({
       where: { paymentId: payment.id, kind: 'LATE_PAYMENT' },
       select: { sessionId: true },
