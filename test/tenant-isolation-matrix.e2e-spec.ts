@@ -483,6 +483,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'cash_session_floats',
       'cash_session_closings',
       'cash_session_closing_lines',
+      // DX-222: indicaciones postoperatorias (plantillas, vínculos y entregas).
+      'post_op_instruction_templates',
+      'post_op_instruction_template_links',
+      'post_op_instruction_deliveries',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {

@@ -9,20 +9,20 @@ datasource db {
 }
 
 model Tenant {
-  id                        String                     @id @default(uuid()) @db.Uuid
+  id                        String                          @id @default(uuid()) @db.Uuid
   name                      String
-  subdomain                 String                     @unique
-  primaryColor              String                     @default("#0F5E9C")
+  subdomain                 String                          @unique
+  primaryColor              String                          @default("#0F5E9C")
   logoUrl                   String?
   // DX-128: canal de los avisos automáticos con el que nace cada paciente.
-  defaultContactChannel     ContactChannel             @default(EMAIL)
+  defaultContactChannel     ContactChannel                  @default(EMAIL)
   // DX-027: ajustes de caja de la clínica. Por defecto, el comportamiento de
   // antes de la caja por turno: se cobra en efectivo sin caja abierta y el
   // cierre enseña el esperado mientras se cuenta.
-  cashRequireOpenSession    Boolean                    @default(false)
-  cashBlindClose            Boolean                    @default(false)
-  createdAt                 DateTime                   @default(now())
-  updatedAt                 DateTime                   @updatedAt
+  cashRequireOpenSession    Boolean                         @default(false)
+  cashBlindClose            Boolean                         @default(false)
+  createdAt                 DateTime                        @default(now())
+  updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
   memberships               ClinicMembership[]
   domains                   TenantDomain[]
@@ -60,6 +60,10 @@ model Tenant {
   discountPolicy            DiscountPolicy?
   // DX-027: cajas por turno.
   cashSessions              CashSession[]
+  // DX-222: indicaciones postoperatorias (plantillas, vínculos y entregas).
+  postOpTemplates           PostOpInstructionTemplate[]
+  postOpTemplateLinks       PostOpInstructionTemplateLink[]
+  postOpDeliveries          PostOpInstructionDelivery[]
 
   @@map("tenants")
 }
@@ -97,12 +101,12 @@ model User {
   privacyPoliciesPublished PrivacyPolicyVersion[]
   dataConsentsRecorded     DataProcessingConsent[]
   perioExamsPerformed      PerioExam[]
-  prescriptionsIssued      Prescription[]            @relation("PrescriptionProfessional")
-  prescriptionsVoided      Prescription[]            @relation("PrescriptionVoidedBy")
+  prescriptionsIssued      Prescription[]              @relation("PrescriptionProfessional")
+  prescriptionsVoided      Prescription[]              @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced           PatientImplant[]          @relation("PatientImplantProfessional")
-  implantsVoided           PatientImplant[]          @relation("PatientImplantVoidedBy")
-  implantCardsDelivered    PatientImplant[]          @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced           PatientImplant[]            @relation("PatientImplantProfessional")
+  implantsVoided           PatientImplant[]            @relation("PatientImplantVoidedBy")
+  implantCardsDelivered    PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
   tokens                   UserToken[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
@@ -110,10 +114,12 @@ model User {
   retentionActions         PatientRetentionAction[]
   platformAccesses         PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts        TreatmentPlanItem[]       @relation("TreatmentPlanItemDiscountBy")
+  planItemDiscounts        TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
   discountPoliciesUpdated  DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
   platformAuditEvents      PlatformAuditEvent[]
+  // DX-222: indicaciones postoperatorias entregadas.
+  postOpDeliveries         PostOpInstructionDelivery[]
 
   @@map("users")
 }
@@ -156,6 +162,10 @@ model Location {
   // locations_reps_habilitation_code_format). Lo pide el RDA (Res. 1888/2025)
   // en las sedes de Colombia; solo lo edita ADMIN.
   repsHabilitationCode String?
+  // DX-222: teléfono de la sede para las indicaciones postoperatorias
+  // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
+  // locations_phone_length_check).
+  phone                String?
   isActive             Boolean       @default(true)
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
@@ -183,6 +193,8 @@ model Location {
   // DX-027: cajas por turno de la sede y sus ajustes.
   cashSessions       CashSession[]
   cashAdjustments    CashSessionAdjustment[]
+  // DX-222: indicaciones postoperatorias entregadas en la sede.
+  postOpDeliveries   PostOpInstructionDelivery[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -353,10 +365,12 @@ model Patient {
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutLinks    ReminderOptOutLink[]
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
-  responsibleParties     PatientResponsibleParty[]  @relation("PatientResponsibleParties")
-  responsibleFor         PatientResponsibleParty[]  @relation("ResponsiblePatient")
-  country                Country?                   @relation(fields: [countryCode], references: [code])
-  city                   City?                      @relation(fields: [cityId], references: [id])
+  responsibleParties     PatientResponsibleParty[]   @relation("PatientResponsibleParties")
+  responsibleFor         PatientResponsibleParty[]   @relation("ResponsiblePatient")
+  // DX-222: indicaciones postoperatorias que se le entregaron.
+  postOpDeliveries       PostOpInstructionDelivery[]
+  country                Country?                    @relation(fields: [countryCode], references: [code])
+  city                   City?                       @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -739,20 +753,20 @@ enum AppointmentStatus {
 }
 
 model Appointment {
-  id                  String            @id @default(uuid()) @db.Uuid
-  tenantId            String            @db.Uuid
-  locationId          String            @db.Uuid
-  patientId           String            @db.Uuid
-  providerId          String            @db.Uuid
+  id                  String             @id @default(uuid()) @db.Uuid
+  tenantId            String             @db.Uuid
+  locationId          String             @db.Uuid
+  patientId           String             @db.Uuid
+  providerId          String             @db.Uuid
   start               DateTime
   end                 DateTime
-  status              AppointmentStatus @default(SCHEDULED)
+  status              AppointmentStatus  @default(SCHEDULED)
   reason              String?
   notes               String?
-  createdById         String?           @db.Uuid
+  createdById         String?            @db.Uuid
   // DX-121: tipo de cita (duración y color). Opcional: las citas anteriores no
   // tienen tipo y siguen siendo válidas.
-  appointmentTypeId   String?           @db.Uuid
+  appointmentTypeId   String?            @db.Uuid
   // DX-005: cuándo recepción generó el último enlace de confirmación vigente
   // (null = nunca, o se invalidó al reagendar/cambiar el estado a mano).
   confirmationSentAt  DateTime?
@@ -761,7 +775,7 @@ model Appointment {
   callbackRequestedAt DateTime?
   // DX-210: «Adelantar si hay hueco». La cita es candidata para ocupar un
   // hueco libre anterior; al moverla a uno se apaga.
-  wantsEarlier        Boolean           @default(false)
+  wantsEarlier        Boolean            @default(false)
   // DX-200: horas del flujo en la clínica (UTC, reloj del servidor). null en
   // las citas anteriores y mientras no se marca el paso. CHECK en la
   // migración: cada estado del flujo lleva su hora y en orden.
@@ -771,8 +785,8 @@ model Appointment {
   // DX-200: el estado (SCHEDULED o CONFIRMED) al que vuelve «Deshacer
   // llegada». Solo con la cita en ARRIVED.
   preArrivalStatus    AppointmentStatus?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
 
   confirmations    AppointmentConfirmation[]
@@ -781,11 +795,13 @@ model Appointment {
   outboundMessages OutboundMessage[]
   // DX-122: la entrada de «Pendientes por agendar» que creó su cancelación o
   // no-show, y la que se resolvió agendando esta cita.
-  waitlistSourced  AppointmentWaitlistEntry[] @relation("WaitlistSource")
-  waitlistResolved AppointmentWaitlistEntry[] @relation("WaitlistResolved")
+  waitlistSourced  AppointmentWaitlistEntry[]  @relation("WaitlistSource")
+  waitlistResolved AppointmentWaitlistEntry[]  @relation("WaitlistResolved")
   reminders        AppointmentReminder[]
   // DX-170: evoluciones documentadas en esta cita.
   clinicalEntries  ClinicalEntry[]
+  // DX-222: indicaciones postoperatorias entregadas por esta cita.
+  postOpDeliveries PostOpInstructionDelivery[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -848,9 +864,11 @@ model AppointmentType {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  tenant          Tenant                     @relation(fields: [tenantId], references: [id])
-  appointments    Appointment[]
-  waitlistEntries AppointmentWaitlistEntry[]
+  tenant              Tenant                          @relation(fields: [tenantId], references: [id])
+  appointments        Appointment[]
+  waitlistEntries     AppointmentWaitlistEntry[]
+  // DX-222: plantillas de indicaciones sugeridas para este tipo de cita.
+  postOpTemplateLinks PostOpInstructionTemplateLink[]
 
   // Destino de la FK compuesta de appointments.appointmentTypeId.
   @@unique([tenantId, id], map: "appointment_types_tenant_id_key")
@@ -2157,6 +2175,10 @@ enum AuditResourceType {
   // DX-212: cambios del catálogo (CUPS) y de las sedes (código REPS).
   DENTAL_CATALOG_ITEM
   LOCATION
+  // DX-222: plantillas de indicaciones postoperatorias (crear, editar,
+  // ejemplos) y su entrega al paciente (impresa, email o enlace de WhatsApp).
+  POSTOP_TEMPLATE
+  POSTOP_DELIVERY
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3093,4 +3115,120 @@ model CashSessionReopening {
   @@unique([tenantId, sessionId, sequence], map: "cash_session_reopenings_session_sequence_key")
   @@index([tenantId, closingId], map: "cash_session_reopenings_tenant_closing_idx")
   @@map("cash_session_reopenings")
+}
+
+// ---------------------------------------------------------------------------
+// Indicaciones postoperatorias (DX-222)
+// ---------------------------------------------------------------------------
+
+/// Por dónde se entregó: impresa en la consulta, por email (enlace) o enlace
+/// para WhatsApp (el mensaje no lleva datos clínicos, solo el enlace).
+enum PostOpDeliveryChannel {
+  PRINT
+  EMAIL
+  WHATSAPP_LINK
+}
+
+/// Plantilla de indicaciones de la clínica (p. ej. «POI-EXO», exodoncia
+/// simple). Se edita en el sitio: un cambio de título o texto sube `version`;
+/// las entregas ya hechas guardan su copia. `active = false` la quita del
+/// selector. Topes y formato del código en CHECK (migración).
+model PostOpInstructionTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  /// 2–20 letras mayúsculas, números o guiones; único por clínica; no se edita.
+  code        String
+  title       String
+  /// Texto con variables `{{paciente}}`, `{{clinica}}`, `{{telefono_sede}}`…
+  body        String
+  version     Int      @default(1)
+  active      Boolean  @default(true)
+  /// Punteros suaves a User, como en las plantillas de evolución.
+  createdById String?  @db.Uuid
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant     Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  links      PostOpInstructionTemplateLink[]
+  deliveries PostOpInstructionDelivery[]
+
+  // Destino de las FK compuestas de los vínculos y de las entregas.
+  @@unique([tenantId, id], map: "post_op_instruction_templates_tenant_id_key")
+  @@unique([tenantId, code], map: "post_op_instruction_templates_tenant_code_key")
+  @@index([tenantId, active], map: "post_op_instruction_templates_tenant_active_idx")
+  @@map("post_op_instruction_templates")
+}
+
+/// Cuándo sugerir una plantilla: por un procedimiento del catálogo o por un
+/// tipo de cita (exactamente uno de los dos, CHECK). Se reemplazan completos
+/// al editar la plantilla y se borran con ella (CASCADE).
+model PostOpInstructionTemplateLink {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @db.Uuid
+  templateId        String   @db.Uuid
+  /// Puntero suave a dental_catalog_items (sin FK, como tooth_records: el
+  /// catálogo no tiene único (tenantId, id) y se retira en blando).
+  catalogItemId     String?  @db.Uuid
+  appointmentTypeId String?  @db.Uuid
+  createdAt         DateTime @default(now())
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  template        PostOpInstructionTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Cascade, map: "post_op_instruction_template_links_template_fkey")
+  appointmentType AppointmentType?          @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict, map: "post_op_instruction_template_links_appointment_type_fkey")
+
+  @@index([tenantId, templateId], map: "post_op_instruction_template_links_template_idx")
+  // PARCIALES (no declarables en Prisma, no generan drift):
+  //   post_op_instruction_template_links_catalog_key  UNIQUE ("tenantId", "templateId", "catalogItemId") WHERE "catalogItemId" IS NOT NULL
+  //   post_op_instruction_template_links_type_key     UNIQUE ("tenantId", "templateId", "appointmentTypeId") WHERE "appointmentTypeId" IS NOT NULL
+  //   post_op_instruction_template_links_catalog_idx  ("tenantId", "catalogItemId") WHERE "catalogItemId" IS NOT NULL
+  //   post_op_instruction_template_links_type_idx     ("tenantId", "appointmentTypeId") WHERE "appointmentTypeId" IS NOT NULL
+  @@map("post_op_instruction_template_links")
+}
+
+/// Entrega de unas indicaciones a un paciente por una cita. INALTERABLE
+/// (trigger post_op_deliveries_immutable): guarda la copia exacta del texto
+/// entregado y la versión de la plantilla; lo único que cambia es
+/// `firstOpenedAt`, de NULL a la primera apertura del enlace público. No se
+/// borra (salvo purga sin `app.current_tenant`). `deliveredAt` y `createdAt`
+/// los pone el servidor de BD en UTC. El enlace guarda solo el hash del token.
+model PostOpInstructionDelivery {
+  id                String                @id @default(uuid()) @db.Uuid
+  tenantId          String                @db.Uuid
+  patientId         String                @db.Uuid
+  appointmentId     String                @db.Uuid
+  locationId        String                @db.Uuid
+  templateId        String                @db.Uuid
+  /// Copia de la plantilla en el momento de la entrega.
+  templateCode      String
+  templateTitle     String
+  templateVersion   Int
+  channel           PostOpDeliveryChannel
+  /// Texto con las variables ya sustituidas, tal como lo recibió el paciente.
+  renderedText      String
+  deliveredById     String                @db.Uuid
+  deliveredByName   String
+  /// La pone el servidor de BD (trigger).
+  deliveredAt       DateTime              @default(now())
+  /// Destinatario enmascarado (email o los 4 últimos dígitos del móvil).
+  recipientMasked   String?
+  /// El email fue al responsable del paciente (DX-203), no al paciente.
+  sentToResponsible Boolean               @default(false)
+  /// SHA-256 en hex del token del enlace público; nunca el token.
+  tokenHash         String?               @unique
+  tokenExpiresAt    DateTime?
+  firstOpenedAt     DateTime?
+  /// La pone el servidor de BD (trigger).
+  createdAt         DateTime              @default(now())
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient     Patient                   @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "post_op_instruction_deliveries_patient_fkey")
+  appointment Appointment               @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "post_op_instruction_deliveries_appointment_fkey")
+  location    Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "post_op_instruction_deliveries_location_fkey")
+  template    PostOpInstructionTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "post_op_instruction_deliveries_template_fkey")
+  deliveredBy User                      @relation(fields: [deliveredById], references: [id], onDelete: Restrict, map: "post_op_instruction_deliveries_delivered_by_fkey")
+
+  @@index([tenantId, patientId, deliveredAt(sort: Desc)], map: "post_op_instruction_deliveries_tenant_patient_idx")
+  @@index([tenantId, appointmentId], map: "post_op_instruction_deliveries_tenant_appointment_idx")
+  @@map("post_op_instruction_deliveries")
 }
