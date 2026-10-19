@@ -444,7 +444,20 @@ export class UpdateAppointmentUseCase {
         ? new ForbiddenException(verdict.message)
         : new ConflictException(verdict.message);
     }
-    if (!isInClinic(from) && !isInClinic(to)) return {};
+    if (!isInClinic(from) && !isInClinic(to)) {
+      // Vuelve a estar pendiente (p. ej. se reactiva una cita que se canceló
+      // tras llegar): sin horas de una visita que ya no está en curso.
+      const pending =
+        to === AppointmentStatus.SCHEDULED ||
+        to === AppointmentStatus.CONFIRMED;
+      const hasTimes =
+        existing.arrivedAt !== null ||
+        existing.seatedAt !== null ||
+        existing.readyForCheckoutAt !== null;
+      return pending && hasTimes
+        ? { arrivedAt: null, seatedAt: null, readyForCheckoutAt: null }
+        : {};
+    }
     const now = new Date();
     return {
       expectStatus: from,

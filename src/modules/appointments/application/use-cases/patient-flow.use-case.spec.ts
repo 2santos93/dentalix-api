@@ -255,6 +255,28 @@ describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
     expect((await original(a.id))?.status).toBe(AppointmentStatus.CONFIRMED);
   });
 
+  it('se fue sin pasar al sillón: se cancela, y al reactivarla no quedan horas', async () => {
+    const { repo, uc } = setup();
+    const a = todayAppointment(repo);
+    await uc.execute(
+      a.id,
+      { status: AppointmentStatus.ARRIVED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    const cancelled = await uc.execute(
+      a.id,
+      { status: AppointmentStatus.CANCELLED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    expect(cancelled.arrivedAt).toBeInstanceOf(Date);
+    const again = await uc.execute(
+      a.id,
+      { status: AppointmentStatus.SCHEDULED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    expect(again.arrivedAt).toBeNull();
+  });
+
   describe('«Deshacer llegada»', () => {
     it('vuelve al estado anterior, borra la hora y queda en auditoría', async () => {
       const { repo, uc, drafts } = setup();
