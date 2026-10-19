@@ -168,10 +168,13 @@ function paymentReceipt(
   const where = vars.locationAddress
     ? `${vars.locationName} (${vars.locationAddress})`
     : vars.locationName;
+  const responsible = vars.responsibleName?.trim() || null;
   const blocks: EmailBlock[] = [
     {
       kind: 'paragraph',
-      text: `Te enviamos el recibo de tu abono en ${clinic}.`,
+      text: responsible
+        ? `Te enviamos el recibo del abono de ${vars.patientName} en ${clinic}.`
+        : `Te enviamos el recibo de tu abono en ${clinic}.`,
     },
     {
       kind: 'paragraph',
@@ -216,7 +219,7 @@ function paymentReceipt(
   return renderLayout({
     brand,
     subject: `Recibo de caja ${vars.reference}${vars.voided ? ' (ANULADO)' : ''} · ${clinic}`,
-    heading: `Hola, ${vars.patientName}`,
+    heading: `Hola, ${responsible ?? vars.patientName}`,
     blocks,
     action: null,
   });

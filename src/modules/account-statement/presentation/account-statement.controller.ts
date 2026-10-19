@@ -18,12 +18,19 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { AccountStatementDto } from './dto/account-statement.dto';
+import {
+  AccountStatementDto,
+  FamilyAccountStatementDto,
+} from './dto/account-statement.dto';
+import { GetFamilyAccountStatementUseCase } from '../application/use-cases/get-family-account-statement.use-case';
 import { AccountStatementQueryDto } from './dto/account-statement-query.dto';
 import { BillablePlanDto } from './dto/billable-plan.dto';
 import { GetAccountStatementUseCase } from '../application/use-cases/get-account-statement.use-case';
 import { ListBillablePlansUseCase } from '../application/use-cases/list-billable-plans.use-case';
-import { AccountStatement } from '../domain/entities/account-statement.entity';
+import {
+  AccountStatement,
+  FamilyAccountStatement,
+} from '../domain/entities/account-statement.entity';
 import { BillablePlan } from '../domain/entities/billable-plan.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -46,6 +53,7 @@ export class AccountStatementController {
   constructor(
     private readonly getAccountStatement: GetAccountStatementUseCase,
     private readonly listBillablePlans: ListBillablePlansUseCase,
+    private readonly getFamilyStatement: GetFamilyAccountStatementUseCase,
   ) {}
 
   @Audit({
@@ -82,6 +90,37 @@ export class AccountStatementController {
       // `canVoid` de cada movimiento se calcula para quien consulta (token).
       { userId: req.user.sub, role: req.user.role },
     );
+  }
+
+  // DX-203: estado de cuenta FAMILIAR del pagador. Mismos roles que el
+  // individual; un evento VIEW del pagador con el motivo.
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    patient: { param: 'patientId' },
+    reason: 'FAMILY_ACCOUNT_STATEMENT',
+  })
+  @Get('patients/:patientId/family-account-statement')
+  @ApiOperation({
+    summary:
+      'Estado de cuenta familiar del pagador: su saldo y el de los pacientes de los que es pagador principal',
+    description:
+      'Solo lectura (no hay abono familiar). Subtotal por paciente y moneda, ' +
+      'del mismo cálculo que el estado de cuenta individual, y el total al ' +
+      'céntimo. Solo importes y nombres: nada clínico ni documentos de los ' +
+      'otros miembros.',
+  })
+  @ApiParam({ name: 'patientId', format: 'uuid' })
+  @ApiOkResponse({ type: FamilyAccountStatementDto })
+  @ApiBadRequestResponse({ description: 'patientId no es UUID' })
+  @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
+  @ApiNotFoundResponse({
+    description: 'Paciente no encontrado en esta clínica.',
+  })
+  familyStatement(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+  ): Promise<FamilyAccountStatement> {
+    return this.getFamilyStatement.execute(patientId);
   }
 
   // DX-067: recepción registra abonos y planes de cuotas desde el estado de

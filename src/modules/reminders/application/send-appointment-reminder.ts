@@ -15,7 +15,8 @@ import { CONFIRMATION_PATH } from '../../appointment-confirmations/presentation/
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { ReminderClock } from './reminder-clock';
 import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
-import { reminderRecipient } from '../../patients/domain/communication/reminder-recipient';
+import { noticeRecipient } from '../../patients/domain/communication/notice-recipient';
+import { civilDateIn } from '../../../shared/time/civil-day';
 
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -80,13 +81,24 @@ export class SendAppointmentReminder {
       });
       return;
     }
+    const now = this.clock.now();
+    // DX-203: un menor (por el país y el día civil de la sede de la cita) o
+    // un paciente sin email lo recibe en el email de su responsable que
+    // recibe avisos. El canal y la baja siguen siendo los del PACIENTE.
+    const recipient = noticeRecipient({
+      patient: { ...ctx.recipient, email: ctx.contact.email },
+      responsibles: ctx.responsibles,
+      country: ctx.locationCountry,
+      today: civilDateIn(now, ctx.locationTimeZone),
+      automatic: true,
+    });
     const decision = decideReminder({
       appointment: ctx.appointment,
       expectedStart: start,
       leadHours,
       settings: ctx.settings,
-      contact: ctx.contact,
-      now: this.clock.now(),
+      contact: { ...ctx.contact, email: recipient.email },
+      now,
     });
     if (decision.action === 'SKIP') {
       const recorded = await this.repo.recordSkipped(
@@ -120,7 +132,7 @@ export class SendAppointmentReminder {
       return;
     }
 
-    const to = (ctx.contact.email ?? '').trim();
+    const to = recipient.email ?? '';
     const tenantId = this.tenantContext.getTenantId();
     // El trabajo corre bajo su clínica (su repositorio ya lo exige); el email
     // es de la clínica, nunca de plataforma (DX-144: EmailOutbox.enqueue la
@@ -145,14 +157,16 @@ export class SendAppointmentReminder {
           channel: 'EMAIL',
           template: TEMPLATE,
           recipient: to,
+          recipientKind:
+            recipient.kind === 'RESPONSIBLE' ? 'RESPONSIBLE' : 'PATIENT',
           appointmentId,
         })
       ).id;
     if (!claim.outboundMessageId) {
       await this.repo.attachOutbound(claim.id, outboundId);
     }
-    // DX-128: la de un menor se dirige a su tutor (o contacto principal).
-    const recipient = reminderRecipient(ctx.recipient, this.clock.now());
+    // DX-128: la de un menor saluda a su responsable (o contacto principal)
+    // y nombra al paciente.
     await this.email.enqueue({
       tenantId,
       to,

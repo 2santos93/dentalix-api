@@ -31,6 +31,7 @@ import {
 } from '../src/modules/location-schedule/application/business-hours';
 import { UpdateCatalogItemUseCase } from '../src/modules/dental-catalog/application/use-cases/update-catalog-item.use-case';
 import { CreatePatientUseCase } from '../src/modules/patients/application/use-cases/create-patient.use-case';
+import { CreateResponsiblePartyUseCase } from '../src/modules/patients/application/use-cases/responsible-parties.use-cases';
 import { PublishPrivacyPolicyUseCase } from '../src/modules/data-consents/application/use-cases/publish-privacy-policy.use-case';
 import { RecordDataConsentsUseCase } from '../src/modules/data-consents/application/use-cases/record-data-consents.use-case';
 import type { ConsentDecision } from '../src/modules/data-consents/domain/entities/data-consent.entity';
@@ -126,6 +127,7 @@ import {
   DEMO_LOCATIONS,
   DEMO_PASSWORD,
   DEMO_PATIENTS,
+  DEMO_RESPONSIBLES,
   DEMO_PLANS,
   DEMO_COLLECTION_NOTES,
   DEMO_PAYMENT_PROMISE,
@@ -793,6 +795,23 @@ class DemoSeeder {
         ids[c.patientIndex],
         c.input,
         ctx,
+      );
+    }
+    // DX-203: responsables de pago y avisos, como los vincularía recepción.
+    for (const r of DEMO_RESPONSIBLES) {
+      await this.use(CreateResponsiblePartyUseCase).execute(
+        ids[r.patientIndex],
+        {
+          responsiblePatientId:
+            r.responsiblePatientIndex !== undefined
+              ? ids[r.responsiblePatientIndex]
+              : undefined,
+          ...r.contact,
+          relationship: r.relationship,
+          isPayer: r.isPayer,
+          receivesNotices: r.receivesNotices,
+        },
+        receptionId,
       );
     }
     return ids;

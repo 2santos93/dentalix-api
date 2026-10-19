@@ -107,10 +107,21 @@ export class PatientDto {
   @ApiProperty({ type: String, nullable: true })
   emergencyContactPhone!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-203), solo lectura: el acudiente es ahora un responsable (`GET /patients/:id/responsible-parties`). La migración lo copió allí.',
+  })
   guardianName!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    deprecated: true,
+    description: 'DEPRECADO (DX-203), solo lectura. Ver `guardianName`.',
+  })
   guardianDocNumber!: string | null;
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })

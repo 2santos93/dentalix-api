@@ -7,7 +7,10 @@ import type {
 import type { ReminderSettingsInput } from '../reminder-lead-hours';
 import type { ReminderRecord } from '../reminder-timeline';
 import type { ReminderContact } from '../reminder-eligibility';
-import type { RecipientPatientFields } from '../../../patients/domain/communication/reminder-recipient';
+import type {
+  NoticePatientFields,
+  NoticeResponsible,
+} from '../../../patients/domain/communication/notice-recipient';
 
 // Sin `tenantId` en ningún input salvo el barrido, que corre como trabajo de
 // PLATAFORMA y recorre las clínicas: el tenant sale SIEMPRE del contexto
@@ -41,8 +44,10 @@ export interface ReminderSendContext {
   patientId: string;
   /** Canal, baja y email VIGENTES del paciente (DX-128). */
   contact: ReminderContact;
-  /** Para saludar al tutor de un menor (DX-128). */
-  recipient: RecipientPatientFields;
+  /** Para decidir a quién va y a quién se saluda (DX-128, DX-203). */
+  recipient: NoticePatientFields;
+  /** DX-203: responsables vivos del paciente (un menor o sin email: a ellos). */
+  responsibles: NoticeResponsible[];
   settings: { enabled: boolean; leadHours: number[] } | null;
 }
 

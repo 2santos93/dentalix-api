@@ -8,12 +8,15 @@ import {
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
+import {
+  loadNoticeLocation,
+  loadNoticeResponsibles,
+} from '../notices/notice-context';
 
 const SELECT = {
   id: true,
   firstName: true,
   birthDate: true,
-  guardianName: true,
   emergencyContactName: true,
   countryCode: true,
   phone: true,
@@ -44,16 +47,28 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     row: Row,
   ): Promise<PatientCommunicationState> {
     const { whatsappOptInById, id, ...rest } = row;
-    const membership = whatsappOptInById
-      ? await tx.clinicMembership.findFirst({
-          where: { userId: whatsappOptInById },
-          orderBy: { createdAt: 'desc' },
-          select: { user: { select: { fullName: true } } },
-        })
-      : null;
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    const [membership, responsibles, noticeLocation] = await Promise.all([
+      whatsappOptInById
+        ? tx.clinicMembership.findFirst({
+            where: { userId: whatsappOptInById },
+            orderBy: { createdAt: 'desc' },
+            select: { user: { select: { fullName: true } } },
+          })
+        : null,
+      loadNoticeResponsibles(tx, id),
+      loadNoticeLocation(
+        tx,
+        tenantId,
+        this.tenantContext.getLocationId() ?? null,
+      ),
+    ]);
     return {
       patientId: id,
       ...rest,
+      responsibles,
+      noticeLocation,
       whatsappOptInBy: whatsappOptInById
         ? {
             id: whatsappOptInById,

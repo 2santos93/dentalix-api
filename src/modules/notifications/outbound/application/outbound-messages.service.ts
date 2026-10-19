@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { OutboundChannel, OutboundMessageStatus } from '@prisma/client';
+import type {
+  OutboundChannel,
+  OutboundMessageStatus,
+  OutboundRecipientKind,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { describeJobError } from '../../../jobs/domain/backoff';
 import { maskRecipient } from '../domain/mask-recipient';
@@ -10,6 +14,8 @@ export interface RecordOutboundMessage {
   template: string;
   /** Dirección o número REAL: solo se usa para enmascararlo; no se guarda. */
   recipient: string;
+  /** DX-203: al paciente (por defecto) o a su responsable. */
+  recipientKind?: OutboundRecipientKind;
   appointmentId?: string;
 }
 
@@ -38,11 +44,13 @@ export class OutboundMessages {
       tx.$queryRaw<{ id: string; tenantId: string }[]>`
         INSERT INTO "outbound_messages"
           ("id", "tenantId", "channel", "template", "recipientMasked",
-           "appointmentId", "updatedAt")
+           "recipientKind", "appointmentId", "updatedAt")
         VALUES
           (gen_random_uuid(), current_setting('app.current_tenant', true)::uuid,
            ${input.channel}::"OutboundChannel", ${input.template},
-           ${recipientMasked}, ${input.appointmentId ?? null}::uuid,
+           ${recipientMasked},
+           ${input.recipientKind ?? 'PATIENT'}::"OutboundRecipientKind",
+           ${input.appointmentId ?? null}::uuid,
            CURRENT_TIMESTAMP)
         RETURNING "id", "tenantId"`.then((rows) => rows[0]),
     );
@@ -53,6 +61,7 @@ export class OutboundMessages {
       channel: input.channel,
       template: input.template,
       to: recipientMasked,
+      recipientKind: input.recipientKind ?? 'PATIENT',
       appointmentId: input.appointmentId ?? null,
     });
     return { id };

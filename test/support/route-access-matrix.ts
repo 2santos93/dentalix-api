@@ -136,6 +136,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // lectura); el canal lo cambian recepción y ADMIN.
   'GET /patients/:id/communication': EVERY_ROLE,
   'PATCH /patients/:id/communication': roles('ADMIN', 'RECEPTION'),
+  // DX-203: bloque «Responsable y familia» (dato demográfico y de cobro, no
+  // clínico): como «Editar» de la ficha, los 4 roles (loop/informes/DX-203).
+  'GET /patients/:patientId/responsible-parties': EVERY_ROLE,
+  'POST /patients/:patientId/responsible-parties': EVERY_ROLE,
+  'PATCH /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
+  'DELETE /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
   // Retención legal de la HC (loop/informes/DX-039.md): archivar, cambiar la
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.
@@ -317,6 +323,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,
   'GET /patients/:patientId/account-statement': BILLING,
+  // DX-203: estado de cuenta familiar del pagador, mismos roles.
+  'GET /patients/:patientId/family-account-statement': BILLING,
   'GET /patients/:patientId/billable-plans': BILLING,
   // Cartera por antigüedad: loop/informes/DX-145.md. El CSV es un dato
   // personal de muchos pacientes: solo ADMIN.

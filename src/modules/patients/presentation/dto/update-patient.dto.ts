@@ -140,13 +140,6 @@ export class UpdatePatientDto {
   @IsString()
   emergencyContactPhone?: string;
 
-  @ApiPropertyOptional({ nullable: true })
-  @IsOptional()
-  @IsString()
-  guardianName?: string;
-
-  @ApiPropertyOptional({ nullable: true })
-  @IsOptional()
-  @IsString()
-  guardianDocNumber?: string;
+  // DX-203: guardianName/guardianDocNumber son de solo lectura (DEPRECADO):
+  // el acudiente se gestiona como responsable. Si llegan, se descartan.
 }

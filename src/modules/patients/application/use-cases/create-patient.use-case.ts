@@ -51,8 +51,6 @@ export interface CreatePatientInput {
   emergencyContactName?: string;
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
-  guardianName?: string;
-  guardianDocNumber?: string;
   createdById?: string;
   /**
    * Rol de quien crea (del token, nunca del cuerpo). Obligatorio: decide si
@@ -130,8 +128,6 @@ export class CreatePatientUseCase {
       emergencyContactName: input.emergencyContactName,
       emergencyContactRelationship: input.emergencyContactRelationship,
       emergencyContactPhone: input.emergencyContactPhone,
-      guardianName: input.guardianName,
-      guardianDocNumber: input.guardianDocNumber,
       createdById: input.createdById,
       medicalHistory,
     });

@@ -34,6 +34,8 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-203: responsables (hijos de patients).
+  'patient_responsible_parties',
   'patient_implants',
   // DX-027: caja por turno (hijas de cash_sessions y de payments).
   'cash_session_adjustments',
@@ -303,6 +305,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.location_schedules).toBe(2);
     expect(firstCounts.clinic_memberships).toBe(5);
     expect(firstCounts.patients).toBe(25);
+    // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
+    expect(firstCounts.patient_responsible_parties).toBe(4);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);

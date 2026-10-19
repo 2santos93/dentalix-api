@@ -231,7 +231,10 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
     const res = await as(clinicA, receptionToken)
       .post(`/payments/${id}/receipt/email`)
       .expect(202);
-    expect(res.body).toEqual({ sentTo: 'ca***@example.com' });
+    expect(res.body).toEqual({
+      sentTo: 'ca***@example.com',
+      sentToResponsible: false,
+    });
 
     await dispatcher.whenIdle();
     const match = await mailer.waitFor(
@@ -297,6 +300,54 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
     expect((res.body as { message: string }).message).toBe(
       'El paciente no tiene un email registrado. Añádelo en su ficha para enviarle el recibo.',
     );
+  });
+
+  it('DX-203: el recibo de un paciente sin email va a su responsable que recibe avisos', async () => {
+    const patient = await as(clinicA)
+      .post('/patients', {
+        firstName: 'Tomás',
+        lastName: 'Ortiz',
+        docType: 'TI',
+        sex: 'M',
+        birthDate: '2016-04-10',
+      })
+      .expect(201);
+    const patientId = (patient.body as { id: string }).id;
+    await as(clinicA, receptionToken)
+      .post(`/patients/${patientId}/responsible-parties`, {
+        fullName: 'Claudia Navarro',
+        email: 'claudia.navarro@example.com',
+        relationship: 'MOTHER',
+        isPayer: true,
+      })
+      .expect(201);
+    const plan = await as(clinicA)
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
+      .expect(201);
+    const payment = await as(clinicA)
+      .post(`/treatment-plans/${(plan.body as { id: string }).id}/payments`, {
+        amount: 1,
+        currency: 'USD',
+        paidAt: new Date().toISOString(),
+      })
+      .expect(201);
+    mailer.clear();
+    const res = await as(clinicA, receptionToken)
+      .post(`/payments/${(payment.body as { id: string }).id}/receipt/email`)
+      .expect(202);
+    expect(res.body).toEqual({
+      sentTo: 'cl***@example.com',
+      sentToResponsible: true,
+    });
+    await dispatcher.whenIdle();
+    await mailer.waitFor(
+      'claudia.navarro@example.com',
+      /Te enviamos el recibo del abono de Tomás Ortiz/,
+    );
+    const email = mailer.sent.find(
+      (m) => m.to === 'claudia.navarro@example.com',
+    );
+    expect(email?.text).toContain('Hola, Claudia');
   });
 
   it('un abono anterior a la numeración: referencia REC-xxxx, «sin serie», sin renumerar', async () => {

@@ -15,6 +15,8 @@ export interface ReminderRecord {
   skipReason: AppointmentReminderSkipReason | null;
   sentAt: Date | null;
   emailDelivery: ReminderEmailDelivery | null;
+  /** DX-203: el registro de envíos dice que fue al responsable del paciente. */
+  sentToResponsible?: boolean;
 }
 
 /**
@@ -36,6 +38,8 @@ export interface ReminderTimelineItem {
   sentAt: Date | null;
   skipReason: AppointmentReminderSkipReason | null;
   emailDelivery: ReminderEmailDelivery | null;
+  /** DX-203: «Recordatorio enviado al responsable». */
+  sentToResponsible: boolean;
   /** false = de una hora anterior de la cita (se reprogramó). */
   current: boolean;
 }
@@ -69,6 +73,7 @@ function fromRecord(
     sentAt: record.sentAt,
     skipReason: record.skipReason,
     emailDelivery: record.emailDelivery,
+    sentToResponsible: record.sentToResponsible ?? false,
     current,
   };
 }
@@ -109,6 +114,7 @@ export function buildReminderTimeline(
         sentAt: null,
         skipReason: null,
         emailDelivery: null,
+        sentToResponsible: false,
         current: true,
       });
     }

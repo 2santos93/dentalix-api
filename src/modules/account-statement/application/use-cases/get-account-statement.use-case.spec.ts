@@ -9,6 +9,7 @@ import {
   AccountStatementData,
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
+import type { StatementNoticeData } from '../../domain/ports/statement-family-repository.port';
 
 // 2026-03-01 10:00 en Bogotá (UTC-5).
 const NOW = new Date('2026-03-01T15:00:00.000Z');
@@ -74,7 +75,10 @@ function data(): AccountStatementData {
   };
 }
 
-function makeUseCase(result: AccountStatementData | null = data()) {
+function makeUseCase(
+  result: AccountStatementData | null = data(),
+  notice: StatementNoticeData | null = null,
+) {
   const load = jest.fn<Promise<AccountStatementData | null>, [string]>(() =>
     Promise.resolve(result),
   );
@@ -82,7 +86,10 @@ function makeUseCase(result: AccountStatementData | null = data()) {
     load,
     loadBillablePlans: jest.fn(),
   };
-  const uc = new GetAccountStatementUseCase(repo, () => NOW);
+  const uc = new GetAccountStatementUseCase(repo, () => NOW, {
+    loadNotice: () => Promise.resolve(notice),
+    loadFamily: jest.fn(),
+  });
   return {
     load,
     useCase: {
@@ -114,6 +121,50 @@ describe('GetAccountStatementUseCase', () => {
     expect(out.range).toEqual({ from: null, to: null });
     expect(out.summary[0]).toMatchObject({ budgeted: 1000, paid: 300 });
     expect(out.movements).toHaveLength(2);
+  });
+
+  it('DX-203: a nombre del paciente adulto con email; el de un menor, a nombre de su responsable', async () => {
+    const adult = await makeUseCase(data(), {
+      patient: {
+        firstName: 'Ana',
+        birthDate: new Date('1990-01-01'),
+        email: 'ana@example.com',
+        emergencyContactName: null,
+      },
+      responsibles: [],
+      location: { country: 'CO', timeZone: 'America/Bogota' },
+    }).useCase.execute('p-1', {});
+    expect(adult.addressee).toEqual({
+      kind: 'PATIENT',
+      name: 'Ana Pérez',
+      email: 'ana@example.com',
+    });
+
+    const minor = await makeUseCase(data(), {
+      patient: {
+        firstName: 'Ana',
+        birthDate: new Date('2016-01-01'),
+        email: null,
+        emergencyContactName: null,
+      },
+      responsibles: [
+        {
+          id: 'r-1',
+          name: 'Claudia Navarro',
+          email: null,
+          isPayer: true,
+          receivesNotices: true,
+          optedOut: false,
+        },
+      ],
+      location: { country: 'CO', timeZone: 'America/Bogota' },
+    }).useCase.execute('p-1', {});
+    // Se imprime y se entrega: aunque el responsable no tenga email.
+    expect(minor.addressee).toEqual({
+      kind: 'RESPONSIBLE',
+      name: 'Claudia Navarro',
+      email: null,
+    });
   });
 
   it('filters only the movements by an inclusive civil-date range', async () => {

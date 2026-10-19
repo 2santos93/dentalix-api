@@ -194,6 +194,7 @@ describe('Patients (e2e)', () => {
         emergencyContactName: 'Ana Pérez',
         emergencyContactRelationship: 'Madre',
         emergencyContactPhone: '+57 300 111 1111',
+        // DX-203: DEPRECADO y de solo lectura: se descartan sin error.
         guardianName: 'Luis Pérez',
         guardianDocNumber: '9001',
       })
@@ -202,7 +203,8 @@ describe('Patients (e2e)', () => {
     expect(admin.occupation).toBe('Docente');
     expect(admin.insurerEps).toBe('Sura');
     expect(admin.emergencyContactName).toBe('Ana Pérez');
-    expect(admin.guardianDocNumber).toBe('9001');
+    expect(admin.guardianName).toBeNull();
+    expect(admin.guardianDocNumber).toBeNull();
 
     // `null` VACÍA un campo que la columna admite como nulo. Es la única forma
     // de corregir un dato mal cargado: omitirlo lo deja como estaba.

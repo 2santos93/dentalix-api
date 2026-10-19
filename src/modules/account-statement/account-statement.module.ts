@@ -5,6 +5,9 @@ import {
   GetAccountStatementUseCase,
 } from './application/use-cases/get-account-statement.use-case';
 import { ListBillablePlansUseCase } from './application/use-cases/list-billable-plans.use-case';
+import { GetFamilyAccountStatementUseCase } from './application/use-cases/get-family-account-statement.use-case';
+import { STATEMENT_FAMILY_REPOSITORY } from './domain/ports/statement-family-repository.port';
+import { PrismaStatementFamilyRepository } from './infrastructure/repositories/prisma-statement-family.repository';
 import { ACCOUNT_STATEMENT_REPOSITORY } from './domain/ports/account-statement-repository.port';
 import { PrismaAccountStatementRepository } from './infrastructure/repositories/prisma-account-statement.repository';
 import { AccountStatementController } from './presentation/account-statement.controller';
@@ -24,6 +27,12 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   providers: [
     GetAccountStatementUseCase,
     ListBillablePlansUseCase,
+    // DX-203: destinatario del estado de cuenta y estado de cuenta familiar.
+    GetFamilyAccountStatementUseCase,
+    {
+      provide: STATEMENT_FAMILY_REPOSITORY,
+      useClass: PrismaStatementFamilyRepository,
+    },
     TokenService,
     TenantContextInterceptor,
     {

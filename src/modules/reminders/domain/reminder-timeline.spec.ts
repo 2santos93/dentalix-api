@@ -32,6 +32,7 @@ describe('buildReminderTimeline (DX-026)', () => {
         sentAt: at(-18 * HOUR),
         skipReason: null,
         emailDelivery: 'SENT',
+        sentToResponsible: false,
         current: true,
       },
       {
@@ -42,6 +43,7 @@ describe('buildReminderTimeline (DX-026)', () => {
         sentAt: null,
         skipReason: null,
         emailDelivery: null,
+        sentToResponsible: false,
         current: true,
       },
       {
@@ -52,9 +54,30 @@ describe('buildReminderTimeline (DX-026)', () => {
         sentAt: null,
         skipReason: null,
         emailDelivery: null,
+        sentToResponsible: false,
         current: true,
       },
     ]);
+  });
+
+  it('DX-203: un recordatorio que salió al responsable lo dice', () => {
+    const items = buildReminderTimeline({
+      appointment: { start, status: 'SCHEDULED', deleted: false },
+      settings: { enabled: true, leadHours: [48] },
+      records: [
+        {
+          leadHours: 48,
+          appointmentStart: start,
+          status: 'SENT',
+          skipReason: null,
+          sentAt: at(-18 * HOUR),
+          emailDelivery: 'PENDING',
+          sentToResponsible: true,
+        },
+      ],
+      now: NOW,
+    });
+    expect(items).toMatchObject([{ state: 'SENT', sentToResponsible: true }]);
   });
 
   it('una antelación cuya hora pasó sin registro (cita agendada tarde) sale como no enviada', () => {

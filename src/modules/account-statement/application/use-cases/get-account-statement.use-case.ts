@@ -11,6 +11,11 @@ import { computeAccountStatement } from '../compute-account-statement';
 import type { VoidActor } from '../../../payments/domain/void-window';
 import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
+import {
+  STATEMENT_FAMILY_REPOSITORY,
+  type StatementFamilyRepository,
+} from '../../domain/ports/statement-family-repository.port';
+import { statementAddressee } from '../statement-addressee';
 
 export interface GetAccountStatementInput {
   /** Primer día de los movimientos (YYYY-MM-DD), inclusive. */
@@ -46,6 +51,8 @@ export class GetAccountStatementUseCase {
     private readonly repo: AccountStatementRepository,
     @Inject(ACCOUNT_STATEMENT_CLOCK)
     private readonly now: AccountStatementClock,
+    @Inject(STATEMENT_FAMILY_REPOSITORY)
+    private readonly family: StatementFamilyRepository,
   ) {}
 
   /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
@@ -64,7 +71,10 @@ export class GetAccountStatementUseCase {
       throw new BadRequestException('from must be on or before to');
     }
 
-    const data = await this.repo.load(patientId);
+    const [data, notice] = await Promise.all([
+      this.repo.load(patientId),
+      this.family.loadNotice(patientId),
+    ]);
     if (!data) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
@@ -81,6 +91,8 @@ export class GetAccountStatementUseCase {
       issuedAt,
       clinic: data.clinic,
       patient: data.patient,
+      // DX-203: un menor o un paciente sin email, a nombre de su responsable.
+      addressee: statementAddressee(data.patient, notice, issuedAt),
       range: { from: input.from ?? null, to: input.to ?? null },
       ...computed,
     };

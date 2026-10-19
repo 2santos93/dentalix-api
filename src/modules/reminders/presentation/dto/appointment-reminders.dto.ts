@@ -50,6 +50,12 @@ export class AppointmentReminderItemDto {
 
   @ApiProperty({
     description:
+      'DX-203: salió al email del responsable del paciente (un menor o un paciente sin email): «Recordatorio enviado al responsable».',
+  })
+  sentToResponsible!: boolean;
+
+  @ApiProperty({
+    description:
       'false = de una hora de inicio anterior (la cita se reprogramó)',
   })
   current!: boolean;

@@ -148,6 +148,8 @@ interface SeedA {
   waitlistEntryId: string;
   noteTemplateId: string;
   waitlistOfferId: string;
+  /** DX-203: un responsable (contacto) del paciente de A. */
+  responsiblePartyId: string;
   /** Caja por turno cerrada de A (DX-027). */
   cashSessionId: string;
 }
@@ -375,6 +377,19 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     dueDate: futureAt(10, 15).slice(0, 10),
   });
 
+  // DX-203: un responsable (contacto pagador) del paciente de A.
+  const responsibleParty = await create(
+    app,
+    a,
+    `/patients/${patientId}/responsible-parties`,
+    {
+      fullName: 'Responsable de A',
+      email: 'responsable-a@example.com',
+      relationship: 'MOTHER',
+      isPayer: true,
+    },
+  );
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -397,6 +412,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
     waitlistOfferId: waitlistOffer.id,
+    responsiblePartyId: responsibleParty.id,
     cashSessionId: cashSession.id,
   };
 }
@@ -459,6 +475,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-150: cobranza.
       'collection_notes',
       'payment_promises',
+      // DX-203: responsables de pago y avisos.
+      'patient_responsible_parties',
       'location_reminder_settings',
       // DX-027: caja por turno.
       'cash_sessions',
@@ -819,6 +837,35 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/appointment-types/${a.appointmentTypeId}`,
       status: 404,
     },
+    // --- responsables de pago y avisos (DX-203) ---
+    {
+      name: 'GET /patients/:patientId/responsible-parties',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/responsible-parties`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/responsible-parties',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/responsible-parties`,
+      body: () => ({ fullName: 'Intrusa', relationship: 'OTHER' }),
+      status: 404,
+    },
+    {
+      name: 'PATCH /patients/:patientId/responsible-parties/:partyId',
+      verb: 'patch',
+      path: () =>
+        `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
+      body: () => ({ isPayer: false, receivesNotices: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /patients/:patientId/responsible-parties/:partyId',
+      verb: 'delete',
+      path: () =>
+        `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
+      status: 404,
+    },
     // --- caja por turno (DX-027) ---
     {
       name: 'GET /cash-sessions/:id',
@@ -1153,6 +1200,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /implants/:id/void': 'implants.e2e-spec.ts',
     'GET /patients/:patientId/account-statement':
       'account-statement.e2e-spec.ts',
+    // DX-203: B → 404 sobre el pagador de A (y el familiar no suma de otra).
+    'GET /patients/:patientId/family-account-statement':
+      'patient-responsible-parties.e2e-spec.ts',
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
   };
 

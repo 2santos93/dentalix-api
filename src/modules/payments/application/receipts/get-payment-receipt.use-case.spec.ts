@@ -10,6 +10,19 @@ import {
   type ReceiptSnapshotInput,
 } from '../../domain/receipt-snapshot';
 
+// DX-203: sin responsables; lo que decide el destinatario lo prueba
+// send-payment-receipt.use-case.spec.ts.
+const NOTICE = {
+  patient: {
+    firstName: 'Ana',
+    birthDate: null,
+    email: null,
+    emergencyContactName: null,
+  },
+  responsibles: [],
+  location: { country: 'CO' as const, timeZone: 'America/Bogota' },
+};
+
 const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
 
 const snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'> = {
@@ -77,6 +90,7 @@ const issued = (
   paymentId: PAYMENT_ID,
   treatmentPlanId: 'plan-1',
   patientEmail: 'ana@example.com',
+  notice: NOTICE,
   receipt: {
     seriesPrefix: 'NOR',
     number: 123,
@@ -136,6 +150,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       paymentId: PAYMENT_ID,
       treatmentPlanId: 'plan-1',
       patientEmail: null,
+      notice: NOTICE,
       legacy: {
         issuedAt: new Date('2025-01-10T17:05:00.000Z'),
         voidedAt: null,
@@ -166,6 +181,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
         paymentId: PAYMENT_ID,
         treatmentPlanId: 'plan-1',
         patientEmail: null,
+        notice: NOTICE,
         legacy: {
           issuedAt: new Date(),
           voidedAt: new Date('2025-02-01T12:00:00.000Z'),

@@ -8,6 +8,10 @@ import type {
   PaymentReceiptSource,
 } from '../../domain/ports/payment-receipt-repository.port';
 import { parseReceiptSnapshot } from '../../domain/receipt-snapshot';
+import {
+  loadNoticeLocation,
+  loadNoticeResponsibles,
+} from '../../../patients/infrastructure/notices/notice-context';
 
 const RECEIPT_SOURCE_SELECT = {
   id: true,
@@ -47,6 +51,8 @@ const RECEIPT_SOURCE_SELECT = {
           docType: true,
           docNumber: true,
           email: true,
+          birthDate: true,
+          emergencyContactName: true,
         },
       },
     },
@@ -70,10 +76,25 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
       });
       if (!payment) return null;
       const { patient } = payment.plan;
+      const patientEmail = patient.email?.trim() ? patient.email.trim() : null;
+      const [responsibles, location] = await Promise.all([
+        loadNoticeResponsibles(tx, patient.id),
+        loadNoticeLocation(tx, payment.tenantId, payment.locationId),
+      ]);
       const base = {
         paymentId: payment.id,
         treatmentPlanId: payment.treatmentPlanId,
-        patientEmail: patient.email?.trim() ? patient.email.trim() : null,
+        patientEmail,
+        notice: {
+          patient: {
+            firstName: patient.firstName,
+            birthDate: patient.birthDate,
+            email: patientEmail,
+            emergencyContactName: patient.emergencyContactName,
+          },
+          responsibles,
+          location,
+        },
       };
       if (payment.receipt) {
         return {

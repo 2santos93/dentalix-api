@@ -8,6 +8,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
+import { loadNoticeResponsibles } from '../../patients/infrastructure/notices/notice-context';
 import {
   REMINDER_CATCH_UP_MS,
   REMINDER_LOOKAHEAD_MS,
@@ -181,7 +182,6 @@ export class PrismaReminderRepository implements ReminderRepository {
               ...CONTACT_SELECT,
               firstName: true,
               birthDate: true,
-              guardianName: true,
               emergencyContactName: true,
             },
           },
@@ -189,12 +189,13 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
       });
       if (!appointment) return null;
-      const [settings, zones] = await Promise.all([
+      const [settings, zones, responsibles] = await Promise.all([
         tx.locationReminderSettings.findFirst({
           where: { locationId: appointment.locationId },
           select: { enabled: true, leadHours: true },
         }),
         loadLocationTimeZones(tx, tenantId, [appointment.locationId]),
+        loadNoticeResponsibles(tx, appointment.patient.id),
       ]);
       return {
         appointment: {
@@ -211,9 +212,10 @@ export class PrismaReminderRepository implements ReminderRepository {
         recipient: {
           firstName: appointment.patient.firstName,
           birthDate: appointment.patient.birthDate,
-          guardianName: appointment.patient.guardianName,
+          email: appointment.patient.email,
           emergencyContactName: appointment.patient.emergencyContactName,
         },
+        responsibles,
         settings,
       };
     });
@@ -330,6 +332,7 @@ export class PrismaReminderRepository implements ReminderRepository {
             skipReason: true,
             sentAt: true,
             outboundMessageId: true,
+            outboundMessage: { select: { recipientKind: true } },
           },
         }),
       ]);
@@ -370,6 +373,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           emailDelivery: r.outboundMessageId
             ? (delivery.get(r.outboundMessageId) ?? null)
             : null,
+          sentToResponsible: r.outboundMessage?.recipientKind === 'RESPONSIBLE',
         })),
       };
     });

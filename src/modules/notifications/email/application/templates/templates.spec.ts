@@ -272,6 +272,18 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.html).not.toContain('<a href');
     });
 
+    it('DX-203: el que va al responsable lo saluda a él y dice de quién es el abono', () => {
+      const email = renderEmail(
+        'payment-receipt',
+        { ...base, patientName: 'Tomás Ortiz', responsibleName: 'Claudia' },
+        brand,
+      );
+      expect(email.text).toContain('Hola, Claudia');
+      expect(email.text).toContain(
+        'Te enviamos el recibo del abono de Tomás Ortiz en Sonrisas del Norte.',
+      );
+    });
+
     it('un recibo anulado lo dice en el asunto y en el cuerpo, con fecha y motivo', () => {
       const email = renderEmail(
         'payment-receipt',
