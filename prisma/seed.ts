@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { Country, State, City } from 'country-state-city';
+import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 
 // Corre con el rol owner (DIRECT_URL): estas tablas son globales, sin RLS.
 const prisma = new PrismaClient({
@@ -80,10 +81,17 @@ async function seedCities(): Promise<void> {
   console.log(`Seeded ${total} cities`);
 }
 
+// DX-212: CIE-10 del capítulo oral (K00–K14 y Z01.2), upsert por código.
+async function seedIcd10(): Promise<void> {
+  const total = await seedIcd10Codes(prisma);
+  console.log(`Seeded ${total} ICD-10 codes`);
+}
+
 async function main(): Promise<void> {
   await seedCurrencies();
   await seedCountries();
   await seedCities();
+  await seedIcd10();
 }
 
 main()

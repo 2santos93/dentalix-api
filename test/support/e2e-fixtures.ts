@@ -35,6 +35,8 @@ const KEEP_TABLES = new Set([
   'currencies',
   'countries',
   'cities',
+  // DX-212: CIE-10 del capítulo oral (los diagnósticos la referencian).
+  'icd10_codes',
   'exchange_rate_snapshots',
 ]);
 
