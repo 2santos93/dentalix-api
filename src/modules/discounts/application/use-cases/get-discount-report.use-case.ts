@@ -36,7 +36,10 @@ export interface DiscountReportTotalView {
 }
 
 export interface DiscountReportRowView extends DiscountReportRow {
-  /** % del descuento sobre el precio del ítem. */
+  /**
+   * % del descuento total sobre el precio de referencia del ítem (el de
+   * catálogo si el precio se rebajó; si no, el precio). SEC-041.
+   */
   percent: number;
 }
 
@@ -55,8 +58,8 @@ export interface DiscountReport {
 /**
  * Informe «Descuentos» (DX-204, solo ADMIN): lo que se descontó en ítems de
  * plan en un periodo, por sede y por quién lo dio. Los totales cuadran con la
- * suma de `discount` de los ítems vivos del periodo; por moneda, sin
- * convertir.
+ * suma del descuento efectivo (rebaja de precio frente al catálogo + `discount`,
+ * SEC-041) de los ítems vivos del periodo; por moneda, sin convertir.
  */
 @Injectable()
 export class GetDiscountReportUseCase {
@@ -130,5 +133,8 @@ export class GetDiscountReportUseCase {
 }
 
 function withPercent(row: DiscountReportRow): DiscountReportRowView {
-  return { ...row, percent: discountPercent(row.price, row.discount) };
+  return {
+    ...row,
+    percent: discountPercent(row.price + row.priceReduction, row.discount),
+  };
 }

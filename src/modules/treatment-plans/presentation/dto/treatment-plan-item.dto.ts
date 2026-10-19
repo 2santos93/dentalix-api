@@ -30,6 +30,14 @@ export class TreatmentPlanItemDto {
   @ApiProperty({ format: 'uuid' })
   catalogItemId!: string;
 
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre). Un precio por debajo cuenta como descuento: tope del rol, motivo e informe de descuentos.',
+  })
+  catalogPrice!: number | null;
+
   @ApiProperty()
   price!: number;
 
@@ -51,7 +59,7 @@ export class TreatmentPlanItemDto {
     format: 'uuid',
     nullable: true,
     description:
-      'DX-204: quién dio el descuento vigente (null sin descuento o anterior a DX-204)',
+      'DX-204: quién dio el descuento vigente, incluida la rebaja de precio frente al catálogo (SEC-041); null sin descuento o anterior a DX-204',
   })
   discountById!: string | null;
 

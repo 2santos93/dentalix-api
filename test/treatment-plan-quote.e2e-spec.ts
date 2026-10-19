@@ -270,6 +270,9 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       surfaces: ['OCCLUSAL', 'MESIAL'],
       catalogItemId: catalogA,
       price: 200,
+      // SEC-041: 200 frente a 1.000 de catálogo es una rebaja del 80 %: pide
+      // el motivo como un descuento.
+      discountReason: 'PROMOTION',
     });
 
     const north = await as(clinicA)

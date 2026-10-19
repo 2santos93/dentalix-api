@@ -11,11 +11,18 @@ import {
 } from '@prisma/client';
 import {
   REASON_NOTE_REQUIRED_MESSAGE,
-  checkItemDiscount,
   reasonRequiredMessage,
   roleDiscountCapMessage,
   type DiscountPolicyRules,
 } from '../../../discounts/domain/discount-policy';
+import {
+  checkEffectiveDiscount,
+  effectiveDiscount,
+  effectiveDiscountRises,
+  priceBelowCatalogCapMessage,
+  priceBelowCatalogReasonMessage,
+  type PricedItem,
+} from '../../../discounts/domain/effective-discount';
 import type { TreatmentPlanWithItems } from '../../domain/entities/treatment-plan.entity';
 import type { DiscountStamp } from '../../domain/ports/treatment-plan-repository.port';
 
@@ -68,40 +75,47 @@ export const NO_DISCOUNT: DiscountDecision = {
   discountStamp: null,
 };
 
+/** El precio y el descuento de un ítem, con su motivo (DX-204, SEC-041). */
+export interface ItemDiscountInput extends PricedItem {
+  reason: DiscountReason | null;
+  reasonNote: string | null;
+}
+
 /**
- * Valida un descuento contra la política para el rol de quien lo da y
- * devuelve lo que se guarda con él (DX-204). 403 «Tu rol permite hasta un X
- * %» si supera el tope; 422 si por encima del umbral falta el motivo (o la
- * nota con «Otro»). Sin descuento, el motivo, el autor y la hora se borran.
+ * Valida el descuento EFECTIVO de un ítem (rebaja frente al precio de
+ * catálogo + `discount`, SEC-041) contra la política para el rol de quien lo
+ * da y devuelve lo que se guarda con él (DX-204). 403 «Tu rol permite hasta un
+ * X %» si supera el tope; 422 si por encima del umbral falta el motivo (o la
+ * nota con «Otro»); si en el exceso entra una rebaja de precio, el mensaje lo
+ * dice. Sin descuento efectivo, el motivo, el autor y la hora se borran.
  */
 export function decideDiscount(
   policy: DiscountPolicyRules,
   actor: DiscountActor,
-  input: {
-    price: number;
-    discount: number;
-    reason: DiscountReason | null;
-    reasonNote: string | null;
-  },
+  input: ItemDiscountInput,
   at: Date,
 ): DiscountDecision {
-  if (input.discount <= 0) return NO_DISCOUNT;
+  if (effectiveDiscount(input).total <= 0) return NO_DISCOUNT;
   const note = input.reasonNote?.trim() || null;
   if (note && !input.reason) {
     throw new UnprocessableEntityException(REASON_NOTE_WITHOUT_REASON_MESSAGE);
   }
-  const check = checkItemDiscount(policy, actor.role, {
-    price: input.price,
-    discount: input.discount,
-    reason: input.reason,
+  const check = checkEffectiveDiscount(policy, actor.role, {
+    ...input,
     reasonNote: note,
   });
   switch (check.kind) {
     case 'over-cap':
-      throw new ForbiddenException(roleDiscountCapMessage(check.maxPercent));
+      throw new ForbiddenException(
+        check.priceReduction
+          ? priceBelowCatalogCapMessage(check.maxPercent)
+          : roleDiscountCapMessage(check.maxPercent),
+      );
     case 'reason-required':
       throw new UnprocessableEntityException(
-        reasonRequiredMessage(check.thresholdPercent),
+        check.priceReduction
+          ? priceBelowCatalogReasonMessage(check.thresholdPercent)
+          : reasonRequiredMessage(check.thresholdPercent),
       );
     case 'note-required':
       throw new UnprocessableEntityException(REASON_NOTE_REQUIRED_MESSAGE);
@@ -112,4 +126,50 @@ export function decideDiscount(
         discountStamp: { byId: actor.userId, at },
       };
   }
+}
+
+/**
+ * Un cambio sobre el descuento de un ítem que ya existe (edición o «Descuento
+ * %»), SEC-041:
+ *
+ * - Se valida y se firma a nombre de quien lo hace si da MÁS descuento: sube
+ *   el % efectivo (p. ej. bajar el precio), pone un `discount` nuevo distinto
+ *   de 0 (como en DX-204) o cambia el motivo o su nota.
+ * - Si el ítem se queda sin descuento efectivo, se borran motivo y firma.
+ * - Si no (subir el precio, quitar el `discount` de un ítem cuyo precio sigue
+ *   rebajado), es libre y conserva el motivo y la firma de quien lo dio:
+ *   devuelve `undefined`.
+ */
+export function decideDiscountChange(
+  policy: DiscountPolicyRules,
+  actor: DiscountActor,
+  before: PricedItem,
+  after: ItemDiscountInput,
+  changes: { discountSet: boolean; reasonChanged: boolean },
+  at: Date,
+): DiscountDecision | undefined {
+  if (effectiveDiscount(after).total <= 0) return NO_DISCOUNT;
+  const givesMore =
+    changes.reasonChanged ||
+    (changes.discountSet && after.discount > 0) ||
+    effectiveDiscountRises(before, after);
+  return givesMore ? decideDiscount(policy, actor, after, at) : undefined;
+}
+
+/**
+ * ¿El cambio toca el descuento efectivo del ítem? Si lo toca, un plan
+ * aceptado lo rechaza (`assertPlanDiscountable`).
+ */
+export function touchesDiscount(
+  before: PricedItem,
+  after: PricedItem,
+  changes: { discountSet: boolean; reasonChanged: boolean },
+): boolean {
+  return (
+    changes.discountSet ||
+    changes.reasonChanged ||
+    (after.price !== before.price &&
+      (effectiveDiscount(before).total > 0 ||
+        effectiveDiscount(after).total > 0))
+  );
 }

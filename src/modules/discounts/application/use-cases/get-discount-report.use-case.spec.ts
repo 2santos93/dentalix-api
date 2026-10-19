@@ -24,7 +24,10 @@ const row = (over: Partial<DiscountReportRow> = {}): DiscountReportRow => ({
   toothNumber: '11',
   procedure: 'Resina',
   currency: 'COP',
+  catalogPrice: null,
   price: 300000,
+  priceReduction: 0,
+  itemDiscount: 30000,
   discount: 30000,
   reason: null,
   reasonNote: null,
@@ -59,7 +62,21 @@ class FakeRepo implements DiscountReportRepository {
     this.lastPage = page;
     return Promise.resolve([
       row(),
-      row({ itemId: 'i2', discount: 45000, price: 700000 }),
+      row({
+        itemId: 'i2',
+        discount: 45000,
+        itemDiscount: 45000,
+        price: 700000,
+      }),
+      // SEC-041: precio rebajado de 1.000.000 a 500.000, sin descuento.
+      row({
+        itemId: 'i3',
+        catalogPrice: 1000000,
+        price: 500000,
+        priceReduction: 500000,
+        itemDiscount: 0,
+        discount: 500000,
+      }),
     ]);
   }
 }
@@ -87,7 +104,8 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
         percentOfGross: 33.33,
       },
     ]);
-    expect(report.items.map((i) => i.percent)).toEqual([10, 6.43]);
+    // SEC-041: la rebaja de precio cuenta sobre el precio de catálogo.
+    expect(report.items.map((i) => i.percent)).toEqual([10, 6.43, 50]);
     expect(report.total).toBe(3);
     expect(report).toMatchObject({
       from: '2026-10-01',
@@ -147,7 +165,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
       from: '2026-10-01',
       to: '2026-10-31',
     });
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(repo.lastPage).toBeUndefined();
   });
 });

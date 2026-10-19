@@ -186,10 +186,9 @@ describe('planes de tratamiento: orden de bloqueos plan → ítem (DX-012, int)'
 
   it('editar un ítem mientras se acepta el plan: sin deadlock, primero la edición', async () => {
     const result = await raceWithItemHeld((_planId, itemId) =>
-      plans.updateItem(itemId, {
-        status: 'ACCEPTED',
-        notes: 'antes de firmar',
-      }),
+      plans.updateItem(itemId, () => ({
+        patch: { status: 'ACCEPTED', notes: 'antes de firmar' },
+      })),
     );
     expect(result).toEqual({ edit: 'ok', accept: 'ok' });
   });

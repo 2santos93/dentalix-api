@@ -8,7 +8,11 @@ export interface DiscountReportQuery {
   professionalId?: string;
 }
 
-/** Una línea del informe: un ítem vivo con descuento en el periodo. */
+/**
+ * Una línea del informe: un ítem vivo con descuento en el periodo. SEC-041: el
+ * descuento es el EFECTIVO, la rebaja del precio frente al de catálogo más el
+ * `discount` del ítem.
+ */
 export interface DiscountReportRow {
   itemId: string;
   planId: string;
@@ -22,7 +26,15 @@ export interface DiscountReportRow {
   toothNumber: string;
   procedure: string;
   currency: string;
+  /** Precio de catálogo al dar de alta el ítem (null = ítem libre). */
+  catalogPrice: number | null;
+  /** Precio pactado del ítem. */
   price: number;
+  /** Rebaja de precio frente al catálogo: max(0, catálogo − precio). */
+  priceReduction: number;
+  /** El `discount` del ítem. */
+  itemDiscount: number;
+  /** Descuento total: rebaja de precio + descuento del ítem. */
   discount: number;
   reason: DiscountReason | null;
   reasonNote: string | null;
@@ -36,7 +48,11 @@ export interface DiscountReportRow {
   locationName: string | null;
 }
 
-/** Suma de una moneda (sin convertir): bruto = precio de esos mismos ítems. */
+/**
+ * Suma de una moneda (sin convertir). Bruto = precio de referencia de esos
+ * mismos ítems (el de catálogo si se rebajó; si no, el precio); descuento =
+ * rebajas de precio + descuentos (SEC-041).
+ */
 export interface DiscountReportTotal {
   currency: string;
   items: number;

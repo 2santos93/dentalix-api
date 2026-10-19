@@ -9,6 +9,7 @@ import {
   ClinicRole,
   ToothSurface,
   TreatmentPlanItemStatus,
+  TreatmentPlanStatus,
 } from '@prisma/client';
 import { UpdateTreatmentPlanItemUseCase } from './update-treatment-plan-item.use-case';
 import {
@@ -17,6 +18,7 @@ import {
 } from '../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import {
+  DecideItemChange,
   DoneMirrorInput,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
@@ -34,6 +36,7 @@ function fakeItem(
     toothNumber: '11',
     surfaces: [],
     catalogItemId: 'cat1',
+    catalogPrice: null,
     price: 200,
     discount: 0,
     discountReason: null,
@@ -90,10 +93,39 @@ function makeCatalogRepo(
   };
 }
 
-// Minimal plan whose only field the use case reads is `patientId`.
+// Minimal open plan: the use case reads `patientId`, `status` and `acceptance`.
 const planWithPatient = {
   patientId: 'pat1',
+  status: TreatmentPlanStatus.DRAFT,
+  acceptance: null,
+  items: [],
 } as unknown as TreatmentPlanWithItems;
+
+/**
+ * `updateItem` del fake con el contrato real (BE-036): `decide` recibe el plan
+ * y el ítem releídos en la transacción y el fake escribe lo decidido.
+ */
+function applying(
+  existing: TreatmentPlanItem,
+  write: (
+    patch: UpdateTreatmentPlanItemRepoInput,
+    mirror?: DoneMirrorInput,
+  ) => Promise<TreatmentPlanItem>,
+): TreatmentPlanRepository['updateItem'] {
+  return (_id: string, decide: DecideItemChange) => {
+    try {
+      const { patch, mirror } = decide({
+        plan: planWithPatient,
+        item: existing,
+      });
+      return write(patch, mirror);
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  };
+}
 
 describe('UpdateTreatmentPlanItemUseCase', () => {
   it('throws NotFoundException when the item does not exist (or belongs to another tenant)', async () => {
@@ -121,16 +153,13 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const repo = makeRepo({
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
-      updateItem: (
-        _id: string,
-        patch: UpdateTreatmentPlanItemRepoInput,
-      ): Promise<TreatmentPlanItem> => {
+      updateItem: applying(existing, (patch) => {
         receivedPatch = patch;
         return Promise.resolve({
           ...existing,
           price: patch.price ?? existing.price,
         });
-      },
+      }),
     });
     const uc = new UpdateTreatmentPlanItemUseCase(
       repo,
@@ -175,17 +204,14 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const repo = makeRepo({
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
-      updateItem: (
-        _id: string,
-        patch: UpdateTreatmentPlanItemRepoInput,
-      ): Promise<TreatmentPlanItem> => {
+      updateItem: applying(existing, (patch) => {
         receivedPatch = patch;
         return Promise.resolve({
           ...existing,
           surfaces: patch.surfaces ?? existing.surfaces,
           notes: patch.notes ?? existing.notes,
         });
-      },
+      }),
     });
     const uc = new UpdateTreatmentPlanItemUseCase(
       repo,
@@ -223,17 +249,13 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
       const repo = makeRepo({
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
-        updateItem: (
-          _id: string,
-          patch: UpdateTreatmentPlanItemRepoInput,
-          mirror?: DoneMirrorInput,
-        ): Promise<TreatmentPlanItem> => {
+        updateItem: applying(existing, (patch, mirror) => {
           calls.push({ patch, mirror });
           return Promise.resolve({
             ...existing,
             status: patch.status ?? existing.status,
           });
-        },
+        }),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
       });

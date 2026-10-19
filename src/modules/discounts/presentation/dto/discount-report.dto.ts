@@ -71,10 +71,16 @@ export class DiscountReportTotalDto {
   @ApiProperty({ description: 'Ítems con descuento en esta moneda' })
   items!: number;
 
-  @ApiProperty({ description: 'Bruto: suma del precio de esos mismos ítems' })
+  @ApiProperty({
+    description:
+      'Bruto: suma del precio de referencia de esos mismos ítems (el de catálogo si el precio se rebajó; si no, el precio)',
+  })
   gross!: number;
 
-  @ApiProperty({ description: 'Suma de su descuento' })
+  @ApiProperty({
+    description:
+      'Suma de su descuento efectivo: rebajas de precio frente al catálogo + descuentos (SEC-041)',
+  })
   discount!: number;
 
   @ApiProperty({ description: 'Descuento sobre el bruto, en % (2 decimales)' })
@@ -118,13 +124,35 @@ export class DiscountReportItemDto {
   @ApiProperty({ example: 'COP' })
   currency!: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre)',
+  })
+  catalogPrice!: number | null;
+
+  @ApiProperty({ description: 'Precio pactado del ítem' })
   price!: number;
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay)',
+  })
+  priceReduction!: number;
+
+  @ApiProperty({ description: 'Descuento del ítem (campo `discount`)' })
+  itemDiscount!: number;
+
+  @ApiProperty({
+    description: 'Descuento total: rebaja de precio + descuento del ítem',
+  })
   discount!: number;
 
-  @ApiProperty({ description: '% del descuento sobre el precio (2 decimales)' })
+  @ApiProperty({
+    description:
+      '% del descuento total sobre el precio de referencia (el de catálogo si se rebajó), 2 decimales',
+  })
   percent!: number;
 
   @ApiProperty({ enum: DiscountReason, nullable: true })

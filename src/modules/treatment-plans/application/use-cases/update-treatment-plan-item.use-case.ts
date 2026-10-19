@@ -11,7 +11,6 @@ import {
 } from '@prisma/client';
 import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-repository.port';
 import type {
-  DoneMirrorInput,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
@@ -25,7 +24,8 @@ import {
 import {
   assertDiscountWithinPrice,
   assertPlanDiscountable,
-  decideDiscount,
+  decideDiscountChange,
+  touchesDiscount,
   type DiscountActor,
 } from './item-discount';
 import { isClosedPlanItemChangeAllowed } from '../../domain/plan-status-machine';
@@ -43,27 +43,21 @@ export interface UpdateTreatmentPlanItemInput {
   discountReasonNote?: string | null;
 }
 
-/**
- * ¿Cambia el descuento del ítem (DX-204)? El importe, el motivo o su nota; o el
- * precio de un ítem con descuento (cambia su %). Un cambio así se valida contra
- * la política del rol de quien lo hace y queda a su nombre.
- */
-function changesDiscount(
+/** ¿La petición pone otro `discount` o cambia el motivo o su nota? (DX-204) */
+function discountFieldChanges(
   existing: TreatmentPlanItem,
   patch: UpdateTreatmentPlanItemInput,
-): boolean {
-  const discount = patch.discount ?? existing.discount;
-  return (
-    discount !== existing.discount ||
-    (patch.price !== undefined &&
-      patch.price !== existing.price &&
-      discount > 0) ||
-    (patch.discountReason !== undefined &&
-      patch.discountReason !== existing.discountReason) ||
-    (patch.discountReasonNote !== undefined &&
-      (patch.discountReasonNote?.trim() || null) !==
-        existing.discountReasonNote)
-  );
+): { discountSet: boolean; reasonChanged: boolean } {
+  return {
+    discountSet:
+      patch.discount !== undefined && patch.discount !== existing.discount,
+    reasonChanged:
+      (patch.discountReason !== undefined &&
+        patch.discountReason !== existing.discountReason) ||
+      (patch.discountReasonNote !== undefined &&
+        (patch.discountReasonNote?.trim() || null) !==
+          existing.discountReasonNote),
+  };
 }
 
 @Injectable()
@@ -91,93 +85,106 @@ export class UpdateTreatmentPlanItemUseCase {
     if (!existing) {
       throw new NotFoundException('Treatment plan item not found');
     }
-
-    // Plan aceptado con firma (DX-012): lo firmado (precio, descuento, caras,
-    // notas) no cambia y el ítem no vuelve a propuesto; avanzar el tratamiento
-    // (aceptado <-> realizado) sí.
-    const plan = await this.repo.findPlanById(existing.planId);
-    // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
-    // aceptado en un plan completado.
-    if (
-      plan &&
-      !isClosedPlanItemChangeAllowed(plan.status, existing.status, patch)
-    ) {
-      assertPlanOpenForItems(plan);
-    }
-    if (
-      plan?.acceptance &&
-      (patch.price !== undefined ||
-        patch.discount !== undefined ||
-        patch.discountReason !== undefined ||
-        patch.discountReasonNote !== undefined ||
-        patch.surfaces !== undefined ||
-        patch.notes !== undefined ||
-        patch.status === TreatmentPlanItemStatus.PROPOSED)
-    ) {
-      throw new ConflictException(SIGNED_PLAN_LOCKED_MESSAGE);
-    }
-    const price = patch.price ?? existing.price;
-    const discount = patch.discount ?? existing.discount;
-    if (patch.price !== undefined || patch.discount !== undefined) {
-      assertDiscountWithinPrice(price, discount);
-    }
-
-    const { discountReason, discountReasonNote, ...rest } = patch;
-    const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;
-    if (plan && changesDiscount(existing, patch)) {
-      assertPlanDiscountable(plan);
-      // Sin motivo en la petición se conserva el del ítem; cambiar de motivo
-      // sin nota borra la nota anterior (era de otro motivo).
-      const reason =
-        discountReason !== undefined ? discountReason : existing.discountReason;
-      const note =
-        discountReasonNote !== undefined
-          ? discountReasonNote
-          : discountReason !== undefined
-            ? null
-            : existing.discountReasonNote;
-      Object.assign(
-        repoPatch,
-        decideDiscount(
-          await this.discountPolicy.execute(),
-          actor,
-          { price, discount, reason, reasonNote: note },
-          this.now(),
-        ),
-      );
-    }
-
-    // Pieza B: a (PROPOSED|ACCEPTED) -> DONE transition mirrors the procedure
-    // into the odontogram — same tooth/surfaces/catalog item, status COMPLETED,
-    // linked back via `sourcePlanItemId`. DX-042 (DB-013): the repository does
-    // the transition AND the insert in ONE transaction with the item locked,
-    // so two concurrent DONE never mirror twice and a failed mirror never
-    // leaves the item DONE without its clinical record. Tooth records are
-    // append-only: reverting a DONE item does not remove the record (a done
-    // procedure is history).
-    const mirror =
-      patch.status === TreatmentPlanItemStatus.DONE &&
-      existing.status !== TreatmentPlanItemStatus.DONE &&
-      plan
-        ? await this.mirrorInput(existing, plan.patientId, actor.userId)
+    // Lo que no puede leerse dentro de la transacción: la política (solo si el
+    // precio o el descuento pueden cambiar) y el `kind` del catálogo para el
+    // espejo DONE (el ítem de catálogo no cambia).
+    const policy =
+      patch.price !== undefined ||
+      patch.discount !== undefined ||
+      patch.discountReason !== undefined ||
+      patch.discountReasonNote !== undefined
+        ? await this.discountPolicy.execute()
+        : null;
+    const kind =
+      patch.status === TreatmentPlanItemStatus.DONE
+        ? await this.catalogKind(existing.catalogItemId)
         : undefined;
+    const at = this.now();
 
-    return this.repo.updateItem(itemId, repoPatch, mirror);
+    // BE-036: el estado del plan y del ítem se comprueban con sus filas
+    // bloqueadas, dentro de la transacción: una aceptación que entre entre
+    // medias no deja cambiar un plan ya aceptado.
+    return this.repo.updateItem(itemId, ({ plan, item }) => {
+      // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
+      // aceptado en un plan completado.
+      if (!isClosedPlanItemChangeAllowed(plan.status, item.status, patch)) {
+        assertPlanOpenForItems(plan);
+      }
+      // Plan aceptado con firma (DX-012): lo firmado (precio, descuento,
+      // caras, notas) no cambia y el ítem no vuelve a propuesto; avanzar el
+      // tratamiento (aceptado <-> realizado) sí.
+      if (
+        plan.acceptance &&
+        (patch.price !== undefined ||
+          patch.discount !== undefined ||
+          patch.discountReason !== undefined ||
+          patch.discountReasonNote !== undefined ||
+          patch.surfaces !== undefined ||
+          patch.notes !== undefined ||
+          patch.status === TreatmentPlanItemStatus.PROPOSED)
+      ) {
+        throw new ConflictException(SIGNED_PLAN_LOCKED_MESSAGE);
+      }
+      const price = patch.price ?? item.price;
+      const discount = patch.discount ?? item.discount;
+      if (patch.price !== undefined || patch.discount !== undefined) {
+        assertDiscountWithinPrice(price, discount);
+      }
+
+      const { discountReason, discountReasonNote, ...rest } = patch;
+      const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;
+      const before = {
+        catalogPrice: item.catalogPrice,
+        price: item.price,
+        discount: item.discount,
+      };
+      const after = { ...before, price, discount };
+      const changes = discountFieldChanges(item, patch);
+      if (policy && touchesDiscount(before, after, changes)) {
+        assertPlanDiscountable(plan);
+        // Sin motivo en la petición se conserva el del ítem; cambiar de motivo
+        // sin nota borra la nota anterior (era de otro motivo).
+        const reason =
+          discountReason !== undefined ? discountReason : item.discountReason;
+        const note =
+          discountReasonNote !== undefined
+            ? discountReasonNote
+            : discountReason !== undefined
+              ? null
+              : item.discountReasonNote;
+        const decision = decideDiscountChange(
+          policy,
+          actor,
+          before,
+          { ...after, reason, reasonNote: note },
+          changes,
+          at,
+        );
+        if (decision) Object.assign(repoPatch, decision);
+      }
+
+      // Pieza B: a (PROPOSED|ACCEPTED) -> DONE transition mirrors the
+      // procedure into the odontogram — same tooth/surfaces/catalog item,
+      // status COMPLETED, linked back via `sourcePlanItemId`. DX-042
+      // (DB-013): the repository does the transition AND the insert in ONE
+      // transaction with the item locked, so two concurrent DONE never mirror
+      // twice and a failed mirror never leaves the item DONE without its
+      // clinical record. Tooth records are append-only: reverting a DONE item
+      // does not remove the record (a done procedure is history).
+      const mirror =
+        kind !== undefined && item.status !== TreatmentPlanItemStatus.DONE
+          ? { patientId: plan.patientId, kind, performedById: actor.userId }
+          : undefined;
+      return { patch: repoPatch, mirror };
+    });
   }
 
-  private async mirrorInput(
-    item: TreatmentPlanItem,
-    // The item has planId but not patientId; it comes from the plan.
-    patientId: string,
-    performedById?: string,
-  ): Promise<DoneMirrorInput> {
-    // ToothRecord requires `kind`; the item doesn't store it — take it from the
-    // catalog item, defaulting to PROCEDURE (plan items are procedures).
-    const catalogItem = await this.catalog.findById(item.catalogItemId);
-    return {
-      patientId,
-      kind: catalogItem?.kind ?? CatalogKind.PROCEDURE,
-      performedById,
-    };
+  /**
+   * ToothRecord requires `kind`; the item doesn't store it — take it from the
+   * catalog item, defaulting to PROCEDURE (plan items are procedures).
+   */
+  private async catalogKind(catalogItemId: string): Promise<CatalogKind> {
+    const catalogItem = await this.catalog.findById(catalogItemId);
+    return catalogItem?.kind ?? CatalogKind.PROCEDURE;
   }
 }

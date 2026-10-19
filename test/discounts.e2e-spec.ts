@@ -39,6 +39,7 @@ const bogotaDay = (offset = 0) =>
 
 interface Item {
   id: string;
+  catalogPrice: number | null;
   price: number;
   discount: number;
   discountReason: string | null;
@@ -59,9 +60,14 @@ interface Report {
   items: {
     itemId: string;
     patientName: string;
+    catalogPrice: number | null;
+    price: number;
+    priceReduction: number;
+    itemDiscount: number;
     discount: number;
     percent: number;
     reason: string | null;
+    discountById: string | null;
     discountByName: string | null;
     locationId: string | null;
   }[];
@@ -78,6 +84,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   let dentistId: string;
   let patientA: string;
   let catalogA: string;
+  let crownA: string;
   let mainLocationA: string;
   let northLocationA: string;
 
@@ -142,16 +149,27 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     const assistant = await seedMember(raw, clinicA, ClinicRole.ASSISTANT);
     tokens.ASSISTANT = await loginAs(app, clinicA.host, assistant.email);
 
+    // Sin precio de catálogo (ítem libre): estos casos de DX-204 miden solo el
+    // campo `discount`. La rebaja frente al catálogo (SEC-041) usa `crownA`.
     const catalog = await as(clinicA)
       .post('/catalog/items', {
         code: 'DESC-COR',
         kind: CatalogKind.PROCEDURE,
         labelEs: 'Corona',
         color: '#2A2B3C',
-        defaultPrice: 1000000,
       })
       .expect(201);
     catalogA = (catalog.body as { id: string }).id;
+    const crown = await as(clinicA)
+      .post('/catalog/items', {
+        code: 'DESC-COR-CAT',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Corona de catálogo',
+        color: '#2A2B3C',
+        defaultPrice: 1000000,
+      })
+      .expect(201);
+    crownA = (crown.body as { id: string }).id;
     const patient = await as(clinicA)
       .post('/patients', {
         firstName: 'Ana',
@@ -528,17 +546,16 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
 
     const period = () => `from=${bogotaDay(-7)}&to=${bogotaDay(0)}`;
 
-    it('cuadra con la suma de discount de los ítems vivos del periodo', async () => {
+    it('cuadra con la suma del descuento efectivo de los ítems vivos del periodo', async () => {
       const res = await as(clinicA)
         .get(`/reports/discounts?${period()}&pageSize=200`)
         .expect(200);
       const report = res.body as Report;
       const from = new Date(Date.now() - 9 * DAY);
-      const live = await raw.treatmentPlanItem.findMany({
+      const candidates = await raw.treatmentPlanItem.findMany({
         where: {
           tenantId: clinicA.tenantId,
           deletedAt: null,
-          discount: { gt: 0 },
           discountAt: { gte: from },
           plan: {
             currency: 'COP',
@@ -547,8 +564,20 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           },
         },
       });
-      const expected = live.reduce((s, i) => s + Number(i.discount), 0);
-      const gross = live.reduce((s, i) => s + Number(i.price), 0);
+      // SEC-041: descuento efectivo = rebaja frente al catálogo + discount.
+      const reduction = (i: (typeof candidates)[number]) =>
+        Math.max(0, Number(i.catalogPrice ?? i.price) - Number(i.price));
+      const live = candidates.filter(
+        (i) => Number(i.discount) > 0 || reduction(i) > 0,
+      );
+      const expected = live.reduce(
+        (s, i) => s + Number(i.discount) + reduction(i),
+        0,
+      );
+      const gross = live.reduce(
+        (s, i) => s + Number(i.price) + reduction(i),
+        0,
+      );
       const cop = report.totals.find((t) => t.currency === 'COP')!;
       expect(cop.discount).toBe(expected);
       expect(cop.gross).toBe(gross);
@@ -688,6 +717,273 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         .get(`/reports/discounts.csv?${period()}`)
         .expect(200);
       expect(csv.text.split('\r\n').filter(Boolean)).toHaveLength(1);
+    });
+  });
+  // SEC-041: bajar el precio por debajo del de catálogo cuenta como descuento
+  // (tope del rol y motivo de DX-204) en el alta, la edición y el bloque, y
+  // sale en el informe con su importe, autor y sede.
+  describe('precio por debajo del de catálogo = descuento (SEC-041)', () => {
+    const CAP_0 =
+      'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
+    const CAP_10 =
+      'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 10 % de descuento por ítem.';
+    const REASON =
+      'Precio por debajo del de catálogo: cuenta como descuento y supera el 10 %. Indica el motivo del descuento.';
+    const period = () => `from=${bogotaDay(-1)}&to=${bogotaDay(1)}`;
+
+    async function report(): Promise<Report> {
+      const res = await as(clinicA)
+        .get(`/reports/discounts?${period()}&pageSize=200`)
+        .expect(200);
+      return res.body as Report;
+    }
+
+    function addCrown(
+      planId: string,
+      body: object,
+      token = tokens.ADMIN,
+      location?: string,
+    ) {
+      return as(clinicA, token, location).post(
+        `/treatment-plans/${planId}/items`,
+        { toothNumber: '16', catalogItemId: crownA, ...body },
+      );
+    }
+
+    it('alta: DENTIST (10 %) con el precio al 50 % del catálogo → 403 en español; al 95 % → 201 a su nombre', async () => {
+      const planId = await newPlan();
+      const denied = await addCrown(
+        planId,
+        { price: 500000 },
+        tokens.DENTIST,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_10);
+      expect(await planItems(planId)).toHaveLength(0);
+
+      const ok = await addCrown(
+        planId,
+        { price: 950000 },
+        tokens.DENTIST,
+        northLocationA,
+      ).expect(201);
+      expect(ok.body).toMatchObject({
+        catalogPrice: 1000000,
+        price: 950000,
+        discount: 0,
+        discountById: dentistId,
+        discountLocationId: northLocationA,
+      });
+      expect((ok.body as Item).discountAt).not.toBeNull();
+      // La rebaja y el descuento se suman: 5 % + 6 % supera su 10 %.
+      await addCrown(
+        planId,
+        { price: 950000, discount: 60000 },
+        tokens.DENTIST,
+      ).expect(403);
+    });
+
+    it('edición: ASSISTANT baja el precio → 403 y no cambia; lo sube → 200 sin firma de descuento', async () => {
+      const planId = await newPlan();
+      // Sin precio: el de catálogo.
+      const item = (await addCrown(planId, {}).expect(201)).body as Item;
+      expect(item).toMatchObject({ price: 1000000, discountById: null });
+
+      const denied = await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, { price: 1 })
+        .expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const [unchanged] = await planItems(planId);
+      expect(unchanged.price).toBe(1000000);
+
+      const raised = await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, {
+          price: 1100000,
+        })
+        .expect(200);
+      expect(raised.body).toMatchObject({
+        price: 1100000,
+        discountById: null,
+        discountReason: null,
+      });
+    });
+
+    it('rebaja por encima del umbral: 422 «Indica el motivo del descuento» sin motivo; con motivo, 201 y sale en el informe con importe, autor y sede', async () => {
+      const planId = await newPlan();
+      const missing = await addCrown(planId, { price: 800000 }).expect(422);
+      expect((missing.body as { message: string }).message).toBe(REASON);
+      // También en la edición.
+      const atCatalog = (await addCrown(planId, {}).expect(201)).body as Item;
+      const missingEdit = await as(clinicA)
+        .patch(`/treatment-plans/${planId}/items/${atCatalog.id}`, {
+          price: 800000,
+        })
+        .expect(422);
+      expect((missingEdit.body as { message: string }).message).toContain(
+        'Indica el motivo del descuento',
+      );
+
+      const created = await addCrown(
+        planId,
+        { price: 800000, discountReason: 'PROMOTION' },
+        tokens.ADMIN,
+        northLocationA,
+      ).expect(201);
+      const item = created.body as Item;
+      expect(item).toMatchObject({
+        catalogPrice: 1000000,
+        price: 800000,
+        discount: 0,
+        discountReason: 'PROMOTION',
+        discountLocationId: northLocationA,
+      });
+      expect(item.discountById).not.toBeNull();
+
+      const row = (await report()).items.find((i) => i.itemId === item.id);
+      expect(row).toMatchObject({
+        catalogPrice: 1000000,
+        price: 800000,
+        priceReduction: 200000,
+        itemDiscount: 0,
+        discount: 200000,
+        percent: 20,
+        reason: 'PROMOTION',
+        discountById: item.discountById,
+        locationId: northLocationA,
+      });
+      expect(row!.discountByName).toEqual(expect.any(String));
+      // El ítem que quedó al precio de catálogo no es un descuento.
+      expect((await report()).items.map((i) => i.itemId)).not.toContain(
+        atCatalog.id,
+      );
+
+      const csv = await as(clinicA)
+        .get(`/reports/discounts.csv?${period()}`)
+        .expect(200);
+      expect(csv.text).toContain(
+        'COP,1000000,800000,200000,0,200000,20.00,"Promoción o campaña"',
+      );
+    });
+
+    it('ADMIN puede fijar cualquier precio (con motivo) y queda en el informe a su nombre', async () => {
+      const planId = await newPlan();
+      const item = (await addCrown(planId, {}).expect(201)).body as Item;
+      const res = await as(clinicA)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, {
+          price: 1,
+          discountReason: 'SERVICE_RECOVERY',
+        })
+        .expect(200);
+      const updated = res.body as Item;
+      expect(updated).toMatchObject({
+        price: 1,
+        discountReason: 'SERVICE_RECOVERY',
+      });
+      expect(updated.discountById).not.toBeNull();
+      const row = (await report()).items.find((i) => i.itemId === item.id);
+      expect(row).toMatchObject({
+        priceReduction: 999999,
+        discount: 999999,
+        discountById: updated.discountById,
+        reason: 'SERVICE_RECOVERY',
+      });
+    });
+
+    it('un ítem libre (sin precio de catálogo) no se trata como descuento', async () => {
+      const planId = await newPlan();
+      const res = await as(clinicA, tokens.ASSISTANT)
+        .post(`/treatment-plans/${planId}/items`, {
+          toothNumber: '17',
+          catalogItemId: catalogA,
+          price: 1,
+        })
+        .expect(201);
+      const item = res.body as Item;
+      expect(item).toMatchObject({
+        catalogPrice: null,
+        price: 1,
+        discountById: null,
+      });
+      await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, { price: 0 })
+        .expect(200);
+      expect((await report()).items.map((i) => i.itemId)).not.toContain(
+        item.id,
+      );
+    });
+
+    it('«Descuento %» en bloque suma la rebaja de precio al tope del rol', async () => {
+      const planId = await newPlan();
+      const item = (
+        await addCrown(planId, { price: 950000 }, tokens.DENTIST).expect(201)
+      ).body as Item;
+      const denied = await as(clinicA, tokens.DENTIST)
+        .post(`/treatment-plans/${planId}/items/bulk-discount`, {
+          itemIds: [item.id],
+          percent: 6,
+        })
+        .expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_10);
+      expect((await planItems(planId))[0].discount).toBe(0);
+      // 5 % del precio (47.500) + la rebaja (50.000) = 9,75 % del catálogo.
+      const ok = await as(clinicA, tokens.DENTIST)
+        .post(`/treatment-plans/${planId}/items/bulk-discount`, {
+          itemIds: [item.id],
+          percent: 5,
+        })
+        .expect(200);
+      expect((ok.body as Item[])[0]).toMatchObject({
+        discount: 47500,
+        discountById: dentistId,
+      });
+      const row = (await report()).items.find((i) => i.itemId === item.id);
+      expect(row).toMatchObject({
+        priceReduction: 50000,
+        itemDiscount: 47500,
+        discount: 97500,
+        percent: 9.75,
+      });
+    });
+
+    it('el cliente no puede mover la referencia: `catalogPrice` en el alta y `catalogItemId` en la edición se ignoran', async () => {
+      const planId = await newPlan();
+      // Un `catalogPrice` falso en el body no rebaja la referencia.
+      const denied = await addCrown(
+        planId,
+        { price: 500000, catalogPrice: 500000 },
+        tokens.DENTIST,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_10);
+
+      // Cambiar el ítem a un procedimiento sin precio (ítem libre) en la
+      // edición no le quita la referencia de catálogo.
+      const item = (await addCrown(planId, {}).expect(201)).body as Item;
+      await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, {
+          catalogItemId: catalogA,
+          catalogPrice: null,
+          price: 1,
+        })
+        .expect(403);
+      const [unchanged] = await planItems(planId);
+      expect(unchanged).toMatchObject({
+        catalogItemId: crownA,
+        catalogPrice: 1000000,
+        price: 1000000,
+      });
+    });
+
+    it('un plan aceptado no admite bajar el precio de catálogo (409)', async () => {
+      const planId = await newPlan();
+      const item = (await addCrown(planId, {}).expect(201)).body as Item;
+      await as(clinicA)
+        .patch(`/treatment-plans/${planId}`, { status: 'ACCEPTED' })
+        .expect(200);
+      await as(clinicA)
+        .patch(`/treatment-plans/${planId}/items/${item.id}`, {
+          price: 990000,
+        })
+        .expect(409);
+      await addCrown(planId, { price: 990000 }).expect(409);
     });
   });
 });

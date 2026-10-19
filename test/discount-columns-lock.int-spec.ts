@@ -170,6 +170,8 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
     ['discountById', { discountById: a.otherUserId }],
     ['discountAt', { discountAt: new Date('2026-10-02T15:00:00Z') }],
     ['discountLocationId', { discountLocationId: a.otherLocationId }],
+    // SEC-041: la referencia de la rebaja de precio también queda congelada.
+    ['catalogPrice', { catalogPrice: 120000 }],
   ];
 
   describe('plan aceptado y firmado (DX-012)', () => {
@@ -348,6 +350,7 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
       ],
       ['nota en blanco', { discountReasonNote: '   ' }],
       ['nota de más de 200', { discountReasonNote: 'x'.repeat(201) }],
+      ['un precio de catálogo negativo (SEC-041)', { catalogPrice: -1 }],
     ] as const)('CHECK: rechaza %s', async (_label, data) => {
       await expect(
         asA((tx) =>
@@ -411,12 +414,18 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
     });
   });
 
-  it('el informe tiene su índice parcial por fecha del descuento', async () => {
-    const [index] = await raw.$queryRaw<{ indexdef: string }[]>`
-      SELECT indexdef FROM pg_indexes
-       WHERE indexname = 'treatment_plan_items_tenant_discounted_at_idx'`;
-    expect(index.indexdef).toMatch(
-      /COALESCE\("discountAt", "createdAt"\).*WHERE \(\(discount > \(0\)::numeric\) AND \("deletedAt" IS NULL\)\)/,
+  it('el informe tiene su índice parcial por fecha del descuento, con las rebajas de precio (SEC-041)', async () => {
+    const indexes = await raw.$queryRaw<
+      { indexname: string; indexdef: string }[]
+    >`
+      SELECT indexname, indexdef FROM pg_indexes
+       WHERE tablename = 'treatment_plan_items'
+         AND indexname LIKE 'treatment_plan_items_tenant_%discount%at_idx'`;
+    expect(indexes.map((i) => i.indexname)).toEqual([
+      'treatment_plan_items_tenant_effective_discount_at_idx',
+    ]);
+    expect(indexes[0].indexdef).toMatch(
+      /COALESCE\("discountAt", "createdAt"\).*WHERE \(\(\(discount > \(0\)::numeric\) OR \(price < "catalogPrice"\)\) AND \("deletedAt" IS NULL\)\)/,
     );
   });
 });

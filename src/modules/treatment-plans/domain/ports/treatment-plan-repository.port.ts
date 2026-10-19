@@ -104,6 +104,8 @@ export interface AddTreatmentPlanItemRepoInput {
   toothNumber: string;
   surfaces?: ToothSurface[];
   catalogItemId: string;
+  /** SEC-041: precio de catálogo en el alta (null = ítem libre). */
+  catalogPrice: number | null;
   price: number;
   /** Ya validado (0 ≤ discount ≤ price) por el caso de uso; 0 si se omite. */
   discount?: number;
@@ -113,6 +115,15 @@ export interface AddTreatmentPlanItemRepoInput {
   discountReasonNote?: string | null;
   discountStamp?: DiscountStamp | null;
 }
+
+/**
+ * Decide el ítem nuevo a partir del plan LEÍDO CON SU FILA BLOQUEADA (BE-036):
+ * el estado (aceptado, firmado, cerrado) que se valida es el que hay al
+ * escribir, no el de una lectura previa. Si lanza, no se escribe nada.
+ */
+export type DecideNewItem = (
+  plan: TreatmentPlanWithItems,
+) => Omit<AddTreatmentPlanItemRepoInput, 'planId'>;
 
 /**
  * Quién da el descuento y cuándo (DX-204). La sede la pone el repositorio: la
@@ -137,23 +148,45 @@ export interface UpdateTreatmentPlanItemRepoInput {
   discountStamp?: DiscountStamp | null;
 }
 
-/** El descuento nuevo de un ítem en la acción en bloque (DX-204). */
-export interface BulkItemDiscount {
-  itemId: string;
-  discount: number;
-  discountReason: DiscountReason | null;
-  discountReasonNote: string | null;
-  discountStamp: DiscountStamp | null;
+/** Lo que decide un cambio de ítem: el parche y, si pasa a DONE, el espejo. */
+export interface ItemChange {
+  patch: UpdateTreatmentPlanItemRepoInput;
+  mirror?: DoneMirrorInput;
 }
 
 /**
- * Decide los descuentos a partir de los ítems LEÍDOS Y BLOQUEADOS (FOR UPDATE)
- * en la transacción: el precio con el que se calculan es el que se guarda. Si
- * lanza, no se escribe nada.
+ * Decide el cambio a partir del plan (fila bloqueada) y del ítem (FOR UPDATE)
+ * LEÍDOS EN LA TRANSACCIÓN (BE-036): una aceptación que se cuele entre una
+ * lectura previa y la escritura no deja cambiar un plan ya aceptado. Si lanza,
+ * no se escribe nada.
  */
-export type DecideBulkDiscount = (
-  items: TreatmentPlanItem[],
-) => BulkItemDiscount[];
+export type DecideItemChange = (current: {
+  plan: TreatmentPlanWithItems;
+  item: TreatmentPlanItem;
+}) => ItemChange;
+
+/**
+ * El descuento nuevo de un ítem en la acción en bloque (DX-204). Motivo, nota
+ * y firma `undefined` = se conservan (SEC-041: quitar el descuento de un ítem
+ * cuyo precio sigue rebajado deja la firma de esa rebaja).
+ */
+export interface BulkItemDiscount {
+  itemId: string;
+  discount: number;
+  discountReason?: DiscountReason | null;
+  discountReasonNote?: string | null;
+  discountStamp?: DiscountStamp | null;
+}
+
+/**
+ * Decide los descuentos a partir del plan y de los ítems LEÍDOS Y BLOQUEADOS
+ * en la transacción: el estado del plan (BE-036) y el precio con el que se
+ * calculan son los que hay al escribir. Si lanza, no se escribe nada.
+ */
+export type DecideBulkDiscount = (current: {
+  plan: TreatmentPlanWithItems;
+  items: TreatmentPlanItem[];
+}) => BulkItemDiscount[];
 
 /**
  * Lo que el espejo DONE → odontograma (Pieza B) necesita y el ítem no guarda:
@@ -195,33 +228,36 @@ export interface TreatmentPlanRepository {
    */
   updatePlan(id: string, decide: DecidePlanChange): Promise<TreatmentPlan>;
 
-  addItem(input: AddTreatmentPlanItemRepoInput): Promise<TreatmentPlanItem>;
+  /**
+   * Añade un ítem en UNA transacción: bloquea el plan (FOR SHARE), lo relee y
+   * deja que `decide` valide su estado y calcule el ítem (BE-036). 404 si el
+   * plan no existe o es de otra clínica.
+   */
+  addItem(planId: string, decide: DecideNewItem): Promise<TreatmentPlanItem>;
 
   /** A single active (non-deleted) item, or `null` if absent/soft-deleted. */
   findItemById(id: string): Promise<TreatmentPlanItem | null>;
 
   /**
-   * Actualiza el ítem (404 si no existe o está retirado). Con `mirror`, si
-   * ESTE cambio lo lleva a DONE, inserta en la MISMA transacción su registro
+   * Actualiza el ítem (404 si no existe o está retirado). Bloquea el plan (FOR
+   * SHARE) y el ítem (FOR UPDATE), los relee y `decide` valida y calcula el
+   * cambio sobre ese estado (BE-036). Con `mirror`, si ESTE cambio lo lleva a
+   * DONE, inserta en la MISMA transacción su registro
    * COMPLETED en el odontograma, enlazado por `sourcePlanItemId` (DX-042,
    * DB-013). El estado previo se lee con la fila bloqueada (FOR UPDATE): dos
    * PATCH DONE concurrentes se serializan y solo el primero espeja. Si el
    * espejo falla, falla todo: nunca queda un ítem DONE sin su registro
    * clínico. El odontograma es append-only: solo se inserta, nunca se cambia.
    */
-  updateItem(
-    id: string,
-    patch: UpdateTreatmentPlanItemRepoInput,
-    mirror?: DoneMirrorInput,
-  ): Promise<TreatmentPlanItem>;
+  updateItem(id: string, decide: DecideItemChange): Promise<TreatmentPlanItem>;
 
   /** Soft-delete: sets `deletedAt`. Never a hard delete. */
   softDeleteItem(id: string): Promise<void>;
 
   /**
    * Acción «Descuento %» (DX-204): en UNA transacción bloquea el plan (FOR
-   * SHARE) y los ítems pedidos (FOR UPDATE), deja que `decide` calcule cada
-   * descuento y los escribe. 404 si algún ítem no existe, está retirado o es de
+   * SHARE) y los ítems pedidos (FOR UPDATE), relee el plan, deja que `decide`
+   * valide su estado y calcule cada descuento, y los escribe. 404 si algún ítem no existe, está retirado o es de
    * otro plan: todo o nada.
    */
   applyBulkDiscount(

@@ -17,7 +17,10 @@ const row: DiscountReportRowView = {
   toothNumber: '36',
   procedure: 'Corona "zirconio"',
   currency: 'EUR',
+  catalogPrice: null,
   price: 450,
+  priceReduction: 0,
+  itemDiscount: 67.5,
   discount: 67.5,
   percent: 15,
   reason: DiscountReason.OTHER,
@@ -51,7 +54,10 @@ describe('CSV del informe de descuentos (DX-204)', () => {
         '"36"',
         '"Corona ""zirconio"""',
         'EUR',
+        '',
         '450.00',
+        '0.00',
+        '67.50',
         '67.50',
         '15.00',
         '"Otro"',
@@ -67,18 +73,59 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       ...row,
       currency: 'COP',
       price: 123457,
+      itemDiscount: 9259,
       discount: 9259,
       percent: 7.5,
     };
     const [, eurLine, copLine] = toDiscountReportCsv([row, cop])
       .slice(1)
       .split('\r\n');
-    expect(eurLine.split(',').slice(7, 10)).toEqual([
+    expect(eurLine.split(',').slice(7, 13)).toEqual([
+      '',
       '450.00',
+      '0.00',
+      '67.50',
       '67.50',
       '15.00',
     ]);
-    expect(copLine.split(',').slice(7, 10)).toEqual(['123457', '9259', '7.50']);
+    expect(copLine.split(',').slice(7, 13)).toEqual([
+      '',
+      '123457',
+      '0',
+      '9259',
+      '9259',
+      '7.50',
+    ]);
+  });
+
+  it('la rebaja de precio frente al catálogo sale con su importe (SEC-041)', () => {
+    const reduced: DiscountReportRowView = {
+      ...row,
+      currency: 'COP',
+      catalogPrice: 1000000,
+      price: 500000,
+      priceReduction: 500000,
+      itemDiscount: 0,
+      discount: 500000,
+      percent: 50,
+    };
+    const line = toDiscountReportCsv([reduced]).slice(1).split('\r\n')[1];
+    expect(line.split(',').slice(7, 13)).toEqual([
+      '1000000',
+      '500000',
+      '500000',
+      '0',
+      '500000',
+      '50.00',
+    ]);
+    expect(DISCOUNT_REPORT_CSV_HEADER.slice(7, 13)).toEqual([
+      'Precio de catálogo',
+      'Precio',
+      'Rebaja de precio',
+      'Descuento del ítem',
+      'Descuento total',
+      'Descuento (%)',
+    ]);
   });
 
   it('el diente también va entre comillas y protegido (dato heredado sin validar)', () => {

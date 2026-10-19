@@ -11,14 +11,15 @@ import {
 } from '../../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../domain/entities/treatment-plan-item.entity';
 import {
-  AddTreatmentPlanItemRepoInput,
   CreateTreatmentPlanRepoInput,
   DecideBulkDiscount,
+  DecideItemChange,
+  DecideNewItem,
   DiscountStamp,
   DecidePlanChange,
+  DoneMirrorInput,
   PaymentPlanCancellation,
   TreatmentPlanRepository,
-  UpdateTreatmentPlanItemRepoInput,
 } from '../../../domain/ports/treatment-plan-repository.port';
 import {
   AlternativeSource,
@@ -111,6 +112,7 @@ export class InMemoryTreatmentPlanRepository
       toothNumber: overrides.toothNumber ?? '11',
       surfaces: overrides.surfaces ?? [],
       catalogItemId: overrides.catalogItemId ?? 'catalog-1',
+      catalogPrice: overrides.catalogPrice ?? null,
       price: overrides.price ?? 100,
       discount: overrides.discount ?? 0,
       discountReason: overrides.discountReason ?? null,
@@ -160,6 +162,7 @@ export class InMemoryTreatmentPlanRepository
       toothNumber: row.toothNumber,
       surfaces: row.surfaces,
       catalogItemId: row.catalogItemId,
+      catalogPrice: row.catalogPrice,
       price: row.price,
       discount: row.discount,
       discountReason: row.discountReason,
@@ -217,18 +220,38 @@ export class InMemoryTreatmentPlanRepository
   }
 
   findPlanById(id: string): Promise<TreatmentPlanWithItems | null> {
+    return Promise.resolve(this.lockedPlan(id));
+  }
+
+  /**
+   * El plan tal como lo relee el repositorio real dentro de su transacción,
+   * con la fila bloqueada (BE-036): no pasa por `findPlanById`, que una spec
+   * puede sustituir por una lectura previa ya vieja.
+   */
+  private lockedPlan(id: string): TreatmentPlanWithItems | null {
     const row = this.plans.find((p) => p.id === id && p.deletedAt === null);
     if (!row) {
-      return Promise.resolve(null);
+      return null;
     }
     const items = this.items
       .filter((i) => i.planId === id && i.deletedAt === null)
       .map((i) => this.toItemEntity(i));
-    return Promise.resolve({
+    return {
       ...this.toPlanEntity(row),
       items,
       acceptance: row.acceptance,
-    });
+    };
+  }
+
+  /** Igual que el repositorio real: `decide` que lanza no escribe nada. */
+  private decided<T>(decide: () => T): Promise<T> {
+    try {
+      return Promise.resolve(decide());
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
   }
 
   listPlansByPatient(patientId: string): Promise<TreatmentPlan[]> {
@@ -383,14 +406,23 @@ export class InMemoryTreatmentPlanRepository
     });
   }
 
-  addItem(input: AddTreatmentPlanItemRepoInput): Promise<TreatmentPlanItem> {
+  async addItem(
+    planId: string,
+    decide: DecideNewItem,
+  ): Promise<TreatmentPlanItem> {
+    const plan = this.lockedPlan(planId);
+    if (!plan) {
+      throw new NotFoundException('Treatment plan not found');
+    }
+    const input = await this.decided(() => decide(plan));
     const row: StoredItem = {
       id: `item-${++seq}`,
       tenantId: 't1',
-      planId: input.planId,
+      planId,
       toothNumber: input.toothNumber,
       surfaces: input.surfaces ?? [],
       catalogItemId: input.catalogItemId,
+      catalogPrice: input.catalogPrice,
       price: input.price,
       discount: input.discount ?? 0,
       discountReason: input.discountReason ?? null,
@@ -403,7 +435,7 @@ export class InMemoryTreatmentPlanRepository
       deletedAt: null,
     };
     this.items.push(row);
-    return Promise.resolve(this.toItemEntity(row));
+    return this.toItemEntity(row);
   }
 
   findItemById(id: string): Promise<TreatmentPlanItem | null> {
@@ -411,18 +443,22 @@ export class InMemoryTreatmentPlanRepository
     return Promise.resolve(row ? this.toItemEntity(row) : null);
   }
 
-  updateItem(
+  /** Último espejo DONE → odontograma que pidió `decide` (Pieza B). */
+  lastMirror: DoneMirrorInput | undefined;
+
+  async updateItem(
     id: string,
-    patch: UpdateTreatmentPlanItemRepoInput,
+    decide: DecideItemChange,
   ): Promise<TreatmentPlanItem> {
     const row = this.items.find((i) => i.id === id && i.deletedAt === null);
-    if (!row) {
-      return Promise.reject(
-        new Error(
-          `InMemoryTreatmentPlanRepository.updateItem: not found ${id}`,
-        ),
-      );
+    const plan = row && this.lockedPlan(row.planId);
+    if (!row || !plan) {
+      throw new NotFoundException('Treatment plan item not found');
     }
+    const { patch, mirror } = await this.decided(() =>
+      decide({ plan, item: this.toItemEntity(row) }),
+    );
+    this.lastMirror = mirror;
     const { discountStamp, ...fields } = patch;
     const definedPatch = Object.fromEntries(
       Object.entries(fields).filter(([, value]) => value !== undefined),
@@ -431,7 +467,7 @@ export class InMemoryTreatmentPlanRepository
     if (discountStamp !== undefined) {
       Object.assign(row, this.stampColumns(discountStamp));
     }
-    return Promise.resolve(this.toItemEntity(row));
+    return this.toItemEntity(row);
   }
 
   /** Igual que el repositorio real: la sede es la del request (o la principal). */
@@ -445,43 +481,39 @@ export class InMemoryTreatmentPlanRepository
       : { discountById: null, discountAt: null, discountLocationId: null };
   }
 
-  applyBulkDiscount(
+  async applyBulkDiscount(
     planId: string,
     itemIds: string[],
     decide: DecideBulkDiscount,
   ): Promise<TreatmentPlanItem[]> {
     const ids = [...new Set(itemIds)];
+    const plan = this.lockedPlan(planId);
     const rows = this.items.filter(
       (i) => ids.includes(i.id) && i.planId === planId && i.deletedAt === null,
     );
+    if (!plan) {
+      throw new NotFoundException('Plan de tratamiento no encontrado');
+    }
     if (rows.length !== ids.length) {
-      return Promise.reject(
-        new NotFoundException(
-          'Algún ítem no existe o no es de este plan de tratamiento.',
-        ),
+      throw new NotFoundException(
+        'Algún ítem no existe o no es de este plan de tratamiento.',
       );
     }
-    let changes: ReturnType<DecideBulkDiscount>;
-    try {
-      changes = decide(rows.map((r) => this.toItemEntity(r)));
-    } catch (error) {
-      return Promise.reject(
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
-    return Promise.resolve(
-      changes.map((change) => {
-        const row = rows.find((r) => r.id === change.itemId)!;
-        Object.assign(row, {
-          discount: change.discount,
-          discountReason: change.discountReason,
-          discountReasonNote: change.discountReasonNote,
-          ...this.stampColumns(change.discountStamp),
-          updatedAt: NOW,
-        });
-        return this.toItemEntity(row);
-      }),
+    const changes = await this.decided(() =>
+      decide({ plan, items: rows.map((r) => this.toItemEntity(r)) }),
     );
+    return changes.map((change) => {
+      const { itemId, discountStamp, ...fields } = change;
+      const row = rows.find((r) => r.id === itemId)!;
+      const definedFields = Object.fromEntries(
+        Object.entries(fields).filter(([, value]) => value !== undefined),
+      );
+      Object.assign(row, definedFields, { updatedAt: NOW });
+      if (discountStamp !== undefined) {
+        Object.assign(row, this.stampColumns(discountStamp));
+      }
+      return this.toItemEntity(row);
+    });
   }
 
   softDeleteItem(id: string): Promise<void> {

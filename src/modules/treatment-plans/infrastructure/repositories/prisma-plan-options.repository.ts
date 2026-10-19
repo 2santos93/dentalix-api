@@ -117,6 +117,8 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             toothNumber: item.toothNumber,
             surfaces: item.surfaces,
             catalogItemId: item.catalogItemId,
+            // SEC-041: la referencia de la rebaja de precio viaja con el ítem.
+            catalogPrice: item.catalogPrice,
             price: item.price,
             discount: item.discount,
             // DX-204: la alternativa copia el descuento tal como se dio.

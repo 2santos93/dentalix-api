@@ -192,18 +192,16 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
         const mirror = { patientId: s.patientId, kind: CatalogKind.PROCEDURE };
         const results = await Promise.all([
           inTenant(() =>
-            plans.updateItem(
-              itemId,
-              { status: TreatmentPlanItemStatus.DONE },
+            plans.updateItem(itemId, () => ({
+              patch: { status: TreatmentPlanItemStatus.DONE },
               mirror,
-            ),
+            })),
           ),
           inTenant(() =>
-            plans.updateItem(
-              itemId,
-              { status: TreatmentPlanItemStatus.DONE },
+            plans.updateItem(itemId, () => ({
+              patch: { status: TreatmentPlanItemStatus.DONE },
               mirror,
-            ),
+            })),
           ),
         ]);
 
@@ -218,11 +216,10 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
       // rechaza el INSERT dentro de la misma transacción del cambio de estado.
       await expect(
         inTenant(() =>
-          plans.updateItem(
-            itemId,
-            { status: TreatmentPlanItemStatus.DONE },
-            { patientId: randomUUID(), kind: CatalogKind.PROCEDURE },
-          ),
+          plans.updateItem(itemId, () => ({
+            patch: { status: TreatmentPlanItemStatus.DONE },
+            mirror: { patientId: randomUUID(), kind: CatalogKind.PROCEDURE },
+          })),
         ),
       ).rejects.toMatchObject({ code: 'P2003' });
 

@@ -56,7 +56,7 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
 
   @ApiPropertyOptional({
     description:
-      'Explicit price (at most 2 decimal places); if omitted, falls back to the catalog item defaultPrice (400 if neither is set)',
+      'Explicit price (at most 2 decimal places); if omitted, falls back to the catalog item defaultPrice (400 if neither is set). SEC-041: un precio por debajo del de catálogo cuenta como descuento (tope del rol y motivo de la política)',
     maximum: MONEY_MAX,
   })
   @IsOptional()

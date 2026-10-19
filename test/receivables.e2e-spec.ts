@@ -655,10 +655,24 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
 
     // Cambios del plan: un ítem más, realizado, otro retirado, y un plan de
     // cuotas sobre el saldo.
+    // Un procedimiento sin precio de catálogo (ítem libre): en un plan ya
+    // aceptado, 40.000 frente a un catálogo de 100.000 sería una rebaja de
+    // precio y no se admite (SEC-041).
+    const freeD = await send(
+      'post',
+      '/catalog/items',
+      {
+        code: 'CARTERA-D-LIBRE',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Ajuste oclusal',
+        color: '#2A2B3C',
+      },
+      201,
+    );
     const item3 = await send(
       'post',
       `/treatment-plans/${plan.id}/items`,
-      { toothNumber: '31', catalogItemId: catalogD.id, price: 40000 },
+      { toothNumber: '31', catalogItemId: freeD.id, price: 40000 },
       201,
     );
     await send(
