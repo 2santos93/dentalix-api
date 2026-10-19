@@ -18,6 +18,7 @@ import type { LocationScheduleRepository } from '../../../location-schedule/doma
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { InMemoryWaitlistRepository } from '../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
+import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { BusinessHours } from '../../../location-schedule/application/business-hours';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
@@ -55,6 +56,9 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    arrivedAt: null,
+    seatedAt: null,
+    readyForCheckoutAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -83,6 +87,8 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
+    undoArrival: () => Promise.resolve(null),
+    listInClinic: () => Promise.resolve([]),
     ...rest,
     update: (id: string, patch: UpdateAppointmentRepoInput) =>
       update
@@ -128,6 +134,14 @@ function makeStaff(known?: string[]): StaffRepository {
   } as unknown as StaffRepository;
 }
 
+// Doble de las sedes (DX-200): la zona con la que se decide qué día es hoy.
+function makeLocations(): LocationRepository {
+  return {
+    findById: (id: string) =>
+      Promise.resolve({ id, timeZone: 'America/Bogota' }),
+  } as unknown as LocationRepository;
+}
+
 // Doble de la auditoría que guarda lo que recibe.
 function makeAudit(drafts: AuditEventDraft[] = []): RecordAuditEventUseCase {
   return {
@@ -151,6 +165,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeStaff(),
       makeAudit(),
       makeBlocks(),
+      makeLocations(),
     );
 
     await expect(
@@ -184,6 +199,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeStaff(),
       makeAudit(),
       makeBlocks(),
+      makeLocations(),
     );
 
     const result = await uc.execute(existing.id, {
@@ -228,6 +244,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeStaff(),
       makeAudit(),
       makeBlocks(),
+      makeLocations(),
     );
 
     const result = await uc.execute(existing.id, {
@@ -260,6 +277,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeStaff(),
       makeAudit(),
       makeBlocks(),
+      makeLocations(),
     );
 
     await expect(
@@ -284,6 +302,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeStaff(),
       makeAudit(),
       makeBlocks(),
+      makeLocations(),
     );
 
     await expect(
@@ -310,6 +329,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       // Shift by 15 minutes — the new window still overlaps the row's OWN
@@ -342,6 +362,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -372,6 +393,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -410,6 +432,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -436,6 +459,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -456,6 +480,8 @@ describe('UpdateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        undoArrival: () => Promise.resolve(null),
+        listInClinic: () => Promise.resolve([]),
         update: (): Promise<Appointment> => Promise.reject(boom),
       });
       const uc = new UpdateAppointmentUseCase(
@@ -464,6 +490,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(uc.execute('a1', { notes: 'x' })).rejects.toBe(boom);
@@ -493,6 +520,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -517,6 +545,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -555,6 +584,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       const result = await uc.execute('a1', {
@@ -585,6 +615,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       const result = await uc.execute('a1', { notes: 'El paciente asistió' });
@@ -613,6 +644,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -637,6 +669,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -662,6 +695,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -701,6 +735,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -724,6 +759,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(['prov1']),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
       await expect(
         uc.execute(existing.id, { providerId: 'intruso' }),
@@ -751,6 +787,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(existing.id, { providerId: PROV2 });
@@ -790,6 +827,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await expect(
@@ -808,6 +846,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(drafts),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(
@@ -853,6 +892,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(drafts),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(
@@ -904,6 +944,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(blocks),
+        makeLocations(),
       );
 
       await expect(
@@ -927,6 +968,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(blocks),
+        makeLocations(),
       );
 
       await expect(
@@ -952,6 +994,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(blocks),
+        makeLocations(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -975,6 +1018,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(blocks),
+        makeLocations(),
       );
 
       await expect(
@@ -997,6 +1041,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(drafts),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(
@@ -1036,6 +1081,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CONFIRMED });
@@ -1076,6 +1122,7 @@ describe('UpdateAppointmentUseCase', () => {
           makeStaff(),
           makeAudit(drafts),
           makeBlocks(),
+          makeLocations(),
         );
 
         await uc.execute(
@@ -1114,6 +1161,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(drafts),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(
@@ -1157,6 +1205,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
@@ -1181,6 +1230,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
@@ -1216,6 +1266,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(drafts),
         makeBlocks(),
+        makeLocations(),
       );
       return { repo, drafts, uc };
     }
@@ -1364,6 +1415,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeStaff(),
         makeAudit(),
         makeBlocks(),
+        makeLocations(),
       );
       await expect(
         uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),

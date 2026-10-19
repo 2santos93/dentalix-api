@@ -3,11 +3,17 @@ import { AppointmentStatus } from '@prisma/client';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../../waitlist/domain/waitlist-rules';
 import { Appointment } from '../../../domain/entities/appointment.entity';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
+import {
+  PATIENT_FLOW_MESSAGES,
+  isInClinic,
+} from '../../../domain/patient-flow';
 import type { InMemoryWaitlistRepository } from '../../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import {
   AppointmentRepository,
   AppointmentUpdate,
   CreateAppointmentRepoInput,
+  InClinicAppointment,
+  ListInClinicParams,
   ListAppointmentsByRangeParams,
   ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
@@ -18,7 +24,11 @@ import {
 // fake still has to honour "non-deleted only" like the real Prisma repo, so
 // it tracks `deletedAt` on the stored row and strips it via `toEntity`
 // (mirrors `mapToEntity` in prisma-appointment.repository.ts).
-type StoredAppointment = Appointment & { deletedAt: Date | null };
+type StoredAppointment = Appointment & {
+  deletedAt: Date | null;
+  /** DX-200: a qué vuelve «Deshacer llegada» (no sale en la entidad). */
+  preArrivalStatus: AppointmentStatus | null;
+};
 
 let seq = 0;
 
@@ -71,6 +81,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       confirmationSentAt: overrides.confirmationSentAt ?? null,
       callbackRequestedAt: overrides.callbackRequestedAt ?? null,
       wantsEarlier: overrides.wantsEarlier ?? false,
+      arrivedAt: overrides.arrivedAt ?? null,
+      seatedAt: overrides.seatedAt ?? null,
+      readyForCheckoutAt: overrides.readyForCheckoutAt ?? null,
+      preArrivalStatus: overrides.preArrivalStatus ?? null,
       createdAt: overrides.createdAt ?? now,
       updatedAt: overrides.updatedAt ?? now,
       deletedAt: overrides.deletedAt ?? null,
@@ -103,6 +117,9 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       confirmationSentAt: row.confirmationSentAt,
       callbackRequestedAt: row.callbackRequestedAt,
       wantsEarlier: row.wantsEarlier,
+      arrivedAt: row.arrivedAt,
+      seatedAt: row.seatedAt,
+      readyForCheckoutAt: row.readyForCheckoutAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -140,6 +157,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       confirmationSentAt: null,
       callbackRequestedAt: null,
       wantsEarlier: input.wantsEarlier ?? false,
+      arrivedAt: null,
+      seatedAt: null,
+      readyForCheckoutAt: null,
+      preArrivalStatus: null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -229,6 +250,9 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     ) {
       return Promise.reject(new ConflictException(WANTS_EARLIER_GONE_MESSAGE));
     }
+    if (patch.expectStatus !== undefined && row.status !== patch.expectStatus) {
+      return Promise.reject(new ConflictException(PATIENT_FLOW_MESSAGES.stale));
+    }
     // `revokeConfirmations` es una orden al repo (revocar enlaces), no un campo.
     const definedPatch = Object.fromEntries(
       Object.entries(patch).filter(
@@ -237,7 +261,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           key !== 'revokeConfirmations' &&
           key !== 'enqueueWaitlist' &&
           key !== 'resolveWaitlist' &&
-          key !== 'requireWantsEarlier',
+          key !== 'requireWantsEarlier' &&
+          key !== 'expectStatus',
       ),
     );
     Object.assign(row, definedPatch, {
@@ -264,5 +289,39 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         enqueued && enqueued.reopened ? enqueued.id : null,
       resolvedWaitlistEntryId,
     });
+  }
+
+  undoArrival(id: string): Promise<Appointment | null> {
+    const row = this.rows.find((r) => r.id === id && r.deletedAt === null);
+    if (
+      !row ||
+      row.status !== AppointmentStatus.ARRIVED ||
+      row.preArrivalStatus === null
+    ) {
+      return Promise.resolve(null);
+    }
+    Object.assign(row, {
+      status: row.preArrivalStatus,
+      preArrivalStatus: null,
+      arrivedAt: null,
+    });
+    return Promise.resolve(this.toEntity(row));
+  }
+
+  /** Test helper: nombres de los profesionales que devuelve `listInClinic`. */
+  readonly providerNames = new Map<string, string>();
+
+  listInClinic(params: ListInClinicParams): Promise<InClinicAppointment[]> {
+    const items = this.rows
+      .filter((r) => r.deletedAt === null && isInClinic(r.status))
+      .filter((r) => r.locationId === params.locationId)
+      .filter((r) => r.start >= params.from && r.start < params.to)
+      .filter((r) => !params.providerId || r.providerId === params.providerId)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .map((r) => ({
+        ...this.toEntity(r),
+        providerName: this.providerNames.get(r.providerId) ?? null,
+      }));
+    return Promise.resolve(items);
   }
 }

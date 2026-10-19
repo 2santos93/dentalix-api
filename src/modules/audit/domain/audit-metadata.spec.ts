@@ -123,6 +123,31 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     });
   });
 
+  describe('status (DX-200: flujo del paciente en la clínica)', () => {
+    it('guarda los códigos de estado antes y después', () => {
+      expect(
+        sanitizeAuditMetadata({
+          reason: 'PATIENT_FLOW',
+          status: { from: 'CONFIRMED', to: 'ARRIVED' },
+        }),
+      ).toEqual({
+        reason: 'PATIENT_FLOW',
+        status: { from: 'CONFIRMED', to: 'ARRIVED' },
+      });
+    });
+
+    it('descarta el cambio entero si alguno no es un código', () => {
+      expect(
+        sanitizeAuditMetadata({
+          status: { from: 'CONFIRMED', to: 'llegó tarde' },
+        }),
+      ).toEqual({});
+      expect(sanitizeAuditMetadata({ status: { from: 'ARRIVED' } })).toEqual(
+        {},
+      );
+    });
+  });
+
   describe('origin (DX-128: de dónde salió un cambio de comunicación)', () => {
     it.each(['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF', 'JOB'])(
       'guarda %s',

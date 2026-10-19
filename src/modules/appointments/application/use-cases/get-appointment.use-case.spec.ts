@@ -27,6 +27,9 @@ function fakeAppointment(id: string): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    arrivedAt: null,
+    seatedAt: null,
+    readyForCheckoutAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
@@ -48,6 +51,8 @@ function makeRepo(
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
+    undoArrival: () => Promise.resolve(null),
+    listInClinic: () => Promise.resolve([]),
     update: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,

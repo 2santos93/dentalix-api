@@ -3,6 +3,8 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -34,6 +36,15 @@ import {
 import { PatientBalanceFlags } from '../../collections/application/patient-balance-flags';
 import type { OverdueBalance } from '../../collections/domain/overdue-balance';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
+import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
+import {
+  ListInClinicUseCase,
+  type InClinicView,
+} from '../application/use-cases/list-in-clinic.use-case';
+import {
+  FRONT_DESK_ROLES,
+  PATIENT_FLOW_MESSAGES,
+} from '../domain/patient-flow';
 import { CreateAppointmentUseCase } from '../application/use-cases/create-appointment.use-case';
 import { ListAppointmentsUseCase } from '../application/use-cases/list-appointments.use-case';
 import { GetAppointmentUseCase } from '../application/use-cases/get-appointment.use-case';
@@ -96,6 +107,7 @@ export class AppointmentsController {
     // DX-150: marca «Saldo vencido» de las tarjetas de la agenda.
     private readonly balanceFlags: PatientBalanceFlags,
     private readonly audit: RecordAuditEventUseCase,
+    private readonly listInClinic: ListInClinicUseCase,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -229,6 +241,29 @@ export class AppointmentsController {
     });
   }
 
+  // Antes de `:id`, por la misma razón que «openings».
+  @Get('in-clinic')
+  @ApiOkResponse({
+    type: InClinicViewDto,
+    description:
+      'DX-200 panel «En clínica» de la sede del request (X-Location-Id): en espera, en sillón y listo para cobrar de un día civil en la zona de la sede, con los minutos calculados con el reloj del servidor y la puntualidad de la llegada. Solo nombre y horas (nada clínico). DENTIST: solo sus pacientes («Te esperan»); RECEPTION, ASSISTANT y ADMIN: toda la sede.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Sin sede (X-Location-Id), sede de otra clínica o fecha inválida',
+  })
+  inClinic(
+    @Query() query: InClinicQueryDto,
+    @Req() req: { user: JwtPayload },
+  ): Promise<InClinicView> {
+    return this.listInClinic.execute({
+      locationId: this.tenantContext.getLocationId(),
+      date: query.date,
+      role: isTenantPayload(req.user) ? req.user.role : null,
+      userId: req.user.sub,
+    });
+  }
+
   @Get(':id')
   @ApiOkResponse({ type: AppointmentDto })
   get(@Param('id') id: string): Promise<Appointment> {
@@ -238,13 +273,16 @@ export class AppointmentsController {
   @Patch(':id')
   @ApiOkResponse({ type: AppointmentWriteDto })
   @ApiBadRequestResponse({ description: 'Datos inválidos o al pasado' })
-  @ApiForbiddenResponse({ description: 'Rol sin permiso de agenda' })
+  @ApiForbiddenResponse({
+    description:
+      'Rol sin permiso de agenda, o sin permiso para ese paso del flujo en la clínica (DX-200)',
+  })
   @ApiNotFoundResponse({
     description: 'Cita o profesional no encontrados en esta clínica',
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), o el nuevo horario está bloqueado (DX-122)',
+      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
@@ -267,6 +305,32 @@ export class AppointmentsController {
       },
       this.auditContext(req),
     );
+  }
+
+  @Post(':id/undo-arrival')
+  @HttpCode(HttpStatus.OK)
+  @Roles(...FRONT_DESK_ROLES)
+  @RolesDeniedMessage(PATIENT_FLOW_MESSAGES.arriveForbidden)
+  @ApiOkResponse({
+    type: AppointmentWriteDto,
+    description:
+      'DX-200 «Deshacer llegada»: el paciente marcado «Llegó» por error vuelve al estado que tenía (SCHEDULED o CONFIRMED) y se borra `arrivedAt`. Solo desde ARRIVED (antes de pasar al sillón); queda en auditoría (`ARRIVAL_UNDONE`).',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo RECEPTION, ASSISTANT y ADMIN',
+  })
+  @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
+  @ApiConflictResponse({
+    description:
+      'La cita no está en espera (ya pasó al sillón, o nunca llegó), o cambió mientras tanto',
+  })
+  undoArrival(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<AppointmentWriteResult> {
+    const ctx = this.auditContext(req);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateAppointment.undoArrival(id, ctx);
   }
 
   @Patch(':id/opening')

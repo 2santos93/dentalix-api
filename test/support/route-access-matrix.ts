@@ -300,6 +300,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointments/openings/:locationId/offers': BILLING,
   'PATCH /appointments/openings/offers/:id': BILLING,
   'PATCH /appointments/:id/opening': BILLING,
+  // DX-200 flujo del paciente en la clínica (loop/informes/DX-200.md): el
+  // panel «En clínica», quien ve la agenda (el odontólogo, solo sus
+  // pacientes: lo filtra el caso de uso); «Deshacer llegada», el mostrador.
+  // Los pasos del flujo van por PATCH /appointments/:id (403 del caso de uso).
+  'GET /appointments/in-clinic': EVERY_ROLE,
+  'POST /appointments/:id/undo-arrival': roles(
+    'ADMIN',
+    'ASSISTANT',
+    'RECEPTION',
+  ),
   'GET /schedule-blocks': EVERY_ROLE,
   'GET /schedule-blocks/affected-appointments': EVERY_ROLE,
   'POST /schedule-blocks': roles('ADMIN', 'DENTIST', 'RECEPTION'),

@@ -16,10 +16,16 @@ import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../waitlist/domain/waitlist-rul
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../domain/wants-earlier';
 import {
+  IN_CLINIC_STATUSES,
+  PATIENT_FLOW_MESSAGES,
+} from '../../domain/patient-flow';
+import {
   AppointmentRepository,
   AppointmentUpdate,
   CreateAppointmentRepoInput,
+  InClinicAppointment,
   ListAppointmentsByRangeParams,
+  ListInClinicParams,
   ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
@@ -75,6 +81,9 @@ function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
     confirmationSentAt: appointment.confirmationSentAt,
     callbackRequestedAt: appointment.callbackRequestedAt,
     wantsEarlier: appointment.wantsEarlier,
+    arrivedAt: appointment.arrivedAt,
+    seatedAt: appointment.seatedAt,
+    readyForCheckoutAt: appointment.readyForCheckoutAt,
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };
@@ -291,8 +300,22 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         enqueueWaitlist,
         resolveWaitlist,
         requireWantsEarlier,
+        expectStatus,
         ...data
       } = patch;
+      // DX-200: paso del flujo en la clínica. Condición (el estado leído) y
+      // cambio en la MISMA sentencia: el UPDATE bloquea la fila, así que si dos
+      // personas cambian el estado a la vez la segunda no cumple la condición.
+      // Todo el cambio va junto: la CHECK de horas se mira por sentencia.
+      if (expectStatus !== undefined) {
+        const { count } = await tx.appointment.updateMany({
+          where: { id, deletedAt: null, status: expectStatus },
+          data,
+        });
+        if (count === 0) {
+          throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+        }
+      }
       // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
       // bloquea la fila: si dos personas la mueven a la vez, la segunda
       // re-evalúa la condición tras el COMMIT de la primera y no la cumple.
@@ -310,11 +333,17 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
         }
       }
-      const appointment = await tx.appointment.update({
-        where: { id },
-        data,
-        include: INCLUDE_PATIENT_NAME,
-      });
+      const appointment =
+        expectStatus !== undefined
+          ? await tx.appointment.findFirstOrThrow({
+              where: { id },
+              include: INCLUDE_PATIENT_NAME,
+            })
+          : await tx.appointment.update({
+              where: { id },
+              data,
+              include: INCLUDE_PATIENT_NAME,
+            });
       if (revokeConfirmations) {
         await tx.appointmentConfirmation.updateMany({
           where: { appointmentId: id, revokedAt: null, respondedAt: null },
@@ -345,6 +374,68 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           enqueued && enqueued.reopened ? enqueued.id : null,
         resolvedWaitlistEntryId,
       };
+    });
+  }
+
+  async undoArrival(id: string): Promise<Appointment | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Una sola sentencia condicional: vuelve al estado previo SOLO si sigue
+      // en ARRIVED (la CHECK de la tabla garantiza que entonces lo tiene).
+      const reverted = await tx.$executeRaw`
+        UPDATE "appointments"
+           SET "status" = "preArrivalStatus",
+               "preArrivalStatus" = NULL,
+               "arrivedAt" = NULL,
+               "updatedAt" = timezone('UTC', now())
+         WHERE "id" = ${id}::uuid
+           AND "deletedAt" IS NULL
+           AND "status" = 'ARRIVED'`;
+      if (reverted === 0) return null;
+      const appointment = await tx.appointment.findFirstOrThrow({
+        where: { id },
+        include: INCLUDE_PATIENT_NAME,
+      });
+      return mapToEntity(appointment);
+    });
+  }
+
+  async listInClinic(
+    params: ListInClinicParams,
+  ): Promise<InClinicAppointment[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // `appointments_tenant_location_in_clinic_idx` (parcial). RLS acota a
+      // la clínica; la sede y el día los pone el caso de uso.
+      const appointments = await tx.appointment.findMany({
+        where: {
+          locationId: params.locationId,
+          deletedAt: null,
+          status: { in: [...IN_CLINIC_STATUSES] },
+          start: { gte: params.from, lt: params.to },
+          ...(params.providerId ? { providerId: params.providerId } : {}),
+        },
+        orderBy: [{ start: 'asc' }, { id: 'asc' }],
+        include: INCLUDE_PATIENT_NAME,
+      });
+      const providerIds = [...new Set(appointments.map((a) => a.providerId))];
+      // El nombre del profesional, a través de la membresía (con RLS): solo
+      // aparece si es de esta clínica. Sin filtrar `deletedAt`: si dejó la
+      // clínica, la cita sigue siendo suya.
+      const memberships =
+        providerIds.length === 0
+          ? []
+          : await tx.clinicMembership.findMany({
+              where: { userId: { in: providerIds } },
+              orderBy: { createdAt: 'desc' },
+              select: { userId: true, user: { select: { fullName: true } } },
+            });
+      const names = new Map<string, string>();
+      for (const m of memberships) {
+        if (!names.has(m.userId)) names.set(m.userId, m.user.fullName);
+      }
+      return appointments.map((a) => ({
+        ...mapToEntity(a),
+        providerName: names.get(a.providerId) ?? null,
+      }));
     });
   }
 }

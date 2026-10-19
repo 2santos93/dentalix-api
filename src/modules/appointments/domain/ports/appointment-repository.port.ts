@@ -69,6 +69,17 @@ export interface UpdateAppointmentRepoInput {
    * misma sentencia (a prueba de carreras): si ya no se cumple, 409.
    */
   requireWantsEarlier?: boolean;
+  /** DX-200: horas del flujo en la clínica (las fija el use-case, nunca el cliente). */
+  arrivedAt?: Date | null;
+  seatedAt?: Date | null;
+  readyForCheckoutAt?: Date | null;
+  /** DX-200: a qué vuelve «Deshacer llegada»; null al salir de ARRIVED. */
+  preArrivalStatus?: AppointmentStatus | null;
+  /**
+   * DX-200: cambiar el estado SOLO si sigue siendo este (condición y cambio en
+   * la misma sentencia): si otra persona lo cambió antes, 409 y nada cambia.
+   */
+  expectStatus?: AppointmentStatus;
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */
@@ -99,6 +110,21 @@ export interface ListUpcomingAppointmentsParams {
   from: Date;
   to: Date;
   limit: number;
+}
+
+/** DX-200: panel «En clínica» de una sede y un día civil. */
+export interface ListInClinicParams {
+  locationId: string;
+  /** Instantes del día civil en la zona de la sede: `[from, to)` sobre `start`. */
+  from: Date;
+  to: Date;
+  /** Solo las citas de este profesional (DENTIST: «Te esperan»). */
+  providerId?: string;
+}
+
+/** Una cita del panel con el nombre de su profesional (sin datos clínicos). */
+export interface InClinicAppointment extends Appointment {
+  providerName: string | null;
 }
 
 export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
@@ -153,4 +179,17 @@ export interface AppointmentRepository {
     id: string,
     patch: UpdateAppointmentRepoInput,
   ): Promise<AppointmentUpdate>;
+
+  /**
+   * DX-200 «Deshacer llegada»: si la cita SIGUE en ARRIVED, vuelve al estado
+   * previo y borra la hora de llegada, en una sola sentencia condicional.
+   * `null` si ya no estaba en ARRIVED (otra persona la movió) o no existe.
+   */
+  undoArrival(id: string): Promise<Appointment | null>;
+
+  /**
+   * DX-200: citas vivas de la sede en ARRIVED, IN_CHAIR o READY_FOR_CHECKOUT
+   * cuyo `start` cae en `[from, to)`, opcionalmente de un profesional.
+   */
+  listInClinic(params: ListInClinicParams): Promise<InClinicAppointment[]>;
 }

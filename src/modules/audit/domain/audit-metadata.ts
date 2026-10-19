@@ -17,6 +17,12 @@ export interface AuditMetadata {
    */
   move?: { from: AuditAppointmentSlot; to: AuditAppointmentSlot };
   /**
+   * DX-200: cambio de estado de una cita en el flujo de la clínica (llegó, en
+   * sillón, listo para cobrar, salida, «Deshacer llegada»): solo los códigos
+   * del estado antes y después.
+   */
+  status?: { from: string; to: string };
+  /**
    * DX-128: de dónde salió un cambio de canal, de opt-in de WhatsApp o una
    * baja de recordatorios: en persona, enlace, mensaje del paciente, o
    * anotado por el personal. DX-150: `JOB` = lo hizo un trabajo programado
@@ -124,6 +130,21 @@ function appointmentMove(value: unknown): AuditMetadata['move'] | null {
   return from && to ? { from, to } : null;
 }
 
+/** Los dos códigos de estado, o nada. */
+function statusChange(value: unknown): AuditMetadata['status'] | null {
+  if (!isRecord(value)) return null;
+  const { from, to } = value;
+  if (
+    typeof from !== 'string' ||
+    typeof to !== 'string' ||
+    !CODE.test(from) ||
+    !CODE.test(to)
+  ) {
+    return null;
+  }
+  return { from, to };
+}
+
 /** Lote/REF con formato de código y nº de filas; si no, nada. */
 function search(value: unknown): AuditSearch | null {
   if (!isRecord(value)) return null;
@@ -171,6 +192,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   }
   const move = appointmentMove(input.move);
   if (move) out.move = move;
+  const status = statusChange(input.status);
+  if (status) out.status = status;
   const origin = AUDIT_ORIGINS.find((o) => o === input.origin);
   if (origin) out.origin = origin;
   const searched = search(input.search);

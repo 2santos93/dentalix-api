@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaScheduleBlockRepository } from '../src/modules/schedule-blocks/infrastructure/repositories/prisma-schedule-block.repository';
+import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
 import type { LocationScheduleRepository } from '../src/modules/location-schedule/domain/ports/location-schedule-repository.port';
@@ -266,6 +267,7 @@ describe('tipos de cita y agenda en columnas (int, DX-121)', () => {
         staff,
         audit,
         new PrismaScheduleBlockRepository(prisma, tenantContext),
+        new PrismaLocationRepository(prisma, tenantContext),
       );
 
       const move = (id: string) =>
