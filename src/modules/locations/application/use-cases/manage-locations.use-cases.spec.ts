@@ -15,6 +15,7 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     name: 'Sede principal',
     address: null,
     country: 'CO',
+    repsHabilitationCode: null,
     isActive: true,
     timeZone: 'America/Bogota',
     createdAt: new Date('2026-01-01'),
@@ -127,5 +128,46 @@ describe('país de la sede (DX-013)', () => {
       expect.objectContaining({ country: 'ES' }),
     );
     expect(updated.country).toBe('ES');
+  });
+});
+
+describe('UpdateLocationUseCase · REPS (DX-212)', () => {
+  it('guarda el código de 12 dígitos sin espacios', async () => {
+    const update = jest.fn((_id: string, patch: object) =>
+      Promise.resolve(makeLocation(patch)),
+    );
+    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    const result = await uc.execute('loc-1', {
+      repsHabilitationCode: ' 110010123401 ',
+    });
+    expect(update).toHaveBeenCalledWith(
+      'loc-1',
+      expect.objectContaining({ repsHabilitationCode: '110010123401' }),
+    );
+    expect(result.repsHabilitationCode).toBe('110010123401');
+  });
+
+  it('vacío lo quita', async () => {
+    const update = jest.fn((_id: string, patch: object) =>
+      Promise.resolve(makeLocation(patch)),
+    );
+    await new UpdateLocationUseCase(makeRepo({ update })).execute('loc-1', {
+      repsHabilitationCode: '',
+    });
+    expect(update).toHaveBeenCalledWith(
+      'loc-1',
+      expect.objectContaining({ repsHabilitationCode: null }),
+    );
+  });
+
+  it('formato inválido: 400 con el formato esperado', async () => {
+    const update = jest.fn();
+    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    await expect(
+      uc.execute('loc-1', { repsHabilitationCode: '12345' }),
+    ).rejects.toThrow(
+      'El código de habilitación REPS debe tener 12 dígitos (p. ej. 110010123401)',
+    );
+    expect(update).not.toHaveBeenCalled();
   });
 });

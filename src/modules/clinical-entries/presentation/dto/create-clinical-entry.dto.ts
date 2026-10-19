@@ -1,10 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { ClinicalDiagnosisKind } from '@prisma/client';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsOptional,
   IsString,
   IsUUID,
@@ -45,6 +47,37 @@ export class ClinicalEntryAnswerDto {
   @IsOptional()
   @IsBoolean()
   skipped?: boolean;
+}
+
+/** DX-212: diagnóstico CIE-10 de la evolución. */
+export class ClinicalEntryDiagnosisInputDto {
+  @ApiProperty({
+    example: 'K02.1',
+    description:
+      'Código CIE-10 (con o sin punto). Tiene que existir en GET /reference/icd10; si no, 400 «Código CIE-10 no válido».',
+  })
+  @IsString()
+  @MaxLength(10, { message: 'Código CIE-10 no válido' })
+  icd10Code!: string;
+
+  @ApiProperty({
+    enum: ClinicalDiagnosisKind,
+    enumName: 'ClinicalDiagnosisKind',
+  })
+  @IsEnum(ClinicalDiagnosisKind, {
+    message: 'El tipo de diagnóstico debe ser PRINCIPAL o RELACIONADO',
+  })
+  kind!: ClinicalDiagnosisKind;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: '36',
+    description: 'Diente FDI (opcional).',
+  })
+  @IsOptional()
+  @IsString()
+  toothFdi?: string | null;
 }
 
 // NOTE: deliberately NO `tenantId`/`patientId`/`performedById` field —
@@ -105,4 +138,17 @@ export class CreateClinicalEntryDto {
   @ValidateNested({ each: true })
   @Type(() => ClinicalEntryAnswerDto)
   answers?: ClinicalEntryAnswerDto[];
+
+  @ApiPropertyOptional({
+    type: [ClinicalEntryDiagnosisInputDto],
+    maxItems: 4,
+    description:
+      'DX-212: diagnósticos CIE-10, guardados en la misma transacción e inalterables. Como máximo 1 PRINCIPAL y 3 RELACIONADO (400 en español si no); los relacionados exigen el principal. Opcional: sin diagnóstico la evolución se guarda igual.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => ClinicalEntryDiagnosisInputDto)
+  diagnoses?: ClinicalEntryDiagnosisInputDto[];
 }

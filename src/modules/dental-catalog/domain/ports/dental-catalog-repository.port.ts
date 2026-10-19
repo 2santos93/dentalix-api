@@ -10,6 +10,7 @@ export interface CreateDentalCatalogItemRepoInput {
   labelPt?: string;
   color: string;
   defaultPrice?: number;
+  cupsCode?: string | null;
   active?: boolean;
 }
 
@@ -22,6 +23,8 @@ export interface UpdateDentalCatalogItemRepoInput {
   labelPt?: string | null;
   color?: string;
   defaultPrice?: number | null;
+  /** DX-212: ya normalizado y validado por el caso de uso; null lo quita. */
+  cupsCode?: string | null;
   active?: boolean;
 }
 

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -10,6 +11,11 @@ import type {
   Location,
   LocationRepository,
 } from '../../domain/ports/location-repository.port';
+import {
+  REPS_FORMAT_MESSAGE,
+  isValidRepsCode,
+  normalizeRepsCode,
+} from '../../../../shared/validation/health-codes';
 
 @Injectable()
 export class ListLocationsUseCase {
@@ -51,9 +57,15 @@ export class UpdateLocationUseCase {
       name?: string;
       address?: string;
       country?: ClinicCountry;
+      repsHabilitationCode?: string | null;
       isActive?: boolean;
     },
   ): Promise<Location> {
+    // DX-212: código REPS normalizado (vacío = quitarlo) o 400 con el formato.
+    const reps = normalizeRepsCode(patch.repsHabilitationCode);
+    if (reps && !isValidRepsCode(reps)) {
+      throw new BadRequestException(REPS_FORMAT_MESSAGE);
+    }
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException('Location not found');
 
@@ -72,6 +84,7 @@ export class UpdateLocationUseCase {
       name: patch.name?.trim(),
       address: patch.address?.trim(),
       country: patch.country,
+      repsHabilitationCode: reps,
       isActive: patch.isActive,
     });
     if (!updated) throw new NotFoundException('Location not found');

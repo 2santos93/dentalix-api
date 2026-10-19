@@ -1204,6 +1204,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/family-account-statement':
       'patient-responsible-parties.e2e-spec.ts',
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
+    // DX-212: B → 404 sobre la evolución de A.
+    'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
   };
 
   it('cubre toda ruta de clínica con :param (aquí o en el spec citado)', () => {

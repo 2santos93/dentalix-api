@@ -31,6 +31,7 @@ import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { Audit } from '../../audit/presentation/audit.decorator';
 
 /**
  * Sedes de la clínica. LEER lo puede todo el mundo (cualquier rol necesita
@@ -63,6 +64,13 @@ export class LocationsController {
     return this.createLocation.execute(dto);
   }
 
+  // DX-212: la sede lleva el código REPS que reporta el RDA: sus cambios
+  // quedan auditados (campos cambiados, nunca valores).
+  @Audit({
+    action: 'UPDATE',
+    resource: 'LOCATION',
+    resourceId: { param: 'id' },
+  })
   @Patch(':id')
   @Roles(ClinicRole.ADMIN)
   @ApiOkResponse({ type: LocationDto })

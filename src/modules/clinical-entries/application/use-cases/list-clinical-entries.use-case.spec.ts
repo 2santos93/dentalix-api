@@ -23,6 +23,7 @@ function fakeEntry(
     appointment: null,
     createdAt: new Date(entryDate),
     addenda: [],
+    diagnoses: [],
     ...overrides,
   };
 }
@@ -35,6 +36,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
     findAppointment: () => Promise.resolve(null),
+    existingIcd10Codes: () => Promise.resolve(new Set<string>()),
+    loadRdaFacts: () => Promise.resolve(null),
     ...overrides,
   };
 }
@@ -60,6 +63,14 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
   }
 
   findAppointment(): Promise<null> {
+    return Promise.resolve(null);
+  }
+
+  existingIcd10Codes(): Promise<Set<string>> {
+    return Promise.resolve(new Set());
+  }
+
+  loadRdaFacts(): Promise<null> {
     return Promise.resolve(null);
   }
 

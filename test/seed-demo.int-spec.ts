@@ -65,6 +65,8 @@ const TENANT_TABLES = [
   'tooth_records',
   'patient_dentition_events',
   'clinical_entry_addenda',
+  // DX-212: diagnósticos CIE-10 (hijos de clinical_entries).
+  'clinical_entry_diagnoses',
   'clinical_entries',
   'clinical_note_template_prompts',
   'clinical_note_templates',

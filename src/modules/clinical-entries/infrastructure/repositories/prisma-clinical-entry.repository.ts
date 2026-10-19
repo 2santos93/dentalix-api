@@ -6,6 +6,8 @@ import {
   loadLocationTimeZones,
   timeZoneForCountry,
 } from '../../../../shared/locations/location-time-zone';
+import { civilDateIn, civilDayRange } from '../../../../shared/time/civil-day';
+import type { RdaFacts, RdaPerformedItem } from '../../domain/rda-readiness';
 import {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
@@ -23,8 +25,18 @@ const APPOINTMENT_SUMMARY = {
   select: { id: true, start: true, providerId: true },
 } as const;
 
+/** DX-212: diagnósticos con su texto CIE-10, el principal primero. */
+const DIAGNOSES = {
+  orderBy: { position: 'asc' },
+  include: { icd10: { select: { labelEs: true } } },
+} as const;
+
 type PrismaClinicalEntry = Prisma.ClinicalEntryGetPayload<{
-  include: { addenda: true; appointment: typeof APPOINTMENT_SUMMARY };
+  include: {
+    addenda: true;
+    appointment: typeof APPOINTMENT_SUMMARY;
+    diagnoses: typeof DIAGNOSES;
+  };
 }>;
 
 function mapToEntity(
@@ -51,6 +63,14 @@ function mapToEntity(
       : null,
     createdAt: row.createdAt,
     addenda: row.addenda.map(mapAddendum),
+    diagnoses: row.diagnoses.map((d) => ({
+      id: d.id,
+      icd10Code: d.icd10Code,
+      labelEs: d.icd10.labelEs,
+      kind: d.kind,
+      toothFdi: d.toothFdi,
+      position: d.position,
+    })),
   };
 }
 
@@ -120,8 +140,25 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           // de este paciente; la plantilla, de esta clínica.
           appointmentId: input.appointmentId,
           templateId: input.templateId,
+          // DX-212: en la MISMA transacción que la evolución (un trigger
+          // rechaza un diagnóstico añadido a una evolución ya guardada).
+          diagnoses: input.diagnoses?.length
+            ? {
+                // tenantId y patientId los pone la relación (FK compuesta).
+                create: input.diagnoses.map((d) => ({
+                  icd10Code: d.icd10Code,
+                  kind: d.kind,
+                  toothFdi: d.toothFdi,
+                  position: d.position,
+                })),
+              }
+            : undefined,
         },
-        include: { addenda: true, appointment: APPOINTMENT_SUMMARY },
+        include: {
+          addenda: true,
+          appointment: APPOINTMENT_SUMMARY,
+          diagnoses: DIAGNOSES,
+        },
       });
       return mapToEntity(row, await providerNamesOf(tx, [row]));
     });
@@ -181,10 +218,167 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
         include: {
           addenda: { orderBy: ADDENDA_ORDER },
           appointment: APPOINTMENT_SUMMARY,
+          diagnoses: DIAGNOSES,
         },
       });
       const names = await providerNamesOf(tx, rows);
       return rows.map((row) => mapToEntity(row, names));
     });
   }
+
+  async existingIcd10Codes(codes: string[]): Promise<Set<string>> {
+    // Tabla global de referencia (sin RLS): no necesita el tenant.
+    const rows = await this.prisma.icd10Code.findMany({
+      where: { code: { in: codes } },
+      select: { code: true },
+    });
+    return new Set(rows.map((r) => r.code));
+  }
+
+  /**
+   * DX-212. Todo bajo RLS, en una transacción:
+   * - sede: la de la cita ligada o, sin cita, la principal de la clínica
+   *   (la primera activa; la evolución no guarda sede);
+   * - día de la atención: la fecha civil de `entryDate` (la que muestra la
+   *   ficha, en UTC);
+   * - procedimientos realizados: registros del odontograma del paciente de
+   *   tipo PROCEDURE, COMPLETED y hechos en esta clínica, ligados a la
+   *   evolución o registrados ese día en la zona de la sede, sin los anulados
+   *   ni las anulaciones (lo hecho en un plan se espeja ahí al marcarlo DONE);
+   * - autor: su membresía en esta clínica (registro profesional y nombre),
+   *   aunque ya no sea miembro.
+   */
+  async loadRdaFacts(id: string): Promise<RdaFacts | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const entry = await tx.clinicalEntry.findFirst({
+        where: { id, deletedAt: null },
+        select: {
+          id: true,
+          entryDate: true,
+          performedById: true,
+          patient: { select: { id: true, docNumber: true } },
+          appointment: { select: { locationId: true } },
+          diagnoses: { where: { kind: 'PRINCIPAL' }, select: { id: true } },
+        },
+      });
+      if (!entry) return null;
+
+      const locationSelect = {
+        id: true,
+        name: true,
+        country: true,
+        repsHabilitationCode: true,
+      } as const;
+      const location = entry.appointment
+        ? await tx.location.findFirst({
+            where: { id: entry.appointment.locationId },
+            select: locationSelect,
+          })
+        : await tx.location.findFirst({
+            where: { deletedAt: null, isActive: true },
+            orderBy: { createdAt: 'asc' },
+            select: locationSelect,
+          });
+      if (!location) return null;
+
+      const zones = await loadLocationTimeZones(tx, tenantId, [location.id]);
+      const timeZone =
+        zones.get(location.id) ?? timeZoneForCountry(location.country);
+      const day = attentionDay(entry.entryDate, timeZone);
+
+      const [performedItems, author] = await Promise.all([
+        performedItemsOf(tx, entry.patient.id, entry.id, day, timeZone),
+        entry.performedById
+          ? tx.clinicMembership.findFirst({
+              where: { userId: entry.performedById },
+              orderBy: { createdAt: 'desc' },
+              select: {
+                professionalLicense: true,
+                user: { select: { fullName: true } },
+              },
+            })
+          : null,
+      ]);
+
+      return {
+        country: location.country,
+        location: {
+          id: location.id,
+          name: location.name,
+          repsHabilitationCode: location.repsHabilitationCode,
+        },
+        patient: entry.patient,
+        hasPrincipalDiagnosis: entry.diagnoses.length > 0,
+        performedItems,
+        author: {
+          userId: entry.performedById,
+          name: author?.user.fullName ?? null,
+          professionalLicense: author?.professionalLicense ?? null,
+        },
+      };
+    });
+  }
+}
+
+/**
+ * Día civil de la atención. Una fecha elegida a mano o la de la cita llega
+ * como fecha civil (medianoche UTC, la que muestra la ficha); la de «ahora»
+ * (alta sin fecha) es un instante, y su día es el de la zona de la sede.
+ */
+function attentionDay(entryDate: Date, timeZone: string): string {
+  const iso = entryDate.toISOString();
+  return iso.endsWith('T00:00:00.000Z')
+    ? iso.slice(0, 10)
+    : civilDateIn(entryDate, timeZone);
+}
+
+/** Ver `loadRdaFacts`: procedimientos hechos en la atención, con su CUPS. */
+async function performedItemsOf(
+  tx: Prisma.TransactionClient,
+  patientId: string,
+  entryId: string,
+  day: string,
+  timeZone: string,
+): Promise<RdaPerformedItem[]> {
+  const { start, end } = civilDayRange(day, timeZone);
+  const records = await tx.toothRecord.findMany({
+    where: {
+      patientId,
+      deletedAt: null,
+      kind: 'PROCEDURE',
+      status: 'COMPLETED',
+      origin: 'THIS_CLINIC',
+      voidsRecordId: null,
+      catalogItemId: { not: null },
+      OR: [
+        { clinicalEntryId: entryId },
+        { recordedAt: { gte: start, lt: end } },
+      ],
+    },
+    orderBy: { recordedAt: 'asc' },
+    select: { id: true, catalogItemId: true },
+  });
+  if (records.length === 0) return [];
+  const voided = new Set(
+    (
+      await tx.toothRecord.findMany({
+        where: { voidsRecordId: { in: records.map((r) => r.id) } },
+        select: { voidsRecordId: true },
+      })
+    ).map((v) => v.voidsRecordId),
+  );
+  const live = records.filter((r) => !voided.has(r.id));
+  const catalogIds = [...new Set(live.map((r) => r.catalogItemId as string))];
+  const items = await tx.dentalCatalogItem.findMany({
+    where: { id: { in: catalogIds } },
+    select: { id: true, labelEs: true, cupsCode: true },
+  });
+  const byId = new Map(items.map((i) => [i.id, i]));
+  return catalogIds.flatMap((catalogItemId) => {
+    const item = byId.get(catalogItemId);
+    return item
+      ? [{ catalogItemId, name: item.labelEs, cupsCode: item.cupsCode }]
+      : [];
+  });
 }

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ClinicalEntriesController } from './presentation/clinical-entries.controller';
+import { ClinicalEntryRdaController } from './presentation/clinical-entry-rda.controller';
+import { GetRdaReadinessUseCase } from './application/use-cases/get-rda-readiness.use-case';
 import { CreateClinicalEntryUseCase } from './application/use-cases/create-clinical-entry.use-case';
 import { ListClinicalEntriesUseCase } from './application/use-cases/list-clinical-entries.use-case';
 import { CLINICAL_ENTRY_REPOSITORY } from './domain/ports/clinical-entry-repository.port';
@@ -27,12 +29,14 @@ import { ClinicalNoteTemplatesModule } from '../clinical-note-templates/clinical
     PatientsModule,
     ClinicalNoteTemplatesModule,
   ],
-  controllers: [ClinicalEntriesController],
+  controllers: [ClinicalEntriesController, ClinicalEntryRdaController],
   providers: [
     CreateClinicalEntryUseCase,
     ListClinicalEntriesUseCase,
     CreateClinicalEntryAddendumUseCase,
     ListClinicalEntryAddendaUseCase,
+    // DX-212: datos del RDA que faltan en una atención.
+    GetRdaReadinessUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on ClinicalEntriesController.
