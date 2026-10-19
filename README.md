@@ -697,6 +697,43 @@ mismos filtros sin paginar, **solo ADMIN**, y cada descarga deja un evento
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
 
+## Compromiso de pago que se reabre al anular su abono (DX-215)
+
+Un compromiso de pago (DX-150) pasa a `KEPT` cuando los abonos lo cubren. Si
+después se anula (`DELETE /api/v1/payments/:id`, solo ADMIN/RECEPTION con la
+regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
+
+- **En la misma transacción que la anulación** se vuelve a evaluar el ÚLTIMO
+  compromiso `KEPT` del paciente en la moneda del abono, si ese abono contaba
+  para él (misma moneda, registrado desde el compromiso y fechado hasta su
+  día). Con los abonos que siguen vivos: si aún lo cubren, sigue `KEPT`; si no,
+  vuelve a `OPEN` mientras no haya pasado su día en la zona de su sede, o pasa
+  a `BROKEN` desde el día siguiente (`statusAfterVoid` en
+  `payment-promise-rule.ts`, con el reloj de la anulación). Si el paciente ya
+  tiene otro compromiso `OPEN` (uno solo por paciente), queda `BROKEN`: el
+  vigente es el nuevo.
+- **Auditoría**: un `UPDATE` de `PAYMENT_PROMISE` con quien anula, su sede y su
+  petición, `reason: PAYMENT_VOIDED`, `params.paymentId` y `statusChange`
+  (`from: KEPT`, `to: OPEN | BROKEN`). Ni importes ni el texto de las notas.
+  Se escribe en la misma transacción que el cambio (o ninguno de los dos).
+- **`reopenedAt`** (compromiso en la ficha y en la cartera): la última vez que se
+  reabrió, puesta por el servidor de BD en UTC. La web lo enseña como
+  «Reabierto: se anuló el abono que lo cumplía».
+- **La BD solo lo admite por esta vía**: el trigger append-only de
+  `payment_promises` acepta `KEPT → OPEN | BROKEN` únicamente si la MISMA
+  transacción anuló un abono del paciente, en esa moneda y registrado desde el
+  compromiso (la versión viva de la fila es de esa transacción). Ninguna otra
+  columna cambia, `BROKEN` no se reabre y nada se borra.
+- **Concurrencia**: crear un compromiso, cerrarlo (abono o barrido) y reabrirlo
+  toman el mismo candado consultivo por paciente
+  (`payment_promise:<tenant>:<paciente>`, hasta el fin de la transacción) y
+  releen compromiso y abonos después de obtenerlo; las transiciones son
+  condicionales (`WHERE status = …`). Una anulación y un barrido simultáneos
+  no dejan un compromiso cumplido con un abono anulado ni duplican
+  transiciones o eventos (`test/payment-promise-reopen.int-spec.ts`).
+- Los compromisos que quedaron `KEPT` con un abono anulado ANTES de esta
+  versión no se tocan (migración solo aditiva).
+
 ## Tope de descuento por rol e informe de descuentos (DX-204)
 
 - **Política** (`discount_policies`, una fila por clínica, RLS FORCE): % máximo
@@ -1117,7 +1154,7 @@ de esquemas propios de una librería).
   | `email.purge-outbox.daily` | `23 4 * * *` | Borra de `email_outbox` los SENT/FAILED de más de `MAIL_OUTBOX_RETENTION_DAYS` (90), clínica a clínica bajo su RLS, y los de plataforma por `email_outbox_purge_platform` (DX-144) |
   | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`); la petición conserva el `fetch` como respaldo |
   | `jobs.purge-finished.daily` | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS` |
-  | `collections.settle-promises.hourly` | `7 * * * *` | Cierra los compromisos de pago (DX-150): `KEPT` si los abonos registrados desde el compromiso y fechados hasta su día (zona de su sede) cubren el importe; `BROKEN` desde el día siguiente. Regla diaria, barrida cada hora para respetar la medianoche de cada sede; idempotente y auditada sin usuario (`origin: JOB`). El abono que cubre un compromiso lo cierra además en el acto |
+  | `collections.settle-promises.hourly` | `7 * * * *` | Cierra los compromisos de pago (DX-150): `KEPT` si los abonos registrados desde el compromiso y fechados hasta su día (zona de su sede) cubren el importe; `BROKEN` desde el día siguiente. Regla diaria, barrida cada hora para respetar la medianoche de cada sede; idempotente y auditada sin usuario (`origin: JOB`). El abono que cubre un compromiso lo cierra además en el acto; anular ese abono lo reabre (DX-215). Cada cierre relee con el candado del paciente |
   | `domains.recheck-sweep.hourly` | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (consulta el DNS de toda la ronda y encola un `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009). Si falla más de la mitad (y son ≥ 4), la ronda no cuenta (`domains.recheck_suspect`, DX-220) |
 - **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
   documentada en `test/rls-catalog.int-spec.ts`): un worker reclama trabajos de
