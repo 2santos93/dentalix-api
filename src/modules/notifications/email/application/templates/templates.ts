@@ -8,6 +8,7 @@ import {
   InvitationEmailVars,
   PasswordResetEmailVars,
   PaymentReceiptEmailVars,
+  PostOpInstructionsEmailVars,
   RegistrationNoticeEmailVars,
   RenderedEmail,
 } from '../../domain/email-message';
@@ -225,6 +226,38 @@ function paymentReceipt(
   });
 }
 
+function postOpInstructions(
+  vars: PostOpInstructionsEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  // La clínica sale de las variables (la del contexto), no de `brand`, que
+  // puede faltar.
+  const clinic = vars.clinicName;
+  const responsible = vars.responsibleName?.trim() || null;
+  const blocks: EmailBlock[] = [
+    {
+      kind: 'paragraph',
+      text: responsible
+        ? `Te enviamos las indicaciones de cuidado de ${vars.patientFirstName} tras su visita a ${clinic}.`
+        : `Te enviamos tus indicaciones de cuidado tras tu visita a ${clinic}.`,
+    },
+  ];
+  const phone = vars.locationPhone?.trim() || null;
+  if (phone) {
+    blocks.push({
+      kind: 'note',
+      text: `Si tienes dudas, llama a la sede al ${phone}.`,
+    });
+  }
+  return renderLayout({
+    brand,
+    subject: `Indicaciones de ${clinic}`,
+    heading: `Hola, ${responsible ?? vars.patientFirstName}`,
+    blocks,
+    action: { label: 'Ver indicaciones', url: vars.url },
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -237,6 +270,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'appointment-reminder': appointmentReminder,
   'registration-notice': registrationNotice,
   'payment-receipt': paymentReceipt,
+  'post-op-instructions': postOpInstructions,
 };
 
 /**

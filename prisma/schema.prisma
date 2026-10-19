@@ -2241,6 +2241,8 @@ enum EmailTemplate {
   REGISTRATION_NOTICE  @map("registration-notice")
   APPOINTMENT_REMINDER @map("appointment-reminder")
   PAYMENT_RECEIPT      @map("payment-receipt")
+  // DX-222: enlace a las indicaciones postoperatorias.
+  POST_OP_INSTRUCTIONS @map("post-op-instructions")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
