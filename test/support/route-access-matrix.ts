@@ -180,6 +180,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /post-op-templates': ADMIN_ONLY,
   'POST /post-op-templates/samples': ADMIN_ONLY,
   'PATCH /post-op-templates/:id': ADMIN_ONLY,
+  // DX-222: entregas de indicaciones por cita (sugerencias y registro por
+  // impresión, email o WhatsApp) e historial en la ficha. Los cuatro roles;
+  // sin PATCH ni DELETE (la entrega es inalterable). loop/informes/DX-222.md.
+  'GET /appointments/:appointmentId/post-op-instructions': EVERY_ROLE,
+  'POST /appointments/:appointmentId/post-op-instructions/deliveries':
+    EVERY_ROLE,
+  'GET /patients/:patientId/post-op-deliveries': EVERY_ROLE,
+  'GET /patients/:patientId/post-op-deliveries/:id': EVERY_ROLE,
   'POST /patients/:patientId/tooth-records': CLINICAL,
   'GET /patients/:patientId/odontogram': CLINICAL,
   'GET /patients/:patientId/teeth/:fdi/history': CLINICAL,

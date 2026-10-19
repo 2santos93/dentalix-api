@@ -8,12 +8,14 @@ export const AUDIT_OPTIONS = 'dentalix:audit';
  * - `{ param }`: el id del paciente va en la ruta (`:patientId`, o `:id` en
  *   `/patients/:id`);
  * - `{ response: 'id' }`: el `id` de la respuesta (alta de paciente);
+ * - `{ response: 'patientId' }`: el `patientId` de la respuesta, cuando la
+ *   ruta es de otro recurso que lo devuelve (DX-222, la cita);
  * - `{ lookup, param }`: el id de la ruta es de otro recurso (plan, ítem,
  *   abono, receta) y el paciente se lee de él, bajo RLS, al escribir.
  */
 export type AuditPatientSource =
   | { param: string }
-  | { response: 'id' }
+  | { response: 'id' | 'patientId' }
   | { lookup: Exclude<AuditPatientRef['kind'], 'patient'>; param: string };
 
 /** Qué se registra de un endpoint marcado con `@Audit(...)`. */

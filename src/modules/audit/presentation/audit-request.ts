@@ -37,9 +37,12 @@ function uuidOrNull(value: unknown): string | null {
   return typeof value === 'string' && UUID.test(value) ? value : null;
 }
 
-function responseId(body: unknown): string | null {
-  return typeof body === 'object' && body !== null && 'id' in body
-    ? uuidOrNull(body.id)
+function responseId(
+  body: unknown,
+  field: 'id' | 'patientId' = 'id',
+): string | null {
+  return typeof body === 'object' && body !== null && field in body
+    ? uuidOrNull((body as Record<string, unknown>)[field])
     : null;
 }
 
@@ -68,7 +71,7 @@ function patientOf(
   const source = options.patient;
   if (!source) return null;
   if ('response' in source) {
-    const id = responseId(body);
+    const id = responseId(body, source.response);
     return id ? { kind: 'patient', id } : null;
   }
   const id = uuidOrNull(req.params?.[source.param]);

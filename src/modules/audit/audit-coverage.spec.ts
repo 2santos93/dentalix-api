@@ -40,6 +40,8 @@ import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
 import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
+import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
+import { PatientPostOpDeliveriesController } from '../post-op-instructions/presentation/patient-post-op-deliveries.controller';
 import {
   ImplantsController,
   PatientImplantsController,
@@ -668,6 +670,25 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'POSTOP_TEMPLATE',
     resourceId: { param: 'id' },
   },
+  // DX-222: entregas de indicaciones. Ver las de una cita (el paciente sale
+  // de la respuesta) y las de la ficha. Registrar una la audita el caso de
+  // uso (CREATE con el canal en `reason`). Nunca el texto.
+  'GET /appointments/:appointmentId/post-op-instructions': {
+    action: 'VIEW',
+    resource: 'POSTOP_DELIVERY',
+    patient: { response: 'patientId' },
+  },
+  'GET /patients/:patientId/post-op-deliveries': {
+    action: 'VIEW',
+    resource: 'POSTOP_DELIVERY',
+    patient: P,
+  },
+  'GET /patients/:patientId/post-op-deliveries/:id': {
+    action: 'VIEW',
+    resource: 'POSTOP_DELIVERY',
+    resourceId: { param: 'id' },
+    patient: P,
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',
@@ -716,6 +737,8 @@ const CONTROLLERS: Type[] = [
   ClinicalNoteTemplatesController,
   DomainsController,
   PostOpTemplatesController,
+  AppointmentPostOpController,
+  PatientPostOpDeliveriesController,
 ];
 
 function joinPath(...parts: string[]): string {
