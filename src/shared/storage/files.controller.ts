@@ -16,10 +16,31 @@ import type { Response } from 'express';
 import { contentTypeOf } from './content-type';
 import { DiskFileStorage } from './disk-file-storage';
 import { isFileKey } from './file-key';
-import { FILE_STORAGE } from './file-storage.port';
-import type { FileStoragePort } from './file-storage.port';
+import { FILE_STORAGE, contentDispositionHeader } from './file-storage.port';
+import type { FileStoragePort, SignedUrlOptions } from './file-storage.port';
 
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Opciones de la URL firmada tal como llegan en la query. Una `disposition`
+ * desconocida es null (= firma inválida); sin `disposition` no hay opciones.
+ */
+function signedOptionsOf(
+  disposition: string | undefined,
+  filename: string | undefined,
+  type: string | undefined,
+): SignedUrlOptions | undefined | null {
+  if (disposition === undefined) {
+    // Nombre o tipo sueltos no los firma nunca getSignedUrl: manipulación.
+    return filename === undefined && type === undefined ? undefined : null;
+  }
+  if (disposition !== 'inline' && disposition !== 'attachment') return null;
+  return {
+    disposition,
+    ...(filename !== undefined ? { filename } : {}),
+    ...(type !== undefined ? { contentType: type } : {}),
+  };
+}
 
 /**
  * Sirve los ficheros PÚBLICOS (avatares) leyendo del almacén configurado
@@ -61,6 +82,11 @@ export class FilesController {
   /**
    * URL firmada del adaptador de DISCO (solo desarrollo). Con S3 las URL
    * firmadas van directas al bucket y esta ruta no existe (404).
+   *
+   * DX-151: la disposición, el nombre y el tipo van firmados en la query. Esta
+   * ruta (y solo esta) se deja enmarcar desde cualquier origen para que la
+   * web muestre el PDF en su visor en desarrollo, y en `sandbox` para que lo
+   * servido no ejecute scripts ni con un tipo raro.
    */
   @Get('signed')
   @ApiExcludeEndpoint()
@@ -70,16 +96,21 @@ export class FilesController {
     @Query('key') key: string | undefined,
     @Query('expires') expires: string | undefined,
     @Query('signature') signature: string | undefined,
+    @Query('disposition') disposition: string | undefined,
+    @Query('filename') filename: string | undefined,
+    @Query('type') type: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     if (!(this.storage instanceof DiskFileStorage)) {
       throw new NotFoundException();
     }
+    const options = signedOptionsOf(disposition, filename, type);
     if (
-      !key ||
-      !expires ||
-      !signature ||
-      !this.storage.verifySignedUrl(key, expires, signature)
+      typeof key !== 'string' ||
+      typeof expires !== 'string' ||
+      typeof signature !== 'string' ||
+      options === null ||
+      !this.storage.verifySignedUrl(key, expires, signature, options)
     ) {
       throw new ForbiddenException('Invalid or expired signature');
     }
@@ -87,7 +118,14 @@ export class FilesController {
     if (!file) {
       throw new NotFoundException('File not found');
     }
-    res.set('Content-Type', contentTypeOf(key));
+    res.set('Content-Type', options?.contentType ?? contentTypeOf(key));
+    if (options) {
+      res.set('Content-Disposition', contentDispositionHeader(options));
+    }
+    // helmet pone X-Frame-Options: SAMEORIGIN y frame-ancestors 'self' en
+    // toda la API; aquí se sustituyen (la web está en otro origen).
+    res.removeHeader('X-Frame-Options');
+    res.set('Content-Security-Policy', 'frame-ancestors *; sandbox');
     return new StreamableFile(file.bytes);
   }
 }

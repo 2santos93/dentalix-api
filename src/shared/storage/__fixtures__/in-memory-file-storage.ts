@@ -1,5 +1,9 @@
 import { publicFileUrl } from '../file-key';
-import type { FileStoragePort, StoredFile } from '../file-storage.port';
+import type {
+  FileStoragePort,
+  SignedUrlOptions,
+  StoredFile,
+} from '../file-storage.port';
 
 /** `FileStoragePort` en memoria para los tests de casos de uso. */
 export class InMemoryFileStorage implements FileStoragePort {
@@ -31,7 +35,19 @@ export class InMemoryFileStorage implements FileStoragePort {
     return publicFileUrl(this.publicBaseUrl, key);
   }
 
-  getSignedUrl(key: string, ttlSeconds: number): Promise<string> {
-    return Promise.resolve(`memory://${key}?ttl=${ttlSeconds}`);
+  /**
+   * `memory://<clave>?ttl=<n>` y, con opciones, `&disposition=…&filename=…&type=…`
+   * (codificados) para que los tests comprueben lo que pidió el caso de uso.
+   */
+  getSignedUrl(
+    key: string,
+    ttlSeconds: number,
+    options?: SignedUrlOptions,
+  ): Promise<string> {
+    const query = new URLSearchParams({ ttl: String(ttlSeconds) });
+    if (options) query.set('disposition', options.disposition);
+    if (options?.filename) query.set('filename', options.filename);
+    if (options?.contentType) query.set('type', options.contentType);
+    return Promise.resolve(`memory://${key}?${query.toString()}`);
   }
 }

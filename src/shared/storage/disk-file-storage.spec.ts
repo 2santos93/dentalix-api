@@ -55,6 +55,51 @@ describe('DiskFileStorage · URL firmada (DX-084)', () => {
     ).toBe(false);
   });
 
+  it('firma también disposición, nombre y tipo: cambiar cualquiera invalida (DX-151)', async () => {
+    const storage = new DiskFileStorage(CFG);
+    const url = new URL(
+      await storage.getSignedUrl('clinical/x.pdf', 60, {
+        disposition: 'inline',
+        filename: 'radio ñ.pdf',
+        contentType: 'application/pdf',
+      }),
+    );
+    const q = url.searchParams;
+    expect(q.get('disposition')).toBe('inline');
+    expect(q.get('filename')).toBe('radio ñ.pdf');
+    expect(q.get('type')).toBe('application/pdf');
+    const key = q.get('key') ?? '';
+    const expires = q.get('expires') ?? '';
+    const signature = q.get('signature') ?? '';
+    const signed = {
+      disposition: 'inline' as const,
+      filename: 'radio ñ.pdf',
+      contentType: 'application/pdf',
+    };
+    expect(storage.verifySignedUrl(key, expires, signature, signed)).toBe(true);
+    for (const tampered of [
+      { ...signed, disposition: 'attachment' as const },
+      { ...signed, filename: 'otro.pdf' },
+      { ...signed, contentType: 'text/html' },
+      undefined,
+    ]) {
+      expect(storage.verifySignedUrl(key, expires, signature, tampered)).toBe(
+        false,
+      );
+    }
+  });
+
+  it('sin opciones la URL no lleva disposición, nombre ni tipo', async () => {
+    const url = new URL(
+      await new DiskFileStorage(CFG).getSignedUrl('clinical/x.pdf', 60),
+    );
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      'expires',
+      'key',
+      'signature',
+    ]);
+  });
+
   it('rechaza un TTL fuera de rango', async () => {
     await expect(
       new DiskFileStorage(CFG).getSignedUrl('clinical/x.pdf', 0),

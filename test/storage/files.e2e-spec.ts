@@ -5,6 +5,7 @@ import * as path from 'path';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { ConfigModule } from '../../src/config/config.module';
+import { applySecurity } from '../../src/shared/security/apply-security';
 import { StorageModule } from '../../src/shared/storage/storage.module';
 import {
   FILE_STORAGE,
@@ -21,6 +22,9 @@ describe('Files (e2e)', () => {
       imports: [ConfigModule, StorageModule],
     }).compile();
     app = moduleRef.createNestApplication();
+    // Helmet como en main.ts: los casos de DX-151 comprueban que /files/signed
+    // (y solo esa ruta) relaja X-Frame-Options y frame-ancestors.
+    applySecurity(app);
     app.setGlobalPrefix('api/v1');
     await app.init();
     storage = app.get<FileStoragePort>(FILE_STORAGE);
@@ -35,6 +39,14 @@ describe('Files (e2e)', () => {
     await app.close();
     await fs.rm(path.join(root, 'avatars', 'sample.png'), { force: true });
     await fs.rm(path.join(root, 'clinical', 'dx084-e2e.pdf'), { force: true });
+    for (const name of [
+      'dx151-e2e.bin',
+      'dx151.heic',
+      'dx151.docx',
+      'dx151.dcm',
+    ]) {
+      await fs.rm(path.join(root, 'clinical', name), { force: true });
+    }
   });
 
   it('serves an existing avatar with an image content-type', async () => {
@@ -111,6 +123,90 @@ describe('Files (e2e)', () => {
       await request(app.getHttpServer()).get(pathOf(url)).expect(200);
       await new Promise((r) => setTimeout(r, 2100));
       await request(app.getHttpServer()).get(pathOf(url)).expect(403);
+    });
+
+    it('los avatares siguen sin poder incrustarse en otro origen (DX-151)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/files/avatars/sample.png')
+        .expect(200);
+      expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+      expect(res.headers['content-security-policy']).toContain(
+        "frame-ancestors 'self'",
+      );
+    });
+
+    it('con disposición y nombre: los responde, enmarcable y en sandbox (DX-151)', async () => {
+      const url = await storage.getSignedUrl(key, 60, {
+        disposition: 'attachment',
+        filename: 'radio ñ.pdf',
+      });
+      const res = await request(app.getHttpServer())
+        .get(pathOf(url))
+        .expect(200);
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="radio n.pdf"; filename*=UTF-8''radio%20%C3%B1.pdf`,
+      );
+      expect(res.headers['content-type']).toContain('application/pdf');
+      expect(res.headers['cache-control']).toBe('private, no-store');
+      expect(res.headers['x-frame-options']).toBeUndefined();
+      expect(res.headers['content-security-policy']).toBe(
+        'frame-ancestors *; sandbox',
+      );
+      expect((res.body as Buffer).toString()).toBe('%PDF-1.7');
+    });
+
+    it('el tipo pedido manda sobre la extensión (DX-151)', async () => {
+      const binKey = 'clinical/dx151-e2e.bin';
+      await storage.save(binKey, Buffer.from('%PDF-1.7'), 'application/pdf');
+      const url = await storage.getSignedUrl(binKey, 60, {
+        disposition: 'inline',
+        contentType: 'application/pdf',
+      });
+      const res = await request(app.getHttpServer())
+        .get(pathOf(url))
+        .expect(200);
+      expect(res.headers['content-type']).toContain('application/pdf');
+      expect(res.headers['content-disposition']).toBe('inline');
+    });
+
+    it('403 si se manipula la disposición, el nombre o el tipo firmados (DX-151)', async () => {
+      const url = new URL(
+        await storage.getSignedUrl(key, 60, {
+          disposition: 'inline',
+          filename: 'radio.pdf',
+        }),
+      );
+      const changes: Array<[string, string | null]> = [
+        ['disposition', 'attachment'],
+        ['filename', 'otro.pdf'],
+        ['type', 'text/html'],
+        ['type', ''],
+        ['disposition', null],
+      ];
+      for (const [param, value] of changes) {
+        const tampered = new URL(url);
+        if (value === null) tampered.searchParams.delete(param);
+        else tampered.searchParams.set(param, value);
+        await request(app.getHttpServer())
+          .get(pathOf(tampered.toString()))
+          .expect(403);
+      }
+    });
+
+    it.each([
+      ['clinical/dx151.heic', 'image/heic'],
+      [
+        'clinical/dx151.docx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ],
+      ['clinical/dx151.dcm', 'application/dicom'],
+    ])('%s se sirve como %s (DX-151)', async (fileKey, type) => {
+      await storage.save(fileKey, Buffer.from('DATA'), type);
+      const url = await storage.getSignedUrl(fileKey, 60);
+      const res = await request(app.getHttpServer())
+        .get(pathOf(url))
+        .expect(200);
+      expect(res.headers['content-type']).toContain(type);
     });
 
     it('404 si la firma vale pero el fichero ya no existe', async () => {
