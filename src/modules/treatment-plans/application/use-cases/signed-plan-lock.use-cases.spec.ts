@@ -34,6 +34,7 @@ const CATALOG_ITEM: DentalCatalogItem = {
   color: '#FFFFFF',
   defaultPrice: 200,
   cupsCode: null,
+  allowDiscount: true,
   active: true,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -46,6 +47,7 @@ function catalog(): DentalCatalogRepository {
   return {
     create: unused,
     list: unused,
+    findByIds: () => Promise.resolve([]),
     listDirectory: unused,
     findById,
     update: unused,

@@ -43,6 +43,12 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // Editar la plantilla los sustituye en la misma transacción y el cambio
   // queda en audit_events.
   'postOpInstructionTemplateLink',
+  // DX-105: el precio de un procedimiento en una lista es configuración, sin
+  // datos de pacientes y sin nada que lo referencie (el ítem del plan guarda
+  // su propia foto del precio al crearse). «Quitar el precio» borra la fila
+  // dentro de la misma transacción que el resto del lote y el cambio queda en
+  // audit_events (PRICES_REPLACED). La lista entera sí se retira en blando.
+  'priceListItem',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([

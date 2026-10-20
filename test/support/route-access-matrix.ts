@@ -321,6 +321,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /payers': roles('ADMIN', 'RECEPTION'),
   'PATCH /payers/:id': ADMIN_ONLY,
   'DELETE /payers/:id': ADMIN_ONLY,
+  // DX-105: listas de precios (leerlas: quien arma el plan; escribirlas: ADMIN).
+  'GET /price-lists': CLINICAL,
+  'POST /price-lists': ADMIN_ONLY,
+  'PATCH /price-lists/:id': ADMIN_ONLY,
+  'DELETE /price-lists/:id': ADMIN_ONLY,
+  'GET /price-lists/:id/items': CLINICAL,
+  'PUT /price-lists/:id/items': ADMIN_ONLY,
   // DX-153: coberturas del paciente (PATIENT_ROLES).
   'GET /patients/:patientId/coverages': EVERY_ROLE,
   'POST /patients/:patientId/coverages': EVERY_ROLE,

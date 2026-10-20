@@ -23,6 +23,7 @@ function fakeItem(
     color: '#FF0000',
     defaultPrice: null,
     cupsCode: null,
+    allowDiscount: true,
     active: true,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -42,6 +43,7 @@ function makeRepo(
       ),
     findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),
     list: (): Promise<DentalCatalogItem[]> => Promise.resolve([]),
+    findByIds: () => Promise.resolve([]),
     listDirectory: () =>
       Promise.reject(new Error('not implemented in this fake')),
     update: (): Promise<DentalCatalogItem> =>

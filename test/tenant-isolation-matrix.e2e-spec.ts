@@ -148,6 +148,8 @@ interface SeedA {
   prescriptionTemplateId: string;
   appointmentTypeId: string;
   payerId: string;
+  /** DX-105: una lista de precios de A con un precio cargado. */
+  priceListId: string;
   scheduleBlockId: string;
   waitlistEntryId: string;
   noteTemplateId: string;
@@ -353,6 +355,15 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     type: 'EMPRESA',
   });
 
+  // DX-105: una lista de precios de A con un precio (para `price_list_items`).
+  const priceList = await create(app, a, '/price-lists', {
+    name: 'Lista de A',
+    currency: 'COP',
+  });
+  await api(app, a, 'put', `/price-lists/${priceList.id}/items`, {
+    items: [{ catalogItemId, price: 90000 }],
+  }).expect(200);
+
   // DX-122: un bloqueo de la sede y un pendiente (alta manual) de A.
   const scheduleBlock = await create(app, a, '/schedule-blocks', {
     locationId: location.id,
@@ -465,6 +476,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
     payerId: payer.id,
+    priceListId: priceList.id,
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
@@ -547,6 +559,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-153: pagadores.
       'payers',
       'patient_coverages',
+      // DX-105: listas de precios y sus precios.
+      'price_lists',
+      'price_list_items',
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
@@ -933,6 +948,33 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /payers/:id',
       verb: 'delete',
       path: () => `/payers/${a.payerId}`,
+      status: 404,
+    },
+    // --- listas de precios (DX-105) ---
+    {
+      name: 'PATCH /price-lists/:id',
+      verb: 'patch',
+      path: () => `/price-lists/${a.priceListId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /price-lists/:id',
+      verb: 'delete',
+      path: () => `/price-lists/${a.priceListId}`,
+      status: 404,
+    },
+    {
+      name: 'GET /price-lists/:id/items',
+      verb: 'get',
+      path: () => `/price-lists/${a.priceListId}/items`,
+      status: 404,
+    },
+    {
+      name: 'PUT /price-lists/:id/items',
+      verb: 'put',
+      path: () => `/price-lists/${a.priceListId}/items`,
+      body: () => ({ items: [{ catalogItemId: b.catalogItemId, price: 1 }] }),
       status: 404,
     },
     // --- responsables de pago y avisos (DX-203) ---

@@ -15,6 +15,7 @@ import { MedicalHistoryController } from '../medical-history/presentation/medica
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
+import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
 import { LocationsController } from '../locations/presentation/locations.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
 import { PerioExamsController } from '../periodontal/presentation/perio-exams.controller';
@@ -202,6 +203,28 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'UPDATE',
     resource: 'DENTAL_CATALOG_ITEM',
     resourceId: { param: 'id' },
+  },
+  // DX-105: listas de precios; el PUT de precios cuenta como UPDATE de la lista.
+  'POST /price-lists': {
+    action: 'CREATE',
+    resource: 'PRICE_LIST',
+    resourceId: RES,
+  },
+  'PATCH /price-lists/:id': {
+    action: 'UPDATE',
+    resource: 'PRICE_LIST',
+    resourceId: { param: 'id' },
+  },
+  'DELETE /price-lists/:id': {
+    action: 'DELETE',
+    resource: 'PRICE_LIST',
+    resourceId: { param: 'id' },
+  },
+  'PUT /price-lists/:id/items': {
+    action: 'UPDATE',
+    resource: 'PRICE_LIST',
+    resourceId: { param: 'id' },
+    reason: 'PRICES_REPLACED',
   },
   'PATCH /locations/:id': {
     action: 'UPDATE',
@@ -799,6 +822,7 @@ const CONTROLLERS: Type[] = [
   ClinicalEntriesController,
   ClinicalEntryRdaController,
   DentalCatalogController,
+  PriceListsController,
   LocationsController,
   OdontogramController,
   PerioExamsController,
