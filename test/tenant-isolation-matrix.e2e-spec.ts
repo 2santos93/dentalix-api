@@ -147,6 +147,7 @@ interface SeedA {
   domainId: string;
   prescriptionTemplateId: string;
   appointmentTypeId: string;
+  payerId: string;
   scheduleBlockId: string;
   waitlistEntryId: string;
   noteTemplateId: string;
@@ -345,6 +346,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     color: '#7C3AED',
   });
 
+  // DX-153: un pagador de A.
+  const payer = await create(app, a, '/payers', {
+    name: 'Pagador de A',
+    type: 'EMPRESA',
+  });
+
   // DX-122: un bloqueo de la sede y un pendiente (alta manual) de A.
   const scheduleBlock = await create(app, a, '/schedule-blocks', {
     locationId: location.id,
@@ -450,6 +457,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     domainId: (domainRes.body as { domain: IdBody }).domain.id,
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
+    payerId: payer.id,
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
@@ -528,6 +536,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'email_outbox',
       'tenant_domains',
       'prescription_templates',
+      // DX-153: pagadores.
+      'payers',
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
@@ -900,6 +910,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- payers (DX-153) ---
+    {
+      name: 'PATCH /payers/:id',
+      verb: 'patch',
+      path: () => `/payers/${a.payerId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /payers/:id',
+      verb: 'delete',
+      path: () => `/payers/${a.payerId}`,
       status: 404,
     },
     // --- responsables de pago y avisos (DX-203) ---

@@ -1,0 +1,130 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ClinicCountry, PayerType } from '@prisma/client';
+import { Payer } from '../../domain/entities/payer.entity';
+import {
+  PAYER_REPOSITORY,
+  type PayerRepository,
+} from '../../domain/ports/payer-repository.port';
+import {
+  normalizePayerName,
+  payerNameKey,
+  validatePayerName,
+  validatePayerTypeCountry,
+} from '../../domain/payer-rules';
+
+export const PAYER_NOT_FOUND_MESSAGE = 'Pagador no encontrado.';
+export const PAYER_DUPLICATE_MESSAGE = 'Ya existe un pagador con ese nombre.';
+export const PAYER_IN_USE_MESSAGE =
+  'Este pagador tiene coberturas asociadas; desactívalo en lugar de retirarlo.';
+
+export interface CreatePayerInput {
+  name: string;
+  type: PayerType;
+  country?: ClinicCountry | null;
+  active?: boolean;
+}
+
+export interface UpdatePayerInput {
+  name?: string;
+  type?: PayerType;
+  country?: ClinicCountry | null;
+  active?: boolean;
+}
+
+function assertValid(error: string | null): void {
+  if (error !== null) throw new BadRequestException(error);
+}
+
+@Injectable()
+export class ListPayersUseCase {
+  constructor(
+    @Inject(PAYER_REPOSITORY) private readonly repo: PayerRepository,
+  ) {}
+
+  /** Por defecto solo los activos (los selectores). */
+  execute(params: { includeInactive?: boolean }): Promise<Payer[]> {
+    return this.repo.list({ includeInactive: params.includeInactive ?? false });
+  }
+}
+
+@Injectable()
+export class CreatePayerUseCase {
+  constructor(
+    @Inject(PAYER_REPOSITORY) private readonly repo: PayerRepository,
+  ) {}
+
+  async execute(input: CreatePayerInput, createdById?: string): Promise<Payer> {
+    assertValid(validatePayerName(input.name));
+    const country = input.country ?? null;
+    assertValid(validatePayerTypeCountry(input.type, country));
+    const name = normalizePayerName(input.name);
+    if (await this.repo.findByNormalizedName(payerNameKey(name))) {
+      throw new ConflictException(PAYER_DUPLICATE_MESSAGE);
+    }
+    return this.repo.create({
+      name,
+      type: input.type,
+      country,
+      active: input.active ?? true,
+      createdById,
+    });
+  }
+}
+
+@Injectable()
+export class UpdatePayerUseCase {
+  constructor(
+    @Inject(PAYER_REPOSITORY) private readonly repo: PayerRepository,
+  ) {}
+
+  async execute(
+    id: string,
+    input: UpdatePayerInput,
+    updatedById?: string,
+  ): Promise<Payer> {
+    const current = await this.repo.findById(id);
+    if (!current) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
+
+    const patch: UpdatePayerInput = { active: input.active };
+    if (input.name !== undefined) {
+      assertValid(validatePayerName(input.name));
+      patch.name = normalizePayerName(input.name);
+      if (await this.repo.findByNormalizedName(payerNameKey(patch.name), id)) {
+        throw new ConflictException(PAYER_DUPLICATE_MESSAGE);
+      }
+    }
+    // Tipo y país se validan juntos, con el valor que quedaría tras el cambio.
+    if (input.type !== undefined || input.country !== undefined) {
+      const type = input.type ?? current.type;
+      const country =
+        input.country !== undefined ? input.country : current.country;
+      assertValid(validatePayerTypeCountry(type, country));
+      if (input.type !== undefined) patch.type = input.type;
+      if (input.country !== undefined) patch.country = input.country;
+    }
+    return this.repo.update(id, { ...patch, updatedById });
+  }
+}
+
+@Injectable()
+export class DeletePayerUseCase {
+  constructor(
+    @Inject(PAYER_REPOSITORY) private readonly repo: PayerRepository,
+  ) {}
+
+  /** Con coberturas vivas no se retira: se desactiva (las coberturas siguen). */
+  async execute(id: string, deletedById?: string): Promise<void> {
+    const current = await this.repo.findById(id);
+    if (!current) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
+    if ((await this.repo.countLiveCoverages(id)) > 0) {
+      throw new ConflictException(PAYER_IN_USE_MESSAGE);
+    }
+    await this.repo.softDelete(id, deletedById);
+  }
+}

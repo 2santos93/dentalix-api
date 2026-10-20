@@ -50,6 +50,21 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
 // Leerlos (selector del formulario de cita): APPOINTMENT_ROLES.
 export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Pagadores (DX-153) — leer (selectores de cobertura): los 4 roles. Crear:
+// ADMIN y recepción, que da de alta al paciente en mostrador y no puede
+// esperar al administrador. Editar, desactivar y retirar: solo gestión.
+export const PAYER_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+export const PAYER_CREATE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+export const PAYER_MANAGE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Plantillas de evolución (DX-170) — crear, editar, desactivar y cargar las de
 // ejemplo: solo gestión. Leerlas (selector de «Nueva evolución»):
 // CLINICAL_ROLES; recepción no documenta evoluciones.
