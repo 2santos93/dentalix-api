@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPayerRepository } from '../src/modules/payers/infrastructure/repositories/prisma-payer.repository';
 import { PrismaPatientCoverageRepository } from '../src/modules/patient-coverages/infrastructure/repositories/prisma-patient-coverage.repository';
 
 // DX-153, capa DB: pagadores (payers) y coberturas del paciente
@@ -529,6 +530,72 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     });
     const live = (patientId: string) =>
       raw.patientCoverage.findMany({ where: { patientId, deletedAt: null } });
+
+    it('retirar un pagador a la vez que se crea una cobertura con él: nunca queda una cobertura viva con un pagador retirado', async () => {
+      const payers = new PrismaPayerRepository(prisma, tenantContext);
+      for (let round = 0; round < 8; round++) {
+        const { patientId, payerId } = await seedPatient(0);
+        const [retired, created] = await Promise.allSettled([
+          inA(() => payers.retire(payerId, by)),
+          inA(() => repo.create(input(patientId, payerId, false))),
+        ]);
+        const payer = await raw.payer.findUniqueOrThrow({
+          where: { id: payerId },
+        });
+        const coverages = await live(patientId);
+        if (payer.deletedAt) {
+          // Ganó el retiro: la alta falla con 400 y no deja nada.
+          expect(retired).toMatchObject({ value: 'RETIRED' });
+          expect(created.status).toBe('rejected');
+          expect((created as PromiseRejectedResult).reason).toMatchObject({
+            message: 'Pagador no encontrado.',
+          });
+          expect(coverages).toHaveLength(0);
+        } else {
+          // Ganó la alta: el retiro ve la cobertura y responde IN_USE.
+          expect(retired).toMatchObject({ value: 'IN_USE' });
+          expect(created.status).toBe('fulfilled');
+          expect(coverages).toHaveLength(1);
+        }
+      }
+    });
+
+    it('con el pagador ya retirado o desactivado, alta y cambio de pagador dan 400', async () => {
+      const payers = new PrismaPayerRepository(prisma, tenantContext);
+      const { patientId, payerId } = await seedPatient(1);
+      const spare = (
+        await raw.payer.create({
+          data: {
+            tenantId: a.tenantId,
+            name: `Spare ${payerId}`,
+            type: 'OTRO',
+          },
+        })
+      ).id;
+      const gone = (
+        await raw.payer.create({
+          data: { tenantId: a.tenantId, name: `Gone ${payerId}`, type: 'OTRO' },
+        })
+      ).id;
+      await expect(inA(() => payers.retire(gone, by))).resolves.toBe('RETIRED');
+      await expect(inA(() => payers.retire(gone, by))).resolves.toBe(
+        'NOT_FOUND',
+      );
+      await expect(
+        inA(() => repo.create(input(patientId, gone, false))),
+      ).rejects.toMatchObject({ message: 'Pagador no encontrado.' });
+      await raw.payer.update({ where: { id: spare }, data: { active: false } });
+      await expect(
+        inA(() => repo.create(input(patientId, spare, false))),
+      ).rejects.toMatchObject({ message: 'Ese pagador está desactivado.' });
+      const [cov] = await live(patientId);
+      await expect(
+        inA(() => repo.update(cov.id, { payerId: gone, updatedById: by })),
+      ).rejects.toMatchObject({ message: 'Pagador no encontrado.' });
+      await expect(
+        inA(() => repo.update(cov.id, { payerId: spare, updatedById: by })),
+      ).rejects.toMatchObject({ message: 'Ese pagador está desactivado.' });
+    });
 
     it('altas simultáneas de la primera cobertura: las dos valen y queda exactamente una principal', async () => {
       const { patientId, payerId } = await seedPatient(0);

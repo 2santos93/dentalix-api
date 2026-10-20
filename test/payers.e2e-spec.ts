@@ -208,6 +208,29 @@ describe('Pagadores (e2e, DX-153)', () => {
     expect(second.id).not.toBe(first.id);
   });
 
+  it('un nombre que coincide con un pagador DESACTIVADO da un 409 que lo dice', async () => {
+    const off = await createPayer({ name: 'Colsanitas Off', type: 'OTRO' });
+    await as(api().patch(`/api/v1/payers/${off.id}`), tokens.ADMIN)
+      .send({ active: false })
+      .expect(200);
+    const res = await as(api().post('/api/v1/payers'), tokens.RECEPTION)
+      .send({ name: 'colsanitas off', type: 'OTRO' })
+      .expect(409);
+    expect((res.body as { message: string }).message).toBe(
+      'Ya existe un pagador con ese nombre, pero está desactivado; pídele a administración que lo reactive.',
+    );
+    const other = await createPayer({ name: 'Colsanitas Otro', type: 'OTRO' });
+    const renamed = await as(
+      api().patch(`/api/v1/payers/${other.id}`),
+      tokens.ADMIN,
+    )
+      .send({ name: 'COLSANITAS OFF' })
+      .expect(409);
+    expect((renamed.body as { message: string }).message).toContain(
+      'está desactivado',
+    );
+  });
+
   it('renombrar hacia el nombre de otro da 409; recepción no edita', async () => {
     const payer = await createPayer({ name: 'Otro Pagador', type: 'OTRO' });
     await as(api().patch(`/api/v1/payers/${payer.id}`), tokens.ADMIN)

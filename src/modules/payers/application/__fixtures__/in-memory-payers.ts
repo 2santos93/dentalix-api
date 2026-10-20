@@ -2,6 +2,7 @@ import { Payer } from '../../domain/entities/payer.entity';
 import {
   CreatePayerRepoInput,
   PayerRepository,
+  RetirePayerResult,
   UpdatePayerRepoInput,
 } from '../../domain/ports/payer-repository.port';
 import { payerNameKey } from '../../domain/payer-rules';
@@ -80,14 +81,12 @@ export class InMemoryPayerRepository implements PayerRepository {
     return Promise.resolve({ ...row });
   }
 
-  softDelete(id: string): Promise<void> {
-    this.deleted.add(id);
+  retire(id: string): Promise<RetirePayerResult> {
     const row = this.rows.find((r) => r.id === id);
-    if (row) row.active = false;
-    return Promise.resolve();
-  }
-
-  countLiveCoverages(payerId: string): Promise<number> {
-    return Promise.resolve(this.liveCoverages.get(payerId) ?? 0);
+    if (!row || this.deleted.has(id)) return Promise.resolve('NOT_FOUND');
+    if ((this.liveCoverages.get(id) ?? 0) > 0) return Promise.resolve('IN_USE');
+    this.deleted.add(id);
+    row.active = false;
+    return Promise.resolve('RETIRED');
   }
 }

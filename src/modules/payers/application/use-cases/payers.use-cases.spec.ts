@@ -8,6 +8,7 @@ import {
   CreatePayerUseCase,
   DeletePayerUseCase,
   ListPayersUseCase,
+  PAYER_DUPLICATE_INACTIVE_MESSAGE,
   PAYER_DUPLICATE_MESSAGE,
   PAYER_IN_USE_MESSAGE,
   PAYER_NOT_FOUND_MESSAGE,
@@ -87,6 +88,19 @@ describe('casos de uso de pagadores (DX-153)', () => {
         create.execute({ name: ' SEGUROS  bolivar', type: 'OTRO' }),
       ).rejects.toThrow(new ConflictException(PAYER_DUPLICATE_MESSAGE));
       expect(repo.rows).toHaveLength(1);
+    });
+
+    it('409 propio si el que coincide está desactivado, al crear y al renombrar', async () => {
+      repo.seed({ name: 'Sura', active: false });
+      await expect(
+        create.execute({ name: 'SURA', type: 'OTRO' }),
+      ).rejects.toThrow(
+        new ConflictException(PAYER_DUPLICATE_INACTIVE_MESSAGE),
+      );
+      const other = repo.seed({ name: 'Allianz' });
+      await expect(update.execute(other.id, { name: 'sura' })).rejects.toThrow(
+        new ConflictException(PAYER_DUPLICATE_INACTIVE_MESSAGE),
+      );
     });
 
     it('permite reutilizar el nombre de un pagador retirado', async () => {

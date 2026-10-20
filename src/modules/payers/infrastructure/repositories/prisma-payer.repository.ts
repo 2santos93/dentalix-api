@@ -6,6 +6,7 @@ import { Payer } from '../../domain/entities/payer.entity';
 import {
   CreatePayerRepoInput,
   PayerRepository,
+  RetirePayerResult,
   UpdatePayerRepoInput,
 } from '../../domain/ports/payer-repository.port';
 
@@ -149,18 +150,27 @@ export class PrismaPayerRepository implements PayerRepository {
     }
   }
 
-  async softDelete(id: string, updatedById?: string): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      tx.payer.update({
+  /**
+   * Candado de fila sobre el pagador (`FOR UPDATE`) antes de contar: el alta o
+   * cambio de cobertura lo relee con `FOR SHARE` dentro de su transacción, así
+   * que uno de los dos espera al otro y ve su resultado.
+   */
+  retire(id: string, updatedById?: string): Promise<RetirePayerResult> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "payers"
+        WHERE id = ${id}::uuid AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (locked.length === 0) return 'NOT_FOUND';
+      const inUse = await tx.patientCoverage.count({
+        where: { payerId: id, deletedAt: null },
+      });
+      if (inUse > 0) return 'IN_USE';
+      await tx.payer.update({
         where: { id },
         data: { active: false, deletedAt: new Date(), updatedById },
-      }),
-    );
-  }
-
-  countLiveCoverages(payerId: string): Promise<number> {
-    return this.prisma.runWithTenant((tx) =>
-      tx.patientCoverage.count({ where: { payerId, deletedAt: null } }),
-    );
+      });
+      return 'RETIRED';
+    });
   }
 }

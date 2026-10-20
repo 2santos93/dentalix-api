@@ -18,6 +18,8 @@ export interface UpdatePayerRepoInput {
   updatedById?: string;
 }
 
+export type RetirePayerResult = 'RETIRED' | 'IN_USE' | 'NOT_FOUND';
+
 export const PAYER_REPOSITORY = Symbol('PAYER_REPOSITORY');
 
 export interface PayerRepository {
@@ -40,8 +42,11 @@ export interface PayerRepository {
   create(input: CreatePayerRepoInput): Promise<Payer>;
   /** `null` si el pagador ya no existe (retirado entre la lectura y la escritura). */
   update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null>;
-  /** Borrado lógico: `deletedAt` y `active = false`. */
-  softDelete(id: string, updatedById?: string): Promise<void>;
-  /** Coberturas vivas de pacientes que usan este pagador. */
-  countLiveCoverages(payerId: string): Promise<number>;
+  /**
+   * Retira el pagador (`deletedAt` y `active = false`) si ninguna cobertura
+   * viva lo usa. Recuento y retiro van en UNA transacción con el pagador
+   * bloqueado, así una cobertura que se crea a la vez o espera (y falla con
+   * «Pagador no encontrado») o se cuenta aquí (`IN_USE`).
+   */
+  retire(id: string, updatedById?: string): Promise<RetirePayerResult>;
 }

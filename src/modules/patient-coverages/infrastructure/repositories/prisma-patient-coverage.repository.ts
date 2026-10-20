@@ -6,10 +6,13 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   COVERAGE_LIMIT_MESSAGE,
+  COVERAGE_PAYER_NOT_FOUND_MESSAGE,
+  PAYER_INACTIVE_MESSAGE,
   MAX_COVERAGES_PER_PATIENT,
 } from '../../domain/coverage-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
@@ -92,6 +95,28 @@ async function lockPatientCoverages(
 }
 
 /**
+ * Relee el pagador DENTRO de la transacción con `FOR SHARE`: el retiro del
+ * pagador (`FOR UPDATE`) espera a esta transacción o nos hace fallar aquí, así
+ * nunca queda una cobertura viva apuntando a un pagador retirado.
+ */
+async function assertPayerUsable(
+  tx: Prisma.TransactionClient,
+  payerId: string,
+  requireActive: boolean,
+): Promise<void> {
+  const rows = await tx.$queryRaw<{ active: boolean }[]>`
+    SELECT "active" FROM "payers"
+    WHERE id = ${payerId}::uuid AND "deletedAt" IS NULL
+    FOR SHARE`;
+  if (rows.length === 0) {
+    throw new BadRequestException(COVERAGE_PAYER_NOT_FOUND_MESSAGE);
+  }
+  if (requireActive && !rows[0].active) {
+    throw new BadRequestException(PAYER_INACTIVE_MESSAGE);
+  }
+}
+
+/**
  * Desmarca las demás principales vivas del paciente. Se llama DENTRO de la
  * transacción de la escritura que marca la nueva, así un 422 por la carrera
  * deshace también esta marca y la edición.
@@ -141,11 +166,17 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
     return found !== null;
   }
 
-  /** Día civil de hoy en la zona de la sede de escritura (molde DX-151). */
+  /**
+   * Día civil de hoy en la zona de la sede de la cabecera o, sin ella, la de
+   * la sede por defecto de la clínica. Es una LECTURA: nunca pasa por
+   * `writeLocationId`, que da 403 a un miembro restringido sin sede activa.
+   */
   clinicToday(now: Date): Promise<string> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const id = await this.tenantContext.writeLocationId(tx);
+      const id =
+        this.tenantContext.getLocationId() ??
+        (await resolveDefaultLocationId(tx));
       const zoneOf = await resolveLocationTimeZones(tx, tenantId, [id]);
       return civilDateIn(now, zoneOf(id));
     });
@@ -211,6 +242,7 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
         await lockPatientCoverages(tx, tenantId, input.patientId);
         // Con el candado tomado nadie más escribe sus coberturas: el tope y
         // «la primera es principal» se deciden sobre lo que de verdad hay.
+        await assertPayerUsable(tx, input.payerId, true);
         const live = await tx.patientCoverage.count({
           where: { patientId: input.patientId, deletedAt: null },
         });
@@ -272,9 +304,16 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
         // Con el candado, otra petición pudo retirarla mientras esperábamos.
         const live = await tx.patientCoverage.findFirst({
           where: { id, patientId, deletedAt: null },
-          select: { id: true },
+          select: { id: true, payerId: true },
         });
         if (!live) return null;
+        if (patch.payerId !== undefined) {
+          await assertPayerUsable(
+            tx,
+            patch.payerId,
+            patch.payerId !== live.payerId,
+          );
+        }
         if (patch.isPrimary) {
           await unmarkOtherPrimaries(tx, patientId, id, patch.updatedById);
         }

@@ -11,6 +11,7 @@ import {
 } from '../../../payers/domain/ports/payer-repository.port';
 import {
   COVERAGE_NOT_FOUND_MESSAGE,
+  COVERAGE_PAYER_NOT_FOUND_MESSAGE,
   COVERAGE_PRIMARY_REQUIRED_MESSAGE,
   PATIENT_NOT_FOUND_MESSAGE,
   PAYER_INACTIVE_MESSAGE,
@@ -28,7 +29,7 @@ import {
 export const COVERAGES_CLOCK = Symbol('COVERAGES_CLOCK');
 
 /** Lo mismo que `PAYER_NOT_FOUND_MESSAGE` del catálogo, aquí como 400. */
-export const COVERAGE_PAYER_NOT_FOUND_MESSAGE = 'Pagador no encontrado.';
+export { COVERAGE_PAYER_NOT_FOUND_MESSAGE };
 
 export interface PatientCoverageView extends PatientCoverage {
   status: CoverageStatus;

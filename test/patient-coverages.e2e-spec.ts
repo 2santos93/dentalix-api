@@ -8,8 +8,10 @@ import {
   loginAs,
   registerClinic,
   resetDatabase,
+  SEEDED_PASSWORD,
   seedMember,
 } from './support/e2e-fixtures';
+import { PasswordService } from '../src/shared/crypto/password.service';
 
 // DX-153 en HTTP real: coberturas del paciente (pagador, plan, afiliado,
 // vigencia). Estado derivado, una sola principal (y su promoción al retirar),
@@ -433,5 +435,49 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
         FROM audit_events
        WHERE "tenantId" = ${clinic.tenantId}::uuid AND "patientId" = ${p}::uuid`;
     expect(text[0].found).toBe(false);
+  });
+
+  it('una recepcionista restringida a una sede desactivada sigue LEYENDO coberturas (200, nunca 403)', async () => {
+    const north = (
+      await as(api().post('/api/v1/locations'), clinic.adminToken)
+        .send({ name: 'Sede Norte' })
+        .expect(201)
+    ).body as { id: string };
+    const member = await raw.user.create({
+      data: {
+        email: 'restringida@dx153-cov.test',
+        passwordHash: await new PasswordService().hash(SEEDED_PASSWORD),
+        fullName: 'Recepción restringida',
+        emailVerifiedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    await raw.clinicMembership.create({
+      data: {
+        tenantId: clinic.tenantId,
+        userId: member.id,
+        role: ClinicRole.RECEPTION,
+      },
+    });
+    await as(
+      api().put(`/api/v1/staff/${member.id}/locations`),
+      clinic.adminToken,
+    )
+      .send({ locationIds: [north.id] })
+      .expect(200);
+    await as(api().patch(`/api/v1/locations/${north.id}`), clinic.adminToken)
+      .send({ isActive: false })
+      .expect(200);
+    const token = await loginAs(app, clinic.host, 'restringida@dx153-cov.test');
+
+    const p = await createPatient(clinic, { firstName: 'Lectura' });
+    await add(p, { payerId: sanitas, isPrimary: true }).expect(201);
+    const detail = await as(api().get(`/api/v1/patients/${p}`), token).expect(
+      200,
+    );
+    expect(
+      (detail.body as { coverage: { payerName: string } }).coverage,
+    ).toMatchObject({ payerName: 'Sanitas' });
+    await as(api().get(coverages(p)), token).expect(200);
   });
 });

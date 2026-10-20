@@ -20,6 +20,8 @@ import {
 
 export const PAYER_NOT_FOUND_MESSAGE = 'Pagador no encontrado.';
 export const PAYER_DUPLICATE_MESSAGE = 'Ya existe un pagador con ese nombre.';
+export const PAYER_DUPLICATE_INACTIVE_MESSAGE =
+  'Ya existe un pagador con ese nombre, pero está desactivado; pídele a administración que lo reactive.';
 export const PAYER_IN_USE_MESSAGE =
   'Este pagador tiene coberturas asociadas; desactívalo en lugar de retirarlo.';
 
@@ -35,6 +37,14 @@ export interface UpdatePayerInput {
   type?: PayerType;
   country?: ClinicCountry | null;
   active?: boolean;
+}
+
+function duplicateConflict(existing: Payer): ConflictException {
+  return new ConflictException(
+    existing.active
+      ? PAYER_DUPLICATE_MESSAGE
+      : PAYER_DUPLICATE_INACTIVE_MESSAGE,
+  );
 }
 
 function assertValid(error: string | null): void {
@@ -64,9 +74,8 @@ export class CreatePayerUseCase {
     const country = input.country ?? null;
     assertValid(validatePayerTypeCountry(input.type, country));
     const name = normalizePayerName(input.name);
-    if (await this.repo.findByNormalizedName(payerNameKey(name))) {
-      throw new ConflictException(PAYER_DUPLICATE_MESSAGE);
-    }
+    const existing = await this.repo.findByNormalizedName(payerNameKey(name));
+    if (existing) throw duplicateConflict(existing);
     return this.repo.create({
       name,
       type: input.type,
@@ -95,9 +104,11 @@ export class UpdatePayerUseCase {
     if (input.name !== undefined) {
       assertValid(validatePayerName(input.name));
       patch.name = normalizePayerName(input.name);
-      if (await this.repo.findByNormalizedName(payerNameKey(patch.name), id)) {
-        throw new ConflictException(PAYER_DUPLICATE_MESSAGE);
-      }
+      const existing = await this.repo.findByNormalizedName(
+        payerNameKey(patch.name),
+        id,
+      );
+      if (existing) throw duplicateConflict(existing);
     }
     // Tipo y país se validan juntos, con el valor que quedaría tras el cambio.
     if (input.type !== undefined || input.country !== undefined) {
@@ -122,11 +133,10 @@ export class DeletePayerUseCase {
 
   /** Con coberturas vivas no se retira: se desactiva (las coberturas siguen). */
   async execute(id: string, deletedById?: string): Promise<void> {
-    const current = await this.repo.findById(id);
-    if (!current) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
-    if ((await this.repo.countLiveCoverages(id)) > 0) {
-      throw new ConflictException(PAYER_IN_USE_MESSAGE);
+    const result = await this.repo.retire(id, deletedById);
+    if (result === 'NOT_FOUND') {
+      throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
     }
-    await this.repo.softDelete(id, deletedById);
+    if (result === 'IN_USE') throw new ConflictException(PAYER_IN_USE_MESSAGE);
   }
 }

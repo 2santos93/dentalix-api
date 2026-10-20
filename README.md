@@ -1519,8 +1519,9 @@ coberturas por paciente, una principal. Sustituye al texto libre
   `isPrimary`, notas). Ambas con RLS FORCE y FK compuestas por `tenantId`
   (un pagador o paciente de otra clínica es imposible en la BD). Se quitan en
   blando.
-- **Reglas**: nombre de pagador único por clínica ignorando mayúsculas,
-  tildes y espacios (409 en español); CHECK de tipo y país (EPS_CO y
+- **Reglas**: nombre de pagador único por clínica entre pagadores vivos
+  (mayúsculas y tildes se comprueban en la API; 409 en español, con mensaje
+  propio si el que coincide está desactivado); CHECK de tipo y país (EPS_CO y
   PREPAGADA_CO solo con país CO); `validTo` no anterior a `validFrom`; hasta 5
   coberturas vivas por paciente; la primera es principal aunque no se pida y
   `isPrimary: true` en otra desmarca la anterior en la misma transacción
@@ -1549,8 +1550,7 @@ coberturas por paciente, una principal. Sustituye al texto libre
 - **Demo**: `npm run seed:demo` crea 7 pagadores (Sura EPS, Sanitas,
   Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una
-  pendiente para ver los tres estados. Es idempotente: busca el pagador por
-  nombre y la cobertura por paciente y pagador.
+  pendiente para ver los tres estados. El seed omite una clínica demo ya creada.
 - **Tests**: `payers.e2e-spec.ts`, `patient-coverages.e2e-spec.ts`,
   `appointments-coverage.e2e-spec.ts`, `patient-coverages.int-spec.ts` (RLS,
   FK compuestas, relleno) y los recuentos de `seed-demo.int-spec.ts`.

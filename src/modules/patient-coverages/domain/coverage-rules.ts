@@ -22,6 +22,7 @@ export const COVERAGE_DATE_RANGE_MESSAGE =
 export const COVERAGE_PRIMARY_REQUIRED_MESSAGE =
   'Debe haber una cobertura principal; marca otra como principal.';
 export const PAYER_INACTIVE_MESSAGE = 'Ese pagador está desactivado.';
+export const COVERAGE_PAYER_NOT_FOUND_MESSAGE = 'Pagador no encontrado.';
 
 export type CoverageStatus = 'ACTIVE' | 'EXPIRED' | 'NOT_STARTED';
 
