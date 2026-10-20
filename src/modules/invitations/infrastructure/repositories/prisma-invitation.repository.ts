@@ -324,6 +324,15 @@ export class PrismaInvitationRepository implements InvitationRepository {
           where: { id: membership.id },
           data: { deletedAt: null, role: input.role },
         });
+        // DX-089: el ADMIN siempre tiene todas las sedes. Reactivarlo como
+        // ADMIN vacía sus filas en esta misma transacción (como ascenderlo
+        // por PATCH /staff/:userId).
+        if (input.role === ClinicRole.ADMIN) {
+          // eslint-disable-next-line no-restricted-syntax
+          await tx.membershipLocation.deleteMany({
+            where: { membershipId: membership.id },
+          });
+        }
       } else {
         await tx.clinicMembership.create({
           data: { tenantId, userId, role: input.role },
@@ -340,9 +349,10 @@ export class PrismaInvitationRepository implements InvitationRepository {
         userId,
         role: input.role,
         tokenVersion,
-        allowedLocationIds: membership
-          ? activeLocationIds(membership.locations)
-          : null,
+        allowedLocationIds:
+          membership && input.role !== ClinicRole.ADMIN
+            ? activeLocationIds(membership.locations)
+            : null,
       };
     });
   }

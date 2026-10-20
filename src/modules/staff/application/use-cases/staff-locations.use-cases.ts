@@ -59,7 +59,11 @@ export class ReplaceStaffLocationsUseCase {
   ) {}
 
   async execute(input: ReplaceStaffLocationsInput): Promise<StaffLocations> {
-    const locationIds = [...new Set(input.locationIds)];
+    // Postgres compara los uuid sin distinguir mayúsculas: se normaliza antes
+    // de quitar duplicados para no intentar insertar la misma sede dos veces.
+    const locationIds = [
+      ...new Set(input.locationIds.map((id) => id.toLowerCase())),
+    ];
     // La comprobación (miembro activo, no ADMIN, sedes activas de la clínica)
     // y la escritura van en la misma transacción del repositorio.
     const outcome = await this.repo.replaceLocations(

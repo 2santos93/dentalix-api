@@ -209,6 +209,36 @@ describe('Sedes permitidas por miembro (DX-089)', () => {
     expect(await rowsOf(a.adminUserId)).toBe(0);
   });
 
+  it('un ADMIN que arrastra filas de sedes figura igualmente con todas', async () => {
+    const membership = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: a.tenantId, userId: a.adminUserId },
+      select: { id: true },
+    });
+    const stale = await raw.membershipLocation.create({
+      data: {
+        tenantId: a.tenantId,
+        membershipId: membership.id,
+        locationId: a1,
+      },
+    });
+    try {
+      await api(a, a.adminToken)
+        .get(`/staff/${a.adminUserId}/locations`)
+        .expect(200, { all: true, locationIds: [] });
+      const list = await api(a, a.adminToken).get('/staff').expect(200);
+      const admin = (list.body as StaffListItem[]).find(
+        (m) => m.userId === a.adminUserId,
+      );
+      expect(admin?.locationIds).toBeNull();
+      const detail = await api(a, a.adminToken)
+        .get(`/staff/${a.adminUserId}`)
+        .expect(200);
+      expect(detail.body).toMatchObject({ locationIds: null });
+    } finally {
+      await raw.membershipLocation.delete({ where: { id: stale.id } });
+    }
+  });
+
   it('DENTIST y RECEPTION no pueden leer ni cambiar sedes (403)', async () => {
     for (const token of [dentistaToken, recepcionToken]) {
       await api(a, token)

@@ -9,6 +9,10 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { otherActiveMemberships } from '../../../../shared/tenancy/other-active-memberships';
 import {
+  activeLocationIds,
+  MEMBERSHIP_LOCATIONS_SELECT,
+} from '../../../../shared/locations/membership-locations';
+import {
   DeactivateStaffOutcome,
   ReplaceLocationsOutcome,
   StaffLocationsLookup,
@@ -196,7 +200,10 @@ export class PrismaStaffRepository implements StaffRepository {
             email: membership.user.email,
             role: membership.role,
             professionalLicense: membership.professionalLicense,
-            locationIds: activeLocationIds(membership.locations),
+            locationIds: allowedLocationIds(
+              membership.role,
+              membership.locations,
+            ),
             status: membership.deletedAt
               ? ('INACTIVE' as const)
               : ('ACTIVE' as const),
@@ -255,7 +262,7 @@ export class PrismaStaffRepository implements StaffRepository {
         fullName: membership.user.fullName,
         email: membership.user.email,
         role: membership.role,
-        locationIds: activeLocationIds(membership.locations),
+        locationIds: allowedLocationIds(membership.role, membership.locations),
       }));
     });
   }
@@ -266,12 +273,15 @@ export class PrismaStaffRepository implements StaffRepository {
       const membership = await tx.clinicMembership.findFirst({
         where: { userId, user: { deletedAt: null } },
         orderBy: { deletedAt: { sort: 'desc', nulls: 'first' } },
-        select: { locations: MEMBERSHIP_LOCATIONS_SELECT },
+        select: { role: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
       });
       return membership
         ? {
             kind: 'FOUND',
-            locationIds: activeLocationIds(membership.locations),
+            locationIds: allowedLocationIds(
+              membership.role,
+              membership.locations,
+            ),
           }
         : { kind: 'NOT_FOUND' };
     });
@@ -454,30 +464,15 @@ function findActiveMembership(
 }
 
 /**
- * DX-089: sedes asignadas a una membresía con lo necesario para saber si
- * siguen activas; mismo criterio que el claim `loc` del token
- * (`prisma-auth.repository.ts`). Orden por antigüedad de la sede.
+ * DX-089: sedes permitidas tal como las ve el resto del sistema. Un ADMIN
+ * siempre tiene todas (`null`), aunque arrastre filas de antes de serlo: mismo
+ * criterio que el claim `loc` del token (`locationClaim`).
  */
-const MEMBERSHIP_LOCATIONS_SELECT = {
-  select: {
-    location: { select: { id: true, isActive: true, deletedAt: true } },
-  },
-  orderBy: { location: { createdAt: 'asc' } },
-} satisfies Prisma.ClinicMembership$locationsArgs;
-
-/**
- * Sin filas → `null` (todas las sedes). Con filas, solo las activas y no
- * borradas; si no queda ninguna, `[]` (ninguna), nunca "todas".
- */
-function activeLocationIds(
-  rows: {
-    location: { id: string; isActive: boolean; deletedAt: Date | null };
-  }[],
+function allowedLocationIds(
+  role: ClinicRole,
+  rows: Parameters<typeof activeLocationIds>[0],
 ): string[] | null {
-  if (rows.length === 0) return null;
-  return rows
-    .filter(({ location }) => location.isActive && !location.deletedAt)
-    .map(({ location }) => location.id);
+  return role === ClinicRole.ADMIN ? null : activeLocationIds(rows);
 }
 
 /** ¿Retirar a este miembro dejaría la clínica sin ADMIN activo? */

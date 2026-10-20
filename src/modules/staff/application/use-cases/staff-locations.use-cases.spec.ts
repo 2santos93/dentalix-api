@@ -114,6 +114,19 @@ describe('sedes permitidas de un miembro (DX-089)', () => {
     });
   });
 
+  it('quita duplicados aunque vengan en otra caja (Postgres no la distingue)', async () => {
+    const { replace, repo } = setup();
+    const spy = jest.spyOn(repo, 'replaceLocations');
+    await expect(
+      replace.execute({
+        userId: 'rec-1',
+        locationIds: [A1.toUpperCase(), A1],
+        actorUserId: ACTOR,
+      }),
+    ).resolves.toEqual({ all: false, locationIds: [A1] });
+    expect(spy).toHaveBeenCalledWith('rec-1', [A1], ACTOR);
+  });
+
   it('[] vuelve a dar todas las sedes', async () => {
     const { get, replace } = setup();
     await replace.execute({
