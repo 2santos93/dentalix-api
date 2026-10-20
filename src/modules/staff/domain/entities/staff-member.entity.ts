@@ -18,7 +18,8 @@ export interface StaffMember {
   professionalLicense?: string | null;
   /**
    * DX-089: sedes permitidas, solo activas. `null` = todas (sin restricción,
-   * siempre en un ADMIN). Lo traen el listado (`listActive`) y el perfil.
+   * siempre en un ADMIN). Lo traen el listado (`listActive`), `findById` y
+   * el perfil.
    */
   locationIds?: string[] | null;
 }

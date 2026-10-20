@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { ListAppointmentsUseCase } from './list-appointments.use-case';
 import { Appointment } from '../../domain/entities/appointment.entity';
@@ -7,6 +7,8 @@ import {
   ListAppointmentsByRangeParams,
 } from '../../domain/ports/appointment-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../provider-location';
 
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
@@ -58,11 +60,20 @@ function makeRepo(
 }
 
 // Personal activo de la clínica: los ids que `providerIds` puede pedir.
-function makeStaff(ids: string[] = ['prov1', 'prov2']): StaffRepository {
+// `locations`: sedes en las que atiende cada uno (DX-121d; sin entrada = todas).
+function makeStaff(
+  ids: string[] = ['prov1', 'prov2'],
+  locations: Record<string, string[]> = {},
+): StaffRepository {
   return {
     listActive: (): Promise<never> =>
       Promise.resolve(
-        ids.map((userId) => ({ userId, fullName: userId, role: 'DENTIST' })),
+        ids.map((userId) => ({
+          userId,
+          fullName: userId,
+          role: 'DENTIST',
+          locationIds: locations[userId] ?? null,
+        })),
       ) as Promise<never>,
   } as unknown as StaffRepository;
 }
@@ -89,7 +100,11 @@ describe('ListAppointmentsUseCase', () => {
         return Promise.resolve([a1, a2]);
       },
     });
-    const uc = new ListAppointmentsUseCase(repo, makeStaff());
+    const uc = new ListAppointmentsUseCase(
+      repo,
+      makeStaff(),
+      new TenantContextService(),
+    );
 
     const result = await uc.execute({ from, to, providerId: 'prov1' });
 
@@ -113,7 +128,11 @@ describe('ListAppointmentsUseCase', () => {
         return Promise.resolve([]);
       },
     });
-    const uc = new ListAppointmentsUseCase(repo, makeStaff());
+    const uc = new ListAppointmentsUseCase(
+      repo,
+      makeStaff(),
+      new TenantContextService(),
+    );
 
     await uc.execute({ from, to });
 
@@ -138,7 +157,11 @@ describe('ListAppointmentsUseCase', () => {
           return Promise.resolve([]);
         },
       });
-      const uc = new ListAppointmentsUseCase(repo, makeStaff());
+      const uc = new ListAppointmentsUseCase(
+        repo,
+        makeStaff(),
+        new TenantContextService(),
+      );
 
       await uc.execute({
         from,
@@ -154,7 +177,11 @@ describe('ListAppointmentsUseCase', () => {
     });
 
     it('rechaza con 400 un id que no es del personal activo de la clínica', async () => {
-      const uc = new ListAppointmentsUseCase(makeRepo(), makeStaff(['prov1']));
+      const uc = new ListAppointmentsUseCase(
+        makeRepo(),
+        makeStaff(['prov1']),
+        new TenantContextService(),
+      );
       await expect(
         uc.execute({ from, to, providerIds: ['prov1', 'de-otra-clinica'] }),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -162,10 +189,59 @@ describe('ListAppointmentsUseCase', () => {
 
     it('rechaza más de 12 profesionales', async () => {
       const ids = Array.from({ length: 13 }, (_, i) => `prov${i}`);
-      const uc = new ListAppointmentsUseCase(makeRepo(), makeStaff(ids));
+      const uc = new ListAppointmentsUseCase(
+        makeRepo(),
+        makeStaff(ids),
+        new TenantContextService(),
+      );
       await expect(uc.execute({ from, to, providerIds: ids })).rejects.toThrow(
         /12/,
       );
+    });
+  });
+
+  // DX-089 / DX-121d.
+  describe('sedes permitidas y profesional ↔ sede', () => {
+    const tenantContext = new TenantContextService();
+    const asRestricted = <T>(fn: () => Promise<T>, header?: string) =>
+      tenantContext.run('t1', header, fn, ['loc1']);
+
+    it('una sede explícita no permitida es 403', async () => {
+      const uc = new ListAppointmentsUseCase(
+        makeRepo(),
+        makeStaff(),
+        tenantContext,
+      );
+      await expect(
+        asRestricted(() => uc.execute({ from, to, locationId: 'loc2' })),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        asRestricted(() => uc.execute({ from, to, locationId: 'loc1' })),
+      ).resolves.toEqual([]);
+    });
+
+    it('un profesional que no atiende en la sede objetivo es 400', async () => {
+      const uc = new ListAppointmentsUseCase(
+        makeRepo(),
+        makeStaff(['prov1', 'prov2'], { prov1: ['loc1'] }),
+        tenantContext,
+      );
+      await expect(
+        uc.execute({ from, to, providerIds: ['prov1'], locationId: 'loc2' }),
+      ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
+      // La sede objetivo también puede ser la del request.
+      await expect(
+        tenantContext.run('t1', 'loc2', () =>
+          uc.execute({ from, to, providerIds: ['prov1'] }),
+        ),
+      ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
+      // Sin restricción atiende en todas; sin sede objetivo no se comprueba.
+      await expect(
+        uc.execute({ from, to, providerIds: ['prov2'], locationId: 'loc2' }),
+      ).resolves.toEqual([]);
+      await expect(
+        uc.execute({ from, to, providerIds: ['prov1'] }),
+      ).resolves.toEqual([]);
     });
   });
 });

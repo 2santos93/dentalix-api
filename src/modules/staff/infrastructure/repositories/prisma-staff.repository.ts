@@ -344,7 +344,7 @@ export class PrismaStaffRepository implements StaffRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const membership = await tx.clinicMembership.findFirst({
         where: { userId, deletedAt: null, user: { deletedAt: null } },
-        include: { user: true },
+        include: { user: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
       });
       return membership
         ? {
@@ -352,6 +352,8 @@ export class PrismaStaffRepository implements StaffRepository {
             fullName: membership.user.fullName,
             email: membership.user.email,
             role: membership.role,
+            // DX-121d: la agenda comprueba en qué sedes atiende.
+            locationIds: activeLocationIds(membership.locations),
           }
         : null;
     });

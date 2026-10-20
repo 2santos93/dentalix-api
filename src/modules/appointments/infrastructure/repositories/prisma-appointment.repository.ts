@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   enqueueWaitlistFromAppointment,
@@ -113,16 +112,6 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     return tenantId;
   }
 
-  /**
-   * Filtro por sede activa, o `{}` si el request no fijó ninguna (vista
-   * consolidada de la clínica). Se aplica SOLO donde la sede es semánticamente
-   * correcta — ver los comentarios en cada consulta.
-   */
-  private locationFilter(): { locationId?: string } {
-    const locationId = this.tenantContext.getLocationId();
-    return locationId ? { locationId } : {};
-  }
-
   async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const tenantId = this.requireTenantId();
     const appointment = await this.prisma.runWithTenant(async (tx) => {
@@ -139,12 +128,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       const created = await tx.appointment.create({
         data: {
           // Sede explícita del caso de uso (DX-122: la de la entrada de
-          // pendientes); si no, la del request (X-Location-Id, ya validada
-          // contra esta clínica); si no, la sede por defecto.
+          // pendientes, ya permitida); si no, la del request o, sin cabecera,
+          // la de escritura de la sesión (DX-089: la primera permitida del
+          // restringido, la principal para los demás).
           locationId:
-            input.locationId ??
-            this.tenantContext.getLocationId() ??
-            (await resolveDefaultLocationId(tx)),
+            input.locationId ?? (await this.tenantContext.writeLocationId(tx)),
           tenantId,
           patientId: input.patientId,
           providerId: input.providerId,
@@ -197,11 +185,12 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       // `appointments_tenantId_providerId_start_idx` (DX-043).
       ...(params.providerIds ? { providerId: { in: params.providerIds } } : {}),
       // La agenda SÍ es por sede: una cita ocurre en un sitio físico. Una sede
-      // explícita (DX-121) manda sobre la del request; una de otra clínica no
-      // devuelve nada (RLS).
+      // explícita (DX-121, ya permitida por el caso de uso) manda sobre la del
+      // request; una de otra clínica no devuelve nada (RLS). Sin ninguna, las
+      // sedes permitidas (DX-089) o la vista consolidada.
       ...(params.locationId
         ? { locationId: params.locationId }
-        : this.locationFilter()),
+        : this.tenantContext.locationScope()),
     };
 
     return this.prisma.runWithTenant(async (tx) => {
@@ -223,7 +212,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           deletedAt: null,
           start: { gte: params.from, lt: params.to },
           // Mismo criterio de sede que la agenda (`listByRange`).
-          ...this.locationFilter(),
+          ...this.tenantContext.locationScope(),
         },
         // Desempate por id: dos citas a la misma hora (distinto profesional)
         // salen siempre en el mismo orden.

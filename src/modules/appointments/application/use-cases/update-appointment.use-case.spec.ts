@@ -23,6 +23,8 @@ import type { BusinessHours } from '../../../location-schedule/application/busin
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AppointmentAuditContext } from './update-appointment.use-case';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../provider-location';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -166,6 +168,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeAudit(),
       makeBlocks(),
       makeLocations(),
+      new TenantContextService(),
     );
 
     await expect(
@@ -200,6 +203,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeAudit(),
       makeBlocks(),
       makeLocations(),
+      new TenantContextService(),
     );
 
     const result = await uc.execute(existing.id, {
@@ -247,6 +251,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeAudit(),
       makeBlocks(),
       makeLocations(),
+      new TenantContextService(),
     );
 
     const result = await uc.execute(existing.id, {
@@ -280,6 +285,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeAudit(),
       makeBlocks(),
       makeLocations(),
+      new TenantContextService(),
     );
 
     await expect(
@@ -305,6 +311,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeAudit(),
       makeBlocks(),
       makeLocations(),
+      new TenantContextService(),
     );
 
     await expect(
@@ -332,6 +339,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       // Shift by 15 minutes — the new window still overlaps the row's OWN
@@ -365,6 +373,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -396,6 +405,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -435,6 +445,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -462,6 +473,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -493,6 +505,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(uc.execute('a1', { notes: 'x' })).rejects.toBe(boom);
@@ -523,6 +536,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -548,6 +562,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -587,6 +602,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute('a1', {
@@ -619,6 +635,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute('a1', { notes: 'El paciente asistió' });
@@ -648,6 +665,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -673,6 +691,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -699,6 +718,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -739,6 +759,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -763,6 +784,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
       await expect(
         uc.execute(existing.id, { providerId: 'intruso' }),
@@ -791,6 +813,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(existing.id, { providerId: PROV2 });
@@ -831,6 +854,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -850,6 +874,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(drafts),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(
@@ -896,6 +921,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(drafts),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(
@@ -948,6 +974,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(blocks),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -972,6 +999,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(blocks),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -998,6 +1026,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(blocks),
         makeLocations(),
+        new TenantContextService(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -1022,6 +1051,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(blocks),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await expect(
@@ -1045,6 +1075,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(drafts),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(
@@ -1085,6 +1116,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CONFIRMED });
@@ -1126,6 +1158,7 @@ describe('UpdateAppointmentUseCase', () => {
           makeAudit(drafts),
           makeBlocks(),
           makeLocations(),
+          new TenantContextService(),
         );
 
         await uc.execute(
@@ -1165,6 +1198,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(drafts),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(
@@ -1209,6 +1243,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
@@ -1234,6 +1269,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
@@ -1270,6 +1306,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(drafts),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
       return { repo, drafts, uc };
     }
@@ -1419,10 +1456,51 @@ describe('UpdateAppointmentUseCase', () => {
         makeAudit(),
         makeBlocks(),
         makeLocations(),
+        new TenantContextService(),
       );
       await expect(
         uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
+  });
+});
+
+// DX-089 / DX-121d.
+describe('UpdateAppointmentUseCase · sedes permitidas y profesional ↔ sede', () => {
+  const tenantContext = new TenantContextService();
+  const uc = (staff: StaffRepository = makeStaff()) =>
+    new UpdateAppointmentUseCase(
+      makeRepo({
+        findById: (): Promise<Appointment | null> =>
+          Promise.resolve(fakeAppointment()),
+        update: (): Promise<Appointment> => Promise.resolve(fakeAppointment()),
+      }),
+      makeSchedule(),
+      staff,
+      makeAudit(),
+      makeBlocks(),
+      makeLocations(),
+      tenantContext,
+    );
+
+  it('una cita de una sede no permitida es 403 (no 404)', async () => {
+    await expect(
+      tenantContext.run(
+        't1',
+        undefined,
+        () => uc().execute('a1', { notes: 'x' }),
+        ['loc2'],
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('pasar la cita a un profesional que no atiende en su sede es 400', async () => {
+    const staff = {
+      findById: (userId: string): Promise<never> =>
+        Promise.resolve({ userId, locationIds: ['loc2'] }) as Promise<never>,
+    } as unknown as StaffRepository;
+    await expect(
+      uc(staff).execute('a1', { providerId: 'prov2' }),
+    ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
   });
 });

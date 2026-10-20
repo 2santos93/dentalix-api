@@ -107,6 +107,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
     noSchedule,
     types,
     blocks,
+    tenantContext,
   );
   const update = new UpdateAppointmentUseCase(
     appointments,
@@ -115,12 +116,14 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
     noAudit,
     blocks,
     new PrismaLocationRepository(prisma, tenantContext),
+    tenantContext,
   );
   const schedule = new ScheduleFromWaitlistUseCase(
     waitlist,
     types,
     create,
     noAudit,
+    tenantContext,
   );
 
   beforeAll(async () => {

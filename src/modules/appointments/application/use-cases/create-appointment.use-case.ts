@@ -29,6 +29,8 @@ import type { AppointmentTypeRepository } from '../../../appointment-types/domai
 import { endFromDuration } from '../../../appointment-types/domain/appointment-type-rules';
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
+import { assertAttendsAt } from '../provider-location';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -81,6 +83,7 @@ export class CreateAppointmentUseCase {
     // DX-122: no agendar encima de un bloqueo que no lo permite.
     @Inject(SCHEDULE_BLOCK_REPOSITORY)
     private readonly blocks: ScheduleBlockRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -168,6 +171,16 @@ export class CreateAppointmentUseCase {
     if (!provider) {
       throw new NotFoundException('Profesional no encontrado');
     }
+
+    // DX-089: la sede de la cita (la de pendientes, o la del request) tiene que
+    // ser una permitida — la cabecera ya la validó el interceptor — y el
+    // profesional tiene que atender en ella (DX-121d). Sin sede objetivo
+    // (miembro con varias sedes y sin cabecera) no hay con qué comparar.
+    if (input.locationId !== undefined) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
+    }
+    const target = input.locationId ?? this.tenantContext.getLocationId();
+    if (target !== undefined) assertAttendsAt(provider, target);
 
     // Horario de atención de la SEDE: la cita tiene que caber completa en un
     // tramo del día. Sede sin horario configurado => sin restricción (ver

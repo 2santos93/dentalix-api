@@ -19,6 +19,7 @@ import type { StaffRepository } from '../../../staff/domain/ports/staff-reposito
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // Hoy es el lunes 19/10/2026 a las 08:00 en Bogotá; el hueco, el martes 20 de
 // 10:00 a 10:30 con la Dra. X en la sede 1.
@@ -133,6 +134,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       staff,
       config,
       clock,
+      new TenantContextService(),
     );
     offer = new CreateWaitlistOfferUseCase(
       repo,
@@ -141,6 +143,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       audit(drafts),
       config,
       clock,
+      new TenantContextService(),
     );
     outcome = new RecordWaitlistOfferOutcomeUseCase(repo, audit(drafts));
   });

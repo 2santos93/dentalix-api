@@ -33,6 +33,8 @@ import {
   STAFF_REPOSITORY,
   type StaffRepository,
 } from '../../../staff/domain/ports/staff-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { locationNotAllowed } from '../../../../shared/tenancy/location-access';
 
 /** Quién escribe: un odontólogo solo puede tocar su propia agenda. */
 export interface ScheduleBlockActor {
@@ -96,6 +98,22 @@ function assertCanWrite(
   }
 }
 
+/**
+ * DX-089: un bloqueo de sede solo lo escribe quien trabaja en esa sede; uno
+ * «en todas las sedes» (`locationId: null`) afecta también a las ajenas, así
+ * que solo quien tiene todas. Si no, 403 `LOCATION_NOT_ALLOWED`.
+ */
+function assertLocationWritable(
+  tenantContext: TenantContextService,
+  locationId: string | null,
+): void {
+  if (locationId !== null) {
+    tenantContext.assertLocationAllowed(locationId);
+  } else if (tenantContext.getAllowedLocationIds() !== 'ALL') {
+    throw locationNotAllowed();
+  }
+}
+
 /** Sede y profesional del cliente: tienen que ser de ESTA clínica (RLS). */
 async function assertScopeBelongs(
   scope: ScheduleBlockScope,
@@ -126,6 +144,7 @@ export class ListScheduleBlocksUseCase {
     private readonly locations: LocationRepository,
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(params: {
@@ -155,6 +174,10 @@ export class ListScheduleBlocksUseCase {
         `Puedes ver como mucho ${MAX_PROVIDER_IDS} profesionales a la vez`,
       );
     }
+    // DX-089: sin sede explícita, el repositorio acota a las permitidas.
+    if (params.locationId) {
+      this.tenantContext.assertLocationAllowed(params.locationId);
+    }
     if (
       params.locationId &&
       !(await this.locations.findById(params.locationId))
@@ -179,6 +202,7 @@ export class ListAffectedAppointmentsUseCase {
     private readonly locations: LocationRepository,
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Las citas que quedarían dentro de un bloqueo, antes de crearlo. */
@@ -194,6 +218,7 @@ export class ListAffectedAppointmentsUseCase {
     };
     assertValid(scheduleBlockScopeError(scope));
     assertValid(scheduleBlockRangeError(input.start, input.end));
+    assertLocationWritable(this.tenantContext, scope.locationId);
     await assertScopeBelongs(scope, this.locations, this.staff);
     return this.repo.findAffectedAppointments(
       { ...scope, start: input.start, end: input.end },
@@ -211,6 +236,7 @@ export class CreateScheduleBlockUseCase {
     private readonly locations: LocationRepository,
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -225,6 +251,7 @@ export class CreateScheduleBlockUseCase {
     assertValid(scheduleBlockRangeError(input.start, input.end));
     const note = cleanNote(input.note) ?? null;
     assertCanWrite(actor, scope.providerId);
+    assertLocationWritable(this.tenantContext, scope.locationId);
     await assertScopeBelongs(scope, this.locations, this.staff);
 
     // Crear un bloqueo NUNCA borra ni mueve citas: si hay alguna dentro, se
@@ -258,6 +285,7 @@ export class UpdateScheduleBlockUseCase {
     private readonly locations: LocationRepository,
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Cambia rango, tipo, si deja agendar y la nota (no el alcance). */
@@ -269,6 +297,7 @@ export class UpdateScheduleBlockUseCase {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
     assertCanWrite(actor, current.providerId);
+    assertLocationWritable(this.tenantContext, current.locationId);
 
     const start = input.start ?? current.start;
     const end = input.end ?? current.end;
@@ -310,6 +339,7 @@ export class DeleteScheduleBlockUseCase {
   constructor(
     @Inject(SCHEDULE_BLOCK_REPOSITORY)
     private readonly repo: ScheduleBlockRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Borrado lógico: la agenda vuelve a quedar libre en ese rango. */
@@ -317,6 +347,7 @@ export class DeleteScheduleBlockUseCase {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
     assertCanWrite(actor, current.providerId);
+    assertLocationWritable(this.tenantContext, current.locationId);
     await this.repo.softDelete(id, actor.userId);
   }
 }

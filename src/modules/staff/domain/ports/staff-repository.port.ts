@@ -108,7 +108,7 @@ export interface StaffRepository {
   /**
    * Active staff member by `userId` for the current tenant, or `null` if no
    * matching non-deleted `ClinicMembership`/`User` exists. Tenant-scoped
-   * (via RLS / `runWithTenant`).
+   * (via RLS / `runWithTenant`). DX-121d: con `locationIds` (`null` = todas).
    */
   findById(userId: string): Promise<StaffMember | null>;
 

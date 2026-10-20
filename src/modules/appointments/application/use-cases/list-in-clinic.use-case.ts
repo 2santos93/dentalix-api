@@ -23,6 +23,7 @@ import {
   type InClinicStatus,
   type Punctuality,
 } from '../../domain/patient-flow';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export const IN_CLINIC_NO_LOCATION_MESSAGE =
   'Elige una sede para ver quién está en la clínica.';
@@ -122,6 +123,7 @@ export class ListInClinicUseCase {
     private readonly repo: AppointmentRepository,
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -131,6 +133,7 @@ export class ListInClinicUseCase {
     if (!input.locationId) {
       throw new BadRequestException(IN_CLINIC_NO_LOCATION_MESSAGE);
     }
+    this.tenantContext.assertLocationAllowed(input.locationId);
     let day: string | null = null;
     if (input.date !== undefined) {
       day = parseCivilDate(input.date);

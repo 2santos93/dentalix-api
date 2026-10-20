@@ -44,6 +44,8 @@ import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { LOCATION_REPOSITORY } from '../../../locations/domain/ports/location-repository.port';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { assertAttendsAt } from '../provider-location';
 import {
   FLOW_TIMESTAMP_FIELD,
   FRONT_DESK_ROLES,
@@ -109,6 +111,7 @@ export class UpdateAppointmentUseCase {
     // DX-200: la llegada solo se marca el día de la cita en la zona de su sede.
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -134,6 +137,7 @@ export class UpdateAppointmentUseCase {
   ): Promise<AppointmentWriteResult> {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Cita no encontrada');
+    this.tenantContext.assertLocationAllowed(existing.locationId);
     if (!existing.wantsEarlier || !MOVABLE_STATUSES.includes(existing.status)) {
       throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
     }
@@ -168,6 +172,8 @@ export class UpdateAppointmentUseCase {
       // makes cross-tenant rows invisible), so both surface as NotFound.
       throw new NotFoundException('Appointment not found');
     }
+    // DX-089: una cita de una sede no permitida es 403 (no 404: existe).
+    this.tenantContext.assertLocationAllowed(existing.locationId);
 
     // DX-210: «Adelantar si hay hueco» lo cambian recepción, el odontólogo y
     // gestión (la asistente ve la agenda pero no la marca).
@@ -241,6 +247,8 @@ export class UpdateAppointmentUseCase {
         if (!provider) {
           throw new NotFoundException('Profesional no encontrado');
         }
+        // DX-121d: el profesional destino atiende en la sede de la cita.
+        assertAttendsAt(provider, existing.locationId);
       }
 
       // Horario de atención de la SEDE DE LA CITA (no la del request: mover una
@@ -412,6 +420,7 @@ export class UpdateAppointmentUseCase {
   ): Promise<AppointmentWriteResult> {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Cita no encontrada');
+    this.tenantContext.assertLocationAllowed(existing.locationId);
     const role = auditContext.actor.role;
     if (role === null || !FRONT_DESK_ROLES.includes(role)) {
       throw new ForbiddenException(PATIENT_FLOW_MESSAGES.arriveForbidden);
