@@ -591,6 +591,17 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       })
       .expect(201);
     const appt = await appointment(patientId);
+    // La evolución no se liga a una cita de un día civil futuro, y la de
+    // `appointment()` cae mañana si el spec corre al final del día en
+    // Bogotá: se pasa a la hora anterior (agendar en el pasado no se puede
+    // por la API).
+    await raw.appointment.update({
+      where: { id: appt },
+      data: {
+        start: new Date(Date.now() - 60 * 60 * 1000),
+        end: new Date(Date.now() - 30 * 60 * 1000),
+      },
+    });
     const before = await as(clinicA, dentist)
       .get(`/appointments/${appt}/post-op-instructions`)
       .expect(200);
