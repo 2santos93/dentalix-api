@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 import { PatientDocumentCategory } from '@prisma/client';
 
 const CATEGORY_DOC =
@@ -63,9 +63,6 @@ export class VoidPatientDocumentDto {
   @ApiProperty({ minLength: 3, maxLength: 500 })
   @IsOptional()
   @IsString({ message: 'El motivo debe ser un texto.' })
-  @MaxLength(500, {
-    message: 'El motivo debe tener entre 3 y 500 caracteres.',
-  })
   reason?: string;
 }
 

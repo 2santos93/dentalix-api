@@ -254,7 +254,7 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       ],
       [
         { category: 'XRAY', notes: 'x'.repeat(501) },
-        'Las notas no pueden superar 500 caracteres.',
+        'Las notas admiten hasta 500 caracteres.',
       ],
     ])('reglas del documento %j → 400 «%s»', async (fields, message) => {
       await expect(

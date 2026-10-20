@@ -35,6 +35,7 @@ import {
   storageKeyFor,
   validateCategory,
   validateClinicalDate,
+  validateNotes,
   validateToothNumbers,
   validateVoidReason,
 } from '../../domain/document-rules';
@@ -60,8 +61,6 @@ export const PATIENT_DOCUMENT_URL_TTL = Symbol('PATIENT_DOCUMENT_URL_TTL');
 
 export const MISSING_FILE_MESSAGE = 'Falta el archivo.';
 export const EMPTY_FILE_MESSAGE = 'El archivo está vacío.';
-export const NOTES_TOO_LONG_MESSAGE =
-  'Las notas no pueden superar 500 caracteres.';
 export const DUPLICATE_DOCUMENT_MESSAGE =
   'Este archivo ya está en la ficha del paciente.';
 export const DOCUMENT_NOT_FOUND_MESSAGE = 'Documento no encontrado';
@@ -69,8 +68,6 @@ export const DOWNLOAD_ONLY_MESSAGE = 'Este tipo solo se puede descargar.';
 export const VOID_FORBIDDEN_MESSAGE =
   'Solo quien subió el documento o un administrador puede anularlo.';
 export const DOCUMENT_ALREADY_VOIDED_MESSAGE = 'El documento ya está anulado.';
-
-const MAX_NOTES_LENGTH = 500;
 
 /** Lo que importa del fichero de multer (sin acoplar el caso de uso a él). */
 export interface UploadedDocumentFile {
@@ -188,15 +185,6 @@ async function requireDocument(
   return doc;
 }
 
-function normalizeNotes(notes: string | undefined): string | null {
-  const trimmed = (notes ?? '').trim();
-  if (trimmed === '') return null;
-  if (trimmed.length > MAX_NOTES_LENGTH) {
-    throw new BadRequestException(NOTES_TOO_LONG_MESSAGE);
-  }
-  return trimmed;
-}
-
 function parseTeethCsv(csv: string | undefined): string[] {
   const parts = (csv ?? '')
     .split(',')
@@ -239,7 +227,7 @@ export class UploadPatientDocumentUseCase {
 
     const category = rule(() => validateCategory(fields.category));
     const toothNumbers = parseTeethCsv(fields.toothNumbers);
-    const notes = normalizeNotes(fields.notes);
+    const notes = rule(() => validateNotes(fields.notes));
     await assertPatientInClinic(this.patients, patientId);
     // El «hoy» de la sede solo se consulta si llega fecha clínica.
     let clinicalDate: string | null = null;
