@@ -159,6 +159,32 @@ describe('buildAuditDraft (DX-009)', () => {
     expect(JSON.stringify(draft)).not.toContain('150000');
   });
 
+  it('DX-222: el paciente puede venir en el `patientId` de la respuesta', () => {
+    const draft = buildAuditDraft(
+      {
+        action: 'VIEW',
+        resource: 'POSTOP_DELIVERY',
+        patient: { response: 'patientId' },
+      },
+      req({ params: { appointmentId: PLAN } }),
+      { patientId: PATIENT, suggested: [] },
+      scope,
+    );
+    expect(draft?.patient).toEqual({ kind: 'patient', id: PATIENT });
+    expect(
+      buildAuditDraft(
+        {
+          action: 'VIEW',
+          resource: 'POSTOP_DELIVERY',
+          patient: { response: 'patientId' },
+        },
+        req(),
+        { patientId: 'no-uuid' },
+        scope,
+      )?.patient,
+    ).toBeNull();
+  });
+
   it('un id que no es UUID (ruta manipulada) no se usa', () => {
     const draft = buildAuditDraft(
       {

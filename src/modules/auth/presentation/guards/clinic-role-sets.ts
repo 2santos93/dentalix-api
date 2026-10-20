@@ -236,3 +236,15 @@ export const CASH_SESSION_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 export const CASH_SESSION_ADMIN_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Indicaciones postoperatorias (DX-222) — LEER las plantillas y ENTREGARLAS:
+// los cuatro roles; recepción entrega las indicaciones en el mostrador, como
+// el presupuesto y la tarjeta de implante. Crear, editar, desactivar y cargar
+// las plantillas de ejemplo: solo gestión.
+export const POSTOP_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+export const POSTOP_TEMPLATE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

@@ -32,6 +32,12 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // compuesto). Editar la plantilla las sustituye en la misma transacción y
   // el cambio queda en audit_events.
   'clinicalNoteTemplatePrompt',
+  // DX-222: los vínculos de una plantilla de indicaciones (procedimiento o
+  // tipo de cita que la sugiere) son configuración, sin datos de pacientes y
+  // sin nada que los referencie (la entrega guarda su propia copia del texto).
+  // Editar la plantilla los sustituye en la misma transacción y el cambio
+  // queda en audit_events.
+  'postOpInstructionTemplateLink',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([

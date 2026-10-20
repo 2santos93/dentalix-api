@@ -17,6 +17,17 @@ import {
   normalizeRepsCode,
 } from '../../../../shared/validation/health-codes';
 
+/**
+ * DX-222: teléfono recortado; vacío o null = quitarlo (null), ausente = no
+ * tocarlo (undefined).
+ */
+function normalizePhone(
+  phone: string | null | undefined,
+): string | null | undefined {
+  if (phone === undefined) return undefined;
+  return phone?.trim() || null;
+}
+
 @Injectable()
 export class ListLocationsUseCase {
   constructor(
@@ -36,11 +47,13 @@ export class CreateLocationUseCase {
     name: string;
     address?: string;
     country?: ClinicCountry;
+    phone?: string;
   }): Promise<Location> {
     return this.repo.create({
       name: input.name.trim(),
       address: input.address?.trim() || undefined,
       country: input.country,
+      phone: input.phone?.trim() || undefined,
     });
   }
 }
@@ -58,6 +71,7 @@ export class UpdateLocationUseCase {
       address?: string;
       country?: ClinicCountry;
       repsHabilitationCode?: string | null;
+      phone?: string | null;
       isActive?: boolean;
     },
   ): Promise<Location> {
@@ -85,6 +99,7 @@ export class UpdateLocationUseCase {
       address: patch.address?.trim(),
       country: patch.country,
       repsHabilitationCode: reps,
+      phone: normalizePhone(patch.phone),
       isActive: patch.isActive,
     });
     if (!updated) throw new NotFoundException('Location not found');

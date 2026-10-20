@@ -105,7 +105,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
-   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), ~90 citas desde el lunes de la semana pasada hasta
+   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
@@ -1361,6 +1361,81 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   Cifuentes (su ficha muestra «Responsable de» y el estado de cuenta
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
+
+## Indicaciones postoperatorias (DX-222)
+
+Las indicaciones que el paciente se lleva tras una exodoncia, un cordal, una
+endodoncia, un implante o una prótesis: plantillas de la clínica, sugeridas
+por la cita y entregadas impresas, por email o por enlace de WhatsApp, con el
+texto congelado tal como lo recibió. Módulo `post-op-instructions`;
+migraciones `20261020000000_dx222_enums`,
+`20261020000100_dx222_post_op_instructions`,
+`20261020000200_dx222_audit_events_idx` y
+`20261020000300_dx222_email_template`.
+
+- **Plantillas y versión** (`post_op_instruction_templates`): `code` (2–20
+  mayúsculas, números o guiones; único por clínica y no se edita), `title`,
+  `body`, `version` y `active`. Cambiar título o texto sube `version`;
+  activar, desactivar o cambiar vínculos no. Una inactiva sale del selector y
+  no se entrega (400). Variables admitidas: `{{paciente}}`,
+  `{{profesional}}`, `{{clinica}}`, `{{telefono_sede}}` y `{{fecha}}` (día
+  civil de la cita en la zona de la sede); una desconocida da 400. Los
+  **vínculos** (`post_op_instruction_template_links`) dicen cuándo sugerirla:
+  por un procedimiento del catálogo (`catalogItemId`) o por un tipo de cita
+  (`appointmentTypeId`), exactamente uno por fila (CHECK); llegan en
+  `catalogItemIds`/`appointmentTypeIds` y se reemplazan completos. Uno de
+  otra clínica da 400. `POST /post-op-templates/samples` carga las 5 de
+  ejemplo (`POI-EXO`, `POI-CORDAL`, `POI-ENDO`, `POI-IMPLANTE`,
+  `POI-PROTESIS`) que la clínica aún no tiene: repetirlo no duplica ni pisa
+  una propia con el mismo código. RLS FORCE y FK compuestas por `tenantId`.
+- **Entrega inalterable** (`post_op_instruction_deliveries`): guarda el
+  texto ya renderizado (`renderedText`) y la copia de código, título y
+  `templateVersion`, así que editar la plantilla después no cambia lo
+  entregado. El trigger `post_op_instruction_deliveries_immutable` (función
+  `post_op_deliveries_immutable`) rechaza cualquier
+  UPDATE salvo poner `firstOpenedAt` una sola vez (de NULL a una fecha) y
+  cualquier DELETE con `app.current_tenant` fijado; `deliveredAt` lo pone la
+  BD. FK compuestas a paciente, cita, sede y plantilla.
+- **Canales** (`channel`): `PRINT` solo registra la entrega (el documento
+  sale de `GET /patients/:patientId/post-op-deliveries/:id`); `EMAIL` encola
+  la plantilla de email `post-op-instructions` con el enlace, al paciente o,
+  si es menor o no tiene email, a su responsable que recibe avisos (DX-203,
+  `sentToResponsible`); `WHATSAPP_LINK` devuelve el número y el mensaje para
+  `wa.me`, que lleva solo el saludo, la clínica y el enlace: **nunca** el
+  procedimiento ni el texto clínico. La baja de envíos del paciente (DX-128),
+  la falta de email o de teléfono con indicativo dan 422 en español sin
+  guardar nada; el tope de emails de la clínica o del destinatario da 429.
+  Si el outbox falla después de guardar, la entrega queda (y auditada) con
+  `emailQueued: false` para que el personal use otro canal.
+- **Enlace público** (`GET /public/post-op-instructions/:token`, sin
+  sesión, tenant por host y límite por IP): EMAIL y WHATSAPP_LINK crean un
+  token del que solo se guarda el hash (`tokenHash`) y caduca a los 30 días
+  (`tokenExpiresAt`). Muestra la marca de la clínica, el teléfono de la sede,
+  el título, la versión y el texto tal como se entregó; ningún otro dato del
+  paciente. Token desconocido, malformado o de otra clínica: 404; caducado:
+  410. Leer no marca nada (los previsualizadores de enlaces la abren solos):
+  la página llama a `POST …/:token/opened`, que fija `firstOpenedAt` la
+  primera vez y no cambia nada después.
+- **Rutas y roles**: `GET /post-op-templates` (los 4 roles) y `POST`,
+  `PATCH /:id` y `POST /samples` (solo ADMIN); `GET
+  /appointments/:appointmentId/post-op-instructions` (sugeridas por los
+  vínculos, el resto, canales disponibles y entregas hechas) y `POST
+  …/deliveries` (los 4 roles: recepción entrega en el mostrador); `GET
+  /patients/:patientId/post-op-deliveries` y `…/:id` (historial de la ficha).
+- **Auditoría** (`audit_events`): `POSTOP_TEMPLATE` (CREATE, CREATE con
+  `reason: SAMPLE_TEMPLATES`, UPDATE) y `POSTOP_DELIVERY` (CREATE con el
+  canal como `reason`, auditado en el caso de uso; VIEW de sugerencias,
+  historial y documento, con el paciente). Nunca se registran la URL, el
+  token ni el destinatario. La apertura pública no se audita: queda en
+  `firstOpenedAt`.
+- **Teléfono de la sede** (`locations.phone`): `PATCH /locations/:id` (solo
+  ADMIN); `null` o vacío lo quita. Es el `{{telefono_sede}}` de las
+  indicaciones y el que muestran la página pública y el email.
+- **Demo**: las 5 de ejemplo; `POI-EXO` vinculada a «Exodoncia simple»
+  (`CX-EXO-SIMPLE`), `POI-CORDAL` a la exodoncia quirúrgica y los cordales,
+  `POI-ENDO` al tipo de cita «Endodoncia»; la sede principal con teléfono
+  `+57 601 555 0101`, y una entrega impresa de `POI-EXO` para la última cita
+  atendida de un día anterior.
 
 ## Dominios personalizados (SEC-009)
 

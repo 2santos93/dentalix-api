@@ -9,6 +9,8 @@ export interface Location {
   country: ClinicCountry;
   /** DX-212: código de habilitación REPS (12 dígitos) o null. */
   repsHabilitationCode: string | null;
+  /** DX-222: teléfono de la sede para las indicaciones postoperatorias, o null. */
+  phone: string | null;
   isActive: boolean;
   /**
    * Zona IANA de la sede (DX-097): la de su horario, o la de su país si no
@@ -25,6 +27,7 @@ export interface CreateLocationRepoInput {
   name: string;
   address?: string;
   country?: ClinicCountry;
+  phone?: string;
 }
 
 export interface UpdateLocationRepoInput {
@@ -33,6 +36,8 @@ export interface UpdateLocationRepoInput {
   country?: ClinicCountry;
   /** DX-212: ya normalizado y validado; null lo quita. */
   repsHabilitationCode?: string | null;
+  /** DX-222: ya recortado; null lo quita. */
+  phone?: string | null;
   isActive?: boolean;
 }
 

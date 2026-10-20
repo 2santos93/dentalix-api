@@ -324,6 +324,71 @@ describe('plantillas reservadas para otras tareas', () => {
     });
   });
 
+  describe('post-op-instructions (DX-222)', () => {
+    const URL = 'https://sonrisas.dentalix.app/indicaciones/abc';
+    const base = {
+      patientFirstName: 'Carolina',
+      clinicName: 'Sonrisas del Norte',
+      locationPhone: '601 555 0101',
+      url: URL,
+      responsibleName: null,
+    };
+
+    it('saluda, enlaza las indicaciones y da el teléfono de la sede; asunto con la clínica', () => {
+      const email = renderEmail('post-op-instructions', base, brand);
+      expect(email.subject).toBe('Indicaciones de Sonrisas del Norte');
+      expect(email.text).toContain('Hola, Carolina');
+      expect(email.text).toContain(
+        'Te enviamos tus indicaciones de cuidado tras tu visita a Sonrisas del Norte.',
+      );
+      expect(email.html).toContain(`href="${URL}"`);
+      expect(email.text).toContain(`Ver indicaciones: ${URL}`);
+      expect(email.text).toContain(
+        'Si tienes dudas, llama a la sede al 601 555 0101.',
+      );
+    });
+
+    it('al responsable lo saluda a él y dice de quién son; sin teléfono de sede no lo menciona', () => {
+      const email = renderEmail(
+        'post-op-instructions',
+        {
+          ...base,
+          patientFirstName: 'Tomás',
+          responsibleName: 'Claudia',
+          locationPhone: null,
+        },
+        brand,
+      );
+      expect(email.text).toContain('Hola, Claudia');
+      expect(email.text).toContain(
+        'Te enviamos las indicaciones de cuidado de Tomás tras su visita a Sonrisas del Norte.',
+      );
+      expect(email.text).not.toContain('llama a la sede');
+    });
+
+    it('escapa lo variable y no lleva el título ni el texto de la plantilla', () => {
+      const email = renderEmail(
+        'post-op-instructions',
+        {
+          ...base,
+          patientFirstName: '<b>Ana</b>',
+          clinicName: 'Sonrisas <script>',
+          locationPhone: '"601"',
+          // Aunque alguien colara el título de la plantilla, no se pinta.
+          ...{ title: 'Exodoncia', body: 'Exodoncia: muerde la gasa' },
+        },
+        brand,
+      );
+      expect(email.html).not.toContain('<b>Ana</b>');
+      expect(email.html).not.toContain('<script>');
+      expect(email.html).toContain('&lt;b&gt;Ana&lt;/b&gt;');
+      // Las variables no admiten el procedimiento: solo el enlace.
+      for (const part of [email.subject, email.html, email.text]) {
+        expect(part).not.toContain('Exodoncia');
+      }
+    });
+  });
+
   // DX-128: baja de los recordatorios desde el propio email.
   it('appointment-reminder lleva el enlace de baja al pie (HTML y texto)', () => {
     const email = renderEmail(

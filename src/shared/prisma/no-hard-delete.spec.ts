@@ -29,6 +29,7 @@ function fakeTx() {
     patient: model('patient'),
     locationScheduleRange: model('locationScheduleRange'),
     clinicalNoteTemplatePrompt: model('clinicalNoteTemplatePrompt'),
+    postOpInstructionTemplateLink: model('postOpInstructionTemplateLink'),
     $executeRaw: jest.fn(() => {
       calls.push('$executeRaw');
       return Promise.resolve(1);
@@ -101,5 +102,13 @@ describe('guardHardDeletes', () => {
 
     await guarded.clinicalNoteTemplatePrompt.deleteMany();
     expect(calls).toEqual(['clinicalNoteTemplatePrompt.deleteMany']);
+  });
+
+  it('deja borrar los vínculos de una plantilla de indicaciones (allowlist, DX-222)', async () => {
+    const { tx, calls } = fakeTx();
+    const guarded = guard(tx);
+
+    await guarded.postOpInstructionTemplateLink.deleteMany();
+    expect(calls).toEqual(['postOpInstructionTemplateLink.deleteMany']);
   });
 });

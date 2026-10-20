@@ -152,6 +152,9 @@ interface SeedA {
   responsiblePartyId: string;
   /** Caja por turno cerrada de A (DX-027). */
   cashSessionId: string;
+  /** DX-222: plantilla de indicaciones de A (con vínculo) y una entrega. */
+  postOpTemplateId: string;
+  postOpDeliveryId: string;
 }
 
 interface SeedB {
@@ -390,6 +393,22 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     },
   );
 
+  // DX-222: una plantilla de indicaciones vinculada al tipo de cita y una
+  // entrega impresa en la cita de A, ambas por la API.
+  const postOpTemplate = await create(app, a, '/post-op-templates', {
+    code: 'POI-A',
+    title: 'Indicaciones de A',
+    body: 'Hola {{paciente}}, cuídate.',
+    appointmentTypeIds: [appointmentType.id],
+  });
+  const postOpDelivery = await api(
+    app,
+    a,
+    'post',
+    `/appointments/${appointment.id}/post-op-instructions/deliveries`,
+    { templateId: postOpTemplate.id, channel: 'PRINT' },
+  ).expect(201);
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -414,6 +433,8 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     waitlistOfferId: waitlistOffer.id,
     responsiblePartyId: responsibleParty.id,
     cashSessionId: cashSession.id,
+    postOpTemplateId: postOpTemplate.id,
+    postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
   };
 }
 
@@ -483,6 +504,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'cash_session_floats',
       'cash_session_closings',
       'cash_session_closing_lines',
+      // DX-222: indicaciones postoperatorias (plantillas, vínculos y entregas).
+      'post_op_instruction_templates',
+      'post_op_instruction_template_links',
+      'post_op_instruction_deliveries',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -1146,6 +1171,42 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         timeZone: 'America/Bogota',
       },
     })),
+    // --- indicaciones postoperatorias (DX-222) ---
+    {
+      name: 'PATCH /post-op-templates/:id',
+      verb: 'patch',
+      path: () => `/post-op-templates/${a.postOpTemplateId}`,
+      body: () => ({ title: 'Hackeada', active: false }),
+      status: 404,
+    },
+    {
+      name: 'GET /appointments/:appointmentId/post-op-instructions',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/post-op-instructions`,
+      status: 404,
+    },
+    {
+      // Entregar en la cita de A (con la plantilla de A) desde B.
+      name: 'POST /appointments/:appointmentId/post-op-instructions/deliveries',
+      verb: 'post',
+      path: () =>
+        `/appointments/${a.appointmentId}/post-op-instructions/deliveries`,
+      body: () => ({ templateId: a.postOpTemplateId, channel: 'PRINT' }),
+      status: 404,
+    },
+    {
+      name: 'GET /patients/:patientId/post-op-deliveries',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/post-op-deliveries`,
+      status: 404,
+    },
+    {
+      name: 'GET /patients/:patientId/post-op-deliveries/:id',
+      verb: 'get',
+      path: () =>
+        `/patients/${a.patientId}/post-op-deliveries/${a.postOpDeliveryId}`,
+      status: 404,
+    },
     // --- domains ---
     {
       name: 'POST /domains/:id/verify',
