@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   PayloadTooLargeException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import {
   FILE_STORAGE,
   type FileStoragePort,
 } from '../../../../shared/storage/file-storage.port';
+import { currentRequestId } from '../../../../shared/observability/request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 import {
@@ -195,6 +197,8 @@ function parseTeethCsv(csv: string | undefined): string[] {
 
 @Injectable()
 export class UploadPatientDocumentUseCase {
+  private readonly logger = new Logger('PatientDocuments');
+
   constructor(
     @Inject(PATIENT_DOCUMENT_REPOSITORY)
     private readonly repo: PatientDocumentRepository,
@@ -299,8 +303,13 @@ export class UploadPatientDocumentUseCase {
       // de una subida cuya fila no se creó, no una fila de la BD.
       // eslint-disable-next-line no-restricted-syntax
       await this.storage.delete(storageKey);
-    } catch {
-      // Best-effort: ver arriba.
+    } catch (error) {
+      // Best-effort: ver arriba. Se avisa con el request id para buscarlo en
+      // el log; nunca la clave (lleva tenant e id del documento) ni el
+      // mensaje del adaptador (podría incluirla).
+      this.logger.warn(
+        `No se pudo borrar el objeto de una subida fallida (requestId=${currentRequestId() ?? '-'}, error=${error instanceof Error ? error.name : 'NonError'})`,
+      );
     }
   }
 }

@@ -138,13 +138,34 @@ export function validateClinicalDate(
   return value;
 }
 
+export const CONTROL_CHARS_MESSAGE =
+  'El texto contiene caracteres no permitidos.';
+
+/**
+ * Controles C0/C1 salvo tabulador, salto de línea y retorno de carro (un
+ * textarea en un multipart llega con CRLF). Postgres rechaza 0x00 en `text`
+ * (sería un 500) y el resto no tiene sentido en un texto clínico. Se rechaza
+ * en vez de quitarlo: no se cambia en silencio lo que escribió el usuario.
+ */
+const FORBIDDEN_CONTROL_CHARS =
+  // eslint-disable-next-line no-control-regex -- detectar controles es justo lo que se quiere
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
+
+function assertNoControlChars(value: string): void {
+  if (FORBIDDEN_CONTROL_CHARS.test(value)) {
+    throw new PatientDocumentRuleError(CONTROL_CHARS_MESSAGE);
+  }
+}
+
 /**
  * Notas opcionales: como mucho 500 caracteres (puntos de código) tras
- * recortar; vacías → null.
+ * recortar, sin caracteres de control (salvo tabulador y saltos de línea);
+ * vacías → null.
  */
 export function validateNotes(notes: string | null | undefined): string | null {
   const trimmed = (notes ?? '').trim();
   if (trimmed === '') return null;
+  assertNoControlChars(trimmed);
   if (codePoints(trimmed) > MAX_NOTES_LENGTH) {
     throw new PatientDocumentRuleError(
       'Las notas admiten hasta 500 caracteres.',
@@ -156,10 +177,11 @@ export function validateNotes(notes: string | null | undefined): string | null {
 /**
  * Motivo de anulación: 3..500 caracteres tras recortar, en puntos de código
  * como el CHECK `char_length(btrim("voidReason"))` (si no, «🦷🦷» pasaría
- * aquí y la BD daría un 500).
+ * aquí y la BD daría un 500), y sin caracteres de control (como las notas).
  */
 export function validateVoidReason(reason: string | null | undefined): string {
   const trimmed = (reason ?? '').trim();
+  assertNoControlChars(trimmed);
   const length = codePoints(trimmed);
   if (length < 3 || length > MAX_VOID_REASON_LENGTH) {
     throw new PatientDocumentRuleError(

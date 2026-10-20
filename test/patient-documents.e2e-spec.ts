@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -133,6 +134,17 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
 
   const rowCount = () =>
     raw.patientDocument.count({ where: { tenantId: a.tenantId } });
+
+  /** Objetos guardados en el almacén de disco bajo un tenant. */
+  const objectCount = async (tenantId: string): Promise<number> => {
+    try {
+      return (
+        await fs.readdir(path.join(STORAGE_ROOT, 'patient-documents', tenantId))
+      ).length;
+    } catch {
+      return 0;
+    }
+  };
 
   async function createPatient(
     clinic: Clinic,
@@ -432,6 +444,24 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
       expect(await rowCount()).toBe(before);
     });
 
+    it('notas con un carácter NUL → 400 (no un 500 de Postgres) y sin fila ni objeto', async () => {
+      const before = await rowCount();
+      const objectsBefore = await objectCount(a.tenantId);
+      const res = await uploadReq(
+        a,
+        dentist.token,
+        patient,
+        pdfWith('nul'),
+        { filename: 'nul.pdf', contentType: 'application/pdf' },
+        { category: 'OTHER', notes: 'hola\u0000mundo' },
+      ).expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        'El texto contiene caracteres no permitidos.',
+      );
+      expect(await rowCount()).toBe(before);
+      expect(await objectCount(a.tenantId)).toBe(objectsBefore);
+    });
+
     it('el mismo contenido vigente otra vez → 409', async () => {
       const res = await uploadReq(a, assistant, patient, pdfFixture(), {
         filename: 'copia.pdf',
@@ -497,6 +527,15 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
         'get',
         `/patients/${patient}/documents?category=NOPE`,
       ).expect(400);
+      const twoTeeth = await call(
+        a,
+        dentist.token,
+        'get',
+        `/patients/${patient}/documents?tooth=11&tooth=21`,
+      ).expect(400);
+      expect((twoTeeth.body as { message: string[] }).message).toEqual([
+        'Filtra por un solo diente.',
+      ]);
     });
 
     it('detalle de un documento', async () => {
@@ -582,6 +621,16 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
       const voidUrl = `/patients/${patient}/documents/${own.id}/void`;
       await call(a, dentist.token, 'post', voidUrl, {}).expect(400);
       // Dos puntos de código (cuatro unidades UTF-16): 400, no un 500 del CHECK.
+      const nul = await call(a, dentist.token, 'post', voidUrl, {
+        reason: 'abc\u0000def',
+      }).expect(400);
+      expect((nul.body as { message: string }).message).toBe(
+        'El texto contiene caracteres no permitidos.',
+      );
+      expect(
+        (await raw.patientDocument.findUniqueOrThrow({ where: { id: own.id } }))
+          .voidedAt,
+      ).toBeNull();
       const emoji = await call(a, dentist.token, 'post', voidUrl, {
         reason: '🦷🦷',
       }).expect(400);
@@ -651,6 +700,36 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
         where: { id: pdfDoc.id },
       });
       expect(row.category).toBe('REFERRAL');
+    });
+  });
+
+  describe('OpenAPI', () => {
+    it('la categoría del multipart es el enum con nombre PatientDocumentCategory', () => {
+      const doc = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      const body = doc.paths['/api/v1/patients/{patientId}/documents'].post
+        ?.requestBody as {
+        content: Record<
+          string,
+          { schema: { properties: Record<string, { $ref?: string }> } }
+        >;
+      };
+      expect(
+        body.content['multipart/form-data'].schema.properties.category,
+      ).toEqual({ $ref: '#/components/schemas/PatientDocumentCategory' });
+      expect(doc.components?.schemas?.PatientDocumentCategory).toMatchObject({
+        type: 'string',
+        enum: [
+          'XRAY',
+          'PHOTO',
+          'REFERRAL',
+          'SIGNED_CONSENT',
+          'REPORT',
+          'OTHER',
+        ],
+      });
     });
   });
 
@@ -729,10 +808,14 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
       await call(b, b.adminToken, 'post', `${base}/${pdfDoc.id}/void`, {
         reason: 'Intento ajeno',
       }).expect(404);
+      const objectsOfA = await objectCount(a.tenantId);
       await uploadReq(b, b.adminToken, patient, pdfWith('ajeno'), {
         filename: 'ajeno.pdf',
         contentType: 'application/pdf',
       }).expect(404);
+      // Nada llegó al almacén: ni bajo B ni bajo A.
+      expect(await objectCount(b.tenantId)).toBe(0);
+      expect(await objectCount(a.tenantId)).toBe(objectsOfA);
       // El documento de A tampoco es alcanzable por la ruta del paciente de B.
       await call(
         b,

@@ -13,6 +13,7 @@ import {
   validateToothNumbers,
   validateNotes,
   validateVoidReason,
+  CONTROL_CHARS_MESSAGE,
 } from './document-rules';
 
 /** El error es del dominio Y el mensaje es exactamente ese (no un prefijo). */
@@ -239,6 +240,39 @@ describe('validateNotes', () => {
       );
     },
   );
+});
+
+describe('notas y motivo sin caracteres de control (Postgres rechaza 0x00)', () => {
+  const BAD = [
+    'hola\u0000mundo',
+    'abc\u0007def',
+    'abc\u001bdef',
+    'abc\u007fdef',
+    'abc\u0085def',
+  ];
+
+  it.each(BAD)('validateNotes(%j) → error', (notes) => {
+    expectRuleError(() => validateNotes(notes), CONTROL_CHARS_MESSAGE);
+  });
+
+  it.each(BAD)('validateVoidReason(%j) → error', (reason) => {
+    expectRuleError(() => validateVoidReason(reason), CONTROL_CHARS_MESSAGE);
+  });
+
+  it('el mensaje es el acordado', () => {
+    expect(CONTROL_CHARS_MESSAGE).toBe(
+      'El texto contiene caracteres no permitidos.',
+    );
+  });
+
+  it('salto de línea (también CRLF del formulario) y tabulador sí valen', () => {
+    expect(validateNotes('línea 1\r\nlínea 2\tfin')).toBe(
+      'línea 1\r\nlínea 2\tfin',
+    );
+    expect(validateVoidReason('motivo\nen dos líneas')).toBe(
+      'motivo\nen dos líneas',
+    );
+  });
 });
 
 describe('sha256Hex / storageKeyFor / TTL', () => {

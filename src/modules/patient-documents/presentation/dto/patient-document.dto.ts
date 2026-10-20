@@ -50,12 +50,12 @@ export class ListPatientDocumentsQueryDto {
     enumName: 'PatientDocumentCategory',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Filtra por una sola categoría.' })
   category?: string;
 
   @ApiPropertyOptional({ example: '11', description: 'Diente FDI' })
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Filtra por un solo diente.' })
   tooth?: string;
 }
 

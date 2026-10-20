@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Logger,
   ForbiddenException,
   NotFoundException,
   PayloadTooLargeException,
@@ -322,7 +323,17 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       const boom = new Error('fallo de BD');
       repo.failNextCreate = boom;
       storage.delete = () => Promise.reject(new Error('bucket caído'));
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
       await expect(uploadPdf()).rejects.toBe(boom);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const line = String(warn.mock.calls[0][0]);
+      expect(line).toMatch(/requestId=/);
+      expect(line).not.toContain('patient-documents/');
+      expect(line).not.toContain(TENANT_ID);
+      expect(line).not.toContain('bucket caído');
+      warn.mockRestore();
     });
   });
 

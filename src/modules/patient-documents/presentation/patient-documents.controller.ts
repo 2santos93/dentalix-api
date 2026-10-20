@@ -30,6 +30,7 @@ import {
   ApiParam,
   ApiPayloadTooLargeResponse,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -119,17 +120,8 @@ export class PatientDocumentsController {
           format: 'binary',
           description: 'PDF, JPG, PNG, HEIC, DOCX o DICOM de hasta 20 MB',
         },
-        category: {
-          type: 'string',
-          enum: [
-            'XRAY',
-            'PHOTO',
-            'REFERRAL',
-            'SIGNED_CONSENT',
-            'REPORT',
-            'OTHER',
-          ],
-        },
+        // El enum con nombre que ya registra PatientDocumentDto (enumName).
+        category: { $ref: getSchemaPath('PatientDocumentCategory') },
         clinicalDate: { type: 'string', format: 'date' },
         toothNumbers: {
           type: 'string',
