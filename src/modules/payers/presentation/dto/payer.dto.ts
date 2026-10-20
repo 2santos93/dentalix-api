@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { ClinicCountry, PayerType } from '@prisma/client';
 import {
@@ -67,7 +72,21 @@ export class CreatePayerDto {
   country?: ClinicCountry;
 }
 
-export class UpdatePayerDto extends PartialType(CreatePayerDto) {
+export class UpdatePayerDto extends PartialType(
+  OmitType(CreatePayerDto, ['country'] as const),
+) {
+  // `null` vacía el país (EMPRESA y OTRO lo admiten); `IsOptional` deja pasar
+  // null y undefined, y el enum solo se valida cuando hay valor.
+  @ApiPropertyOptional({
+    enum: ClinicCountry,
+    enumName: 'ClinicCountry',
+    nullable: true,
+    description: 'null = sin país. MUTUA_ES, PREPAGADA_CO y EPS_CO lo exigen.',
+  })
+  @IsOptional()
+  @IsEnum(ClinicCountry, { message: COUNTRY_MESSAGE })
+  country?: ClinicCountry | null;
+
   @ApiPropertyOptional({ description: 'false = sale de los selectores.' })
   @IsOptional()
   @IsBoolean()

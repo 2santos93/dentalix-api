@@ -154,6 +154,36 @@ describe('Pagadores (e2e, DX-153)', () => {
     expect(await names('?includeInactive=true')).toContain('Prepagada Z');
   });
 
+  it('country null vacía el país de una empresa y se rechaza en una mutua', async () => {
+    const empresa = await createPayer({
+      name: 'Empresa con país',
+      type: 'EMPRESA',
+      country: 'ES',
+    });
+    const ok = await as(
+      api().patch(`/api/v1/payers/${empresa.id}`),
+      tokens.ADMIN,
+    )
+      .send({ country: null })
+      .expect(200);
+    expect((ok.body as PayerBody).country).toBeNull();
+
+    const mutua = await createPayer({
+      name: 'Mutua con país',
+      type: 'MUTUA_ES',
+      country: 'ES',
+    });
+    const bad = await as(
+      api().patch(`/api/v1/payers/${mutua.id}`),
+      tokens.ADMIN,
+    )
+      .send({ country: null })
+      .expect(400);
+    expect(JSON.stringify(bad.body)).toContain(
+      'El tipo de pagador no corresponde con el país.',
+    );
+  });
+
   it('renombrar hacia el nombre de otro da 409; recepción no edita', async () => {
     const payer = await createPayer({ name: 'Otro Pagador', type: 'OTRO' });
     await as(api().patch(`/api/v1/payers/${payer.id}`), tokens.ADMIN)

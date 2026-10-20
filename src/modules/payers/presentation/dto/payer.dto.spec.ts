@@ -49,6 +49,7 @@ describe('DTOs de pagadores (DX-153)', () => {
   it('el PATCH admite campos sueltos y valida active', async () => {
     expect(await messages(UpdatePayerDto, {})).toEqual([]);
     expect(await messages(UpdatePayerDto, { active: false })).toEqual([]);
+    expect(await messages(UpdatePayerDto, { country: null })).toEqual([]);
     expect(await messages(UpdatePayerDto, { active: 'no' })).toHaveLength(1);
   });
 
