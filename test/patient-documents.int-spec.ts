@@ -338,6 +338,37 @@ describe('patient_documents: RLS, FK, CHECKs, hash único, inalterabilidad y hor
       await expect(insertTeethSql(['11', '21'])).resolves.toBe(1);
       await expect(insertTeethSql([])).resolves.toBe(1);
     });
+
+    it('por SQL nada se esconde dentro de un elemento: una coma o 9 dientes en uno dan 23514', async () => {
+      await expect(insertTeethSql(['11,12'])).rejects.toThrow(/23514/);
+      await expect(
+        insertTeethSql(['11,12,13,14,15,16,17,18,21']),
+      ).rejects.toThrow(/23514/);
+      await expect(insertTeethSql(['11', '21,22'])).rejects.toThrow(/23514/);
+      await expect(insertTeethSql([' 11'])).rejects.toThrow(/23514/);
+    });
+
+    it('un array de 2 dimensiones da 23514 (no otro error)', async () => {
+      const d = docData(a);
+      await expect(
+        asAppRole(
+          `INSERT INTO "patient_documents" ("id", "tenantId", "patientId", "locationId", "category",
+             "originalName", "mimeType", "sizeBytes", "sha256", "storageKey", "toothNumbers", "uploadedById")
+           VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'PHOTO',
+             'foto.jpg', 'image/jpeg', 10, $4, $5, ARRAY[['11', '12'], ['21', '22']]::text[], $6::uuid)`,
+          a.tenantId,
+          a.patientId,
+          a.locationId,
+          d.sha256,
+          d.storageKey,
+          a.userId,
+        ),
+      ).rejects.toThrow(/23514/);
+    });
+
+    it('los duplicados (11, 11) los acepta la BD: la API los quita antes (validateToothNumbers)', async () => {
+      await expect(insertTeethSql(['11', '11'])).resolves.toBe(1);
+    });
   });
 
   describe('hash único entre los vigentes del paciente', () => {
