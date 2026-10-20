@@ -407,6 +407,124 @@ describe('Staff invitations (e2e)', () => {
     );
   });
 
+  it('DX-089: un miembro restringido a sedes, dado de baja y reinvitado, conserva su restricción en el token de la aceptación', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Inv Sedes',
+      subdomain: 'clinica-inv-sedes',
+      email: 'owner@clinica-inv-sedes.com',
+    });
+    const email = 'recepcion.sede@example.com';
+    const { userId } = await seedRoledMember(
+      clinic.tenantId,
+      email,
+      ClinicRole.RECEPTION,
+      'Recepción Sede',
+    );
+    const principal = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    const membership = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, userId },
+      select: { id: true },
+    });
+    await raw.membershipLocation.create({
+      data: {
+        tenantId: clinic.tenantId,
+        membershipId: membership.id,
+        locationId: principal.id,
+      },
+    });
+
+    // Baja (borrado lógico: sus filas de sedes sobreviven) y reinvitación.
+    await request(app.getHttpServer())
+      .delete(`/api/v1/staff/${userId}`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(204);
+    await request(app.getHttpServer())
+      .post('/api/v1/staff/invitations')
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .send({ fullName: 'Recepción Sede', email, role: ClinicRole.RECEPTION })
+      .expect(201);
+    const token = await mailer.invitationToken(email);
+
+    const acceptRes = await request(app.getHttpServer())
+      .post(`/api/v1/public/invitations/${token}/accept`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .send({ password: SEEDED_PASSWORD })
+      .expect(201);
+    const { accessToken } = acceptRes.body as LoginResponseBody;
+    const [, body] = accessToken.split('.');
+    const claims = JSON.parse(
+      Buffer.from(body, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    expect(claims.role).toBe(ClinicRole.RECEPTION);
+    expect(claims.loc).toEqual([principal.id]);
+  });
+
+  it('DX-089: reinvitar como ADMIN a un miembro restringido borra sus sedes: el ADMIN siempre tiene todas', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Inv Sedes Admin',
+      subdomain: 'clinica-inv-sedes-admin',
+      email: 'owner@clinica-inv-sedes-admin.com',
+    });
+    const email = 'recepcion.ascendida@example.com';
+    const { userId } = await seedRoledMember(
+      clinic.tenantId,
+      email,
+      ClinicRole.RECEPTION,
+      'Recepción Ascendida',
+    );
+    const principal = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    const auth = (t: request.Test) =>
+      t
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    await auth(
+      request(app.getHttpServer()).put(`/api/v1/staff/${userId}/locations`),
+    )
+      .send({ locationIds: [principal.id] })
+      .expect(200);
+    await auth(
+      request(app.getHttpServer()).delete(`/api/v1/staff/${userId}`),
+    ).expect(204);
+    await auth(request(app.getHttpServer()).post('/api/v1/staff/invitations'))
+      .send({ fullName: 'Recepción Ascendida', email, role: ClinicRole.ADMIN })
+      .expect(201);
+    const token = await mailer.invitationToken(email);
+
+    const acceptRes = await request(app.getHttpServer())
+      .post(`/api/v1/public/invitations/${token}/accept`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .send({ password: SEEDED_PASSWORD })
+      .expect(201);
+    const { accessToken } = acceptRes.body as LoginResponseBody;
+    const [, body] = accessToken.split('.');
+    const claims = JSON.parse(
+      Buffer.from(body, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    expect(claims.role).toBe(ClinicRole.ADMIN);
+    expect(claims.loc).toBeUndefined();
+
+    expect(
+      await raw.membershipLocation.count({
+        where: { tenantId: clinic.tenantId, membership: { userId } },
+      }),
+    ).toBe(0);
+    const list = await auth(
+      request(app.getHttpServer()).get('/api/v1/staff'),
+    ).expect(200);
+    const member = (
+      list.body as { userId: string; locationIds: string[] | null }[]
+    ).find((m) => m.userId === userId);
+    expect(member?.locationIds).toBeNull();
+  });
+
   it('caso 5: revocada — invitar, DELETE (204), luego GET -> REVOKED y accept -> 410', async () => {
     const subdomain = 'clinica-inv-e';
     const clinicE = await registerAndLogin(app, {

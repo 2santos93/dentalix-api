@@ -80,6 +80,15 @@ export class StaffMemberDetailDto {
   status!: 'ACTIVE' | 'INACTIVE';
 
   @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Sedes activas en las que puede trabajar (DX-089). null = todas (sin restricción)',
+  })
+  locationIds!: string[] | null;
+
+  @ApiProperty({
     type: String,
     format: 'date-time',
     nullable: true,

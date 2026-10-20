@@ -4,6 +4,7 @@ import {
   JwtPayload,
   isTenantPayload,
 } from '../../../shared/crypto/token.service';
+import { locationClaim } from '../../../shared/tenancy/location-access';
 import { AUTH_REPOSITORY } from '../domain/ports/auth-repository.port';
 import type {
   AuthRepository,
@@ -26,7 +27,8 @@ export interface CurrentSession {
  * Se renueva el MISMO tipo de sesión: una de plataforma sigue sin tenant ni
  * rol, una de clínica conserva su tenant. Así renovar nunca convierte un token
  * de plataforma en uno de clínica (ni al revés), que sería una escalada
- * silenciosa. Lo que sí cambia es el ROL: sale de la membresía vigente.
+ * silenciosa. Lo que sí cambia es el ROL y las SEDES permitidas (`loc`,
+ * DX-089): salen de la membresía vigente.
  *
  * 401 ("Session is no longer valid", sin más detalle) si el usuario ya no existe, si
  * ya no es superadmin (sesión de plataforma), si ya no tiene membresía activa
@@ -51,8 +53,14 @@ export class SessionClaimsService {
         tokenVersion: state.tokenVersion,
       };
     }
+    const role = roleIn(state);
     return {
-      claims: { sub: session.sub, tenantId, role: roleIn(state) },
+      claims: {
+        sub: session.sub,
+        tenantId,
+        role,
+        ...locationClaim(role, state.tenant!.allowedLocationIds),
+      },
       tokenVersion: state.tokenVersion,
     };
   }

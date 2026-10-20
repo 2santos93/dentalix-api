@@ -146,6 +146,71 @@ describe('Session revalidation on refresh (e2e)', () => {
     expect(claimsOf(renewed.refreshToken).role).toBe(ClinicRole.ASSISTANT);
   });
 
+  it('DX-089: restringir las sedes se aplica en el siguiente refresh (claim `loc`) y una sede no permitida da 403', async () => {
+    const member = await seedMember('recepcion-sede', ClinicRole.RECEPTION);
+    const before = await login(member.email);
+    // Sin filas en membership_locations: todas las sedes, sin claim.
+    expect(claimsOf(before.accessToken)).not.toHaveProperty('loc');
+
+    const principal = await raw.location.findFirstOrThrow({
+      where: { tenantId, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    const norte = await http()
+      .post('/api/v1/locations')
+      .set('X-Tenant-Host', hostFor(SUB))
+      .set('Authorization', `Bearer ${ownerAccess}`)
+      .send({ name: 'Sede Norte' })
+      .expect(201);
+    const otherLocationId = (norte.body as { id: string }).id;
+
+    const membership = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId, userId: member.userId },
+      select: { id: true },
+    });
+    await raw.membershipLocation.create({
+      data: {
+        tenantId,
+        membershipId: membership.id,
+        locationId: principal.id,
+      },
+    });
+
+    // El access vigente no cambia hasta renovar…
+    expect(claimsOf(before.accessToken)).not.toHaveProperty('loc');
+    // …y el par renovado ya lleva la restricción vigente.
+    const res = await refresh(before.refreshToken).expect(201);
+    const renewed = res.body as Tokens;
+    expect(claimsOf(renewed.accessToken).loc).toEqual([principal.id]);
+    expect(claimsOf(renewed.refreshToken).loc).toEqual([principal.id]);
+
+    const range = {
+      from: '2026-01-01T00:00:00.000Z',
+      to: '2026-01-08T00:00:00.000Z',
+    };
+    const forbidden = await http()
+      .get('/api/v1/appointments')
+      .query(range)
+      .set('X-Tenant-Host', hostFor(SUB))
+      .set('X-Location-Id', otherLocationId)
+      .set('Authorization', `Bearer ${renewed.accessToken}`)
+      .expect(403);
+    expect(forbidden.body).toMatchObject({
+      statusCode: 403,
+      code: 'LOCATION_NOT_ALLOWED',
+      message: 'No tienes acceso a esta sede.',
+    });
+
+    await http()
+      .get('/api/v1/appointments')
+      .query(range)
+      .set('X-Tenant-Host', hostFor(SUB))
+      .set('X-Location-Id', principal.id)
+      .set('Authorization', `Bearer ${renewed.accessToken}`)
+      .expect(200);
+  });
+
   it('a refresh token is single-use: the second refresh with it is 401', async () => {
     const { refreshToken } = await login(OWNER);
 

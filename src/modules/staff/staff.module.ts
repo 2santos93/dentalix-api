@@ -11,6 +11,10 @@ import { STAFF_REPOSITORY } from './domain/ports/staff-repository.port';
 import { PrismaStaffRepository } from './infrastructure/repositories/prisma-staff.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import {
+  GetStaffLocationsUseCase,
+  ReplaceStaffLocationsUseCase,
+} from './application/use-cases/staff-locations.use-cases';
 import { UnlockStaffLoginUseCase } from './application/use-cases/unlock-staff-login.use-case';
 import { STAFF_LOGIN_LOCKS } from './domain/ports/staff-login-locks.port';
 import { LoginLockoutModule } from '../auth/login-lockout.module';
@@ -31,6 +35,8 @@ import { LoginLockoutService } from '../auth/application/login-lockout.service';
     ReactivateStaffUseCase,
     DeactivateStaffUseCase,
     UnlockStaffLoginUseCase,
+    GetStaffLocationsUseCase,
+    ReplaceStaffLocationsUseCase,
     { provide: STAFF_LOGIN_LOCKS, useExisting: LoginLockoutService },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;

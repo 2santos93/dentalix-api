@@ -202,6 +202,7 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
   const panel = new ListInClinicUseCase(
     repo,
     new PrismaLocationRepository(prisma, tenantContext),
+    tenantContext,
   );
   const SUBDOMAINS = ['dx200-int-a', 'dx200-int-b'];
   // Mediodía de Bogotá de un día fijo: las horas no dependen de la corrida.

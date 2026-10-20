@@ -240,8 +240,13 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
    */
   async loadLedgers(query: LedgersQuery): Promise<PatientLedger[]> {
     const tenantId = this.tenantId();
-    const locationFilter = query.locationId
-      ? Prisma.sql`AND l."locationId" = ${query.locationId}::uuid`
+    // Sede pedida; si no, las permitidas al miembro (DX-089); sin restricción,
+    // toda la clínica.
+    const scopeIds = query.locationId
+      ? [query.locationId]
+      : this.tenantContext.scopeLocationIds();
+    const locationFilter = scopeIds
+      ? Prisma.sql`AND l."locationId" = ANY(${scopeIds}::uuid[])`
       : Prisma.empty;
 
     const rows = await this.prisma.runWithTenant(

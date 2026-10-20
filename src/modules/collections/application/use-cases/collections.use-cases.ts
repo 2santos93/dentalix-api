@@ -123,6 +123,9 @@ export class CreatePaymentPromiseUseCase {
     if (!(await this.repo.patientExists(patientId))) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
+    if (input.locationId) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
+    }
     const requested = input.locationId ?? this.tenantContext.getLocationId();
     if (requested && !(await this.repo.locationExists(requested))) {
       throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);

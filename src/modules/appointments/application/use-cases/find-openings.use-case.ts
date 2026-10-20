@@ -33,6 +33,8 @@ import {
   civilRangeInZone,
   parseCivilDate,
 } from '../../../../shared/time/civil-day';
+import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export interface FindOpeningsInput {
   providerId: string;
@@ -73,6 +75,7 @@ export class FindOpeningsUseCase {
     private readonly staff: StaffRepository,
     @Inject(PATIENT_REPOSITORY)
     private readonly patients: PatientRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(input: FindOpeningsInput): Promise<OpeningsView> {
@@ -96,6 +99,7 @@ export class FindOpeningsUseCase {
       );
     }
 
+    this.tenantContext.assertLocationAllowed(input.locationId);
     const location = await this.locations.findById(input.locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
     const provider = await this.staff.findById(input.providerId);
@@ -103,6 +107,7 @@ export class FindOpeningsUseCase {
     if (!ATTENDING_ROLES.includes(provider.role)) {
       throw new BadRequestException(NOT_ATTENDING_MESSAGE);
     }
+    assertAttendsAt(provider, input.locationId);
     if (input.patientId && !(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');
     }

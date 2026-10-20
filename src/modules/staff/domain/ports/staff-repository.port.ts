@@ -24,6 +24,26 @@ export type UpdateStaffOutcome =
   | { kind: 'NOT_FOUND' }
   | { kind: 'LAST_ADMIN' };
 
+/**
+ * DX-089: sedes permitidas de un miembro. `locationIds: null` = sin
+ * restricción (todas las sedes); con filas, solo las sedes activas y no
+ * borradas, así que puede quedar `[]` (ninguna) si todas se desactivaron.
+ */
+export type StaffLocationsLookup =
+  { kind: 'FOUND'; locationIds: string[] | null } | { kind: 'NOT_FOUND' };
+
+/**
+ * DX-089: resultado de sustituir las sedes de un miembro. `NOT_FOUND`: no hay
+ * membresía activa. `IS_ADMIN`: el ADMIN siempre tiene todas.
+ * `UNKNOWN_LOCATION`: alguna sede no existe, está borrada o inactiva, o es de
+ * otra clínica. En los tres casos no se ha escrito nada.
+ */
+export type ReplaceLocationsOutcome =
+  | { kind: 'UPDATED'; locationIds: string[] }
+  | { kind: 'NOT_FOUND' }
+  | { kind: 'IS_ADMIN' }
+  | { kind: 'UNKNOWN_LOCATION' };
+
 export type DeactivateStaffOutcome = 'DEACTIVATED' | 'NOT_FOUND' | 'LAST_ADMIN';
 
 export interface StaffRepository {
@@ -60,15 +80,35 @@ export interface StaffRepository {
   hasOtherActiveMemberships(userId: string): Promise<boolean>;
 
   /**
+   * DX-089: sedes permitidas del miembro `userId` de esta clínica (incluidos
+   * los desactivados, que conservan sus filas). Tenant-scoped.
+   */
+  getLocations(userId: string): Promise<StaffLocationsLookup>;
+
+  /**
+   * DX-089: sustituye las sedes permitidas del miembro activo `userId`
+   * (`[]` = todas). En UNA transacción: bloquea (FOR UPDATE) la membresía,
+   * comprueba que no sea ADMIN y que todas las sedes sean activas de esta
+   * clínica, y reemplaza las filas. Un ascenso concurrente a ADMIN se
+   * serializa con este bloqueo. `actorUserId` queda en `createdById`.
+   */
+  replaceLocations(
+    userId: string,
+    locationIds: string[],
+    actorUserId: string,
+  ): Promise<ReplaceLocationsOutcome>;
+
+  /**
    * Active clinic staff — non-deleted `ClinicMembership` rows joined to their
    * `User`, tenant-scoped (via RLS / `runWithTenant`), ordered by full name.
+   * DX-089: cada uno con `locationIds` (`null` = todas las sedes).
    */
   listActive(): Promise<StaffMember[]>;
 
   /**
    * Active staff member by `userId` for the current tenant, or `null` if no
    * matching non-deleted `ClinicMembership`/`User` exists. Tenant-scoped
-   * (via RLS / `runWithTenant`).
+   * (via RLS / `runWithTenant`). DX-121d: con `locationIds` (`null` = todas).
    */
   findById(userId: string): Promise<StaffMember | null>;
 
@@ -81,6 +121,9 @@ export interface StaffRepository {
    * que bloquea las membresías ADMIN vivas antes de contar. Dos degradaciones
    * concurrentes de los dos últimos ADMIN se serializan: la segunda ve un solo
    * ADMIN y devuelve `LAST_ADMIN` sin escribir nada.
+   *
+   * DX-089: ascender a ADMIN borra en la misma transacción sus sedes
+   * permitidas (el ADMIN siempre tiene todas).
    */
   updateById(userId: string, patch: StaffPatch): Promise<UpdateStaffOutcome>;
 

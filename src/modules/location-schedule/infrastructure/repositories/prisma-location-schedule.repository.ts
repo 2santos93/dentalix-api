@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import {
   LocationScheduleRepository,
   ReplaceScheduleInput,
@@ -59,9 +58,9 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
 
   async findForCurrentLocation(): Promise<BusinessHours | null> {
     return this.prisma.runWithTenant(async (tx) => {
-      const locationId =
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+      // DX-089: la sede del request o la de escritura de la sesión (la
+      // principal sin restricción): la misma en la que se agenda.
+      const locationId = await this.tenantContext.writeLocationId(tx);
       const row = await tx.locationSchedule.findFirst({
         where: { locationId, deletedAt: null },
         include: LIVE_RANGES,
@@ -75,9 +74,9 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
   ): Promise<BusinessHours> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant(async (tx) => {
-      const locationId =
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+      // DX-089: la sede del request o la de escritura de la sesión (la
+      // principal sin restricción): la misma en la que se agenda.
+      const locationId = await this.tenantContext.writeLocationId(tx);
 
       // Upsert manual (no `upsert`) porque la clave única es (tenantId,
       // locationId) y el tenantId lo pone el servidor, no el cliente.

@@ -139,10 +139,11 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
   listPendingFollowUp(
     query: PendingFollowUpQuery,
   ): Promise<{ rows: PendingFollowUpRow[]; total: number }> {
-    const locationId = this.tenantContext.getLocationId();
-    // Sin sede en el request = vista consolidada de toda la clínica.
-    const locationFilter = locationId
-      ? Prisma.sql`AND p."presentedLocationId" = ${locationId}::uuid`
+    // La sede del request o, sin ella, las permitidas al miembro (DX-089). Sin
+    // restricción ni cabecera = vista consolidada de toda la clínica.
+    const scopeIds = this.tenantContext.scopeLocationIds();
+    const locationFilter = scopeIds
+      ? Prisma.sql`AND p."presentedLocationId" = ANY(${scopeIds}::uuid[])`
       : Prisma.empty;
     // Sin cita FUTURA y viva (agendada o confirmada) del paciente, en
     // cualquier sede: si ya vuelve, no hace falta llamarlo. Ni una en curso

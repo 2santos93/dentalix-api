@@ -9,7 +9,13 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { otherActiveMemberships } from '../../../../shared/tenancy/other-active-memberships';
 import {
+  activeLocationIds,
+  MEMBERSHIP_LOCATIONS_SELECT,
+} from '../../../../shared/locations/membership-locations';
+import {
   DeactivateStaffOutcome,
+  ReplaceLocationsOutcome,
+  StaffLocationsLookup,
   StaffPatch,
   StaffRepository,
   UpdateStaffOutcome,
@@ -185,7 +191,7 @@ export class PrismaStaffRepository implements StaffRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const membership = await tx.clinicMembership.findFirst({
         where: { userId, user: { deletedAt: null } },
-        include: { user: true },
+        include: { user: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
       });
       return membership
         ? {
@@ -194,6 +200,10 @@ export class PrismaStaffRepository implements StaffRepository {
             email: membership.user.email,
             role: membership.role,
             professionalLicense: membership.professionalLicense,
+            locationIds: allowedLocationIds(
+              membership.role,
+              membership.locations,
+            ),
             status: membership.deletedAt
               ? ('INACTIVE' as const)
               : ('ACTIVE' as const),
@@ -243,7 +253,7 @@ export class PrismaStaffRepository implements StaffRepository {
           deletedAt: null,
           user: { deletedAt: null },
         },
-        include: { user: true },
+        include: { user: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
         orderBy: { user: { fullName: 'asc' } },
       });
 
@@ -252,7 +262,81 @@ export class PrismaStaffRepository implements StaffRepository {
         fullName: membership.user.fullName,
         email: membership.user.email,
         role: membership.role,
+        locationIds: allowedLocationIds(membership.role, membership.locations),
       }));
+    });
+  }
+
+  async getLocations(userId: string): Promise<StaffLocationsLookup> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Incluidos los desactivados: conservan sus filas y su perfil se abre.
+      const membership = await tx.clinicMembership.findFirst({
+        where: { userId, user: { deletedAt: null } },
+        orderBy: { deletedAt: { sort: 'desc', nulls: 'first' } },
+        select: { role: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
+      });
+      return membership
+        ? {
+            kind: 'FOUND',
+            locationIds: allowedLocationIds(
+              membership.role,
+              membership.locations,
+            ),
+          }
+        : { kind: 'NOT_FOUND' };
+    });
+  }
+
+  async replaceLocations(
+    userId: string,
+    locationIds: string[],
+    actorUserId: string,
+  ): Promise<ReplaceLocationsOutcome> {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return this.prisma.runWithTenant(async (tx) => {
+      // Bloquea la membresía ANTES de leer su rol: un PATCH que la asciende a
+      // ADMIN (UPDATE de la misma fila) y este PUT se serializan. Si el PATCH
+      // va primero, aquí se lee ADMIN; si va después, borra lo que se escriba.
+      await tx.$queryRaw`
+        SELECT "id" FROM "clinic_memberships"
+         WHERE "userId" = ${userId}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
+      const membership = await findActiveMembership(tx, userId);
+      if (!membership) {
+        return { kind: 'NOT_FOUND' };
+      }
+      if (membership.role === ClinicRole.ADMIN) {
+        return { kind: 'IS_ADMIN' };
+      }
+      // La RLS acota a esta clínica: una sede ajena no aparece y cuenta como
+      // desconocida, igual que una borrada o inactiva.
+      const locations = await tx.location.findMany({
+        where: { id: { in: locationIds }, isActive: true, deletedAt: null },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (locations.length !== locationIds.length) {
+        return { kind: 'UNKNOWN_LOCATION' };
+      }
+      // DX-089: las filas son configuración de acceso, sin datos de pacientes;
+      // el PUT las sustituye en la MISMA transacción y el cambio queda en
+      // audit_events (allowlist de no-hard-delete).
+      // eslint-disable-next-line no-restricted-syntax
+      await tx.membershipLocation.deleteMany({
+        where: { membershipId: membership.id },
+      });
+      if (locations.length > 0) {
+        await tx.membershipLocation.createMany({
+          data: locations.map(({ id }) => ({
+            tenantId,
+            membershipId: membership.id,
+            locationId: id,
+            createdById: actorUserId,
+          })),
+        });
+      }
+      return { kind: 'UPDATED', locationIds: locations.map(({ id }) => id) };
     });
   }
 
@@ -260,7 +344,7 @@ export class PrismaStaffRepository implements StaffRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const membership = await tx.clinicMembership.findFirst({
         where: { userId, deletedAt: null, user: { deletedAt: null } },
-        include: { user: true },
+        include: { user: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
       });
       return membership
         ? {
@@ -268,6 +352,11 @@ export class PrismaStaffRepository implements StaffRepository {
             fullName: membership.user.fullName,
             email: membership.user.email,
             role: membership.role,
+            // DX-121d: la agenda comprueba en qué sedes atiende.
+            locationIds: allowedLocationIds(
+              membership.role,
+              membership.locations,
+            ),
           }
         : null;
     });
@@ -299,6 +388,15 @@ export class PrismaStaffRepository implements StaffRepository {
             role: patch.role,
             professionalLicense: patch.professionalLicense,
           },
+        });
+      }
+      // DX-089: el ADMIN siempre tiene todas las sedes. Va DESPUÉS del UPDATE,
+      // que bloquea la fila: un PUT de sedes concurrente o ya terminó (y aquí
+      // se borran sus filas) o espera y luego lee ADMIN.
+      if (patch.role === ClinicRole.ADMIN) {
+        // eslint-disable-next-line no-restricted-syntax
+        await tx.membershipLocation.deleteMany({
+          where: { membershipId: membership.id },
         });
       }
       if (patch.fullName) {
@@ -368,6 +466,18 @@ function findActiveMembership(
     where: { userId, deletedAt: null, user: { deletedAt: null } },
     select: { id: true, role: true },
   });
+}
+
+/**
+ * DX-089: sedes permitidas tal como las ve el resto del sistema. Un ADMIN
+ * siempre tiene todas (`null`), aunque arrastre filas de antes de serlo: mismo
+ * criterio que el claim `loc` del token (`locationClaim`).
+ */
+function allowedLocationIds(
+  role: ClinicRole,
+  rows: Parameters<typeof activeLocationIds>[0],
+): string[] | null {
+  return role === ClinicRole.ADMIN ? null : activeLocationIds(rows);
 }
 
 /** ¿Retirar a este miembro dejaría la clínica sin ADMIN activo? */

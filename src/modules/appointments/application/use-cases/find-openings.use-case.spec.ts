@@ -7,6 +7,7 @@ import type { LocationScheduleRepository } from '../../../location-schedule/doma
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // Un martes futuro (para que "ahora" no recorte nada), en Bogotá (UTC−5).
 function nextTuesday(): string {
@@ -58,6 +59,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       locations,
       staff,
       patients,
+      new TenantContextService(),
     );
   }
 

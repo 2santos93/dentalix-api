@@ -147,5 +147,15 @@ export interface InvitationRepository {
     email: string;
     role: ClinicRole;
     user: AcceptUserResolution;
-  }): Promise<AcceptOutcome & { tokenVersion: number }>;
+  }): Promise<
+    AcceptOutcome & {
+      tokenVersion: number;
+      /**
+       * DX-089: sedes activas de la membresía ya reactivada (sus filas de
+       * `membership_locations` sobreviven a la baja). `null` = sin
+       * restricción (membresía nueva o sin filas).
+       */
+      allowedLocationIds: string[] | null;
+    }
+  >;
 }

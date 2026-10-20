@@ -106,6 +106,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     noSchedule,
     types,
     blocks,
+    tenantContext,
   );
   const update = new UpdateAppointmentUseCase(
     appointments,
@@ -114,6 +115,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     noAudit,
     blocks,
     new PrismaLocationRepository(prisma, tenantContext),
+    tenantContext,
   );
 
   beforeAll(async () => {
@@ -520,6 +522,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         types,
         create,
         noAudit,
+        tenantContext,
       );
       const results = await Promise.allSettled([
         inA(() =>

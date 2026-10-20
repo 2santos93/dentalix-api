@@ -16,7 +16,6 @@ import {
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
 } from '../../domain/ports/treatment-plan-repository.port';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import {
   acceptPlanInTx,
   cancelActivePaymentPlans,
@@ -96,7 +95,7 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
 async function discountStampData(
   tx: Prisma.TransactionClient,
   stamp: DiscountStamp | null | undefined,
-  requestLocationId: string | undefined,
+  tenantContext: TenantContextService,
 ): Promise<{
   discountById?: string | null;
   discountAt?: Date | null;
@@ -109,8 +108,8 @@ async function discountStampData(
   return {
     discountById: stamp.byId,
     discountAt: stamp.at,
-    discountLocationId:
-      requestLocationId ?? (await resolveDefaultLocationId(tx)),
+    // DX-089: la sede del request o la de escritura de la sesión.
+    discountLocationId: await tenantContext.writeLocationId(tx),
   };
 }
 
@@ -235,12 +234,11 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         optionLabel: change.optionLabel,
       };
       if (change.presentation) {
-        // La sede del request, o la principal en la vista consolidada: la
-        // lista de presupuestos por seguir filtra por ella.
+        // La sede del request o, en la vista consolidada, la de escritura de
+        // la sesión (la principal, o la primera permitida — DX-089): la lista
+        // de presupuestos por seguir filtra por ella.
         data.presentedAt = change.presentation.at;
-        data.presentedLocationId =
-          this.tenantContext.getLocationId() ??
-          (await resolveDefaultLocationId(tx));
+        data.presentedLocationId = await this.tenantContext.writeLocationId(tx);
       }
       if (change.rejection) {
         data.rejectedAt = change.rejection.at;
@@ -296,7 +294,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           ...(await discountStampData(
             tx,
             input.discountStamp ?? undefined,
-            this.tenantContext.getLocationId(),
+            this.tenantContext,
           )),
         },
       });
@@ -346,11 +344,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         where: { id },
         data: {
           ...fields,
-          ...(await discountStampData(
-            tx,
-            discountStamp,
-            this.tenantContext.getLocationId(),
-          )),
+          ...(await discountStampData(tx, discountStamp, this.tenantContext)),
         },
       });
 
@@ -410,7 +404,6 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         orderBy: { id: 'asc' },
       });
       const changes = decide({ plan, items: current.map(mapItemToEntity) });
-      const requestLocationId = this.tenantContext.getLocationId();
       const updated: TreatmentPlanItem[] = [];
       for (const change of changes) {
         const item = await tx.treatmentPlanItem.update({
@@ -422,7 +415,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
             ...(await discountStampData(
               tx,
               change.discountStamp,
-              requestLocationId,
+              this.tenantContext,
             )),
           },
         });

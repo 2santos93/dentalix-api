@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, type CashSessionStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../shared/locations/default-location';
 import {
   loadLocationTimeZones,
   resolveLocationTimeZones,
@@ -228,7 +227,9 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
   resolveLocation(locationId?: string): Promise<string | null> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      if (!locationId) return resolveDefaultLocationId(tx);
+      // DX-089: sin sede pedida, la de escritura de la sesión (la principal
+      // sin restricción, la primera permitida con ella).
+      if (!locationId) return this.tenantContext.writeLocationId(tx);
       const row = await tx.location.findFirst({
         where: { id: locationId, tenantId, deletedAt: null },
         select: { id: true },
@@ -315,12 +316,14 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         const zones = await loadLocationTimeZones(
           tx,
           tenantId,
-          params.locationId ? [params.locationId] : undefined,
+          params.locationIds,
         );
         const where: Prisma.CashSessionWhereInput = {
           tenantId,
           ...(params.openedById ? { openedById: params.openedById } : {}),
-          ...(params.locationId ? { locationId: params.locationId } : {}),
+          ...(params.locationIds
+            ? { locationId: { in: [...params.locationIds] } }
+            : {}),
           ...(params.status ? { status: params.status } : {}),
           ...this.periodWhere(params, zones),
         };

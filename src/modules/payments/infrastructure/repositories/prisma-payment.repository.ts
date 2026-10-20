@@ -16,7 +16,6 @@ import {
   type IdempotentPayment,
 } from '../../domain/idempotency';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import {
   loadLocationTimeZones,
   resolveLocationTimeZones,
@@ -216,11 +215,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
     tx: Prisma.TransactionClient,
     period: CivilPeriod,
   ): Promise<PeriodScope> {
-    const locationId = this.tenantContext.getLocationId();
+    // DX-089: la sede del request o, sin ella, las permitidas al miembro
+    // (`undefined` = sin restricción: todas las sedes de la clínica).
+    const scopeIds = this.tenantContext.scopeLocationIds();
     const zones = await loadLocationTimeZones(
       tx,
       this.requireTenantId(),
-      locationId ? [locationId] : undefined,
+      scopeIds,
     );
     const timeZoneOf = (id: string) =>
       zones.get(id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE;
@@ -244,14 +245,18 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // Sin sedes visibles no puede haber abonos (FK a la sede): nada casa.
       return { where: { id: { in: [] } }, timeZoneOf };
     }
-    if (locationId) {
+    if (branches.length === 1) {
+      // Una sola zona: un rango, acotado a las sedes del alcance si lo hay.
+      const locationScope =
+        scopeIds === undefined
+          ? {}
+          : scopeIds.length === 1
+            ? { locationId: scopeIds[0] }
+            : { locationId: { in: scopeIds } };
       return {
-        where: { locationId, paidAt: paidAtIn(branches[0]) },
+        where: { ...locationScope, paidAt: paidAtIn(branches[0]) },
         timeZoneOf,
       };
-    }
-    if (branches.length === 1) {
-      return { where: { paidAt: paidAtIn(branches[0]) }, timeZoneOf };
     }
     return {
       where: {
@@ -347,11 +352,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
         throw new ConflictException(notBillableMessage(plan.status));
       }
       // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-      // contra esta clínica); si no, la sede por defecto — que es lo que
-      // hacen hoy todos los clientes y mantiene el comportamiento igual.
-      const locationId =
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+      // contra esta clínica); si no, la de escritura de la sesión: la sede por
+      // defecto sin restricción (lo de siempre) o la primera permitida
+      // (DX-089).
+      const locationId = await this.tenantContext.writeLocationId(tx);
       // DX-097: un pago con solo el día se guarda al mediodía de ESA sede, así
       // cae en su día de caja (medianoche UTC sería la tarde del día anterior
       // en Bogotá).
@@ -427,10 +431,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
     if (!(paidAt instanceof Date)) return paidAt.civilDate;
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      // La misma sede que usará `insert`: la del request o la principal.
-      const locationId =
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+      // La misma sede que usará `insert`.
+      const locationId = await this.tenantContext.writeLocationId(tx);
       const timeZone = (
         await resolveLocationTimeZones(tx, tenantId, [locationId])
       )(locationId);

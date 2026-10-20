@@ -26,11 +26,15 @@ const platformPayload = {
   exp: EXP,
 };
 
-function activeMember(role: ClinicRole, tokenVersion = 0): SessionState {
+function activeMember(
+  role: ClinicRole,
+  tokenVersion = 0,
+  allowedLocationIds: string[] | null = null,
+): SessionState {
   return {
     tokenVersion,
     isPlatformAdmin: false,
-    tenant: { membershipRole: role },
+    tenant: { membershipRole: role, allowedLocationIds },
   };
 }
 
@@ -97,12 +101,61 @@ describe('RefreshUseCase', () => {
     });
   });
 
+  describe('sedes permitidas VIGENTES (DX-089)', () => {
+    it('el par renovado lleva `loc` con las sedes actuales de la membresía', async () => {
+      const { uc, tokens } = setup({
+        state: activeMember(ClinicRole.RECEPTION, 0, ['loc-a']),
+      });
+
+      await uc.execute({ refreshToken: 'old-ref' });
+
+      expect(tokens.issue).toHaveBeenCalledWith({
+        sub: 'u1',
+        tenantId: 't1',
+        role: ClinicRole.RECEPTION,
+        tv: 0,
+        loc: ['loc-a'],
+      });
+    });
+
+    it('sin filas → el par renovado no lleva `loc`, aunque el viejo sí', async () => {
+      const { uc, tokens } = setup({
+        payload: { ...tenantPayload, role: ClinicRole.RECEPTION, loc: ['x'] },
+        state: activeMember(ClinicRole.RECEPTION, 0, null),
+      });
+
+      await uc.execute({ refreshToken: 'old-ref' });
+
+      expect(tokens.issue).toHaveBeenCalledWith({
+        sub: 'u1',
+        tenantId: 't1',
+        role: ClinicRole.RECEPTION,
+        tv: 0,
+      });
+    });
+
+    it('ADMIN nunca lleva `loc`', async () => {
+      const { uc, tokens } = setup({
+        state: activeMember(ClinicRole.ADMIN, 0, ['loc-a']),
+      });
+
+      await uc.execute({ refreshToken: 'old-ref' });
+
+      expect(tokens.issue).toHaveBeenCalledWith({
+        sub: 'u1',
+        tenantId: 't1',
+        role: ClinicRole.ADMIN,
+        tv: 0,
+      });
+    });
+  });
+
   it('rejects (401) when the membership is no longer active', async () => {
     const { uc, tokens, repo } = setup({
       state: {
         tokenVersion: 0,
         isPlatformAdmin: false,
-        tenant: { membershipRole: null },
+        tenant: { membershipRole: null, allowedLocationIds: null },
       },
     });
 
@@ -138,7 +191,7 @@ describe('RefreshUseCase', () => {
       state: {
         tokenVersion: 0,
         isPlatformAdmin: true,
-        tenant: { membershipRole: null },
+        tenant: { membershipRole: null, allowedLocationIds: null },
       },
     });
 

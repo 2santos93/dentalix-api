@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import type {
   AcceptPlanOutcome,
@@ -167,9 +166,8 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     });
     if (!plan || plan.patient.deletedAt !== null) return null;
 
-    const locationId =
-      this.tenantContext.getLocationId() ??
-      (await resolveDefaultLocationId(tx));
+    // DX-089: la sede del request o la de escritura de la sesión.
+    const locationId = await this.tenantContext.writeLocationId(tx);
     const [location, tenant, professional, catalog, zoneOf] = await Promise.all(
       [
         tx.location.findFirstOrThrow({

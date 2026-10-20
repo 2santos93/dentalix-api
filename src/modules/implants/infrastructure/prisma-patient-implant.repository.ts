@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, type PatientImplantKind } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../shared/locations/default-location';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import type {
   ImplantCardPatient,
@@ -177,9 +176,8 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
   resolveLocation(): Promise<{ id: string; timeZone: string }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const id =
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+      // DX-089: la sede del request o la de escritura de la sesión.
+      const id = await this.tenantContext.writeLocationId(tx);
       const zoneOf = await resolveLocationTimeZones(tx, tenantId, [id]);
       return { id, timeZone: zoneOf(id) };
     });

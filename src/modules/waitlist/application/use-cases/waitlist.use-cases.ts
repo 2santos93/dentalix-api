@@ -54,6 +54,7 @@ import {
 import type { AppointmentWriteResult } from '../../../appointments/domain/entities/appointment.entity';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 function assertValid(error: string | null): void {
   if (error !== null) throw new BadRequestException(error);
@@ -89,6 +90,7 @@ export class ListWaitlistUseCase {
     private readonly repo: WaitlistRepository,
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(params: {
@@ -97,6 +99,10 @@ export class ListWaitlistUseCase {
     page?: number;
     pageSize?: number;
   }): Promise<WaitlistPage> {
+    // DX-089: sin sede explícita, el repositorio acota a las permitidas.
+    if (params.locationId) {
+      this.tenantContext.assertLocationAllowed(params.locationId);
+    }
     if (
       params.locationId &&
       !(await this.locations.findById(params.locationId))
@@ -140,6 +146,7 @@ export class CreateWaitlistEntryUseCase {
     @Inject(APPOINTMENT_TYPE_REPOSITORY)
     private readonly types: AppointmentTypeRepository,
     private readonly audit: RecordAuditEventUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Alta manual (p. ej. un paciente que llama pidiendo el primer hueco). */
@@ -168,6 +175,9 @@ export class CreateWaitlistEntryUseCase {
     // descarta una (las automáticas son una por cita).
     if (await this.repo.hasOpenForPatient(input.patientId)) {
       throw new ConflictException(WAITLIST_DUPLICATE_MESSAGE);
+    }
+    if (input.locationId) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
     }
     if (
       input.locationId &&
@@ -212,6 +222,7 @@ export class DismissWaitlistEntryUseCase {
     @Inject(WAITLIST_REPOSITORY)
     private readonly repo: WaitlistRepository,
     private readonly audit: RecordAuditEventUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Sacar al paciente de la lista sin agendarlo, con motivo (obligatorio). */
@@ -223,6 +234,7 @@ export class DismissWaitlistEntryUseCase {
     assertValid(dismissReasonError(reason));
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(WAITLIST_NOT_FOUND_MESSAGE);
+    this.tenantContext.assertLocationAllowed(current.locationId);
     if (current.status !== WaitlistStatus.OPEN) {
       throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
     }
@@ -264,6 +276,7 @@ export class ScheduleFromWaitlistUseCase {
     private readonly types: AppointmentTypeRepository,
     private readonly createAppointment: CreateAppointmentUseCase,
     private readonly audit: RecordAuditEventUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -278,6 +291,8 @@ export class ScheduleFromWaitlistUseCase {
   ): Promise<AppointmentWriteResult> {
     const entry = await this.repo.findById(id);
     if (!entry) throw new NotFoundException(WAITLIST_NOT_FOUND_MESSAGE);
+    // DX-089: la cita nace en la sede de la entrada, que tiene que ser suya.
+    this.tenantContext.assertLocationAllowed(entry.locationId);
     if (entry.status !== WaitlistStatus.OPEN) {
       throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
     }

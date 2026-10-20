@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -95,7 +96,7 @@ describe('GetCashSessionUseCase (DX-027)', () => {
   it('RECEPTION solo ve las suyas (el repositorio filtra por quien abrió)', async () => {
     const repo = fakeRepo();
     repo.detail.mockResolvedValue(null);
-    const get = new GetCashSessionUseCase(asRepo(repo));
+    const get = new GetCashSessionUseCase(asRepo(repo), context);
     await expect(get.execute('s-1', RECEPTION)).rejects.toThrow(
       NotFoundException,
     );
@@ -112,7 +113,7 @@ describe('GetCashSessionUseCase (DX-027)', () => {
       requireOpenSession: false,
       blindClose: true,
     });
-    const get = new GetCashSessionUseCase(asRepo(repo));
+    const get = new GetCashSessionUseCase(asRepo(repo), context);
     const blind = await get.execute('s-1', RECEPTION);
     expect(blind).toMatchObject({
       blindHidden: true,
@@ -133,7 +134,7 @@ describe('GetCashSessionUseCase (DX-027)', () => {
       blindClose: true,
     });
     repo.detail.mockResolvedValue(record({ status: 'CLOSED' }));
-    const get = new GetCashSessionUseCase(asRepo(repo));
+    const get = new GetCashSessionUseCase(asRepo(repo), context);
     const reception = await get.execute('s-1', RECEPTION);
     expect(reception.blindHidden).toBe(false);
     expect(reception.can).toEqual({
@@ -155,7 +156,7 @@ describe('OpenCashSessionUseCase (DX-027)', () => {
       repo,
       open: new OpenCashSessionUseCase(
         asRepo(repo),
-        new GetCashSessionUseCase(asRepo(repo)),
+        new GetCashSessionUseCase(asRepo(repo), context),
         context,
       ),
     };
@@ -259,8 +260,9 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     );
     const close = new CloseCashSessionUseCase(
       asRepo(repo),
-      new GetCashSessionUseCase(asRepo(repo)),
+      new GetCashSessionUseCase(asRepo(repo), context),
       () => NOW,
+      context,
     );
     return { repo, close, draft: () => draft };
   }
@@ -364,7 +366,7 @@ describe('ReopenCashSessionUseCase y AddCashAdjustmentUseCase (DX-027)', () => {
     const repo = fakeRepo();
     const reopen = new ReopenCashSessionUseCase(
       asRepo(repo),
-      new GetCashSessionUseCase(asRepo(repo)),
+      new GetCashSessionUseCase(asRepo(repo), context),
     );
     repo.reopen.mockResolvedValueOnce('NOT_FOUND');
     await expect(reopen.execute('s-1', 'Motivo', ADMIN)).rejects.toThrow(
@@ -433,5 +435,79 @@ describe('ListCashSessionsUseCase (DX-027)', () => {
     await expect(
       list.execute({ from: '2026-10-17', to: '2026-10-01' }, ADMIN),
     ).rejects.toThrow(BadRequestException);
+  });
+});
+
+// DX-089: personal restringido a sedes.
+describe('cajas y sedes permitidas (DX-089)', () => {
+  const asRestricted = <T>(fn: () => Promise<T>) =>
+    context.run('t1', undefined, fn, ['loc-1', 'loc-2']);
+
+  it('el listado sin sede va acotado a las permitidas; una sede ajena es 403', async () => {
+    const repo = fakeRepo();
+    const list = new ListCashSessionsUseCase(asRepo(repo), context);
+    await asRestricted(() => list.execute({}, RECEPTION));
+    expect(repo.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ locationIds: ['loc-1', 'loc-2'] }),
+    );
+    await list.execute({}, ADMIN);
+    expect(repo.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ locationIds: undefined }),
+    );
+    await expect(
+      asRestricted(() => list.execute({ locationId: 'loc-9' }, RECEPTION)),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('una caja de una sede no permitida es 403 al verla y al cerrarla', async () => {
+    const repo = fakeRepo();
+    repo.detail.mockResolvedValue(
+      record({ location: { id: 'loc-9', name: 'Otra' } }),
+    );
+    const get = new GetCashSessionUseCase(asRepo(repo), context);
+    await expect(
+      asRestricted(() => get.execute('s-1', RECEPTION)),
+    ).rejects.toThrow(ForbiddenException);
+
+    repo.close.mockImplementation(
+      (
+        _id: string,
+        _scope: unknown,
+        _by: string,
+        decide: (ctx: CloseContext) => ClosingDraft,
+      ) => {
+        decide({
+          locationId: 'loc-9',
+          expected: [],
+          blind: false,
+          timeZone: 'America/Bogota',
+        } as unknown as CloseContext);
+        return Promise.resolve('CLOSED');
+      },
+    );
+    const close = new CloseCashSessionUseCase(
+      asRepo(repo),
+      get,
+      () => NOW,
+      context,
+    );
+    await expect(
+      asRestricted(() => close.execute('s-1', { counts: [] }, RECEPTION)),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('abrir en una sede ajena es 403', async () => {
+    const repo = fakeRepo();
+    const open = new OpenCashSessionUseCase(
+      asRepo(repo),
+      new GetCashSessionUseCase(asRepo(repo), context),
+      context,
+    );
+    await expect(
+      asRestricted(() =>
+        open.execute({ floats: [], locationId: 'loc-9' }, RECEPTION),
+      ),
+    ).rejects.toThrow(ForbiddenException);
+    expect(repo.resolveLocation).not.toHaveBeenCalled();
   });
 });

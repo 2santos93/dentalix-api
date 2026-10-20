@@ -15,6 +15,12 @@ export interface MembershipRecord {
   passwordHash: string;
   role: ClinicRole;
   tokenVersion: number;
+  /**
+   * DX-089: sedes ACTIVAS a las que está restringida la membresía. `null` =
+   * sin restricción (no tiene filas en `membership_locations`); `[]` = tiene
+   * filas pero ninguna de esas sedes sigue activa (nunca equivale a todas).
+   */
+  allowedLocationIds: string[] | null;
 }
 
 /**
@@ -41,7 +47,11 @@ export interface SessionState {
    * borrada. `membershipRole` = rol de la membresía ACTIVA del usuario en esa
    * clínica, o `null` si no la tiene (nunca la tuvo o fue desactivada).
    */
-  tenant: { membershipRole: ClinicRole | null } | null;
+  tenant: {
+    membershipRole: ClinicRole | null;
+    /** DX-089: igual que `MembershipRecord.allowedLocationIds`. */
+    allowedLocationIds: string[] | null;
+  } | null;
 }
 
 export const AUTH_REPOSITORY = Symbol('AUTH_REPOSITORY');

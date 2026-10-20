@@ -428,6 +428,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /staff/:userId/reactivate': ADMIN_ONLY,
   // DX-048: desbloquear el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': ADMIN_ONLY,
+  // DX-089: sedes permitidas de un miembro.
+  'GET /staff/:userId/locations': ADMIN_ONLY,
+  'PUT /staff/:userId/locations': ADMIN_ONLY,
   'DELETE /staff/:userId': ADMIN_ONLY,
   'POST /staff/invitations': ADMIN_ONLY,
   'GET /staff/invitations': ADMIN_ONLY,
