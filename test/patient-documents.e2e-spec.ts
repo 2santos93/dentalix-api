@@ -391,6 +391,45 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
       expect((badTooth.body as { message: string }).message).toBe(
         'El diente «99» no es un número FDI válido.',
       );
+      // El dominio rechaza un diente repetido (no lo deduplica).
+      const repeated = await uploadReq(
+        a,
+        dentist.token,
+        patient,
+        pdfWith('repeated'),
+        { filename: 'a.pdf', contentType: 'application/pdf' },
+        { category: 'XRAY', toothNumbers: '11, 11' },
+      ).expect(400);
+      expect((repeated.body as { message: string }).message).toBe(
+        'El diente «11» está repetido.',
+      );
+    });
+
+    it('notas: 500 puntos de código pasan (aunque sean 2000 bytes); 501 → 400', async () => {
+      const ok = await uploadReq(
+        a,
+        dentist.token,
+        patient,
+        pdfWith('notas-500'),
+        { filename: 'notas.pdf', contentType: 'application/pdf' },
+        { category: 'OTHER', notes: '🦷'.repeat(500) },
+      ).expect(201);
+      expect(Array.from((ok.body as DocumentBody).notes ?? '')).toHaveLength(
+        500,
+      );
+      const before = await rowCount();
+      const tooLong = await uploadReq(
+        a,
+        dentist.token,
+        patient,
+        pdfWith('notas-501'),
+        { filename: 'notas.pdf', contentType: 'application/pdf' },
+        { category: 'OTHER', notes: '🦷'.repeat(501) },
+      ).expect(400);
+      expect((tooLong.body as { message: string }).message).toBe(
+        'Las notas admiten hasta 500 caracteres.',
+      );
+      expect(await rowCount()).toBe(before);
     });
 
     it('el mismo contenido vigente otra vez → 409', async () => {
@@ -542,6 +581,13 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
       ).body as DocumentBody;
       const voidUrl = `/patients/${patient}/documents/${own.id}/void`;
       await call(a, dentist.token, 'post', voidUrl, {}).expect(400);
+      // Dos puntos de código (cuatro unidades UTF-16): 400, no un 500 del CHECK.
+      const emoji = await call(a, dentist.token, 'post', voidUrl, {
+        reason: '🦷🦷',
+      }).expect(400);
+      expect((emoji.body as { message: string }).message).toBe(
+        'El motivo debe tener entre 3 y 500 caracteres.',
+      );
       const forbidden = await call(a, dentist2, 'post', voidUrl, {
         reason: 'No es mío',
       }).expect(403);
