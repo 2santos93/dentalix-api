@@ -116,6 +116,23 @@ describe('Me (e2e)', () => {
     await login('NewPass2!'); // 201 or throws
   });
 
+  it('DX-084: rejects (400) a file that is not really the declared image type', async () => {
+    const token = await login('NewPass2!');
+    await request(app.getHttpServer())
+      .post('/api/v1/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', Buffer.from('<svg onload="alert(1)"/>'), {
+        filename: 'a.png',
+        contentType: 'image/png',
+      })
+      .expect(400);
+    const stored = await raw.user.findFirstOrThrow({
+      where: { email: 'perfil@e2e.com' },
+      select: { avatarKey: true },
+    });
+    expect(stored.avatarKey).toBeNull();
+  });
+
   it('uploads an avatar, exposes it on GET /me and serves the file', async () => {
     const token = await login('NewPass2!');
     const png = Buffer.from('89504e470d0a1a0a', 'hex'); // PNG magic bytes

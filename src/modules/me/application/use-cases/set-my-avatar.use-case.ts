@@ -4,6 +4,7 @@ import { USER_PROFILE_REPOSITORY } from '../../domain/ports/user-profile-reposit
 import type { FileStoragePort } from '../../../../shared/storage/file-storage.port';
 import { FILE_STORAGE } from '../../../../shared/storage/file-storage.port';
 import { avatarKeyOf } from '../avatar-url.util';
+import { sniffAvatarImage } from '../avatar-image';
 
 const EXT_BY_MIME: Record<string, string> = {
   'image/png': 'png',
@@ -29,6 +30,13 @@ export class SetMyAvatarUseCase {
     const ext = EXT_BY_MIME[input.contentType];
     if (!ext) {
       throw new BadRequestException('Unsupported image type');
+    }
+    // DX-084: el contenido debe ser de verdad el tipo declarado (la etiqueta
+    // del multipart la pone el cliente y fija la extensión con la que se sirve).
+    if (sniffAvatarImage(input.buffer) !== input.contentType) {
+      throw new BadRequestException(
+        'File content does not match the image type',
+      );
     }
     // DX-084: clave sin PII (el id del usuario) y es lo que va a la BD.
     const key = `avatars/${input.userId}.${ext}`;
