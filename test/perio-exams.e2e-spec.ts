@@ -185,6 +185,15 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
     await raw.$disconnect();
   });
 
+  // DX-251: los tests de permisos y aislamiento crean su propio examen (en
+  // DRAFT, el estado escribible) para pasar también ejecutados solos (-t).
+  async function draftExamOfA(): Promise<string> {
+    const res = await as(clinicA, dentistA.token)
+      .post(path(patientA), { examDate: '2026-04-12', notes: 'Propio' })
+      .expect(201);
+    return (res.body as ExamBody).id;
+  }
+
   it('el dentista crea un DRAFT; el autor sale del token', async () => {
     const res = await as(clinicA, dentistA.token)
       .post(path(patientA), { examDate: '2026-04-10', notes: 'Inicial' })
@@ -355,6 +364,7 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
   });
 
   it('RECEPTION recibe 403 en todas las rutas', async () => {
+    const examId = await draftExamOfA();
     await as(clinicA, receptionA).get(path(patientA)).expect(403);
     await as(clinicA, receptionA).post(path(patientA)).expect(403);
     await as(clinicA, receptionA)
@@ -369,6 +379,7 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
   });
 
   it('aislamiento: la clínica B no lee ni escribe exámenes de pacientes de A', async () => {
+    const examId = await draftExamOfA();
     await as(clinicB).get(path(patientA)).expect(404);
     await as(clinicB).post(path(patientA)).expect(404);
     await as(clinicB)
