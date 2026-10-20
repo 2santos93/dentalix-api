@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPatientCoverageRepository } from '../src/modules/patient-coverages/infrastructure/repositories/prisma-patient-coverage.repository';
 
 // DX-153, capa DB: pagadores (payers) y coberturas del paciente
 // (patient_coverages). RLS FORCE, FK COMPUESTAS (cruzar clínicas falla), las
@@ -468,6 +470,101 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       expect(cov).toHaveLength(1);
       expect(cov[0].patientId).toBe(patientId);
       expect(cov[0].payerId).toBe(existing.id);
+    });
+  });
+
+  describe('carrera de la cobertura principal', () => {
+    const repo = new PrismaPatientCoverageRepository(prisma, tenantContext);
+
+    /** Espera a que `n` sesiones estén bloqueadas esperando un lock de fila. */
+    async function waitForBlocked(n: number): Promise<void> {
+      for (let i = 0; i < 200; i++) {
+        const [{ blocked }] = await raw.$queryRaw<{ blocked: number }[]>`
+          SELECT count(*)::int AS blocked FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock'
+             AND query ILIKE '%patient_coverages%'`;
+        if (blocked >= n) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error('las dos escrituras no llegaron a bloquearse');
+    }
+
+    it('dos setPrimary a la vez: una gana, la otra recibe 422 y queda exactamente una principal', async () => {
+      // Los bloques del relleno borran los pacientes sembrados: uno propio.
+      const patientId = (
+        await raw.patient.create({
+          data: {
+            tenantId: a.tenantId,
+            firstName: 'Carrera',
+            lastName: 'Principal',
+          },
+        })
+      ).id;
+      if (!(await raw.payer.findFirst({ where: { id: a.payerId } }))) {
+        a.payerId = (
+          await raw.payer.create({
+            data: {
+              tenantId: a.tenantId,
+              name: 'Pagador carrera',
+              type: 'OTRO',
+            },
+          })
+        ).id;
+      }
+      const held = await raw.patientCoverage.create({
+        data: coverage(a, patientId, { isPrimary: true }),
+      });
+      const x = await raw.patientCoverage.create({
+        data: coverage(a, patientId),
+      });
+      const y = await raw.patientCoverage.create({
+        data: coverage(a, patientId),
+      });
+
+      // Un lock de fila sobre la principal actual deja a las dos escrituras
+      // con su foto previa a la otra: sin él, el orden de los viajes decide si
+      // la segunda ve la marca de la primera y la carrera no se produce.
+      let release!: () => void;
+      let locked!: () => void;
+      const lockTaken = new Promise<void>((r) => (locked = r));
+      const lockReleased = new Promise<void>((r) => (release = r));
+      const holder = raw.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM patient_coverages WHERE id = ${held.id}::uuid FOR UPDATE`;
+          locked();
+          await lockReleased;
+        },
+        { timeout: 30_000 },
+      );
+      await lockTaken;
+
+      const run = (coverageId: string) =>
+        tenantContext.run(a.tenantId, () =>
+          repo.setPrimary(patientId, coverageId, randomUUID()),
+        );
+      const both = Promise.allSettled([run(x.id), run(y.id)]);
+      await waitForBlocked(2);
+      release();
+      await holder;
+      const results = await both;
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toMatchObject({
+        status: 422,
+        message:
+          'Otra petición acaba de cambiar la cobertura principal; vuelve a intentarlo.',
+      });
+
+      const primaries = await raw.patientCoverage.findMany({
+        where: { patientId, isPrimary: true, deletedAt: null },
+      });
+      expect(primaries).toHaveLength(1);
+      expect([x.id, y.id]).toContain(primaries[0].id);
     });
   });
 
