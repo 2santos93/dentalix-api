@@ -87,6 +87,8 @@ const TENANT_TABLES = [
   'patients',
   'dental_catalog_items',
   'clinic_invitations',
+  // DX-089: sedes de un miembro (hijas de clinic_memberships y locations).
+  'membership_locations',
   'clinic_memberships',
   'tenant_domains',
   'locations',

@@ -161,28 +161,30 @@ model Location {
   updatedAt            DateTime      @updatedAt
   deletedAt            DateTime?
 
-  appointments       Appointment[]
-  payments           Payment[]
-  inventoryItems     InventoryItem[]
-  inventoryMovements InventoryMovement[]
-  prescriptions      Prescription[]
+  appointments        Appointment[]
+  payments            Payment[]
+  inventoryItems      InventoryItem[]
+  inventoryMovements  InventoryMovement[]
+  prescriptions       Prescription[]
   // DX-191: implantes colocados en la sede.
-  patientImplants    PatientImplant[]
-  planAcceptances    TreatmentPlanAcceptance[]
-  presentedPlans     TreatmentPlan[]
+  patientImplants     PatientImplant[]
+  planAcceptances     TreatmentPlanAcceptance[]
+  presentedPlans      TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
-  scheduleBlocks     ScheduleBlock[]
-  waitlistEntries    AppointmentWaitlistEntry[]
-  waitlistOffers     WaitlistOffer[]
-  reminderSettings   LocationReminderSettings[]
-  paymentReceipts    PaymentReceipt[]
-  collectionNotes    CollectionNote[]
-  paymentPromises    PaymentPromise[]
+  scheduleBlocks      ScheduleBlock[]
+  waitlistEntries     AppointmentWaitlistEntry[]
+  waitlistOffers      WaitlistOffer[]
+  reminderSettings    LocationReminderSettings[]
+  paymentReceipts     PaymentReceipt[]
+  collectionNotes     CollectionNote[]
+  paymentPromises     PaymentPromise[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
-  planItemDiscounts  TreatmentPlanItem[]
+  planItemDiscounts   TreatmentPlanItem[]
   // DX-027: cajas por turno de la sede y sus ajustes.
-  cashSessions       CashSession[]
-  cashAdjustments    CashSessionAdjustment[]
+  cashSessions        CashSession[]
+  cashAdjustments     CashSessionAdjustment[]
+  // DX-089: miembros restringidos a la sede.
+  membershipLocations MembershipLocation[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -194,18 +196,20 @@ model Location {
 }
 
 model ClinicMembership {
-  id                  String     @id @default(uuid()) @db.Uuid
-  tenantId            String     @db.Uuid
-  userId              String     @db.Uuid
+  id                  String               @id @default(uuid()) @db.Uuid
+  tenantId            String               @db.Uuid
+  userId              String               @db.Uuid
   role                ClinicRole
   // Registro profesional (CO: RETHUS / tarjeta profesional) o nº de colegiado
   // (ES) del miembro EN ESTA CLÍNICA (DX-013). Lo exige la receta.
   professionalLicense String?
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
   deletedAt           DateTime?
-  tenant              Tenant     @relation(fields: [tenantId], references: [id])
-  user                User       @relation(fields: [userId], references: [id])
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  user                User                 @relation(fields: [userId], references: [id])
+  // DX-089: sedes a las que se restringe el miembro (sin filas = todas).
+  locations           MembershipLocation[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -213,8 +217,30 @@ model ClinicMembership {
   // the name/columns here keep migrate-status drift-free. Same pattern as
   // users_email_key. Do NOT accept a migrate-dev diff that makes this full again.
   @@unique([tenantId, userId])
+  // Destino de la FK compuesta (tenantId, membershipId) de membership_locations
+  // (SEC-004): la membresía tiene que ser del MISMO tenant.
+  @@unique([tenantId, id], map: "clinic_memberships_tenant_id_key")
   @@index([tenantId])
   @@map("clinic_memberships")
+}
+
+/// DX-089: sede a la que se restringe un miembro de la clínica. Sin filas, el
+/// miembro trabaja en todas las sedes; con filas, solo en esas. Borrar la
+/// membresía borra sus filas (CASCADE); la sede no se borra mientras tenga
+/// filas (RESTRICT). FK compuestas por tenant (SEC-004) y RLS FORCE.
+model MembershipLocation {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @db.Uuid
+  membershipId String           @db.Uuid
+  locationId   String           @db.Uuid
+  createdById  String?          @db.Uuid
+  createdAt    DateTime         @default(now())
+  membership   ClinicMembership @relation(fields: [tenantId, membershipId], references: [tenantId, id], onDelete: Cascade)
+  location     Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, membershipId, locationId], map: "membership_locations_member_location_key")
+  @@index([tenantId, locationId])
+  @@map("membership_locations")
 }
 
 model ClinicInvitation {
