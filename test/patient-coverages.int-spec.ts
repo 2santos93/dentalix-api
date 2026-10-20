@@ -395,6 +395,82 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     });
   });
 
+  describe('relleno de insurerEps: clave única y reutilización', () => {
+    const tenants = () => ({ in: [a.tenantId, b.tenantId] });
+
+    async function wipe(): Promise<void> {
+      await raw.patientCoverage.deleteMany({ where: { tenantId: tenants() } });
+      await raw.payer.deleteMany({ where: { tenantId: tenants() } });
+      await raw.patient.deleteMany({ where: { tenantId: tenants() } });
+    }
+
+    beforeAll(async () => {
+      keepCoverages = true;
+      await wipe();
+    });
+
+    afterAll(async () => {
+      await wipe();
+      keepCoverages = false;
+    });
+
+    const mkPatient = async (
+      clinic: Clinic,
+      firstName: string,
+      insurerEps: string,
+    ) =>
+      (
+        await raw.patient.create({
+          data: {
+            tenantId: clinic.tenantId,
+            firstName,
+            lastName: 'Clave',
+            insurerEps,
+          },
+        })
+      ).id;
+
+    it('dos textos de 121 caracteres que solo difieren en mayúsculas dan UN pagador y dos coberturas', async () => {
+      const p1 = await mkPatient(b, 'L1', 'Y'.repeat(121));
+      const p2 = await mkPatient(b, 'L2', 'y'.repeat(121));
+      await runBackfill();
+      const payers = await raw.payer.findMany({
+        where: { tenantId: b.tenantId },
+      });
+      expect(payers).toHaveLength(1);
+      expect(payers[0].name).toHaveLength(120);
+      const cov = await raw.patientCoverage.findMany({
+        where: { tenantId: b.tenantId },
+      });
+      expect(cov.map((c) => c.patientId).sort()).toEqual([p1, p2].sort());
+      expect(cov.every((c) => c.payerId === payers[0].id)).toBe(true);
+    });
+
+    it('un pagador vivo con la misma clave en otra caja se reutiliza: no se crea otro', async () => {
+      const existing = await raw.payer.create({
+        data: {
+          tenantId: a.tenantId,
+          name: 'SURA EPS',
+          type: 'EPS_CO',
+          country: 'CO',
+        },
+      });
+      const patientId = await mkPatient(a, 'R1', 'Sura EPS');
+      await runBackfill();
+      const payers = await raw.payer.findMany({
+        where: { tenantId: a.tenantId },
+      });
+      expect(payers.map((p) => p.id)).toEqual([existing.id]);
+      expect(payers[0].type).toBe('EPS_CO');
+      const cov = await raw.patientCoverage.findMany({
+        where: { tenantId: a.tenantId },
+      });
+      expect(cov).toHaveLength(1);
+      expect(cov[0].patientId).toBe(patientId);
+      expect(cov[0].payerId).toBe(existing.id);
+    });
+  });
+
   it('los FORCE se restauran tras el relleno', async () => {
     const rows = await raw.$queryRaw<{ relname: string; force: boolean }[]>`
       SELECT relname, relforcerowsecurity AS force FROM pg_class
