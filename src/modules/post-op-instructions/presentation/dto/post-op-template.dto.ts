@@ -125,11 +125,14 @@ export class ListPostOpTemplatesQueryDto {
     description: 'true = solo activas; false = solo inactivas; sin él, todas',
   })
   @IsOptional()
-  // `Boolean('false')` sería `true`.
-  @Transform(({ value }: { value: unknown }) =>
-    value === undefined ? undefined : value === true || value === 'true',
-  )
-  @IsBoolean()
+  // `Boolean('false')` sería `true`; cualquier otro valor se deja intacto
+  // para que `@IsBoolean` lo rechace con 400.
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'active debe ser true o false.' })
   active?: boolean;
 }
 

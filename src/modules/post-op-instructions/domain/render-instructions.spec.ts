@@ -52,6 +52,12 @@ describe('unknownVariables', () => {
     expect(unknownVariables('{{foo}} {{paciente}} {{ foo }}')).toEqual(['foo']);
   });
 
+  it('detecta variables desconocidas con dígitos', () => {
+    expect(unknownVariables('{{paciente2}} {{paciente}}')).toEqual([
+      'paciente2',
+    ]);
+  });
+
   it('devuelve vacío si todas son conocidas', () => {
     expect(unknownVariables('{{paciente}} {{fecha}}')).toEqual([]);
   });

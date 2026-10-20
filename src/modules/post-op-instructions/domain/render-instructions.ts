@@ -15,7 +15,7 @@ export type PostOpVariable = (typeof POSTOP_VARIABLES)[number];
 export type PostOpVariables = Record<PostOpVariable, string>;
 
 const KNOWN: ReadonlySet<string> = new Set(POSTOP_VARIABLES);
-const VARIABLE_PATTERN = /\{\{\s*([A-Za-z_]+)\s*\}\}/g;
+const VARIABLE_PATTERN = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g;
 
 function isKnown(name: string): name is PostOpVariable {
   return KNOWN.has(name);

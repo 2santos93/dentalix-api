@@ -247,6 +247,16 @@ describe('Plantillas de indicaciones postoperatorias (e2e, DX-222)', () => {
       expect(await auditCount('UPDATE')).toBe(2);
     });
 
+    it('`?active` distinto de true/false responde 400', async () => {
+      const res = await as(
+        api().get('/api/v1/post-op-templates?active=foo'),
+        clinic.adminToken,
+      ).expect(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'active debe ser true o false.',
+      );
+    });
+
     it('los vínculos se reemplazan completos; `code` no se edita', async () => {
       const res = await as(
         api().patch(`/api/v1/post-op-templates/${exo.id}`),
