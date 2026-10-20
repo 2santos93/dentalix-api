@@ -1,8 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   CreateLocationUseCase,
+  ListLocationsUseCase,
   UpdateLocationUseCase,
 } from './manage-locations.use-cases';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
   Location,
   LocationRepository,
@@ -169,5 +171,32 @@ describe('UpdateLocationUseCase · REPS (DX-212)', () => {
       'El código de habilitación REPS debe tener 12 dígitos (p. ej. 110010123401)',
     );
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+// DX-089: el restringido solo ve sus sedes.
+describe('ListLocationsUseCase', () => {
+  const tenantContext = new TenantContextService();
+  const uc = new ListLocationsUseCase(
+    makeRepo({
+      list: () =>
+        Promise.resolve([
+          makeLocation({ id: 'loc-1' }),
+          makeLocation({ id: 'loc-2' }),
+        ]),
+    }),
+    tenantContext,
+  );
+  const ids = (locations: Location[]) => locations.map((l) => l.id);
+
+  it('sin restricción, todas', async () => {
+    expect(ids(await uc.execute())).toEqual(['loc-1', 'loc-2']);
+  });
+
+  it('con restricción, solo las permitidas (ninguna si no le queda ninguna)', async () => {
+    const as = (allowed: string[]) =>
+      tenantContext.run('t1', undefined, () => uc.execute(), allowed);
+    expect(ids(await as(['loc-2']))).toEqual(['loc-2']);
+    expect(ids(await as([]))).toEqual([]);
   });
 });

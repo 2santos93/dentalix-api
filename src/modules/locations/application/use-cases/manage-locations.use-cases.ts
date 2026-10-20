@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { ClinicCountry } from '@prisma/client';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
 import type {
   Location,
@@ -17,13 +18,23 @@ import {
   normalizeRepsCode,
 } from '../../../../shared/validation/health-codes';
 
+/**
+ * Sedes de la clínica. DX-089: un miembro restringido solo ve las suyas (el
+ * selector de sede, la agenda y la caja no le ofrecen las demás); el ADMIN
+ * y quien no tiene restricción, todas.
+ */
 @Injectable()
 export class ListLocationsUseCase {
   constructor(
     @Inject(LOCATION_REPOSITORY) private readonly repo: LocationRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
-  execute(): Promise<Location[]> {
-    return this.repo.list();
+  async execute(): Promise<Location[]> {
+    const locations = await this.repo.list();
+    const allowed = this.tenantContext.getAllowedLocationIds();
+    return allowed === 'ALL'
+      ? locations
+      : locations.filter((location) => allowed.includes(location.id));
   }
 }
 
