@@ -100,6 +100,7 @@ import {
   daysAgoAt,
   daysUntilMondayAfterNext,
   daysUntilNextWeekday,
+  daysUntilRotationCover,
   planAppointments,
   planInClinicToday,
 } from './demo/calendar';
@@ -110,6 +111,10 @@ import {
   ListWaitlistUseCase,
 } from '../src/modules/waitlist/application/use-cases/waitlist.use-cases';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import {
+  ReplaceProviderScheduleUseCase,
+  SetProviderOverrideUseCase,
+} from '../src/modules/provider-schedule/application/use-cases/provider-schedule.use-cases';
 import {
   LoadSamplePostOpTemplatesUseCase,
   UpdatePostOpTemplateUseCase,
@@ -133,6 +138,7 @@ import {
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
+  DEMO_ROTATION,
   DEMO_VACATION,
   DEMO_WAITLIST,
   DEMO_PERIO,
@@ -557,6 +563,11 @@ class DemoSeeder {
 
     const typeByReason = await this.inTenant(tenantId, undefined, () =>
       this.createAppointmentTypes(ownerId),
+    );
+
+    // DX-233: antes de las citas, para que las suyas caigan en su horario.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createProviderRotation(tenantId, locations, dentists, ownerId),
     );
 
     const attended = await this.createAppointments(
@@ -1044,6 +1055,64 @@ class DemoSeeder {
       for (const reason of spec.reasons) typeByReason.set(reason, type.id);
     }
     return typeByReason;
+  }
+
+  /**
+   * DX-233: la segunda dentista rota entre las dos sedes (lun, mié y vie en
+   * la principal; mar y jue en la Norte) y, el lunes que vuelve de
+   * vacaciones, no va a la principal y cubre la Norte por la mañana. El ADMIN
+   * lo guarda con los mismos casos de uso que /settings/horarios (auditado).
+   */
+  private async createProviderRotation(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    dentists: string[],
+    ownerId: string,
+  ): Promise<void> {
+    const ctx: AuditRequestContext = {
+      tenantId,
+      locationId: null,
+      actor: { userId: ownerId, role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+    const providerId = dentists[DEMO_ROTATION.dentistIndex];
+    const keys: DemoLocationKey[] = ['principal', 'norte'];
+    await this.use(ReplaceProviderScheduleUseCase).execute(
+      providerId,
+      {
+        locations: keys.map((key) => ({
+          locationId: locations[key],
+          ranges: DEMO_ROTATION.weekdays[key].flatMap((weekday) =>
+            DEMO_ROTATION.ranges[key].map((r) => ({ weekday, ...r })),
+          ),
+        })),
+      },
+      ctx,
+    );
+    const cover = civilDateIn(
+      daysAgoAt(this.now, -daysUntilRotationCover(this.now), 12 * 60),
+      DEMO_TIMEZONE,
+    );
+    const overrides = this.use(SetProviderOverrideUseCase);
+    // Primero «no trabaja» en la principal: si no, la mañana de la Norte se
+    // solaparía con su lunes en la principal.
+    await overrides.execute(
+      providerId,
+      { locationId: locations.principal, date: cover, ranges: [] },
+      ctx,
+    );
+    await overrides.execute(
+      providerId,
+      {
+        locationId: locations.norte,
+        date: cover,
+        ranges: [...DEMO_ROTATION.cover.ranges],
+        note: DEMO_ROTATION.cover.note,
+      },
+      ctx,
+    );
   }
 
   private async createAppointments(

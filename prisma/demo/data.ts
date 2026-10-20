@@ -2070,6 +2070,32 @@ export const DEMO_VACATION = {
   note: 'Vacaciones de mitad de año',
 } as const;
 
+/**
+ * DX-233: rotación de ejemplo de la segunda dentista entre las dos sedes:
+ * lunes, miércoles y viernes en la principal (su horario completo) y martes y
+ * jueves en la Norte (el de la Norte). Sus citas demo siguen esta rotación
+ * (ver `planAppointments`). Y una excepción tras sus vacaciones: ese lunes no
+ * va a la principal y cubre la Norte por la mañana.
+ */
+export const DEMO_ROTATION = {
+  dentistIndex: 1,
+  weekdays: { principal: [1, 3, 5], norte: [2, 4] },
+  ranges: {
+    principal: [
+      { startMinute: 9 * 60, endMinute: 13 * 60 },
+      { startMinute: 15 * 60, endMinute: 19 * 60 },
+    ],
+    norte: [
+      { startMinute: 7 * 60, endMinute: 12 * 60 },
+      { startMinute: 13 * 60, endMinute: 17 * 60 },
+    ],
+  },
+  cover: {
+    ranges: [{ startMinute: 7 * 60, endMinute: 12 * 60 }],
+    note: 'Cubre la Sede Norte',
+  },
+} as const;
+
 export const DEMO_LUNCH = {
   startMinute: 12 * 60 + 30,
   endMinute: 13 * 60,

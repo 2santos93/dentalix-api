@@ -1,4 +1,5 @@
 import { AppointmentStatus } from '@prisma/client';
+import { DEMO_ROTATION } from './data';
 
 /**
  * Calendario de la clínica demo. Todo es función pura de "hoy" (sin azar), así
@@ -59,6 +60,15 @@ export function daysAgoAt(
 export function daysUntilMondayAfterNext(now: Date): number {
   const daysSinceMonday = (bogotaDay(now, 0).weekday + 6) % 7;
   return 14 - daysSinceMonday;
+}
+
+/**
+ * DX-233: días desde hoy hasta el lunes en que la segunda dentista vuelve de
+ * vacaciones (el de después de `daysUntilMondayAfterNext`): ahí va la
+ * excepción de ejemplo de su horario.
+ */
+export function daysUntilRotationCover(now: Date): number {
+  return daysUntilMondayAfterNext(now) + 7;
 }
 
 /** DX-122: días desde hoy hasta el próximo día laborable (lunes a viernes). */
@@ -124,7 +134,9 @@ interface PlannedAppointment {
  * Citas desde el lunes de la semana pasada hasta el sábado de la próxima.
  *
  * Garantías (que también vigilan las EXCLUDE constraints de la base):
- * - un dentista atiende UNA sede por día y sus huecos no se pisan;
+ * - un dentista atiende UNA sede por día y sus huecos no se pisan; la
+ *   segunda sigue su rotación semanal (DX-233, `DEMO_ROTATION`) y la primera
+ *   alterna de sede día a día;
  * - cada dentista atiende un grupo de pacientes disjunto del otro, así que un
  *   paciente nunca tiene dos citas a la vez;
  * - el filtrado por horario lo hace quien llama (`fits`), con el validador
@@ -156,7 +168,15 @@ export function planAppointments(
     for (let dentistIndex = 0; dentistIndex < 2; dentistIndex++) {
       if (day.weekday === 6 && dentistIndex === 1) continue; // libra sábados
       const location: DemoLocationKey =
-        (dayIndex + dentistIndex) % 2 === 0 ? 'principal' : 'norte';
+        dentistIndex === DEMO_ROTATION.dentistIndex
+          ? (DEMO_ROTATION.weekdays.norte as readonly number[]).includes(
+              day.weekday,
+            )
+            ? 'norte'
+            : 'principal'
+          : (dayIndex + dentistIndex) % 2 === 0
+            ? 'principal'
+            : 'norte';
 
       SLOT_TEMPLATES[location].forEach(([startMinute, duration], slot) => {
         if ((dayIndex * 3 + slot * 5 + dentistIndex * 2) % 7 >= 3) return;
