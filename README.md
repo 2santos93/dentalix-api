@@ -1038,8 +1038,10 @@ módulo `src/modules/implants`, tabla `patient_implants`.
   imprime la vista A4/carta y el navegador guarda como PDF.
 - **Búsqueda por lote/REF** (solo ADMIN): `GET /implants/search?lot=&reference=`
   y `GET /implants/search.csv` (UTF-8 con BOM, anti fórmulas), coincidencia
-  exacta sin mayúsculas sobre los índices de expresión
-  `patient_implants_tenant_lot_idx`/`_reference_idx`, SIEMPRE en toda la
+  exacta sin mayúsculas ni blancos alrededor (también en el parámetro) sobre
+  las columnas generadas `lotKey`/`referenceKey` (`upper(btrim(...))`) y sus
+  índices `patient_implants_tenant_lot_key_idx`/`_reference_key_idx`, que
+  sirven bajo RLS porque la consulta compara la columna con `=` (DX-225), SIEMPRE en toda la
   clínica (la sede activa no la acota: una retirada de lote no puede dejar
   fuera a un paciente operado en otra sede; la columna «Sede» lo dice). Cada consulta deja `VIEW`/`EXPORT` sobre `PATIENT_IMPLANT`
   con `metadata.search = { lot, reference, rows }` (el nº de filas sale de la
@@ -1294,7 +1296,8 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
 - **Baja por mensaje**: `OptOutByMessageUseCase` (exportado por
   `RemindersModule`) reconoce «BAJA», «STOP» y «NO MÁS» (sin tildes ni
   mayúsculas, mensaje entero) y da de baja a todos los pacientes vivos de la
-  clínica con ese móvil (prefiltro indexado `dx_phone_tail`), con origen
+  clínica con ese móvil (prefiltro por la columna `phoneTail`, que mantiene
+  un trigger, con el índice parcial `patients_tenant_phone_tail_idx`: DX-225), con origen
   MESSAGE. Lo invocará el webhook de WhatsApp de DX-126, que aún no existe.
 - **Menores**: desde DX-203 los avisos de un menor (o de un paciente sin
   email) van al email de su **responsable** (ver la sección siguiente). Sin
@@ -1832,6 +1835,21 @@ dentalix_email_dispatcher`) o repón la política como en
   FORCE también a `patient_ledgers` y a ellas (como hace
   `20261017233000_dx155_patient_ledgers`), o el refresco falla («no se ven N
   de M pacientes…») y la migración con él.
+- **Rellenos grandes por lotes, sin `NO FORCE` ni ACCESS EXCLUSIVE** (DX-225,
+  DB-029): `NO FORCE` toma ACCESS EXCLUSIVE sobre la tabla hasta el COMMIT,
+  así que un relleno de una tabla grande y caliente bajo él bloquea hasta las
+  lecturas. Para esos, separa el esquema (`ADD COLUMN` sin `DEFAULT` y, si la
+  columna la mantiene la BD, el trigger que la calcula en las filas nuevas)
+  del relleno, en una migración propia de **una sola sentencia `DO`** que
+  recorre las clínicas, fija `set_config('app.current_tenant', …, true)` y
+  hace `COMMIT` tras cada lote (`prisma migrate deploy` la ejecuta fuera de un
+  bloque de transacción, como un `CREATE INDEX CONCURRENTLY`). Con la clínica
+  fijada, la RLS del owner sin superusuario deja ver y escribir sus filas, y
+  cada lote solo retiene bloqueos de fila hasta su COMMIT. Idempotente (`WHERE
+  <columna> IS NULL`) para poder repetirla si se corta. Después, el índice
+  `CONCURRENTLY` en otro fichero. Modelo:
+  `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
+  `test/owner-nosu/migrations-data.owner-spec.ts`.
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …
   REFERENCES` o `VALIDATE CONSTRAINT` necesita `NO FORCE` **en la tabla hija y

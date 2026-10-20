@@ -100,6 +100,46 @@ interface LotRow {
 export const IMPLANT_LOT_SEARCH_LIMIT = 1000;
 
 /**
+ * Coincidencia exacta sin mayúsculas ni blancos alrededor: el parámetro pasa
+ * por el mismo `upper(btrim(...))` que las columnas generadas "lotKey" /
+ * "referenceKey" (DX-225). Comparar la COLUMNA con `=` (texteq, LEAKPROOF)
+ * es lo que deja usar patient_implants_tenant_lot_key_idx /
+ * _reference_key_idx bajo RLS FORCE; una expresión con upper/btrim sobre la
+ * columna quedaría en Filter (no son LEAKPROOF). Exportada para que el
+ * int-spec explique (EXPLAIN) la consulta real.
+ */
+export function implantLotSearchSql(
+  tenantId: string,
+  query: ImplantLotQuery,
+): Prisma.Sql {
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`i."tenantId" = ${tenantId}::uuid`,
+  ];
+  if (query.lot) {
+    conditions.push(Prisma.sql`i."lotKey" = upper(btrim(${query.lot}))`);
+  }
+  if (query.reference) {
+    conditions.push(
+      Prisma.sql`i."referenceKey" = upper(btrim(${query.reference}))`,
+    );
+  }
+  return Prisma.sql`
+    SELECT i."id" AS "implantId", i."patientId", p."firstName", p."lastName",
+           p."docType"::text AS "docType", p."docNumber", p."phone",
+           i."placedOn", i."toothNumber", i."kind", i."manufacturer",
+           i."system", i."reference", i."lot",
+           u."fullName" AS "professionalName", l."name" AS "locationName",
+           (i."voidedAt" IS NOT NULL) AS "voided"
+    FROM "patient_implants" i
+    JOIN "patients" p ON p."tenantId" = i."tenantId" AND p."id" = i."patientId"
+    JOIN "locations" l ON l."tenantId" = i."tenantId" AND l."id" = i."locationId"
+    JOIN "users" u ON u."id" = i."professionalId"
+    WHERE ${Prisma.join(conditions, ' AND ')}
+    ORDER BY i."placedOn" DESC, p."lastName", p."firstName", i."id"
+    LIMIT ${IMPLANT_LOT_SEARCH_LIMIT}`;
+}
+
+/**
  * Todo bajo `runWithTenant` (RLS FORCE). `users` y `tenants` son globales: se
  * leen por el id de la fila o del contexto. El repositorio NUNCA actualiza el
  * contenido de un implante: solo inserta, anula y marca la entrega (lo único
@@ -292,40 +332,11 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
     }));
   }
 
-  /**
-   * Coincidencia exacta sin mayúsculas sobre `upper(btrim(...))`, la misma
-   * expresión de los índices patient_implants_tenant_lot_idx / _reference_idx.
-   * El `tenantId` explícito, además de la RLS, deja al planificador usarlos.
-   */
+  /** Ver `implantLotSearchSql`. */
   async searchByLot(query: ImplantLotQuery): Promise<ImplantLotMatch[]> {
-    const tenantId = this.requireTenantId();
-    const conditions: Prisma.Sql[] = [
-      Prisma.sql`i."tenantId" = ${tenantId}::uuid`,
-    ];
-    if (query.lot) {
-      conditions.push(Prisma.sql`upper(btrim(i."lot")) = upper(${query.lot})`);
-    }
-    if (query.reference) {
-      conditions.push(
-        Prisma.sql`upper(btrim(i."reference")) = upper(${query.reference})`,
-      );
-    }
-    const rows = await this.prisma.runWithTenant(
-      (tx) =>
-        tx.$queryRaw<LotRow[]>`
-        SELECT i."id" AS "implantId", i."patientId", p."firstName", p."lastName",
-               p."docType"::text AS "docType", p."docNumber", p."phone",
-               i."placedOn", i."toothNumber", i."kind", i."manufacturer",
-               i."system", i."reference", i."lot",
-               u."fullName" AS "professionalName", l."name" AS "locationName",
-               (i."voidedAt" IS NOT NULL) AS "voided"
-        FROM "patient_implants" i
-        JOIN "patients" p ON p."tenantId" = i."tenantId" AND p."id" = i."patientId"
-        JOIN "locations" l ON l."tenantId" = i."tenantId" AND l."id" = i."locationId"
-        JOIN "users" u ON u."id" = i."professionalId"
-        WHERE ${Prisma.join(conditions, ' AND ')}
-        ORDER BY i."placedOn" DESC, p."lastName", p."firstName", i."id"
-        LIMIT ${IMPLANT_LOT_SEARCH_LIMIT}`,
+    const sql = implantLotSearchSql(this.requireTenantId(), query);
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.$queryRaw<LotRow[]>(sql),
     );
     return rows.map((r) => ({
       implantId: r.implantId,

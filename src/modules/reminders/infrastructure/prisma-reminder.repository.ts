@@ -53,6 +53,62 @@ const SETTINGS_SELECT = {
   updatedAt: true,
 } as const satisfies Prisma.LocationReminderSettingsSelect;
 
+/**
+ * Por cada antelación de cada sede activa (y no retirada), el tramo de
+ * `start` cuya hora de recordatorio cae en (now - catchUp, now + lookahead],
+ * es decir `start` en (lo, hi] con lo = max(now, now + lead - catchUp) y
+ * hi = now + lead + lookahead.
+ *
+ * DX-225 (DB-036): cada ventana se calcula ANTES (LATERAL `w`) y la cita se
+ * busca en otro LATERAL con `OFFSET 0`, que el planificador no aplana: así
+ * `a."start" > w.lo AND a."start" <= w.hi` es un rango parametrizado sobre
+ * appointments_tenant_location_start_idx (tenantId, locationId, start), y
+ * solo se leen las citas de la ventana. Con las cotas en el JOIN, el plan
+ * recorría todas las citas futuras de la sede y las descartaba después.
+ *
+ * Todos los estados: el handler registra el motivo si la cita ya no va.
+ * DX-128: sin los pacientes con baja o con canal distinto de EMAIL (regla
+ * de reminder-eligibility.ts): esos nunca entran en la cola. El paciente
+ * se lee por su PK (tenantId, id) desde cada cita. Exportada para que el
+ * int-spec explique (EXPLAIN) la consulta real.
+ */
+export function dueCandidatesSql(tenantId: string, now: Date): Prisma.Sql {
+  const lookahead = REMINDER_LOOKAHEAD_MS / 1000;
+  const catchUp = REMINDER_CATCH_UP_MS / 1000;
+  return Prisma.sql`
+    SELECT c."appointmentId", w.lead AS "leadHours", c."start"
+      FROM "location_reminder_settings" rs
+      JOIN "locations" l
+        ON l."tenantId" = rs."tenantId"
+       AND l."id" = rs."locationId"
+       AND l."deletedAt" IS NULL
+      CROSS JOIN LATERAL (
+        SELECT lead,
+               GREATEST(${utc(now)},
+                        ${utc(now)} + make_interval(hours => lead, secs => ${-catchUp})) AS lo,
+               ${utc(now)} + make_interval(hours => lead, secs => ${lookahead}) AS hi
+          FROM unnest(rs."leadHours") AS lead
+      ) w
+      CROSS JOIN LATERAL (
+        SELECT a."id" AS "appointmentId", a."start"
+          FROM "appointments" a
+          JOIN "patients" p
+            ON p."tenantId" = a."tenantId"
+           AND p."id" = a."patientId"
+         WHERE a."tenantId" = rs."tenantId"
+           AND a."locationId" = rs."locationId"
+           AND a."start" > w.lo
+           AND a."start" <= w.hi
+           AND a."deletedAt" IS NULL
+           AND p."contactChannel" = 'EMAIL'
+           AND p."reminderOptOutAt" IS NULL
+        OFFSET 0
+      ) c
+     WHERE rs."tenantId" = ${tenantId}::uuid
+       AND rs."enabled"
+     ORDER BY c."start"`;
+}
+
 @Injectable()
 export class PrismaReminderRepository implements ReminderRepository {
   constructor(
@@ -131,36 +187,8 @@ export class PrismaReminderRepository implements ReminderRepository {
   }
 
   dueCandidates(tenantId: string, now: Date): Promise<ReminderCandidate[]> {
-    const lookahead = REMINDER_LOOKAHEAD_MS / 1000;
-    const catchUp = REMINDER_CATCH_UP_MS / 1000;
-    // Por cada antelación de cada sede activa, el tramo de `start` cuya hora
-    // de recordatorio cae en (now - catchUp, now + lookahead]: lo sirve
-    // appointments_tenant_location_start_idx (tenantId, locationId, start).
-    // Todos los estados: el handler registra el motivo si la cita ya no va.
-    // DX-128: sin los pacientes con baja o con canal distinto de EMAIL (regla
-    // de reminder-eligibility.ts): esos nunca entran en la cola. El paciente
-    // se lee por su PK (tenantId, id) desde cada cita.
-    return this.prisma.runWithTenant(
-      tenantId,
-      (tx) => tx.$queryRaw<ReminderCandidate[]>`
-        SELECT a."id" AS "appointmentId", lead AS "leadHours", a."start"
-          FROM "location_reminder_settings" rs
-          CROSS JOIN LATERAL unnest(rs."leadHours") AS lead
-          JOIN "appointments" a
-            ON a."tenantId" = rs."tenantId"
-           AND a."locationId" = rs."locationId"
-          JOIN "patients" p
-            ON p."tenantId" = a."tenantId"
-           AND p."id" = a."patientId"
-         WHERE rs."tenantId" = ${tenantId}::uuid
-           AND rs."enabled"
-           AND a."deletedAt" IS NULL
-           AND p."contactChannel" = 'EMAIL'
-           AND p."reminderOptOutAt" IS NULL
-           AND a."start" > ${utc(now)}
-           AND a."start" <= ${utc(now)} + make_interval(hours => lead, secs => ${lookahead})
-           AND a."start" > ${utc(now)} + make_interval(hours => lead, secs => ${-catchUp})
-         ORDER BY a."start"`,
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.$queryRaw<ReminderCandidate[]>(dueCandidatesSql(tenantId, now)),
     );
   }
 
