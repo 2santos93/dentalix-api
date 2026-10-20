@@ -1609,6 +1609,25 @@ absolutas de antes a su clave, y la API reduce a clave cualquier URL de avatar
 que una réplica antigua escriba durante un despliegue escalonado. Las claves
 se arman con ids, nunca con datos del paciente o del usuario.
 
+**Al desplegar DX-084** (pasar de disco a bucket):
+1. Copia los avatares que hubiera en el disco al bucket, con la misma clave:
+   `aws s3 sync "$STORAGE_DIR/avatars" "s3://<bucket>/avatars"` (con
+   `--endpoint-url` en R2 o MinIO). Lo que no se copie da 404 y la web muestra
+   las iniciales; nada se rompe, pero el usuario tendría que subirlo de nuevo.
+2. Mientras convivan réplicas de antes y de después de la migración, una
+   réplica antigua responde la clave (`avatars/<id>.png`) como `avatarUrl`
+   (la web no la puede cargar hasta el siguiente refresco servido por una
+   réplica nueva) y puede volver a escribir una URL absoluta al subir un
+   avatar. La API nueva lee las dos formas; cuando ya no quede ninguna réplica
+   antigua, repite el `UPDATE` de la migración (es idempotente) para que en la
+   BD solo queden claves:
+   `psql "$DIRECT_URL" -f prisma/migrations/20261019224000_dx084_avatar_keys/migration.sql`.
+
+**Subida de avatares**: PNG, JPEG o WebP de hasta 2 MB. Se comprueba la
+cabecera real del fichero (no solo el tipo que declara el cliente): lo que no
+sea de verdad la imagen declarada es un 400 y no llega al almacén. El tipo con
+el que se sirve sale de la extensión de la clave, con `nosniff`.
+
 **Público y privado.**
 - Lo público (avatares; logos en el futuro) tiene una URL estable:
   `FILES_PUBLIC_BASE_URL/avatars/<nombre>`. La sirve la API leyendo del
@@ -1680,6 +1699,12 @@ S3_TEST_BUCKET="dentalix-test"
 S3_TEST_ACCESS_KEY_ID="dentalix-minio"
 S3_TEST_SECRET_ACCESS_KEY="dentalix-minio-local"
 ```
+
+Con otro servidor S3 compatible en lugar de MinIO, ojo: **moto** (5.2.x) no
+comprueba firmas ni caducidad de las URL prefirmadas, así que el test «una URL
+firmada … caduca al pasar el TTL» falla contra moto (la URL sigue sirviendo)
+aunque el adaptador es correcto; la CI usa MinIO, que sí lo comprueba. El
+resto de los tests de S3 pasan igual contra moto.
 
 ## Despliegue: roles de la BD (DX-113)
 
