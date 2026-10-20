@@ -3,6 +3,10 @@ import { AppointmentStatus } from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
+import {
+  APPOINTMENT_WARNING_CODES,
+  type AppointmentWarningCode,
+} from '../../domain/entities/appointment.entity';
 
 // Response shape for Appointment endpoints — documents the Appointment
 // entity contract for Swagger (same convention as BrandingDto /
@@ -128,8 +132,21 @@ export class AppointmentDto {
  * permite agendar: Almuerzo (13:00–14:00).»). Vacío si no hay ninguno.
  */
 export class AppointmentWriteDto extends AppointmentDto {
-  @ApiProperty({ type: [String] })
+  @ApiProperty({
+    type: [String],
+    description:
+      'Avisos en español que no impiden la operación (p. ej. «Fuera del horario del profesional en Sede Norte (jueves 22/10: 14:00–19:00).»).',
+  })
   warnings!: string[];
+
+  @ApiProperty({
+    enum: APPOINTMENT_WARNING_CODES,
+    enumName: 'AppointmentWarningCode',
+    isArray: true,
+    description:
+      'DX-233: código de cada aviso, en el mismo orden que `warnings`: SCHEDULE_BLOCK (bloqueo que deja agendar, DX-122) o PROVIDER_OFF_SCHEDULE (fuera del horario del profesional en la sede).',
+  })
+  warningCodes!: AppointmentWarningCode[];
 }
 
 /**

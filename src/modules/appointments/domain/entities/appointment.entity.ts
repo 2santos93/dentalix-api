@@ -67,4 +67,17 @@ export interface Appointment {
  */
 export interface AppointmentWriteResult extends Appointment {
   warnings: string[];
+  /**
+   * DX-233: el código de cada aviso, en el mismo orden que `warnings`
+   * (`SCHEDULE_BLOCK` o `PROVIDER_OFF_SCHEDULE`), para que la web decida
+   * cómo pintarlo sin leer el texto.
+   */
+  warningCodes: AppointmentWarningCode[];
 }
+
+/** Códigos de `AppointmentWriteResult.warningCodes`. */
+export const APPOINTMENT_WARNING_CODES = [
+  'SCHEDULE_BLOCK',
+  'PROVIDER_OFF_SCHEDULE',
+] as const;
+export type AppointmentWarningCode = (typeof APPOINTMENT_WARNING_CODES)[number];

@@ -46,6 +46,12 @@ import type { LocationRepository } from '../../../locations/domain/ports/locatio
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import {
+  NO_WARNINGS,
+  collectWarnings,
+  type Warnings,
+} from '../appointment-warnings';
 import {
   FLOW_TIMESTAMP_FIELD,
   FRONT_DESK_ROLES,
@@ -112,6 +118,9 @@ export class UpdateAppointmentUseCase {
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
     private readonly tenantContext: TenantContextService,
+    // DX-233: mover fuera del horario del profesional destino → aviso, o 409
+    // en modo estricto.
+    private readonly availability: ProviderAvailabilityService,
   ) {}
 
   async execute(
@@ -207,7 +216,7 @@ export class UpdateAppointmentUseCase {
 
     // Reagendar = cambiar la hora O el profesional (DX-121: «Mover a…» y el
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
-    let warnings: string[] = [];
+    let warnings: Warnings = NO_WARNINGS;
     const isReschedule =
       patch.start !== undefined ||
       patch.end !== undefined ||
@@ -263,15 +272,27 @@ export class UpdateAppointmentUseCase {
         );
       }
 
+      // DX-233: horario del profesional DESTINO en la sede de la cita; solo
+      // al reagendar, como el de la sede.
+      const offSchedule = await this.availability.warnOrReject({
+        providerId: nextProviderId,
+        locationId: existing.locationId,
+        start: nextStart,
+        end: nextEnd,
+      });
+
       // DX-122: bloqueos del profesional DESTINO en la sede de la cita. Solo al
       // reagendar, como el horario: cancelar o completar una cita que quedó
       // dentro de un bloqueo creado después tiene que seguir siendo posible.
-      warnings = await checkScheduleBlocks(this.blocks, {
-        providerId: nextProviderId,
-        start: nextStart,
-        end: nextEnd,
-        locationId: existing.locationId,
-      });
+      warnings = collectWarnings(
+        await checkScheduleBlocks(this.blocks, {
+          providerId: nextProviderId,
+          start: nextStart,
+          end: nextEnd,
+          locationId: existing.locationId,
+        }),
+        offSchedule,
+      );
 
       // Re-check overlap EXCLUDING this appointment's own id — otherwise an
       // unchanged appointment would always "collide" with itself. Contra el
@@ -405,7 +426,7 @@ export class UpdateAppointmentUseCase {
         'APPOINTMENT_REACTIVATED',
       );
     }
-    return { ...updated, warnings };
+    return { ...updated, ...warnings };
   }
 
   /**
@@ -436,7 +457,7 @@ export class UpdateAppointmentUseCase {
       'ARRIVAL_UNDONE',
       auditContext,
     );
-    return { ...updated, warnings: [] };
+    return { ...updated, ...NO_WARNINGS };
   }
 
   /**

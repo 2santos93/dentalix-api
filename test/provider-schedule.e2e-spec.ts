@@ -34,6 +34,11 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
+/** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
+function local(day: string, hhmm: string): string {
+  return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+}
+
 const MON = nextMonday();
 const WED = addDays(MON, 2);
 const THU = addDays(MON, 3);
@@ -72,6 +77,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
   let sedeA: string;
   let sedeB: string;
   let otherLocationId: string;
+  const patients: string[] = [];
 
   const api = () => request(app.getHttpServer());
   const as = (req: request.Test, token: string, host = clinic.host) =>
@@ -136,6 +142,21 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       .expect(201);
     sedeB = (created.body as Body).id;
     otherLocationId = await firstLocation(other);
+    for (const [doc, firstName] of [
+      ['233001', 'Ana'],
+      ['233002', 'Berta'],
+    ]) {
+      const p = await as(api().post('/api/v1/patients'), clinic.adminToken)
+        .send({
+          firstName,
+          lastName: 'Horario',
+          docType: 'CC',
+          docNumber: doc,
+          sex: 'F',
+        })
+        .expect(201);
+      patients.push((p.body as Body).id);
+    }
     // Las dos sedes abiertas de lunes a viernes de 7:00 a 20:00 (Bogotá).
     for (const loc of [sedeA, sedeB]) {
       await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
@@ -457,6 +478,156 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
           statusChange: { from: 'STRICT', to: 'WARN' },
         }),
       ]);
+    });
+  });
+
+  describe('efecto en la agenda', () => {
+    type Opening = { start: string; end: string };
+    const openings = async (
+      providerId: string,
+      locationId: string,
+      from: string,
+      to: string,
+    ) => {
+      const res = await as(
+        api().get(
+          `/api/v1/appointments/openings?providerId=${providerId}&locationId=${locationId}&from=${from}&to=${to}&durationMinutes=30`,
+        ),
+        reception.token,
+      ).expect(200);
+      return (res.body as { openings: Opening[] }).openings;
+    };
+    const book = (
+      locationId: string,
+      day: string,
+      hhmm: string,
+      minutes = 30,
+      patient = 0,
+    ) => {
+      const start = local(day, hhmm);
+      return as(api().post('/api/v1/appointments'), reception.token)
+        .set('X-Location-Id', locationId)
+        .send({
+          patientId: patients[patient],
+          providerId: draX.userId,
+          start,
+          end: new Date(Date.parse(start) + minutes * 60_000).toISOString(),
+        });
+    };
+    let thursdayAppointment: string;
+
+    it('«Buscar hueco» en la sede B: solo los jueves 14:00–19:00, menos sus citas', async () => {
+      const created = await book(sedeB, THU, '15:00').expect(201);
+      thursdayAppointment = (created.body as Body).id;
+      expect(created.body).toMatchObject({ warnings: [], warningCodes: [] });
+      expect(await openings(draX.userId, sedeB, MON, addDays(MON, 6))).toEqual([
+        { start: local(THU, '14:00'), end: local(THU, '15:00') },
+        { start: local(THU, '15:30'), end: local(THU, '19:00') },
+      ]);
+      // En la sede A, lunes y miércoles de 8 a 13.
+      expect(await openings(draX.userId, sedeA, MON, addDays(MON, 6))).toEqual([
+        { start: local(MON, '08:00'), end: local(MON, '13:00') },
+        { start: local(WED, '08:00'), end: local(WED, '13:00') },
+      ]);
+    });
+
+    it('con «no trabaja» el jueves no devuelve nada; con otro horario, el de la excepción', async () => {
+      const off = await as(
+        api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+        clinic.adminToken,
+      )
+        .send({ locationId: sedeB, date: NEXT_THU, ranges: [] })
+        .expect(201);
+      expect(await openings(draX.userId, sedeB, NEXT_THU, NEXT_THU)).toEqual(
+        [],
+      );
+      await as(
+        api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+        clinic.adminToken,
+      )
+        .send({
+          locationId: sedeB,
+          date: NEXT_THU,
+          ranges: [{ startMinute: H(9), endMinute: H(12) }],
+        })
+        .expect(201);
+      expect(await openings(draX.userId, sedeB, NEXT_THU, NEXT_THU)).toEqual([
+        { start: local(NEXT_THU, '09:00'), end: local(NEXT_THU, '12:00') },
+      ]);
+      expect((off.body as Body).id).toBeDefined();
+    });
+
+    it('un profesional sin horario se comporta como hoy (horario de la sede)', async () => {
+      expect(await openings(clinic.adminUserId, sedeA, MON, MON)).toEqual([
+        { start: local(MON, '07:00'), end: local(MON, '20:00') },
+      ]);
+    });
+
+    it('crear fuera de horario: aviso PROVIDER_OFF_SCHEDULE; modo estricto: 409 en español', async () => {
+      const res = await book(sedeA, THU, '09:00', 30, 1).expect(201);
+      expect(res.body).toMatchObject({
+        warningCodes: ['PROVIDER_OFF_SCHEDULE'],
+        warnings: [
+          expect.stringMatching(
+            /^Fuera del horario del profesional: no trabaja en Sede principal el jueves \d{2}\/\d{2}\.$/,
+          ),
+        ],
+      });
+
+      await as(api().put('/api/v1/schedule/settings'), clinic.adminToken)
+        .send({ strictProviderSchedule: true })
+        .expect(200);
+      const strict = await book(sedeA, THU, '11:00', 30, 1).expect(409);
+      expect((strict.body as { message: string }).message).toMatch(
+        /no trabaja en Sede principal.*La clínica no permite citar fuera del horario del profesional\./,
+      );
+      // Dentro de su horario se sigue pudiendo, también en modo estricto.
+      await book(sedeA, MON, '09:00', 30, 1).expect(201);
+      await as(api().put('/api/v1/schedule/settings'), clinic.adminToken)
+        .send({ strictProviderSchedule: false })
+        .expect(200);
+    });
+
+    it('mover una cita fuera de horario también avisa', async () => {
+      const res = await as(
+        api().patch(`/api/v1/appointments/${thursdayAppointment}`),
+        reception.token,
+      )
+        .send({ start: local(THU, '19:00'), end: local(THU, '19:30') })
+        .expect(200);
+      expect(res.body).toMatchObject({
+        warningCodes: ['PROVIDER_OFF_SCHEDULE'],
+        warnings: [
+          expect.stringMatching(
+            /^Fuera del horario del profesional en Sede B \(jueves \d{2}\/\d{2}: 14:00–19:00\)\.$/,
+          ),
+        ],
+      });
+    });
+
+    it('«Ocupar este hueco»: fuera del horario de su profesional no hay candidatos', async () => {
+      const res = await as(
+        api()
+          .get(`/api/v1/appointments/openings/${sedeA}/candidates`)
+          .query({
+            start: local(THU, '09:00'),
+            end: local(THU, '09:30'),
+            providerId: draX.userId,
+          }),
+        reception.token,
+      ).expect(200);
+      expect(res.body).toMatchObject({ providerOffSchedule: true, items: [] });
+      const inside = await as(
+        api()
+          .get(`/api/v1/appointments/openings/${sedeB}/candidates`)
+          .query({
+            start: local(THU, '16:00'),
+            end: local(THU, '16:30'),
+            providerId: draX.userId,
+          }),
+        reception.token,
+      ).expect(200);
+      expect(inside.body).toMatchObject({ providerOffSchedule: false });
     });
   });
 });
