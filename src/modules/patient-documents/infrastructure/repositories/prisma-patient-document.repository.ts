@@ -100,7 +100,9 @@ export class PrismaPatientDocumentRepository implements PatientDocumentRepositor
    * primera permitida del miembro (DX-089) o la principal de la clínica. ÚNICO
    * punto que la resuelve en el módulo.
    */
-  private resolveWriteLocationId(tx: Prisma.TransactionClient): Promise<string> {
+  private resolveWriteLocationId(
+    tx: Prisma.TransactionClient,
+  ): Promise<string> {
     return this.tenantContext.writeLocationId(tx);
   }
 
