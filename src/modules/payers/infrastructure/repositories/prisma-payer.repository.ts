@@ -119,10 +119,13 @@ export class PrismaPayerRepository implements PayerRepository {
     return mapToEntity(row);
   }
 
-  /** Por `id` bajo RLS; el caso de uso ya comprobó que existe y está vivo. */
-  async update(id: string, patch: UpdatePayerRepoInput): Promise<Payer> {
-    const row = await this.prisma
-      .runWithTenant((tx) =>
+  /**
+   * Por `id` bajo RLS. `null` si el pagador desapareció entre la lectura del
+   * caso de uso y esta escritura (P2025).
+   */
+  async update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null> {
+    try {
+      const row = await this.prisma.runWithTenant((tx) =>
         tx.payer.update({
           where: { id },
           data: {
@@ -133,9 +136,17 @@ export class PrismaPayerRepository implements PayerRepository {
             updatedById: patch.updatedById,
           },
         }),
-      )
-      .catch(rethrowDuplicateName);
-    return mapToEntity(row);
+      );
+      return mapToEntity(row);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        return null;
+      }
+      return rethrowDuplicateName(error);
+    }
   }
 
   async softDelete(id: string, updatedById?: string): Promise<void> {

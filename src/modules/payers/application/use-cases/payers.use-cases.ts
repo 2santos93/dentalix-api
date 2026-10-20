@@ -108,7 +108,9 @@ export class UpdatePayerUseCase {
       if (input.type !== undefined) patch.type = input.type;
       if (input.country !== undefined) patch.country = input.country;
     }
-    return this.repo.update(id, { ...patch, updatedById });
+    const updated = await this.repo.update(id, { ...patch, updatedById });
+    if (!updated) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
+    return updated;
   }
 }
 

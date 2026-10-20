@@ -53,6 +53,15 @@ describe('DTOs de pagadores (DX-153)', () => {
     expect(await messages(UpdatePayerDto, { active: 'no' })).toHaveLength(1);
   });
 
+  it.each(['name', 'type', 'active'])(
+    'el PATCH rechaza %s: null',
+    async (key) => {
+      expect(
+        (await messages(UpdatePayerDto, { [key]: null })).length,
+      ).toBeGreaterThan(0);
+    },
+  );
+
   it('includeInactive acepta solo "true" como verdadero', () => {
     const q = (v: unknown) =>
       plainToInstance(ListPayersQueryDto, { includeInactive: v })

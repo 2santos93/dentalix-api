@@ -12,6 +12,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  ValidateIf,
 } from 'class-validator';
 import {
   PAYER_NAME_MAX,
@@ -21,6 +22,14 @@ import {
 
 const TYPE_MESSAGE = `El tipo de pagador debe ser uno de: ${Object.values(PayerType).join(', ')}.`;
 const COUNTRY_MESSAGE = `El país debe ser uno de: ${Object.values(ClinicCountry).join(', ')}.`;
+
+/**
+ * Para columnas NOT NULL en el PATCH: `@IsOptional()` saltaría los validadores
+ * con `null` y llegaría a Prisma como 500. Ausente = no se toca; `null` = 400.
+ */
+function NotNullable(): PropertyDecorator {
+  return ValidateIf((_object: unknown, value: unknown) => value !== undefined);
+}
 
 /** Respuesta de los endpoints de pagadores (DX-153). */
 export class PayerDto {
@@ -73,8 +82,19 @@ export class CreatePayerDto {
 }
 
 export class UpdatePayerDto extends PartialType(
-  OmitType(CreatePayerDto, ['country'] as const),
+  OmitType(CreatePayerDto, ['name', 'type', 'country'] as const),
 ) {
+  @ApiPropertyOptional({ minLength: PAYER_NAME_MIN, maxLength: PAYER_NAME_MAX })
+  @NotNullable()
+  @IsString({ message: PAYER_NAME_MESSAGE })
+  @Length(PAYER_NAME_MIN, PAYER_NAME_MAX, { message: PAYER_NAME_MESSAGE })
+  name?: string;
+
+  @ApiPropertyOptional({ enum: PayerType, enumName: 'PayerType' })
+  @NotNullable()
+  @IsEnum(PayerType, { message: TYPE_MESSAGE })
+  type?: PayerType;
+
   // `null` vacía el país (EMPRESA y OTRO lo admiten); `IsOptional` deja pasar
   // null y undefined, y el enum solo se valida cuando hay valor.
   @ApiPropertyOptional({
@@ -88,8 +108,8 @@ export class UpdatePayerDto extends PartialType(
   country?: ClinicCountry | null;
 
   @ApiPropertyOptional({ description: 'false = sale de los selectores.' })
-  @IsOptional()
-  @IsBoolean()
+  @NotNullable()
+  @IsBoolean({ message: 'El estado activo debe ser verdadero o falso.' })
   active?: boolean;
 }
 

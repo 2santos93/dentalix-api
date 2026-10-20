@@ -70,9 +70,9 @@ export class InMemoryPayerRepository implements PayerRepository {
     );
   }
 
-  update(id: string, patch: UpdatePayerRepoInput): Promise<Payer> {
+  update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null> {
     const row = this.rows.find((r) => r.id === id);
-    if (!row) throw new Error('not found');
+    if (!row || this.deleted.has(id)) return Promise.resolve(null);
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.type !== undefined) row.type = patch.type;
     if (patch.country !== undefined) row.country = patch.country;

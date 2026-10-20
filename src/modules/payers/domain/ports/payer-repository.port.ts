@@ -38,7 +38,8 @@ export interface PayerRepository {
     excludeId?: string,
   ): Promise<Payer | null>;
   create(input: CreatePayerRepoInput): Promise<Payer>;
-  update(id: string, patch: UpdatePayerRepoInput): Promise<Payer>;
+  /** `null` si el pagador ya no existe (retirado entre la lectura y la escritura). */
+  update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null>;
   /** Borrado lógico: `deletedAt` y `active = false`. */
   softDelete(id: string, updatedById?: string): Promise<void>;
   /** Coberturas vivas de pacientes que usan este pagador. */

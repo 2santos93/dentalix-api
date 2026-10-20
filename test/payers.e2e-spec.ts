@@ -184,6 +184,30 @@ describe('Pagadores (e2e, DX-153)', () => {
     );
   });
 
+  it('el PATCH con name, type o active en null da 400, nunca 500', async () => {
+    const payer = await createPayer({ name: 'Null no', type: 'OTRO' });
+    for (const body of [{ name: null }, { type: null }, { active: null }]) {
+      await as(api().patch(`/api/v1/payers/${payer.id}`), tokens.ADMIN)
+        .send(body)
+        .expect(400);
+    }
+  });
+
+  it('tras retirar un pagador, otro con el mismo nombre se crea (201)', async () => {
+    const first = await createPayer({
+      name: 'Nombre reutilizable',
+      type: 'OTRO',
+    });
+    await as(api().delete(`/api/v1/payers/${first.id}`), tokens.ADMIN).expect(
+      204,
+    );
+    const second = await createPayer({
+      name: 'nombre REUTILIZABLE',
+      type: 'OTRO',
+    });
+    expect(second.id).not.toBe(first.id);
+  });
+
   it('renombrar hacia el nombre de otro da 409; recepción no edita', async () => {
     const payer = await createPayer({ name: 'Otro Pagador', type: 'OTRO' });
     await as(api().patch(`/api/v1/payers/${payer.id}`), tokens.ADMIN)
