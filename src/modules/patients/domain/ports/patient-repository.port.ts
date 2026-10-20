@@ -46,7 +46,6 @@ export interface CreatePatientRepoInput {
   consent?: CreatePatientConsent;
   maritalStatus?: string;
   occupation?: string;
-  insurerEps?: string;
   physicianName?: string;
   physicianPhone?: string;
   emergencyContactName?: string;
@@ -75,7 +74,6 @@ export interface UpdatePatientRepoInput {
   notes?: string | null;
   maritalStatus?: string | null;
   occupation?: string | null;
-  insurerEps?: string | null;
   physicianName?: string | null;
   physicianPhone?: string | null;
   emergencyContactName?: string | null;
@@ -89,6 +87,12 @@ export interface ListPatientsParams {
    * mayúsculas ("jose" encuentra "José") y por subcadena.
    */
   query?: string;
+  /**
+   * Solo pacientes vivos con alguna cobertura viva (principal o no) de este
+   * pagador (DX-153). Un pagador de otra clínica no existe bajo la RLS: lista
+   * vacía.
+   */
+  payerId?: string;
   skip?: number;
   take?: number;
 }

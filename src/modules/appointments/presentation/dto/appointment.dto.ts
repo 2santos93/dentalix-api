@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AppointmentStatus } from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
+import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
 
 // Response shape for Appointment endpoints — documents the Appointment
@@ -134,9 +135,13 @@ export class AppointmentWriteDto extends AppointmentDto {
 /**
  * Una cita de GET /appointments (la agenda) con la marca «Saldo vencido» de su
  * paciente (DX-150). El importe (`balance.amounts`) solo llega a ADMIN y
- * RECEPTION; DENTIST y ASSISTANT ven la marca y los días.
+ * RECEPTION; DENTIST y ASSISTANT ven la marca y los días. `coverage` (DX-153)
+ * resume la cobertura principal del paciente, sin número de afiliado.
  */
 export class AppointmentListItemDto extends AppointmentDto {
   @ApiProperty({ type: OverdueBalanceDto })
   balance!: OverdueBalanceDto;
+
+  @ApiProperty({ type: CoverageSummaryDto })
+  coverage!: CoverageSummaryDto;
 }

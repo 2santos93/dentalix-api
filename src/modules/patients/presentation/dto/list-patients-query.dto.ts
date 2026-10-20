@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -27,6 +28,15 @@ export class ListPatientsQueryDto {
     message: `La búsqueda admite como mucho ${PATIENTS_MAX_QUERY_LENGTH} caracteres.`,
   })
   query?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-153: solo pacientes con alguna cobertura viva de este pagador. Combinable con `query`. Un pagador de otra clínica da una lista vacía.',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'payerId debe ser un UUID.' })
+  payerId?: string;
 
   @ApiPropertyOptional({
     minimum: 1,

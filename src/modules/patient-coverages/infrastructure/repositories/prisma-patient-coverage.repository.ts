@@ -16,6 +16,7 @@ import type { PatientCoverage } from '../../domain/entities/patient-coverage.ent
 import type {
   CreateCoverageRepoInput,
   PatientCoverageRepository,
+  PrimaryCoverageRow,
   UpdateCoverageRepoPatch,
 } from '../../domain/ports/patient-coverage-repository.port';
 
@@ -172,6 +173,35 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
       }),
     );
     return row ? toEntity(row) : null;
+  }
+
+  async listPrimaryLiveByPatients(
+    patientIds: readonly string[],
+  ): Promise<PrimaryCoverageRow[]> {
+    if (patientIds.length === 0) return [];
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.patientCoverage.findMany({
+        where: {
+          patientId: { in: [...patientIds] },
+          isPrimary: true,
+          deletedAt: null,
+        },
+        select: {
+          patientId: true,
+          planName: true,
+          validFrom: true,
+          validTo: true,
+          payer: { select: { name: true } },
+        },
+      }),
+    );
+    return rows.map((r) => ({
+      patientId: r.patientId,
+      payerName: r.payer.name,
+      planName: r.planName,
+      validFrom: r.validFrom ? toDateOnly(r.validFrom) : null,
+      validTo: r.validTo ? toDateOnly(r.validTo) : null,
+    }));
   }
 
   async create(input: CreateCoverageRepoInput): Promise<PatientCoverage> {

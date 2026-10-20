@@ -11,6 +11,7 @@ import {
   ListPatientCoveragesUseCase,
   UpdatePatientCoverageUseCase,
 } from './application/use-cases/patient-coverages.use-cases';
+import { PatientCoverageFlags } from './application/patient-coverage-flags';
 import { PATIENT_COVERAGE_REPOSITORY } from './domain/ports/patient-coverage-repository.port';
 import { PrismaPatientCoverageRepository } from './infrastructure/repositories/prisma-patient-coverage.repository';
 
@@ -28,6 +29,7 @@ import { PrismaPatientCoverageRepository } from './infrastructure/repositories/p
     CreatePatientCoverageUseCase,
     UpdatePatientCoverageUseCase,
     DeletePatientCoverageUseCase,
+    PatientCoverageFlags,
     TokenService,
     TenantContextInterceptor,
     { provide: COVERAGES_CLOCK, useValue: () => new Date() },
@@ -36,5 +38,7 @@ import { PrismaPatientCoverageRepository } from './infrastructure/repositories/p
       useClass: PrismaPatientCoverageRepository,
     },
   ],
+  // Resumen por lote para la ficha, el listado de pacientes y la agenda.
+  exports: [PatientCoverageFlags],
 })
 export class PatientCoveragesModule {}

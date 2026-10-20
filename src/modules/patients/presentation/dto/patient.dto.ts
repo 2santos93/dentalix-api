@@ -1,3 +1,4 @@
+import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { ApiProperty } from '@nestjs/swagger';
 import {
@@ -89,7 +90,13 @@ export class PatientDto {
   @ApiProperty({ type: String, nullable: true })
   occupation!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    deprecated: true,
+    description:
+      'DEPRECADO (DX-153): texto libre original, solo lectura. La aseguradora vive ahora en las coberturas del paciente (`/patients/:id/coverages`); enviarlo en POST o PATCH se ignora.',
+  })
   insurerEps!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
@@ -220,8 +227,18 @@ export class PatientDto {
 /**
  * GET /patients/:id (DX-150): la ficha con la marca «Saldo vencido» de su
  * cabecera. El importe (`balance.amounts`) solo llega a ADMIN y RECEPTION.
+ * `coverage` (DX-153) resume la cobertura principal, sin número de afiliado.
  */
 export class PatientDetailDto extends PatientDto {
   @ApiProperty({ type: OverdueBalanceDto })
   balance!: OverdueBalanceDto;
+
+  @ApiProperty({ type: CoverageSummaryDto })
+  coverage!: CoverageSummaryDto;
+}
+
+/** Un paciente de GET /patients: la ficha base más el resumen de cobertura (DX-153). */
+export class PatientListItemDto extends PatientDto {
+  @ApiProperty({ type: CoverageSummaryDto })
+  coverage!: CoverageSummaryDto;
 }

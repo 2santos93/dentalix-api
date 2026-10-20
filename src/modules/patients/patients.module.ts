@@ -39,12 +39,15 @@ import { PrismaReferenceLookup } from './infrastructure/adapters/prisma-referenc
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
+import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
+
 @Module({
   // JwtModule.register({}) mirrors AuthModule: JwtAuthGuard depends on
   // TokenService, which depends on JwtService — must be available here since
   // the guard is applied on this module's controller.
+  // DX-153: PatientCoveragesModule da el resumen `coverage` de la ficha y el listado.
   // DX-150: CollectionsModule da la marca «Saldo vencido» de la ficha.
-  imports: [JwtModule.register({}), CollectionsModule],
+  imports: [JwtModule.register({}), CollectionsModule, PatientCoveragesModule],
   controllers: [
     PatientsController,
     PatientCommunicationController,

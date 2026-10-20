@@ -31,6 +31,15 @@ export interface UpdateCoverageRepoPatch {
   updatedById: string;
 }
 
+/** Lo mínimo de la cobertura principal viva que necesita el resumen (sin `memberNumber`). */
+export interface PrimaryCoverageRow {
+  patientId: string;
+  payerName: string;
+  planName: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+}
+
 export interface PatientCoverageRepository {
   /** ¿El paciente vivo es de esta clínica? Bajo RLS, otra clínica = `false`. */
   patientExists(patientId: string): Promise<boolean>;
@@ -39,6 +48,14 @@ export interface PatientCoverageRepository {
   /** Vivas: principal primero, luego por alta. */
   listByPatient(patientId: string): Promise<PatientCoverage[]>;
   findById(patientId: string, id: string): Promise<PatientCoverage | null>;
+  /**
+   * Cobertura principal viva de cada paciente de `patientIds`, con el nombre
+   * del pagador: UNA consulta para todo el lote (sin N+1). Quien no tiene
+   * cobertura viva no aparece.
+   */
+  listPrimaryLiveByPatients(
+    patientIds: readonly string[],
+  ): Promise<PrimaryCoverageRow[]>;
   /**
    * Una transacción con candado por paciente: comprueba el tope (400), decide
    * si es la primera (principal) o si desmarca la anterior, y escribe. Si la

@@ -10,6 +10,7 @@ import type { PatientCoverage } from '../../domain/entities/patient-coverage.ent
 import type {
   CreateCoverageRepoInput,
   PatientCoverageRepository,
+  PrimaryCoverageRow,
   UpdateCoverageRepoPatch,
 } from '../../domain/ports/patient-coverage-repository.port';
 import type { InMemoryPayerRepository } from '../../../payers/application/__fixtures__/in-memory-payers';
@@ -86,7 +87,30 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
     return Promise.resolve(this.patientsKnown.has(patientId));
   }
 
+  /** Cuenta las llamadas por nombre en `calls` (para afirmar «sin N+1»). */
+  listPrimaryLiveByPatients(
+    patientIds: readonly string[],
+  ): Promise<PrimaryCoverageRow[]> {
+    this.calls.push('listPrimaryLiveByPatients');
+    const out: PrimaryCoverageRow[] = [];
+    for (const r of this.rows) {
+      if (r.deleted || !r.isPrimary || !patientIds.includes(r.patientId)) {
+        continue;
+      }
+      const payer = this.payers.rows.find((p) => p.id === r.payerId)!;
+      out.push({
+        patientId: r.patientId,
+        payerName: payer.name,
+        planName: r.planName,
+        validFrom: r.validFrom,
+        validTo: r.validTo,
+      });
+    }
+    return Promise.resolve(out);
+  }
+
   clinicToday(): Promise<string> {
+    this.calls.push('clinicToday');
     return Promise.resolve(this.today);
   }
 

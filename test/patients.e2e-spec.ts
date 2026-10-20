@@ -187,6 +187,7 @@ describe('Patients (e2e)', () => {
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         occupation: 'Docente',
+        // DX-153: DEPRECADO y de solo lectura: se descarta sin error.
         insurerEps: 'Sura',
         maritalStatus: 'Casado',
         physicianName: 'Dra. Ruiz',
@@ -201,7 +202,7 @@ describe('Patients (e2e)', () => {
       .expect(200);
     const admin = patchAdmin.body as Record<string, unknown>;
     expect(admin.occupation).toBe('Docente');
-    expect(admin.insurerEps).toBe('Sura');
+    expect(admin.insurerEps).toBeNull();
     expect(admin.emergencyContactName).toBe('Ana Pérez');
     expect(admin.guardianName).toBeNull();
     expect(admin.guardianDocNumber).toBeNull();
@@ -220,8 +221,8 @@ describe('Patients (e2e)', () => {
     // birthDate era el caso peligroso: `new Date(null)` da 1970-01-01, así que
     // un null mal manejado escribía una fecha falsa en vez de vaciar.
     expect(cleared.birthDate).toBeNull();
-    // Lo omitido no se toca.
-    expect(cleared.insurerEps).toBe('Sura');
+    // Lo omitido no se toca (y `insurerEps` sigue como estaba: nunca se escribe).
+    expect(cleared.insurerEps).toBeNull();
   });
 
   it('rejects null on columns that are NOT NULL, with 400 instead of a 500', async () => {

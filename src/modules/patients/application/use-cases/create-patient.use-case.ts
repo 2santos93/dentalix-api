@@ -45,7 +45,6 @@ export interface CreatePatientInput {
   dataConsentPolicyVersion?: string;
   maritalStatus?: string;
   occupation?: string;
-  insurerEps?: string;
   physicianName?: string;
   physicianPhone?: string;
   emergencyContactName?: string;
@@ -122,7 +121,6 @@ export class CreatePatientUseCase {
       notes: input.notes,
       maritalStatus: input.maritalStatus,
       occupation: input.occupation,
-      insurerEps: input.insurerEps,
       physicianName: input.physicianName,
       physicianPhone: input.physicianPhone,
       emergencyContactName: input.emergencyContactName,
