@@ -310,7 +310,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     firstCounts = await countsFor(tenantId);
     expect(firstCounts.locations).toBe(2);
     expect(firstCounts.location_schedules).toBe(2);
-    expect(firstCounts.clinic_memberships).toBe(5);
+    expect(firstCounts.clinic_memberships).toBe(6);
+    // DX-089: solo «Recepción Norte» tiene sedes; el resto atiende en todas.
+    expect(firstCounts.membership_locations).toBe(1);
     expect(firstCounts.patients).toBe(25);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
@@ -511,6 +513,61 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       Object.fromEntries(DEMO_USERS.map((u) => [u.email, u.role])),
     );
     expect(byEmail[`admin@${DEMO_EMAIL_DOMAIN}`]).toBe('ADMIN');
+  });
+
+  it('la recepción de la Sede Norte queda restringida a esa sede (DX-089)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const norte = await raw.location.findFirstOrThrow({
+      where: { tenantId, name: 'Sede Norte', deletedAt: null },
+      select: { id: true },
+    });
+    const rows = await raw.membershipLocation.findMany({
+      where: { tenantId },
+      select: {
+        locationId: true,
+        membership: { select: { user: { select: { email: true } } } },
+      },
+    });
+    expect(rows.map((r) => [r.membership.user.email, r.locationId])).toEqual([
+      [`recepcion.norte@${DEMO_EMAIL_DOMAIN}`, norte.id],
+    ]);
+
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({
+        email: `recepcion.norte@${DEMO_EMAIL_DOMAIN}`,
+        password: DEMO_PASSWORD,
+      })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+    const claims = JSON.parse(
+      Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
+    ) as { role: string; loc?: string[] };
+    expect(claims.role).toBe(ClinicRole.RECEPTION);
+    expect(claims.loc).toEqual([norte.id]);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/locations')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((res.body as { id: string }[]).map((l) => l.id)).toEqual([norte.id]);
+
+    // La recepción de siempre no se tocó: sin filas, atiende en todas.
+    const paola = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({
+        email: `recepcion@${DEMO_EMAIL_DOMAIN}`,
+        password: DEMO_PASSWORD,
+      })
+      .expect(201);
+    const paolaToken = (paola.body as { accessToken: string }).accessToken;
+    const paolaClaims = JSON.parse(
+      Buffer.from(paolaToken.split('.')[1], 'base64url').toString('utf8'),
+    ) as { loc?: string[] };
+    expect(paolaClaims.loc).toBeUndefined();
   });
 
   it('las citas cubren semana pasada/actual/próxima, varios estados, sedes y dentistas, dentro del horario', async () => {

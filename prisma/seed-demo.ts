@@ -88,6 +88,7 @@ import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/
 import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
 import { RegisterImplantUseCase } from '../src/modules/implants/application/use-cases/implants.use-cases';
 import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/update-staff.use-case';
+import { ReplaceStaffLocationsUseCase } from '../src/modules/staff/application/use-cases/staff-locations.use-cases';
 import {
   CreatePerioExamUseCase,
   FinalizePerioExamUseCase,
@@ -511,6 +512,9 @@ class DemoSeeder {
     const locations = await this.inTenant(tenantId, undefined, () =>
       this.setUpLocations(tenantId),
     );
+    await this.inTenant(tenantId, undefined, () =>
+      this.restrictStaffLocations(ownerId, userIds, locations),
+    );
     const hours = await this.readBusinessHours(tenantId, locations);
 
     const catalog = await this.inTenant(tenantId, undefined, () =>
@@ -679,6 +683,26 @@ class DemoSeeder {
       ids.push(user.id);
     }
     return ids;
+  }
+
+  /**
+   * DX-089: los miembros con `locations` quedan restringidos a esas sedes por
+   * el mismo caso de uso que `PUT /staff/:userId/locations` (el resto, sin
+   * filas, atiende en todas). Va después de crear las sedes.
+   */
+  private async restrictStaffLocations(
+    ownerId: string,
+    userIds: string[],
+    locations: Record<DemoLocationKey, string>,
+  ): Promise<void> {
+    for (const [index, member] of DEMO_USERS.entries()) {
+      if (!member.locations) continue;
+      await this.use(ReplaceStaffLocationsUseCase).execute({
+        userId: userIds[index],
+        locationIds: member.locations.map((key) => locations[key]),
+        actorUserId: ownerId,
+      });
+    }
   }
 
   private async setUpLocations(
