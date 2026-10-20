@@ -4,7 +4,8 @@ export interface UserRecord {
   id: string;
   email: string;
   fullName: string;
-  avatarUrl: string | null;
+  /** Clave del avatar (`avatars/<id>.<ext>`, DX-084), no una URL. */
+  avatarKey: string | null;
   emailVerifiedAt: Date | null;
 }
 
@@ -22,5 +23,5 @@ export interface UserProfileRepository {
     userId: string,
     passwordHash: string,
   ): Promise<number>;
-  updateAvatarUrl(userId: string, avatarUrl: string | null): Promise<void>;
+  updateAvatarKey(userId: string, avatarKey: string | null): Promise<void>;
 }

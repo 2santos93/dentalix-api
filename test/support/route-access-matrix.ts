@@ -73,6 +73,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Readiness con BD, sin tenant ni rate limit: loop/informes/DX-023.md.
   'GET /health/ready': PUBLIC,
   'GET /files/avatars/:name': PUBLIC,
+  // URL firmada del adaptador de disco (solo desarrollo; la firma HMAC es la
+  // autorización, y con S3 responde 404): loop/informes/DX-084.md.
+  'GET /files/signed': PUBLIC,
 
   // --- Auth (sesión) -------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-login-drop-subdomain-host-tenant.md,

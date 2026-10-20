@@ -45,6 +45,8 @@ const prodEnv = (
     MAIL_FROM: 'Dentalix <no-reply@dentalix.app>',
     MAIL_ENCRYPTION_KEY: MAIL_KEY,
     MFA_ENCRYPTION_KEY: MFA_KEY,
+    STORAGE_DRIVER: 's3',
+    S3_BUCKET: 'dentalix-files',
     ...overrides,
   });
 
@@ -236,6 +238,104 @@ describe('validateEnv', () => {
       );
       expect(msg).toContain('JWT_ACCESS_SECRET');
       expect(msg).toContain('JWT_REFRESH_SECRET');
+    });
+  });
+
+  describe('almacén de ficheros (DX-084)', () => {
+    it('producción con STORAGE_DRIVER=disk no arranca, con un mensaje claro', () => {
+      const msg = errorOf(prodEnv({ STORAGE_DRIVER: 'disk' }));
+      expect(msg).toContain('Configuración inválida; la API no arranca');
+      expect(msg).toContain('STORAGE_DRIVER=disk no se admite en producción');
+      expect(msg).toContain('STORAGE_DRIVER=s3');
+    });
+
+    it('producción sin STORAGE_DRIVER tampoco arranca (el default es disco)', () => {
+      expect(errorOf(prodEnv({ STORAGE_DRIVER: undefined }))).toContain(
+        'STORAGE_DRIVER',
+      );
+    });
+
+    it('fuera de producción el disco vale, explícito o por defecto', () => {
+      expect(() =>
+        validateEnv(baseEnv({ STORAGE_DRIVER: 'disk' })),
+      ).not.toThrow();
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+    });
+
+    it('rechaza un STORAGE_DRIVER desconocido', () => {
+      expect(errorOf(baseEnv({ STORAGE_DRIVER: 'gcs' }))).toContain(
+        'STORAGE_DRIVER debe ser uno de: disk, s3',
+      );
+    });
+
+    it('s3 exige S3_BUCKET con un nombre válido', () => {
+      expect(errorOf(prodEnv({ S3_BUCKET: undefined }))).toContain('S3_BUCKET');
+      expect(
+        errorOf(baseEnv({ STORAGE_DRIVER: 's3', S3_BUCKET: 'Mi_Bucket' })),
+      ).toContain('S3_BUCKET');
+    });
+
+    it('s3 valida endpoint, región, path-style y cifrado', () => {
+      const msg = errorOf(
+        baseEnv({
+          STORAGE_DRIVER: 's3',
+          S3_BUCKET: 'b-ok',
+          S3_ENDPOINT: 'minio:9000',
+          S3_REGION: 'Región 1',
+          S3_FORCE_PATH_STYLE: 'si',
+          S3_SSE: 'DES',
+        }),
+      );
+      expect(msg).toContain('S3_ENDPOINT');
+      expect(msg).toContain('S3_REGION');
+      expect(msg).toContain('S3_FORCE_PATH_STYLE');
+      expect(msg).toContain('S3_SSE');
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            STORAGE_DRIVER: 's3',
+            S3_BUCKET: 'dentalix-local',
+            S3_ENDPOINT: 'http://localhost:9000',
+            S3_FORCE_PATH_STYLE: 'true',
+            S3_ACCESS_KEY_ID: 'dentalix-minio',
+            S3_SECRET_ACCESS_KEY: 'dentalix-minio-local',
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('en producción el endpoint debe ser https y no local', () => {
+      expect(
+        errorOf(prodEnv({ S3_ENDPOINT: 'http://minio.interno:9000' })),
+      ).toContain('S3_ENDPOINT');
+      expect(
+        errorOf(prodEnv({ S3_ENDPOINT: 'https://localhost:9000' })),
+      ).toContain('S3_ENDPOINT');
+      expect(() =>
+        validateEnv(
+          prodEnv({ S3_ENDPOINT: 'https://cuenta.r2.cloudflarestorage.com' }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('las credenciales van juntas, y en producción no valen las de ejemplo; nunca se imprimen', () => {
+      const msg = errorOf(
+        baseEnv({
+          STORAGE_DRIVER: 's3',
+          S3_BUCKET: 'b-ok',
+          S3_ACCESS_KEY_ID: 'solo-el-id',
+        }),
+      );
+      expect(msg).toContain('S3_ACCESS_KEY_ID y S3_SECRET_ACCESS_KEY');
+      expect(msg).not.toContain('solo-el-id');
+      const prod = errorOf(
+        prodEnv({
+          S3_ACCESS_KEY_ID: 'minioadmin',
+          S3_SECRET_ACCESS_KEY: 'minioadmin',
+        }),
+      );
+      expect(prod).toContain('S3_SECRET_ACCESS_KEY');
+      expect(prod).not.toContain('minioadmin');
     });
   });
 

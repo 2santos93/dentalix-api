@@ -116,6 +116,23 @@ describe('Me (e2e)', () => {
     await login('NewPass2!'); // 201 or throws
   });
 
+  it('DX-084: rejects (400) a file that is not really the declared image type', async () => {
+    const token = await login('NewPass2!');
+    await request(app.getHttpServer())
+      .post('/api/v1/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', Buffer.from('<svg onload="alert(1)"/>'), {
+        filename: 'a.png',
+        contentType: 'image/png',
+      })
+      .expect(400);
+    const stored = await raw.user.findFirstOrThrow({
+      where: { email: 'perfil@e2e.com' },
+      select: { avatarKey: true },
+    });
+    expect(stored.avatarKey).toBeNull();
+  });
+
   it('uploads an avatar, exposes it on GET /me and serves the file', async () => {
     const token = await login('NewPass2!');
     const png = Buffer.from('89504e470d0a1a0a', 'hex'); // PNG magic bytes
@@ -126,6 +143,15 @@ describe('Me (e2e)', () => {
       .expect(200);
     const avatarUrl = (up.body as { avatarUrl: string }).avatarUrl;
     expect(avatarUrl).toContain('/files/avatars/');
+    // DX-084: en la BD solo la clave; la URL se calcula al responder.
+    const stored = await raw.user.findFirstOrThrow({
+      where: { email: 'perfil@e2e.com' },
+      select: { id: true, avatarKey: true },
+    });
+    expect(stored.avatarKey).toBe(`avatars/${stored.id}.png`);
+    expect(avatarUrl).toBe(
+      `${process.env.FILES_PUBLIC_BASE_URL}/${stored.avatarKey}`,
+    );
 
     const me = await request(app.getHttpServer())
       .get('/api/v1/me')
@@ -137,6 +163,31 @@ describe('Me (e2e)', () => {
     const name = avatarUrl.split('/files/avatars/')[1];
     await request(app.getHttpServer())
       .get(`/api/v1/files/avatars/${name}`)
+      .expect(200);
+  });
+
+  it('DX-084: an existing avatar saved as an absolute URL of another domain is still served', async () => {
+    const token = await login('NewPass2!');
+    const user = await raw.user.findFirstOrThrow({
+      where: { email: 'perfil@e2e.com' },
+      select: { id: true },
+    });
+    await raw.user.update({
+      where: { id: user.id },
+      data: {
+        avatarKey: `https://api.dominio-viejo.app/api/v1/files/avatars/${user.id}.png`,
+      },
+    });
+    const me = await request(app.getHttpServer())
+      .get('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const avatarUrl = (me.body as Profile).avatarUrl ?? '';
+    expect(avatarUrl).toBe(
+      `${process.env.FILES_PUBLIC_BASE_URL}/avatars/${user.id}.png`,
+    );
+    await request(app.getHttpServer())
+      .get(new URL(avatarUrl).pathname)
       .expect(200);
   });
 
