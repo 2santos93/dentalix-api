@@ -115,6 +115,14 @@ import {
   UpdatePostOpTemplateUseCase,
 } from '../src/modules/post-op-instructions/application/use-cases/post-op-templates.use-cases';
 import { DeliverPostOpInstructionsUseCase } from '../src/modules/post-op-instructions/application/use-cases/post-op-deliveries.use-cases';
+import {
+  CreatePayerUseCase,
+  ListPayersUseCase,
+} from '../src/modules/payers/application/use-cases/payers.use-cases';
+import {
+  CreatePatientCoverageUseCase,
+  ListPatientCoveragesUseCase,
+} from '../src/modules/patient-coverages/application/use-cases/patient-coverages.use-cases';
 import { UpdatePatientCommunicationUseCase } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
 import {
   DEMO_CLINIC_NAME,
@@ -139,6 +147,8 @@ import {
   DEMO_LOCATIONS,
   DEMO_PASSWORD,
   DEMO_PATIENTS,
+  DEMO_PAYERS,
+  DEMO_COVERAGES,
   DEMO_RESPONSIBLES,
   DEMO_PLANS,
   DEMO_COLLECTION_NOTES,
@@ -879,6 +889,44 @@ class DemoSeeder {
           relationship: r.relationship,
           isPayer: r.isPayer,
           receivesNotices: r.receivesNotices,
+        },
+        receptionId,
+      );
+    }
+    // DX-153: catálogo de pagadores y coberturas, como las cargaría recepción.
+    // Idempotente: el pagador se busca por nombre y la cobertura por pagador.
+    const existing = await this.use(ListPayersUseCase).execute({
+      includeInactive: true,
+    });
+    const payerIds = new Map<string, string>();
+    for (const payer of DEMO_PAYERS) {
+      const found = existing.find((e) => e.name === payer.name);
+      const id =
+        found?.id ??
+        (
+          await this.use(CreatePayerUseCase).execute(
+            { name: payer.name, type: payer.type, country: 'CO' },
+            receptionId,
+          )
+        ).id;
+      payerIds.set(payer.key, id);
+    }
+    for (const c of DEMO_COVERAGES) {
+      const patientId = ids[c.patientIndex];
+      const payerId = payerIds.get(c.payerKey) as string;
+      const has = await this.use(ListPatientCoveragesUseCase).execute(
+        patientId,
+      );
+      if (has.some((h) => h.payer.id === payerId)) continue;
+      await this.use(CreatePatientCoverageUseCase).execute(
+        patientId,
+        {
+          payerId,
+          planName: c.planName,
+          memberNumber: c.memberNumber,
+          validFrom: c.validFrom,
+          validTo: c.validTo,
+          isPrimary: c.isPrimary,
         },
         receptionId,
       );

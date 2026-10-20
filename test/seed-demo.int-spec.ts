@@ -13,6 +13,7 @@ import {
   assertLocalEnvironment,
   seedDemo,
 } from '../prisma/seed-demo';
+import { DEMO_COVERAGES } from '../prisma/demo/data';
 import { hostFor } from './support/tenant-host';
 
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
@@ -326,6 +327,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patients).toBe(25);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
+    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora.
+    expect(firstCounts.payers).toBe(7);
+    expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
