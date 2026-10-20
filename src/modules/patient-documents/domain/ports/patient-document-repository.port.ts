@@ -35,6 +35,18 @@ export interface PatientDocumentFilters {
   tooth?: string;
 }
 
+/**
+ * El INSERT chocó con el único parcial `patient_documents_active_sha256_key`:
+ * otra subida del MISMO contenido ganó la carrera (red de seguridad del
+ * `findActiveBySha256` previo). El use-case lo traduce a 409.
+ */
+export class DuplicateActivePatientDocumentError extends Error {
+  constructor() {
+    super('Documento vigente con el mismo contenido');
+    this.name = 'DuplicateActivePatientDocumentError';
+  }
+}
+
 export type VoidPatientDocumentOutcome =
   'VOIDED' | 'NOT_FOUND' | 'ALREADY_VOIDED';
 
@@ -44,7 +56,13 @@ export type VoidPatientDocumentOutcome =
  * PROPÓSITO: un documento solo se anula.
  */
 export interface PatientDocumentRepository {
+  /** Lanza `DuplicateActivePatientDocumentError` si el contenido ya está vigente. */
   create(input: CreatePatientDocumentInput): Promise<PatientDocument>;
+  /**
+   * Día civil `YYYY-MM-DD` de `now` en la zona de la sede donde se escribe
+   * (la misma que tomará `create`): tope de la fecha clínica.
+   */
+  clinicToday(now: Date): Promise<string>;
   /** null si no existe o es de otro paciente. */
   findById(patientId: string, id: string): Promise<PatientDocument | null>;
   /** Más reciente primero; incluye los anulados (se muestran tachados). */

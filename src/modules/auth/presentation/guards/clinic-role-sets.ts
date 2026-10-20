@@ -248,3 +248,14 @@ export const POSTOP_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 export const POSTOP_TEMPLATE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Documentos del paciente (DX-151) — ver, descargar y SUBIR: los cuatro roles
+// (recepción escanea remisiones y consentimientos firmados en el mostrador).
+// ANULAR también llega a los cuatro por la ruta, pero solo lo hace quien lo
+// subió o un ADMIN (lo comprueba el caso de uso: 403).
+export const PATIENT_DOCUMENT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];

@@ -250,6 +250,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /implants/search.csv': ADMIN_ONLY,
   'POST /implants/:id/void': PRESCRIBERS,
 
+  // --- Documentos del paciente (DX-151) -------------------------------------
+  // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
+  // (recepción escanea remisiones y consentimientos). Anular: la ruta admite
+  // los 4, pero solo el autor o un ADMIN (403 del caso de uso).
+  'POST /patients/:patientId/documents': EVERY_ROLE,
+  'GET /patients/:patientId/documents': EVERY_ROLE,
+  'GET /patients/:patientId/documents/:id': EVERY_ROLE,
+  'GET /patients/:patientId/documents/:id/url/inline': EVERY_ROLE,
+  'GET /patients/:patientId/documents/:id/url/download': EVERY_ROLE,
+  'POST /patients/:patientId/documents/:id/void': EVERY_ROLE,
+
   // --- Catálogo dental -----------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,
   // escritura solo ADMIN).

@@ -6,6 +6,8 @@ import {
   PrismaClient,
   Sex,
 } from '@prisma/client';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -18,6 +20,7 @@ import {
 import { ROUTE_ACCESS } from './support/route-access-matrix';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { clinicTables, TenantTable } from './support/tenant-tables';
+import { pdfFixture } from './support/document-fixtures';
 
 /**
  * DX-068 (TST-002): matriz de aislamiento entre clínicas en las rutas por id.
@@ -409,6 +412,18 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     { templateId: postOpTemplate.id, channel: 'PRINT' },
   ).expect(201);
 
+  // DX-151: un documento del paciente de A, subido por la API (multipart).
+  await request(app.getHttpServer())
+    .post(`/api/v1/patients/${patientId}/documents`)
+    .set('X-Tenant-Host', a.host)
+    .set('Authorization', `Bearer ${a.adminToken}`)
+    .field('category', 'REPORT')
+    .attach('file', pdfFixture(), {
+      filename: 'informe-a.pdf',
+      contentType: 'application/pdf',
+    })
+    .expect(201);
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -462,6 +477,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   });
 
   afterAll(async () => {
+    // El documento de A (DX-151) quedó en el almacén de disco de los e2e.
+    await fs.rm(
+      path.join(
+        process.env.STORAGE_DIR ?? './storage-test',
+        'patient-documents',
+        clinicA.tenantId,
+      ),
+      { recursive: true, force: true },
+    );
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
@@ -508,6 +532,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'post_op_instruction_templates',
       'post_op_instruction_template_links',
       'post_op_instruction_deliveries',
+      // DX-151: un documento del paciente subido por la API.
+      'patient_documents',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -1274,6 +1300,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/implant-card': 'implants.e2e-spec.ts',
     'POST /patients/:patientId/implant-card/print': 'implants.e2e-spec.ts',
     'POST /implants/:id/void': 'implants.e2e-spec.ts',
+    // DX-151: B → 404 en lista, detalle, URL, subida y anulación del documento
+    // de A, sin cambios en sus filas.
+    'POST /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
+    'GET /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
+    'GET /patients/:patientId/documents/:id': 'patient-documents.e2e-spec.ts',
+    'GET /patients/:patientId/documents/:id/url/inline':
+      'patient-documents.e2e-spec.ts',
+    'GET /patients/:patientId/documents/:id/url/download':
+      'patient-documents.e2e-spec.ts',
+    'POST /patients/:patientId/documents/:id/void':
+      'patient-documents.e2e-spec.ts',
     'GET /patients/:patientId/account-statement':
       'account-statement.e2e-spec.ts',
     // DX-203: B → 404 sobre el pagador de A (y el familiar no suma de otra).
