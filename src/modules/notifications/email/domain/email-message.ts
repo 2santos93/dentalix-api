@@ -17,6 +17,7 @@ export const EMAIL_TEMPLATES = [
   'appointment-reminder',
   'registration-notice',
   'payment-receipt',
+  'post-op-instructions',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -121,6 +122,23 @@ export interface PaymentReceiptEmailVars {
   legalNotice: string;
 }
 
+/**
+ * DX-222: indicaciones de cuidado tras la visita. Solo el enlace a la página
+ * pública y el teléfono de la sede: ni el título ni el texto de la plantilla,
+ * que nombran el procedimiento (dato clínico), viajan en el email.
+ */
+export interface PostOpInstructionsEmailVars {
+  /** Nombre de pila del paciente. */
+  patientFirstName: string;
+  clinicName: string;
+  /** Teléfono de la sede de la cita, o null si no tiene. */
+  locationPhone: string | null;
+  /** Enlace público a las indicaciones (`/indicaciones/<token>`). */
+  url: string;
+  /** DX-203: va al responsable (nombre de pila): se le saluda a él. */
+  responsibleName: string | null;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -128,6 +146,7 @@ export interface EmailVarsByTemplate {
   'appointment-reminder': AppointmentReminderEmailVars;
   'registration-notice': RegistrationNoticeEmailVars;
   'payment-receipt': PaymentReceiptEmailVars;
+  'post-op-instructions': PostOpInstructionsEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

@@ -39,6 +39,9 @@ import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedu
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
+import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
+import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
+import { PatientPostOpDeliveriesController } from '../post-op-instructions/presentation/patient-post-op-deliveries.controller';
 import {
   ImplantsController,
   PatientImplantsController,
@@ -658,6 +661,42 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CLINICAL_NOTE_TEMPLATE',
     resourceId: { param: 'id' },
   },
+  // DX-222: plantillas de indicaciones postoperatorias (sin paciente). Ni el
+  // texto ni los vínculos van a la auditoría; desactivar es un PATCH.
+  'POST /post-op-templates': {
+    action: 'CREATE',
+    resource: 'POSTOP_TEMPLATE',
+    resourceId: RES,
+  },
+  'POST /post-op-templates/samples': {
+    action: 'CREATE',
+    resource: 'POSTOP_TEMPLATE',
+    reason: 'SAMPLE_TEMPLATES',
+  },
+  'PATCH /post-op-templates/:id': {
+    action: 'UPDATE',
+    resource: 'POSTOP_TEMPLATE',
+    resourceId: { param: 'id' },
+  },
+  // DX-222: entregas de indicaciones. Ver las de una cita (el paciente sale
+  // de la respuesta) y las de la ficha. Registrar una la audita el caso de
+  // uso (CREATE con el canal en `reason`). Nunca el texto.
+  'GET /appointments/:appointmentId/post-op-instructions': {
+    action: 'VIEW',
+    resource: 'POSTOP_DELIVERY',
+    patient: { response: 'patientId' },
+  },
+  'GET /patients/:patientId/post-op-deliveries': {
+    action: 'VIEW',
+    resource: 'POSTOP_DELIVERY',
+    patient: P,
+  },
+  'GET /patients/:patientId/post-op-deliveries/:id': {
+    action: 'VIEW',
+    resource: 'POSTOP_DELIVERY',
+    resourceId: { param: 'id' },
+    patient: P,
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',
@@ -670,6 +709,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TENANT_DOMAIN',
     resourceId: { param: 'id' },
   },
+};
+
+/**
+ * Rutas que auditan desde el CASO DE USO (RecordAuditEventUseCase), no con
+ * `@Audit`: el decorador no sabe leer lo que necesitan. Cada una cita qué
+ * spec prueba su evento. Tienen que existir y no llevar además `@Audit`
+ * (sería un evento doble).
+ */
+const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-222: CREATE POSTOP_DELIVERY con el id de `delivery` y el canal como
+  // `reason`; queda auditada aunque el email no se pueda encolar.
+  'POST /appointments/:appointmentId/post-op-instructions/deliveries':
+    'post-op-deliveries.use-cases.spec.ts y post-op-deliveries.e2e-spec.ts',
 };
 
 const CONTROLLERS: Type[] = [
@@ -705,6 +757,9 @@ const CONTROLLERS: Type[] = [
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,
+  PostOpTemplatesController,
+  AppointmentPostOpController,
+  PatientPostOpDeliveriesController,
 ];
 
 function joinPath(...parts: string[]): string {
@@ -713,6 +768,24 @@ function joinPath(...parts: string[]): string {
     .filter(Boolean)
     .join('/');
   return `/${path}`;
+}
+
+/** `MÉTODO /ruta` de todos los handlers del controlador, auditados o no. */
+function routeKeys(controller: Type): string[] {
+  const base = (Reflect.getMetadata(PATH_METADATA, controller) as string) ?? '';
+  const proto = controller.prototype as Record<string, unknown>;
+  return Object.getOwnPropertyNames(proto).flatMap((name) => {
+    const handler = proto[name];
+    if (typeof handler !== 'function' || name === 'constructor') return [];
+    const path = Reflect.getMetadata(PATH_METADATA, handler) as
+      string | undefined;
+    if (path === undefined) return [];
+    const method =
+      RequestMethod[
+        Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod
+      ];
+    return [`${method} ${joinPath(base, path)}`];
+  });
 }
 
 interface AuditedRoute {
@@ -759,6 +832,16 @@ describe('cobertura de la auditoría (DX-009)', () => {
     expect(Object.fromEntries(routes.map((r) => [r.key, r.options]))).toEqual(
       EXPECTED,
     );
+  });
+
+  it('las rutas auditadas en el caso de uso existen y no llevan además @Audit', () => {
+    const all = new Set(CONTROLLERS.flatMap(routeKeys));
+    const decorated = new Set(routes.map((r) => r.key));
+    expect(
+      Object.keys(AUDITED_IN_USE_CASE).filter(
+        (key) => !all.has(key) || decorated.has(key),
+      ),
+    ).toEqual([]);
   });
 
   it('el AuditInterceptor va en el MÉTODO: corre dentro del contexto de tenant de la clase', () => {

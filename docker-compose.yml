@@ -18,5 +18,39 @@ services:
     ports: ['5433:5432']
     volumes:
       - './docker/db-init:/docker-entrypoint-initdb.d:ro'
+  # DX-084: almacén de ficheros S3 compatible para local y e2e
+  # (STORAGE_DRIVER=s3, ver README «Ficheros en un bucket S3»). API en :9000 y
+  # consola en :9001. Credenciales SOLO locales: la API las rechaza en
+  # producción.
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: dentalix-minio
+      MINIO_ROOT_PASSWORD: dentalix-minio-local
+    ports: ['9000:9000', '9001:9001']
+    volumes:
+      - 'dentalix_minio:/data'
+    healthcheck:
+      # La imagen no trae curl; trae `mc` y su alias `local`.
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  # Crea los buckets privados (local y test) con versionado, como en producción.
+  minio_init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 dentalix-minio dentalix-minio-local &&
+        for b in dentalix-local dentalix-test; do
+          mc mb --ignore-existing local/$$b && mc version enable local/$$b && mc anonymous set none local/$$b;
+        done
 volumes:
   dentalix_db:
+  dentalix_minio:

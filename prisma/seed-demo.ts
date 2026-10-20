@@ -110,6 +110,11 @@ import {
   ListWaitlistUseCase,
 } from '../src/modules/waitlist/application/use-cases/waitlist.use-cases';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import {
+  LoadSamplePostOpTemplatesUseCase,
+  UpdatePostOpTemplateUseCase,
+} from '../src/modules/post-op-instructions/application/use-cases/post-op-templates.use-cases';
+import { DeliverPostOpInstructionsUseCase } from '../src/modules/post-op-instructions/application/use-cases/post-op-deliveries.use-cases';
 import { UpdatePatientCommunicationUseCase } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
 import {
   DEMO_CLINIC_NAME,
@@ -142,6 +147,8 @@ import {
   DEMO_PRICES,
   DEMO_CUPS,
   DEMO_PRINCIPAL_REPS,
+  DEMO_PRINCIPAL_PHONE,
+  DEMO_POSTOP,
   DEMO_PRIMARY_COLOR,
   DEMO_PRIVACY_POLICY,
   DEMO_SIGNED_CONSENT,
@@ -556,6 +563,16 @@ class DemoSeeder {
       this.createTemplateEvolutions(ownerId, attended),
     );
 
+    await this.inTenant(tenantId, undefined, () =>
+      this.createPostOpInstructions(
+        tenantId,
+        ownerId,
+        catalog,
+        typeByReason,
+        attended,
+      ),
+    );
+
     await this.createScheduleBlocksAndWaitlist(
       tenantId,
       locations,
@@ -719,6 +736,8 @@ class DemoSeeder {
       address: DEMO_LOCATIONS.principal.address,
       // DX-212: la sede principal (CO) tiene REPS; la Norte no, a propósito.
       repsHabilitationCode: DEMO_PRINCIPAL_REPS,
+      // DX-222: el de urgencias en las indicaciones postoperatorias.
+      phone: DEMO_PRINCIPAL_PHONE,
     });
     // Nace con el horario por defecto (como cualquier sede nueva) y luego se
     // le pone el suyo con el caso de uso de /settings/horarios.
@@ -1075,6 +1094,75 @@ class DemoSeeder {
         appointment.providerId,
       );
     }
+  }
+
+  /**
+   * DX-222: el ADMIN carga las indicaciones postoperatorias de ejemplo (como el
+   * botón de Ajustes) y las vincula a procedimientos y tipos de cita; el
+   * odontólogo de la última cita atendida de un día anterior entrega impresas
+   * las de `DEMO_POSTOP.delivered`, por el mismo caso de uso que la API (texto
+   * congelado y auditado).
+   */
+  private async createPostOpInstructions(
+    tenantId: string,
+    ownerId: string,
+    catalog: Map<string, string>,
+    typeByReason: Map<string, string>,
+    attended: AttendedAppointment[],
+  ): Promise<void> {
+    await this.use(LoadSamplePostOpTemplatesUseCase).execute(ownerId);
+    const templates = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.postOpInstructionTemplate.findMany({
+        select: { id: true, code: true },
+      }),
+    );
+    const idByCode = new Map(templates.map((t) => [t.code, t.id]));
+    const typeByName = new Map(
+      DEMO_APPOINTMENT_TYPES.map((t) => [
+        t.name,
+        typeByReason.get(t.reasons[0]),
+      ]),
+    );
+    const lookup = (map: Map<string, string | undefined>, key: string) => {
+      const id = map.get(key);
+      if (!id) throw new Error(`Demo DX-222: no existe «${key}».`);
+      return id;
+    };
+    for (const link of DEMO_POSTOP.links) {
+      await this.use(UpdatePostOpTemplateUseCase).execute(
+        lookup(idByCode, link.code),
+        {
+          catalogItemIds: link.catalogCodes.map((c) => lookup(catalog, c)),
+          appointmentTypeIds: link.appointmentTypes.map((n) =>
+            lookup(typeByName, n),
+          ),
+        },
+        ownerId,
+      );
+    }
+
+    const todayStart = daysAgoAt(this.now, 0, 0).getTime();
+    const appointment = [...attended]
+      .filter((a) => a.start.getTime() < todayStart)
+      .sort((x, y) => y.start.getTime() - x.start.getTime())[0];
+    if (!appointment) return;
+    await this.use(DeliverPostOpInstructionsUseCase).execute(
+      appointment.id,
+      {
+        templateId: lookup(idByCode, DEMO_POSTOP.delivered),
+        channel: 'PRINT',
+      },
+      {
+        tenantId,
+        locationId: null,
+        actor: { userId: appointment.providerId, role: ClinicRole.DENTIST },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+      },
+      // Impreso: sin enlace, no hace falta host.
+      { protocol: 'http', host: null },
+    );
   }
 
   /**

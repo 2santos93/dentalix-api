@@ -63,6 +63,7 @@ export class PrismaLocationRepository implements LocationRepository {
           name: input.name,
           address: input.address,
           country: input.country,
+          phone: input.phone,
         },
       });
       // Una sede nueva nace con horario por defecto, igual que la que se crea al

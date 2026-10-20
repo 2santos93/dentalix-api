@@ -3,7 +3,7 @@ import type { UserProfileRepository } from '../../domain/ports/user-profile-repo
 import { USER_PROFILE_REPOSITORY } from '../../domain/ports/user-profile-repository.port';
 import type { FileStoragePort } from '../../../../shared/storage/file-storage.port';
 import { FILE_STORAGE } from '../../../../shared/storage/file-storage.port';
-import { splitFileUrl } from '../avatar-url.util';
+import { avatarKeyOf } from '../avatar-url.util';
 
 export interface RemoveMyAvatarInput {
   userId: string;
@@ -19,16 +19,16 @@ export class RemoveMyAvatarUseCase {
 
   async execute(input: RemoveMyAvatarInput): Promise<void> {
     const current = await this.repo.findUserById(input.userId);
-    if (current?.avatarUrl) {
-      const key = splitFileUrl(current.avatarUrl);
+    const key = avatarKeyOf(current?.avatarKey ?? null);
+    if (key) {
       // Excepción justificada al borrado blando: esto borra el FICHERO del
       // bucket, no una fila. La fila de `users` se conserva; sólo se le pone
-      // `avatarUrl` a null (abajo). Retener en blando un blob que ya nadie
+      // la clave a null (abajo). Retener en blando un blob que ya nadie
       // referencia sería pagar almacenamiento por una imagen que el usuario
-      // pidió quitar.
+      // pidió quitar (el versionado del bucket guarda la copia un tiempo).
       // eslint-disable-next-line no-restricted-syntax
-      if (key) await this.storage.delete(key.namespace, key.filename);
+      await this.storage.delete(key);
     }
-    await this.repo.updateAvatarUrl(input.userId, null);
+    await this.repo.updateAvatarKey(input.userId, null);
   }
 }

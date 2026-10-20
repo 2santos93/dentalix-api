@@ -72,7 +72,8 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    sin mostrar su valor. Con `NODE_ENV=production` además exige
    `CORS_ROOT_DOMAIN`, `TENANT_BASE_DOMAINS` y `FILES_PUBLIC_BASE_URL` (https,
    sin dominios locales), rechaza los secretos ficticios de CI (`solo-test…`) y
-   las contraseñas de base de datos de ejemplo (`changeme`, `dentalix_app`…).
+   las contraseñas de base de datos de ejemplo (`changeme`, `dentalix_app`…),
+   y exige `STORAGE_DRIVER=s3` con su bucket (ver «Ficheros en un bucket S3»).
 3. Aplicar las migraciones:
    ```bash
    npx prisma migrate deploy
@@ -106,7 +107,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
-   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), ~90 citas desde el lunes de la semana pasada hasta
+   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
@@ -1425,6 +1426,81 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
 
+## Indicaciones postoperatorias (DX-222)
+
+Las indicaciones que el paciente se lleva tras una exodoncia, un cordal, una
+endodoncia, un implante o una prótesis: plantillas de la clínica, sugeridas
+por la cita y entregadas impresas, por email o por enlace de WhatsApp, con el
+texto congelado tal como lo recibió. Módulo `post-op-instructions`;
+migraciones `20261020000000_dx222_enums`,
+`20261020000100_dx222_post_op_instructions`,
+`20261020000200_dx222_audit_events_idx` y
+`20261020000300_dx222_email_template`.
+
+- **Plantillas y versión** (`post_op_instruction_templates`): `code` (2–20
+  mayúsculas, números o guiones; único por clínica y no se edita), `title`,
+  `body`, `version` y `active`. Cambiar título o texto sube `version`;
+  activar, desactivar o cambiar vínculos no. Una inactiva sale del selector y
+  no se entrega (400). Variables admitidas: `{{paciente}}`,
+  `{{profesional}}`, `{{clinica}}`, `{{telefono_sede}}` y `{{fecha}}` (día
+  civil de la cita en la zona de la sede); una desconocida da 400. Los
+  **vínculos** (`post_op_instruction_template_links`) dicen cuándo sugerirla:
+  por un procedimiento del catálogo (`catalogItemId`) o por un tipo de cita
+  (`appointmentTypeId`), exactamente uno por fila (CHECK); llegan en
+  `catalogItemIds`/`appointmentTypeIds` y se reemplazan completos. Uno de
+  otra clínica da 400. `POST /post-op-templates/samples` carga las 5 de
+  ejemplo (`POI-EXO`, `POI-CORDAL`, `POI-ENDO`, `POI-IMPLANTE`,
+  `POI-PROTESIS`) que la clínica aún no tiene: repetirlo no duplica ni pisa
+  una propia con el mismo código. RLS FORCE y FK compuestas por `tenantId`.
+- **Entrega inalterable** (`post_op_instruction_deliveries`): guarda el
+  texto ya renderizado (`renderedText`) y la copia de código, título y
+  `templateVersion`, así que editar la plantilla después no cambia lo
+  entregado. El trigger `post_op_instruction_deliveries_immutable` (función
+  `post_op_deliveries_immutable`) rechaza cualquier
+  UPDATE salvo poner `firstOpenedAt` una sola vez (de NULL a una fecha) y
+  cualquier DELETE con `app.current_tenant` fijado; `deliveredAt` lo pone la
+  BD. FK compuestas a paciente, cita, sede y plantilla.
+- **Canales** (`channel`): `PRINT` solo registra la entrega (el documento
+  sale de `GET /patients/:patientId/post-op-deliveries/:id`); `EMAIL` encola
+  la plantilla de email `post-op-instructions` con el enlace, al paciente o,
+  si es menor o no tiene email, a su responsable que recibe avisos (DX-203,
+  `sentToResponsible`); `WHATSAPP_LINK` devuelve el número y el mensaje para
+  `wa.me`, que lleva solo el saludo, la clínica y el enlace: **nunca** el
+  procedimiento ni el texto clínico. La baja de envíos del paciente (DX-128),
+  la falta de email o de teléfono con indicativo dan 422 en español sin
+  guardar nada; el tope de emails de la clínica o del destinatario da 429.
+  Si el outbox falla después de guardar, la entrega queda (y auditada) con
+  `emailQueued: false` para que el personal use otro canal.
+- **Enlace público** (`GET /public/post-op-instructions/:token`, sin
+  sesión, tenant por host y límite por IP): EMAIL y WHATSAPP_LINK crean un
+  token del que solo se guarda el hash (`tokenHash`) y caduca a los 30 días
+  (`tokenExpiresAt`). Muestra la marca de la clínica, el teléfono de la sede,
+  el título, la versión y el texto tal como se entregó; ningún otro dato del
+  paciente. Token desconocido, malformado o de otra clínica: 404; caducado:
+  410. Leer no marca nada (los previsualizadores de enlaces la abren solos):
+  la página llama a `POST …/:token/opened`, que fija `firstOpenedAt` la
+  primera vez y no cambia nada después.
+- **Rutas y roles**: `GET /post-op-templates` (los 4 roles) y `POST`,
+  `PATCH /:id` y `POST /samples` (solo ADMIN); `GET
+  /appointments/:appointmentId/post-op-instructions` (sugeridas por los
+  vínculos, el resto, canales disponibles y entregas hechas) y `POST
+  …/deliveries` (los 4 roles: recepción entrega en el mostrador); `GET
+  /patients/:patientId/post-op-deliveries` y `…/:id` (historial de la ficha).
+- **Auditoría** (`audit_events`): `POSTOP_TEMPLATE` (CREATE, CREATE con
+  `reason: SAMPLE_TEMPLATES`, UPDATE) y `POSTOP_DELIVERY` (CREATE con el
+  canal como `reason`, auditado en el caso de uso; VIEW de sugerencias,
+  historial y documento, con el paciente). Nunca se registran la URL, el
+  token ni el destinatario. La apertura pública no se audita: queda en
+  `firstOpenedAt`.
+- **Teléfono de la sede** (`locations.phone`): `PATCH /locations/:id` (solo
+  ADMIN); `null` o vacío lo quita. Es el `{{telefono_sede}}` de las
+  indicaciones y el que muestran la página pública y el email.
+- **Demo**: las 5 de ejemplo; `POI-EXO` vinculada a «Exodoncia simple»
+  (`CX-EXO-SIMPLE`), `POI-CORDAL` a la exodoncia quirúrgica y los cordales,
+  `POI-ENDO` al tipo de cita «Endodoncia»; la sede principal con teléfono
+  `+57 601 555 0101`, y una entrega impresa de `POI-EXO` para la última cita
+  atendida de un día anterior.
+
 ## Dominios personalizados (SEC-009)
 
 Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio
@@ -1563,6 +1639,135 @@ de la demo (`UPDATE users SET "isPlatformAdmin" = true WHERE email = '…'`),
 enrola el MFA en http://localhost:3001/admin y entra en
 http://demo.localhost:3001/login con su email: la web pide el código y el
 motivo. Luego, como `admin@demo.dentalix.app`, Ajustes → «Accesos de soporte».
+
+## Ficheros en un bucket S3 (DX-084)
+
+Los ficheros (hoy los avatares; DX-008 añadirá radiografías y PDFs) pasan por
+el puerto `FileStoragePort` (`src/shared/storage`), con dos adaptadores que se
+eligen con `STORAGE_DRIVER`:
+
+| `STORAGE_DRIVER` | Adaptador | Uso |
+|---|---|---|
+| `disk` (defecto) | `DiskFileStorage`, en `STORAGE_DIR` | Solo desarrollo y tests. **Con `NODE_ENV=production` la API no arranca** (el disco del contenedor es efímero, no se comparte entre réplicas y no tiene copia). |
+| `s3` | `S3FileStorage` (`@aws-sdk/client-s3`) | Producción: AWS S3, Cloudflare R2 o MinIO. |
+
+Variables de `s3` (las valida `validateEnv` al arrancar; los mensajes nunca
+muestran secretos):
+
+| Variable | |
+|---|---|
+| `S3_BUCKET` | Obligatoria. El bucket **privado** de los ficheros. |
+| `S3_REGION` | Defecto `us-east-1`. R2: `auto`. |
+| `S3_ENDPOINT` | Vacío = AWS. R2: `https://<cuenta>.r2.cloudflarestorage.com`. MinIO local: `http://localhost:9000`. En producción, https y no local. |
+| `S3_FORCE_PATH_STYLE` | `true` para MinIO; `false` (defecto) para AWS y R2. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Las dos o ninguna. Sin ellas el SDK usa su cadena por defecto (rol IAM de la tarea o instancia, lo preferible en AWS). En producción se rechazan las de ejemplo de MinIO. |
+| `S3_SSE` | `AES256` o `aws:kms` añade la cabecera de cifrado en cada subida; vacío = el cifrado por defecto del bucket. |
+
+**Claves, no URL.** En la BD se guarda la **clave** del fichero
+(`users.avatarUrl` = `avatars/<userId>.<ext>`; en Prisma el campo se llama
+`avatarKey`). La URL pública se calcula al responder con la
+`FILES_PUBLIC_BASE_URL` vigente, así que cambiar de dominio no rompe ningún
+avatar. La migración `20261019224000_dx084_avatar_keys` convierte las URL
+absolutas de antes a su clave, y la API reduce a clave cualquier URL de avatar
+que una réplica antigua escriba durante un despliegue escalonado. Las claves
+se arman con ids, nunca con datos del paciente o del usuario.
+
+**Al desplegar DX-084** (pasar de disco a bucket):
+1. Copia los avatares que hubiera en el disco al bucket, con la misma clave:
+   `aws s3 sync "$STORAGE_DIR/avatars" "s3://<bucket>/avatars"` (con
+   `--endpoint-url` en R2 o MinIO). Lo que no se copie da 404 y la web muestra
+   las iniciales; nada se rompe, pero el usuario tendría que subirlo de nuevo.
+2. Mientras convivan réplicas de antes y de después de la migración, una
+   réplica antigua responde la clave (`avatars/<id>.png`) como `avatarUrl`
+   (la web no la puede cargar hasta el siguiente refresco servido por una
+   réplica nueva) y puede volver a escribir una URL absoluta al subir un
+   avatar. La API nueva lee las dos formas; cuando ya no quede ninguna réplica
+   antigua, repite el `UPDATE` de la migración (es idempotente) para que en la
+   BD solo queden claves:
+   `psql "$DIRECT_URL" -f prisma/migrations/20261019224000_dx084_avatar_keys/migration.sql`.
+
+**Subida de avatares**: PNG, JPEG o WebP de hasta 2 MB. Se comprueba la
+cabecera real del fichero (no solo el tipo que declara el cliente): lo que no
+sea de verdad la imagen declarada es un 400 y no llega al almacén. El tipo con
+el que se sirve sale de la extensión de la clave, con `nosniff`.
+
+**Público y privado.**
+- Lo público (avatares; logos en el futuro) tiene una URL estable:
+  `FILES_PUBLIC_BASE_URL/avatars/<nombre>`. La sirve la API leyendo del
+  almacén, así que cualquier réplica la sirve y el bucket no se abre al
+  público.
+- Lo privado (DX-008) se entrega con `getSignedUrl(key, ttlSeconds)`: con S3
+  es una URL SigV4 directa al bucket que caduca a los `ttlSeconds` (1 s – 7
+  días); con el disco, una URL de la API (`/files/signed`) firmada con HMAC
+  por una clave aleatoria del proceso. **Nada clínico con URL pública.**
+
+**El bucket en producción** (lo crea quien opera, no la API):
+1. **Privado**: bloqueo de acceso público activado (AWS «Block Public Access»;
+   en R2 sin dominio público ni `r2.dev`). Ninguna política anónima.
+2. **Cifrado del lado del servidor**: cifrado por defecto del bucket con SSE-S3
+   (AES256) o SSE-KMS con una clave propia; R2 cifra siempre en reposo. Si la
+   política del bucket exige la cabecera, pon `S3_SSE`.
+3. **Versionado** activado: un reemplazo o un borrado (el avatar anterior se
+   borra al subir uno nuevo) deja una versión anterior recuperable. Es la base
+   de la copia de ficheros de DX-082 (replicación a otra cuenta o región).
+4. **Ciclo de vida**: expirar las versiones no actuales a los 30 días y
+   abortar las subidas multiparte incompletas a los 7 días. Los ficheros
+   clínicos de DX-008 seguirán la retención de la historia clínica (DX-039),
+   así que **no** se expiran versiones actuales.
+5. **Credenciales mínimas**: un usuario o rol solo para la API con
+   `s3:GetObject`, `s3:PutObject` y `s3:DeleteObject` sobre
+   `arn:aws:s3:::<bucket>/*` y nada más (sin `s3:ListAllMyBuckets`, sin
+   permisos de bucket ni de otros buckets). En R2, un token de API «Object
+   Read & Write» limitado a ese bucket. Ejemplo de política de AWS:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+       "Resource": "arn:aws:s3:::dentalix-files/*"
+     }]
+   }
+   ```
+
+   Con SSE-KMS, el rol necesita además `kms:Encrypt`, `kms:Decrypt` y
+   `kms:GenerateDataKey` sobre esa clave.
+
+**En local** con MinIO (`docker compose up -d minio minio_init` crea los
+buckets privados `dentalix-local` y `dentalix-test` con versionado; consola en
+http://localhost:9001):
+
+```bash
+STORAGE_DRIVER=s3 S3_BUCKET=dentalix-local S3_ENDPOINT=http://localhost:9000 \
+S3_FORCE_PATH_STYLE=true S3_ACCESS_KEY_ID=dentalix-minio \
+S3_SECRET_ACCESS_KEY=dentalix-minio-local npm run start:dev
+```
+
+**Tests.** Los unitarios cubren el adaptador con un cliente simulado. Los de
+integración y e2e contra MinIO (`test/storage/s3-file-storage.int-spec.ts`,
+`test/storage/s3-avatar.e2e-spec.ts`: subir, servir, reemplazar y borrar el
+avatar con **dos réplicas** de la API, un avatar existente con URL absoluta y
+la caducidad de una URL firmada) leen `S3_TEST_ENDPOINT`, `S3_TEST_BUCKET`,
+`S3_TEST_ACCESS_KEY_ID` y `S3_TEST_SECRET_ACCESS_KEY` de `.env.test`. Sin
+`S3_TEST_ENDPOINT` se saltan **de forma visible** (el nombre de la suite dice
+`[SALTADO: falta S3_TEST_ENDPOINT]` y se avisa por consola); en la CI el job de
+integración levanta MinIO y fija `REQUIRE_S3_TESTS=1`, con lo que faltar la
+variable es un fallo. Para correrlos en local con el MinIO de docker-compose,
+añade a `.env.test`:
+
+```bash
+S3_TEST_ENDPOINT="http://localhost:9000"
+S3_TEST_BUCKET="dentalix-test"
+S3_TEST_ACCESS_KEY_ID="dentalix-minio"
+S3_TEST_SECRET_ACCESS_KEY="dentalix-minio-local"
+```
+
+Con otro servidor S3 compatible en lugar de MinIO, ojo: **moto** (5.2.x) no
+comprueba firmas ni caducidad de las URL prefirmadas, así que el test «una URL
+firmada … caduca al pasar el TTL» falla contra moto (la URL sigue sirviendo)
+aunque el adaptador es correcto; la CI usa MinIO, que sí lo comprueba. El
+resto de los tests de S3 pasan igual contra moto.
 
 ## Despliegue: roles de la BD (DX-113)
 

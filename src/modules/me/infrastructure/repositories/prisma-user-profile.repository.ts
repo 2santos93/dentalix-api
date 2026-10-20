@@ -18,7 +18,7 @@ export class PrismaUserProfileRepository implements UserProfileRepository {
         id: true,
         email: true,
         fullName: true,
-        avatarUrl: true,
+        avatarKey: true,
         emailVerifiedAt: true,
       },
     });
@@ -59,13 +59,13 @@ export class PrismaUserProfileRepository implements UserProfileRepository {
     return user.tokenVersion;
   }
 
-  async updateAvatarUrl(
+  async updateAvatarKey(
     userId: string,
-    avatarUrl: string | null,
+    avatarKey: string | null,
   ): Promise<void> {
     await this.prisma.user.update({
       where: { id: userId },
-      data: { avatarUrl },
+      data: { avatarKey },
     });
   }
 }

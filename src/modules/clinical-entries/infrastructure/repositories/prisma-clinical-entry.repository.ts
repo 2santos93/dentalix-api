@@ -6,8 +6,9 @@ import {
   loadLocationTimeZones,
   timeZoneForCountry,
 } from '../../../../shared/locations/location-time-zone';
-import { civilDateIn, civilDayRange } from '../../../../shared/time/civil-day';
-import type { RdaFacts, RdaPerformedItem } from '../../domain/rda-readiness';
+import { civilDateIn } from '../../../../shared/time/civil-day';
+import type { RdaFacts } from '../../domain/rda-readiness';
+import { performedItemsOf } from './performed-items';
 import {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
@@ -288,7 +289,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
       const day = attentionDay(entry.entryDate, timeZone);
 
       const [performedItems, author] = await Promise.all([
-        performedItemsOf(tx, entry.patient.id, entry.id, day, timeZone),
+        performedItemsOf(tx, entry.patient.id, [entry.id], day, timeZone),
         entry.performedById
           ? tx.clinicMembership.findFirst({
               where: { userId: entry.performedById },
@@ -331,54 +332,4 @@ function attentionDay(entryDate: Date, timeZone: string): string {
   return iso.endsWith('T00:00:00.000Z')
     ? iso.slice(0, 10)
     : civilDateIn(entryDate, timeZone);
-}
-
-/** Ver `loadRdaFacts`: procedimientos hechos en la atención, con su CUPS. */
-async function performedItemsOf(
-  tx: Prisma.TransactionClient,
-  patientId: string,
-  entryId: string,
-  day: string,
-  timeZone: string,
-): Promise<RdaPerformedItem[]> {
-  const { start, end } = civilDayRange(day, timeZone);
-  const records = await tx.toothRecord.findMany({
-    where: {
-      patientId,
-      deletedAt: null,
-      kind: 'PROCEDURE',
-      status: 'COMPLETED',
-      origin: 'THIS_CLINIC',
-      voidsRecordId: null,
-      catalogItemId: { not: null },
-      OR: [
-        { clinicalEntryId: entryId },
-        { recordedAt: { gte: start, lt: end } },
-      ],
-    },
-    orderBy: { recordedAt: 'asc' },
-    select: { id: true, catalogItemId: true },
-  });
-  if (records.length === 0) return [];
-  const voided = new Set(
-    (
-      await tx.toothRecord.findMany({
-        where: { voidsRecordId: { in: records.map((r) => r.id) } },
-        select: { voidsRecordId: true },
-      })
-    ).map((v) => v.voidsRecordId),
-  );
-  const live = records.filter((r) => !voided.has(r.id));
-  const catalogIds = [...new Set(live.map((r) => r.catalogItemId as string))];
-  const items = await tx.dentalCatalogItem.findMany({
-    where: { id: { in: catalogIds } },
-    select: { id: true, labelEs: true, cupsCode: true },
-  });
-  const byId = new Map(items.map((i) => [i.id, i]));
-  return catalogIds.flatMap((catalogItemId) => {
-    const item = byId.get(catalogItemId);
-    return item
-      ? [{ catalogItemId, name: item.labelEs, cupsCode: item.cupsCode }]
-      : [];
-  });
 }

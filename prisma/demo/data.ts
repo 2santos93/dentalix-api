@@ -124,6 +124,12 @@ export const DEMO_CUPS: Record<string, string> = {
 /** DX-212: código de habilitación REPS (12 dígitos) de la sede principal. */
 export const DEMO_PRINCIPAL_REPS = '110010123401';
 
+/**
+ * DX-222: teléfono de la sede principal, el que las indicaciones
+ * postoperatorias muestran para urgencias (`{{telefono_sede}}`). Ficticio.
+ */
+export const DEMO_PRINCIPAL_PHONE = '+57 601 555 0101';
+
 export const DEMO_PRICES: Record<string, number> = {
   'IMG-CONSULTA': 80000,
   'IMG-RX-PERIAPICAL': 35000,
@@ -2065,3 +2071,25 @@ export const DEMO_PAYMENT_PROMISE = {
   dueInDays: 5,
   location: 'principal' as DemoLocationKey,
 };
+
+/**
+ * DX-222: indicaciones postoperatorias de la demo. Se cargan las 5 plantillas
+ * de ejemplo y se vinculan para que la cita sugiera la correcta: por
+ * procedimiento del catálogo (códigos de `default-dental-catalog`) o por tipo
+ * de cita (nombre de `DEMO_APPOINTMENT_TYPES`). La demo no tiene un tipo de
+ * cita de cirugía, así que el cordal se vincula solo por procedimiento y la
+ * endodoncia enseña el vínculo por tipo de cita. `delivered` sale impresa para
+ * la última cita atendida de un día anterior.
+ */
+export const DEMO_POSTOP = {
+  links: [
+    { code: 'POI-EXO', catalogCodes: ['CX-EXO-SIMPLE'], appointmentTypes: [] },
+    {
+      code: 'POI-CORDAL',
+      catalogCodes: ['CX-EXO-QUIRURGICA', 'CX-CORDAL-ERUP', 'CX-CORDAL-INCL'],
+      appointmentTypes: [],
+    },
+    { code: 'POI-ENDO', catalogCodes: [], appointmentTypes: ['Endodoncia'] },
+  ],
+  delivered: 'POI-EXO',
+} as const;

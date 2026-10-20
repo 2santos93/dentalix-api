@@ -39,6 +39,7 @@ import { LocationScheduleModule } from './modules/location-schedule/location-sch
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
+import { PostOpInstructionsModule } from './modules/post-op-instructions/post-op-instructions.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { ImplantsModule } from './modules/implants/implants.module';
@@ -101,6 +102,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     SupportAccessesModule,
     DashboardModule,
     ConsentsModule,
+    PostOpInstructionsModule,
     PeriodontalModule,
     PrescriptionsModule,
     ImplantsModule,

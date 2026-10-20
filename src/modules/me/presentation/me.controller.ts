@@ -16,7 +16,14 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import {
   JwtPayload,
@@ -128,6 +135,24 @@ export class MeController {
   @Post('avatar')
   @HttpCode(200)
   @ApiOkResponse({ type: AvatarResponseDto })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'PNG, JPEG o WebP de hasta 2 MB',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Falta el fichero, tipo no admitido o el contenido no es la imagen declarada',
+  })
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: MAX_AVATAR_BYTES } }),
   )

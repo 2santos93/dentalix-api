@@ -26,8 +26,15 @@
  * (duración del acceso de soporte a una clínica, 5–60) y
  * `BREAK_GLASS_MFA_COOLDOWN_MINUTES` (espera tras activar el MFA antes de
  * poder usarlo, 0–10080; por defecto 1440).
+ * DX-084: `STORAGE_DRIVER` (disk | s3; el disco no se admite en producción)
+ * y los ajustes `S3_*` del bucket de ficheros.
  */
 
+import {
+  S3_SSE_VALUES,
+  STORAGE_DRIVERS,
+  storageDriverOf,
+} from '../shared/storage/storage-config';
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
 import {
@@ -534,6 +541,106 @@ function breakGlassProblems(env: Env, isProd: boolean): string[] {
   return problems;
 }
 
+/** Credenciales de ejemplo de MinIO (su default y la de docker-compose). */
+const KNOWN_INSECURE_S3_SECRETS = new Set([
+  'minioadmin',
+  'dentalix-minio-local',
+]);
+
+/** Nombre de bucket S3 (3–63, minúsculas, dígitos, `.` y `-`). */
+const S3_BUCKET_PATTERN = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+
+/** DX-084: almacén de ficheros (disco solo fuera de producción, o bucket S3). */
+function storageProblems(env: Env, isProd: boolean): string[] {
+  const problems: string[] = [];
+  const driver = storageDriverOf(str(env, 'STORAGE_DRIVER')) ?? 'disk';
+  if (!(STORAGE_DRIVERS as readonly string[]).includes(driver)) {
+    problems.push(
+      `STORAGE_DRIVER debe ser uno de: ${STORAGE_DRIVERS.join(', ')}.`,
+    );
+    return problems;
+  }
+  if (driver === 'disk') {
+    if (isProd) {
+      problems.push(
+        'STORAGE_DRIVER=disk no se admite en producción (y es el valor por defecto): el disco del contenedor es efímero, no se comparte entre réplicas y no tiene copia. Usa STORAGE_DRIVER=s3 con S3_BUCKET y, si no es AWS, S3_ENDPOINT (README, «Ficheros en un bucket S3»).',
+      );
+    }
+    return problems;
+  }
+
+  const bucket = str(env, 'S3_BUCKET')?.trim();
+  if (bucket == null) {
+    problems.push(
+      'S3_BUCKET es obligatorio con STORAGE_DRIVER=s3 (el bucket privado de los ficheros).',
+    );
+  } else if (!S3_BUCKET_PATTERN.test(bucket)) {
+    problems.push(
+      'S3_BUCKET no es un nombre de bucket válido (3–63 caracteres: minúsculas, dígitos, "." y "-").',
+    );
+  }
+
+  const endpoint = str(env, 'S3_ENDPOINT')?.trim();
+  if (endpoint != null) {
+    let url: URL | null = null;
+    try {
+      url = new URL(endpoint);
+    } catch {
+      url = null;
+    }
+    if (url == null || !['http:', 'https:'].includes(url.protocol)) {
+      problems.push(
+        'S3_ENDPOINT debe ser una URL http(s) (p. ej. "http://localhost:9000" para MinIO o "https://<cuenta>.r2.cloudflarestorage.com"). Vacío = AWS S3.',
+      );
+    } else if (
+      isProd &&
+      (url.protocol !== 'https:' || isLocalHost(url.hostname))
+    ) {
+      problems.push(
+        'S3_ENDPOINT debe ser https y no local en producción: las credenciales y los ficheros no viajan en claro.',
+      );
+    }
+  }
+
+  const region = str(env, 'S3_REGION')?.trim();
+  if (region != null && !/^[a-z0-9-]{2,32}$/.test(region)) {
+    problems.push(
+      'S3_REGION no es válida (p. ej. "us-east-1", o "auto" en R2).',
+    );
+  }
+
+  const pathStyle = str(env, 'S3_FORCE_PATH_STYLE')?.trim().toLowerCase();
+  if (pathStyle != null && pathStyle !== 'true' && pathStyle !== 'false') {
+    problems.push(
+      'S3_FORCE_PATH_STYLE debe ser "true" (MinIO) o "false" (AWS, R2).',
+    );
+  }
+
+  const sse = str(env, 'S3_SSE')?.trim();
+  if (sse != null && !(S3_SSE_VALUES as readonly string[]).includes(sse)) {
+    problems.push(
+      `S3_SSE debe ser uno de: ${S3_SSE_VALUES.join(', ')} (vacío = el cifrado por defecto del bucket).`,
+    );
+  }
+
+  const keyId = str(env, 'S3_ACCESS_KEY_ID');
+  const secret = str(env, 'S3_SECRET_ACCESS_KEY');
+  if ((keyId == null) !== (secret == null)) {
+    problems.push(
+      'S3_ACCESS_KEY_ID y S3_SECRET_ACCESS_KEY van juntas: las dos o ninguna (sin ellas, el SDK usa el rol de la instancia).',
+    );
+  } else if (
+    isProd &&
+    secret != null &&
+    KNOWN_INSECURE_S3_SECRETS.has(secret.trim().toLowerCase())
+  ) {
+    problems.push(
+      'S3_SECRET_ACCESS_KEY es una credencial de ejemplo (MinIO por defecto o docker-compose). Crea una clave con acceso solo a este bucket (README, «Ficheros en un bucket S3»).',
+    );
+  }
+  return problems;
+}
+
 export function validateEnv(env: Env): Env {
   const problems: string[] = [];
   for (const key of REQUIRED) {
@@ -554,6 +661,7 @@ export function validateEnv(env: Env): Env {
   problems.push(...jobsProblems(env));
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));
+  problems.push(...storageProblems(env, isProd));
 
   if (problems.length > 0) {
     throw new Error(

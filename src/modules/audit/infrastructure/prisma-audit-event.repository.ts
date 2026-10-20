@@ -84,6 +84,15 @@ async function resolvePatientId(
           })
         )?.patientId ?? null
       );
+    case 'postOpDelivery':
+      return (
+        (
+          await tx.postOpInstructionDelivery.findFirst({
+            where,
+            select: { patientId: true },
+          })
+        )?.patientId ?? null
+      );
   }
 }
 

@@ -34,6 +34,11 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-222: entregas (hijas de appointments, patients, locations y plantillas)
+  // y vínculos (hijos de plantillas y de appointment_types).
+  'post_op_instruction_deliveries',
+  'post_op_instruction_template_links',
+  'post_op_instruction_templates',
   // DX-203: responsables (hijos de patients).
   'patient_responsible_parties',
   'patient_implants',
@@ -400,6 +405,82 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     }
     const resin = entries.find((e) => e.template?.name === 'Resina');
     expect(resin?.notes).toContain('Diente 36, superficie O');
+  });
+
+  it('deja las 5 indicaciones postoperatorias de ejemplo, POI-EXO ligada a la exodoncia simple y una entrega impresa de ayer (DX-222)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const templates = await raw.postOpInstructionTemplate.findMany({
+      where: { tenantId },
+      include: { links: true },
+      orderBy: { code: 'asc' },
+    });
+    expect(templates.map((t) => t.code)).toEqual([
+      'POI-CORDAL',
+      'POI-ENDO',
+      'POI-EXO',
+      'POI-IMPLANTE',
+      'POI-PROTESIS',
+    ]);
+    const exo = templates.find((t) => t.code === 'POI-EXO');
+    const exoItems = await raw.dentalCatalogItem.findMany({
+      where: {
+        tenantId,
+        id: {
+          in: (exo?.links ?? [])
+            .map((l) => l.catalogItemId)
+            .filter((id): id is string => id !== null),
+        },
+      },
+    });
+    expect(exoItems).toEqual([
+      expect.objectContaining({ code: 'CX-EXO-SIMPLE', kind: 'PROCEDURE' }),
+    ]);
+
+    const principal = await raw.location.findFirstOrThrow({
+      where: { tenantId, name: 'Sede principal' },
+    });
+    expect(principal.phone).toBe('+57 601 555 0101');
+
+    const deliveries = await raw.postOpInstructionDelivery.findMany({
+      where: { tenantId },
+      include: { appointment: true },
+    });
+    expect(deliveries).toHaveLength(1);
+    const [delivery] = deliveries;
+    expect(delivery).toMatchObject({
+      templateId: exo?.id,
+      templateCode: 'POI-EXO',
+      templateVersion: 1,
+      channel: 'PRINT',
+      tokenHash: null,
+      recipientMasked: null,
+    });
+    expect(delivery.renderedText).toContain('Clínica Demo');
+    expect(delivery.renderedText).not.toMatch(/\{\{/);
+    expect(delivery.appointment).toMatchObject({
+      status: 'COMPLETED',
+      patientId: delivery.patientId,
+    });
+    // Cita de un día anterior (ayer, o el último día con consulta): empezó
+    // antes de la medianoche de hoy en Bogotá (UTC-5 fijo).
+    const bogotaWall = new Date(Date.now() - 5 * 3600 * 1000);
+    const todayStart =
+      Date.UTC(
+        bogotaWall.getUTCFullYear(),
+        bogotaWall.getUTCMonth(),
+        bogotaWall.getUTCDate(),
+      ) +
+      5 * 3600 * 1000;
+    expect(delivery.appointment.start.getTime()).toBeLessThan(todayStart);
+    await expect(
+      raw.auditEvent.count({
+        where: {
+          tenantId,
+          resourceType: 'POSTOP_DELIVERY',
+          resourceId: delivery.id,
+        },
+      }),
+    ).resolves.toBe(1);
   });
 
   it('deja un bloqueo de vacaciones, uno de almuerzo y 3 pendientes abiertos (DX-122)', async () => {
