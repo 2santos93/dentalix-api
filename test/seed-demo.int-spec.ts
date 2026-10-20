@@ -336,9 +336,16 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patients).toBe(25);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
-    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora.
-    expect(firstCounts.payers).toBe(7);
+    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
+    // DX-105 añade «Empresa Alfa» (8).
+    expect(firstCounts.payers).toBe(8);
     expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
+    // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
+    // convenios (Sura −15 % y Empresa Alfa lista) y tres pacientes asignados.
+    expect(firstCounts.price_lists).toBe(2);
+    expect(firstCounts.price_list_items).toBe(8);
+    expect(firstCounts.agreements).toBe(2);
+    expect(firstCounts.patient_agreements).toBe(3);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);

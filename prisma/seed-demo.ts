@@ -33,6 +33,19 @@ import {
   BusinessHours,
   fitsBusinessHours,
 } from '../src/modules/location-schedule/application/business-hours';
+import {
+  CreatePriceListUseCase,
+  ListPriceListsUseCase,
+  ReplacePriceListItemsUseCase,
+} from '../src/modules/price-lists/application/use-cases/price-lists.use-cases';
+import {
+  CreateAgreementUseCase,
+  ListAgreementsUseCase,
+} from '../src/modules/agreements/application/use-cases/agreements.use-cases';
+import {
+  AssignPatientAgreementUseCase,
+  GetPatientAgreementUseCase,
+} from '../src/modules/patient-agreements/application/use-cases/patient-agreements.use-cases';
 import { UpdateCatalogItemUseCase } from '../src/modules/dental-catalog/application/use-cases/update-catalog-item.use-case';
 import { CreatePatientUseCase } from '../src/modules/patients/application/use-cases/create-patient.use-case';
 import { CreateResponsiblePartyUseCase } from '../src/modules/patients/application/use-cases/responsible-parties.use-cases';
@@ -155,6 +168,10 @@ import {
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
   DEMO_PRICES,
+  DEMO_ALFA_PAYER,
+  DEMO_PRICE_LISTS,
+  DEMO_AGREEMENTS,
+  DEMO_PATIENT_AGREEMENTS,
   DEMO_CUPS,
   DEMO_PRINCIPAL_REPS,
   DEMO_PRINCIPAL_PHONE,
@@ -640,6 +657,13 @@ class DemoSeeder {
       this.createImplants(patientIds, dentists),
     );
 
+    // DX-105 al final: una lista activa en la Sede Norte o un convenio asignado
+    // re-precian los ítems que se añadan después, y los planes de la demo ya
+    // están fijados con sus precios de catálogo.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createAgreements(locations, patientIds, catalog, receptionId),
+    );
+
     return this.requestConfirmations(tenantId, receptionId);
   }
 
@@ -778,6 +802,100 @@ class DemoSeeder {
         this.use(GetLocationScheduleUseCase).execute(),
       );
     return { principal: await read('principal'), norte: await read('norte') };
+  }
+
+  /**
+   * DX-105: listas de precios, convenios y su asignación a tres pacientes, por
+   * los mismos casos de uso que la API. Idempotente: lista, convenio y
+   * pagador se buscan por nombre y la asignación se salta si el paciente ya
+   * tiene una viva.
+   */
+  private async createAgreements(
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    catalog: Map<string, string>,
+    receptionId: string,
+  ): Promise<void> {
+    const payers = await this.use(ListPayersUseCase).execute({
+      includeInactive: true,
+    });
+    const alfaPayer =
+      payers.find((p) => p.name === DEMO_ALFA_PAYER.name) ??
+      (await this.use(CreatePayerUseCase).execute(
+        {
+          name: DEMO_ALFA_PAYER.name,
+          type: DEMO_ALFA_PAYER.type,
+          country: 'CO',
+        },
+        receptionId,
+      ));
+    const payerIds = new Map(payers.map((p) => [p.name, p.id]));
+    payerIds.set(alfaPayer.name, alfaPayer.id);
+
+    const existingLists = await this.use(ListPriceListsUseCase).execute({
+      includeInactive: true,
+    });
+    const listIds = new Map<string, string>();
+    for (const spec of DEMO_PRICE_LISTS) {
+      let id = existingLists.find((l) => l.name === spec.name)?.id;
+      if (!id) {
+        const created = await this.use(CreatePriceListUseCase).execute(
+          {
+            name: spec.name,
+            currency: DEMO_CURRENCY,
+            locationId: spec.locationKey ? locations[spec.locationKey] : null,
+          },
+          receptionId,
+        );
+        id = created.id;
+        await this.use(ReplacePriceListItemsUseCase).execute(
+          id,
+          Object.entries(spec.prices).map(([code, price]) => ({
+            catalogItemId: catalogId(catalog, code),
+            price,
+          })),
+        );
+      }
+      listIds.set(spec.key, id);
+    }
+
+    const existingAgreements = await this.use(ListAgreementsUseCase).execute({
+      includeInactive: true,
+    });
+    const agreementIds = new Map<string, string>();
+    for (const spec of DEMO_AGREEMENTS) {
+      const id =
+        existingAgreements.find((a) => a.name === spec.name)?.id ??
+        (
+          await this.use(CreateAgreementUseCase).execute(
+            {
+              name: spec.name,
+              payerId: payerIds.get(spec.payerName) as string,
+              kind: spec.kind,
+              percent: spec.percent,
+              priceListId: spec.priceListKey
+                ? (listIds.get(spec.priceListKey) as string)
+                : null,
+            },
+            receptionId,
+          )
+        ).id;
+      agreementIds.set(spec.key, id);
+    }
+
+    for (const a of DEMO_PATIENT_AGREEMENTS) {
+      const patientId = patientIds[a.patientIndex];
+      const current = await this.use(GetPatientAgreementUseCase).execute(
+        patientId,
+        false,
+      );
+      if (current.current) continue;
+      await this.use(AssignPatientAgreementUseCase).execute(
+        patientId,
+        { agreementId: agreementIds.get(a.agreementKey) as string },
+        receptionId,
+      );
+    }
   }
 
   /** Tarifas COP en el catálogo por defecto; devuelve código → id. */
