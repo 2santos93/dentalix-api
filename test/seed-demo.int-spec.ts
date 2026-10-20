@@ -42,6 +42,8 @@ const TENANT_TABLES = [
   // DX-203: responsables (hijos de patients).
   'patient_responsible_parties',
   'patient_implants',
+  // DX-151: documentos (hijos de patients y locations).
+  'patient_documents',
   // DX-027: caja por turno (hijas de cash_sessions y de payments).
   'cash_session_adjustments',
   'cash_session_reopenings',

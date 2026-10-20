@@ -46,6 +46,7 @@ import {
   ImplantsController,
   PatientImplantsController,
 } from '../implants/presentation/implants.controller';
+import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -354,6 +355,47 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PATIENT_IMPLANT',
     resourceId: { param: 'id' },
     patient: { lookup: 'patientImplant', param: 'id' },
+  },
+
+  // DX-151: documentos del paciente. Ver la URL en línea es VIEW y descargar
+  // es EXPORT; la metadata solo lleva el código, nunca el nombre del fichero.
+  'POST /patients/:patientId/documents': {
+    action: 'CREATE',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: RES,
+    patient: P,
+  },
+  'GET /patients/:patientId/documents': {
+    action: 'VIEW',
+    resource: 'PATIENT_DOCUMENT',
+    patient: P,
+    reason: 'DOCUMENT_LIST',
+  },
+  'GET /patients/:patientId/documents/:id': {
+    action: 'VIEW',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: { param: 'id' },
+    patient: P,
+  },
+  'GET /patients/:patientId/documents/:id/url/inline': {
+    action: 'VIEW',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'DOCUMENT_VIEW',
+  },
+  'GET /patients/:patientId/documents/:id/url/download': {
+    action: 'EXPORT',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'DOCUMENT_DOWNLOAD',
+  },
+  'POST /patients/:patientId/documents/:id/void': {
+    action: 'VOID',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: { param: 'id' },
+    patient: P,
   },
 
   'POST /patients/:patientId/treatment-plans': {
@@ -741,6 +783,7 @@ const CONTROLLERS: Type[] = [
   PrescriptionsController,
   PatientImplantsController,
   ImplantsController,
+  PatientDocumentsController,
   PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,

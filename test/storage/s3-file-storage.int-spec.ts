@@ -1,5 +1,6 @@
 import { S3FileStorage } from '../../src/shared/storage/s3-file-storage';
 import { createS3Client } from '../../src/shared/storage/s3-file-storage';
+import { contentDispositionHeader } from '../../src/shared/storage/file-storage.port';
 import { describeWithMinio, ensureBucket } from '../support/minio';
 
 // DX-084: el adaptador contra un S3 real (MinIO). Sin S3_TEST_ENDPOINT se
@@ -55,4 +56,26 @@ describeWithMinio('S3FileStorage contra MinIO (int)', (cfg) => {
     expect(await expired.text()).toContain('expired');
     await storage.delete(key);
   }, 20_000);
+
+  it('la URL firmada responde con la disposición, el nombre y el tipo pedidos (DX-151)', async () => {
+    const key = `clinical/${run}-disposicion.bin`;
+    await storage.save(
+      key,
+      Buffer.from('%PDF-1.7'),
+      'application/octet-stream',
+    );
+    const options = {
+      disposition: 'attachment' as const,
+      filename: 'radio ñ.pdf',
+      contentType: 'application/pdf',
+    };
+    const res = await fetch(await storage.getSignedUrl(key, 60, options));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toBe(
+      contentDispositionHeader(options),
+    );
+    expect(res.headers.get('content-type')).toBe('application/pdf');
+    expect(await res.text()).toBe('%PDF-1.7');
+    await storage.delete(key);
+  });
 });

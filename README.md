@@ -1504,6 +1504,98 @@ migraciones `20261020000000_dx222_enums`,
   `+57 601 555 0101`, y una entrega impresa de `POI-EXO` para la última cita
   atendida de un día anterior.
 
+## Documentos del paciente (DX-151)
+
+Radiografías, fotos, remisiones, consentimientos firmados escaneados e
+informes adjuntos a la ficha del paciente. El contenido vive en el almacén de
+ficheros (ver [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084));
+la BD guarda solo la clave y los metadatos. Módulo `patient-documents`;
+migraciones `20261020200000_dx151_enums`,
+`20261020200100_dx151_patient_documents`,
+`20261020200200_dx151_audit_events_idx` y
+`20261020200300_dx151_teeth_check`.
+
+- **Tabla** (`patient_documents`): `category` (`XRAY`, `PHOTO`, `REFERRAL`,
+  `SIGNED_CONSENT`, `REPORT`, `OTHER`), `clinicalDate` opcional (día civil,
+  nunca futuro en la zona de la sede), `toothNumbers` (hasta 8 dientes FDI;
+  CHECK por elemento y de una sola dimensión, migración `…_teeth_check`; la
+  API rechaza un diente repetido), `notes` (hasta 500), nombre original,
+  tipo detectado, tamaño y `sha256`. El mismo contenido no se sube dos veces
+  al mismo paciente: índice único parcial `patient_documents_active_sha256_key`
+  (`tenantId`, `patientId`, `sha256`) entre los **no anulados** (409 «ya
+  subido»; anulado, se puede volver a subir). La **sede** queda sellada al
+  subir (la activa por `X-Location-Id` o, sin cabecera, la principal).
+  `uploadedAt` y `createdAt` los pone la BD con la **hora del servidor**
+  (trigger `dx_patient_documents_server_time`), sea cual sea lo que mande el
+  cliente. **Inalterable**: el trigger `dx_patient_documents_immutable`
+  (`search_path` fijo) rechaza cualquier UPDATE salvo la **anulación única**
+  (`voidedAt`, `voidedById` y `voidReason` de NULL a un valor, una sola vez)
+  y cualquier DELETE o TRUNCATE. RLS FORCE y FK compuestas por `tenantId` a
+  paciente y sede, todas RESTRICT.
+- **Lista blanca y detección por contenido**: PDF, JPEG, PNG, HEIC, DOCX y
+  DICOM. **Decide el contenido**, no la extensión ni el tipo que declara el
+  cliente: `sniffDocument` lee las firmas (`%PDF-`, `FF D8 FF`, PNG con
+  `IHDR`, `ftyp` HEIC, ZIP con `word/document.xml` en el directorio central,
+  preámbulo DICOM + `DICM`). HTML, SVG, EML o cualquier otra cosa **nunca**
+  entran: 400 «Tipo de archivo no admitido. Se aceptan PDF, JPG, PNG, HEIC,
+  DOCX y DICOM.». Si el tipo o la extensión declarados son de otro tipo de la
+  lista (un PNG renombrado `.pdf`), 400 «El contenido del archivo no coincide
+  con su tipo.»; `application/octet-stream` o un DICOM sin extensión no dicen
+  nada y pasan. Nada rechazado llega al almacén.
+- **Límites**: 20 MB por fichero (multer corta antes de leer más) → **413**
+  con cuerpo en español «El archivo supera el máximo de 20 MB.»; un solo
+  fichero por subida; los demás errores de multipart también salen en
+  español (filtro `MultipartErrorsFilter` del controlador). Notas hasta 500
+  caracteres y motivo de anulación de 3 a 500, contados en puntos de código
+  como los CHECK de la BD; en ambos, **sin caracteres de control** (salvo
+  tabulador y saltos de línea): 400 «El texto contiene caracteres no
+  permitidos.».
+- **Claves sin PII**: `patient-documents/<tenantId>/<documentId>.<ext>`; el
+  nombre original solo está en la BD. La API nunca expone la clave ni el
+  tenant. **URL firmadas con `Content-Disposition`** (300 s,
+  `PATIENT_DOCUMENT_URL_TTL_SECONDS`): `inline` solo para PDF, JPEG y PNG
+  (`inlineViewable` en la respuesta; HEIC, DOCX o DICOM en línea dan 400
+  «Este tipo solo se puede descargar.»), `attachment` para cualquiera. La
+  disposición, el nombre (saneado, con `filename*` UTF-8) y el tipo detectado
+  van **dentro de la firma** (S3: `response-content-*` en SigV4; disco: el
+  HMAC), así que tocarlos invalida la URL. Con el disco, `/files/signed` es la
+  única ruta enmarcable (`frame-ancestors *`, sin `X-Frame-Options`), con
+  `nosniff` y `private, no-store`, y solo sirve tipos de la lista blanca:
+  firmar o pedir otro tipo es 403.
+- **Rutas y roles** (`/patients/:patientId/documents`; los cuatro roles leen y
+  suben): `POST /` multipart (`file`, `category`, `clinicalDate?`,
+  `toothNumbers?` separado por comas, `notes?`); `GET /?category=&tooth=`
+  (más recientes primero, anulados incluidos); `GET /:id`; `GET
+  /:id/url/inline` y `GET /:id/url/download` (`Cache-Control: no-store`; un
+  anulado se sigue pudiendo descargar); `POST /:id/void` `{ reason }`, solo el
+  **autor o ADMIN** (403 a los demás, 409 si ya está anulado). **Sin PATCH,
+  PUT ni DELETE**, a propósito: un documento se corrige anulándolo y subiendo
+  otro. Paciente u otro documento de otra clínica: 404.
+- **Auditoría** (`audit_events`, `PATIENT_DOCUMENT`, siempre con el
+  paciente): CREATE al subir; VIEW con `reason` `DOCUMENT_LIST` (listado),
+  sin motivo (detalle) y `DOCUMENT_VIEW` (URL en línea); EXPORT con
+  `DOCUMENT_DOWNLOAD`; VOID. **Nunca** se registran el nombre del fichero, el
+  de los usuarios, la clave ni la URL. Las llamadas que fallan no dejan
+  evento.
+- **Retención**: un documento **nunca se borra**, ni de la BD ni del almacén
+  (la anulación lo marca y lo conserva); sigue la retención de la historia
+  clínica (DX-039), así que el ciclo de vida del bucket no debe expirar
+  versiones actuales. Si el INSERT falla después de guardar el fichero, el
+  objeto huérfano se borra en el acto (es lo único que se borra).
+- **CSP de la web**: la web ve los PDF en un `iframe` y las imágenes en
+  `<img>` desde la URL firmada, así que su CSP añade a `frame-src` e
+  `img-src` el origen de los ficheros: `NEXT_PUBLIC_FILES_ORIGIN` (variable
+  de la **web**, no de la API; por defecto el origen de la API, que es el de
+  `/files/signed` con el disco). Con S3 en producción, pon ahí el origen del
+  bucket (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no
+  tiene variables nuevas.
+- **Pendiente tras DX-089**: la sede de escritura la resuelve solo
+  `PrismaPatientDocumentRepository.resolveWriteLocationId` (hoy la activa o
+  la principal); cuando DX-089 llegue a main pasa a
+  `tenantContext.writeLocationId(tx)`, un cambio de una línea.
+- **Demo**: `seed:demo` no crea documentos (no hay ficheros de ejemplo que
+  guardar en el almacén).
+
 ## Dominios personalizados (SEC-009)
 
 Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio
@@ -1645,7 +1737,7 @@ motivo. Luego, como `admin@demo.dentalix.app`, Ajustes → «Accesos de soporte�
 
 ## Ficheros en un bucket S3 (DX-084)
 
-Los ficheros (hoy los avatares; DX-008 añadirá radiografías y PDFs) pasan por
+Los ficheros (los avatares y los [documentos del paciente](#documentos-del-paciente-dx-151)) pasan por
 el puerto `FileStoragePort` (`src/shared/storage`), con dos adaptadores que se
 eligen con `STORAGE_DRIVER`:
 

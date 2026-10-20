@@ -9,8 +9,11 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { assertFileKey, publicFileUrl } from './file-key';
 import {
   FileStoragePort,
+  SignedUrlOptions,
   StoredFile,
+  assertSignedUrlOptions,
   assertSignedUrlTtl,
+  contentDispositionHeader,
 } from './file-storage.port';
 import type { S3StorageConfig } from './storage-config';
 
@@ -97,12 +100,28 @@ export class S3FileStorage implements FileStoragePort {
     return publicFileUrl(this.cfg.publicBaseUrl, key);
   }
 
-  async getSignedUrl(key: string, ttlSeconds: number): Promise<string> {
+  async getSignedUrl(
+    key: string,
+    ttlSeconds: number,
+    options?: SignedUrlOptions,
+  ): Promise<string> {
     assertFileKey(key);
     assertSignedUrlTtl(ttlSeconds);
+    assertSignedUrlOptions(options);
+    // Los response-* van dentro de la firma SigV4: el bucket responde con esa
+    // disposición y ese tipo, y cambiarlos en la URL la invalida (DX-151).
     return getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: this.cfg.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.cfg.bucket,
+        Key: key,
+        ...(options
+          ? { ResponseContentDisposition: contentDispositionHeader(options) }
+          : {}),
+        ...(options?.contentType
+          ? { ResponseContentType: options.contentType }
+          : {}),
+      }),
       { expiresIn: ttlSeconds },
     );
   }

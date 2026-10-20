@@ -150,6 +150,42 @@ describe('S3FileStorage (DX-084, cliente simulado)', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('getSignedUrl con opciones: el bucket responde con la disposición y el tipo pedidos (DX-151)', async () => {
+    const send = mockSend();
+    const { storage } = makeStorage(send);
+    const url = new URL(
+      await storage.getSignedUrl('clinical/x.bin', 60, {
+        disposition: 'attachment',
+        filename: 'radio ñ.pdf',
+        contentType: 'application/pdf',
+      }),
+    );
+    expect(url.searchParams.get('response-content-disposition')).toBe(
+      `attachment; filename="radio n.pdf"; filename*=UTF-8''radio%20%C3%B1.pdf`,
+    );
+    expect(url.searchParams.get('response-content-type')).toBe(
+      'application/pdf',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('getSignedUrl sin opciones no fuerza disposición ni tipo (compatible)', async () => {
+    const { storage } = makeStorage(mockSend());
+    const url = new URL(await storage.getSignedUrl('clinical/x.pdf', 60));
+    expect(url.searchParams.has('response-content-disposition')).toBe(false);
+    expect(url.searchParams.has('response-content-type')).toBe(false);
+  });
+
+  it('getSignedUrl rechaza un tipo fuera de la lista blanca (DX-151)', async () => {
+    const { storage } = makeStorage(mockSend());
+    await expect(
+      storage.getSignedUrl('clinical/x.pdf', 60, {
+        disposition: 'inline',
+        contentType: 'text/html',
+      }),
+    ).rejects.toThrow('Tipo');
+  });
+
   it('getSignedUrl rechaza un TTL fuera de 1 s – 7 días', async () => {
     const { storage } = makeStorage(mockSend());
     await expect(storage.getSignedUrl('clinical/x.pdf', 0)).rejects.toThrow(

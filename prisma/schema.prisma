@@ -64,6 +64,8 @@ model Tenant {
   postOpTemplates           PostOpInstructionTemplate[]
   postOpTemplateLinks       PostOpInstructionTemplateLink[]
   postOpDeliveries          PostOpInstructionDelivery[]
+  // DX-151: documentos de los pacientes.
+  patientDocuments          PatientDocument[]
 
   @@map("tenants")
 }
@@ -110,6 +112,9 @@ model User {
   implantsPlaced           PatientImplant[]            @relation("PatientImplantProfessional")
   implantsVoided           PatientImplant[]            @relation("PatientImplantVoidedBy")
   implantCardsDelivered    PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
+  // DX-151: documentos del paciente subidos y anulados.
+  uploadedPatientDocuments PatientDocument[]           @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments   PatientDocument[]           @relation("PatientDocumentVoidedBy")
   planAcceptancesRecorded  TreatmentPlanAcceptance[]
   tokens                   UserToken[]
   clinicalEntryAddenda     ClinicalEntryAddendum[]
@@ -181,6 +186,8 @@ model Location {
   prescriptions       Prescription[]
   // DX-191: implantes colocados en la sede.
   patientImplants     PatientImplant[]
+  // DX-151: documentos del paciente subidos en la sede.
+  patientDocuments    PatientDocument[]
   planAcceptances     TreatmentPlanAcceptance[]
   presentedPlans      TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
@@ -385,6 +392,8 @@ model Patient {
   prescriptions          Prescription[]
   // DX-191: implantes y demás componentes colocados.
   implants               PatientImplant[]
+  // DX-151: radiografías, fotos, remisiones, consentimientos firmados…
+  documents              PatientDocument[]
   retentionActions       PatientRetentionAction[]
   // DX-122: pendientes por agendar del paciente.
   waitlistEntries        AppointmentWaitlistEntry[]
@@ -2212,6 +2221,8 @@ enum AuditResourceType {
   // ejemplos) y su entrega al paciente (impresa, email o enlace de WhatsApp).
   POSTOP_TEMPLATE
   POSTOP_DELIVERY
+  // DX-151: documentos del paciente (subir, ver, descargar, anular).
+  PATIENT_DOCUMENT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -2819,6 +2830,71 @@ model PatientImplant {
   @@index([voidedById])
   @@index([cardDeliveredById])
   @@map("patient_implants")
+}
+
+// DX-151: categoría de un documento del paciente.
+enum PatientDocumentCategory {
+  XRAY
+  PHOTO
+  REFERRAL
+  SIGNED_CONSENT
+  REPORT
+  OTHER
+}
+
+/// DX-151: un fichero adjunto a la ficha del paciente (radiografía, foto,
+/// remisión, consentimiento firmado escaneado, informe…). El contenido vive en
+/// el bucket (`storageKey`); aquí van sus metadatos y su huella `sha256`.
+/// INALTERABLE en la BD (trigger `dx_patient_documents_immutable`): solo se
+/// anula una vez (motivo, autor y fecha); DELETE/TRUNCATE solo un
+/// superusuario. `uploadedAt` y `createdAt` los pone el servidor en UTC
+/// (trigger BEFORE INSERT). RLS forzada.
+/// En SQL y no en Prisma (20261020200100):
+///   patient_documents_active_sha256_key  UNIQUE ("tenantId", "patientId", "sha256")
+///                                        WHERE "voidedAt" IS NULL
+///   CHECK de dientes: cada elemento FDI y como mucho 8.
+model PatientDocument {
+  id           String                  @id @default(uuid()) @db.Uuid
+  tenantId     String                  @db.Uuid
+  patientId    String                  @db.Uuid
+  // Sede activa al subirlo.
+  locationId   String                  @db.Uuid
+  category     PatientDocumentCategory
+  // Nombre del fichero tal como lo subió el usuario (solo para mostrar).
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  // SHA-256 del contenido en hex minúsculas.
+  sha256       String
+  storageKey   String                  @unique
+  // Fecha clínica del documento (p. ej. el día de la radiografía), si se sabe.
+  clinicalDate DateTime?               @db.Date
+  // Dientes FDI a los que se refiere (0..8).
+  toothNumbers String[]                @default([])
+  notes        String?
+  // Quien lo sube: sale del token, nunca del cuerpo.
+  uploadedById String                  @db.Uuid
+  uploadedAt   DateTime                @default(now())
+  voidedAt     DateTime?
+  voidedById   String?                 @db.Uuid
+  voidReason   String?
+  createdAt    DateTime                @default(now())
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
+  patient    Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  location   Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  uploadedBy User     @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  voidedBy   User?    @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "patient_documents_tenant_id_key")
+  @@index([tenantId, patientId, uploadedAt(sort: Desc)], map: "patient_documents_patient_uploaded_idx")
+  @@index([tenantId, patientId, category], map: "patient_documents_patient_category_idx")
+  @@index([toothNumbers], type: Gin, map: "patient_documents_tooth_numbers_idx")
+  @@index([tenantId, locationId])
+  @@index([uploadedById])
+  @@index([voidedById])
+  @@map("patient_documents")
 }
 
 // ---------------------------------------------------------------------------

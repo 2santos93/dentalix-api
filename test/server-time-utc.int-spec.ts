@@ -44,6 +44,7 @@ async function cleanup(): Promise<void> {
   await raw.clinicalEntryAddendum.deleteMany({ where });
   await raw.clinicalEntry.deleteMany({ where });
   await raw.patientImplant.deleteMany({ where });
+  await raw.patientDocument.deleteMany({ where });
   await raw.collectionNote.deleteMany({ where });
   await raw.paymentPromise.deleteMany({ where });
   await raw.paymentReceipt.deleteMany({ where });
@@ -207,6 +208,22 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       s.userId,
     );
     expect(implant.drift).toBeLessThan(1);
+  });
+
+  it('patient_documents: uploadedAt y createdAt en UTC', async () => {
+    const doc = await inBogota<{ id: string; createdDrift: number }>(
+      `INSERT INTO "patient_documents" ("id", "tenantId", "patientId", "locationId", "category",
+         "originalName", "mimeType", "sizeBytes", "sha256", "storageKey", "uploadedById")
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'XRAY',
+         'rx.png', 'image/png', 10, repeat('a', 64), 'dx226-utc-int/rx.png', $4::uuid)
+       RETURNING "id", ${drift('"uploadedAt"')},
+         abs(extract(epoch FROM ("createdAt" - (now() AT TIME ZONE 'UTC'))))::float8 AS "createdDrift"`,
+      s.patientId,
+      s.locationId,
+      s.userId,
+    );
+    expect(doc.drift).toBeLessThan(1);
+    expect(doc.createdDrift).toBeLessThan(1);
   });
 
   it('collection_notes y payment_promises: createdAt en UTC', async () => {
