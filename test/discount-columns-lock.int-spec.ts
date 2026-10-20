@@ -446,6 +446,17 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
       ).rejects.toMatchObject(FK_VIOLATION);
     });
 
+    it('la sede del precio no puede ser de otra clínica (DX-105)', async () => {
+      await expect(
+        asA((tx) =>
+          tx.treatmentPlanItem.update({
+            where: { id: itemId },
+            data: { pricingLocationId: b.locationId },
+          }),
+        ),
+      ).rejects.toMatchObject(FK_VIOLATION);
+    });
+
     it('la sede del descuento no puede ser de otra clínica', async () => {
       await expect(
         asA((tx) =>

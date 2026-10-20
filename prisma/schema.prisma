@@ -207,7 +207,9 @@ model Location {
   collectionNotes     CollectionNote[]
   paymentPromises     PaymentPromise[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
-  planItemDiscounts   TreatmentPlanItem[]
+  planItemDiscounts   TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
+  // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
+  planItemPricings    TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
   // DX-027: cajas por turno de la sede y sus ajustes.
   cashSessions        CashSession[]
   cashAdjustments     CashSessionAdjustment[]
@@ -1367,12 +1369,15 @@ model TreatmentPlanItem {
   plan             TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
   discountBy       User?         @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
   // FK COMPUESTA (SEC-004): la sede del descuento es de la MISMA clínica.
-  discountLocation Location?     @relation(fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
+  discountLocation Location?     @relation("TreatmentPlanItemDiscountLocation", fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
   // FK COMPUESTA (SEC-004, DX-105): el convenio aplicado es de la MISMA clínica.
   agreement        Agreement?    @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
+  // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
+  pricingLocation  Location?     @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
 
   @@index([tenantId, planId])
   @@index([tenantId, agreementId], map: "treatment_plan_items_tenant_agreement_idx")
+  @@index([tenantId, pricingLocationId], map: "treatment_plan_items_tenant_pricing_location_idx")
   @@index([tenantId, discountLocationId])
   @@index([discountById])
   // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:

@@ -42,15 +42,11 @@ const TENANT_TABLES = [
   'post_op_instruction_templates',
   // DX-203: responsables (hijos de patients).
   'patient_responsible_parties',
-  // DX-105: precios y asignaciones (hijos de las listas, convenios y patients),
-  // convenios (hijos de payers y listas) y listas (hijas de locations).
-  'price_list_items',
+  // DX-105: asignaciones de convenio (hijas de patients, convenios y coberturas).
   'patient_agreements',
-  'agreements',
-  'price_lists',
-  // DX-153: coberturas (hijas de patients y payers) y pagadores.
+  // DX-153: coberturas (hijas de patients y payers). Los pagadores van más abajo
+  // (los convenios los referencian).
   'patient_coverages',
-  'payers',
   'patient_implants',
   // DX-151: documentos (hijos de patients y locations).
   'patient_documents',
@@ -78,6 +74,13 @@ const TENANT_TABLES = [
   'cash_sessions',
   'treatment_plan_acceptances',
   'treatment_plan_items',
+  // DX-105: tras treatment_plan_items (agreementId, RESTRICT): precios de lista,
+  // convenios (hijos de payers y listas), listas (hijas de locations) y, al fin,
+  // los pagadores (DX-153).
+  'price_list_items',
+  'agreements',
+  'price_lists',
+  'payers',
   'treatment_plans',
   'tooth_records',
   'patient_dentition_events',
