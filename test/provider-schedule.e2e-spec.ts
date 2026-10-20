@@ -8,8 +8,10 @@ import {
   loginAs,
   registerClinic,
   resetDatabase,
+  SEEDED_PASSWORD,
   seedMember,
 } from './support/e2e-fixtures';
+import { PasswordService } from '../src/shared/crypto/password.service';
 
 // DX-233 en HTTP real: horario de cada profesional por sede (PUT/GET), sus
 // excepciones por fecha, el cuadrante, permisos, auditoría y aislamiento; y su
@@ -628,6 +630,156 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         reception.token,
       ).expect(200);
       expect(inside.body).toMatchObject({ providerOffSchedule: false });
+    });
+  });
+
+  // DX-089: miembros acotados a una o varias sedes.
+  describe('sedes permitidas (DX-089)', () => {
+    let draY: Member;
+    let receptionB: Member;
+    const NOT_ALLOWED =
+      /^.+ no atiende en Sede B: solo se le puede poner horario en las sedes que tiene permitidas en Personal\.$/;
+
+    /**
+     * Miembro acotado a `locationIds` (email propio: `seedMember` da uno por
+     * rol); el login ya lleva el claim `loc`.
+     */
+    async function restricted(
+      email: string,
+      role: ClinicRole,
+      locationIds: string[],
+    ): Promise<Member> {
+      const user = await raw.user.create({
+        data: {
+          email,
+          passwordHash: await new PasswordService().hash(SEEDED_PASSWORD),
+          fullName: `Miembro ${email}`,
+          emailVerifiedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      await raw.clinicMembership.create({
+        data: { tenantId: clinic.tenantId, userId: user.id, role },
+      });
+      await as(
+        api().put(`/api/v1/staff/${user.id}/locations`),
+        clinic.adminToken,
+      )
+        .send({ locationIds })
+        .expect(200);
+      return {
+        userId: user.id,
+        token: await loginAs(app, clinic.host, email),
+      };
+    }
+
+    beforeAll(async () => {
+      draY = await restricted('dra-y@dx233-e2e.test', ClinicRole.DENTIST, [
+        sedeA,
+      ]);
+      receptionB = await restricted(
+        'recepcion-b@dx233-e2e.test',
+        ClinicRole.RECEPTION,
+        [sedeB],
+      );
+    });
+
+    it('a una profesional acotada a A no se le pone horario ni excepciones en B (400, español)', async () => {
+      const put = await as(
+        api().put(`/api/v1/providers/${draY.userId}/schedule`),
+        clinic.adminToken,
+      )
+        .send({
+          locations: [
+            {
+              locationId: sedeB,
+              ranges: [{ weekday: 2, startMinute: H(8), endMinute: H(12) }],
+            },
+          ],
+        })
+        .expect(400);
+      expect((put.body as { message: string }).message).toMatch(NOT_ALLOWED);
+
+      for (const ranges of [
+        [{ startMinute: H(8), endMinute: H(12) }],
+        [] as unknown[],
+      ]) {
+        const post = await as(
+          api().post(`/api/v1/providers/${draY.userId}/schedule-overrides`),
+          clinic.adminToken,
+        )
+          .send({ locationId: sedeB, date: NEXT_THU, ranges })
+          .expect(400);
+        expect((post.body as { message: string }).message).toMatch(NOT_ALLOWED);
+      }
+
+      // En su sede, sí.
+      await as(
+        api().put(`/api/v1/providers/${draY.userId}/schedule`),
+        clinic.adminToken,
+      )
+        .send({
+          locations: [
+            {
+              locationId: sedeA,
+              ranges: [{ weekday: 2, startMinute: H(8), endMinute: H(12) }],
+            },
+          ],
+        })
+        .expect(200);
+    });
+
+    it('el cuadrante de recepción acotada a B: solo B, sin quien no atiende en B y 403 para A', async () => {
+      await as(
+        api()
+          .get('/api/v1/schedule/roster')
+          .query({ weekStart: MON, locationId: sedeA }),
+        receptionB.token,
+      ).expect(403);
+
+      const res = await as(
+        api().get('/api/v1/schedule/roster').query({ weekStart: MON }),
+        receptionB.token,
+      ).expect(200);
+      const roster = res.body as Roster & { locations: { id: string }[] };
+      expect(roster.locations.map((l) => l.id)).toEqual([sedeB]);
+      const ids = roster.providers.map((p) => p.providerId);
+      expect(ids).not.toContain(draY.userId);
+      expect(ids).toContain(draX.userId);
+      // Ninguna asignación de otra sede.
+      for (const p of roster.providers) {
+        for (const d of p.days) {
+          for (const a of d.assignments) expect(a.locationId).toBe(sedeB);
+        }
+      }
+
+      // Para quien ve todas, la Dra. Y no trabaja en B ningún día.
+      const admin = await as(
+        api()
+          .get('/api/v1/schedule/roster')
+          .query({ weekStart: MON, locationId: sedeB }),
+        clinic.adminToken,
+      ).expect(200);
+      const y = (admin.body as Roster).providers.find(
+        (p) => p.providerId === draY.userId,
+      )!;
+      expect(y.days.every((d) => d.worksAtLocation === false)).toBe(true);
+    });
+
+    it('el horario que lee recepción acotada a B es solo el de B', async () => {
+      const res = await as(
+        api().get(`/api/v1/providers/${draX.userId}/schedule`),
+        receptionB.token,
+      ).expect(200);
+      const view = res.body as { locations: { locationId: string }[] };
+      expect(view.locations.map((l) => l.locationId)).toEqual([sedeB]);
+      const overrides = await as(
+        api().get(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+        receptionB.token,
+      ).expect(200);
+      for (const o of overrides.body as { locationId: string }[]) {
+        expect(o.locationId).toBe(sedeB);
+      }
     });
   });
 });

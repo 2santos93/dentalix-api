@@ -14,7 +14,11 @@ import {
   STAFF_REPOSITORY,
   type StaffRepository,
 } from '../../../staff/domain/ports/staff-repository.port';
+import type { StaffMember } from '../../../staff/domain/entities/staff-member.entity';
+import { attendsAt } from '../../../staff/domain/provider-location';
 import { ATTENDING_ROLES } from '../../../schedule-blocks/domain/schedule-block-rules';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { isLocationAllowed } from '../../../../shared/tenancy/location-access';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { AuditScheduleEntry } from '../../../audit/domain/audit-metadata';
@@ -55,6 +59,16 @@ export const PROVIDER_NOT_ATTENDING_MESSAGE =
 export const OVERRIDE_NOT_FOUND_MESSAGE = 'Excepción no encontrada';
 export const CIVIL_DATE_MESSAGE =
   'Las fechas tienen que ser días reales en formato AAAA-MM-DD';
+/**
+ * DX-089: un profesional acotado a ciertas sedes (`membership_locations`) no
+ * puede tener horario ni excepciones en las demás: allí no se le puede citar.
+ */
+export function providerLocationNotAllowedMessage(
+  providerName: string,
+  locationName: string,
+): string {
+  return `${providerName} no atiende en ${locationName}: solo se le puede poner horario en las sedes que tiene permitidas en Personal.`;
+}
 /** Días máximos del cuadrante en una petición. */
 export const MAX_ROSTER_DAYS = 31;
 
@@ -140,12 +154,36 @@ export interface ProviderScheduleSettings {
 async function requireAttendingProvider(
   staff: StaffRepository,
   providerId: string,
-): Promise<void> {
+): Promise<StaffMember> {
   const member = await staff.findById(providerId);
   if (!member) throw new NotFoundException(PROVIDER_NOT_FOUND_MESSAGE);
   if (!ATTENDING_ROLES.includes(member.role)) {
     throw new BadRequestException(PROVIDER_NOT_ATTENDING_MESSAGE);
   }
+  return member;
+}
+
+/** 400 si el profesional está acotado a sedes y esta no es una de ellas. */
+function assertProviderAttendsAt(
+  member: StaffMember,
+  location: Pick<Location, 'id' | 'name'>,
+): void {
+  if (!attendsAt(member, location.id)) {
+    throw new BadRequestException(
+      providerLocationNotAllowedMessage(member.fullName, location.name),
+    );
+  }
+}
+
+/**
+ * DX-089: lo que LEE un miembro acotado se limita a sus sedes permitidas,
+ * como `GET /locations` (sin restricción, todas).
+ */
+function visibleLocation(
+  tenantContext: TenantContextService,
+): (locationId: string) => boolean {
+  const allowed = tenantContext.getAllowedLocationIds();
+  return (locationId) => isLocationAllowed(allowed, locationId);
 }
 
 /** Sedes de la clínica por id (bajo RLS: una ajena no está). */
@@ -226,6 +264,7 @@ export class GetProviderScheduleUseCase {
     private readonly locations: LocationRepository,
     @Inject(PROVIDER_SCHEDULE_CLOCK)
     private readonly clock: ProviderScheduleClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(providerId: string): Promise<ProviderScheduleView> {
@@ -234,7 +273,16 @@ export class GetProviderScheduleUseCase {
     const snapshot = (
       await this.repo.findSnapshots([providerId], { from: today, to: today })
     ).get(providerId)!;
-    return toView(providerId, snapshot, await locationsById(this.locations));
+    // `configured` es del profesional; las sedes, solo las que ve el lector.
+    const visible = visibleLocation(this.tenantContext);
+    return toView(
+      providerId,
+      {
+        ...snapshot,
+        weekly: snapshot.weekly.filter((r) => visible(r.locationId)),
+      },
+      await locationsById(this.locations),
+    );
   }
 }
 
@@ -261,11 +309,13 @@ export class ReplaceProviderScheduleUseCase {
     input: ReplaceProviderScheduleInput,
     ctx: AuditRequestContext,
   ): Promise<ProviderScheduleView> {
-    await requireAttendingProvider(this.staff, providerId);
+    const member = await requireAttendingProvider(this.staff, providerId);
     const byId = await locationsById(this.locations);
     for (const loc of input.locations) {
       const location = byId.get(loc.locationId);
       if (!location) throw new BadRequestException('Sede no encontrada');
+      // Quitarle una sede (sin tramos) siempre se puede.
+      if (loc.ranges.length > 0) assertProviderAttendsAt(member, location);
       if (!location.isActive && loc.ranges.length > 0) {
         throw new BadRequestException(
           `La sede ${location.name} está desactivada: no se le puede poner horario.`,
@@ -392,6 +442,7 @@ export class ListProviderOverridesUseCase {
     private readonly locations: LocationRepository,
     @Inject(PROVIDER_SCHEDULE_CLOCK)
     private readonly clock: ProviderScheduleClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -418,7 +469,10 @@ export class ListProviderOverridesUseCase {
     }
     const byId = await locationsById(this.locations);
     const rows = await this.repo.listOverrides(providerId, { from, to });
-    return rows.map((o) => overrideView(providerId, o, byId));
+    const visible = visibleLocation(this.tenantContext);
+    return rows
+      .filter((o) => visible(o.locationId))
+      .map((o) => overrideView(providerId, o, byId));
   }
 }
 
@@ -451,10 +505,11 @@ export class SetProviderOverrideUseCase {
     input: SetOverrideInput,
     ctx: AuditRequestContext,
   ): Promise<ProviderOverrideView & { replaced: boolean }> {
-    await requireAttendingProvider(this.staff, providerId);
+    const member = await requireAttendingProvider(this.staff, providerId);
     const byId = await locationsById(this.locations);
     const location = byId.get(input.locationId);
     if (!location) throw new BadRequestException('Sede no encontrada');
+    assertProviderAttendsAt(member, location);
     const date = requireCivilDate(input.date);
     const today = civilDateIn(this.clock(), location.timeZone);
     if (date < today) {
@@ -595,6 +650,7 @@ export class GetScheduleRosterUseCase {
     @Inject(STAFF_REPOSITORY) private readonly staff: StaffRepository,
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(input: RosterInput): Promise<RosterView> {
@@ -613,8 +669,18 @@ export class GetScheduleRosterUseCase {
     ) {
       throw new NotFoundException('Sede no encontrada');
     }
-    const providers = (await this.staff.listActive()).filter((m) =>
-      ATTENDING_ROLES.includes(m.role),
+    // DX-089: una sede explícita fuera de las permitidas es 403 (como la
+    // agenda); sin ella, el miembro acotado solo ve sus sedes y a quien
+    // atiende en alguna de ellas (como las columnas de la agenda).
+    if (input.locationId !== undefined) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
+    }
+    const visible = visibleLocation(this.tenantContext);
+    const shown = all.filter((l) => visible(l.id));
+    const providers = (await this.staff.listActive()).filter(
+      (m) =>
+        ATTENDING_ROLES.includes(m.role) &&
+        shown.some((l) => attendsAt(m, l.id)),
     );
     const snapshots = await this.repo.findSnapshots(
       providers.map((p) => p.userId),
@@ -627,7 +693,7 @@ export class GetScheduleRosterUseCase {
       from,
       to,
       locationId,
-      locations: all.map((l) => ({
+      locations: shown.map((l) => ({
         id: l.id,
         name: l.name,
         timeZone: l.timeZone,
@@ -641,15 +707,18 @@ export class GetScheduleRosterUseCase {
           configured: snapshot.configured,
           days: dates.map((date): RosterDayView => {
             const assignments = providerDayAssignments(snapshot, date);
+            // DX-121d: donde no atiende no se le puede citar: «no trabaja».
             const atLocation =
               locationId === null
                 ? null
-                : providerRangesOn(snapshot, locationId, date);
+                : attendsAt(p, locationId)
+                  ? providerRangesOn(snapshot, locationId, date)
+                  : [];
             return {
               date,
               weekday: civilWeekday(date),
               unrestricted: !snapshot.configured && assignments.length === 0,
-              assignments,
+              assignments: assignments.filter((a) => visible(a.locationId)),
               worksAtLocation:
                 locationId === null
                   ? null

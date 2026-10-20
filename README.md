@@ -615,6 +615,14 @@ hasta 1 h (SEC-028).
   con el del profesional cada día; «Ocupar este hueco» (DX-210) deja fuera a
   quien caería fuera del horario de su profesional y trae
   `providerOffSchedule`.
+- **Sedes permitidas (DX-089)**: a un profesional acotado a ciertas sedes no
+  se le pone horario semanal ni excepciones en las demás (400 en español;
+  quitarle una sede, sin tramos, siempre se puede). Un miembro acotado que lee
+  el horario, las excepciones o el cuadrante solo ve sus sedes, y en el
+  cuadrante solo a quien atiende en alguna de ellas; un `locationId` fuera de
+  las suyas es 403, como en la agenda. Con `locationId`, quien no atiende en
+  esa sede sale con `worksAtLocation: false`. El aviso de una cita sin
+  cabecera mira la sede donde se escribe (`writeLocationId`).
 - **Auditoría**: `PROVIDER_SCHEDULE` con `reason`
   `PROVIDER_SCHEDULE_REPLACED`, `PROVIDER_SCHEDULE_OVERRIDE_SET`,
   `PROVIDER_SCHEDULE_OVERRIDE_DELETED` o `PROVIDER_SCHEDULE_SETTINGS`, autor y

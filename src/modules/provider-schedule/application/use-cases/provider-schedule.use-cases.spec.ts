@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
@@ -6,9 +10,12 @@ import type { RecordAuditEventUseCase } from '../../../audit/application/record-
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { InMemoryProviderScheduleRepository } from '../__fixtures__/in-memory-provider-schedule.repository';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   DeleteProviderOverrideUseCase,
+  GetProviderScheduleUseCase,
   GetScheduleRosterUseCase,
+  ListProviderOverridesUseCase,
   ReplaceProviderScheduleUseCase,
   SetProviderOverrideUseCase,
 } from './provider-schedule.use-cases';
@@ -113,7 +120,12 @@ describe('horario de los profesionales (DX-233)', () => {
       makeStaff(),
       audit,
     );
-    roster = new GetScheduleRosterUseCase(repo, makeStaff(), makeLocations());
+    roster = new GetScheduleRosterUseCase(
+      repo,
+      makeStaff(),
+      makeLocations(),
+      new TenantContextService(),
+    );
   });
 
   describe('PUT del semanal', () => {
@@ -390,5 +402,238 @@ describe('horario de los profesionales (DX-233)', () => {
         roster.execute({ weekStart: '2026-10-19', locationId: 'otra' }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
+  });
+});
+
+// DX-089: sedes permitidas de cada miembro (`membership_locations`).
+describe('horario de los profesionales y sedes permitidas (DX-233 × DX-089)', () => {
+  // La Dra. Y solo atiende en la sede A; el Dr. Z, sin restricción.
+  const members = [
+    {
+      userId: 'dra-y',
+      fullName: 'Dra. Y',
+      role: ClinicRole.DENTIST,
+      locationIds: [A],
+    },
+    {
+      userId: 'dr-z',
+      fullName: 'Dr. Z',
+      role: ClinicRole.DENTIST,
+      locationIds: null,
+    },
+  ];
+  const staff = {
+    findById: (id: string) =>
+      Promise.resolve(members.find((m) => m.userId === id) ?? null),
+    listActive: () => Promise.resolve(members),
+  } as unknown as StaffRepository;
+  const audit = {
+    record: () => Promise.resolve(),
+  } as unknown as RecordAuditEventUseCase;
+  const clock = () => NOW;
+  const tenantContext = new TenantContextService();
+  /** Lo que haría un miembro acotado a `allowed` (claim `loc`). */
+  const as = <T>(allowed: string[], fn: () => Promise<T>) =>
+    tenantContext.run('t', undefined, fn, allowed);
+  const thursdayAt = (locationId: string) => ({
+    locationId,
+    ranges: [{ weekday: 4, startMinute: H(8), endMinute: H(12) }],
+  });
+
+  let repo: InMemoryProviderScheduleRepository;
+  let replace: ReplaceProviderScheduleUseCase;
+  let setOverride: SetProviderOverrideUseCase;
+  let getSchedule: GetProviderScheduleUseCase;
+  let listOverrides: ListProviderOverridesUseCase;
+  let roster: GetScheduleRosterUseCase;
+
+  beforeEach(() => {
+    repo = new InMemoryProviderScheduleRepository();
+    const locations = makeLocations();
+    replace = new ReplaceProviderScheduleUseCase(
+      repo,
+      staff,
+      locations,
+      audit,
+      clock,
+    );
+    setOverride = new SetProviderOverrideUseCase(
+      repo,
+      staff,
+      locations,
+      audit,
+      clock,
+    );
+    getSchedule = new GetProviderScheduleUseCase(
+      repo,
+      staff,
+      locations,
+      clock,
+      tenantContext,
+    );
+    listOverrides = new ListProviderOverridesUseCase(
+      repo,
+      staff,
+      locations,
+      clock,
+      tenantContext,
+    );
+    roster = new GetScheduleRosterUseCase(
+      repo,
+      staff,
+      locations,
+      tenantContext,
+    );
+  });
+
+  it('no se le pone horario semanal en una sede que no tiene permitida (400, español)', async () => {
+    await expect(
+      replace.execute(
+        'dra-y',
+        {
+          locations: [
+            { locationId: A, ranges: [] },
+            {
+              locationId: B,
+              ranges: [{ weekday: 1, startMinute: H(8), endMinute: H(12) }],
+            },
+          ],
+        },
+        CTX,
+      ),
+    ).rejects.toThrow(
+      'Dra. Y no atiende en Sede B: solo se le puede poner horario en las sedes que tiene permitidas en Personal.',
+    );
+    await expect(
+      replace.execute('dra-y', { locations: [thursdayAt(B)] }, CTX),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.weekly.get('dra-y')).toBeUndefined();
+    // En su sede, sí; y una sede ajena SIN tramos (quitarla) no molesta.
+    const view = await replace.execute(
+      'dra-y',
+      { locations: [thursdayAt(A), { locationId: B, ranges: [] }] },
+      CTX,
+    );
+    expect(view.locations.map((l) => l.locationId)).toEqual([A]);
+    // Sin restricción, en cualquiera.
+    await expect(
+      replace.execute('dr-z', { locations: [thursdayAt(B)] }, CTX),
+    ).resolves.toMatchObject({ configured: true });
+  });
+
+  it('ni una excepción (tampoco «no trabaja») en una sede que no tiene permitida', async () => {
+    for (const ranges of [[{ startMinute: H(9), endMinute: H(12) }], []]) {
+      await expect(
+        setOverride.execute(
+          'dra-y',
+          { locationId: B, date: '2026-10-22', ranges },
+          CTX,
+        ),
+      ).rejects.toThrow(
+        'Dra. Y no atiende en Sede B: solo se le puede poner horario en las sedes que tiene permitidas en Personal.',
+      );
+    }
+    expect(repo.overrides.get('dra-y')).toBeUndefined();
+    await expect(
+      setOverride.execute(
+        'dra-y',
+        { locationId: A, date: '2026-10-22', ranges: [] },
+        CTX,
+      ),
+    ).resolves.toMatchObject({ locationId: A, off: true });
+  });
+
+  it('el cuadrante de un miembro acotado solo enseña sus sedes y a quien atiende en ellas', async () => {
+    await replace.execute('dra-y', { locations: [thursdayAt(A)] }, CTX);
+    await replace.execute(
+      'dr-z',
+      {
+        locations: [
+          {
+            locationId: A,
+            ranges: [{ weekday: 1, startMinute: H(8), endMinute: H(12) }],
+          },
+          thursdayAt(B),
+        ],
+      },
+      CTX,
+    );
+    // Acotado a B: pedir la sede A es 403, como la agenda.
+    await expect(
+      as([B], () => roster.execute({ weekStart: '2026-10-19', locationId: A })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const view = await as([B], () =>
+      roster.execute({ weekStart: '2026-10-19' }),
+    );
+    expect(view.locations.map((l) => l.id)).toEqual([B]);
+    // La Dra. Y no atiende en B: no sale.
+    expect(view.providers.map((p) => p.providerId)).toEqual(['dr-z']);
+    const z = view.providers[0];
+    // Lunes: el Dr. Z está en A, que el acotado no ve.
+    expect(z.days[0]).toMatchObject({ unrestricted: false, assignments: [] });
+    expect(z.days[3].assignments).toEqual([
+      expect.objectContaining({ locationId: B, source: 'WEEKLY' }),
+    ]);
+
+    // Sin restricción ve todo.
+    const all = await roster.execute({ weekStart: '2026-10-19' });
+    expect(all.locations.map((l) => l.id)).toEqual([A, B, OFF]);
+    expect(all.providers.map((p) => p.providerId)).toEqual(['dra-y', 'dr-z']);
+  });
+
+  it('en una sede donde el profesional no atiende, el cuadrante dice que no trabaja allí', async () => {
+    // Sin horario, pero acotada a A: en B no se la puede citar (DX-121d).
+    const view = await roster.execute({
+      weekStart: '2026-10-19',
+      days: 1,
+      locationId: B,
+    });
+    const y = view.providers.find((p) => p.providerId === 'dra-y')!;
+    expect(y.days[0]).toMatchObject({
+      worksAtLocation: false,
+      locationRanges: [],
+    });
+    const z = view.providers.find((p) => p.providerId === 'dr-z')!;
+    expect(z.days[0]).toMatchObject({
+      worksAtLocation: true,
+      locationRanges: null,
+    });
+  });
+
+  it('el horario y las excepciones que lee un miembro acotado son solo de sus sedes', async () => {
+    await replace.execute(
+      'dr-z',
+      {
+        locations: [
+          thursdayAt(A),
+          {
+            ...thursdayAt(B),
+            ranges: [{ weekday: 2, startMinute: H(8), endMinute: H(12) }],
+          },
+        ],
+      },
+      CTX,
+    );
+    await setOverride.execute(
+      'dr-z',
+      { locationId: A, date: '2026-10-22', ranges: [] },
+      CTX,
+    );
+    await setOverride.execute(
+      'dr-z',
+      { locationId: B, date: '2026-10-27', ranges: [] },
+      CTX,
+    );
+    const mine = await as([B], () => getSchedule.execute('dr-z'));
+    expect(mine.locations.map((l) => l.locationId)).toEqual([B]);
+    expect(mine.configured).toBe(true);
+    const overrides = await as([B], () => listOverrides.execute('dr-z', {}));
+    expect(overrides.map((o) => o.locationId)).toEqual([B]);
+
+    expect(
+      (await getSchedule.execute('dr-z')).locations.map((l) => l.locationId),
+    ).toEqual([A, B]);
+    expect(await listOverrides.execute('dr-z', {})).toHaveLength(2);
   });
 });
