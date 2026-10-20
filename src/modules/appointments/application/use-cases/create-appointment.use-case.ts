@@ -29,7 +29,7 @@ import type { AppointmentTypeRepository } from '../../../appointment-types/domai
 import { endFromDuration } from '../../../appointment-types/domain/appointment-type-rules';
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
-import { assertAttendsAt } from '../provider-location';
+import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
@@ -172,15 +172,16 @@ export class CreateAppointmentUseCase {
       throw new NotFoundException('Profesional no encontrado');
     }
 
-    // DX-089: la sede de la cita (la de pendientes, o la del request) tiene que
-    // ser una permitida — la cabecera ya la validó el interceptor — y el
-    // profesional tiene que atender en ella (DX-121d). Sin sede objetivo
-    // (miembro con varias sedes y sin cabecera) no hay con qué comparar.
+    // DX-089: la sede de la cita (la de pendientes, ya permitida, o la misma en
+    // la que el repositorio la escribirá: la del request o, sin cabecera, la
+    // de escritura de la sesión) — y el profesional tiene que atender en ella
+    // (DX-121d), también sin cabecera.
     if (input.locationId !== undefined) {
       this.tenantContext.assertLocationAllowed(input.locationId);
     }
-    const target = input.locationId ?? this.tenantContext.getLocationId();
-    if (target !== undefined) assertAttendsAt(provider, target);
+    const target =
+      input.locationId ?? (await this.repo.resolveWriteLocationId());
+    assertAttendsAt(provider, target);
 
     // Horario de atención de la SEDE: la cita tiene que caber completa en un
     // tramo del día. Sede sin horario configurado => sin restricción (ver

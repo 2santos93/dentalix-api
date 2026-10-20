@@ -24,7 +24,7 @@ import type { RecordAuditEventUseCase } from '../../../audit/application/record-
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AppointmentAuditContext } from './update-appointment.use-case';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../provider-location';
+import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -81,6 +81,7 @@ type RepoOverrides = Partial<Omit<AppointmentRepository, 'update'>> & {
 function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
   const { update, ...rest } = overrides;
   return {
+    resolveWriteLocationId: () => Promise.resolve('loc1'),
     create: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<Appointment | null> => Promise.resolve(null),

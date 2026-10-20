@@ -112,6 +112,12 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     return tenantId;
   }
 
+  resolveWriteLocationId(): Promise<string> {
+    return this.prisma.runWithTenant((tx) =>
+      this.tenantContext.writeLocationId(tx),
+    );
+  }
+
   async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const tenantId = this.requireTenantId();
     const appointment = await this.prisma.runWithTenant(async (tx) => {

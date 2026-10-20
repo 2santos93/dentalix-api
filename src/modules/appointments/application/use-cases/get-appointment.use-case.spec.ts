@@ -40,6 +40,7 @@ function makeRepo(
   overrides: Partial<AppointmentRepository> = {},
 ): AppointmentRepository {
   return {
+    resolveWriteLocationId: () => Promise.resolve('loc1'),
     create: (input: CreateAppointmentRepoInput): Promise<Appointment> =>
       Promise.reject(
         new Error(

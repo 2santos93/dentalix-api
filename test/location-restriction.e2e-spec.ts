@@ -15,7 +15,7 @@ import {
   LOCATION_NOT_ALLOWED_CODE,
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
-import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/appointments/application/provider-location';
+import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/staff/domain/provider-location';
 
 // DX-089: el personal restringido a sedes solo ve y escribe en las suyas, y un
 // profesional restringido solo atiende en sus sedes (DX-121d).
@@ -55,6 +55,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
   let d: Member;
   let e: Member;
   let u: Member;
+  let f: Member;
   const tokens: Record<string, string> = {};
   let patient: string;
   let plan: string;
@@ -172,10 +173,13 @@ describe('Personal restringido a sedes (DX-089)', () => {
     d = await seedUser('d@dx089-restr-a.test', ClinicRole.DENTIST);
     e = await seedUser('e@dx089-restr-a.test', ClinicRole.DENTIST);
     u = await seedUser('u@dx089-restr-a.test', ClinicRole.RECEPTION);
+    // F atiende solo en A2: no en la sede principal.
+    f = await seedUser('f@dx089-restr-a.test', ClinicRole.DENTIST);
     await restrict(r, [a1]);
     await restrict(r2, [a2, a3]);
     await restrict(s, [a1]);
     await restrict(d, [a1]);
+    await restrict(f, [a2]);
     // El login lee las sedes vigentes: el token ya lleva `loc`.
     for (const m of [r, r2, s, d, e, u]) {
       tokens[m.email] = await loginAs(app, a.host, m.email);
@@ -424,6 +428,28 @@ describe('Personal restringido a sedes (DX-089)', () => {
       await raw.appointment.delete({
         where: { id: (created.body as { id: string }).id },
       });
+    });
+
+    it('sin cabecera se comprueba contra la sede donde se escribe la cita', async () => {
+      const body = {
+        patientId: patient,
+        start: '2027-03-08T15:00:00.000Z',
+        end: '2027-03-08T15:30:00.000Z',
+      };
+      // R2 (A2 y A3) escribe en A2, donde D (solo A1) no atiende.
+      const restricted = await as(r2)
+        .post('/appointments', { ...body, providerId: d.userId })
+        .expect(400);
+      expect((restricted.body as { message: string }).message).toBe(
+        PROVIDER_NOT_AT_LOCATION_MESSAGE,
+      );
+      // Sin restricción se escribe en la principal (A1), donde F no atiende.
+      const unrestricted = await as(u)
+        .post('/appointments', { ...body, providerId: f.userId })
+        .expect(400);
+      expect((unrestricted.body as { message: string }).message).toBe(
+        PROVIDER_NOT_AT_LOCATION_MESSAGE,
+      );
     });
 
     it('mover una cita de A2 a D es 400', async () => {

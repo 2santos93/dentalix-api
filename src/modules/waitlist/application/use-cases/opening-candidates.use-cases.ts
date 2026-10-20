@@ -61,6 +61,7 @@ import {
 } from '../../domain/waitlist-offer-rules';
 import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { assertAttendsAt } from '../../../staff/domain/provider-location';
 
 /** Reloj de las ofertas (el día de hoy en la zona de la sede); los tests lo fijan. */
 export const OPENING_CLOCK = Symbol('OPENING_CLOCK');
@@ -153,13 +154,15 @@ async function requireLocation(
   return location;
 }
 
+/** Profesional de esta clínica que atiende en la sede del hueco (DX-121d). */
 async function requireProvider(
   staff: StaffRepository,
   id: string,
+  locationId: string,
 ): Promise<void> {
-  if (!(await staff.findById(id))) {
-    throw new NotFoundException('Profesional no encontrado');
-  }
+  const provider = await staff.findById(id);
+  if (!provider) throw new NotFoundException('Profesional no encontrado');
+  assertAttendsAt(provider, locationId);
 }
 
 function contactOf(patient: CandidatePatient, country: string) {
@@ -211,7 +214,8 @@ export class ListOpeningCandidatesUseCase {
       this.tenantContext,
       input.locationId,
     );
-    if (input.providerId) await requireProvider(this.staff, input.providerId);
+    if (input.providerId)
+      await requireProvider(this.staff, input.providerId, location.id);
 
     const timeZone = location.timeZone;
     const slot: CandidateSlot = {
@@ -387,7 +391,7 @@ export class CreateWaitlistOfferUseCase {
       this.tenantContext,
       input.locationId,
     );
-    await requireProvider(this.staff, input.providerId);
+    await requireProvider(this.staff, input.providerId, location.id);
     const patient = await this.repo.patientContact(input.patientId);
     if (!patient) throw new NotFoundException('Paciente no encontrado');
 
@@ -466,6 +470,7 @@ export class RecordWaitlistOfferOutcomeUseCase {
     @Inject(OPENING_CANDIDATES_REPOSITORY)
     private readonly repo: OpeningCandidatesRepository,
     private readonly audit: RecordAuditEventUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -475,6 +480,8 @@ export class RecordWaitlistOfferOutcomeUseCase {
   ): Promise<WaitlistOffer> {
     const current = await this.repo.findOffer(id);
     if (!current) throw new NotFoundException(OFFER_NOT_FOUND_MESSAGE);
+    // DX-089: la oferta es de un hueco de una sede; ajena → 403.
+    this.tenantContext.assertLocationAllowed(current.locationId);
     const updated = await this.repo.recordOutcome(
       id,
       outcome,

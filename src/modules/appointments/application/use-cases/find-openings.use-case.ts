@@ -33,7 +33,7 @@ import {
   civilRangeInZone,
   parseCivilDate,
 } from '../../../../shared/time/civil-day';
-import { assertAttendsAt } from '../provider-location';
+import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export interface FindOpeningsInput {

@@ -131,6 +131,13 @@ export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
 
 export interface AppointmentRepository {
   create(input: CreateAppointmentRepoInput): Promise<Appointment>;
+
+  /**
+   * DX-089: la sede en la que `create` escribiría una cita sin sede explícita
+   * (la del request; sin cabecera, la primera permitida del restringido o la
+   * principal). El caso de uso la usa para comprobar profesional ↔ sede.
+   */
+  resolveWriteLocationId(): Promise<string>;
   findById(id: string): Promise<Appointment | null>;
 
   /**

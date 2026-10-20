@@ -10,6 +10,7 @@ import {
   RecordWaitlistOfferOutcomeUseCase,
 } from './opening-candidates.use-cases';
 import { InMemoryOpeningCandidatesRepository } from '../__fixtures__/in-memory-opening-candidates';
+import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import type {
   AppointmentCandidateRow,
   EntryCandidateRow,
@@ -42,9 +43,16 @@ const locations = {
         : null,
     ),
 } as unknown as LocationRepository;
+// `drz` está restringido a loc2 (DX-121d): no atiende en loc1.
 const staff = {
   findById: (userId: string) =>
-    Promise.resolve(['drx', 'dry'].includes(userId) ? { userId } : null),
+    Promise.resolve(
+      ['drx', 'dry'].includes(userId)
+        ? { userId }
+        : userId === 'drz'
+          ? { userId, locationIds: ['loc2'] }
+          : null,
+    ),
 } as unknown as StaffRepository;
 const config = { offersPerPatientPerDay: 2 };
 
@@ -145,7 +153,11 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       clock,
       new TenantContextService(),
     );
-    outcome = new RecordWaitlistOfferOutcomeUseCase(repo, audit(drafts));
+    outcome = new RecordWaitlistOfferOutcomeUseCase(
+      repo,
+      audit(drafts),
+      new TenantContextService(),
+    );
   });
 
   describe('candidatos', () => {
@@ -221,6 +233,42 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         whatsappBlockedReason: 'NO_OPT_IN',
         whatsappPhone: null,
       });
+    });
+
+    it('DX-121d: un profesional que no atiende en la sede del hueco es 400', async () => {
+      await expect(
+        list.execute({ ...SLOT, providerId: 'drz' }, RECEPTION),
+      ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
+    });
+
+    it('DX-089: registrar la respuesta de una oferta de una sede ajena es 403', async () => {
+      addEntry('e1', 'p1');
+      const wa = await offer.execute(
+        {
+          locationId: 'loc1',
+          slotStart: SLOT.start,
+          slotEnd: SLOT.end,
+          patientId: 'p1',
+          providerId: 'drx',
+          waitlistEntryId: 'e1',
+          channel: 'WA_ME',
+        },
+        CTX,
+      );
+      const tenantContext = new TenantContextService();
+      const restricted = new RecordWaitlistOfferOutcomeUseCase(
+        repo,
+        audit(drafts),
+        tenantContext,
+      );
+      await expect(
+        tenantContext.run(
+          't1',
+          undefined,
+          () => restricted.execute(wa.id, 'DECLINED', CTX),
+          ['loc2'],
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('la oferta por WhatsApp sin respuesta del hueco viaja como `pendingOfferId`', async () => {

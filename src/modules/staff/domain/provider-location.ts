@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import type { StaffMember } from '../../staff/domain/entities/staff-member.entity';
+import type { StaffMember } from './entities/staff-member.entity';
 
 /**
  * DX-121d: un profesional restringido a sedes (DX-089, `membership_locations`)

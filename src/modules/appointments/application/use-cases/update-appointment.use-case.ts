@@ -45,7 +45,7 @@ import { LOCATION_REPOSITORY } from '../../../locations/domain/ports/location-re
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { assertAttendsAt } from '../provider-location';
+import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import {
   FLOW_TIMESTAMP_FIELD,
   FRONT_DESK_ROLES,

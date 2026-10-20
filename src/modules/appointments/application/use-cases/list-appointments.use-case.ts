@@ -7,7 +7,7 @@ import type { StaffRepository } from '../../../staff/domain/ports/staff-reposito
 import {
   attendsAt,
   PROVIDER_NOT_AT_LOCATION_MESSAGE,
-} from '../provider-location';
+} from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 /** DX-121: columnas de la vista Día como mucho (12 = scroll interno en web). */

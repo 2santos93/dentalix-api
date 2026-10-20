@@ -125,6 +125,11 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     };
   }
 
+  /** La sede por defecto del doble (la misma que usa `create`). */
+  resolveWriteLocationId(): Promise<string> {
+    return Promise.resolve('loc1');
+  }
+
   create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const now = new Date('2026-01-01T00:00:00.000Z');
     const id = `a-${++seq}`;

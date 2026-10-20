@@ -8,7 +8,7 @@ import {
 } from '../../domain/ports/appointment-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../provider-location';
+import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 
 function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
   return {
@@ -43,6 +43,7 @@ function makeRepo(
   overrides: Partial<AppointmentRepository> = {},
 ): AppointmentRepository {
   return {
+    resolveWriteLocationId: () => Promise.resolve('loc1'),
     create: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
