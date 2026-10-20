@@ -29,6 +29,7 @@ import {
 } from '../prescriptions/presentation/prescriptions.controller';
 import { TreatmentPlansController } from '../treatment-plans/presentation/treatment-plans.controller';
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
+import { PriceQuoteController } from '../treatment-plans/presentation/price-quote.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
@@ -57,8 +58,10 @@ import { PatientDocumentsController } from '../patient-documents/presentation/pa
  * `@Audit` que desaparece, cambia de acción o de recurso, o una ruta nueva
  * auditada sin entrada, ponen `npm test` en rojo.
  *
- * Fuera a propósito: `GET /patients` (búsqueda, no es la ficha de nadie) y
- * `GET /audit-events` (leer el propio registro).
+ * Fuera a propósito: `GET /patients` (búsqueda, no es la ficha de nadie),
+ * `GET /audit-events` (leer el propio registro) y `GET
+ * /patients/:patientId/price-quote` (DX-105: calcula un precio, sin datos
+ * clínicos ni escritura).
  */
 const P = { param: 'patientId' } as const;
 const RES = { response: 'id' } as const;
@@ -871,6 +874,7 @@ const CONTROLLERS: Type[] = [
   PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,
+  PriceQuoteController,
   PaymentsController,
   PaymentReceiptsController,
   PaymentPlansController,

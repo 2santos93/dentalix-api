@@ -337,6 +337,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/agreement': EVERY_ROLE,
   'PUT /patients/:patientId/agreement': EVERY_ROLE,
   'DELETE /patients/:patientId/agreement': EVERY_ROLE,
+  // DX-105: precio resuelto de un ítem nuevo (CLINICAL_ROLES, R15).
+  'GET /patients/:patientId/price-quote': CLINICAL,
   // DX-153: coberturas del paciente (PATIENT_ROLES).
   'GET /patients/:patientId/coverages': EVERY_ROLE,
   'POST /patients/:patientId/coverages': EVERY_ROLE,

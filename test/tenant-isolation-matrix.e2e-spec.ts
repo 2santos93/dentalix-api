@@ -1092,6 +1092,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}/agreement`,
       status: 404,
     },
+    // --- precio resuelto de un ítem nuevo (DX-105) ---
+    {
+      name: 'GET /patients/:patientId/price-quote',
+      verb: 'get',
+      path: () =>
+        `/patients/${a.patientId}/price-quote?catalogItemId=${b.catalogItemId}&currency=USD`,
+      status: 404,
+    },
     // --- caja por turno (DX-027) ---
     {
       name: 'GET /cash-sessions/:id',

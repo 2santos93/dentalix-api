@@ -19,6 +19,7 @@ import {
   testDiscountPolicy,
 } from './__fixtures__/discount-fixtures';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
+import { catalogPricing } from './__fixtures__/catalog-pricing-source';
 import { AddTreatmentPlanItemUseCase } from './add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from './update-treatment-plan-item.use-case';
 import { ApplyBulkDiscountUseCase } from './apply-bulk-discount.use-case';
@@ -30,11 +31,15 @@ const CATALOG_ITEM = {
   id: 'cat1',
   kind: CatalogKind.PROCEDURE,
   defaultPrice: 1000,
+  allowDiscount: true,
 } as DentalCatalogItem;
 
 const catalog = {
   findById: (id: string) =>
     Promise.resolve(id === CATALOG_ITEM.id ? CATALOG_ITEM : null),
+  // DX-105: el «Descuento %» mira si cada procedimiento admite descuentos.
+  findByIds: (ids: string[]) =>
+    Promise.resolve(ids.map((id) => ({ ...CATALOG_ITEM, id }))),
 } as unknown as DentalCatalogRepository;
 
 function setup(plan: { status?: TreatmentPlanStatus; currency?: string } = {}) {
@@ -47,14 +52,19 @@ function setup(plan: { status?: TreatmentPlanStatus; currency?: string } = {}) {
   const policy = testDiscountPolicy();
   return {
     repo,
-    add: new AddTreatmentPlanItemUseCase(repo, catalog, policy, FIXED_CLOCK),
+    add: new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogPricing(catalog),
+      policy,
+      FIXED_CLOCK,
+    ),
     update: new UpdateTreatmentPlanItemUseCase(
       repo,
       catalog,
       policy,
       FIXED_CLOCK,
     ),
-    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK),
+    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK, catalog),
   };
 }
 
@@ -291,7 +301,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
 
     it('COP: 7,5 % de tres ítems, sin decimales', async () => {
       const { bulk } = withItems('COP', [85000, 123457, 99999]);
-      const items = await bulk.execute(
+      const { items } = await bulk.execute(
         'plan1',
         { itemIds: ['item1', 'item2', 'item3'], percent: 7.5 },
         DENTIST_ACTOR,
@@ -304,7 +314,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
 
     it('EUR: a céntimos', async () => {
       const { bulk } = withItems('EUR', [85.55, 123.45, 0.99]);
-      const items = await bulk.execute(
+      const { items } = await bulk.execute(
         'plan1',
         { itemIds: ['item1', 'item2', 'item3'], percent: 7.5 },
         DENTIST_ACTOR,
@@ -314,7 +324,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
 
     it('el tope se respeta ítem a ítem aunque el redondeo lo pase', async () => {
       const { bulk } = withItems('COP', [1005, 2000, 3333]);
-      const items = await bulk.execute(
+      const { items } = await bulk.execute(
         'plan1',
         { itemIds: ['item1', 'item2', 'item3'], percent: 10 },
         DENTIST_ACTOR,
@@ -351,7 +361,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
       const plan = await repo.findPlanById('plan1');
       expect(plan!.items.map((i) => i.discount)).toEqual([0, 0]);
-      const done = await bulk.execute(
+      const { items: done } = await bulk.execute(
         'plan1',
         {
           itemIds: ['item1', 'item2'],

@@ -10,6 +10,7 @@ import {
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { catalogPricing } from './__fixtures__/catalog-pricing-source';
 import { AddTreatmentPlanItemUseCase } from './add-treatment-plan-item.use-case';
 import {
   TreatmentPlan,
@@ -24,6 +25,7 @@ import {
 import { DentalCatalogItem } from '../../../dental-catalog/domain/entities/dental-catalog-item.entity';
 import { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import { PLAN_WITHOUT_OPTIONS } from './__fixtures__/in-memory-treatment-plan.repository';
+import { PRICE_REQUIRED_MESSAGE } from '../../domain/pricing/resolve-item-price';
 
 function fakePlanWithItems(
   overrides: Partial<TreatmentPlanWithItems> = {},
@@ -79,6 +81,11 @@ function fakeItem(
     surfaces: [],
     catalogItemId: 'cat1',
     catalogPrice: null,
+    basePrice: null,
+    priceSource: null,
+    agreementId: null,
+    agreementName: null,
+    pricingLocationId: null,
     price: 200,
     discount: 0,
     discountReason: null,
@@ -168,7 +175,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     const catalogRepo = makeCatalogRepo();
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );
@@ -189,7 +196,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     });
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );
@@ -211,7 +218,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     });
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );
@@ -240,7 +247,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     });
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );
@@ -268,7 +275,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     });
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );
@@ -279,7 +286,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
         { toothNumber: '11', catalogItemId: 'cat1' },
         ADMIN_ACTOR,
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(new BadRequestException(PRICE_REQUIRED_MESSAGE));
   });
 
   it('new item starts in PROPOSED status', async () => {
@@ -287,7 +294,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     const catalogRepo = makeCatalogRepo();
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );
@@ -313,7 +320,7 @@ describe('AddTreatmentPlanItemUseCase', () => {
     const catalogRepo = makeCatalogRepo();
     const uc = new AddTreatmentPlanItemUseCase(
       repo,
-      catalogRepo,
+      catalogPricing(catalogRepo),
       testDiscountPolicy(),
       FIXED_CLOCK,
     );

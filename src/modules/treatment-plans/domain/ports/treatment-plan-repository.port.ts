@@ -1,6 +1,7 @@
 import {
   CatalogKind,
   DiscountReason,
+  PriceSource,
   ToothSurface,
   TreatmentPlanItemStatus,
   TreatmentPlanRejectionReason,
@@ -104,8 +105,10 @@ export interface AddTreatmentPlanItemRepoInput {
   toothNumber: string;
   surfaces?: ToothSurface[];
   catalogItemId: string;
-  /** SEC-041: precio de catálogo en el alta (null = ítem libre). */
+  /** SEC-041: precio de referencia en el alta (null = ítem libre). DX-105: el resuelto. */
   catalogPrice: number | null;
+  /** DX-105: foto del precio (ver `PricingSnapshot`). */
+  pricing: PricingSnapshot;
   price: number;
   /** Ya validado (0 ≤ discount ≤ price) por el caso de uso; 0 si se omite. */
   discount?: number;
@@ -114,6 +117,19 @@ export interface AddTreatmentPlanItemRepoInput {
   discountReason?: DiscountReason | null;
   discountReasonNote?: string | null;
   discountStamp?: DiscountStamp | null;
+}
+
+/**
+ * Foto del precio de un ítem nuevo (DX-105): precio de catálogo, origen de la
+ * referencia, convenio y sede con la que se resolvió. Se escribe una vez, en
+ * el alta; las alternativas la copian.
+ */
+export interface PricingSnapshot {
+  basePrice: number | null;
+  priceSource: PriceSource;
+  agreementId: string | null;
+  agreementName: string | null;
+  pricingLocationId: string;
 }
 
 /**

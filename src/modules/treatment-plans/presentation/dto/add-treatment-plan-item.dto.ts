@@ -24,8 +24,8 @@ import { DiscountReasonFieldsDto } from './discount-reason.dto';
 // `surfaces` reuse the odontogram's exported FDI pattern + ToothSurface enum
 // — NOT a new/duplicated regex (see AddToothRecordUseCase /
 // CreateToothRecordDto for the identical convention). `price` is optional:
-// when omitted, the use case resolves it from the catalog item's
-// `defaultPrice` (400 if neither is available).
+// when omitted, the use case resolves it (DX-105: agreement → location price
+// list → catalog `defaultPrice`; 400 if none is available).
 export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @ApiProperty({
     description:
@@ -56,7 +56,7 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
 
   @ApiPropertyOptional({
     description:
-      'Explicit price (at most 2 decimal places); if omitted, falls back to the catalog item defaultPrice (400 if neither is set). SEC-041: un precio por debajo del de catálogo cuenta como descuento (tope del rol y motivo de la política)',
+      'Precio explícito (máx. 2 decimales). Si se omite, la API lo resuelve (DX-105): convenio vigente del paciente → lista de precios activa de la sede → precio de catálogo; sin ninguno, 400. El resuelto queda como referencia (`catalogPrice`): un precio por debajo cuenta como descuento (tope del rol y motivo de la política) y, si la prestación no admite descuentos, 400',
     maximum: MONEY_MAX,
   })
   @IsOptional()
