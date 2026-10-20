@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type { DetectedType } from '../../domain/document-content';
@@ -97,16 +96,12 @@ export class PrismaPatientDocumentRepository implements PatientDocumentRepositor
   }
 
   /**
-   * Sede donde se escribe: la activa del request (`X-Location-Id`) o, sin
-   * ella, la principal. ÚNICO punto que la resuelve: cuando DX-089 llegue a
-   * main se sustituye por `this.tenantContext.writeLocationId(tx)`.
+   * Sede donde se escribe: la de la cabecera (`X-Location-Id`) o, sin ella, la
+   * primera permitida del miembro (DX-089) o la principal de la clínica. ÚNICO
+   * punto que la resuelve en el módulo.
    */
-  private async resolveWriteLocationId(
-    tx: Prisma.TransactionClient,
-  ): Promise<string> {
-    return (
-      this.tenantContext.getLocationId() ?? (await resolveDefaultLocationId(tx))
-    );
+  private resolveWriteLocationId(tx: Prisma.TransactionClient): Promise<string> {
+    return this.tenantContext.writeLocationId(tx);
   }
 
   clinicToday(now: Date): Promise<string> {
