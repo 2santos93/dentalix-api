@@ -1,10 +1,12 @@
 import { ForbiddenException } from '@nestjs/common';
+import { ClinicRole } from '@prisma/client';
 import {
   LOCATION_NOT_ALLOWED_CODE,
   LOCATION_NOT_ALLOWED_MESSAGE,
   NO_ACTIVE_LOCATION_MESSAGE,
   allowedLocationsFromClaim,
   isLocationAllowed,
+  locationClaim,
   locationNotAllowed,
   noActiveLocation,
 } from './location-access';
@@ -62,5 +64,22 @@ describe('location-access (DX-089)', () => {
     expect(NO_ACTIVE_LOCATION_MESSAGE).toBe(
       'No tienes ninguna sede activa asignada.',
     );
+  });
+
+  describe('locationClaim', () => {
+    it('miembro restringido → `loc` con sus sedes (también `[]`)', () => {
+      expect(locationClaim(ClinicRole.RECEPTION, ['a'])).toEqual({
+        loc: ['a'],
+      });
+      expect(locationClaim(ClinicRole.DENTIST, [])).toEqual({ loc: [] });
+    });
+
+    it('sin filas → sin claim', () => {
+      expect(locationClaim(ClinicRole.RECEPTION, null)).toEqual({});
+    });
+
+    it('ADMIN → nunca lleva claim, aunque tuviera filas', () => {
+      expect(locationClaim(ClinicRole.ADMIN, ['a'])).toEqual({});
+    });
   });
 });

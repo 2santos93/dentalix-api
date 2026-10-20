@@ -620,4 +620,84 @@ describe('AcceptInvitationUseCase', () => {
       expect(repo.isAccepted('tok-multi')).toBe(true);
     });
   });
+
+  describe('sedes permitidas en el token (DX-089)', () => {
+    async function acceptAs(opts: {
+      role: ClinicRole;
+      previous?: { allowedLocationIds: string[] | null };
+    }): Promise<Record<string, unknown>> {
+      const repo = new InMemoryInvitationRepository();
+      repo.seedUser({
+        id: 'user-x',
+        email: 'x@clinic.com',
+        passwordHash: 'OLD_HASH',
+        tokenVersion: 1,
+      });
+      if (opts.previous) {
+        // Membresía dada de baja (borrado lógico) que la invitación reactiva.
+        repo.seedMembership({
+          userId: 'user-x',
+          tenantId: 't1',
+          role: ClinicRole.RECEPTION,
+          deletedAt: new Date('2026-01-01T00:00:00.000Z'),
+          allowedLocationIds: opts.previous.allowedLocationIds,
+        });
+      }
+      repo.seedInvitation({
+        token: 'tok-loc',
+        email: 'x@clinic.com',
+        role: opts.role,
+      });
+      const issue = jest
+        .fn()
+        .mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT' });
+      const ctx = new TenantContextService();
+      const uc = new AcceptInvitationUseCase(
+        repo,
+        makePassword(),
+        makeTokens({ issue }),
+        ctx,
+        makeAudit(),
+      );
+      await ctx.run('t1', () =>
+        uc.execute({ token: 'tok-loc', password: 'longenough1' }),
+      );
+      return (issue.mock.calls as Record<string, unknown>[][])[0][0];
+    }
+
+    it('membresía reactivada que estaba restringida → el token conserva `loc`', async () => {
+      const payload = await acceptAs({
+        role: ClinicRole.RECEPTION,
+        previous: { allowedLocationIds: ['loc-a'] },
+      });
+      expect(payload).toEqual({
+        sub: 'user-x',
+        tenantId: 't1',
+        role: ClinicRole.RECEPTION,
+        tv: 1,
+        loc: ['loc-a'],
+      });
+    });
+
+    it('membresía reactivada sin restricción → sin `loc`', async () => {
+      const payload = await acceptAs({
+        role: ClinicRole.RECEPTION,
+        previous: { allowedLocationIds: null },
+      });
+      expect(payload).not.toHaveProperty('loc');
+    });
+
+    it('membresía nueva → sin `loc` (todas las sedes)', async () => {
+      const payload = await acceptAs({ role: ClinicRole.DENTIST });
+      expect(payload).not.toHaveProperty('loc');
+    });
+
+    it('invitada como ADMIN → sin `loc`, aunque la membresía tuviera filas', async () => {
+      const payload = await acceptAs({
+        role: ClinicRole.ADMIN,
+        previous: { allowedLocationIds: ['loc-a'] },
+      });
+      expect(payload).not.toHaveProperty('loc');
+    });
+  });
 });

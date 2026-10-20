@@ -1,7 +1,6 @@
 import { ClinicRole } from '@prisma/client';
 import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.entity';
 import {
-  AcceptOutcome,
   AcceptUserResolution,
   AccountClaimBlockedError,
   AccountClaimConflictError,
@@ -32,6 +31,12 @@ interface StoredMembership {
   tenantId: string;
   role: ClinicRole;
   deletedAt: Date | null;
+  /**
+   * DX-089: sedes activas de `membership_locations` (ya filtradas, como las
+   * devuelve el repo de Prisma). `null` = sin filas = todas las sedes. Las
+   * filas sobreviven al borrado lógico de la membresía.
+   */
+  allowedLocationIds?: string[] | null;
 }
 
 let seq = 0;
@@ -123,12 +128,14 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     tenantId: string;
     role?: ClinicRole;
     deletedAt?: Date | null;
+    allowedLocationIds?: string[] | null;
   }): void {
     this.memberships.push({
       userId: input.userId,
       tenantId: input.tenantId,
       role: input.role ?? ClinicRole.ASSISTANT,
       deletedAt: input.deletedAt ?? null,
+      allowedLocationIds: input.allowedLocationIds ?? null,
     });
   }
 
@@ -295,7 +302,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     email: string;
     role: ClinicRole;
     user: AcceptUserResolution;
-  }): Promise<AcceptOutcome & { tokenVersion: number }> {
+  }): ReturnType<InvitationRepository['acceptTransactional']> {
     let user: StoredUser;
     const resolution = input.user;
     if ('newUser' in resolution) {
@@ -353,6 +360,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       userId,
       role: input.role,
       tokenVersion: user.tokenVersion,
+      allowedLocationIds: membership?.allowedLocationIds ?? null,
     });
   }
 

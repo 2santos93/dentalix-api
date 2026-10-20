@@ -15,7 +15,7 @@ import {
   BreakGlassService,
   type BreakGlassSession,
 } from '../break-glass.service';
-import { locationClaim } from '../session-claims.service';
+import { locationClaim } from '../../../../shared/tenancy/location-access';
 
 export interface PlatformLoginInput {
   email: string;

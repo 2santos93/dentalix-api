@@ -4,6 +4,7 @@ import {
   JwtPayload,
   isTenantPayload,
 } from '../../../shared/crypto/token.service';
+import { locationClaim } from '../../../shared/tenancy/location-access';
 import { AUTH_REPOSITORY } from '../domain/ports/auth-repository.port';
 import type {
   AuthRepository,
@@ -63,19 +64,6 @@ export class SessionClaimsService {
       tokenVersion: state.tokenVersion,
     };
   }
-}
-
-/**
- * DX-089: claim `loc` de una sesión de clínica. Solo lo lleva un miembro
- * restringido (con filas en `membership_locations`); un ADMIN nunca, aunque
- * tuviera filas, porque administra todas las sedes. Sin claim = todas.
- */
-export function locationClaim(
-  role: ClinicRole,
-  allowedLocationIds: string[] | null,
-): { loc?: string[] } {
-  if (role === ClinicRole.ADMIN || allowedLocationIds === null) return {};
-  return { loc: allowedLocationIds };
 }
 
 function roleIn(state: SessionState): ClinicRole {

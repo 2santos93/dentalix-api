@@ -21,6 +21,7 @@ import { RecordAuditEventUseCase } from '../../../audit/application/record-audit
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { locationClaim } from '../../../../shared/tenancy/location-access';
 import { hashInvitationToken, invitationStatus } from '../invitation-token';
 import { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
 
@@ -191,7 +192,7 @@ export class AcceptInvitationUseCase {
       }
       throw err;
     }
-    const { userId, tokenVersion } = outcome;
+    const { userId, tokenVersion, allowedLocationIds } = outcome;
 
     if ('claim' in resolution) {
       this.logger.log({
@@ -216,12 +217,14 @@ export class AcceptInvitationUseCase {
     }
 
     // El rol viene de la invitación (`invitation.role`), NUNCA de `input` —
-    // que ni siquiera lo acepta. `tenantId` ya se validó al principio.
+    // que ni siquiera lo acepta. `tenantId` ya se validó al principio. Las
+    // sedes (DX-089), de la membresía: una reactivada conserva su restricción.
     return this.tokens.issue({
       sub: userId,
       tenantId,
       role: invitation.role,
       tv: tokenVersion,
+      ...locationClaim(invitation.role, allowedLocationIds),
     });
   }
 

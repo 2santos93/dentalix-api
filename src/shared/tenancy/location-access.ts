@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { ClinicRole } from '@prisma/client';
 
 /**
  * DX-089: personal restringido a sedes.
@@ -28,6 +29,21 @@ export function isLocationAllowed(
   locationId: string,
 ): boolean {
   return allowed === 'ALL' || allowed.includes(locationId);
+}
+
+/**
+ * Claim `loc` de una sesión de clínica. Solo lo lleva un miembro restringido
+ * (con filas en `membership_locations`); un ADMIN nunca, aunque tuviera
+ * filas, porque administra todas las sedes. Sin claim = todas. Lo usan todos
+ * los sitios que emiten un token de clínica (login, refresh, cambio de
+ * contraseña y aceptación de invitación).
+ */
+export function locationClaim(
+  role: ClinicRole,
+  allowedLocationIds: string[] | null,
+): { loc?: string[] } {
+  if (role === ClinicRole.ADMIN || allowedLocationIds === null) return {};
+  return { loc: allowedLocationIds };
 }
 
 /** 403 estable (`code`) para una sede fuera de las permitidas. */

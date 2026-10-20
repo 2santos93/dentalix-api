@@ -7,6 +7,10 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { otherActiveMemberships } from '../../../../shared/tenancy/other-active-memberships';
 import {
+  MEMBERSHIP_LOCATIONS_SELECT,
+  activeLocationIds,
+} from '../../../../shared/locations/membership-locations';
+import {
   InvitationRepository,
   AcceptOutcome,
   GlobalUserRecord,
@@ -219,7 +223,12 @@ export class PrismaInvitationRepository implements InvitationRepository {
     email: string;
     role: ClinicRole;
     user: AcceptUserResolution;
-  }): Promise<AcceptOutcome & { tokenVersion: number }> {
+  }): Promise<
+    AcceptOutcome & {
+      tokenVersion: number;
+      allowedLocationIds: string[] | null;
+    }
+  > {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       // 1. Usuario (tabla global, sin RLS). El enlace llegó al email, así que
@@ -302,9 +311,13 @@ export class PrismaInvitationRepository implements InvitationRepository {
       }
 
       // 2. Membresía: crea o REACTIVA (limpia deletedAt y aplica el rol
-      // invitado). RLS ya limita `findFirst` al tenant en contexto.
+      // invitado). RLS ya limita `findFirst` al tenant en contexto. Al
+      // reactivar, sus sedes permitidas (DX-089) siguen vigentes: la baja es
+      // lógica y no borra sus filas de `membership_locations`, así que el
+      // token de esta sesión ya nace restringido.
       const membership = await tx.clinicMembership.findFirst({
         where: { userId },
+        select: { id: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
       });
       if (membership) {
         await tx.clinicMembership.update({
@@ -323,7 +336,14 @@ export class PrismaInvitationRepository implements InvitationRepository {
         data: { acceptedAt: new Date() },
       });
 
-      return { userId, role: input.role, tokenVersion };
+      return {
+        userId,
+        role: input.role,
+        tokenVersion,
+        allowedLocationIds: membership
+          ? activeLocationIds(membership.locations)
+          : null,
+      };
     });
   }
 }
