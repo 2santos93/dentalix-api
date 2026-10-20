@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CreateInventoryItemRepoInput,
@@ -80,16 +79,6 @@ export class PrismaInventoryRepository implements InventoryRepository {
     return tenantId;
   }
 
-  /**
-   * Filtro por sede activa, o `{}` si el request no fijó ninguna (vista
-   * consolidada de la clínica). Se aplica SOLO donde la sede es semánticamente
-   * correcta — ver los comentarios en cada consulta.
-   */
-  private locationFilter(): { locationId?: string } {
-    const locationId = this.tenantContext.getLocationId();
-    return locationId ? { locationId } : {};
-  }
-
   async createItem(
     input: CreateInventoryItemRepoInput,
   ): Promise<InventoryItem> {
@@ -98,11 +87,10 @@ export class PrismaInventoryRepository implements InventoryRepository {
       return tx.inventoryItem.create({
         data: {
           // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la sede por defecto — que es lo que
-          // hacen hoy todos los clientes y mantiene el comportamiento igual.
-          locationId:
-            this.tenantContext.getLocationId() ??
-            (await resolveDefaultLocationId(tx)),
+          // contra esta clínica); si no, la de escritura de la sesión: la
+          // principal sin restricción (lo de siempre) o la primera permitida
+          // (DX-089).
+          locationId: await this.tenantContext.writeLocationId(tx),
           tenantId,
           name: input.name,
           sku: input.sku,
@@ -122,6 +110,9 @@ export class PrismaInventoryRepository implements InventoryRepository {
         where: { id, deletedAt: null },
       });
     });
+    // DX-089: el stock es de una sede; un ítem de otra no permitida es 403
+    // (no 404: existe). Leer, editar, borrar y moverlo pasan por aquí.
+    if (item) this.tenantContext.assertLocationAllowed(item.locationId);
     return item ? mapToEntity(item) : null;
   }
 
@@ -133,7 +124,7 @@ export class PrismaInventoryRepository implements InventoryRepository {
         // El stock es físico: pertenece a una sede.
         where: {
           deletedAt: null,
-          ...this.locationFilter(),
+          ...this.tenantContext.locationScope(),
           ...(params?.query
             ? {
                 OR: [
@@ -207,11 +198,10 @@ export class PrismaInventoryRepository implements InventoryRepository {
       return tx.inventoryMovement.create({
         data: {
           // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la sede por defecto — que es lo que
-          // hacen hoy todos los clientes y mantiene el comportamiento igual.
-          locationId:
-            this.tenantContext.getLocationId() ??
-            (await resolveDefaultLocationId(tx)),
+          // contra esta clínica); si no, la de escritura de la sesión: la
+          // principal sin restricción (lo de siempre) o la primera permitida
+          // (DX-089).
+          locationId: await this.tenantContext.writeLocationId(tx),
           tenantId,
           itemId: input.itemId,
           type: input.type,
