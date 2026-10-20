@@ -26,6 +26,7 @@ export class StaffMemberDto {
   })
   professionalLicense?: string | null;
 
+  // Opcional en el contrato porque el DTO también describe el PATCH, que no lo envía; GET /staff siempre incluye la clave.
   @ApiPropertyOptional({
     type: [String],
     format: 'uuid',
