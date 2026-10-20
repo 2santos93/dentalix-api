@@ -32,6 +32,11 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // compuesto). Editar la plantilla las sustituye en la misma transacción y
   // el cambio queda en audit_events.
   'clinicalNoteTemplatePrompt',
+  // DX-089: sedes permitidas de un miembro. Configuración de acceso, sin
+  // datos de pacientes y sin nada que las referencie. El PUT las sustituye en
+  // la misma transacción (y ascender a ADMIN las vacía) y el cambio queda en
+  // audit_events.
+  'membershipLocation',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([

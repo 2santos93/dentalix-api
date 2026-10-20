@@ -25,4 +25,13 @@ export class StaffMemberDto {
       'Registro profesional / nº de colegiado (DX-013). Solo en el perfil y en la respuesta del PATCH.',
   })
   professionalLicense?: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Sedes activas en las que puede trabajar (DX-089). null = todas (sin restricción). Solo en GET /staff y en el perfil.',
+  })
+  locationIds?: string[] | null;
 }

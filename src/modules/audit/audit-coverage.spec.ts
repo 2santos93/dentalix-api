@@ -633,6 +633,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'LOGIN_UNLOCKED',
   },
 
+  // DX-089: un ADMIN cambia las sedes en las que puede trabajar un miembro.
+  'PUT /staff/:userId/locations': {
+    action: 'UPDATE',
+    resource: 'STAFF_MEMBER',
+    resourceId: { param: 'userId' },
+    reason: 'LOCATIONS_CHANGED',
+  },
+
   // DX-170: plantillas de evolución (sin paciente: no llevan sus datos).
   // Desactivar es un PATCH con `active` en `changedFields`.
   'POST /clinical-note-templates': {
