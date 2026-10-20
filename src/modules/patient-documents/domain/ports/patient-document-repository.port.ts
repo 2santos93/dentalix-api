@@ -10,13 +10,15 @@ export const PATIENT_DOCUMENT_REPOSITORY = Symbol(
 
 /**
  * Lo que el use-case ya validó. El `id` lo genera el use-case porque la
- * clave del almacén (`storageKeyFor`) lo necesita ANTES del INSERT. El tenant
- * y la sede no van aquí: el repositorio los toma del contexto dentro de la
- * transacción (RLS y `writeLocationId(tx)`).
+ * clave del almacén (`storageKeyFor`) lo necesita ANTES del INSERT. La sede
+ * (`resolveWriteLocation`) también se resuelve antes de guardar el objeto:
+ * si falla, no queda nada en el bucket. El tenant no va aquí: el repositorio
+ * lo toma del contexto dentro de la transacción (RLS).
  */
 export interface CreatePatientDocumentInput {
   id: string;
   patientId: string;
+  locationId: string;
   category: PatientDocumentCategory;
   originalName: string;
   mimeType: DetectedType;
@@ -59,8 +61,14 @@ export interface PatientDocumentRepository {
   /** Lanza `DuplicateActivePatientDocumentError` si el contenido ya está vigente. */
   create(input: CreatePatientDocumentInput): Promise<PatientDocument>;
   /**
+   * Sede donde se escribe y su zona horaria. El use-case la pide ANTES de
+   * guardar el objeto: si no se puede (p. ej. sede no permitida), lanza y
+   * no se toca el bucket.
+   */
+  resolveWriteLocation(): Promise<{ locationId: string; timeZone: string }>;
+  /**
    * Día civil `YYYY-MM-DD` de `now` en la zona de la sede donde se escribe
-   * (la misma que tomará `create`): tope de la fecha clínica.
+   * (la misma que `resolveWriteLocation`): tope de la fecha clínica.
    */
   clinicToday(now: Date): Promise<string>;
   /** null si no existe o es de otro paciente. */

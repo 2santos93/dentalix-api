@@ -337,6 +337,20 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
       },
     );
 
+    it('exactamente 20 MB → 201 (multer deja pasar el límite justo)', async () => {
+      const exact = Buffer.alloc(MAX_BYTES, 0x20);
+      pdfFixture().copy(exact, 0);
+      const res = await uploadReq(a, dentist.token, patient, exact, {
+        filename: 'justo.pdf',
+        contentType: 'application/pdf',
+      });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        sizeBytes: MAX_BYTES,
+        mimeType: 'application/pdf',
+      });
+    });
+
     it('20 MB + 1 → 413 en español y sin fila', async () => {
       const before = await rowCount();
       const big = Buffer.concat([

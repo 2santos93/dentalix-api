@@ -9,7 +9,7 @@ import {
   NotFoundException,
   PayloadTooLargeException,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import {
   FILE_STORAGE,
   type FileStoragePort,
@@ -195,6 +195,22 @@ function parseTeethCsv(csv: string | undefined): string[] {
   return rule(() => validateToothNumbers(parts));
 }
 
+/** Códigos de Prisma de conexión perdida o inalcanzable (no de la consulta). */
+const CONNECTION_LOST_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017']);
+
+/**
+ * ¿Falló la conexión y no la consulta? Entonces no se sabe si el INSERT se
+ * confirmó: la fila puede existir.
+ */
+function isConnectionLostError(error: unknown): boolean {
+  return (
+    (error instanceof Prisma.PrismaClientKnownRequestError &&
+      CONNECTION_LOST_CODES.has(error.code)) ||
+    error instanceof Prisma.PrismaClientInitializationError ||
+    error instanceof Prisma.PrismaClientRustPanicError
+  );
+}
+
 @Injectable()
 export class UploadPatientDocumentUseCase {
   private readonly logger = new Logger('PatientDocuments');
@@ -260,6 +276,9 @@ export class UploadPatientDocumentUseCase {
 
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
+    // La sede se resuelve ANTES de guardar el objeto: si falla (sede no
+    // permitida, BD caída), el bucket no se toca.
+    const { locationId } = await this.repo.resolveWriteLocation();
     const id = randomUUID();
     const storageKey = storageKeyFor(tenantId, id, detected);
     await this.storage.save(storageKey, bytes, detected);
@@ -269,6 +288,7 @@ export class UploadPatientDocumentUseCase {
       created = await this.repo.create({
         id,
         patientId,
+        locationId,
         category,
         originalName: normalizeOriginalName(file.originalname),
         mimeType: detected,
@@ -281,6 +301,15 @@ export class UploadPatientDocumentUseCase {
         uploadedById,
       });
     } catch (error) {
+      if (isConnectionLostError(error)) {
+        // El INSERT pudo confirmarse antes de caer la conexión: borrar el
+        // objeto dejaría una fila con un 404 permanente. Se conserva (a lo
+        // sumo, un huérfano) y se avisa solo con el request id.
+        this.logger.warn(
+          `Conexión perdida al crear un documento; se conserva el objeto (requestId=${currentRequestId() ?? '-'}, error=${error instanceof Error ? error.name : 'NonError'})`,
+        );
+        throw error;
+      }
       await this.discardObject(storageKey);
       if (error instanceof DuplicateActivePatientDocumentError) {
         throw new ConflictException(DUPLICATE_DOCUMENT_MESSAGE);

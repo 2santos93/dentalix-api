@@ -134,8 +134,9 @@ export function extensionOf(type: DetectedType): string {
 }
 
 /**
- * Solo PDF, JPEG y PNG se abren en el navegador (visor con `sandbox`); HEIC,
- * DOCX y DICOM solo se descargan.
+ * Solo PDF, JPEG y PNG se abren en el navegador (el iframe no lleva
+ * `sandbox`: lo protegen la lista de tipos firmados en la URL y `nosniff`);
+ * HEIC, DOCX y DICOM solo se descargan.
  */
 export function isInlineViewable(type: DetectedType): boolean {
   return (

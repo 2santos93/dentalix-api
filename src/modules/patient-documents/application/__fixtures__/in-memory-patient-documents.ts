@@ -22,7 +22,19 @@ export class InMemoryPatientDocumentRepository implements PatientDocumentReposit
   today = '2026-10-17';
   /** Hace fallar el próximo `create` con este error (después de comprobar). */
   failNextCreate: Error | null = null;
+  /** Hace fallar `resolveWriteLocation` con este error (p. ej. sede ajena). */
+  failResolveLocation: Error | null = null;
   private tick = 0;
+
+  resolveWriteLocation(): Promise<{ locationId: string; timeZone: string }> {
+    if (this.failResolveLocation) {
+      return Promise.reject(this.failResolveLocation);
+    }
+    return Promise.resolve({
+      locationId: LOCATION_ID,
+      timeZone: 'America/Bogota',
+    });
+  }
 
   create(input: CreatePatientDocumentInput): Promise<PatientDocument> {
     const failure = this.failNextCreate;
@@ -40,7 +52,6 @@ export class InMemoryPatientDocumentRepository implements PatientDocumentReposit
     const row: PatientDocument = {
       ...input,
       tenantId: TENANT_ID,
-      locationId: LOCATION_ID,
       uploadedAt: at,
       createdAt: at,
       voidedAt: null,

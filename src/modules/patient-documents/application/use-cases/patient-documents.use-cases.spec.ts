@@ -6,7 +6,7 @@ import {
   NotFoundException,
   PayloadTooLargeException,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { InMemoryFileStorage } from '../../../../shared/storage/__fixtures__/in-memory-file-storage';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
@@ -317,6 +317,105 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       repo.failNextCreate = boom;
       await expect(uploadPdf()).rejects.toBe(boom);
       expect(storage.deleted).toEqual(storage.saved);
+    });
+
+    it('si la sede de escritura no se resuelve, no se guarda el objeto ni se crea la fila', async () => {
+      const denied = new ForbiddenException('Sede no permitida');
+      repo.failResolveLocation = denied;
+      const create = jest.spyOn(repo, 'create');
+      await expect(uploadPdf()).rejects.toBe(denied);
+      expect(storage.saved).toEqual([]);
+      expect(create).not.toHaveBeenCalled();
+      expect(repo.rows.size).toBe(0);
+    });
+
+    it('la fila se crea con la sede resuelta antes de guardar el objeto', async () => {
+      const create = jest.spyOn(repo, 'create');
+      await uploadPdf();
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ locationId: LOCATION_ID }),
+      );
+    });
+
+    it.each([
+      [
+        'P1001',
+        () =>
+          new Prisma.PrismaClientKnownRequestError('x', {
+            code: 'P1001',
+            clientVersion: 't',
+          }),
+      ],
+      [
+        'P1002',
+        () =>
+          new Prisma.PrismaClientKnownRequestError('x', {
+            code: 'P1002',
+            clientVersion: 't',
+          }),
+      ],
+      [
+        'P1008',
+        () =>
+          new Prisma.PrismaClientKnownRequestError('x', {
+            code: 'P1008',
+            clientVersion: 't',
+          }),
+      ],
+      [
+        'P1017',
+        () =>
+          new Prisma.PrismaClientKnownRequestError('x', {
+            code: 'P1017',
+            clientVersion: 't',
+          }),
+      ],
+      [
+        'inicialización',
+        () => new Prisma.PrismaClientInitializationError('x', 't'),
+      ],
+      [
+        'pánico del motor',
+        () => new Prisma.PrismaClientRustPanicError('x', 't'),
+      ],
+    ])(
+      'fallo de conexión (%s) tras el INSERT: el objeto se conserva y el error sube',
+      async (_label, make) => {
+        const lost = make();
+        repo.failNextCreate = lost;
+        const warn = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+        await expect(uploadPdf()).rejects.toBe(lost);
+        expect(storage.saved).toHaveLength(1);
+        expect(storage.deleted).toEqual([]);
+        expect(storage.files.size).toBe(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        const line = String(warn.mock.calls[0][0]);
+        expect(line).toMatch(/requestId=/);
+        expect(line).not.toContain('patient-documents/');
+        expect(line).not.toContain(TENANT_ID);
+        warn.mockRestore();
+      },
+    );
+
+    it('un P2002 ajeno al sha256 o un error de validación de Prisma sí borran el objeto', async () => {
+      const unique = new Prisma.PrismaClientKnownRequestError('x', {
+        code: 'P2002',
+        clientVersion: 't',
+        meta: { target: ['storageKey'] },
+      });
+      repo.failNextCreate = unique;
+      await expect(uploadPdf()).rejects.toBe(unique);
+      expect(storage.deleted).toEqual(storage.saved);
+
+      const invalid = new Prisma.PrismaClientValidationError('x', {
+        clientVersion: 't',
+      });
+      repo.failNextCreate = invalid;
+      await expect(uploadPdf()).rejects.toBe(invalid);
+      expect(storage.deleted).toEqual(storage.saved);
+      expect(storage.files.size).toBe(0);
     });
 
     it('si además falla el borrado del objeto, sigue subiendo el error del INSERT', async () => {

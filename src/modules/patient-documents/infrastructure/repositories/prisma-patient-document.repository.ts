@@ -118,6 +118,15 @@ export class PrismaPatientDocumentRepository implements PatientDocumentRepositor
     });
   }
 
+  resolveWriteLocation(): Promise<{ locationId: string; timeZone: string }> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const locationId = await this.resolveWriteLocationId(tx);
+      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
+      return { locationId, timeZone: zoneOf(locationId) };
+    });
+  }
+
   async create(input: CreatePatientDocumentInput): Promise<PatientDocument> {
     const tenantId = this.requireTenantId();
     const { clinicalDate, ...rest } = input;
@@ -127,7 +136,6 @@ export class PrismaPatientDocumentRepository implements PatientDocumentRepositor
           data: {
             ...rest,
             tenantId,
-            locationId: await this.resolveWriteLocationId(tx),
             clinicalDate: clinicalDate ? fromDateOnly(clinicalDate) : null,
           },
         }),
