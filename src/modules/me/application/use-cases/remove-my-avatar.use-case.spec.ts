@@ -44,4 +44,12 @@ describe('RemoveMyAvatarUseCase', () => {
     expect(storage.deleted).toEqual([]);
     expect(calls.avatarKey).toBeNull();
   });
+
+  it('never deletes a key outside the avatars space, still nulls the column (DX-084)', async () => {
+    const { calls, repo } = makeRepo('clinical/t1/x.pdf');
+    const storage = new InMemoryFileStorage();
+    await new RemoveMyAvatarUseCase(repo, storage).execute({ userId: 'u1' });
+    expect(storage.deleted).toEqual([]);
+    expect(calls.avatarKey).toBeNull();
+  });
 });

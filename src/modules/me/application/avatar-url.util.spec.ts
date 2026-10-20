@@ -1,5 +1,5 @@
 import { InMemoryFileStorage } from '../../../shared/storage/__fixtures__/in-memory-file-storage';
-import { avatarPublicUrl } from './avatar-url.util';
+import { avatarKeyOf, avatarPublicUrl } from './avatar-url.util';
 
 describe('avatarPublicUrl (DX-084)', () => {
   it('calcula la URL con la base vigente a partir de la clave guardada', () => {
@@ -23,5 +23,12 @@ describe('avatarPublicUrl (DX-084)', () => {
     const storage = new InMemoryFileStorage();
     expect(avatarPublicUrl(storage, null)).toBeNull();
     expect(avatarPublicUrl(storage, 'basura')).toBeNull();
+  });
+
+  it('solo el espacio avatars: una clave o URL de otro espacio no es un avatar', () => {
+    expect(avatarKeyOf('avatars/u1.png')).toBe('avatars/u1.png');
+    expect(avatarKeyOf('clinical/t1/x.pdf')).toBeNull();
+    expect(avatarKeyOf('http://h/api/v1/files/clinical/x.pdf')).toBeNull();
+    expect(avatarKeyOf('avatars/sub/u1.png')).toBeNull();
   });
 });

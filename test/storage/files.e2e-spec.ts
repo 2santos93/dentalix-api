@@ -57,6 +57,15 @@ describe('Files (e2e)', () => {
       .expect(400);
   });
 
+  it('400s a name the storage would reject as a key (".." inside), not a 500', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/files/avatars/a..png')
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/api/v1/files/avatars/.env')
+      .expect(400);
+  });
+
   // DX-084: con el disco (solo desarrollo), las URL firmadas las sirve la API
   // en /files/signed; con S3 van directas al bucket.
   describe('URL firmada (disco)', () => {

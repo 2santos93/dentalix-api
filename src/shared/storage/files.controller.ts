@@ -15,6 +15,7 @@ import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { contentTypeOf } from './content-type';
 import { DiskFileStorage } from './disk-file-storage';
+import { isFileKey } from './file-key';
 import { FILE_STORAGE } from './file-storage.port';
 import type { FileStoragePort } from './file-storage.port';
 
@@ -41,10 +42,12 @@ export class FilesController {
     @Param('name') name: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
-    if (!SAFE_NAME.test(name) || name.startsWith('.')) {
+    const key = `avatars/${name}`;
+    // isFileKey además rechaza `..` dentro del nombre, que el almacén no
+    // acepta como clave (sería un 500 en vez de un 400).
+    if (!SAFE_NAME.test(name) || !isFileKey(key)) {
       throw new BadRequestException('Invalid file name');
     }
-    const key = `avatars/${name}`;
     const file = await this.storage.read(key);
     if (!file) {
       throw new NotFoundException('File not found');
