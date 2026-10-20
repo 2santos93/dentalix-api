@@ -353,7 +353,10 @@ export class PrismaStaffRepository implements StaffRepository {
             email: membership.user.email,
             role: membership.role,
             // DX-121d: la agenda comprueba en qué sedes atiende.
-            locationIds: activeLocationIds(membership.locations),
+            locationIds: allowedLocationIds(
+              membership.role,
+              membership.locations,
+            ),
           }
         : null;
     });
