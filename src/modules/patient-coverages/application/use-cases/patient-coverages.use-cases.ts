@@ -10,10 +10,8 @@ import {
   type PayerRepository,
 } from '../../../payers/domain/ports/payer-repository.port';
 import {
-  COVERAGE_LIMIT_MESSAGE,
   COVERAGE_NOT_FOUND_MESSAGE,
   COVERAGE_PRIMARY_REQUIRED_MESSAGE,
-  MAX_COVERAGES_PER_PATIENT,
   PATIENT_NOT_FOUND_MESSAGE,
   PAYER_INACTIVE_MESSAGE,
   coverageStatus,
@@ -139,12 +137,7 @@ export class CreatePatientCoverageUseCase {
     const validTo = input.validTo ?? null;
     assertDates(validFrom, validTo);
     await resolvePayer(this.payers, input.payerId, true);
-    const live = await this.repo.countLive(patientId);
-    if (live >= MAX_COVERAGES_PER_PATIENT) {
-      throw new BadRequestException(COVERAGE_LIMIT_MESSAGE);
-    }
 
-    const first = live === 0;
     const created = await this.repo.create({
       patientId,
       payerId: input.payerId,
@@ -153,18 +146,13 @@ export class CreatePatientCoverageUseCase {
       policyHolderName: normalizeCoverageText(input.policyHolderName),
       validFrom,
       validTo,
-      isPrimary: first,
+      // El repositorio decide con el candado tomado: tope (400), primera
+      // cobertura (principal) y desmarcar la anterior, en una transacción.
+      isPrimary: input.isPrimary === true,
       notes: normalizeCoverageText(input.notes),
       createdById,
     });
-    if (!first && input.isPrimary === true) {
-      await this.repo.setPrimary(patientId, created.id, createdById);
-    }
-    const saved =
-      first || input.isPrimary !== true
-        ? created
-        : ((await this.repo.findById(patientId, created.id)) ?? created);
-    return withStatus(saved, await this.repo.clinicToday(this.clock()));
+    return withStatus(created, await this.repo.clinicToday(this.clock()));
   }
 }
 
@@ -228,11 +216,10 @@ export class UpdatePatientCoverageUseCase {
         input.notes === undefined
           ? undefined
           : normalizeCoverageText(input.notes),
+      isPrimary:
+        input.isPrimary === true && !current.isPrimary ? true : undefined,
       updatedById,
     });
-    if (input.isPrimary === true && !current.isPrimary) {
-      await this.repo.setPrimary(patientId, coverageId, updatedById);
-    }
     const saved = await this.repo.findById(patientId, coverageId);
     if (!saved) throw new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE);
     return withStatus(saved, await this.repo.clinicToday(this.clock()));

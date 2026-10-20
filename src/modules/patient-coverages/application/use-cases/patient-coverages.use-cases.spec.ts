@@ -151,14 +151,12 @@ describe('casos de uso de coberturas (DX-153)', () => {
         status: 'ACTIVE',
         payer: { id: sanitas, name: 'Sanitas', active: true },
       });
-      expect(repo.calls).not.toContain('setPrimary');
     });
 
     it('la segunda no es principal si no se pide; con isPrimary:true desmarca la anterior', async () => {
       const first = await create.execute(PATIENT, { payerId: sanitas }, 'u1');
       const second = await create.execute(PATIENT, { payerId: sura }, 'u1');
       expect(second.isPrimary).toBe(false);
-      expect(repo.calls).not.toContain('setPrimary');
 
       const third = await create.execute(
         PATIENT,
@@ -166,7 +164,6 @@ describe('casos de uso de coberturas (DX-153)', () => {
         'u1',
       );
       expect(third.isPrimary).toBe(true);
-      expect(repo.calls).toContain('setPrimary');
       const primaries = repo.live(PATIENT).filter((r) => r.isPrimary);
       expect(primaries.map((r) => r.id)).toEqual([third.id]);
       expect(first.id).not.toBe(third.id);
@@ -296,10 +293,22 @@ describe('casos de uso de coberturas (DX-153)', () => {
 
     it('la carrera del índice parcial sube como 422', async () => {
       const second = await create.execute(PATIENT, { payerId: sura }, 'u1');
-      repo.failNextSetPrimary = true;
+      repo.failNextPrimaryWrite = true;
       await expect(
         update.execute(PATIENT, second.id, { isPrimary: true }, 'u1'),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(
+        repo.live(PATIENT).find((r) => r.id === second.id)!.isPrimary,
+      ).toBe(false);
+    });
+
+    it('la carrera en un alta con isPrimary:true sube como 422 y no deja la fila', async () => {
+      const before = repo.live(PATIENT).length;
+      repo.failNextPrimaryWrite = true;
+      await expect(
+        create.execute(PATIENT, { payerId: sura, isPrimary: true }, 'u1'),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(repo.live(PATIENT)).toHaveLength(before);
     });
   });
 

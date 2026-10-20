@@ -1,9 +1,17 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import {
+  COVERAGE_LIMIT_MESSAGE,
+  MAX_COVERAGES_PER_PATIENT,
+} from '../../domain/coverage-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import type {
   CreateCoverageRepoInput,
@@ -69,6 +77,42 @@ async function translatePrimaryRace<T>(work: Promise<T>): Promise<T> {
 }
 
 /**
+ * Candado de la transacción sobre las coberturas de UN paciente: serializa
+ * altas, ediciones y retiros del mismo paciente (el de otro no espera). Se
+ * suelta solo al terminar la transacción. El índice único parcial queda como
+ * última red.
+ */
+async function lockPatientCoverages(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  patientId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId} || ':' || ${patientId}))`;
+}
+
+/**
+ * Desmarca las demás principales vivas del paciente. Se llama DENTRO de la
+ * transacción de la escritura que marca la nueva, así un 422 por la carrera
+ * deshace también esta marca y la edición.
+ */
+async function unmarkOtherPrimaries(
+  tx: Prisma.TransactionClient,
+  patientId: string,
+  exceptId: string | null,
+  updatedById: string,
+): Promise<void> {
+  await tx.patientCoverage.updateMany({
+    where: {
+      patientId,
+      isPrimary: true,
+      deletedAt: null,
+      ...(exceptId ? { id: { not: exceptId } } : {}),
+    },
+    data: { isPrimary: false, updatedById },
+  });
+}
+
+/**
  * Coberturas del paciente (DX-153), todo bajo `runWithTenant` (RLS FORCE):
  * un paciente, pagador o cobertura de otra clínica no existe para esta, y las
  * FK compuestas lo impiden aunque algo se saltara el caso de uso.
@@ -130,17 +174,29 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
     return row ? toEntity(row) : null;
   }
 
-  countLive(patientId: string): Promise<number> {
-    return this.prisma.runWithTenant((tx) =>
-      tx.patientCoverage.count({ where: { patientId, deletedAt: null } }),
-    );
-  }
-
   async create(input: CreateCoverageRepoInput): Promise<PatientCoverage> {
     const tenantId = this.requireTenantId();
     const row = await translatePrimaryRace(
-      this.prisma.runWithTenant((tx) =>
-        tx.patientCoverage.create({
+      this.prisma.runWithTenant(async (tx) => {
+        await lockPatientCoverages(tx, tenantId, input.patientId);
+        // Con el candado tomado nadie más escribe sus coberturas: el tope y
+        // «la primera es principal» se deciden sobre lo que de verdad hay.
+        const live = await tx.patientCoverage.count({
+          where: { patientId: input.patientId, deletedAt: null },
+        });
+        if (live >= MAX_COVERAGES_PER_PATIENT) {
+          throw new BadRequestException(COVERAGE_LIMIT_MESSAGE);
+        }
+        const isPrimary = live === 0 || input.isPrimary;
+        if (isPrimary && live > 0) {
+          await unmarkOtherPrimaries(
+            tx,
+            input.patientId,
+            null,
+            input.createdById,
+          );
+        }
+        return tx.patientCoverage.create({
           data: {
             tenantId,
             patientId: input.patientId,
@@ -150,52 +206,78 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
             policyHolderName: input.policyHolderName,
             validFrom: dateOrNull(input.validFrom),
             validTo: dateOrNull(input.validTo),
-            isPrimary: input.isPrimary,
+            isPrimary,
             notes: input.notes,
             createdById: input.createdById,
             updatedById: input.createdById,
           },
           include: COVERAGE_INCLUDE,
-        }),
-      ),
+        });
+      }),
     );
     return toEntity(row);
+  }
+
+  /** Lee la cobertura viva sin candado solo para saber de qué paciente es. */
+  private async patientOf(id: string): Promise<string | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.patientCoverage.findFirst({
+        where: { id, deletedAt: null },
+        select: { patientId: true },
+      }),
+    );
+    return row?.patientId ?? null;
   }
 
   async update(
     id: string,
     patch: UpdateCoverageRepoPatch,
   ): Promise<PatientCoverage | null> {
-    const row = await this.prisma.runWithTenant(async (tx) => {
-      const live = await tx.patientCoverage.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!live) return null;
-      return tx.patientCoverage.update({
-        where: { id },
-        data: {
-          payerId: patch.payerId,
-          planName: patch.planName,
-          memberNumber: patch.memberNumber,
-          policyHolderName: patch.policyHolderName,
-          validFrom: dateOrNull(patch.validFrom),
-          validTo: dateOrNull(patch.validTo),
-          notes: patch.notes,
-          updatedById: patch.updatedById,
-        },
-        include: COVERAGE_INCLUDE,
-      });
-    });
+    const tenantId = this.requireTenantId();
+    const patientId = await this.patientOf(id);
+    if (!patientId) return null;
+    const row = await translatePrimaryRace(
+      this.prisma.runWithTenant(async (tx) => {
+        await lockPatientCoverages(tx, tenantId, patientId);
+        // Con el candado, otra petición pudo retirarla mientras esperábamos.
+        const live = await tx.patientCoverage.findFirst({
+          where: { id, patientId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!live) return null;
+        if (patch.isPrimary) {
+          await unmarkOtherPrimaries(tx, patientId, id, patch.updatedById);
+        }
+        return tx.patientCoverage.update({
+          where: { id, patientId, deletedAt: null },
+          data: {
+            payerId: patch.payerId,
+            planName: patch.planName,
+            memberNumber: patch.memberNumber,
+            policyHolderName: patch.policyHolderName,
+            validFrom: dateOrNull(patch.validFrom),
+            validTo: dateOrNull(patch.validTo),
+            notes: patch.notes,
+            isPrimary: patch.isPrimary,
+            updatedById: patch.updatedById,
+          },
+          include: COVERAGE_INCLUDE,
+        });
+      }),
+    );
     return row ? toEntity(row) : null;
   }
 
-  softDelete(id: string, updatedById: string): Promise<boolean> {
+  async softDelete(id: string, updatedById: string): Promise<boolean> {
+    const tenantId = this.requireTenantId();
+    const patientId = await this.patientOf(id);
+    if (!patientId) return false;
     return translatePrimaryRace(
       this.prisma.runWithTenant(async (tx) => {
+        await lockPatientCoverages(tx, tenantId, patientId);
         const row = await tx.patientCoverage.findFirst({
-          where: { id, deletedAt: null },
-          select: { id: true, patientId: true, isPrimary: true },
+          where: { id, patientId, deletedAt: null },
+          select: { id: true, isPrimary: true },
         });
         if (!row) return false;
         // `isPrimary` se apaga junto con el retiro: así la fila retirada no
@@ -206,42 +288,18 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
         });
         if (row.isPrimary) {
           const oldest = await tx.patientCoverage.findFirst({
-            where: { patientId: row.patientId, deletedAt: null },
+            where: { patientId, deletedAt: null },
             orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             select: { id: true },
           });
           if (oldest) {
             await tx.patientCoverage.update({
-              where: { id: oldest.id },
+              where: { id: oldest.id, patientId, deletedAt: null },
               data: { isPrimary: true, updatedById },
             });
           }
         }
         return true;
-      }),
-    );
-  }
-
-  setPrimary(
-    patientId: string,
-    coverageId: string,
-    updatedById: string,
-  ): Promise<void> {
-    return translatePrimaryRace(
-      this.prisma.runWithTenant(async (tx) => {
-        await tx.patientCoverage.updateMany({
-          where: {
-            patientId,
-            isPrimary: true,
-            deletedAt: null,
-            id: { not: coverageId },
-          },
-          data: { isPrimary: false, updatedById },
-        });
-        await tx.patientCoverage.update({
-          where: { id: coverageId },
-          data: { isPrimary: true, updatedById },
-        });
       }),
     );
   }

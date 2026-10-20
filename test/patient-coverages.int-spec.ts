@@ -473,24 +473,13 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     });
   });
 
-  describe('carrera de la cobertura principal', () => {
+  describe('escrituras concurrentes sobre las coberturas de un paciente', () => {
     const repo = new PrismaPatientCoverageRepository(prisma, tenantContext);
+    const by = randomUUID();
 
-    /** Espera a que `n` sesiones estén bloqueadas esperando un lock de fila. */
-    async function waitForBlocked(n: number): Promise<void> {
-      for (let i = 0; i < 200; i++) {
-        const [{ blocked }] = await raw.$queryRaw<{ blocked: number }[]>`
-          SELECT count(*)::int AS blocked FROM pg_stat_activity
-           WHERE datname = current_database() AND wait_event_type = 'Lock'
-             AND query ILIKE '%patient_coverages%'`;
-        if (blocked >= n) return;
-        await new Promise((r) => setTimeout(r, 25));
-      }
-      throw new Error('las dos escrituras no llegaron a bloquearse');
-    }
-
-    it('dos setPrimary a la vez: una gana, la otra recibe 422 y queda exactamente una principal', async () => {
-      // Los bloques del relleno borran los pacientes sembrados: uno propio.
+    // Los bloques del relleno borran los pacientes sembrados: uno propio por
+    // prueba, con su pagador.
+    async function seedPatient(live: number) {
       const patientId = (
         await raw.patient.create({
           data: {
@@ -500,71 +489,167 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           },
         })
       ).id;
-      if (!(await raw.payer.findFirst({ where: { id: a.payerId } }))) {
-        a.payerId = (
-          await raw.payer.create({
-            data: {
-              tenantId: a.tenantId,
-              name: 'Pagador carrera',
-              type: 'OTRO',
-            },
-          })
-        ).id;
+      const payerId = (
+        await raw.payer.create({
+          data: {
+            tenantId: a.tenantId,
+            name: `Pagador carrera ${patientId}`,
+            type: 'OTRO',
+          },
+        })
+      ).id;
+      const ids: string[] = [];
+      for (let i = 0; i < live; i++) {
+        const row = await raw.patientCoverage.create({
+          data: {
+            tenantId: a.tenantId,
+            patientId,
+            payerId,
+            isPrimary: i === 0,
+            createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)),
+          },
+        });
+        ids.push(row.id);
       }
-      const held = await raw.patientCoverage.create({
-        data: coverage(a, patientId, { isPrimary: true }),
-      });
-      const x = await raw.patientCoverage.create({
-        data: coverage(a, patientId),
-      });
-      const y = await raw.patientCoverage.create({
-        data: coverage(a, patientId),
-      });
+      return { patientId, payerId, ids };
+    }
 
-      // Un lock de fila sobre la principal actual deja a las dos escrituras
-      // con su foto previa a la otra: sin él, el orden de los viajes decide si
-      // la segunda ve la marca de la primera y la carrera no se produce.
-      let release!: () => void;
-      let locked!: () => void;
-      const lockTaken = new Promise<void>((r) => (locked = r));
-      const lockReleased = new Promise<void>((r) => (release = r));
-      const holder = raw.$transaction(
-        async (tx) => {
-          await tx.$queryRaw`SELECT id FROM patient_coverages WHERE id = ${held.id}::uuid FOR UPDATE`;
-          locked();
-          await lockReleased;
-        },
-        { timeout: 30_000 },
+    const inA = <T>(fn: () => Promise<T>) => tenantContext.run(a.tenantId, fn);
+    const input = (patientId: string, payerId: string, isPrimary: boolean) => ({
+      patientId,
+      payerId,
+      planName: 'Nueva',
+      memberNumber: null,
+      policyHolderName: null,
+      validFrom: null,
+      validTo: null,
+      isPrimary,
+      notes: null,
+      createdById: by,
+    });
+    const live = (patientId: string) =>
+      raw.patientCoverage.findMany({ where: { patientId, deletedAt: null } });
+
+    it('altas simultáneas de la primera cobertura: las dos valen y queda exactamente una principal', async () => {
+      const { patientId, payerId } = await seedPatient(0);
+      const results = await Promise.allSettled([
+        inA(() => repo.create(input(patientId, payerId, false))),
+        inA(() => repo.create(input(patientId, payerId, false))),
+        inA(() => repo.create(input(patientId, payerId, true))),
+      ]);
+      expect(results.map((r) => r.status)).toEqual([
+        'fulfilled',
+        'fulfilled',
+        'fulfilled',
+      ]);
+      const rows = await live(patientId);
+      expect(rows).toHaveLength(3);
+      expect(rows.filter((r) => r.isPrimary)).toHaveLength(1);
+    });
+
+    it('el tope de 5 aguanta altas simultáneas: sobran las que no caben, con 400', async () => {
+      const { patientId, payerId } = await seedPatient(3);
+      const results = await Promise.allSettled(
+        [false, false, false, false].map((p) =>
+          inA(() => repo.create(input(patientId, payerId, p))),
+        ),
       );
-      await lockTaken;
-
-      const run = (coverageId: string) =>
-        tenantContext.run(a.tenantId, () =>
-          repo.setPrimary(patientId, coverageId, randomUUID()),
-        );
-      const both = Promise.allSettled([run(x.id), run(y.id)]);
-      await waitForBlocked(2);
-      release();
-      await holder;
-      const results = await both;
-
-      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
       const rejected = results.filter(
         (r): r is PromiseRejectedResult => r.status === 'rejected',
       );
-      expect(fulfilled).toHaveLength(1);
-      expect(rejected).toHaveLength(1);
-      expect(rejected[0].reason).toMatchObject({
-        status: 422,
-        message:
-          'Otra petición acaba de cambiar la cobertura principal; vuelve a intentarlo.',
-      });
+      expect(rejected).toHaveLength(2);
+      for (const r of rejected) {
+        expect(r.reason).toMatchObject({
+          status: 400,
+          message: 'Un paciente admite hasta 5 coberturas.',
+        });
+      }
+      const rows = await live(patientId);
+      expect(rows).toHaveLength(5);
+      expect(rows.filter((r) => r.isPrimary)).toHaveLength(1);
+    });
 
-      const primaries = await raw.patientCoverage.findMany({
-        where: { patientId, isPrimary: true, deletedAt: null },
+    it('marcar principal a la vez (PATCH y POST): todas valen, sin 422, y queda una sola principal', async () => {
+      const { patientId, payerId, ids } = await seedPatient(3);
+      for (let round = 0; round < 4; round++) {
+        const results = await Promise.allSettled([
+          inA(() => repo.update(ids[1], { isPrimary: true, updatedById: by })),
+          inA(() => repo.update(ids[2], { isPrimary: true, updatedById: by })),
+          inA(() => repo.create(input(patientId, payerId, true))),
+        ]);
+        expect(results.map((r) => r.status)).toEqual([
+          'fulfilled',
+          'fulfilled',
+          'fulfilled',
+        ]);
+        const rows = await live(patientId);
+        expect(rows.filter((r) => r.isPrimary)).toHaveLength(1);
+        // Deja sitio para la siguiente ronda.
+        const extra = rows.find((r) => r.planName === 'Nueva');
+        if (extra) {
+          await raw.patientCoverage.update({
+            where: { id: extra.id },
+            data: { deletedAt: new Date(), isPrimary: false },
+          });
+        }
+      }
+    });
+
+    it('retirar la principal y la más antigua de las otras a la vez deja una principal entre las vivas', async () => {
+      const { patientId, ids } = await seedPatient(3);
+      const results = await Promise.all([
+        inA(() => repo.softDelete(ids[0], by)),
+        inA(() => repo.softDelete(ids[1], by)),
+      ]);
+      expect(results).toEqual([true, true]);
+      const rows = await live(patientId);
+      expect(rows.map((r) => [r.id, r.isPrimary])).toEqual([[ids[2], true]]);
+    });
+
+    it('marcar principal una cobertura que otra petición retira: no se resucita ni se pierde la principal', async () => {
+      const { patientId, ids } = await seedPatient(3);
+      const [removed, marked] = await Promise.all([
+        inA(() => repo.softDelete(ids[1], by)),
+        inA(() => repo.update(ids[1], { isPrimary: true, updatedById: by })),
+      ]);
+      expect(removed).toBe(true);
+      const rows = await live(patientId);
+      expect(rows.map((r) => r.id)).not.toContain(ids[1]);
+      expect(rows.filter((r) => r.isPrimary)).toHaveLength(1);
+      // Según quién entre primero, el PATCH ve la fila viva (la marca y luego
+      // se retira, promoviendo otra) o ya retirada (null).
+      expect(marked === null || marked.id === ids[1]).toBe(true);
+    });
+
+    it('un POST con isPrimary:true que falla (FK) no deja la marca de la anterior desmarcada', async () => {
+      const { patientId, ids } = await seedPatient(2);
+      await expect(
+        inA(() => repo.create(input(patientId, randomUUID(), true))),
+      ).rejects.toBeDefined();
+      const rows = await live(patientId);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.id === ids[0])?.isPrimary).toBe(true);
+    });
+
+    it('un PATCH con isPrimary:true que falla (FK) no guarda la edición ni desmarca la anterior', async () => {
+      const { patientId, ids } = await seedPatient(2);
+      await expect(
+        inA(() =>
+          repo.update(ids[1], {
+            payerId: randomUUID(),
+            planName: 'Cambiado',
+            isPrimary: true,
+            updatedById: by,
+          }),
+        ),
+      ).rejects.toBeDefined();
+      const rows = await live(patientId);
+      expect(rows.find((r) => r.id === ids[0])?.isPrimary).toBe(true);
+      expect(rows.find((r) => r.id === ids[1])).toMatchObject({
+        isPrimary: false,
+        planName: null,
       });
-      expect(primaries).toHaveLength(1);
-      expect([x.id, y.id]).toContain(primaries[0].id);
     });
   });
 

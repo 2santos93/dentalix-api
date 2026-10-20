@@ -12,12 +12,13 @@ export interface CreateCoverageRepoInput {
   policyHolderName: string | null;
   validFrom: string | null;
   validTo: string | null;
+  /** Pedida: la primera cobertura viva es principal aunque sea `false`. */
   isPrimary: boolean;
   notes: string | null;
   createdById: string;
 }
 
-/** Solo lo que cambia; `isPrimary` va por `setPrimary`. */
+/** Solo lo que cambia. `isPrimary: true` la marca principal (ver `update`). */
 export interface UpdateCoverageRepoPatch {
   payerId?: string;
   planName?: string | null;
@@ -26,6 +27,7 @@ export interface UpdateCoverageRepoPatch {
   validFrom?: string | null;
   validTo?: string | null;
   notes?: string | null;
+  isPrimary?: true;
   updatedById: string;
 }
 
@@ -37,8 +39,13 @@ export interface PatientCoverageRepository {
   /** Vivas: principal primero, luego por alta. */
   listByPatient(patientId: string): Promise<PatientCoverage[]>;
   findById(patientId: string, id: string): Promise<PatientCoverage | null>;
-  countLive(patientId: string): Promise<number>;
+  /**
+   * Una transacción con candado por paciente: comprueba el tope (400), decide
+   * si es la primera (principal) o si desmarca la anterior, y escribe. Si la
+   * red del índice parcial salta, 422 y no queda nada escrito.
+   */
   create(input: CreateCoverageRepoInput): Promise<PatientCoverage>;
+  /** Igual que `create` para `patch.isPrimary: true`: edición y marca, o nada. */
   update(
     id: string,
     patch: UpdateCoverageRepoPatch,
@@ -48,14 +55,4 @@ export interface PatientCoverageRepository {
    * principal en la misma transacción. `false` si no había nada que retirar.
    */
   softDelete(id: string, updatedById: string): Promise<boolean>;
-  /**
-   * Una transacción: desmarca las demás principales vivas del paciente y marca
-   * esta. Si otra petición cambia la principal a la vez, la implementación
-   * lanza 422 (como las demás escrituras de este puerto).
-   */
-  setPrimary(
-    patientId: string,
-    coverageId: string,
-    updatedById: string,
-  ): Promise<void>;
 }

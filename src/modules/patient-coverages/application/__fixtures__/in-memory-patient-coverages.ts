@@ -1,4 +1,11 @@
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import {
+  COVERAGE_LIMIT_MESSAGE,
+  MAX_COVERAGES_PER_PATIENT,
+} from '../../domain/coverage-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import type {
   CreateCoverageRepoInput,
@@ -16,13 +23,13 @@ interface Row extends Omit<PatientCoverage, 'payer'> {
  * Repositorio de coberturas en memoria con estado, como la tabla real: los
  * tests afirman sobre `rows`. `patientsKnown` son los pacientes de «esta
  * clínica» (otro id = paciente de otra clínica); `today` fija el día civil de
- * la sede; `failNextSetPrimary` simula la carrera del índice parcial.
+ * la sede; `failNextPrimaryWrite` simula la carrera del índice parcial.
  */
 export class InMemoryPatientCoverageRepository implements PatientCoverageRepository {
   readonly rows: Row[] = [];
   readonly patientsKnown = new Set<string>();
   today = '2026-10-20';
-  failNextSetPrimary = false;
+  failNextPrimaryWrite = false;
   readonly calls: string[] = [];
   private nextId = 1;
   private tick = 0;
@@ -100,21 +107,23 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
     return Promise.resolve(row ? this.view(row) : null);
   }
 
-  countLive(patientId: string): Promise<number> {
-    return Promise.resolve(this.live(patientId).length);
-  }
-
   create(input: CreateCoverageRepoInput): Promise<PatientCoverage> {
     this.calls.push('create');
-    if (
-      input.isPrimary &&
-      this.live(input.patientId).some((r) => r.isPrimary)
-    ) {
+    if (input.isPrimary && this.failNextPrimaryWrite) {
+      this.failNextPrimaryWrite = false;
       return Promise.reject(new UnprocessableEntityException('race'));
+    }
+    const live = this.live(input.patientId).length;
+    if (live >= MAX_COVERAGES_PER_PATIENT) {
+      return Promise.reject(new BadRequestException(COVERAGE_LIMIT_MESSAGE));
+    }
+    const isPrimary = live === 0 || input.isPrimary;
+    if (isPrimary) {
+      for (const r of this.live(input.patientId)) r.isPrimary = false;
     }
     const { createdById: _by, ...rest } = input;
     void _by;
-    return Promise.resolve(this.view(this.seed(rest)));
+    return Promise.resolve(this.view(this.seed({ ...rest, isPrimary })));
   }
 
   update(
@@ -124,6 +133,14 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
     this.calls.push('update');
     const row = this.rows.find((r) => r.id === id && !r.deleted);
     if (!row) return Promise.resolve(null);
+    if (patch.isPrimary && this.failNextPrimaryWrite) {
+      // Como la BD: la transacción entera se deshace, no se escribe nada.
+      this.failNextPrimaryWrite = false;
+      return Promise.reject(new UnprocessableEntityException('race'));
+    }
+    if (patch.isPrimary) {
+      for (const r of this.live(row.patientId)) r.isPrimary = false;
+    }
     const { updatedById: _by, ...fields } = patch;
     void _by;
     for (const [key, value] of Object.entries(fields)) {
@@ -146,15 +163,5 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
       if (oldest) oldest.isPrimary = true;
     }
     return Promise.resolve(true);
-  }
-
-  setPrimary(patientId: string, coverageId: string): Promise<void> {
-    this.calls.push('setPrimary');
-    if (this.failNextSetPrimary) {
-      this.failNextSetPrimary = false;
-      return Promise.reject(new UnprocessableEntityException('race'));
-    }
-    for (const r of this.live(patientId)) r.isPrimary = r.id === coverageId;
-    return Promise.resolve();
   }
 }
