@@ -150,6 +150,8 @@ interface SeedA {
   payerId: string;
   /** DX-105: una lista de precios de A con un precio cargado. */
   priceListId: string;
+  /** DX-105: un convenio de A por lista de precios. */
+  agreementId: string;
   scheduleBlockId: string;
   waitlistEntryId: string;
   noteTemplateId: string;
@@ -364,6 +366,14 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     items: [{ catalogItemId, price: 90000 }],
   }).expect(200);
 
+  // DX-105: un convenio de A (pagador + lista de precios).
+  const agreement = await create(app, a, '/agreements', {
+    name: 'Convenio de A',
+    payerId: payer.id,
+    kind: 'PRICE_LIST',
+    priceListId: priceList.id,
+  });
+
   // DX-122: un bloqueo de la sede y un pendiente (alta manual) de A.
   const scheduleBlock = await create(app, a, '/schedule-blocks', {
     locationId: location.id,
@@ -477,6 +487,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     appointmentTypeId: appointmentType.id,
     payerId: payer.id,
     priceListId: priceList.id,
+    agreementId: agreement.id,
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
@@ -562,6 +573,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-105: listas de precios y sus precios.
       'price_lists',
       'price_list_items',
+      // DX-105: convenios.
+      'agreements',
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
@@ -975,6 +988,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'put',
       path: () => `/price-lists/${a.priceListId}/items`,
       body: () => ({ items: [{ catalogItemId: b.catalogItemId, price: 1 }] }),
+      status: 404,
+    },
+    // --- convenios (DX-105) ---
+    {
+      name: 'PATCH /agreements/:id',
+      verb: 'patch',
+      path: () => `/agreements/${a.agreementId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /agreements/:id',
+      verb: 'delete',
+      path: () => `/agreements/${a.agreementId}`,
       status: 404,
     },
     // --- responsables de pago y avisos (DX-203) ---

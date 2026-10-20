@@ -17,6 +17,7 @@ import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
 import { PayersModule } from './modules/payers/payers.module';
 import { PriceListsModule } from './modules/price-lists/price-lists.module';
+import { AgreementsModule } from './modules/agreements/agreements.module';
 import { PatientCoveragesModule } from './modules/patient-coverages/patient-coverages.module';
 import { ScheduleBlocksModule } from './modules/schedule-blocks/schedule-blocks.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
@@ -81,6 +82,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AppointmentTypesModule,
     PayersModule,
     PriceListsModule,
+    AgreementsModule,
     PatientCoveragesModule,
     ScheduleBlocksModule,
     WaitlistModule,

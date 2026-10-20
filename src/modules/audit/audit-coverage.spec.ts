@@ -16,6 +16,7 @@ import { ClinicalEntriesController } from '../clinical-entries/presentation/clin
 import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
 import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
+import { AgreementsController } from '../agreements/presentation/agreements.controller';
 import { LocationsController } from '../locations/presentation/locations.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
 import { PerioExamsController } from '../periodontal/presentation/perio-exams.controller';
@@ -225,6 +226,22 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PRICE_LIST',
     resourceId: { param: 'id' },
     reason: 'PRICES_REPLACED',
+  },
+  // DX-105: convenios.
+  'POST /agreements': {
+    action: 'CREATE',
+    resource: 'AGREEMENT',
+    resourceId: RES,
+  },
+  'PATCH /agreements/:id': {
+    action: 'UPDATE',
+    resource: 'AGREEMENT',
+    resourceId: { param: 'id' },
+  },
+  'DELETE /agreements/:id': {
+    action: 'DELETE',
+    resource: 'AGREEMENT',
+    resourceId: { param: 'id' },
   },
   'PATCH /locations/:id': {
     action: 'UPDATE',
@@ -823,6 +840,7 @@ const CONTROLLERS: Type[] = [
   ClinicalEntryRdaController,
   DentalCatalogController,
   PriceListsController,
+  AgreementsController,
   LocationsController,
   OdontogramController,
   PerioExamsController,

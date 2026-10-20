@@ -328,6 +328,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /price-lists/:id': ADMIN_ONLY,
   'GET /price-lists/:id/items': CLINICAL,
   'PUT /price-lists/:id/items': ADMIN_ONLY,
+  // DX-105: convenios (leerlos: los 4 roles; escribirlos: ADMIN).
+  'GET /agreements': EVERY_ROLE,
+  'POST /agreements': ADMIN_ONLY,
+  'PATCH /agreements/:id': ADMIN_ONLY,
+  'DELETE /agreements/:id': ADMIN_ONLY,
   // DX-153: coberturas del paciente (PATIENT_ROLES).
   'GET /patients/:patientId/coverages': EVERY_ROLE,
   'POST /patients/:patientId/coverages': EVERY_ROLE,

@@ -75,6 +75,17 @@ export const PRICE_LIST_READ_ROLES: ClinicRole[] = [
 ];
 export const PRICE_LIST_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Convenios (DX-105) — leerlos (selector de la ficha del paciente y del plan):
+// los 4 roles; recepción asigna el convenio en mostrador. Crear, editar y
+// retirar: solo ADMIN.
+export const AGREEMENT_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+];
+export const AGREEMENT_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Plantillas de evolución (DX-170) — crear, editar, desactivar y cargar las de
 // ejemplo: solo gestión. Leerlas (selector de «Nueva evolución»):
 // CLINICAL_ROLES; recepción no documenta evoluciones.
