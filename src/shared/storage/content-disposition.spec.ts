@@ -1,5 +1,5 @@
 import { contentDispositionHeader } from './file-storage.port';
-import { contentTypeOf } from './content-type';
+import { contentTypeOf, isServableContentType } from './content-type';
 
 // DX-151: cabecera Content-Disposition de las URL firmadas (RFC 6266 con el
 // `filename*` de RFC 5987 para los nombres que no son ASCII).
@@ -61,6 +61,40 @@ describe('contentDispositionHeader (DX-151)', () => {
     expect(fallback.endsWith('.pdf')).toBe(true);
   });
 
+  it('comilla y barra invertida de ancho completo (U+FF02, U+FF3C) no rompen el fallback', () => {
+    const header = contentDispositionHeader({
+      disposition: 'attachment',
+      filename: 'a＂; filename=＂evil.exe',
+    });
+    expect(header).toBe(
+      `attachment; filename="a_; filename=_evil.exe"; filename*=UTF-8''a%EF%BC%82%3B%20filename%3D%EF%BC%82evil.exe`,
+    );
+    expect(header.match(/"/g)).toHaveLength(2);
+    expect(
+      contentDispositionHeader({ disposition: 'inline', filename: 'a＼b.pdf' }),
+    ).toBe(`inline; filename="a_b.pdf"; filename*=UTF-8''a%EF%BC%BCb.pdf`);
+  });
+
+  it('el fallback no pasa de 255 aunque NFKD expanda (U+FDFA → 18 caracteres)', () => {
+    const fallbackOf = (filename: string): string =>
+      /filename="([^"]*)"/.exec(
+        contentDispositionHeader({ disposition: 'attachment', filename }),
+      )?.[1] ?? '';
+    expect(fallbackOf('ﷺ'.repeat(255))).toHaveLength(255);
+    const withExt = fallbackOf(`${'ﷺ'.repeat(251)}.pdf`);
+    expect(withExt).toHaveLength(255);
+    expect(withExt.endsWith('.pdf')).toBe(true);
+  });
+
+  it('un surrogate suelto no lanza: pasa a U+FFFD', () => {
+    expect(
+      contentDispositionHeader({
+        disposition: 'inline',
+        filename: '\uD800a.pdf',
+      }),
+    ).toBe(`inline; filename="_a.pdf"; filename*=UTF-8''%EF%BF%BDa.pdf`);
+  });
+
   it('un nombre que queda vacío al sanear no se manda', () => {
     expect(
       contentDispositionHeader({ disposition: 'inline', filename: '"\r\n' }),
@@ -80,5 +114,16 @@ describe('contentTypeOf · tipos de documentos del paciente (DX-151)', () => {
     ['clinical/a.pdf', 'application/pdf'],
   ])('%s → %s', (key, type) => {
     expect(contentTypeOf(key)).toBe(type);
+  });
+});
+
+describe('isServableContentType (DX-151)', () => {
+  it('solo los tipos de la lista blanca', () => {
+    expect(isServableContentType('application/pdf')).toBe(true);
+    expect(isServableContentType('application/dicom')).toBe(true);
+    expect(isServableContentType('text/html')).toBe(false);
+    expect(isServableContentType('image/svg+xml')).toBe(false);
+    expect(isServableContentType('application/octet-stream')).toBe(false);
+    expect(isServableContentType('application/pdf; charset=utf-8')).toBe(false);
   });
 });

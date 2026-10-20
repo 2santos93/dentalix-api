@@ -100,6 +100,15 @@ describe('DiskFileStorage · URL firmada (DX-084)', () => {
     ]);
   });
 
+  it('rechaza un tipo fuera de la lista blanca (DX-151)', async () => {
+    await expect(
+      new DiskFileStorage(CFG).getSignedUrl('clinical/x.pdf', 60, {
+        disposition: 'inline',
+        contentType: 'image/svg+xml',
+      }),
+    ).rejects.toThrow('Tipo');
+  });
+
   it('rechaza un TTL fuera de rango', async () => {
     await expect(
       new DiskFileStorage(CFG).getSignedUrl('clinical/x.pdf', 0),

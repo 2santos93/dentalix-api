@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { contentTypeOf } from './content-type';
+import { contentTypeOf, isServableContentType } from './content-type';
 import { DiskFileStorage } from './disk-file-storage';
 import { isFileKey } from './file-key';
 import { FILE_STORAGE, contentDispositionHeader } from './file-storage.port';
@@ -85,8 +85,10 @@ export class FilesController {
    *
    * DX-151: la disposición, el nombre y el tipo van firmados en la query. Esta
    * ruta (y solo esta) se deja enmarcar desde cualquier origen para que la
-   * web muestre el PDF en su visor en desarrollo, y en `sandbox` para que lo
-   * servido no ejecute scripts ni con un tipo raro.
+   * web muestre el PDF en su visor en desarrollo. Sin `sandbox` en la CSP
+   * (Chromium deja en blanco el visor PDF en un documento en sandbox): lo
+   * compensa que el tipo servido es siempre de la lista blanca (nada de
+   * HTML ni SVG), con `nosniff` de helmet, URL que caduca y `no-store`.
    */
   @Get('signed')
   @ApiExcludeEndpoint()
@@ -110,6 +112,9 @@ export class FilesController {
       typeof expires !== 'string' ||
       typeof signature !== 'string' ||
       options === null ||
+      // Defensa en profundidad: getSignedUrl ya no firma otro tipo.
+      (options?.contentType !== undefined &&
+        !isServableContentType(options.contentType)) ||
       !this.storage.verifySignedUrl(key, expires, signature, options)
     ) {
       throw new ForbiddenException('Invalid or expired signature');
@@ -125,7 +130,7 @@ export class FilesController {
     // helmet pone X-Frame-Options: SAMEORIGIN y frame-ancestors 'self' en
     // toda la API; aquí se sustituyen (la web está en otro origen).
     res.removeHeader('X-Frame-Options');
-    res.set('Content-Security-Policy', 'frame-ancestors *; sandbox');
+    res.set('Content-Security-Policy', 'frame-ancestors *');
     return new StreamableFile(file.bytes);
   }
 }

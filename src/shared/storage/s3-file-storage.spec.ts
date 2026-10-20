@@ -176,6 +176,16 @@ describe('S3FileStorage (DX-084, cliente simulado)', () => {
     expect(url.searchParams.has('response-content-type')).toBe(false);
   });
 
+  it('getSignedUrl rechaza un tipo fuera de la lista blanca (DX-151)', async () => {
+    const { storage } = makeStorage(mockSend());
+    await expect(
+      storage.getSignedUrl('clinical/x.pdf', 60, {
+        disposition: 'inline',
+        contentType: 'text/html',
+      }),
+    ).rejects.toThrow('Tipo');
+  });
+
   it('getSignedUrl rechaza un TTL fuera de 1 s – 7 días', async () => {
     const { storage } = makeStorage(mockSend());
     await expect(storage.getSignedUrl('clinical/x.pdf', 0)).rejects.toThrow(

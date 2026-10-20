@@ -1,4 +1,5 @@
 import { publicFileUrl } from '../file-key';
+import { assertSignedUrlOptions } from '../file-storage.port';
 import type {
   FileStoragePort,
   SignedUrlOptions,
@@ -44,10 +45,14 @@ export class InMemoryFileStorage implements FileStoragePort {
     ttlSeconds: number,
     options?: SignedUrlOptions,
   ): Promise<string> {
-    const query = new URLSearchParams({ ttl: String(ttlSeconds) });
-    if (options) query.set('disposition', options.disposition);
-    if (options?.filename) query.set('filename', options.filename);
-    if (options?.contentType) query.set('type', options.contentType);
-    return Promise.resolve(`memory://${key}?${query.toString()}`);
+    // Como los adaptadores reales: un tipo fuera de la lista blanca rechaza.
+    return Promise.resolve().then(() => {
+      assertSignedUrlOptions(options);
+      const query = new URLSearchParams({ ttl: String(ttlSeconds) });
+      if (options) query.set('disposition', options.disposition);
+      if (options?.filename) query.set('filename', options.filename);
+      if (options?.contentType) query.set('type', options.contentType);
+      return `memory://${key}?${query.toString()}`;
+    });
   }
 }

@@ -11,6 +11,7 @@ import {
   FileStoragePort,
   SignedUrlOptions,
   StoredFile,
+  assertSignedUrlOptions,
   assertSignedUrlTtl,
   contentDispositionHeader,
 } from './file-storage.port';
@@ -106,6 +107,7 @@ export class S3FileStorage implements FileStoragePort {
   ): Promise<string> {
     assertFileKey(key);
     assertSignedUrlTtl(ttlSeconds);
+    assertSignedUrlOptions(options);
     // Los response-* van dentro de la firma SigV4: el bucket responde con esa
     // disposición y ese tipo, y cambiarlos en la URL la invalida (DX-151).
     return getSignedUrl(

@@ -135,7 +135,7 @@ describe('Files (e2e)', () => {
       );
     });
 
-    it('con disposición y nombre: los responde, enmarcable y en sandbox (DX-151)', async () => {
+    it('con disposición y nombre: los responde y se deja enmarcar (DX-151)', async () => {
       const url = await storage.getSignedUrl(key, 60, {
         disposition: 'attachment',
         filename: 'radio ñ.pdf',
@@ -149,9 +149,10 @@ describe('Files (e2e)', () => {
       expect(res.headers['content-type']).toContain('application/pdf');
       expect(res.headers['cache-control']).toBe('private, no-store');
       expect(res.headers['x-frame-options']).toBeUndefined();
-      expect(res.headers['content-security-policy']).toBe(
-        'frame-ancestors *; sandbox',
-      );
+      // Sin `sandbox`: Chromium trata el visor PDF como plugin y lo deja en
+      // blanco dentro de un documento en sandbox.
+      expect(res.headers['content-security-policy']).toBe('frame-ancestors *');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
       expect((res.body as Buffer).toString()).toBe('%PDF-1.7');
     });
 
@@ -180,6 +181,7 @@ describe('Files (e2e)', () => {
         ['disposition', 'attachment'],
         ['filename', 'otro.pdf'],
         ['type', 'text/html'],
+        ['type', 'image/svg+xml'],
         ['type', ''],
         ['disposition', null],
       ];

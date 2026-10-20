@@ -7,6 +7,7 @@ import {
   FileStoragePort,
   SignedUrlOptions,
   StoredFile,
+  assertSignedUrlOptions,
   assertSignedUrlTtl,
 } from './file-storage.port';
 import type { DiskStorageConfig } from './storage-config';
@@ -70,6 +71,7 @@ export class DiskFileStorage implements FileStoragePort {
     return Promise.resolve().then(() => {
       assertFileKey(key);
       assertSignedUrlTtl(ttlSeconds);
+      assertSignedUrlOptions(options);
       const expires = String(Math.floor(Date.now() / 1000) + ttlSeconds);
       // Nombre o tipo vacíos no viajan en la URL, así que tampoco se firman.
       const signed: SignedUrlOptions | undefined = options && {

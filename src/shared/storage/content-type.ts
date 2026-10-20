@@ -20,3 +20,14 @@ export function contentTypeOf(key: string): string {
     MIME_BY_EXT[path.extname(key).toLowerCase()] ?? 'application/octet-stream'
   );
 }
+
+const SERVABLE_TYPES = new Set(Object.values(MIME_BY_EXT));
+
+/**
+ * true si `type` es uno de los tipos de la lista blanca (DX-151). Una URL
+ * firmada solo puede forzar uno de estos: nunca `text/html`, `image/svg+xml`
+ * ni nada que el navegador ejecute.
+ */
+export function isServableContentType(type: string): boolean {
+  return SERVABLE_TYPES.has(type);
+}
