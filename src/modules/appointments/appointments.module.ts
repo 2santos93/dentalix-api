@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
 import { JwtModule } from '@nestjs/jwt';
 import { AppointmentsController } from './presentation/appointments.controller';
 import { CreateAppointmentUseCase } from './application/use-cases/create-appointment.use-case';
@@ -43,6 +44,8 @@ import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.m
     CollectionsModule,
     // DX-153: resumen `coverage` de las tarjetas, por lote.
     PatientCoveragesModule,
+    // DX-233: horario de cada profesional por sede.
+    ProviderScheduleModule,
   ],
   controllers: [AppointmentsController],
   providers: [

@@ -27,6 +27,7 @@ import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.p
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { DEFAULT_BUSINESS_HOURS } from '../../../../shared/locations/default-business-hours';
 import {
   civilDaysInclusive,
@@ -56,7 +57,9 @@ export interface OpeningsView {
 
 /**
  * «Buscar hueco» (DX-122): huecos libres de un profesional en una sede, dentro
- * del horario de la sede, fuera de bloqueos (también de los que dejan agendar:
+ * del horario de la sede y del horario del profesional en ESA sede (DX-233:
+ * sin horario configurado, sin restricción; la excepción de la fecha
+ * prevalece), fuera de bloqueos (también de los que dejan agendar:
  * un hueco propuesto no debería caer en el almuerzo) y sin solape con sus
  * citas (de cualquier sede) ni, si se indica, con las del paciente.
  */
@@ -76,6 +79,8 @@ export class FindOpeningsUseCase {
     @Inject(PATIENT_REPOSITORY)
     private readonly patients: PatientRepository,
     private readonly tenantContext: TenantContextService,
+    // DX-233: solo donde el profesional trabaja en esa sede.
+    private readonly availability: ProviderAvailabilityService,
   ) {}
 
   async execute(input: FindOpeningsInput): Promise<OpeningsView> {
@@ -142,6 +147,13 @@ export class FindOpeningsUseCase {
       ).filter((b) => blockAffects(b, input.providerId, input.locationId)),
     ].map((i) => ({ start: i.start, end: i.end }));
 
+    const providerRangesOn = await this.availability.rangesByDay(
+      input.providerId,
+      input.locationId,
+      input.from,
+      input.to,
+    );
+
     const result = findOpenings({
       fromDay: input.from,
       toDay: input.to,
@@ -150,6 +162,7 @@ export class FindOpeningsUseCase {
       busy,
       durationMinutes: input.durationMinutes,
       now: new Date(),
+      providerRangesOn,
     });
     return { timeZone, durationMinutes: input.durationMinutes, ...result };
   }
