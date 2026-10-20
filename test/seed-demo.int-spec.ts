@@ -41,6 +41,9 @@ const TENANT_TABLES = [
   'post_op_instruction_templates',
   // DX-203: responsables (hijos de patients).
   'patient_responsible_parties',
+  // DX-153: coberturas (hijas de patients y payers) y pagadores.
+  'patient_coverages',
+  'payers',
   'patient_implants',
   // DX-151: documentos (hijos de patients y locations).
   'patient_documents',

@@ -54,6 +54,9 @@ model Tenant {
   collectionNotes           CollectionNote[]
   // DX-203: responsables de pago y avisos de los pacientes.
   patientResponsibleParties PatientResponsibleParty[]
+  // DX-153: pagadores de la clínica y coberturas de sus pacientes.
+  payers                    Payer[]
+  patientCoverages          PatientCoverage[]
   paymentPromises           PaymentPromise[]
   platformAccesses          PlatformAccessAudit[]
   // DX-204: topes de descuento por rol (una fila; sin ella, los de por defecto).
@@ -333,6 +336,9 @@ model Patient {
   // Identificación ampliada.
   maritalStatus                String?
   occupation                   String?
+  // DEPRECADO (DX-153): solo lectura; el pagador vive en patient_coverages
+  // (la migración 20261020210200 copió cada valor a un pagador y una
+  // cobertura principal con `migratedFromInsurerEps`).
   insurerEps                   String?
   physicianName                String?
   physicianPhone               String?
@@ -408,6 +414,8 @@ model Patient {
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
   responsibleParties     PatientResponsibleParty[]   @relation("PatientResponsibleParties")
   responsibleFor         PatientResponsibleParty[]   @relation("ResponsiblePatient")
+  // DX-153: sus coberturas (pagador, plan, afiliado, vigencia).
+  coverages              PatientCoverage[]
   // DX-222: indicaciones postoperatorias que se le entregaron.
   postOpDeliveries       PostOpInstructionDelivery[]
   country                Country?                    @relation(fields: [countryCode], references: [code])
@@ -3064,6 +3072,90 @@ model PatientResponsibleParty {
   //   patient_responsible_parties_migrated_key    UNIQUE ("tenantId", "patientId") WHERE "migratedFromGuardian"
   //   patient_responsible_parties_responsible_idx ("tenantId", "responsiblePatientId") WHERE "responsiblePatientId" IS NOT NULL
   @@map("patient_responsible_parties")
+}
+
+// ---------------------------------------------------------------------------
+// Pagadores y coberturas del paciente (DX-153)
+// ---------------------------------------------------------------------------
+
+enum PayerType {
+  MUTUA_ES
+  PREPAGADA_CO
+  EPS_CO
+  EMPRESA
+  /// «Otro / sin clasificar»: el que crea el relleno de `insurerEps`.
+  OTRO
+}
+
+/// DX-153: pagador de la clínica (mutua, prepagada, EPS, empresa). Catálogo
+/// POR CLÍNICA. Se retira en blando (`deletedAt` + `active = false`); desactivar
+/// solo lo oculta de los selectores. RLS FORCE.
+/// CHECK `payers_type_country_check` en la BD: MUTUA_ES exige ES; PREPAGADA_CO y
+/// EPS_CO exigen CO; EMPRESA y OTRO admiten CO, ES o nulo.
+model Payer {
+  id          String         @id @default(uuid()) @db.Uuid
+  tenantId    String         @db.Uuid
+  name        String
+  type        PayerType
+  country     ClinicCountry?
+  active      Boolean        @default(true)
+  /// Punteros suaves a User, como `Payment.createdById`.
+  createdById String?        @db.Uuid
+  updatedById String?        @db.Uuid
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  coverages PatientCoverage[]
+
+  // Destino de la FK compuesta de `patient_coverages`.
+  @@unique([tenantId, id], map: "payers_tenant_id_key")
+  // PARCIAL: en la BD es UNIQUE ("tenantId", "name") WHERE "deletedAt" IS NULL
+  // (un nombre por clínica entre los vivos). Prisma no expresa el WHERE: NO
+  // aceptar un diff de `migrate dev` que lo recree sin el WHERE.
+  @@unique([tenantId, name], map: "payers_tenant_name_key")
+  @@map("payers")
+}
+
+/// DX-153: cobertura de un paciente con un pagador (plan, nº de afiliado,
+/// titular, vigencia en días civiles sin zona). `memberNumber` es un DATO
+/// PERSONAL: nunca en logs, auditoría ni CSV. `policyHolderName` es el titular
+/// cuando no es el paciente: dato de un tercero tratado bajo la autorización
+/// del paciente (finalidad «gestión de cobro»). Se retira en blando
+/// (`deletedAt`). RLS FORCE y FK COMPUESTAS por tenant.
+/// PARCIALES (no declarables en Prisma, no generan drift):
+///   patient_coverages_one_primary_key    UNIQUE ("tenantId", "patientId") WHERE "isPrimary" AND "deletedAt" IS NULL
+///   patient_coverages_migrated_key       UNIQUE ("tenantId", "patientId") WHERE "migratedFromInsurerEps"
+///   patient_coverages_tenant_payer_live_idx ("tenantId", "payerId", "patientId") WHERE "deletedAt" IS NULL
+/// CHECK patient_coverages_valid_range_check: "validTo" >= "validFrom" si ambos existen.
+model PatientCoverage {
+  id                     String    @id @default(uuid()) @db.Uuid
+  tenantId               String    @db.Uuid
+  patientId              String    @db.Uuid
+  payerId                String    @db.Uuid
+  planName               String?
+  memberNumber           String?
+  policyHolderName       String?
+  validFrom              DateTime? @db.Date
+  validTo                DateTime? @db.Date
+  isPrimary              Boolean   @default(false)
+  notes                  String?
+  /// Copiado de `patients.insurerEps` por la migración.
+  migratedFromInsurerEps Boolean   @default(false)
+  /// Punteros suaves a User, como `Payment.createdById`.
+  createdById            String?   @db.Uuid
+  updatedById            String?   @db.Uuid
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_patient_fkey")
+  payer   Payer   @relation(fields: [tenantId, payerId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_payer_fkey")
+
+  @@index([tenantId, patientId, createdAt], map: "patient_coverages_tenant_patient_idx")
+  @@map("patient_coverages")
 }
 
 // ---------------------------------------------------------------------------
