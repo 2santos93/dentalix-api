@@ -75,6 +75,11 @@ describe('sniffDocument (DX-151)', () => {
     expect(sniffDocument(docx)).toBeNull();
   });
 
+  it('un DICOM cuyo preámbulo empieza por PK\\x03\\x04 sigue siendo DICOM', () => {
+    const zipLike = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+    expect(sniffDocument(dicomFixture(zipLike))).toBe('application/dicom');
+  });
+
   it('un PNG renombrado a .pdf se detecta como PNG: manda el contenido', () => {
     expect(sniffDocument(pngRenamedAsPdf().bytes)).toBe('image/png');
   });
@@ -104,6 +109,15 @@ describe('declaredTypeMatches', () => {
     ).toBe(false);
   });
 
+  it('un PDF etiquetado como ZIP no coincide (el alias es solo de DOCX)', () => {
+    expect(
+      declaredTypeMatches(
+        { mimeType: 'application/zip', originalName: 'x.zip' },
+        'application/pdf',
+      ),
+    ).toBe(false);
+  });
+
   it('un PNG etiquetado como SVG no coincide', () => {
     expect(
       declaredTypeMatches(
@@ -124,6 +138,10 @@ describe('declaredTypeMatches', () => {
     ['application/octet-stream', 'CT.dcm', 'application/dicom'],
     ['application/octet-stream', 'IM000001', 'application/dicom'],
     ['application/dicom', 'serie.dicom', 'application/dicom'],
+    ['application/x-dicom', 'CT.dcm', 'application/dicom'],
+    ['image/dicom', 'CT.dcm', 'application/dicom'],
+    ['application/zip', 'informe.docx', DOCX],
+    ['application/x-zip-compressed', 'informe.docx', DOCX],
   ])('%s / %s coincide con %s', (mimeType, originalName, detected) => {
     expect(declaredTypeMatches({ mimeType, originalName }, detected)).toBe(
       true,

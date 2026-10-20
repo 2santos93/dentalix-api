@@ -111,19 +111,20 @@ export const docxFixture = (): Buffer =>
     },
   ]);
 
-/** Preámbulo de 128 bytes + `DICM` + un elemento del grupo 0002. */
-export function dicomFixture(): Buffer {
+/**
+ * Preámbulo de 128 bytes + `DICM` + un elemento del grupo 0002. El preámbulo
+ * es libre: `preamble` rellena su comienzo (p. ej. `PK\x03\x04`).
+ */
+export function dicomFixture(preamble: Buffer = Buffer.alloc(0)): Buffer {
   const element = Buffer.alloc(12);
   element.writeUInt16LE(0x0002, 0);
   element.writeUInt16LE(0x0000, 2);
   element.write('UL', 4, 'latin1');
   element.writeUInt16LE(4, 6);
   element.writeUInt32LE(0, 8);
-  return Buffer.concat([
-    Buffer.alloc(128),
-    Buffer.from('DICM', 'latin1'),
-    element,
-  ]);
+  const head = Buffer.alloc(128);
+  preamble.copy(head, 0, 0, 128);
+  return Buffer.concat([head, Buffer.from('DICM', 'latin1'), element]);
 }
 
 // --- Falsos -----------------------------------------------------------------

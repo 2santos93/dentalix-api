@@ -53,8 +53,13 @@ export function sniffDocument(bytes: Buffer): DetectedType | null {
   ) {
     return 'image/heic';
   }
-  if (startsWith(bytes, ZIP_LOCAL_MAGIC)) {
-    return zipHasEntry(bytes, 'word/document.xml') ? DOCX_TYPE : null;
+  // Un ZIP sin `word/document.xml` sigue: el preámbulo libre de un DICOM
+  // puede empezar por `PK\x03\x04`.
+  if (
+    startsWith(bytes, ZIP_LOCAL_MAGIC) &&
+    zipHasEntry(bytes, 'word/document.xml')
+  ) {
+    return DOCX_TYPE;
   }
   if (
     bytes.length >= DICOM_PREAMBLE + 4 &&
@@ -149,8 +154,13 @@ const MIME_ALIASES: Record<DetectedType, readonly string[]> = {
     'image/heic-sequence',
     'image/heif-sequence',
   ],
-  [DOCX_TYPE]: [DOCX_TYPE],
-  'application/dicom': ['application/dicom'],
+  // Algunos navegadores etiquetan un .docx como ZIP genérico.
+  [DOCX_TYPE]: [DOCX_TYPE, 'application/zip', 'application/x-zip-compressed'],
+  'application/dicom': [
+    'application/dicom',
+    'application/x-dicom',
+    'image/dicom',
+  ],
 };
 
 /** Extensiones de nombre que corresponden a cada tipo. */

@@ -20,6 +20,14 @@ export const PATIENT_DOCUMENT_URL_TTL_SECONDS = 300;
 
 export const MAX_ORIGINAL_NAME_LENGTH = 255;
 export const MAX_TOOTH_NUMBERS = 8;
+export const MAX_NOTES_LENGTH = 500;
+export const MAX_VOID_REASON_LENGTH = 500;
+
+/**
+ * Longitud en puntos de código, como `char_length` de Postgres (los CHECK de
+ * la BD): un emoji cuenta 1, no 2 unidades UTF-16.
+ */
+const codePoints = (value: string): number => Array.from(value).length;
 export const FALLBACK_ORIGINAL_NAME = 'documento';
 
 /** Mismo orden y valores que el enum `PatientDocumentCategory` de la BD. */
@@ -33,12 +41,11 @@ export const PATIENT_DOCUMENT_CATEGORIES: readonly PatientDocumentCategory[] = [
 ];
 
 /**
- * Controles C0/C1 y caracteres de formato que disfrazan un nombre (marcas y
- * overrides bidi, ancho cero): `foto<U+202E>gnp.exe` se ve como «fotoexe.png».
+ * Controles (Cc), caracteres de formato (Cf: marcas y overrides bidi, ancho
+ * cero, U+061C, U+2060-2064, BOM, …) y separadores de línea y párrafo
+ * (U+2028/U+2029): `foto<U+202E>gnp.exe` se ve como «fotoexe.png».
  */
-const UNSAFE_CHARS =
-  // eslint-disable-next-line no-control-regex -- quitar controles es justo lo que se quiere
-  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const EXTENSION = /\.[^.]{1,16}$/;
 
 /**
@@ -69,19 +76,27 @@ export function validateCategory(value: unknown): PatientDocumentCategory {
   throw new PatientDocumentRuleError('La categoría no es válida.');
 }
 
+/** Cómo se nombra en el mensaje un elemento que llegó (texto o no). */
+const shown = (value: unknown): string =>
+  typeof value === 'string' ? value : (JSON.stringify(value) ?? 'sin valor');
+
 /** Dientes FDI (0..8, sin repetir), recortados. */
 export function validateToothNumbers(
   list: readonly string[] | null | undefined,
 ): string[] {
-  const teeth = (list ?? []).map((t) => t.trim());
+  // El cuerpo llega de fuera: un elemento que no es texto da el mensaje FDI,
+  // no un TypeError (500).
+  const teeth: unknown[] = (list ?? []).map((t: unknown) =>
+    typeof t === 'string' ? t.trim() : t,
+  );
   if (teeth.length > MAX_TOOTH_NUMBERS) {
     throw new PatientDocumentRuleError('Como mucho 8 dientes por documento.');
   }
   const seen = new Set<string>();
   for (const tooth of teeth) {
-    if (!FDI_TOOTH_NUMBER_PATTERN.test(tooth)) {
+    if (typeof tooth !== 'string' || !FDI_TOOTH_NUMBER_PATTERN.test(tooth)) {
       throw new PatientDocumentRuleError(
-        `El diente «${tooth}» no es un número FDI válido.`,
+        `El diente «${shown(tooth)}» no es un número FDI válido.`,
       );
     }
     if (seen.has(tooth)) {
@@ -89,7 +104,7 @@ export function validateToothNumbers(
     }
     seen.add(tooth);
   }
-  return teeth;
+  return teeth as string[];
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -123,10 +138,30 @@ export function validateClinicalDate(
   return value;
 }
 
-/** Motivo de anulación: 3..500 caracteres tras recortar (CHECK de la BD). */
+/**
+ * Notas opcionales: como mucho 500 caracteres (puntos de código) tras
+ * recortar; vacías → null.
+ */
+export function validateNotes(notes: string | null | undefined): string | null {
+  const trimmed = (notes ?? '').trim();
+  if (trimmed === '') return null;
+  if (codePoints(trimmed) > MAX_NOTES_LENGTH) {
+    throw new PatientDocumentRuleError(
+      'Las notas admiten hasta 500 caracteres.',
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Motivo de anulación: 3..500 caracteres tras recortar, en puntos de código
+ * como el CHECK `char_length(btrim("voidReason"))` (si no, «🦷🦷» pasaría
+ * aquí y la BD daría un 500).
+ */
 export function validateVoidReason(reason: string | null | undefined): string {
   const trimmed = (reason ?? '').trim();
-  if (trimmed.length < 3 || trimmed.length > 500) {
+  const length = codePoints(trimmed);
+  if (length < 3 || length > MAX_VOID_REASON_LENGTH) {
     throw new PatientDocumentRuleError(
       'El motivo debe tener entre 3 y 500 caracteres.',
     );
