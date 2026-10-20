@@ -570,6 +570,24 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       expect(rows.filter((r) => r.isPrimary)).toHaveLength(1);
     });
 
+    it('dos altas a la vez con 4 vivas: exactamente una entra y la otra recibe 400 con el mensaje del tope, nunca 500', async () => {
+      const { patientId, payerId } = await seedPatient(4);
+      const results = await Promise.allSettled([
+        inA(() => repo.create(input(patientId, payerId, false))),
+        inA(() => repo.create(input(patientId, payerId, false))),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toMatchObject({
+        status: 400,
+        message: 'Un paciente admite hasta 5 coberturas.',
+      });
+      expect(await live(patientId)).toHaveLength(5);
+    });
+
     it('marcar principal a la vez (PATCH y POST): todas valen, sin 422, y queda una sola principal', async () => {
       const { patientId, payerId, ids } = await seedPatient(3);
       for (let round = 0; round < 4; round++) {
