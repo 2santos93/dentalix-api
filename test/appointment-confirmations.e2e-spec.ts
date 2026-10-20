@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DX-005: enlace firmado de confirmación de cita, contra Postgres real (RLS +
 // FK compuestas). Cubre: generación con permisos por rol, solo hash en BD,
@@ -184,13 +185,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
     };
 
   async function cleanup() {
-    await raw.appointmentConfirmation.deleteMany();
-    await raw.toothRecord.deleteMany();
-    await raw.appointment.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
   }
 
   beforeAll(async () => {

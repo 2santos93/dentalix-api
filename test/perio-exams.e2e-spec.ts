@@ -8,6 +8,7 @@ import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
 // un contexto de tenant los triggers de inmutabilidad dejan borrar.
@@ -54,13 +55,7 @@ interface ExamBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.perioExam.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {

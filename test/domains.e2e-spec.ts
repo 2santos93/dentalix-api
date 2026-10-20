@@ -14,6 +14,7 @@ import {
 } from '../src/modules/domains/application/__fixtures__/fake-domains';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -114,10 +115,7 @@ describe('Domains (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
-    await raw.tenantDomain.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
 
     token = await signUp(SUB, 'Dr. Owner');
     tokenB = await signUp(SUB_B, 'Dra. Real');
@@ -125,10 +123,7 @@ describe('Domains (e2e)', () => {
 
   afterAll(async () => {
     await raw.job.deleteMany({ where: { name: { startsWith: 'domains.' } } });
-    await raw.tenantDomain.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
   });

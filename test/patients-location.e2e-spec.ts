@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -29,16 +30,7 @@ describe('patient location (e2e)', () => {
     );
     await app.init();
 
-    // tooth_records referencia patients (y plan items): marcar un ítem de plan
-    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-    // patients falla por FK y hace reventar el afterAll (contaminando las
-    // suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenantDomain.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
 
     await registerVerified(app, {
       clinicName: 'Loc',
@@ -62,16 +54,7 @@ describe('patient location (e2e)', () => {
   });
 
   afterAll(async () => {
-    // tooth_records referencia patients (y plan items): marcar un ítem de plan
-    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-    // patients falla por FK y hace reventar el afterAll (contaminando las
-    // suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenantDomain.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
   });

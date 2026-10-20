@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en beforeAll —
 // usa DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -39,11 +40,7 @@ describe('Auth (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
-    // FK-safe order: memberships -> users -> tenants.
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
-    await raw.revokedToken.deleteMany();
+    await resetDatabase(raw);
   });
 
   afterAll(async () => {

@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -130,17 +131,11 @@ describe('Staff (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
-    // FK-safe order (same convention as appointments.e2e-spec.ts /
-    // role-matrix.e2e-spec.ts): memberships -> users -> tenants.
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
   });
 
   afterAll(async () => {
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
   });

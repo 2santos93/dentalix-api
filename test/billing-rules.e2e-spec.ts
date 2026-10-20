@@ -6,6 +6,7 @@ import { CatalogKind, DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DX-109 · reglas de cobro por HTTP: un solo «aceptar», nada cobrable en
 // planes cerrados, saldo coherente con el estado de cuenta, idempotencia con
@@ -54,21 +55,7 @@ interface ErrorBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.treatmentPlanAcceptance.deleteMany();
-  await raw.toothRecord.deleteMany();
-  await raw.appointment.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.installment.deleteMany();
-  await raw.paymentPlan.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Reglas de cobro (e2e, DX-109)', () => {

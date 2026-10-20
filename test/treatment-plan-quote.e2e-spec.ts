@@ -16,6 +16,7 @@ import { MAX_SIGNATURE_BYTES } from '../src/modules/consents/domain/signature-im
 import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
@@ -77,21 +78,7 @@ interface QuoteBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.treatmentPlanAcceptance.deleteMany();
-  await raw.patientConsent.deleteMany();
-  await raw.toothRecord.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.locationScheduleRange.deleteMany();
-  await raw.locationSchedule.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatment-plans/:planId/{quote,acceptance} (e2e, DX-012)', () => {

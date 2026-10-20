@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es la conexión de ADMINISTRACIÓN (DIRECT_URL, superuser) para
 // sembrar y limpiar: con RLS aplicado, una conexión sin contexto de tenant no
@@ -36,15 +37,7 @@ interface DirectoryBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
@@ -86,7 +79,12 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
     // sean exactos y legibles: si no, cada aserción tendría que ir contra una
     // línea base que cambia cada vez que alguien añade un procedimiento al
     // catálogo semilla, y el test fallaría por un motivo que no es el suyo.
-    await raw.dentalCatalogItem.deleteMany();
+    // Solo el catálogo de ESTA clínica (DX-251: sin deleteMany() a ciegas).
+    const { id: tenantId } = await raw.tenant.findUniqueOrThrow({
+      where: { subdomain: SUBDOMAIN },
+      select: { id: true },
+    });
+    await raw.dentalCatalogItem.deleteMany({ where: { tenantId } });
 
     // 25 procedimientos + 1 diagnóstico inactivo. 25 pasa del tamaño de página
     // por defecto (20) a propósito: sin eso, "paginado" y "sin paginar" darían

@@ -6,6 +6,7 @@ import { PrismaClient, DocType, Sex, CatalogKind } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -131,36 +132,11 @@ describe('Clinical history (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
-    // FK-safe order: children of patient -> patients -> memberships -> users
-    // -> tenants. medical_history_versions / clinical_entries FK to patients;
-    // dental_catalog_items only FKs to tenants.
-    // tooth_records referencia patients (y plan items): marcar un ítem de plan
-    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-    // patients falla por FK y hace reventar el afterAll (contaminando las
-    // suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.medicalHistoryVersion.deleteMany();
-    await raw.clinicalEntry.deleteMany();
-    await raw.dentalCatalogItem.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
   });
 
   afterAll(async () => {
-    // tooth_records referencia patients (y plan items): marcar un ítem de plan
-    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-    // patients falla por FK y hace reventar el afterAll (contaminando las
-    // suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.medicalHistoryVersion.deleteMany();
-    await raw.clinicalEntry.deleteMany();
-    await raw.dentalCatalogItem.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
   });

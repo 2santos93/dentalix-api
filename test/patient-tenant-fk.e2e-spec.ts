@@ -7,6 +7,7 @@ import { DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // SEC-004: los endpoints que reciben `:patientId` en la ruta tienen que
 // resolver el paciente en la clínica en contexto ANTES de insertar. Antes
@@ -74,14 +75,7 @@ async function createPatient(
 }
 
 async function cleanup(): Promise<void> {
-  // Orden FK-safe: hijos de patients/treatment_plans primero.
-  await raw.toothRecord.deleteMany();
-  await raw.clinicalEntry.deleteMany();
-  await raw.medicalHistoryVersion.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.appointment.deleteMany();
-  await raw.patient.deleteMany();
+  await resetDatabase(raw);
   // El registro crea la sede por defecto y su horario: se borran los de las
   // clínicas de ESTE spec (no las de otros) antes de borrar los tenants.
   const ours = await raw.tenant.findMany({
@@ -92,9 +86,7 @@ async function cleanup(): Promise<void> {
   await raw.locationScheduleRange.deleteMany({ where: ourTenants });
   await raw.locationSchedule.deleteMany({ where: ourTenants });
   await raw.location.deleteMany({ where: ourTenants });
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 interface Endpoint {
