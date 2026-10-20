@@ -102,6 +102,22 @@ async function cleanup(): Promise<void> {
   await raw.tenant.deleteMany({ where: { id: { in: ids } } });
 }
 
+/**
+ * Ejecuta un INSERT como owner y, si viola un único, relanza el error con el
+ * NOMBRE del índice (Postgres lo da en el diagnóstico; Prisma no lo expone en
+ * los índices parciales). Solo recibe SQL propio de la prueba (ids de siembra).
+ */
+async function insertViolating(insertSql: string): Promise<void> {
+  await raw.$executeRawUnsafe(`DO $do$
+    DECLARE c text;
+    BEGIN
+      ${insertSql};
+    EXCEPTION WHEN unique_violation THEN
+      GET STACKED DIAGNOSTICS c = CONSTRAINT_NAME;
+      RAISE EXCEPTION 'unique violation en %', c;
+    END $do$`);
+}
+
 const FK = /23503|foreign key/i;
 const UNIQUE = /23505|unique/i;
 
@@ -319,16 +335,13 @@ describe('listas de precios y convenios (int, DX-105)', () => {
           locationId: a.locationId,
         },
       });
+      // Postgres nombra el índice en el error; Prisma no lo expone en los parciales.
       await expect(
-        raw.priceList.create({
-          data: {
-            tenantId: a.tenantId,
-            name: 'Sede 1 bis',
-            currency: 'COP',
-            locationId: a.locationId,
-          },
-        }),
-      ).rejects.toThrow(UNIQUE);
+        insertViolating(
+          `INSERT INTO "price_lists" ("id","tenantId","name","currency","locationId","updatedAt")
+          VALUES (gen_random_uuid(), '${a.tenantId}', 'Sede 1 bis', 'COP', '${a.locationId}', now())`,
+        ),
+      ).rejects.toThrow(/price_lists_tenant_location_active_key/);
       // Por la ruta de la app también (P2002).
       await expect(
         asA((tx) =>
@@ -386,10 +399,11 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: { tenantId: a.tenantId, name: 'Repetida', currency: 'COP' },
       });
       await expect(
-        raw.priceList.create({
-          data: { tenantId: a.tenantId, name: 'Repetida', currency: 'USD' },
-        }),
-      ).rejects.toThrow(UNIQUE);
+        insertViolating(
+          `INSERT INTO "price_lists" ("id","tenantId","name","currency","updatedAt")
+          VALUES (gen_random_uuid(), '${a.tenantId}', 'Repetida', 'USD', now())`,
+        ),
+      ).rejects.toThrow(/price_lists_tenant_name_key/);
       // Otra clínica puede usar el mismo nombre.
       await raw.priceList.create({
         data: { tenantId: b.tenantId, name: 'Repetida', currency: 'COP' },
@@ -397,8 +411,11 @@ describe('listas de precios y convenios (int, DX-105)', () => {
 
       const first = await raw.agreement.create({ data: percentAgreement(a) });
       await expect(
-        raw.agreement.create({ data: percentAgreement(a) }),
-      ).rejects.toThrow(UNIQUE);
+        insertViolating(
+          `INSERT INTO "agreements" ("id","tenantId","name","payerId","kind","percent","updatedAt")
+           VALUES (gen_random_uuid(), '${a.tenantId}', 'Convenio 10', '${a.payerId}', 'PERCENT_DISCOUNT', 10, now())`,
+        ),
+      ).rejects.toThrow(/agreements_tenant_name_key/);
       await raw.agreement.update({
         where: { id: first.id },
         data: { deletedAt: new Date() },
@@ -420,8 +437,11 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         ),
       ).rejects.toMatchObject({ code: 'P2002' });
       await expect(
-        raw.patientAgreement.create({ data: assignment(a, one.id) }),
-      ).rejects.toThrow(UNIQUE);
+        insertViolating(
+          `INSERT INTO "patient_agreements" ("id","tenantId","patientId","agreementId","updatedAt")
+          VALUES (gen_random_uuid(), '${a.tenantId}', '${a.patientId}', '${one.id}', now())`,
+        ),
+      ).rejects.toThrow(/patient_agreements_one_live_key/);
       // Otro paciente no compite.
       await raw.patientAgreement.create({
         data: assignment(a, one.id, { patientId: a.otherPatientId }),

@@ -12,10 +12,19 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- DX-134: con un owner sin BYPASSRLS, ADD/VALIDATE de una FK entre tablas con
+-- RLS FORCE falla o acepta huérfanas; se quita FORCE de la hija y de la
+-- referenciada durante la FK y se repone después (misma transacción).
+ALTER TABLE "treatment_plan_items" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "locations" NO FORCE ROW LEVEL SECURITY;
+
 ALTER TABLE "treatment_plan_items" ADD CONSTRAINT "treatment_plan_items_pricing_location_fkey"
   FOREIGN KEY ("tenantId", "pricingLocationId") REFERENCES "locations"("tenantId", "id")
   ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
 ALTER TABLE "treatment_plan_items" VALIDATE CONSTRAINT "treatment_plan_items_pricing_location_fkey";
+
+ALTER TABLE "locations" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "treatment_plan_items" FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX "treatment_plan_items_tenant_pricing_location_idx"
   ON "treatment_plan_items"("tenantId", "pricingLocationId");

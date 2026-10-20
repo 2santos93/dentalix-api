@@ -43,10 +43,19 @@ ALTER TABLE "treatment_plan_items" VALIDATE CONSTRAINT "treatment_plan_items_bas
 
 -- FK COMPUESTA: el convenio aplicado es de la MISMA clínica (SEC-004). Todas las
 -- filas existentes tienen "agreementId" NULL.
+-- DX-134: con un owner sin BYPASSRLS, ADD/VALIDATE de una FK entre tablas con
+-- RLS FORCE falla o acepta huérfanas; se quita FORCE de la hija y de la
+-- referenciada durante la FK y se repone después (misma transacción).
+ALTER TABLE "treatment_plan_items" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "agreements" NO FORCE ROW LEVEL SECURITY;
+
 ALTER TABLE "treatment_plan_items" ADD CONSTRAINT "treatment_plan_items_agreement_fkey"
   FOREIGN KEY ("tenantId", "agreementId") REFERENCES "agreements"("tenantId", "id")
   ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
 ALTER TABLE "treatment_plan_items" VALIDATE CONSTRAINT "treatment_plan_items_agreement_fkey";
+
+ALTER TABLE "agreements" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "treatment_plan_items" FORCE ROW LEVEL SECURITY;
 
 -- Lado hijo de la FK del convenio.
 CREATE INDEX "treatment_plan_items_tenant_agreement_idx"
