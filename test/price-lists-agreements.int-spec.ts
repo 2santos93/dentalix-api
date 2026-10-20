@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPatientAgreementRepository } from '../src/modules/patient-agreements/infrastructure/repositories/prisma-patient-agreement.repository';
 
 // DX-105, capa DB: listas de precios (price_lists, price_list_items), convenios
 // (agreements) y su asignación a pacientes (patient_agreements). RLS FORCE, FK
@@ -625,6 +626,99 @@ describe('listas de precios y convenios (int, DX-105)', () => {
       await raw.patientAgreement.create({
         data: assignment(a, agreement.id, { notes: 'n'.repeat(500) }),
       });
+    });
+  });
+
+  describe('escrituras concurrentes sobre el convenio de un paciente', () => {
+    const repo = new PrismaPatientAgreementRepository(prisma, tenantContext);
+    const by = '00000000-0000-4000-8000-000000000105';
+    const inA = <T>(fn: () => Promise<T>) => tenantContext.run(a.tenantId, fn);
+    const input = (agreementId: string) => ({
+      agreementId,
+      coverageId: null,
+      validFrom: null,
+      validTo: null,
+      notes: null,
+    });
+    const live = () =>
+      raw.patientAgreement.findMany({
+        where: { patientId: a.patientId, deletedAt: null },
+      });
+
+    it('dos PUT simultáneos: una sola viva, la otra al historial y nunca un error distinto del 422 de la carrera', async () => {
+      const one = await raw.agreement.create({ data: percentAgreement(a) });
+      const two = await raw.agreement.create({
+        data: percentAgreement(a, { name: 'Convenio 20', percent: 20 }),
+      });
+      const results = await Promise.allSettled(
+        [one.id, two.id, one.id, two.id].map((id) =>
+          inA(() => repo.replace(a.patientId, input(id), by)),
+        ),
+      );
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          expect(r.reason).toMatchObject({
+            message:
+              'Otra petición acaba de cambiar el convenio del paciente; vuelve a intentarlo.',
+          });
+        }
+      }
+      expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+      const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+      expect(await live()).toHaveLength(1);
+      // Cada PUT que valió dejó una fila; todas menos la viva, retiradas.
+      expect(
+        await raw.patientAgreement.count({
+          where: { patientId: a.patientId },
+        }),
+      ).toBe(fulfilled);
+    });
+
+    it('un PUT y un DELETE simultáneos dejan a lo sumo una viva', async () => {
+      const one = await raw.agreement.create({ data: percentAgreement(a) });
+      await raw.patientAgreement.create({ data: assignment(a, one.id) });
+      const two = await raw.agreement.create({
+        data: percentAgreement(a, { name: 'Convenio 20', percent: 20 }),
+      });
+      const results = await Promise.allSettled([
+        inA(() => repo.replace(a.patientId, input(two.id), by)),
+        inA(() => repo.retireCurrent(a.patientId, by)),
+      ]);
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect((await live()).length).toBeLessThanOrEqual(1);
+    });
+
+    it('retirar el convenio a la vez que se asigna: nunca queda una asignación viva a un convenio retirado', async () => {
+      const agreement = await raw.agreement.create({
+        data: percentAgreement(a),
+      });
+      const [assigned, retired] = await Promise.allSettled([
+        inA(() => repo.replace(a.patientId, input(agreement.id), by)),
+        raw.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "agreements" WHERE id = ${agreement.id}::uuid FOR UPDATE`;
+          const inUse = await tx.patientAgreement.count({
+            where: { agreementId: agreement.id, deletedAt: null },
+          });
+          if (inUse > 0) throw new Error('IN_USE');
+          await tx.agreement.update({
+            where: { id: agreement.id },
+            data: { deletedAt: new Date(), active: false },
+          });
+        }),
+      ]);
+      const rows = await live();
+      const row = await raw.agreement.findUniqueOrThrow({
+        where: { id: agreement.id },
+      });
+      // O la asignación ganó (y el retiro falló por «en uso»), o el retiro ganó
+      // (y la asignación falló con 400): jamás las dos.
+      expect(assigned.status === 'fulfilled' && row.deletedAt === null).toBe(
+        rows.length === 1,
+      );
+      expect(rows.length === 0 || row.deletedAt === null).toBe(true);
+      expect(
+        [assigned.status, retired.status].filter((s) => s === 'fulfilled'),
+      ).toHaveLength(1);
     });
   });
 

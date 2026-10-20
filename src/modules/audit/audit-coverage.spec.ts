@@ -9,6 +9,7 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
+import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
@@ -129,6 +130,21 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: P,
     patient: P,
     reason: 'COVERAGE_REMOVED',
+  },
+  // DX-105: convenio del paciente; solo el motivo, sin el cuerpo.
+  'PUT /patients/:patientId/agreement': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'AGREEMENT_ASSIGNED',
+  },
+  'DELETE /patients/:patientId/agreement': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'AGREEMENT_REMOVED',
   },
   // DX-039: archivar y retención legal de la HC.
   'DELETE /patients/:id': {
@@ -835,6 +851,7 @@ const CONTROLLERS: Type[] = [
   PatientsController,
   PatientResponsiblePartiesController,
   PatientCoveragesController,
+  PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
   ClinicalEntryRdaController,

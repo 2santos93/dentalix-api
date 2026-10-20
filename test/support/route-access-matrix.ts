@@ -333,6 +333,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /agreements': ADMIN_ONLY,
   'PATCH /agreements/:id': ADMIN_ONLY,
   'DELETE /agreements/:id': ADMIN_ONLY,
+  // DX-105: convenio del paciente (PATIENT_ROLES).
+  'GET /patients/:patientId/agreement': EVERY_ROLE,
+  'PUT /patients/:patientId/agreement': EVERY_ROLE,
+  'DELETE /patients/:patientId/agreement': EVERY_ROLE,
   // DX-153: coberturas del paciente (PATIENT_ROLES).
   'GET /patients/:patientId/coverages': EVERY_ROLE,
   'POST /patients/:patientId/coverages': EVERY_ROLE,

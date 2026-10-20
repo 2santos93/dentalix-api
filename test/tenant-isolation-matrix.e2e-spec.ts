@@ -159,6 +159,8 @@ interface SeedA {
   /** DX-203: un responsable (contacto) del paciente de A. */
   responsiblePartyId: string;
   coverageId: string;
+  /** DX-105: la asignación del convenio al paciente de A (creada por la API). */
+  patientAgreementId: string;
   /** Caja por turno cerrada de A (DX-027). */
   cashSessionId: string;
   /** DX-222: plantilla de indicaciones de A (con vínculo) y una entrega. */
@@ -439,6 +441,14 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     memberNumber: 'AFI-A-0001',
   });
 
+  // DX-105: el convenio de A asignado al paciente de A, con su cobertura.
+  const patientAgreement = (
+    await api(app, a, 'put', `/patients/${patientId}/agreement`, {
+      agreementId: agreement.id,
+      coverageId: coverage.id,
+    }).expect(200)
+  ).body as IdBody;
+
   // DX-222: una plantilla de indicaciones vinculada al tipo de cita y una
   // entrega impresa en la cita de A, ambas por la API.
   const postOpTemplate = await create(app, a, '/post-op-templates', {
@@ -494,6 +504,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     waitlistOfferId: waitlistOffer.id,
     responsiblePartyId: responsibleParty.id,
     coverageId: coverage.id,
+    patientAgreementId: patientAgreement.id,
     cashSessionId: cashSession.id,
     postOpTemplateId: postOpTemplate.id,
     postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
@@ -575,6 +586,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'price_list_items',
       // DX-105: convenios.
       'agreements',
+      'patient_agreements',
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
@@ -1058,6 +1070,26 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /patients/:patientId/coverages/:coverageId',
       verb: 'delete',
       path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
+      status: 404,
+    },
+    // --- convenio del paciente (DX-105) ---
+    {
+      name: 'GET /patients/:patientId/agreement',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/agreement?includeHistory=true`,
+      status: 404,
+    },
+    {
+      name: 'PUT /patients/:patientId/agreement',
+      verb: 'put',
+      path: () => `/patients/${a.patientId}/agreement`,
+      body: () => ({ agreementId: a.agreementId }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /patients/:patientId/agreement',
+      verb: 'delete',
+      path: () => `/patients/${a.patientId}/agreement`,
       status: 404,
     },
     // --- caja por turno (DX-027) ---
