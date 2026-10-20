@@ -143,7 +143,11 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
     );
     // Otra clínica no lo ve.
     const seen = await asClinic(
-      () => repo.findSnapshots([provider], { from: '2026-01-01' }),
+      () =>
+        repo.findSnapshots([provider], {
+          from: '2026-01-01',
+          to: '2026-12-31',
+        }),
       otherTenantId,
     );
     expect(seen.get(provider)).toMatchObject({
