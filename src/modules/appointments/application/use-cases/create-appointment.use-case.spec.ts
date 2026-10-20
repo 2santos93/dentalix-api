@@ -25,6 +25,9 @@ import { InMemoryAppointmentTypeRepository } from '../../../appointment-types/ap
 import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
+import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
+import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
+import { civilWeekday } from '../../../../shared/time/civil-day';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -159,6 +162,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -185,6 +189,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       // Una hora atrás: mismo día, instante pasado.
       const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -209,6 +214,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const soon = new Date(Date.now() + 1000);
 
@@ -240,6 +246,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const created = await uc.registerHistorical({
         patientId: 'p1',
@@ -259,6 +266,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         uc.registerHistorical({
@@ -279,6 +287,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         noPatient.registerHistorical({
@@ -297,6 +306,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         noProvider.registerHistorical({
@@ -319,6 +329,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         uc.registerHistorical({
@@ -351,6 +362,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         uc.registerHistorical({
@@ -393,6 +405,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const start = nextMondayLocal(20); // 20:00 local, cierra 13:00
 
@@ -424,6 +437,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const start = nextMondayLocal(10); // 10:00 local
 
@@ -446,6 +460,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const start = nextMondayLocal(3); // 03:00 local, madrugada
 
@@ -474,6 +489,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -499,6 +515,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -527,6 +544,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -546,6 +564,7 @@ describe('CreateAppointmentUseCase', () => {
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     const result = await uc.execute({
@@ -572,6 +591,7 @@ describe('CreateAppointmentUseCase', () => {
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await expect(
@@ -594,6 +614,7 @@ describe('CreateAppointmentUseCase', () => {
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await expect(
@@ -622,6 +643,7 @@ describe('CreateAppointmentUseCase', () => {
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await expect(
@@ -649,6 +671,7 @@ describe('CreateAppointmentUseCase', () => {
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await uc.execute({ patientId: 'p1', providerId: 'prov1', start, end });
@@ -672,6 +695,7 @@ describe('CreateAppointmentUseCase', () => {
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     const maliciousInput = {
@@ -708,6 +732,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute({
@@ -737,6 +762,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute({
@@ -764,6 +790,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -795,6 +822,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -823,6 +851,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute({
@@ -852,6 +881,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute({
@@ -879,6 +909,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute({
@@ -934,6 +965,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -967,6 +999,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -991,6 +1024,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1021,6 +1055,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1043,6 +1078,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(types),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const created = await uc.execute({
@@ -1067,6 +1103,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(types),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       const created = await uc.execute({
         patientId: 'p1',
@@ -1089,6 +1126,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(types),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       for (const appointmentTypeId of [inactive.id, 'de-otra-clinica']) {
         await expect(
@@ -1111,6 +1149,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         uc.execute({
@@ -1142,6 +1181,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(blocks),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1175,6 +1215,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(blocks),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1200,6 +1241,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(blocks),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const created = await uc.execute({
@@ -1245,6 +1287,7 @@ describe('CreateAppointmentUseCase', () => {
         makeTypes(),
         makeBlocks(blocks),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const created = await uc.execute({
@@ -1304,6 +1347,7 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
       makeTypes(),
       makeBlocks(),
       tenantContext,
+      inMemoryAvailability(),
     );
   const input = { patientId: 'p1', providerId: 'prov1', start, end };
 
@@ -1346,5 +1390,135 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
     await expect(
       uc({ userId: 'prov1', locationIds: ['loc2'] }).execute(input),
     ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
+  });
+});
+
+describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)', () => {
+  // La sede del contexto es loc1 (zona UTC para leer las horas tal cual):
+  // el profesional trabaja allí ese día de 08:00 a 12:00.
+  function withSchedule(strict = false) {
+    const schedules = new InMemoryProviderScheduleRepository();
+    schedules.currentLocationId = 'loc1';
+    schedules.strict = strict;
+    schedules.weekly.set('prov1', [
+      {
+        locationId: 'loc1',
+        weekday: civilWeekday(ANCHOR_DAY),
+        startMinute: 480,
+        endMinute: 720,
+      },
+    ]);
+    return new CreateAppointmentUseCase(
+      makeRepo(),
+      makePatients(),
+      makeStaff(),
+      makeSchedule(),
+      makeTypes(),
+      makeBlocks(),
+      new TenantContextService(),
+      inMemoryAvailability(schedules, 'UTC'),
+    );
+  }
+
+  it('dentro de su horario: sin aviso', async () => {
+    const result = await withSchedule().execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start: at('10:00'),
+      end: at('10:30'),
+    });
+    expect(result.warnings).toEqual([]);
+    expect(result.warningCodes).toEqual([]);
+  });
+
+  it('fuera de su horario: se crea con el aviso PROVIDER_OFF_SCHEDULE', async () => {
+    const result = await withSchedule().execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start: at('13:00'),
+      end: at('13:30'),
+    });
+    expect(result.warningCodes).toEqual(['PROVIDER_OFF_SCHEDULE']);
+    expect(result.warnings[0]).toMatch(
+      /^Fuera del horario del profesional en Sede \(.+: 08:00–12:00\)\.$/,
+    );
+  });
+
+  it('modo estricto de la clínica: 409 en español', async () => {
+    await expect(
+      withSchedule(true).execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('13:00'),
+        end: at('13:30'),
+      }),
+    ).rejects.toThrow(
+      /Fuera del horario del profesional.*La clínica no permite citar fuera del horario del profesional\./,
+    );
+    await expect(
+      withSchedule(true).execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: at('13:00'),
+        end: at('13:30'),
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('profesional sin horario: como siempre, sin aviso (regresión)', async () => {
+    const result = await new CreateAppointmentUseCase(
+      makeRepo(),
+      makePatients(),
+      makeStaff(),
+      makeSchedule(),
+      makeTypes(),
+      makeBlocks(),
+      new TenantContextService(),
+      inMemoryAvailability(),
+    ).execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start: at('03:00'),
+      end: at('03:30'),
+    });
+    expect(result).toMatchObject({ warnings: [], warningCodes: [] });
+  });
+
+  it('DX-089: sin cabecera, el horario que cuenta es el de la sede donde se escribe la cita', async () => {
+    // Miembro acotado a loc2 sin cabecera: la cita se escribe en loc2 (la
+    // de escritura de la sesión), no en la sede por defecto de la clínica.
+    const schedules = new InMemoryProviderScheduleRepository();
+    schedules.currentLocationId = 'loc1';
+    schedules.weekly.set('prov1', [
+      {
+        locationId: 'loc2',
+        weekday: civilWeekday(ANCHOR_DAY),
+        startMinute: 480,
+        endMinute: 720,
+      },
+    ]);
+    const tenantContext = new TenantContextService();
+    const result = await tenantContext.run(
+      't1',
+      undefined,
+      () =>
+        new CreateAppointmentUseCase(
+          makeRepo({ resolveWriteLocationId: () => Promise.resolve('loc2') }),
+          makePatients(),
+          makeStaff(),
+          makeSchedule(),
+          makeTypes(),
+          makeBlocks(),
+          tenantContext,
+          inMemoryAvailability(schedules, 'UTC'),
+        ).execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: at('10:00'),
+          end: at('10:30'),
+        }),
+      ['loc2'],
+    );
+    expect(result).toMatchObject({ warnings: [], warningCodes: [] });
   });
 });

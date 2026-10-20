@@ -25,6 +25,7 @@ import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AppointmentAuditContext } from './update-appointment.use-case';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
+import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
@@ -170,6 +171,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeBlocks(),
       makeLocations(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await expect(
@@ -205,13 +207,14 @@ describe('UpdateAppointmentUseCase', () => {
       makeBlocks(),
       makeLocations(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     const result = await uc.execute(existing.id, {
       status: AppointmentStatus.CONFIRMED,
     });
 
-    expect(result).toEqual({ ...updated, warnings: [] });
+    expect(result).toEqual({ ...updated, warnings: [], warningCodes: [] });
     // DX-005: un cambio de estado limpia los indicadores del enlace de confirmación.
     expect(receivedPatch).toEqual({
       status: AppointmentStatus.CONFIRMED,
@@ -253,6 +256,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeBlocks(),
       makeLocations(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     const result = await uc.execute(existing.id, {
@@ -260,7 +264,7 @@ describe('UpdateAppointmentUseCase', () => {
       end: newEnd,
     });
 
-    expect(result).toEqual({ ...updated, warnings: [] });
+    expect(result).toEqual({ ...updated, warnings: [], warningCodes: [] });
     expect(overlapArgs).toEqual({
       providerId: existing.providerId,
       start: newStart,
@@ -287,6 +291,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeBlocks(),
       makeLocations(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await expect(
@@ -313,6 +318,7 @@ describe('UpdateAppointmentUseCase', () => {
       makeBlocks(),
       makeLocations(),
       new TenantContextService(),
+      inMemoryAvailability(),
     );
 
     await expect(
@@ -341,6 +347,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       // Shift by 15 minutes — the new window still overlaps the row's OWN
@@ -375,6 +382,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -407,6 +415,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -447,6 +456,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -475,6 +485,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -507,6 +518,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(uc.execute('a1', { notes: 'x' })).rejects.toBe(boom);
@@ -538,6 +550,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -564,6 +577,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -604,6 +618,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute('a1', {
@@ -637,6 +652,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute('a1', { notes: 'El paciente asistió' });
@@ -667,6 +683,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -693,6 +710,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -720,6 +738,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -761,6 +780,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -786,6 +806,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         uc.execute(existing.id, { providerId: 'intruso' }),
@@ -815,6 +836,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(existing.id, { providerId: PROV2 });
@@ -856,6 +878,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -876,6 +899,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(
@@ -923,6 +947,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(
@@ -976,6 +1001,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(blocks),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1001,6 +1027,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(blocks),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1028,6 +1055,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(blocks),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       const result = await uc.execute(existing.id, {
@@ -1053,6 +1081,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(blocks),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await expect(
@@ -1077,6 +1106,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(
@@ -1118,6 +1148,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CONFIRMED });
@@ -1160,6 +1191,7 @@ describe('UpdateAppointmentUseCase', () => {
           makeBlocks(),
           makeLocations(),
           new TenantContextService(),
+          inMemoryAvailability(),
         );
 
         await uc.execute(
@@ -1200,6 +1232,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(
@@ -1245,6 +1278,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
@@ -1271,6 +1305,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
 
       await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
@@ -1308,6 +1343,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       return { repo, drafts, uc };
     }
@@ -1458,6 +1494,7 @@ describe('UpdateAppointmentUseCase', () => {
         makeBlocks(),
         makeLocations(),
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       await expect(
         uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),
@@ -1482,6 +1519,7 @@ describe('UpdateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
       makeBlocks(),
       makeLocations(),
       tenantContext,
+      inMemoryAvailability(),
     );
 
   it('una cita de una sede no permitida es 403 (no 404)', async () => {

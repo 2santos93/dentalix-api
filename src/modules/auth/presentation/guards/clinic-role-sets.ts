@@ -295,3 +295,8 @@ export const PATIENT_DOCUMENT_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+// Horario de cada profesional por sede (DX-233) — LEERLO (editor, cuadrante,
+// sombreado de la agenda): los cuatro roles de agenda (APPOINTMENT_ROLES).
+// Escribir el semanal, las excepciones por fecha y el modo estricto de la
+// clínica: solo gestión.
+export const PROVIDER_SCHEDULE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

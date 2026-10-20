@@ -5,6 +5,8 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaScheduleBlockRepository } from '../src/modules/schedule-blocks/infrastructure/repositories/prisma-schedule-block.repository';
 import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
+import { ProviderAvailabilityService } from '../src/modules/provider-schedule/application/provider-availability.service';
+import { PrismaProviderScheduleRepository } from '../src/modules/provider-schedule/infrastructure/prisma-provider-schedule.repository';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { PrismaAppointmentTypeRepository } from '../src/modules/appointment-types/infrastructure/repositories/prisma-appointment-type.repository';
 import { PrismaWaitlistRepository } from '../src/modules/waitlist/infrastructure/repositories/prisma-waitlist.repository';
@@ -29,6 +31,12 @@ const raw = new PrismaClient({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
+// DX-233: la regla real del horario del profesional (aquí nadie tiene
+// horario: sin restricción, como antes).
+const availability = new ProviderAvailabilityService(
+  new PrismaProviderScheduleRepository(prisma, tenantContext),
+  new PrismaLocationRepository(prisma, tenantContext),
+);
 
 const SUBDOMAINS = ['dx122-a', 'dx122-b'];
 const DOCTOR = randomUUID();
@@ -107,6 +115,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     types,
     blocks,
     tenantContext,
+    availability,
   );
   const update = new UpdateAppointmentUseCase(
     appointments,
@@ -116,6 +125,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     blocks,
     new PrismaLocationRepository(prisma, tenantContext),
     tenantContext,
+    availability,
   );
 
   beforeAll(async () => {

@@ -41,6 +41,7 @@ import { DataConsentsModule } from './modules/data-consents/data-consents.module
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
+import { ProviderScheduleModule } from './modules/provider-schedule/provider-schedule.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
@@ -108,6 +109,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     InventoryModule,
     LocationsModule,
     LocationScheduleModule,
+    // DX-233: horario de cada profesional por sede y cuadrante.
+    ProviderScheduleModule,
     PlatformModule,
     // Accesos de soporte (break-glass) visibles para el ADMIN (SEC-008).
     SupportAccessesModule,

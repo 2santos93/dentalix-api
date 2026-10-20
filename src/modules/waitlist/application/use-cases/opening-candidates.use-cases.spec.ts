@@ -21,6 +21,8 @@ import type { RecordAuditEventUseCase } from '../../../audit/application/record-
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
+import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
 
 // Hoy es el lunes 19/10/2026 a las 08:00 en Bogotá; el hueco, el martes 20 de
 // 10:00 a 10:30 con la Dra. X en la sede 1.
@@ -81,6 +83,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   let list: ListOpeningCandidatesUseCase;
   let offer: CreateWaitlistOfferUseCase;
   let outcome: RecordWaitlistOfferOutcomeUseCase;
+  let providerSchedules: InMemoryProviderScheduleRepository;
 
   function addEntry(
     id: string,
@@ -136,6 +139,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   beforeEach(() => {
     repo = new InMemoryOpeningCandidatesRepository();
     drafts = [];
+    providerSchedules = new InMemoryProviderScheduleRepository();
     list = new ListOpeningCandidatesUseCase(
       repo,
       locations,
@@ -143,6 +147,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       config,
       clock,
       new TenantContextService(),
+      inMemoryAvailability(providerSchedules),
     );
     offer = new CreateWaitlistOfferUseCase(
       repo,
@@ -494,6 +499,49 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         'OFFER_WA_ME',
         'OFFER_ACCEPTED',
       ]);
+    });
+  });
+
+  describe('con el horario de los profesionales (DX-233)', () => {
+    it('el profesional del hueco no trabaja ese hueco en la sede: sin candidatos y providerOffSchedule', async () => {
+      addEntry('e1', 'p1');
+      addAppointment('a1', 'p2');
+      // La Dra. X solo trabaja los martes por la tarde en loc1.
+      providerSchedules.weekly.set('drx', [
+        { locationId: 'loc1', weekday: 2, startMinute: 840, endMinute: 1140 },
+      ]);
+      const view = await list.execute(SLOT, RECEPTION);
+      expect(view.providerOffSchedule).toBe(true);
+      expect(view.items).toEqual([]);
+    });
+
+    it('dentro de su horario, los mismos candidatos que sin horario (regresión)', async () => {
+      addEntry('e1', 'p1');
+      addAppointment('a1', 'p2');
+      const before = await list.execute(SLOT, RECEPTION);
+      providerSchedules.weekly.set('drx', [
+        { locationId: 'loc1', weekday: 2, startMinute: 540, endMinute: 780 },
+      ]);
+      const after = await list.execute(SLOT, RECEPTION);
+      expect(after.providerOffSchedule).toBe(false);
+      expect(after.items.map((i) => i.patientId)).toEqual(
+        before.items.map((i) => i.patientId),
+      );
+      expect(before.items.map((i) => i.patientId)).toEqual(['p1', 'p2']);
+    });
+
+    it('hueco sin profesional: fuera la cita cuyo profesional no trabaja allí ese día', async () => {
+      addEntry('e1', 'p1');
+      addAppointment('a1', 'p2', { providerId: 'dry' });
+      providerSchedules.weekly.set('dry', [
+        { locationId: 'loc2', weekday: 2, startMinute: 540, endMinute: 780 },
+      ]);
+      const view = await list.execute(
+        { ...SLOT, providerId: undefined },
+        RECEPTION,
+      );
+      expect(view.providerOffSchedule).toBe(false);
+      expect(view.items.map((i) => i.patientId)).toEqual(['p1']);
     });
   });
 });

@@ -209,4 +209,78 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
       ).toEqual({ statusChange: { from: 'KEPT', to: 'BROKEN' } });
     });
   });
+
+  describe('scheduleChange (DX-233: horario de un profesional)', () => {
+    const loc = randomUUID();
+
+    it('guarda los tramos antes y después (semanal y excepción)', () => {
+      const change = {
+        before: [
+          { locationId: loc, weekday: 1, startMinute: 480, endMinute: 780 },
+        ],
+        after: [
+          { locationId: loc, date: '2026-10-22', off: true },
+          {
+            locationId: loc,
+            date: '2026-10-23',
+            startMinute: 540,
+            endMinute: 600,
+          },
+        ],
+      };
+      expect(sanitizeAuditMetadata({ scheduleChange: change })).toEqual({
+        scheduleChange: change,
+      });
+    });
+
+    it('descarta el cambio entero si un tramo no tiene la forma admitida', () => {
+      for (const bad of [
+        { locationId: 'no-uuid', weekday: 1, startMinute: 0, endMinute: 60 },
+        { locationId: loc, weekday: 8, startMinute: 0, endMinute: 60 },
+        { locationId: loc, weekday: 1, startMinute: 0, endMinute: 2000 },
+        { locationId: loc, startMinute: 0, endMinute: 60 },
+        {
+          locationId: loc,
+          weekday: 1,
+          date: '2026-10-22',
+          startMinute: 0,
+          endMinute: 60,
+        },
+        { locationId: loc, weekday: 1, off: true },
+        { locationId: loc, date: 'mañana', off: true },
+      ]) {
+        expect(
+          sanitizeAuditMetadata({
+            scheduleChange: { before: [], after: [bad] },
+          }),
+        ).toEqual({});
+      }
+    });
+
+    it('no deja pasar claves de más dentro de un tramo', () => {
+      expect(
+        sanitizeAuditMetadata({
+          scheduleChange: {
+            before: [],
+            after: [
+              {
+                locationId: loc,
+                weekday: 2,
+                startMinute: 60,
+                endMinute: 120,
+                note: 'Cubre a la Dra. Ruiz',
+              },
+            ],
+          },
+        }),
+      ).toEqual({
+        scheduleChange: {
+          before: [],
+          after: [
+            { locationId: loc, weekday: 2, startMinute: 60, endMinute: 120 },
+          ],
+        },
+      });
+    });
+  });
 });

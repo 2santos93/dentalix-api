@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
@@ -47,6 +48,8 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
     LocationsModule,
     PatientsModule,
     StaffModule,
+    // DX-233: horario de cada profesional por sede.
+    ProviderScheduleModule,
   ],
   controllers: [WaitlistController, OpeningCandidatesController],
   providers: [

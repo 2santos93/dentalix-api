@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
+import { providerWorksAt } from '../src/modules/provider-schedule/domain/provider-availability';
 import {
   DEMO_EMAIL_DOMAIN,
   DEMO_PASSWORD,
@@ -35,6 +36,11 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-233: horario de los profesionales (hijas de locations, en orden de FK).
+  'provider_schedule_override_ranges',
+  'provider_schedule_overrides',
+  'provider_schedule_ranges',
+  'provider_schedules',
   // DX-222: entregas (hijas de appointments, patients, locations y plantillas)
   // y vínculos (hijos de plantillas y de appointment_types).
   'post_op_instruction_deliveries',
@@ -541,6 +547,75 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(open.filter((e) => e.sourceAppointmentId === null)).toEqual([
       expect.objectContaining({ priority: 'URGENT' }),
     ]);
+  });
+
+  it('deja la rotación de la segunda dentista en dos sedes, una excepción y sus citas dentro (DX-233)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const schedules = await raw.providerSchedule.findMany({
+      where: { tenantId, deletedAt: null },
+      include: {
+        location: { select: { name: true } },
+        ranges: { where: { deletedAt: null } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(new Set(schedules.map((s) => s.providerId)).size).toBe(1);
+    const weekdays = Object.fromEntries(
+      schedules.map((s) => [
+        s.location.name,
+        [...new Set(s.ranges.map((r) => r.weekday))].sort(),
+      ]),
+    );
+    expect(weekdays).toEqual({
+      'Sede principal': [1, 3, 5],
+      'Sede Norte': [2, 4],
+    });
+    const overrides = await raw.providerScheduleOverride.findMany({
+      where: { tenantId, deletedAt: null },
+      include: { ranges: { where: { deletedAt: null } } },
+    });
+    expect(overrides).toHaveLength(2);
+    expect(new Set(overrides.map((o) => o.date.toISOString())).size).toBe(1);
+    expect(overrides.map((o) => o.ranges.length).sort()).toEqual([0, 1]);
+    await expect(
+      raw.auditEvent.count({
+        where: { tenantId, resourceType: 'PROVIDER_SCHEDULE' },
+      }),
+    ).resolves.toBe(3);
+
+    // Las citas de la rotación (salvo las de «En clínica» de hoy, mejor
+    // esfuerzo) caen en su horario.
+    const providerId = schedules[0].providerId;
+    const snapshot = {
+      providerId,
+      configured: true,
+      weekly: schedules.flatMap((s) =>
+        s.ranges.map((r) => ({
+          locationId: s.locationId,
+          weekday: r.weekday,
+          startMinute: r.startMinute,
+          endMinute: r.endMinute,
+        })),
+      ),
+      overrides: [],
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const theirs = await raw.appointment.findMany({
+      where: { tenantId, providerId, deletedAt: null },
+    });
+    expect(theirs.length).toBeGreaterThan(0);
+    const outside = theirs.filter(
+      (a) =>
+        a.start.toISOString().slice(0, 10) !== today &&
+        !providerWorksAt(
+          snapshot,
+          a.locationId,
+          a.start,
+          a.end,
+          'America/Bogota',
+        ),
+    );
+    expect(outside).toEqual([]);
   });
 
   it('la sede principal tiene recordatorios por email activos a 48 h y 2 h (DX-026)', async () => {

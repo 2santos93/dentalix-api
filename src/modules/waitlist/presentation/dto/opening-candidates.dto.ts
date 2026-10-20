@@ -177,6 +177,12 @@ export class OpeningCandidatesDto {
   @ApiProperty({ example: 'America/Bogota' })
   timeZone!: string;
 
+  @ApiProperty({
+    description:
+      'DX-233: el profesional del hueco no trabaja todo ese hueco en la sede según su horario (entonces no hay candidatos). Sin `providerId`, false.',
+  })
+  providerOffSchedule!: boolean;
+
   @ApiProperty({ description: 'Tope de ofertas por paciente y día.' })
   offerCap!: number;
 

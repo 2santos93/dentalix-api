@@ -21,6 +21,9 @@ model Tenant {
   // cierre enseña el esperado mientras se cuenta.
   cashRequireOpenSession    Boolean                         @default(false)
   cashBlindClose            Boolean                         @default(false)
+  // DX-233: cita fuera del horario del profesional. false (defecto) = se
+  // agenda con el aviso PROVIDER_OFF_SCHEDULE; true = 409.
+  providerScheduleStrict    Boolean                         @default(false)
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -74,6 +77,9 @@ model Tenant {
   postOpDeliveries          PostOpInstructionDelivery[]
   // DX-151: documentos de los pacientes.
   patientDocuments          PatientDocument[]
+  // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
+  providerSchedules         ProviderSchedule[]
+  providerScheduleOverrides ProviderScheduleOverride[]
 
   @@map("tenants")
 }
@@ -187,39 +193,42 @@ model Location {
   updatedAt            DateTime      @updatedAt
   deletedAt            DateTime?
 
-  appointments        Appointment[]
-  payments            Payment[]
-  inventoryItems      InventoryItem[]
-  inventoryMovements  InventoryMovement[]
-  prescriptions       Prescription[]
+  appointments              Appointment[]
+  payments                  Payment[]
+  inventoryItems            InventoryItem[]
+  inventoryMovements        InventoryMovement[]
+  prescriptions             Prescription[]
   // DX-191: implantes colocados en la sede.
-  patientImplants     PatientImplant[]
+  patientImplants           PatientImplant[]
   // DX-151: documentos del paciente subidos en la sede.
-  patientDocuments    PatientDocument[]
-  planAcceptances     TreatmentPlanAcceptance[]
-  presentedPlans      TreatmentPlan[]
+  patientDocuments          PatientDocument[]
+  planAcceptances           TreatmentPlanAcceptance[]
+  presentedPlans            TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
-  scheduleBlocks      ScheduleBlock[]
-  waitlistEntries     AppointmentWaitlistEntry[]
-  waitlistOffers      WaitlistOffer[]
-  reminderSettings    LocationReminderSettings[]
-  paymentReceipts     PaymentReceipt[]
-  collectionNotes     CollectionNote[]
-  paymentPromises     PaymentPromise[]
+  scheduleBlocks            ScheduleBlock[]
+  waitlistEntries           AppointmentWaitlistEntry[]
+  waitlistOffers            WaitlistOffer[]
+  reminderSettings          LocationReminderSettings[]
+  paymentReceipts           PaymentReceipt[]
+  collectionNotes           CollectionNote[]
+  paymentPromises           PaymentPromise[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
-  planItemDiscounts   TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
+  planItemDiscounts         TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
-  planItemPricings    TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
+  planItemPricings          TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
   // DX-027: cajas por turno de la sede y sus ajustes.
-  cashSessions        CashSession[]
-  cashAdjustments     CashSessionAdjustment[]
+  cashSessions              CashSession[]
+  cashAdjustments           CashSessionAdjustment[]
   // DX-089: miembros restringidos a la sede.
-  membershipLocations MembershipLocation[]
+  membershipLocations       MembershipLocation[]
   // DX-222: indicaciones postoperatorias entregadas en la sede.
-  postOpDeliveries    PostOpInstructionDelivery[]
+  postOpDeliveries          PostOpInstructionDelivery[]
   // DX-105: listas y convenios de la sede.
-  priceLists          PriceList[]
-  agreements          Agreement[]
+  priceLists                PriceList[]
+  agreements                Agreement[]
+  // DX-233: horario de los profesionales en la sede y sus excepciones.
+  providerSchedules         ProviderSchedule[]
+  providerScheduleOverrides ProviderScheduleOverride[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1916,6 +1925,116 @@ model LocationScheduleRange {
   @@map("location_schedule_ranges")
 }
 
+// DX-233: horario de cada profesional por sede, con excepciones por fecha.
+//
+// Un profesional SIN filas vivas en `provider_schedules` no tiene restricción
+// (compatibilidad, igual que una sede sin horario). Con alguna, solo trabaja
+// en los tramos de sus sedes. Una excepción (`provider_schedule_overrides`)
+// prevalece sobre el semanal de ESA sede ESE día; sin tramos = «no trabaja».
+// Las ausencias siguen siendo bloqueos VACATION (DX-122).
+//
+// `providerId` es el usuario del personal, sin FK (como `appointments` y
+// `schedule_blocks`: la membresía solo tiene un único PARCIAL); la API exige
+// un miembro activo con rol que atiende. La sede va por FK COMPUESTA
+// (SEC-004). Reglas en la BD: migración 20261020220100_dx233_provider_schedules.
+model ProviderSchedule {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  providerId  String    @db.Uuid
+  locationId  String    @db.Uuid
+  /// Zona IANA de la sede al guardar (informativa: las reglas usan siempre la
+  /// zona VIGENTE de la sede, `Location.timeZone`).
+  timezone    String
+  createdById String?   @db.Uuid
+  updatedById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant   Tenant                  @relation(fields: [tenantId], references: [id])
+  location Location                @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  ranges   ProviderScheduleRange[]
+
+  // Destino de la FK compuesta de los tramos (con el profesional, para que
+  // el tramo no pueda mentir sobre de quién es).
+  @@unique([tenantId, id, providerId], map: "provider_schedules_tenant_id_provider_key")
+  // Único PARCIAL (WHERE "deletedAt" IS NULL) en la migración: un horario
+  // vivo por profesional y sede. Prisma no expresa el predicado.
+  @@unique([tenantId, providerId, locationId], map: "provider_schedules_live_key")
+  // Lado hijo de la FK a la sede y roster por sede.
+  @@index([tenantId, locationId], map: "provider_schedules_tenant_location_idx")
+  @@map("provider_schedules")
+}
+
+/// Un tramo semanal (hora de pared de la sede). Se retiran en blando al
+/// reemplazar el horario, como los de la sede. EXCLUDE: dos tramos vivos del
+/// mismo profesional y día de la semana no se solapan, en NINGUNA sede.
+model ProviderScheduleRange {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  scheduleId  String    @db.Uuid
+  providerId  String    @db.Uuid
+  /// 0=domingo .. 6=sábado.
+  weekday     Int
+  /// Minutos desde 00:00, múltiplos de 5; 0 <= start < end <= 1440.
+  startMinute Int
+  endMinute   Int
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  schedule ProviderSchedule @relation(fields: [tenantId, scheduleId, providerId], references: [tenantId, id, providerId], onDelete: Restrict)
+
+  @@index([tenantId, scheduleId, providerId], map: "provider_schedule_ranges_tenant_schedule_idx")
+  @@index([tenantId, providerId, weekday], map: "provider_schedule_ranges_tenant_provider_weekday_idx")
+  @@map("provider_schedule_ranges")
+}
+
+/// Excepción por fecha civil de la sede: prevalece sobre el semanal de esa
+/// sede ese día. Sin tramos vivos = «no trabaja». Una viva por profesional,
+/// sede y fecha (único parcial en la migración).
+model ProviderScheduleOverride {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  providerId  String    @db.Uuid
+  locationId  String    @db.Uuid
+  date        DateTime  @db.Date
+  /// Hasta 200 caracteres (CHECK), p. ej. «Cubre a la Dra. Ruiz».
+  note        String?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant   Tenant                          @relation(fields: [tenantId], references: [id])
+  location Location                        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  ranges   ProviderScheduleOverrideRange[]
+
+  @@unique([tenantId, id, providerId, date], map: "provider_schedule_overrides_tenant_id_provider_date_key")
+  @@unique([tenantId, providerId, locationId, date], map: "provider_schedule_overrides_live_key")
+  @@index([tenantId, providerId, date], map: "provider_schedule_overrides_tenant_provider_date_idx")
+  @@index([tenantId, locationId, date], map: "provider_schedule_overrides_tenant_location_date_idx")
+  @@map("provider_schedule_overrides")
+}
+
+/// Tramo de una excepción. EXCLUDE: los tramos vivos de las excepciones del
+/// mismo profesional y fecha no se solapan, en NINGUNA sede.
+model ProviderScheduleOverrideRange {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  overrideId  String    @db.Uuid
+  providerId  String    @db.Uuid
+  date        DateTime  @db.Date
+  startMinute Int
+  endMinute   Int
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  override ProviderScheduleOverride @relation(fields: [tenantId, overrideId, providerId, date], references: [tenantId, id, providerId, date], onDelete: Restrict)
+
+  @@index([tenantId, overrideId, providerId, date], map: "provider_schedule_override_ranges_tenant_override_idx")
+  @@map("provider_schedule_override_ranges")
+}
+
 // DX-006: consentimientos informados.
 //
 // La PLANTILLA es de la clínica y se edita (cada cambio de título o texto sube
@@ -2272,6 +2391,9 @@ enum AuditResourceType {
   // DX-105: convenios y listas de precios (altas, cambios, retiros, asignaciones).
   AGREEMENT
   PRICE_LIST
+  // DX-233: horario semanal de un profesional, sus excepciones por fecha y el
+  // modo estricto de la clínica.
+  PROVIDER_SCHEDULE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

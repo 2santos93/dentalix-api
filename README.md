@@ -108,7 +108,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
-   el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), planes de tratamiento en todos
+   el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
    el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
@@ -574,6 +574,60 @@ hasta 1 h (SEC-028).
   hueco: la EXCLUDE por profesional deja una y la otra recibe 409.
 - El texto del `wa.me` lo arma la web solo con nombre de pila, fecha, hora,
   sede y profesional (nunca motivo ni tratamiento).
+
+## Horario de cada profesional por sede (DX-233)
+
+- **Modelo** (migración `20261020220100_dx233_provider_schedules`):
+  `provider_schedules` (un horario vivo por profesional y sede: único
+  PARCIAL), `provider_schedule_ranges` (tramos semanales: día 0–6, minutos de
+  pared de la sede), `provider_schedule_overrides` (excepción por fecha civil
+  de una sede, una viva por profesional, sede y fecha) y
+  `provider_schedule_override_ranges` (sus tramos; sin tramos = «no
+  trabaja»). RLS FORCE y FK compuestas por tenant a la sede y entre tablas;
+  `providerId` sin FK, como `appointments` (la API exige un miembro activo
+  DENTIST o ADMIN). CHECK: minutos múltiplos de 5, `0 <= inicio < fin <=
+  1440`. EXCLUDE: dos tramos vivos del mismo profesional no se solapan el
+  mismo día de la semana (o la misma fecha, en las excepciones) en ninguna
+  sede. Todo se retira en blando. Las ausencias siguen siendo bloqueos
+  VACATION (DX-122).
+- **Regla** (`domain/provider-availability.ts`, `providerWorksAt`): sin
+  horario configurado = sin restricción (como una sede sin horario). Con
+  horario, la cita cabe completa en un tramo del profesional en ESA sede ese
+  día, en la zona vigente de la sede (cambio de hora incluido); la excepción
+  de la fecha prevalece sobre el semanal de esa sede. Nunca cruza medianoche.
+  El horario de la sede se sigue comprobando aparte (422).
+- **Endpoints**: `GET/PUT /providers/:providerId/schedule` (todas sus sedes
+  en un cuerpo; lista vacía = sin horario), `GET/POST/DELETE
+  /providers/:providerId/schedule-overrides` (POST crea o reemplaza la de esa
+  sede y fecha, de hoy a dos años), `GET /schedule/roster?weekStart&days&locationId`
+  (cuadrante profesional × día; con `locationId`, `worksAtLocation` y
+  `locationRanges` para sombrear la agenda) y `GET/PUT /schedule/settings`
+  (`strictProviderSchedule`). Leen los cuatro roles de agenda; escribe ADMIN.
+  Validación en español: ≤ 7 tramos por día y sede, sin solapes, y ningún
+  tramo el mismo día en dos sedes (también contra las excepciones). La
+  validación y la escritura van en la misma transacción con un candado por
+  profesional.
+- **Agenda**: crear o mover una cita fuera del horario del profesional la deja
+  agendar con el aviso en `warnings` y `warningCodes: ["PROVIDER_OFF_SCHEDULE"]`
+  (`warningCodes[i]` es el código de `warnings[i]`; los bloqueos que dejan
+  agendar llevan `SCHEDULE_BLOCK`). Con `tenants.providerScheduleStrict`
+  (modo estricto), 409 en español. «Buscar hueco» cruza el horario de la sede
+  con el del profesional cada día; «Ocupar este hueco» (DX-210) deja fuera a
+  quien caería fuera del horario de su profesional y trae
+  `providerOffSchedule`.
+- **Sedes permitidas (DX-089)**: a un profesional acotado a ciertas sedes no
+  se le pone horario semanal ni excepciones en las demás (400 en español;
+  quitarle una sede, sin tramos, siempre se puede). Un miembro acotado que lee
+  el horario, las excepciones o el cuadrante solo ve sus sedes, y en el
+  cuadrante solo a quien atiende en alguna de ellas; un `locationId` fuera de
+  las suyas es 403, como en la agenda. Con `locationId`, quien no atiende en
+  esa sede sale con `worksAtLocation: false`. El aviso de una cita sin
+  cabecera mira la sede donde se escribe (`writeLocationId`).
+- **Auditoría**: `PROVIDER_SCHEDULE` con `reason`
+  `PROVIDER_SCHEDULE_REPLACED`, `PROVIDER_SCHEDULE_OVERRIDE_SET`,
+  `PROVIDER_SCHEDULE_OVERRIDE_DELETED` o `PROVIDER_SCHEDULE_SETTINGS`, autor y
+  `scheduleChange: { before, after }` con los tramos (sedes, días o fechas y
+  minutos; nada de pacientes).
 
 ## Flujo del paciente en la clínica (DX-200)
 

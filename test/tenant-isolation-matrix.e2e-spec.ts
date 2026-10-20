@@ -166,12 +166,17 @@ interface SeedA {
   /** DX-222: plantilla de indicaciones de A (con vínculo) y una entrega. */
   postOpTemplateId: string;
   postOpDeliveryId: string;
+  /** DX-233: excepción por fecha del horario de la dentista de A. */
+  providerOverrideId: string;
 }
 
 interface SeedB {
   patientId: string;
   catalogItemId: string;
-  /** Sede propia de B (DX-089: B intenta restringir a un miembro de A a ella). */
+  /**
+   * Sede propia de B (DX-089: B intenta restringir a un miembro de A a ella;
+   * DX-233: cuerpo de las excepciones).
+   */
   locationId: string;
 }
 
@@ -477,6 +482,27 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     })
     .expect(201);
 
+  // DX-233: horario de la dentista de A en su sede nueva y una excepción.
+  await api(app, a, 'put', `/providers/${dentist.userId}/schedule`, {
+    locations: [
+      {
+        locationId: location.id,
+        ranges: [{ weekday: 1, startMinute: 480, endMinute: 780 }],
+      },
+    ],
+  }).expect(200);
+  const providerOverride = await create(
+    app,
+    a,
+    `/providers/${dentist.userId}/schedule-overrides`,
+    {
+      locationId: location.id,
+      date: futureAt(90, 15).slice(0, 10),
+      ranges: [],
+      note: 'Congreso',
+    },
+  );
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -508,6 +534,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     cashSessionId: cashSession.id,
     postOpTemplateId: postOpTemplate.id,
     postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
+    providerOverrideId: providerOverride.id,
   };
 }
 
@@ -571,6 +598,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'payments',
       'consent_templates',
       'locations',
+      // DX-233: horario de los profesionales y excepciones.
+      'provider_schedules',
+      'provider_schedule_ranges',
+      'provider_schedule_overrides',
       'clinic_memberships',
       'clinic_invitations',
       // DX-089: sedes permitidas de la dentista de A.
@@ -1246,6 +1277,52 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'patch',
       path: () => `/appointments/${a.appointmentId}/opening`,
       body: () => ({ start: futureAt(62, 15) }),
+      status: 404,
+    },
+    // --- Horario de cada profesional por sede (DX-233) ---
+    {
+      name: 'GET /providers/:providerId/schedule',
+      verb: 'get',
+      path: () => `/providers/${a.dentistUserId}/schedule`,
+      status: 404,
+    },
+    {
+      name: 'PUT /providers/:providerId/schedule',
+      verb: 'put',
+      path: () => `/providers/${a.dentistUserId}/schedule`,
+      body: () => ({ locations: [] }),
+      status: 404,
+    },
+    {
+      name: 'GET /providers/:providerId/schedule-overrides',
+      verb: 'get',
+      path: () => `/providers/${a.dentistUserId}/schedule-overrides`,
+      status: 404,
+    },
+    {
+      name: 'POST /providers/:providerId/schedule-overrides',
+      verb: 'post',
+      path: () => `/providers/${a.dentistUserId}/schedule-overrides`,
+      body: () => ({
+        locationId: b.locationId,
+        date: futureAt(91, 15).slice(0, 10),
+        ranges: [],
+      }),
+      status: 404,
+    },
+    {
+      // Con un profesional de B: la excepción de A «no existe» para B.
+      name: 'DELETE /providers/:providerId/schedule-overrides/:overrideId',
+      verb: 'delete',
+      path: () =>
+        `/providers/${clinicB.adminUserId}/schedule-overrides/${a.providerOverrideId}`,
+      status: 404,
+    },
+    {
+      name: 'DELETE /providers/:providerId/schedule-overrides/:overrideId (profesional de A)',
+      verb: 'delete',
+      path: () =>
+        `/providers/${a.dentistUserId}/schedule-overrides/${a.providerOverrideId}`,
       status: 404,
     },
     // --- Flujo del paciente en la clínica (DX-200) ---

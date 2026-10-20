@@ -23,6 +23,7 @@ import type { StaffRepository } from '../../../staff/domain/ports/staff-reposito
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 
 const CTX: AuditRequestContext = {
   tenantId: 't1',
@@ -241,6 +242,7 @@ describe('pendientes por agendar (DX-122)', () => {
         types,
         blocks,
         new TenantContextService(),
+        inMemoryAvailability(),
       );
       return {
         appointments,
