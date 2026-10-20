@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import {
+  MEMBERSHIP_LOCATIONS_SELECT,
+  activeLocationIds,
+} from '../../../../shared/locations/membership-locations';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
 import {
@@ -110,6 +114,7 @@ export class PrismaAuthRepository implements AuthRepository {
           userId: true,
           role: true,
           user: { select: { passwordHash: true, tokenVersion: true } },
+          locations: MEMBERSHIP_LOCATIONS_SELECT,
         },
       });
       if (!membership) return null;
@@ -118,6 +123,7 @@ export class PrismaAuthRepository implements AuthRepository {
         role: membership.role,
         passwordHash: membership.user.passwordHash,
         tokenVersion: membership.user.tokenVersion,
+        allowedLocationIds: activeLocationIds(membership.locations),
       };
     });
   }
@@ -148,10 +154,18 @@ export class PrismaAuthRepository implements AuthRepository {
     const membership = await this.prisma.runWithTenant(tenantId, (tx) =>
       tx.clinicMembership.findFirst({
         where: { tenantId, userId, deletedAt: null },
-        select: { role: true },
+        select: { role: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
       }),
     );
-    return { ...user, tenant: { membershipRole: membership?.role ?? null } };
+    return {
+      ...user,
+      tenant: {
+        membershipRole: membership?.role ?? null,
+        allowedLocationIds: membership
+          ? activeLocationIds(membership.locations)
+          : null,
+      },
+    };
   }
 
   // Denylist de refresh tokens. Tabla global sin RLS → acceso directo, sin

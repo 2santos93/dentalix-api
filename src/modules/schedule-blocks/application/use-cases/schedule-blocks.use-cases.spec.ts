@@ -16,6 +16,7 @@ import {
 import { InMemoryScheduleBlockRepository } from '../__fixtures__/in-memory-schedule-blocks';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 const z = (iso: string) => new Date(iso);
 const ADMIN: ScheduleBlockActor = { userId: 'admin', role: ClinicRole.ADMIN };
@@ -67,9 +68,19 @@ describe('bloqueos de agenda (DX-122)', () => {
 
   beforeEach(() => {
     repo = new InMemoryScheduleBlockRepository();
-    create = new CreateScheduleBlockUseCase(repo, makeLocations(), makeStaff());
-    update = new UpdateScheduleBlockUseCase(repo, makeLocations(), makeStaff());
-    remove = new DeleteScheduleBlockUseCase(repo);
+    create = new CreateScheduleBlockUseCase(
+      repo,
+      makeLocations(),
+      makeStaff(),
+      new TenantContextService(),
+    );
+    update = new UpdateScheduleBlockUseCase(
+      repo,
+      makeLocations(),
+      makeStaff(),
+      new TenantContextService(),
+    );
+    remove = new DeleteScheduleBlockUseCase(repo, new TenantContextService());
   });
 
   describe('crear', () => {
@@ -229,6 +240,7 @@ describe('bloqueos de agenda (DX-122)', () => {
         repo,
         makeLocations(),
         makeStaff(),
+        new TenantContextService(),
       );
       repo.seed({ providerId: 'doc' });
       await expect(
@@ -263,6 +275,7 @@ describe('bloqueos de agenda (DX-122)', () => {
         repo,
         makeLocations(),
         makeStaff(),
+        new TenantContextService(),
       );
       repo.appointments.push({
         id: 'a1',
@@ -312,6 +325,7 @@ describe('bloqueos de agenda (DX-122)', () => {
         repo,
         makeLocations(),
         makeStaff(),
+        new TenantContextService(),
       );
       await expect(
         affected.execute({
@@ -360,6 +374,7 @@ describe('bloqueos de agenda (DX-122)', () => {
         repo,
         makeLocations(),
         makeStaff(),
+        new TenantContextService(),
       );
       const page = await affected.execute({
         providerId: 'doc',
@@ -378,6 +393,7 @@ describe('bloqueos de agenda (DX-122)', () => {
         repo,
         makeLocations(),
         makeStaff(),
+        new TenantContextService(),
       );
       await expect(
         list.execute({

@@ -111,6 +111,7 @@ export class BreakGlassService {
         role: ClinicRole.ADMIN,
         tv: input.user.tokenVersion,
         breakGlass: true,
+        // Sin `loc` (DX-089): como todo ADMIN, opera en todas las sedes.
       },
       this.ttlSeconds,
     );

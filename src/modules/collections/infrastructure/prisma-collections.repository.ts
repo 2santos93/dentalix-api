@@ -6,7 +6,7 @@ import {
   loadLocationTimeZones,
   resolveLocationTimeZones,
 } from '../../../shared/locations/location-time-zone';
-import { resolveDefaultLocationId } from '../../../shared/locations/default-location';
+import { isLocationAllowed } from '../../../shared/tenancy/location-access';
 import { loadLedgersOf } from '../../receivables/infrastructure/prisma-receivables.repository';
 import type { PatientLedger } from '../../receivables/domain/entities/receivables.entity';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
@@ -288,15 +288,23 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
         where: { tenantId, patientId, locationId: { not: null } },
         select: { locationId: true },
       });
-      // La sede de la deuda puede estar ya retirada: entonces, la principal.
-      if (ledger?.locationId) {
+      // La sede de la deuda puede estar ya retirada, o no ser de las del
+      // miembro (DX-089): entonces, la de escritura de la sesión (la
+      // principal, o la primera permitida).
+      if (
+        ledger?.locationId &&
+        isLocationAllowed(
+          this.tenantContext.getAllowedLocationIds(),
+          ledger.locationId,
+        )
+      ) {
         const alive = await tx.location.findFirst({
           where: { id: ledger.locationId, tenantId, deletedAt: null },
           select: { id: true },
         });
         if (alive) return alive.id;
       }
-      return resolveDefaultLocationId(tx);
+      return this.tenantContext.writeLocationId(tx);
     });
   }
 

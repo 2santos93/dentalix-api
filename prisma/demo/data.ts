@@ -36,6 +36,12 @@ interface DemoUser {
   email: string;
   fullName: string;
   role: ClinicRole;
+  /**
+   * DX-089: sedes en las que atiende. Sin el campo atiende en todas (lo
+   * normal); con él, el seed lo restringe con el mismo caso de uso que
+   * `PUT /staff/:userId/locations`.
+   */
+  locations?: readonly DemoLocationKey[];
 }
 
 /** El primero es el dueño (lo crea el registro); el resto entra por invitación. */
@@ -64,6 +70,14 @@ export const DEMO_USERS: readonly DemoUser[] = [
     email: `asistente@${DEMO_EMAIL_DOMAIN}`,
     fullName: 'Camilo Herrera Duarte',
     role: ClinicRole.ASSISTANT,
+  },
+  // DX-089: «Recepción Norte», restringida a la Sede Norte. Va la última para
+  // no mover los índices del resto (dentistas, recepción y asistente).
+  {
+    email: `recepcion.norte@${DEMO_EMAIL_DOMAIN}`,
+    fullName: 'Lorena Ospina Vargas',
+    role: ClinicRole.RECEPTION,
+    locations: ['norte'],
   },
 ];
 

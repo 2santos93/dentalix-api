@@ -25,4 +25,14 @@ export class StaffMemberDto {
       'Registro profesional / nº de colegiado (DX-013). Solo en el perfil y en la respuesta del PATCH.',
   })
   professionalLicense?: string | null;
+
+  // Opcional en el contrato porque el DTO también describe el PATCH, que no lo envía; GET /staff siempre incluye la clave.
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Sedes activas en las que puede trabajar (DX-089). null = todas (sin restricción). Solo en GET /staff y en el perfil.',
+  })
+  locationIds?: string[] | null;
 }

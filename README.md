@@ -102,6 +102,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    | DENTIST   | `dentista2@demo.dentalix.app` |
    | RECEPTION | `recepcion@demo.dentalix.app` |
    | ASSISTANT | `asistente@demo.dentalix.app` |
+   | RECEPTION | `recepcion.norte@demo.dentalix.app` (solo Sede Norte — DX-089) |
 
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
@@ -111,7 +112,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
    el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
-   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2.000 (con su motivo) y la de la tarde abierta con su fondo y un cobro; los abonos históricos quedan sin caja.
+   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2.000 (con su motivo) y la de la tarde abierta con su fondo y un cobro; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»).
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
      imprimir las credenciales). `--reset` retira la demo anterior **en blando**
@@ -1038,8 +1039,10 @@ módulo `src/modules/implants`, tabla `patient_implants`.
   imprime la vista A4/carta y el navegador guarda como PDF.
 - **Búsqueda por lote/REF** (solo ADMIN): `GET /implants/search?lot=&reference=`
   y `GET /implants/search.csv` (UTF-8 con BOM, anti fórmulas), coincidencia
-  exacta sin mayúsculas sobre los índices de expresión
-  `patient_implants_tenant_lot_idx`/`_reference_idx`, SIEMPRE en toda la
+  exacta sin mayúsculas ni blancos alrededor (también en el parámetro) sobre
+  las columnas generadas `lotKey`/`referenceKey` (`upper(btrim(...))`) y sus
+  índices `patient_implants_tenant_lot_key_idx`/`_reference_key_idx`, que
+  sirven bajo RLS porque la consulta compara la columna con `=` (DX-225), SIEMPRE en toda la
   clínica (la sede activa no la acota: una retirada de lote no puede dejar
   fuera a un paciente operado en otra sede; la columna «Sede» lo dice). Cada consulta deja `VIEW`/`EXPORT` sobre `PATIENT_IMPLANT`
   con `metadata.search = { lot, reference, rows }` (el nº de filas sale de la
@@ -1048,6 +1051,68 @@ módulo `src/modules/implants`, tabla `patient_implants`.
   sistemas ya usados por la clínica.
 - **Demo**: implante y pilar del 36 del paciente del plan de implante y otro
   paciente con el mismo lote `DEMO-LOT-2026A`.
+
+## Personal restringido a sedes (DX-089)
+
+Un miembro puede atender solo en algunas sedes de la clínica (la recepción de
+la Sede Norte, por ejemplo). Por defecto nadie está restringido.
+
+- **Tabla `membership_locations`** (RLS FORCE, FK compuesta a la membresía y a
+  la sede): una fila por sede permitida. **Sin filas = todas las sedes**, que es
+  como quedan todos los miembros existentes. Las sedes inactivas o borradas no
+  cuentan; si a un restringido no le queda ninguna activa, no ve ninguna (nunca
+  se amplía a «todas»).
+- **Claim `loc` del JWT**: login, refresh, cambio de contraseña y aceptar una
+  invitación ponen en el access token `loc: [ids]` con las sedes activas
+  permitidas (en el orden de creación de las sedes). Sin `loc` = todas; el ADMIN
+  y el break-glass nunca lo llevan. Un cambio de sedes **surte efecto en el
+  siguiente refresh** del token (como un cambio de rol), no al instante.
+- **403 con `code`**: una cabecera `X-Location-Id` o una sede explícita
+  (`?locationId=`, `locationId` del body, una cita, caja, ítem… de otra sede)
+  que el miembro no tiene da
+  `403 { code: "LOCATION_NOT_ALLOWED", message: "No tienes acceso a esta sede." }`.
+  Una cabecera con una sede que no es de la clínica sigue dando el 400 de
+  siempre (se valida antes). Sin ninguna sede activa al escribir: mismo `code`, «No tienes ninguna
+  sede activa asignada.».
+- **Sin cabecera de sede**: los listados son el consolidado de SUS sedes (no de
+  toda la clínica) y las escrituras van a la primera sede permitida y activa
+  (no a la principal). Con una sola sede permitida, la API la fija como si
+  hubiera mandado la cabecera (auto-pin). Sin restricción, todo sigue igual.
+- **Módulos afectados**: agenda (citas, huecos libres, pendientes por agendar,
+  bloqueos y horario de la sede), caja (abonos y turnos de caja), inventario,
+  recetas (sede emisora), cartera, cobranza, presupuestos por seguir,
+  `GET /locations` (solo sus sedes) y la sede que se sella en presupuestos,
+  descuentos e implantes. Las filas sin sede (planes antiguos, ledgers sin
+  sede) no las ve un restringido.
+- **No afectados** (son de toda la clínica): pacientes, historia clínica
+  (evoluciones, odontograma, periodontograma, consentimientos), catálogo, los
+  listados por paciente (su agenda, estado de cuenta…) y los módulos solo-ADMIN
+  (el ADMIN siempre tiene todas las sedes).
+- **Endpoints** (solo ADMIN, `@Roles(...STAFF_WRITE_ROLES)`):
+  `GET /staff/:userId/locations` → `{ all, locationIds }` y
+  `PUT /staff/:userId/locations` con `{ locationIds: [...] }` (`[]` = todas;
+  máx. 50, uuids). Reemplaza el conjunto entero en una transacción, queda en
+  `audit_events` (`UPDATE`, `STAFF_MEMBER`, `LOCATIONS_CHANGED`) y una sede
+  ajena, inactiva o borrada da 400 «Alguna sede no existe en esta clínica.» sin
+  escribir nada. `GET /staff` y la ficha del miembro traen `locationIds`
+  (`null` = todas). Otra clínica: 404.
+- **Invariante del ADMIN**: no se puede restringir (`PUT` → 409 «El ADMIN
+  siempre tiene todas las sedes y no se puede restringir.»). Ascender a ADMIN
+  (`PATCH /staff/:userId`) borra sus filas en la misma transacción, y también
+  reinvitar como ADMIN a un miembro retirado. Retirar a un miembro conserva sus
+  filas: si se le reinvita con otro rol, vuelve restringido a las mismas sedes.
+- **Profesional ↔ sede**: un odontólogo restringido solo atiende en sus sedes.
+  Agendar o mover una cita a un profesional en una sede donde no atiende,
+  pedir sus huecos libres allí o filtrar la agenda por él en esa sede da
+  400 «Algún profesional no atiende en esta sede.». Al editar una cita cuenta la
+  sede de la propia cita.
+- **Bloqueos «todas las sedes»**: crearlos, editarlos, borrarlos o ver sus
+  citas afectadas exige no estar restringido (403 si no); un restringido
+  bloquea indicando una de sus sedes. Sí ve los de «todas las sedes» en su
+  agenda.
+- **Demo**: «Recepción Norte» (`recepcion.norte@demo.dentalix.app`, RECEPTION)
+  solo atiende en la Sede Norte; la recepción de siempre
+  (`recepcion@demo.dentalix.app`) sigue con todas.
 
 ## Trabajos en segundo plano (DX-085)
 
@@ -1294,7 +1359,8 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
 - **Baja por mensaje**: `OptOutByMessageUseCase` (exportado por
   `RemindersModule`) reconoce «BAJA», «STOP» y «NO MÁS» (sin tildes ni
   mayúsculas, mensaje entero) y da de baja a todos los pacientes vivos de la
-  clínica con ese móvil (prefiltro indexado `dx_phone_tail`), con origen
+  clínica con ese móvil (prefiltro por la columna `phoneTail`, que mantiene
+  un trigger, con el índice parcial `patients_tenant_phone_tail_idx`: DX-225), con origen
   MESSAGE. Lo invocará el webhook de WhatsApp de DX-126, que aún no existe.
 - **Menores**: desde DX-203 los avisos de un menor (o de un paciente sin
   email) van al email de su **responsable** (ver la sección siguiente). Sin
@@ -1924,6 +1990,21 @@ dentalix_email_dispatcher`) o repón la política como en
   FORCE también a `patient_ledgers` y a ellas (como hace
   `20261017233000_dx155_patient_ledgers`), o el refresco falla («no se ven N
   de M pacientes…») y la migración con él.
+- **Rellenos grandes por lotes, sin `NO FORCE` ni ACCESS EXCLUSIVE** (DX-225,
+  DB-029): `NO FORCE` toma ACCESS EXCLUSIVE sobre la tabla hasta el COMMIT,
+  así que un relleno de una tabla grande y caliente bajo él bloquea hasta las
+  lecturas. Para esos, separa el esquema (`ADD COLUMN` sin `DEFAULT` y, si la
+  columna la mantiene la BD, el trigger que la calcula en las filas nuevas)
+  del relleno, en una migración propia de **una sola sentencia `DO`** que
+  recorre las clínicas, fija `set_config('app.current_tenant', …, true)` y
+  hace `COMMIT` tras cada lote (`prisma migrate deploy` la ejecuta fuera de un
+  bloque de transacción, como un `CREATE INDEX CONCURRENTLY`). Con la clínica
+  fijada, la RLS del owner sin superusuario deja ver y escribir sus filas, y
+  cada lote solo retiene bloqueos de fila hasta su COMMIT. Idempotente (`WHERE
+  <columna> IS NULL`) para poder repetirla si se corta. Después, el índice
+  `CONCURRENTLY` en otro fichero. Modelo:
+  `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
+  `test/owner-nosu/migrations-data.owner-spec.ts`.
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …
   REFERENCES` o `VALIDATE CONSTRAINT` necesita `NO FORCE` **en la tabla hija y

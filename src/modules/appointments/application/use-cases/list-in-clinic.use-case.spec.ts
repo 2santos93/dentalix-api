@@ -3,6 +3,7 @@ import { AppointmentStatus, ClinicRole } from '@prisma/client';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { ListInClinicUseCase } from './list-in-clinic.use-case';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // DX-200: panel «En clínica» de la sede: tres grupos, minutos con el reloj del
 // servidor, puntualidad por color y el día civil en la zona de la sede.
@@ -26,6 +27,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
     const uc = new ListInClinicUseCase(
       repo,
       locationsWith({ bog: 'America/Bogota', mad: 'Europe/Madrid' }),
+      new TenantContextService(),
     );
     return { repo, uc };
   }

@@ -187,6 +187,23 @@ const FIXTURE_AVATARS = [
      ('${U_D}','d@mig.test','x','Dani D','https://otro.cdn/foto.png',now())`,
 ];
 
+/**
+ * Esquema de 20261020100000 (DX-225): un implante con blancos y minúsculas
+ * en lote y referencia (la clave generada los normaliza al reescribir la
+ * tabla) y móviles en pacientes de las dos clínicas para el relleno por
+ * lotes de "phoneTail" (con la clínica fijada, sin NO FORCE). El de B, sin
+ * dígitos: su clave queda vacía, no NULL.
+ */
+const FIXTURE_DX225 = [
+  `INSERT INTO "patient_implants" ("id","tenantId","locationId","patientId","professionalId","placedOn","toothNumber","kind","manufacturer","reference","lot") 
+   SELECT gen_random_uuid(), '${T_A}', l."id", '${P_A}', '${U_A}', '2026-05-01', '36', 'IMPLANT', 'Straumann', ' ref-9 ', ' lot-77 '
+     FROM "locations" l WHERE l."tenantId" = '${T_A}' ORDER BY l."createdAt" LIMIT 1`,
+  `UPDATE "patients" SET "phone" = 'sin número' WHERE "id" = '${P_B}'`,
+  `INSERT INTO "patients" ("id","tenantId","firstName","lastName","phone","updatedAt")
+   SELECT gen_random_uuid(), '${T_B}', 'Lote', 'N' || g, '+57 300 ' || lpad(g::text, 7, '0'), now()
+     FROM generate_series(1, 4500) AS g`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -229,8 +246,11 @@ const STEPS: Step[] = [
   // sec041_plan_item_catalog_price (FORCE fuera de treatment_plan_items y de
   // dental_catalog_items durante el backfill) y las siguientes hasta DX-084.
   { until: '20261019224000', fixture: FIXTURE_CATALOG_PRICE },
-  // dx084_avatar_keys (users es global, sin RLS).
-  { until: '99999999999999', fixture: FIXTURE_AVATARS },
+  // dx084_avatar_keys (users es global, sin RLS) y las siguientes hasta DX-225.
+  { until: '20261020100000', fixture: FIXTURE_AVATARS },
+  // dx225: claves generadas de implantes, "phoneTail" con su trigger, relleno
+  // por lotes con la clínica fijada (sin NO FORCE) e índice CONCURRENTLY.
+  { until: '99999999999999', fixture: FIXTURE_DX225 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -566,6 +586,41 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         'd@mig.test=https://otro.cdn/foto.png',
       ].join(','),
     );
+  }, 180_000);
+
+  it('claves de búsqueda (DX-225): el implante previo queda con su clave y el relleno por lotes ve los pacientes de las dos clínicas', async () => {
+    await run(STEPS[14]);
+    expect(
+      await scalar<string>(
+        `SELECT "lotKey" || ':' || "referenceKey" AS v FROM "patient_implants"`,
+      ),
+    ).toBe('LOT-77:REF-9');
+    expect(
+      await scalar<string>(
+        `SELECT count(*) FILTER (WHERE "phone" IS NOT NULL) || ':' ||
+                count(*) FILTER (WHERE "phone" IS NOT NULL AND "phoneTail" IS NULL) || ':' ||
+                count(*) FILTER (WHERE "phoneTail" <> pg_catalog.right(pg_catalog.regexp_replace("phone", '[^0-9]', '', 'g'), 8)) AS v
+           FROM "patients"`,
+      ),
+    ).toBe('4502:0:0');
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(coalesce("phoneTail", '-'), ',' ORDER BY "tenantId") AS v
+           FROM "patients" WHERE "id" IN ('${P_A}', '${P_B}')`,
+      ),
+    ).toBe('05550101,');
+    expect(
+      await scalar<boolean>(
+        `SELECT indisvalid AS v FROM pg_index
+          WHERE indexrelid = 'public.patients_tenant_phone_tail_idx'::regclass`,
+      ),
+    ).toBe(true);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM pg_class
+          WHERE relname = 'patients_tenant_phone_tail_live_idx'`,
+      ),
+    ).toBe(0);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

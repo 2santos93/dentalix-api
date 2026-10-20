@@ -22,6 +22,7 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 const CTX: AuditRequestContext = {
   tenantId: 't1',
@@ -88,7 +89,11 @@ describe('pendientes por agendar (DX-122)', () => {
         dismissReason: 'x',
         resolvedAt: new Date(),
       });
-      const list = new ListWaitlistUseCase(waitlist, locations);
+      const list = new ListWaitlistUseCase(
+        waitlist,
+        locations,
+        new TenantContextService(),
+      );
 
       const page = await list.execute({});
       expect(page.items.map((e) => e.id)).toEqual([urgent.id, old.id]);
@@ -102,7 +107,11 @@ describe('pendientes por agendar (DX-122)', () => {
     });
 
     it('una sede de otra clínica es 404', async () => {
-      const list = new ListWaitlistUseCase(waitlist, locations);
+      const list = new ListWaitlistUseCase(
+        waitlist,
+        locations,
+        new TenantContextService(),
+      );
       await expect(list.execute({ locationId: 'ajena' })).rejects.toThrow(
         NotFoundException,
       );
@@ -118,6 +127,7 @@ describe('pendientes por agendar (DX-122)', () => {
         staff,
         types,
         audit(drafts),
+        new TenantContextService(),
       );
     }
 
@@ -188,7 +198,11 @@ describe('pendientes por agendar (DX-122)', () => {
   describe('descartar', () => {
     it('con motivo, una sola vez, y deja audit_event', async () => {
       const entry = waitlist.seed({ patientId: 'p2' });
-      const dismiss = new DismissWaitlistEntryUseCase(waitlist, audit(drafts));
+      const dismiss = new DismissWaitlistEntryUseCase(
+        waitlist,
+        audit(drafts),
+        new TenantContextService(),
+      );
 
       await expect(dismiss.execute(entry.id, '   ', CTX)).rejects.toThrow(
         BadRequestException,
@@ -226,6 +240,7 @@ describe('pendientes por agendar (DX-122)', () => {
         noSchedule,
         types,
         blocks,
+        new TenantContextService(),
       );
       return {
         appointments,
@@ -234,6 +249,7 @@ describe('pendientes por agendar (DX-122)', () => {
           types,
           create,
           audit(drafts),
+          new TenantContextService(),
         ),
       };
     }

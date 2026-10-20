@@ -68,7 +68,14 @@ export class ReceivablesController {
     private readonly tenantContext: TenantContextService,
   ) {}
 
+  /**
+   * Sede explícita (DX-089: tiene que ser permitida, si no 403) o la del
+   * request. Sin ninguna, el repositorio acota a las sedes permitidas.
+   */
   private locationOf(query: ReceivablesAgingFiltersDto): string | undefined {
+    if (query.locationId) {
+      this.tenantContext.assertLocationAllowed(query.locationId);
+    }
     return query.locationId ?? this.tenantContext.getLocationId();
   }
 

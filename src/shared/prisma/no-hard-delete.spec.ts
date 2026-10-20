@@ -29,6 +29,7 @@ function fakeTx() {
     patient: model('patient'),
     locationScheduleRange: model('locationScheduleRange'),
     clinicalNoteTemplatePrompt: model('clinicalNoteTemplatePrompt'),
+    membershipLocation: model('membershipLocation'),
     postOpInstructionTemplateLink: model('postOpInstructionTemplateLink'),
     $executeRaw: jest.fn(() => {
       calls.push('$executeRaw');
@@ -102,6 +103,14 @@ describe('guardHardDeletes', () => {
 
     await guarded.clinicalNoteTemplatePrompt.deleteMany();
     expect(calls).toEqual(['clinicalNoteTemplatePrompt.deleteMany']);
+  });
+
+  it('deja borrar las sedes permitidas de un miembro (allowlist, DX-089)', async () => {
+    const { tx, calls } = fakeTx();
+    const guarded = guard(tx);
+
+    await guarded.membershipLocation.deleteMany();
+    expect(calls).toEqual(['membershipLocation.deleteMany']);
   });
 
   it('deja borrar los vínculos de una plantilla de indicaciones (allowlist, DX-222)', async () => {

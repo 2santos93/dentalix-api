@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ReminderOptOutSource } from '@prisma/client';
+import { Prisma, type ReminderOptOutSource } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type {
@@ -8,6 +8,24 @@ import type {
   OptOutLinkLookup,
   ReminderOptOutRepository,
 } from '../domain/ports/reminder-opt-out-repository.port';
+
+/**
+ * Pacientes vivos de la clínica activa con esos 8 últimos dígitos de móvil.
+ * Compara la columna "phoneTail" (la mantiene un trigger) con `=`, que bajo
+ * RLS FORCE sí es condición del índice parcial patients_tenant_phone_tail_idx
+ * (DX-225); la expresión dx_phone_tail(phone) quedaba en Filter. La API
+ * compara después el E.164 completo. Exportada para que el int-spec explique
+ * (EXPLAIN) la consulta real.
+ */
+export function patientsByPhoneTailSql(tail: string): Prisma.Sql {
+  return Prisma.sql`
+    SELECT "id" AS "patientId", "phone"
+      FROM "patients"
+     WHERE "tenantId" = current_setting('app.current_tenant', true)::uuid
+       AND "phoneTail" = ${tail}
+       AND "deletedAt" IS NULL
+     ORDER BY "createdAt", "id"`;
+}
 
 @Injectable()
 export class PrismaReminderOptOutRepository implements ReminderOptOutRepository {
@@ -86,16 +104,8 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
   }
 
   findByPhoneTail(tail: string): Promise<MobileCandidate[]> {
-    // Sirve el índice parcial patients_tenant_phone_tail_live_idx.
-    return this.prisma.runWithTenant(
-      (tx) => tx.$queryRaw<MobileCandidate[]>`
-        SELECT "id" AS "patientId", "phone"
-          FROM "patients"
-         WHERE "tenantId" = current_setting('app.current_tenant', true)::uuid
-           AND public.dx_phone_tail("phone") = ${tail}
-           AND "deletedAt" IS NULL
-           AND "phone" IS NOT NULL
-         ORDER BY "createdAt", "id"`,
+    return this.prisma.runWithTenant((tx) =>
+      tx.$queryRaw<MobileCandidate[]>(patientsByPhoneTailSql(tail)),
     );
   }
 

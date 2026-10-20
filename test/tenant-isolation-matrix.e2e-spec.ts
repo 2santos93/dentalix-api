@@ -163,6 +163,8 @@ interface SeedA {
 interface SeedB {
   patientId: string;
   catalogItemId: string;
+  /** Sede propia de B (DX-089: B intenta restringir a un miembro de A a ella). */
+  locationId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -302,6 +304,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     leadHours: [48, 2],
   }).expect(200);
   const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
+  // DX-089: la dentista de A queda restringida a TODAS las sedes activas de A
+  // (deja filas en membership_locations sin cambiar a qué puede acceder).
+  const sedesA = await api(app, a, 'get', '/locations').expect(200);
+  await api(app, a, 'put', `/staff/${dentist.userId}/locations`, {
+    locationIds: (sedesA.body as IdBody[]).map(({ id }) => id),
+  }).expect(200);
   const assistant = await seedMember(raw, a, ClinicRole.ASSISTANT);
   await api(app, a, 'delete', `/staff/${assistant.userId}`).expect((res) =>
     expect(res.status).toBeLessThan(300),
@@ -469,7 +477,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     clinicA = await registerClinic(app, 'clinica-aislada-a');
     clinicB = await registerClinic(app, 'clinica-aislada-b');
     a = await seedA(app, clinicA);
-    b = await seedClinicData(app, clinicB, '9101');
+    const sedesB = await api(app, clinicB, 'get', '/locations').expect(200);
+    b = {
+      ...(await seedClinicData(app, clinicB, '9101')),
+      locationId: (sedesB.body as IdBody[])[0].id,
+    };
     tables = await clinicTables(raw);
     // La invitación de A encola su email (DX-088): se espera a que el
     // despachador lo deje SENT para que la fotografía no cambie por él.
@@ -511,6 +523,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'locations',
       'clinic_memberships',
       'clinic_invitations',
+      // DX-089: sedes permitidas de la dentista de A.
+      'membership_locations',
       'email_outbox',
       'tenant_domains',
       'prescription_templates',
@@ -1161,6 +1175,21 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'post',
       path: () => `/staff/${a.dentistUserId}/login-unlock`,
       body: () => ({}),
+      status: 404,
+    },
+    {
+      // DX-089: leer las sedes permitidas de un miembro de A desde B.
+      name: 'GET /staff/:userId/locations',
+      verb: 'get',
+      path: () => `/staff/${a.dentistUserId}/locations`,
+      status: 404,
+    },
+    {
+      // DX-089: restringir a un miembro de A a una sede de B.
+      name: 'PUT /staff/:userId/locations',
+      verb: 'put',
+      path: () => `/staff/${a.dentistUserId}/locations`,
+      body: () => ({ locationIds: [b.locationId] }),
       status: 404,
     },
     // --- invitations ---

@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, WaitlistStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import type {
   WaitlistEntry,
   WaitlistPage,
@@ -69,13 +68,15 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
   }
 
   list(params: ListWaitlistParams): Promise<WaitlistPage> {
-    // Como la agenda: sede explícita > sede del request > vista consolidada.
-    const locationId = params.locationId ?? this.tenantContext.getLocationId();
+    // Como la agenda: sede explícita (ya permitida) > sede del request > sedes
+    // permitidas (DX-089) > vista consolidada.
     const where: Prisma.AppointmentWaitlistEntryWhereInput = {
       status: params.status,
       // Un paciente archivado no se llama: sale de la lista (su entrada queda).
       patient: { deletedAt: null },
-      ...(locationId ? { locationId } : {}),
+      ...(params.locationId
+        ? { locationId: params.locationId }
+        : this.tenantContext.locationScope()),
     };
     // Página y total en la MISMA foto (como la caja): una entrada que se
     // agenda entre las dos consultas no descuadra el contador.
@@ -134,9 +135,7 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
         data: {
           tenantId,
           locationId:
-            input.locationId ??
-            this.tenantContext.getLocationId() ??
-            (await resolveDefaultLocationId(tx)),
+            input.locationId ?? (await this.tenantContext.writeLocationId(tx)),
           patientId: input.patientId,
           providerId: input.providerId,
           appointmentTypeId: input.appointmentTypeId,

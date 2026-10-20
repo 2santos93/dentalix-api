@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
@@ -89,7 +88,11 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
   }
 
   list(params: ListScheduleBlocksParams): Promise<ScheduleBlock[]> {
-    const locationId = params.locationId ?? this.tenantContext.getLocationId();
+    // Sede explícita (ya permitida) > la del request > las permitidas (DX-089)
+    // > vista consolidada (sin filtro).
+    const { locationId } = params.locationId
+      ? { locationId: params.locationId }
+      : this.tenantContext.locationScope();
     const and: Prisma.ScheduleBlockWhereInput[] = [
       overlapping(params.from, params.to),
     ];
@@ -174,12 +177,10 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       // La misma resolución de sede que usa el alta de la cita (sede del
-      // request o la sede por defecto): validar contra los bloqueos de una sede
-      // y escribir en otra sería una validación que miente.
+      // request o la de escritura de la sesión): validar contra los bloqueos de
+      // una sede y escribir en otra sería una validación que miente.
       const locationId =
-        query.locationId ??
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+        query.locationId ?? (await this.tenantContext.writeLocationId(tx));
       const rows = await tx.scheduleBlock.findMany({
         where: {
           AND: [

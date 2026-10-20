@@ -16,6 +16,7 @@ import type { LocationRepository } from '../../../locations/domain/ports/locatio
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import { civilDateIn, civilDayRange } from '../../../../shared/time/civil-day';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // DX-200: el flujo del paciente en la clínica en UpdateAppointmentUseCase
 // (llegó → en sillón → listo para cobrar → completada, y «Deshacer llegada»),
@@ -61,6 +62,7 @@ function setup() {
     audit,
     new InMemoryScheduleBlockRepository(),
     locations,
+    new TenantContextService(),
   );
   return { repo, uc, drafts };
 }

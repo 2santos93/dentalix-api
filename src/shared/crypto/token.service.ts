@@ -15,6 +15,14 @@ export interface TenantJwtPayload {
    * nunca se emite un refresh con él y /auth/refresh lo rechaza.
    */
   breakGlass?: true;
+  /**
+   * DX-089: sedes en las que puede trabajar este miembro. AUSENTE = todas
+   * (miembro sin restricción, ADMIN, break-glass y tokens anteriores a
+   * DX-089). `[]` = ninguna: sus sedes asignadas ya no están activas. Se
+   * recalcula en cada emisión (login, refresh, cambio de contraseña), así que
+   * un cambio de sedes se aplica en el siguiente refresh.
+   */
+  loc?: string[];
 }
 
 /**

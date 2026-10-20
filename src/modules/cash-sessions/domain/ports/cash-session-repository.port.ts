@@ -22,7 +22,8 @@ export interface OpenCashSessionData {
 }
 
 export interface ListCashSessionsParams extends CashSessionScope {
-  locationId?: string;
+  /** Sedes del listado (DX-089); `undefined` = todas las de la clínica. */
+  locationIds?: readonly string[];
   /** Días civiles YYYY-MM-DD (ambos inclusive) en la zona de cada sede. */
   from?: string;
   to?: string;

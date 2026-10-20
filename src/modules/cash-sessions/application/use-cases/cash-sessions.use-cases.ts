@@ -140,6 +140,7 @@ export class GetCashSessionUseCase {
   constructor(
     @Inject(CASH_SESSION_REPOSITORY)
     private readonly repo: CashSessionRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(id: string, actor: CashActor): Promise<CashSessionDetail> {
@@ -148,6 +149,8 @@ export class GetCashSessionUseCase {
       this.repo.getSettings(),
     ]);
     if (!record) throw new NotFoundException(SESSION_NOT_FOUND_MESSAGE);
+    // DX-089: una caja de una sede no permitida es 403 (no 404: existe).
+    this.tenantContext.assertLocationAllowed(record.location.id);
     const open = record.status === 'OPEN';
     const blindHidden = open && settings.blindClose && !actor.isAdmin;
     return {
@@ -187,6 +190,7 @@ export class GetCurrentCashSessionUseCase {
     actor: CashActor,
     locationId?: string,
   ): Promise<CurrentCashSession> {
+    if (locationId) this.tenantContext.assertLocationAllowed(locationId);
     const location = await this.repo.resolveLocation(
       locationId ?? this.tenantContext.getLocationId(),
     );
@@ -240,6 +244,9 @@ export class OpenCashSessionUseCase {
     }
     if (floats.length > CASH_MAX_CURRENCIES) {
       throw new BadRequestException(TOO_MANY_CURRENCIES_MESSAGE);
+    }
+    if (input.locationId) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
     }
     const locationId = await this.repo.resolveLocation(
       input.locationId ?? this.tenantContext.getLocationId(),
@@ -310,9 +317,15 @@ export class ListCashSessionsUseCase {
       MAX_PAGE_SIZE,
       Math.max(1, input.pageSize ?? DEFAULT_PAGE_SIZE),
     );
+    // DX-089: sede explícita (permitida), la del request o las permitidas.
+    if (input.locationId) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
+    }
     const result = await this.repo.list({
       ...scopeFor(actor),
-      locationId: input.locationId ?? this.tenantContext.getLocationId(),
+      locationIds: input.locationId
+        ? [input.locationId]
+        : this.tenantContext.scopeLocationIds(),
       from,
       to,
       status: input.status,
@@ -346,6 +359,7 @@ export class CloseCashSessionUseCase {
     private readonly repo: CashSessionRepository,
     private readonly getSession: GetCashSessionUseCase,
     @Inject(CASH_SESSIONS_CLOCK) private readonly now: CashSessionsClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -371,6 +385,8 @@ export class CloseCashSessionUseCase {
       scopeFor(actor),
       actor.userId,
       (context): ClosingDraft => {
+        // DX-089: con la caja bloqueada; el 403 deshace la transacción.
+        this.tenantContext.assertLocationAllowed(context.locationId);
         let result: ReturnType<typeof arqueo>;
         try {
           result = arqueo(context.expected, counts);

@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, PrescriptionStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../../shared/locations/default-location';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import type { AllergyMatch } from '../../domain/allergy-match';
 import type {
@@ -131,16 +130,15 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
   }
 
   /**
-   * Sede del request (X-Location-Id, ya validada contra esta clínica) o la
-   * principal si el request pidió la vista consolidada: una receta siempre se
-   * emite desde UNA sede, que da el país y la dirección.
+   * Sede del request (X-Location-Id, ya validada contra esta clínica) o, en
+   * la vista consolidada, la de escritura de la sesión (la principal, o la
+   * primera permitida de un miembro restringido — DX-089): una receta siempre
+   * se emite desde UNA sede, que da el país y la dirección.
    */
   loadIssuer(professionalUserId: string): Promise<PrescriptionIssuer> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const locationId =
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx));
+      const locationId = await this.tenantContext.writeLocationId(tx);
       const [location, tenant, user, membership, zoneOf] = await Promise.all([
         tx.location.findFirstOrThrow({
           where: { id: locationId, deletedAt: null },

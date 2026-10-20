@@ -268,6 +268,7 @@ describe('tipos de cita y agenda en columnas (int, DX-121)', () => {
         audit,
         new PrismaScheduleBlockRepository(prisma, tenantContext),
         new PrismaLocationRepository(prisma, tenantContext),
+        tenantContext,
       );
 
       const move = (id: string) =>
