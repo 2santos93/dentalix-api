@@ -48,6 +48,10 @@ import {
   PatientImplantsController,
 } from '../implants/presentation/implants.controller';
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
+import {
+  ProviderScheduleController,
+  ScheduleRosterController,
+} from '../provider-schedule/presentation/provider-schedule.controller';
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -788,6 +792,15 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // `reason`; queda auditada aunque el email no se pueda encolar.
   'POST /appointments/:appointmentId/post-op-instructions/deliveries':
     'post-op-deliveries.use-cases.spec.ts y post-op-deliveries.e2e-spec.ts',
+  // DX-233: PROVIDER_SCHEDULE con los tramos antes y después
+  // (`scheduleChange`), que el interceptor no conoce.
+  'PUT /providers/:providerId/schedule':
+    'provider-schedule.use-cases.spec.ts y provider-schedule.e2e-spec.ts',
+  'POST /providers/:providerId/schedule-overrides':
+    'provider-schedule.use-cases.spec.ts y provider-schedule.e2e-spec.ts',
+  'DELETE /providers/:providerId/schedule-overrides/:overrideId':
+    'provider-schedule.e2e-spec.ts',
+  'PUT /schedule/settings': 'provider-schedule.e2e-spec.ts',
 };
 
 const CONTROLLERS: Type[] = [
@@ -828,6 +841,8 @@ const CONTROLLERS: Type[] = [
   PostOpTemplatesController,
   AppointmentPostOpController,
   PatientPostOpDeliveriesController,
+  ProviderScheduleController,
+  ScheduleRosterController,
 ];
 
 function joinPath(...parts: string[]): string {

@@ -434,6 +434,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /locations/:id': ADMIN_ONLY,
   'GET /locations/schedule': EVERY_ROLE,
   'PUT /locations/schedule': ADMIN_ONLY,
+  // Horario de cada profesional por sede (DX-233, loop/informes/DX-233.md):
+  // lo leen los 4 roles de agenda (editor, cuadrante, sombreado); lo cambia
+  // solo ADMIN, igual que el horario de la sede.
+  'GET /providers/:providerId/schedule': EVERY_ROLE,
+  'PUT /providers/:providerId/schedule': ADMIN_ONLY,
+  'GET /providers/:providerId/schedule-overrides': EVERY_ROLE,
+  'POST /providers/:providerId/schedule-overrides': ADMIN_ONLY,
+  'DELETE /providers/:providerId/schedule-overrides/:overrideId': ADMIN_ONLY,
+  'GET /schedule/roster': EVERY_ROLE,
+  'GET /schedule/settings': EVERY_ROLE,
+  'PUT /schedule/settings': ADMIN_ONLY,
   // Ajustes → Recordatorios por sede (DX-026): solo ADMIN, también para leer.
   'GET /reminder-settings': ADMIN_ONLY,
   'PUT /reminder-settings/:locationId': ADMIN_ONLY,

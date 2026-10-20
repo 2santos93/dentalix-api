@@ -72,6 +72,45 @@ export class AuditStatusChangeDto {
   to!: string;
 }
 
+/** Un tramo del horario de un profesional en la auditoría (DX-233). */
+export class AuditScheduleEntryDto {
+  @ApiProperty({ format: 'uuid' })
+  locationId!: string;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 6,
+    description: 'Tramo semanal: 0 = domingo … 6 = sábado.',
+  })
+  weekday?: number;
+
+  @ApiPropertyOptional({
+    example: '2026-10-22',
+    description: 'Excepción: fecha civil de la sede.',
+  })
+  date?: string;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 1440 })
+  startMinute?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 1440 })
+  endMinute?: number;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description: 'Excepción «no trabaja».',
+  })
+  off?: true;
+}
+
+export class AuditScheduleChangeDto {
+  @ApiProperty({ type: [AuditScheduleEntryDto] })
+  before!: AuditScheduleEntryDto[];
+
+  @ApiProperty({ type: [AuditScheduleEntryDto] })
+  after!: AuditScheduleEntryDto[];
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -124,6 +163,13 @@ export class AuditMetadataDto {
       'DX-215: estado antes y después (p. ej. un compromiso de pago cumplido que vuelve a abierto al anular su abono). Solo códigos.',
   })
   statusChange?: AuditStatusChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditScheduleChangeDto,
+    description:
+      'DX-233: horario de un profesional antes y después (semanal o una excepción por fecha): sedes, días, fechas y minutos.',
+  })
+  scheduleChange?: AuditScheduleChangeDto;
 }
 
 export class AuditEventDto {
