@@ -368,6 +368,9 @@ model Patient {
   reminderOptOutAt             DateTime?
   reminderOptOutSource         ReminderOptOutSource?
   searchText                   String?               @default(dbgenerated("dx_search_normalize(((((\"firstName\" || ' '::text) || \"lastName\") || ' '::text) || COALESCE(\"docNumber\", ''::text)))")) @map("search_text") @ignore
+  // DX-225: últimos 8 dígitos del teléfono (dx_phone_tail). Lo mantiene el
+  // trigger `patients_phone_tail`; la app solo lo lee en SQL (BAJA por móvil).
+  phoneTail                    String?               @ignore
 
   medicalHistoryVersions MedicalHistoryVersion[]
   clinicalEntries        ClinicalEntry[]
@@ -418,8 +421,9 @@ model Patient {
   //     -> búsqueda (dx_patient_search_ids/_count).
   //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
   //     -> historias que salen de retención (DX-039).
-  //   patients_tenant_phone_tail_live_idx ("tenantId", dx_phone_tail(phone))
-  //     -> pacientes de un móvil que respondió «BAJA» (DX-128).
+  //   patients_tenant_phone_tail_idx ("tenantId", "phoneTail")
+  //     WHERE "deletedAt" IS NULL AND "phoneTail" IS NOT NULL
+  //     -> pacientes de un móvil que respondió «BAJA» (DX-128, DX-225).
   @@map("patients")
 }
 
@@ -2761,9 +2765,11 @@ enum PatientImplantKind {
 /// RD 192/2023 (ES). INALTERABLE en la BD (trigger
 /// `dx_patient_implants_immutable`): solo se anula una vez (motivo, autor y
 /// fecha) o se marca su tarjeta como entregada una vez. RLS forzada.
-/// Índices de expresión que Prisma no declara (20261017235200):
-///   patient_implants_tenant_lot_idx       ("tenantId", upper(btrim(lot)))
-///   patient_implants_tenant_reference_idx ("tenantId", upper(btrim(reference)))
+/// Búsqueda por lote / REF (DX-225): columnas GENERADAS "lotKey" y
+/// "referenceKey" (upper(btrim(...))), ignoradas por Prisma, con los índices
+/// que Prisma no declara sobre campos ignorados (20261020100000):
+///   patient_implants_tenant_lot_key_idx       ("tenantId", "lotKey")
+///   patient_implants_tenant_reference_key_idx ("tenantId", "referenceKey")
 /// FK (tenantId, treatmentPlanItemId) -> treatment_plan_items(tenantId, id)
 /// solo en SQL (20261017235400): Prisma no la modela sin relación inversa.
 model PatientImplant {
@@ -2794,6 +2800,8 @@ model PatientImplant {
   voidReason           String?
   cardDeliveredAt      DateTime?
   cardDeliveredById    String?            @db.Uuid
+  lotKey               String?            @default(dbgenerated("upper(btrim(lot))")) @ignore
+  referenceKey         String?            @default(dbgenerated("upper(btrim(reference))")) @ignore
 
   // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
   patient       Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
