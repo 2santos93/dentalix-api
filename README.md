@@ -2203,6 +2203,20 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+**Limpieza entre ficheros e2e/int (DX-251).** Cada `*.e2e-spec.ts` /
+`*.int-spec.ts` limpia con `await resetDatabase(raw)`
+(`test/support/e2e-fixtures.ts`: `TRUNCATE … CASCADE` de todas las tablas de
+datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
+hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
+fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
+
+**CI.** `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
+su MinIO): un rojo en `test:int` no oculta la e2e. El MinIO de prueba es
+`cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
+y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
+si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
+el resto de la suite sigue corriendo.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
