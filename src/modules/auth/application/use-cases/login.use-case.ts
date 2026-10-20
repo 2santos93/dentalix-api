@@ -15,6 +15,7 @@ import {
   BreakGlassService,
   type BreakGlassSession,
 } from '../break-glass.service';
+import { locationClaim } from '../session-claims.service';
 
 export interface PlatformLoginInput {
   email: string;
@@ -80,6 +81,7 @@ export class LoginUseCase {
       tenantId: input.tenantId,
       role: membership.role,
       tv: membership.tokenVersion,
+      ...locationClaim(membership.role, membership.allowedLocationIds),
     });
   }
 

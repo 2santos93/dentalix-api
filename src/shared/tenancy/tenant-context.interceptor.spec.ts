@@ -2,6 +2,7 @@ import {
   BadRequestException,
   CallHandler,
   ExecutionContext,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -193,6 +194,112 @@ describe('TenantContextInterceptor', () => {
         expect(err).toBeInstanceOf(BadRequestException);
         done();
       },
+    });
+  });
+
+  describe('sedes permitidas del token (DX-089)', () => {
+    /** Handler que devuelve la sede activa y la lista permitida vistas DENTRO del store. */
+    function readLocationContext(tenantContext: TenantContextService) {
+      return {
+        handle: () =>
+          new Observable((sub) => {
+            sub.next({
+              locationId: tenantContext.getLocationId(),
+              allowed: tenantContext.getAllowedLocationIds(),
+            });
+            sub.complete();
+          }),
+      } as CallHandler;
+    }
+
+    function runWith(
+      user: { loc?: string[] },
+      headers: Record<string, string> = {},
+      known = ['loc-1', 'loc-2'],
+    ): Promise<unknown> {
+      const tenantContext = new TenantContextService();
+      const interceptor = new TenantContextInterceptor(
+        tenantContext,
+        makePrisma(known),
+      );
+      const ctx = makeCtx({
+        tenantHost: { tenantId: 't-1' },
+        user: { tenantId: 't-1', sub: 'u', role: 'RECEPTION', ...user },
+        headers,
+      });
+      return new Promise((resolve, reject) => {
+        interceptor
+          .intercept(ctx, readLocationContext(tenantContext))
+          .subscribe({ next: resolve, error: reject });
+      });
+    }
+
+    it('cabecera con una sede NO permitida → 403 LOCATION_NOT_ALLOWED en español', async () => {
+      const err = await runWith(
+        { loc: ['loc-1'] },
+        { 'x-location-id': 'loc-2' },
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect((err as ForbiddenException).getResponse()).toEqual({
+        statusCode: 403,
+        error: 'Forbidden',
+        code: 'LOCATION_NOT_ALLOWED',
+        message: 'No tienes acceso a esta sede.',
+      });
+    });
+
+    it('loc = [] rechaza cualquier cabecera', async () => {
+      const err = await runWith(
+        { loc: [] },
+        { 'x-location-id': 'loc-1' },
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+    });
+
+    it('una sede de otra clínica sigue siendo 400 (antes que el 403)', async () => {
+      const err = await runWith(
+        { loc: ['loc-1'] },
+        { 'x-location-id': 'loc-ajena' },
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BadRequestException);
+    });
+
+    it('cabecera con una sede permitida → la expone junto con la lista', async () => {
+      await expect(
+        runWith({ loc: ['loc-1', 'loc-2'] }, { 'x-location-id': 'loc-2' }),
+      ).resolves.toEqual({ locationId: 'loc-2', allowed: ['loc-1', 'loc-2'] });
+    });
+
+    it('una sola sede y sin cabecera → se fija esa sede (auto-pin)', async () => {
+      await expect(runWith({ loc: ['loc-1'] })).resolves.toEqual({
+        locationId: 'loc-1',
+        allowed: ['loc-1'],
+      });
+    });
+
+    it('varias sedes y sin cabecera → sin sede fija, solo la lista', async () => {
+      await expect(runWith({ loc: ['loc-1', 'loc-2'] })).resolves.toEqual({
+        locationId: undefined,
+        allowed: ['loc-1', 'loc-2'],
+      });
+    });
+
+    it('loc = [] y sin cabecera → sin sede y lista vacía (no se convierte en ALL)', async () => {
+      await expect(runWith({ loc: [] })).resolves.toEqual({
+        locationId: undefined,
+        allowed: [],
+      });
+    });
+
+    it('sin claim → igual que hoy: cualquier sede de la clínica y ALL', async () => {
+      await expect(runWith({}, { 'x-location-id': 'loc-2' })).resolves.toEqual({
+        locationId: 'loc-2',
+        allowed: 'ALL',
+      });
+      await expect(runWith({})).resolves.toEqual({
+        locationId: undefined,
+        allowed: 'ALL',
+      });
     });
   });
 });

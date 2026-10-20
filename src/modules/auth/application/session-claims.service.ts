@@ -26,7 +26,8 @@ export interface CurrentSession {
  * Se renueva el MISMO tipo de sesión: una de plataforma sigue sin tenant ni
  * rol, una de clínica conserva su tenant. Así renovar nunca convierte un token
  * de plataforma en uno de clínica (ni al revés), que sería una escalada
- * silenciosa. Lo que sí cambia es el ROL: sale de la membresía vigente.
+ * silenciosa. Lo que sí cambia es el ROL y las SEDES permitidas (`loc`,
+ * DX-089): salen de la membresía vigente.
  *
  * 401 ("Session is no longer valid", sin más detalle) si el usuario ya no existe, si
  * ya no es superadmin (sesión de plataforma), si ya no tiene membresía activa
@@ -51,11 +52,30 @@ export class SessionClaimsService {
         tokenVersion: state.tokenVersion,
       };
     }
+    const role = roleIn(state);
     return {
-      claims: { sub: session.sub, tenantId, role: roleIn(state) },
+      claims: {
+        sub: session.sub,
+        tenantId,
+        role,
+        ...locationClaim(role, state.tenant!.allowedLocationIds),
+      },
       tokenVersion: state.tokenVersion,
     };
   }
+}
+
+/**
+ * DX-089: claim `loc` de una sesión de clínica. Solo lo lleva un miembro
+ * restringido (con filas en `membership_locations`); un ADMIN nunca, aunque
+ * tuviera filas, porque administra todas las sedes. Sin claim = todas.
+ */
+export function locationClaim(
+  role: ClinicRole,
+  allowedLocationIds: string[] | null,
+): { loc?: string[] } {
+  if (role === ClinicRole.ADMIN || allowedLocationIds === null) return {};
+  return { loc: allowedLocationIds };
 }
 
 function roleIn(state: SessionState): ClinicRole {

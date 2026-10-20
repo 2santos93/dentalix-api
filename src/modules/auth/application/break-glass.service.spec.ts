@@ -167,6 +167,8 @@ describe('BreakGlassService (SEC-008)', () => {
       tv: 3,
       breakGlass: true,
     });
+    // DX-089: el break-glass es ADMIN, que nunca lleva sedes restringidas.
+    expect(claims).not.toHaveProperty('loc');
     expect((claims.exp as number) - (claims.iat as number)).toBe(15 * 60);
     expect(session.breakGlass).toBe(true);
     expect(session.expiresAt.getTime()).toBe((claims.exp as number) * 1000);

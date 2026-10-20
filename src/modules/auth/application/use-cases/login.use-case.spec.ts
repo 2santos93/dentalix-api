@@ -42,6 +42,7 @@ describe('LoginUseCase', () => {
       passwordHash: hash,
       role: ClinicRole.ADMIN,
       tokenVersion: 0,
+      allowedLocationIds: null,
     });
     const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
     const result = await uc.execute({
@@ -59,6 +60,7 @@ describe('LoginUseCase', () => {
       passwordHash: hash,
       role: ClinicRole.DENTIST,
       tokenVersion: 5,
+      allowedLocationIds: null,
     });
     const issue = jest
       .fn()
@@ -75,6 +77,65 @@ describe('LoginUseCase', () => {
       tenantId: 't1',
       role: ClinicRole.DENTIST,
       tv: 5,
+    });
+  });
+
+  describe('sedes permitidas en el token (DX-089)', () => {
+    async function issuedFor(
+      role: ClinicRole,
+      allowedLocationIds: string[] | null,
+    ): Promise<unknown> {
+      const hash = await password.hash('S3cret!');
+      const repo = makeRepo({
+        userId: 'u1',
+        passwordHash: hash,
+        role,
+        tokenVersion: 0,
+        allowedLocationIds,
+      });
+      const issue = jest
+        .fn()
+        .mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref' });
+      const uc = new LoginUseCase(
+        repo,
+        password,
+        { issue } as never,
+        unusedBreakGlass,
+      );
+      await uc.execute({
+        tenantId: 't1',
+        email: 'a@b.com',
+        password: 'S3cret!',
+      });
+      return (issue.mock.calls as unknown[][])[0][0];
+    }
+
+    it('un miembro restringido lleva `loc` con sus sedes', async () => {
+      await expect(
+        issuedFor(ClinicRole.RECEPTION, ['loc-a', 'loc-b']),
+      ).resolves.toEqual({
+        sub: 'u1',
+        tenantId: 't1',
+        role: ClinicRole.RECEPTION,
+        tv: 0,
+        loc: ['loc-a', 'loc-b'],
+      });
+    });
+
+    it('restringido a sedes ya inactivas → `loc: []` (nunca todas)', async () => {
+      await expect(issuedFor(ClinicRole.DENTIST, [])).resolves.toMatchObject({
+        loc: [],
+      });
+    });
+
+    it('sin filas → sin claim `loc` (todas las sedes)', async () => {
+      const claims = await issuedFor(ClinicRole.RECEPTION, null);
+      expect(claims).not.toHaveProperty('loc');
+    });
+
+    it('ADMIN nunca lleva `loc`, aunque tuviera filas', async () => {
+      const claims = await issuedFor(ClinicRole.ADMIN, ['loc-a']);
+      expect(claims).not.toHaveProperty('loc');
     });
   });
 
@@ -97,6 +158,7 @@ describe('LoginUseCase', () => {
       passwordHash: hash,
       role: ClinicRole.ADMIN,
       tokenVersion: 0,
+      allowedLocationIds: null,
     });
     const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
     await expect(

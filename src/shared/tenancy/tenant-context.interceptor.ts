@@ -11,6 +11,7 @@ import { isTenantPayload } from '../crypto/token.service';
 import { TenantContextService } from './tenant-context.service';
 import { TenantHostRequest } from './tenant-host-request';
 import { PrismaService } from '../prisma/prisma.service';
+import { locationNotAllowed } from './location-access';
 
 @Injectable()
 export class TenantContextInterceptor implements NestInterceptor {
@@ -70,12 +71,40 @@ export class TenantContextInterceptor implements NestInterceptor {
       // resuelve ANTES de abrir el store: así el handler ya corre con la sede
       // definitiva y nunca con una a medio validar.
       this.resolveLocationId(req, hostTenantId)
-        .then((locationId) => {
-          this.tenantContext.run(hostTenantId, locationId, () => {
-            next.handle().subscribe(subscriber);
-          });
+        .then((headerLocationId) => {
+          const allowed = allowedLocationsOf(req);
+          if (
+            headerLocationId &&
+            allowed &&
+            !allowed.includes(headerLocationId)
+          ) {
+            throw locationNotAllowed();
+          }
+          // Auto-pin: quien solo puede trabajar en UNA sede trabaja en ella
+          // aunque el cliente no mande la cabecera (lecturas y escrituras
+          // quedan en su sede sin que cada repositorio tenga que decidirlo).
+          const locationId =
+            headerLocationId ??
+            (allowed?.length === 1 ? allowed[0] : undefined);
+          this.tenantContext.run(
+            hostTenantId,
+            locationId,
+            () => {
+              next.handle().subscribe(subscriber);
+            },
+            allowed,
+          );
         })
         .catch((err) => subscriber.error(err));
     });
   }
+}
+
+/** DX-089: sedes permitidas del token (claim `loc`), o `undefined` = todas. */
+function allowedLocationsOf(
+  req: TenantHostRequest,
+): readonly string[] | undefined {
+  const user = req.user;
+  if (!user || !isTenantPayload(user)) return undefined;
+  return user.loc;
 }
