@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { resolveDefaultLocationId } from '../../../shared/locations/default-location';
 import type {
   MinuteRange,
   ProviderOverride,
@@ -343,10 +342,10 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
   }
 
   resolveCurrentLocationId(): Promise<string> {
-    return this.prisma.runWithTenant(
-      async (tx) =>
-        this.tenantContext.getLocationId() ??
-        (await resolveDefaultLocationId(tx)),
+    // DX-089: la sede del request o la de escritura de la sesión (la
+    // principal sin restricción): la misma en la que se agenda.
+    return this.prisma.runWithTenant((tx) =>
+      this.tenantContext.writeLocationId(tx),
     );
   }
 }

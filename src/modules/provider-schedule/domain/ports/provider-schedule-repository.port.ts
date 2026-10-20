@@ -91,8 +91,9 @@ export interface ProviderScheduleRepository {
   setStrict(strict: boolean): Promise<boolean>;
 
   /**
-   * Sede EN CONTEXTO (cabecera `X-Location-Id` o la sede por defecto), la
-   * misma resolución con la que el repositorio de citas escribe la cita.
+   * Sede EN CONTEXTO (cabecera `X-Location-Id` o, sin ella, la de escritura
+   * de la sesión: DX-089), la misma resolución con la que el repositorio de
+   * citas escribe la cita.
    */
   resolveCurrentLocationId(): Promise<string>;
 }

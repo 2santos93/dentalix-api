@@ -205,11 +205,12 @@ export class CreateAppointmentUseCase {
       );
     }
 
-    // DX-233: horario del profesional en la sede de la cita. Sin horario
-    // configurado no cambia nada; fuera de él, aviso (o 409 en modo estricto).
+    // DX-233: horario del profesional en la sede de la cita (`target`, la
+    // misma en la que se escribe; DX-089). Sin horario configurado no cambia
+    // nada; fuera de él, aviso (o 409 en modo estricto).
     const offSchedule = await this.availability.warnOrReject({
       providerId: input.providerId,
-      locationId: input.locationId,
+      locationId: target,
       start: input.start,
       end: input.end,
     });

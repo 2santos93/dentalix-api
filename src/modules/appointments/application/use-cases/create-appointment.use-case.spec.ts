@@ -1483,4 +1483,42 @@ describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)'
     });
     expect(result).toMatchObject({ warnings: [], warningCodes: [] });
   });
+
+  it('DX-089: sin cabecera, el horario que cuenta es el de la sede donde se escribe la cita', async () => {
+    // Miembro acotado a loc2 sin cabecera: la cita se escribe en loc2 (la
+    // de escritura de la sesión), no en la sede por defecto de la clínica.
+    const schedules = new InMemoryProviderScheduleRepository();
+    schedules.currentLocationId = 'loc1';
+    schedules.weekly.set('prov1', [
+      {
+        locationId: 'loc2',
+        weekday: civilWeekday(ANCHOR_DAY),
+        startMinute: 480,
+        endMinute: 720,
+      },
+    ]);
+    const tenantContext = new TenantContextService();
+    const result = await tenantContext.run(
+      't1',
+      undefined,
+      () =>
+        new CreateAppointmentUseCase(
+          makeRepo({ resolveWriteLocationId: () => Promise.resolve('loc2') }),
+          makePatients(),
+          makeStaff(),
+          makeSchedule(),
+          makeTypes(),
+          makeBlocks(),
+          tenantContext,
+          inMemoryAvailability(schedules, 'UTC'),
+        ).execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: at('10:00'),
+          end: at('10:30'),
+        }),
+      ['loc2'],
+    );
+    expect(result).toMatchObject({ warnings: [], warningCodes: [] });
+  });
 });
