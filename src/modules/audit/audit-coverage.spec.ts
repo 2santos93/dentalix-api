@@ -9,6 +9,7 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
+import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
@@ -103,6 +104,29 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: P,
     patient: P,
     reason: 'RESPONSIBLE_PARTY_REMOVED',
+  },
+  // DX-153: coberturas del paciente; motivo y nombres de campo, nunca el número
+  // de afiliado ni el titular.
+  'POST /patients/:patientId/coverages': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'COVERAGE_ADDED',
+  },
+  'PATCH /patients/:patientId/coverages/:coverageId': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'COVERAGE_CHANGED',
+  },
+  'DELETE /patients/:patientId/coverages/:coverageId': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'COVERAGE_REMOVED',
   },
   // DX-039: archivar y retención legal de la HC.
   'DELETE /patients/:id': {
@@ -770,6 +794,7 @@ const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
   PatientResponsiblePartiesController,
+  PatientCoveragesController,
   MedicalHistoryController,
   ClinicalEntriesController,
   ClinicalEntryRdaController,

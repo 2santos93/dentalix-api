@@ -174,7 +174,6 @@ interface DemoPatient {
   city: string;
   occupation?: string;
   maritalStatus?: string;
-  insurerEps?: string;
   emergencyContactName?: string;
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
@@ -205,7 +204,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     city: 'Bogotá D.C.',
     occupation: 'Diseñadora gráfica',
     maritalStatus: 'Soltera',
-    insurerEps: 'Sura EPS',
     emergencyContactName: 'Rosa Jiménez',
     emergencyContactRelationship: 'Madre',
     emergencyContactPhone: '+57 310 555 0201',
@@ -235,7 +233,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     city: 'Bogotá D.C.',
     occupation: 'Contador',
     maritalStatus: 'Casado',
-    insurerEps: 'Sanitas',
     emergencyContactName: 'Gloria Ospina',
     emergencyContactRelationship: 'Esposa',
     emergencyContactPhone: '+57 311 555 0202',
@@ -278,7 +275,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 53 # 24-12',
     city: 'Bogotá D.C.',
     occupation: 'Estudiante de medicina',
-    insurerEps: 'Compensar',
     medicalHistory: healthy,
   },
   {
@@ -293,7 +289,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Avenida Boyacá # 64-20',
     city: 'Bogotá D.C.',
     occupation: 'Conductor',
-    insurerEps: 'Nueva EPS',
     medicalHistory: {
       allergies: [],
       conditions: [
@@ -332,7 +327,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 10 # 43-50',
     city: 'Medellín',
     occupation: 'Abogada',
-    insurerEps: 'Sura EPS',
   },
   {
     firstName: 'Santiago',
@@ -346,7 +340,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Carrera 11 # 118-05',
     city: 'Bogotá D.C.',
     occupation: 'Ingeniero de software',
-    insurerEps: 'Famisanar',
   },
   {
     firstName: 'Martha Lucía',
@@ -361,7 +354,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     city: 'Bogotá D.C.',
     occupation: 'Pensionada',
     maritalStatus: 'Viuda',
-    insurerEps: 'Sanitas',
     emergencyContactName: 'Felipe Becerra',
     emergencyContactRelationship: 'Hijo',
     emergencyContactPhone: '+57 316 555 0207',
@@ -411,7 +403,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Transversal 23 # 97-45',
     city: 'Bogotá D.C.',
     occupation: 'Comerciante',
-    insurerEps: 'Salud Total',
     medicalHistory: {
       allergies: [],
       conditions: [
@@ -446,7 +437,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     email: 'familia.ortiz@example.com',
     address: 'Calle 160 # 58-10',
     city: 'Bogotá D.C.',
-    insurerEps: 'Compensar',
     emergencyContactName: 'Claudia Navarro',
     emergencyContactRelationship: 'Madre',
     emergencyContactPhone: '+57 318 555 0209',
@@ -467,7 +457,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Carrera 50 # 102-33',
     city: 'Bogotá D.C.',
     occupation: 'Docente',
-    insurerEps: 'Sura EPS',
     medicalHistory: {
       ...healthy,
       embarazo: true,
@@ -487,7 +476,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 5 # 38-25',
     city: 'Cali',
     occupation: 'Chef',
-    insurerEps: 'Coomeva',
   },
   {
     firstName: 'Juliana',
@@ -501,7 +489,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 72 # 10-07',
     city: 'Bogotá D.C.',
     occupation: 'Periodista',
-    insurerEps: 'Sanitas',
     medicalHistory: {
       allergies: [
         {
@@ -541,7 +528,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     email: 'familia.cifuentes@example.com',
     address: 'Carrera 68 # 24-15',
     city: 'Bogotá D.C.',
-    insurerEps: 'Nueva EPS',
   },
   {
     firstName: 'Ana María',
@@ -555,7 +541,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 33 # 80-12',
     city: 'Medellín',
     occupation: 'Administradora de empresas',
-    insurerEps: 'Sura EPS',
     medicalHistory: healthy,
   },
   {
@@ -570,7 +555,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Carrera 54 # 72-80',
     city: 'Barranquilla',
     occupation: 'Ingeniero civil',
-    insurerEps: 'Salud Total',
   },
   {
     firstName: 'Valeria',
@@ -584,7 +568,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 116 # 7-15',
     city: 'Bogotá D.C.',
     occupation: 'Estudiante',
-    insurerEps: 'Compensar',
   },
   {
     firstName: 'Gustavo',
@@ -598,7 +581,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Carrera 27 # 36-14',
     city: 'Bucaramanga',
     occupation: 'Agricultor',
-    insurerEps: 'Nueva EPS',
     medicalHistory: {
       allergies: [
         {
@@ -626,7 +608,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 63 # 9-48',
     city: 'Bogotá D.C.',
     occupation: 'Fotógrafa',
-    insurerEps: 'Famisanar',
   },
   {
     firstName: 'Alejandro',
@@ -653,7 +634,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 26 # 69-76',
     city: 'Bogotá D.C.',
     occupation: 'Asesora comercial',
-    insurerEps: 'Sanitas',
   },
   {
     firstName: 'Diego',
@@ -667,7 +647,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Avenida 68 # 13-45',
     city: 'Bogotá D.C.',
     occupation: 'Mecánico',
-    insurerEps: 'Salud Total',
   },
   {
     firstName: 'Paula Andrea',
@@ -681,7 +660,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 100 # 45-21',
     city: 'Bogotá D.C.',
     occupation: 'Enfermera',
-    insurerEps: 'Compensar',
   },
   {
     firstName: 'Tomás',
@@ -708,7 +686,6 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Carrera 43A # 1-50',
     city: 'Medellín',
     occupation: 'Arquitecta',
-    insurerEps: 'Sura EPS',
   },
   {
     firstName: 'Sebastián',
@@ -722,7 +699,243 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Calle 45 # 13-31',
     city: 'Bogotá D.C.',
     occupation: 'Músico',
-    insurerEps: 'Famisanar',
+  },
+];
+
+/** DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre `insurerEps`). */
+export const DEMO_PAYERS = [
+  { key: 'sura', name: 'Sura EPS', type: 'EPS_CO' },
+  { key: 'sanitas', name: 'Sanitas', type: 'PREPAGADA_CO' },
+  { key: 'compensar', name: 'Compensar', type: 'EPS_CO' },
+  { key: 'nuevaEps', name: 'Nueva EPS', type: 'EPS_CO' },
+  { key: 'famisanar', name: 'Famisanar', type: 'EPS_CO' },
+  { key: 'saludTotal', name: 'Salud Total', type: 'EPS_CO' },
+  { key: 'coomeva', name: 'Coomeva', type: 'PREPAGADA_CO' },
+] as const satisfies readonly {
+  key: string;
+  name: string;
+  type: 'EPS_CO' | 'PREPAGADA_CO';
+}[];
+
+export interface DemoCoverage {
+  patientIndex: number;
+  payerKey: (typeof DEMO_PAYERS)[number]['key'];
+  planName: string;
+  memberNumber: string;
+  /** YYYY-MM-DD; fechas fijas para que la demo sea estable. */
+  validFrom: string | null;
+  validTo: string | null;
+  isPrimary: boolean;
+}
+
+/** Una cobertura principal por paciente que tenía `insurerEps`; una vencida y una pendiente. */
+export const DEMO_COVERAGES: readonly DemoCoverage[] = [
+  {
+    patientIndex: 0,
+    payerKey: 'sura',
+    planName: 'Plan de Salud Sura',
+    memberNumber: 'DEMO-SURA-1000',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 1,
+    payerKey: 'sanitas',
+    planName: 'Medicina Prepagada Sanitas',
+    memberNumber: 'DEMO-SANITAS-1001',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 2,
+    payerKey: 'compensar',
+    planName: 'Compensar Contributivo',
+    memberNumber: 'DEMO-COMPENSAR-1002',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 3,
+    payerKey: 'nuevaEps',
+    planName: 'Nueva EPS Contributivo',
+    memberNumber: 'DEMO-NUEVAEPS-1003',
+    validFrom: null,
+    validTo: '2025-12-31',
+    isPrimary: true,
+  },
+  {
+    patientIndex: 4,
+    payerKey: 'sura',
+    planName: 'Plan de Salud Sura',
+    memberNumber: 'DEMO-SURA-1004',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 5,
+    payerKey: 'famisanar',
+    planName: 'Famisanar Contributivo',
+    memberNumber: 'DEMO-FAMISANAR-1005',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 6,
+    payerKey: 'sanitas',
+    planName: 'Medicina Prepagada Sanitas',
+    memberNumber: 'DEMO-SANITAS-1006',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 7,
+    payerKey: 'saludTotal',
+    planName: 'Salud Total Contributivo',
+    memberNumber: 'DEMO-SALUDTOTAL-1007',
+    validFrom: '2027-06-01',
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 8,
+    payerKey: 'compensar',
+    planName: 'Compensar Contributivo',
+    memberNumber: 'DEMO-COMPENSAR-1008',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 9,
+    payerKey: 'sura',
+    planName: 'Plan de Salud Sura',
+    memberNumber: 'DEMO-SURA-1009',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 10,
+    payerKey: 'coomeva',
+    planName: 'Coomeva Plan Premium',
+    memberNumber: 'DEMO-COOMEVA-1010',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 11,
+    payerKey: 'sanitas',
+    planName: 'Medicina Prepagada Sanitas',
+    memberNumber: 'DEMO-SANITAS-1011',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 12,
+    payerKey: 'nuevaEps',
+    planName: 'Nueva EPS Contributivo',
+    memberNumber: 'DEMO-NUEVAEPS-1012',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 13,
+    payerKey: 'sura',
+    planName: 'Plan de Salud Sura',
+    memberNumber: 'DEMO-SURA-1013',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 14,
+    payerKey: 'saludTotal',
+    planName: 'Salud Total Contributivo',
+    memberNumber: 'DEMO-SALUDTOTAL-1014',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 15,
+    payerKey: 'compensar',
+    planName: 'Compensar Contributivo',
+    memberNumber: 'DEMO-COMPENSAR-1015',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 16,
+    payerKey: 'nuevaEps',
+    planName: 'Nueva EPS Contributivo',
+    memberNumber: 'DEMO-NUEVAEPS-1016',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 17,
+    payerKey: 'famisanar',
+    planName: 'Famisanar Contributivo',
+    memberNumber: 'DEMO-FAMISANAR-1017',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 19,
+    payerKey: 'sanitas',
+    planName: 'Medicina Prepagada Sanitas',
+    memberNumber: 'DEMO-SANITAS-1018',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 20,
+    payerKey: 'saludTotal',
+    planName: 'Salud Total Contributivo',
+    memberNumber: 'DEMO-SALUDTOTAL-1019',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 21,
+    payerKey: 'compensar',
+    planName: 'Compensar Contributivo',
+    memberNumber: 'DEMO-COMPENSAR-1020',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 23,
+    payerKey: 'sura',
+    planName: 'Plan de Salud Sura',
+    memberNumber: 'DEMO-SURA-1021',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
+  },
+  {
+    patientIndex: 24,
+    payerKey: 'famisanar',
+    planName: 'Famisanar Contributivo',
+    memberNumber: 'DEMO-FAMISANAR-1022',
+    validFrom: null,
+    validTo: null,
+    isPrimary: true,
   },
 ];
 

@@ -161,7 +161,6 @@ export class PrismaPatientRepository implements PatientRepository {
           notes: input.notes,
           maritalStatus: input.maritalStatus,
           occupation: input.occupation,
-          insurerEps: input.insurerEps,
           physicianName: input.physicianName,
           physicianPhone: input.physicianPhone,
           emergencyContactName: input.emergencyContactName,
@@ -242,7 +241,11 @@ export class PrismaPatientRepository implements PatientRepository {
 
   async list(params: ListPatientsParams): Promise<ListPatientsResult> {
     const query = params.query?.replace(/\s+/g, ' ').trim();
-    if (query && query.length >= MIN_INDEXED_QUERY_LENGTH) {
+    // DX-153 (spec R9): las funciones `dx_patient_search_*` solo reciben texto,
+    // límite y desplazamiento, no admiten filtros. Con `payerId` el pagador ya
+    // acota el conjunto, así que se usa el camino Prisma (`contains`, sin
+    // trigramas) aunque el texto tenga 2 o más caracteres.
+    if (query && query.length >= MIN_INDEXED_QUERY_LENGTH && !params.payerId) {
       return this.search(query, params);
     }
 
@@ -251,6 +254,13 @@ export class PrismaPatientRepository implements PatientRepository {
     // todos los tenants por un término que no lo acota.
     const where: Prisma.PatientWhereInput = {
       deletedAt: null,
+      ...(params.payerId
+        ? {
+            coverages: {
+              some: { payerId: params.payerId, deletedAt: null },
+            },
+          }
+        : {}),
       ...(query
         ? {
             OR: [

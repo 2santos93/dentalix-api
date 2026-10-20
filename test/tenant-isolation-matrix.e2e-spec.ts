@@ -147,12 +147,14 @@ interface SeedA {
   domainId: string;
   prescriptionTemplateId: string;
   appointmentTypeId: string;
+  payerId: string;
   scheduleBlockId: string;
   waitlistEntryId: string;
   noteTemplateId: string;
   waitlistOfferId: string;
   /** DX-203: un responsable (contacto) del paciente de A. */
   responsiblePartyId: string;
+  coverageId: string;
   /** Caja por turno cerrada de A (DX-027). */
   cashSessionId: string;
   /** DX-222: plantilla de indicaciones de A (con vínculo) y una entrega. */
@@ -345,6 +347,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     color: '#7C3AED',
   });
 
+  // DX-153: un pagador de A.
+  const payer = await create(app, a, '/payers', {
+    name: 'Pagador de A',
+    type: 'EMPRESA',
+  });
+
   // DX-122: un bloqueo de la sede y un pendiente (alta manual) de A.
   const scheduleBlock = await create(app, a, '/schedule-blocks', {
     locationId: location.id,
@@ -404,6 +412,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     },
   );
 
+  // DX-153: una cobertura del paciente de A con el pagador de A.
+  const coverage = await create(app, a, `/patients/${patientId}/coverages`, {
+    payerId: payer.id,
+    memberNumber: 'AFI-A-0001',
+  });
+
   // DX-222: una plantilla de indicaciones vinculada al tipo de cita y una
   // entrega impresa en la cita de A, ambas por la API.
   const postOpTemplate = await create(app, a, '/post-op-templates', {
@@ -450,11 +464,13 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     domainId: (domainRes.body as { domain: IdBody }).domain.id,
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
+    payerId: payer.id,
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
     waitlistOfferId: waitlistOffer.id,
     responsiblePartyId: responsibleParty.id,
+    coverageId: coverage.id,
     cashSessionId: cashSession.id,
     postOpTemplateId: postOpTemplate.id,
     postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
@@ -528,6 +544,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'email_outbox',
       'tenant_domains',
       'prescription_templates',
+      // DX-153: pagadores.
+      'payers',
+      'patient_coverages',
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
@@ -902,6 +921,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/appointment-types/${a.appointmentTypeId}`,
       status: 404,
     },
+    // --- payers (DX-153) ---
+    {
+      name: 'PATCH /payers/:id',
+      verb: 'patch',
+      path: () => `/payers/${a.payerId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /payers/:id',
+      verb: 'delete',
+      path: () => `/payers/${a.payerId}`,
+      status: 404,
+    },
     // --- responsables de pago y avisos (DX-203) ---
     {
       name: 'GET /patients/:patientId/responsible-parties',
@@ -929,6 +962,33 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'delete',
       path: () =>
         `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
+      status: 404,
+    },
+    // --- coberturas del paciente (DX-153) ---
+    {
+      name: 'GET /patients/:patientId/coverages',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/coverages`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/coverages',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/coverages`,
+      body: () => ({ payerId: a.payerId }),
+      status: 404,
+    },
+    {
+      name: 'PATCH /patients/:patientId/coverages/:coverageId',
+      verb: 'patch',
+      path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
+      body: () => ({ planName: 'Intrusa' }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /patients/:patientId/coverages/:coverageId',
+      verb: 'delete',
+      path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
       status: 404,
     },
     // --- caja por turno (DX-027) ---

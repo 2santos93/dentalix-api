@@ -110,10 +110,8 @@ export class UpdatePatientDto {
   @IsString()
   occupation?: string;
 
-  @ApiPropertyOptional({ nullable: true })
-  @IsOptional()
-  @IsString()
-  insurerEps?: string;
+  // DX-153: `insurerEps` es solo lectura (la ValidationPipe lo descarta); la
+  // aseguradora se registra en `/patients/:id/coverages`.
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()

@@ -17,6 +17,8 @@ export const PATIENTS_MAX_QUERY_LENGTH = 100;
 
 export interface ListPatientsInput {
   query?: string;
+  /** Solo pacientes con alguna cobertura viva de este pagador (DX-153). */
+  payerId?: string;
   page?: number;
   pageSize?: number;
 }
@@ -54,6 +56,7 @@ export class ListPatientsUseCase {
 
     const { items, total } = await this.repo.list({
       query: input.query,
+      payerId: input.payerId,
       skip: (page - 1) * pageSize,
       take: pageSize,
     });

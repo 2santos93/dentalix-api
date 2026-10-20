@@ -44,4 +44,24 @@ describe('ListPatientsQueryDto (DX-043: tope de page)', () => {
       'La búsqueda admite como mucho 100 caracteres.',
     ]);
   });
+
+  describe('payerId (DX-153)', () => {
+    it('acepta un UUID v4 o ningún valor', async () => {
+      expect(
+        await errorsFor({ payerId: '3f0c2d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f' }),
+      ).toEqual([]);
+      expect(await errorsFor({})).toEqual([]);
+    });
+
+    it.each(['no-es-uuid', '123', '3f0c2d4e-5b6a-1c7d-8e9f-0a1b2c3d4e5f'])(
+      'rechaza %s con un mensaje en español',
+      async (payerId) => {
+        const errors = await errorsFor({ payerId });
+        expect(errors[0].property).toBe('payerId');
+        expect(Object.values(errors[0].constraints ?? {})).toEqual([
+          'payerId debe ser un UUID.',
+        ]);
+      },
+    );
+  });
 });

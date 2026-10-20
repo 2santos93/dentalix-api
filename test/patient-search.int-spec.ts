@@ -426,3 +426,158 @@ describe('Búsqueda de pacientes con RLS (DX-043, int)', () => {
     });
   });
 });
+
+// DX-153 (spec §3.4, R8/R9): filtro por pagador. Con `payerId` el repositorio
+// usa SIEMPRE el camino Prisma (las funciones `dx_patient_search_*` no admiten
+// filtros), también con texto de 2+ caracteres.
+describe('Filtro de pacientes por pagador (DX-153, int)', () => {
+  let tenantId: string;
+  let otherTenantId: string;
+  let payer1: string;
+  let payer2: string;
+  let foreignPayer: string;
+  const ids: Record<string, string> = {};
+
+  async function patient(
+    key: string,
+    firstName: string,
+    lastName: string,
+    minute: number,
+    deleted = false,
+  ) {
+    const created = await raw.patient.create({
+      data: {
+        tenantId,
+        firstName,
+        lastName,
+        createdAt: new Date(Date.UTC(2026, 0, 2, 0, minute)),
+        deletedAt: deleted ? new Date() : null,
+      },
+    });
+    ids[key] = created.id;
+  }
+
+  const cover = (
+    key: string,
+    payerId: string,
+    extra: { isPrimary?: boolean; deletedAt?: Date } = {},
+  ) =>
+    raw.patientCoverage.create({
+      data: { tenantId, patientId: ids[key], payerId, ...extra },
+    });
+
+  beforeAll(async () => {
+    await prisma.onModuleInit();
+    const tenant = await raw.tenant.create({
+      data: { name: 'dx153-payer-a', subdomain: 'dx153-payer-a' },
+    });
+    const other = await raw.tenant.create({
+      data: { name: 'dx153-payer-b', subdomain: 'dx153-payer-b' },
+    });
+    tenantId = tenant.id;
+    otherTenantId = other.id;
+    payer1 = (
+      await raw.payer.create({
+        data: { tenantId, name: 'Sura', type: 'EPS_CO', country: 'CO' },
+      })
+    ).id;
+    payer2 = (
+      await raw.payer.create({
+        data: { tenantId, name: 'Sanitas', type: 'EPS_CO', country: 'CO' },
+      })
+    ).id;
+    foreignPayer = (
+      await raw.payer.create({
+        data: {
+          tenantId: otherTenantId,
+          name: 'Ajena',
+          type: 'EPS_CO',
+          country: 'CO',
+        },
+      })
+    ).id;
+
+    await patient('alpha', 'Ana', 'Beltrán', 0);
+    await patient('beta', 'Ana', 'Cortés', 1);
+    await patient('gamma', 'Carlos', 'Díaz', 2);
+    await patient('delta', 'Ana', 'Delgado', 3); // cobertura retirada
+    await patient('sin', 'Ana', 'Sinpagador', 4);
+    await patient('borrado', 'Ana', 'Borrada', 5, true);
+
+    await cover('alpha', payer1, { isPrimary: true });
+    await cover('beta', payer2, { isPrimary: true });
+    await cover('beta', payer1); // secundaria: cuenta (R8)
+    await cover('gamma', payer2, { isPrimary: true });
+    await cover('delta', payer1, { isPrimary: true, deletedAt: new Date() });
+    await cover('borrado', payer1, { isPrimary: true });
+  });
+
+  afterAll(async () => {
+    const tenantIds = [tenantId, otherTenantId];
+    await raw.patientCoverage.deleteMany({
+      where: { tenantId: { in: tenantIds } },
+    });
+    await raw.patient.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await raw.payer.deleteMany({ where: { tenantId: { in: tenantIds } } });
+    await raw.tenant.deleteMany({ where: { id: { in: tenantIds } } });
+    await raw.$disconnect();
+    await prisma.onModuleDestroy();
+  });
+
+  const list = (params: {
+    payerId?: string;
+    query?: string;
+    skip?: number;
+    take?: number;
+  }) => inTenant(tenantId, () => repo.list({ skip: 0, take: 20, ...params }));
+  const keys = (res: { items: { id: string }[] }) =>
+    res.items.map((p) => Object.keys(ids).find((k) => ids[k] === p.id));
+
+  it('solo payerId: quien tiene alguna cobertura viva de ese pagador, vivo, del más nuevo al más antiguo', async () => {
+    const res = await list({ payerId: payer1 });
+    expect(keys(res)).toEqual(['beta', 'alpha']);
+    expect(res.total).toBe(2);
+    expect(keys(await list({ payerId: payer2 }))).toEqual(['gamma', 'beta']);
+  });
+
+  it('payerId + texto de 3 letras: camino Prisma, filtra por ambos', async () => {
+    const ana = await list({ payerId: payer1, query: 'ana' });
+    expect(keys(ana)).toEqual(['beta', 'alpha']);
+    expect(ana.total).toBe(2);
+    // Sin tildes ni mayúsculas, como el camino indexado.
+    expect(keys(await list({ payerId: payer2, query: 'CARL' }))).toEqual([
+      'gamma',
+    ]);
+    // El texto no rescata a quien no tiene el pagador.
+    const none = await list({ payerId: payer1, query: 'carlos' });
+    expect(none.items).toEqual([]);
+    expect(none.total).toBe(0);
+  });
+
+  it('la paginación y el total cuentan solo el conjunto filtrado', async () => {
+    const page1 = await list({ payerId: payer1, skip: 0, take: 1 });
+    const page2 = await list({ payerId: payer1, skip: 1, take: 1 });
+    expect(keys(page1)).toEqual(['beta']);
+    expect(keys(page2)).toEqual(['alpha']);
+    expect(page1.total).toBe(2);
+    expect(page2.total).toBe(2);
+    expect((await list({ payerId: payer1, skip: 2, take: 1 })).items).toEqual(
+      [],
+    );
+  });
+
+  it('el pagador de otra clínica da una lista vacía, no un error', async () => {
+    const res = await list({ payerId: foreignPayer });
+    expect(res).toEqual({ items: [], total: 0 });
+    expect(await list({ payerId: foreignPayer, query: 'ana' })).toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+
+  it('sin payerId nada cambia: también aparecen quienes no tienen cobertura', async () => {
+    const res = await list({ query: 'ana' });
+    expect(keys(res).sort()).toEqual(['alpha', 'beta', 'delta', 'sin']);
+    expect(res.total).toBe(4);
+  });
+});

@@ -15,6 +15,8 @@ import { ClinicalNoteTemplatesModule } from './modules/clinical-note-templates/c
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
+import { PayersModule } from './modules/payers/payers.module';
+import { PatientCoveragesModule } from './modules/patient-coverages/patient-coverages.module';
 import { ScheduleBlocksModule } from './modules/schedule-blocks/schedule-blocks.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { AppointmentConfirmationsModule } from './modules/appointment-confirmations/appointment-confirmations.module';
@@ -76,6 +78,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OdontogramModule,
     AppointmentsModule,
     AppointmentTypesModule,
+    PayersModule,
+    PatientCoveragesModule,
     ScheduleBlocksModule,
     WaitlistModule,
     AppointmentConfirmationsModule,

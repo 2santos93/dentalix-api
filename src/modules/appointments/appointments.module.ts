@@ -20,6 +20,8 @@ import { CollectionsModule } from '../collections/collections.module';
 import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-case';
 import { ListInClinicUseCase } from './application/use-cases/list-in-clinic.use-case';
 
+import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
+
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
   // JwtAuthGuard depends on TokenService, which depends on JwtService — must
@@ -39,6 +41,8 @@ import { ListInClinicUseCase } from './application/use-cases/list-in-clinic.use-
     LocationsModule,
     // DX-150: marca «Saldo vencido» de las tarjetas, por lote.
     CollectionsModule,
+    // DX-153: resumen `coverage` de las tarjetas, por lote.
+    PatientCoveragesModule,
   ],
   controllers: [AppointmentsController],
   providers: [

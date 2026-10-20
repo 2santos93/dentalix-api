@@ -1504,6 +1504,57 @@ migraciones `20261020000000_dx222_enums`,
   `+57 601 555 0101`, y una entrega impresa de `POI-EXO` para la última cita
   atendida de un día anterior.
 
+## Pagadores y coberturas del paciente (DX-153)
+
+Con qué pagador, plan y afiliado se atiende cada paciente: un catálogo de
+pagadores por clínica (EPS, prepagadas, mutuas, empresas) y hasta 5
+coberturas por paciente, una principal. Sustituye al texto libre
+`patients."insurerEps"`. Módulos `payers` y `patient-coverages`; migraciones
+`20261020210000_dx153_enums`, `20261020210100_dx153_payers_and_coverages` y
+`20261020210200_dx153_insurer_eps_backfill`.
+
+- **Tablas**: `payers` (nombre, `type` MUTUA_ES | PREPAGADA_CO | EPS_CO |
+  EMPRESA | OTRO, `country`, `active`) y `patient_coverages` (paciente,
+  pagador, plan, nº de afiliado, titular, vigencia `validFrom`/`validTo`,
+  `isPrimary`, notas). Ambas con RLS FORCE y FK compuestas por `tenantId`
+  (un pagador o paciente de otra clínica es imposible en la BD). Se quitan en
+  blando.
+- **Reglas**: nombre de pagador único por clínica entre pagadores vivos
+  (mayúsculas y tildes se comprueban en la API; 409 en español, con mensaje
+  propio si el que coincide está desactivado); CHECK de tipo y país (EPS_CO y
+  PREPAGADA_CO solo con país CO); `validTo` no anterior a `validFrom`; hasta 5
+  coberturas vivas por paciente; la primera es principal aunque no se pida y
+  `isPrimary: true` en otra desmarca la anterior en la misma transacción
+  (con candado por paciente); la principal no se puede desmarcar sin marcar
+  otra. Un pagador con coberturas no se retira: se desactiva. Solo un pagador
+  activo admite coberturas nuevas. El estado de cada cobertura (vigente,
+  vencida, pendiente) se calcula contra el día civil de la sede.
+- **Endpoints**: `GET|POST /payers`, `PATCH|DELETE /payers/:id` y
+  `GET|POST /patients/:patientId/coverages`, `PATCH|DELETE …/:coverageId`.
+  `GET /patients/:id`, `GET /patients` y `GET /appointments` traen `coverage`
+  (resumen de la principal viva, sin nº de afiliado; un número fijo de
+  consultas por página). `GET /patients?payerId=` filtra por pagador.
+- **Roles**: leer pagadores, los 4 roles; crearlos, ADMIN y recepción;
+  editar, desactivar y retirar, ADMIN. Las coberturas las gestionan los 4
+  roles, como «Editar» de la ficha (son datos administrativos, no clínicos).
+- **Auditoría**: las coberturas escriben UPDATE de PATIENT con `reason`
+  `COVERAGE_ADDED|CHANGED|REMOVED`; la metadata solo lleva los nombres de los
+  campos, nunca el nº de afiliado ni el titular. El catálogo de pagadores no
+  se audita. El GET de coberturas tampoco (la ficha ya se audita).
+- **Relleno**: la migración `…_insurer_eps_backfill` crea un pagador por
+  clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
+  una cobertura principal por paciente con `insurerEps` no vacío, marcada
+  `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
+  `insurerEps`, que queda DEPRECADO y de solo lectura: la API ya no lo
+  escribe y un cliente antiguo que lo mande no da error.
+- **Demo**: `npm run seed:demo` crea 7 pagadores (Sura EPS, Sanitas,
+  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva) y una cobertura
+  principal por paciente que tenía aseguradora, con una vencida y una
+  pendiente para ver los tres estados. El seed omite una clínica demo ya creada.
+- **Tests**: `payers.e2e-spec.ts`, `patient-coverages.e2e-spec.ts`,
+  `appointments-coverage.e2e-spec.ts`, `patient-coverages.int-spec.ts` (RLS,
+  FK compuestas, relleno) y los recuentos de `seed-demo.int-spec.ts`.
+
 ## Documentos del paciente (DX-151)
 
 Radiografías, fotos, remisiones, consentimientos firmados escaneados e

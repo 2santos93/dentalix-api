@@ -34,6 +34,11 @@ import {
   AppointmentWriteDto,
 } from './dto/appointment.dto';
 import { PatientBalanceFlags } from '../../collections/application/patient-balance-flags';
+import {
+  NO_COVERAGE,
+  PatientCoverageFlags,
+  type CoverageSummary,
+} from '../../patient-coverages/application/patient-coverage-flags';
 import type { OverdueBalance } from '../../collections/domain/overdue-balance';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
 import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
@@ -106,6 +111,8 @@ export class AppointmentsController {
     private readonly tenantContext: TenantContextService,
     // DX-150: marca «Saldo vencido» de las tarjetas de la agenda.
     private readonly balanceFlags: PatientBalanceFlags,
+    // DX-153: resumen de cobertura del paciente en las tarjetas.
+    private readonly coverageFlags: PatientCoverageFlags,
     private readonly audit: RecordAuditEventUseCase,
     private readonly listInClinic: ListInClinicUseCase,
   ) {}
@@ -187,7 +194,7 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: [AppointmentListItemDto],
     description:
-      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION.',
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Y con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote.',
   })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
@@ -195,7 +202,9 @@ export class AppointmentsController {
   async list(
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
-  ): Promise<(Appointment & { balance: OverdueBalance })[]> {
+  ): Promise<
+    (Appointment & { balance: OverdueBalance; coverage: CoverageSummary })[]
+  > {
     const appointments = await this.listAppointments.execute({
       from: new Date(query.from),
       to: new Date(query.to),
@@ -207,12 +216,15 @@ export class AppointmentsController {
       appointments.map((a) => a.patientId),
       isTenantPayload(req.user) ? req.user.role : null,
     );
+    const patientIds = appointments.map((a) => a.patientId);
+    const coverage = await this.coverageFlags.forPatients(patientIds);
     return appointments.map((a) => ({
       ...a,
       balance: flags.get(a.patientId) ?? {
         hasOverdue: false,
         overdueDays: null,
       },
+      coverage: coverage.get(a.patientId) ?? NO_COVERAGE,
     }));
   }
 

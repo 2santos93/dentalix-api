@@ -28,6 +28,11 @@ import { UpdatePatientDto } from './dto/update-patient.dto';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto';
 import { PatientDetailDto, PatientDto } from './dto/patient.dto';
 import { PatientBalanceFlags } from '../../collections/application/patient-balance-flags';
+import {
+  NO_COVERAGE,
+  PatientCoverageFlags,
+  type CoverageSummary,
+} from '../../patient-coverages/application/patient-coverage-flags';
 import type { OverdueBalance } from '../../collections/domain/overdue-balance';
 import { ListPatientsResponseDto } from './dto/list-patients-response.dto';
 import { CreatePatientUseCase } from '../application/use-cases/create-patient.use-case';
@@ -67,6 +72,10 @@ import {
 } from '../../data-consents/presentation/consent-evidence';
 import { Audit } from '../../audit/presentation/audit.decorator';
 
+type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
+  items: (Patient & { coverage: CoverageSummary })[];
+};
+
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
 type AuthenticatedRequest = EvidenceRequest & { user: TenantJwtPayload };
@@ -89,6 +98,8 @@ export class PatientsController {
     private readonly listRetentionExpiring: ListRetentionExpiringUseCase,
     // DX-150: marca «Saldo vencido» de la cabecera de la ficha.
     private readonly balanceFlags: PatientBalanceFlags,
+    // DX-153: resumen de cobertura de la ficha y del listado.
+    private readonly coverageFlags: PatientCoverageFlags,
   ) {}
 
   @Audit({
@@ -125,13 +136,30 @@ export class PatientsController {
   }
 
   @Get()
-  @ApiOkResponse({ type: ListPatientsResponseDto })
-  list(@Query() query: ListPatientsQueryDto): Promise<ListPatientsOutput> {
-    return this.listPatients.execute({
+  @ApiOkResponse({
+    type: ListPatientsResponseDto,
+    description:
+      'Cada paciente lleva `coverage` (DX-153): resumen de su cobertura principal, calculado para la página entera en un número fijo de consultas. `payerId` limita a quienes tienen alguna cobertura viva de ese pagador.',
+  })
+  async list(
+    @Query() query: ListPatientsQueryDto,
+  ): Promise<ListPatientsWithCoverageOutput> {
+    const result = await this.listPatients.execute({
       query: query.query,
+      payerId: query.payerId,
       page: query.page,
       pageSize: query.pageSize,
     });
+    const coverage = await this.coverageFlags.forPatients(
+      result.items.map((p) => p.id),
+    );
+    return {
+      ...result,
+      items: result.items.map((p) => ({
+        ...p,
+        coverage: coverage.get(p.id) ?? NO_COVERAGE,
+      })),
+    };
   }
 
   @Get('retention/expiring')
@@ -175,18 +203,19 @@ export class PatientsController {
   @ApiOkResponse({
     type: PatientDetailDto,
     description:
-      'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION.',
+      'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION. Y con `coverage` (DX-153): resumen de la cobertura principal.',
   })
   async get(
     @Param('id') id: string,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Patient & { balance: OverdueBalance }> {
+  ): Promise<Patient & { balance: OverdueBalance; coverage: CoverageSummary }> {
     const patient = await this.getPatient.execute(id);
     const balance = await this.balanceFlags.forPatient(
       patient.id,
       req.user.role,
     );
-    return { ...patient, balance };
+    const coverage = await this.coverageFlags.forPatient(patient.id);
+    return { ...patient, balance, coverage };
   }
 
   @Audit({

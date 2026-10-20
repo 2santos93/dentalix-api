@@ -317,6 +317,15 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointment-types': ADMIN_ONLY,
   'PATCH /appointment-types/:id': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
+  'GET /payers': EVERY_ROLE,
+  'POST /payers': roles('ADMIN', 'RECEPTION'),
+  'PATCH /payers/:id': ADMIN_ONLY,
+  'DELETE /payers/:id': ADMIN_ONLY,
+  // DX-153: coberturas del paciente (PATIENT_ROLES).
+  'GET /patients/:patientId/coverages': EVERY_ROLE,
+  'POST /patients/:patientId/coverages': EVERY_ROLE,
+  'PATCH /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
+  'DELETE /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
   // «Buscar hueco», bloqueos y pendientes (DX-122, loop/informes/DX-122.md):
   // leer y agendar, quien agenda; los bloqueos los escriben ADMIN, recepción y
   // el odontólogo (solo su agenda: 403 del caso de uso), no la asistente.
