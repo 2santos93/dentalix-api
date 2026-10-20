@@ -245,7 +245,8 @@ export class PrismaAgreementRepository implements AgreementRepository {
           await lockUsablePriceList(tx, patch.priceListId);
         }
         return tx.agreement.update({
-          where: { id },
+          // deletedAt: null → P2025 si un DELETE se coló: 404, no se reescribe.
+          where: { id, deletedAt: null },
           data: {
             name: patch.name,
             payerId: patch.payerId,

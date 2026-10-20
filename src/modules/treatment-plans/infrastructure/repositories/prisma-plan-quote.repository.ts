@@ -232,7 +232,7 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         referencePrice: item.catalogPrice?.toNumber() ?? null,
         agreementName: item.agreementName,
         agreementPayerName: item.agreementId
-          ? (payerNames.get(item.agreementId) ?? null)
+          ? requirePayerName(payerNames, item.agreementId, plan.id)
           : null,
       })),
       patient: {
@@ -259,4 +259,23 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         : null,
     };
   }
+}
+
+/**
+ * El pagador del convenio de un ítem tiene que existir: sellar un presupuesto
+ * con el pagador en blanco lo dejaría firmado sin remedio, así que se falla
+ * (500 con mensaje interno claro) antes de sellar.
+ */
+function requirePayerName(
+  payerNames: Map<string, string>,
+  agreementId: string,
+  planId: string,
+): string {
+  const name = payerNames.get(agreementId);
+  if (!name) {
+    throw new Error(
+      `Plan ${planId}: el convenio ${agreementId} de un ítem no tiene pagador; no se puede sellar el presupuesto.`,
+    );
+  }
+  return name;
 }

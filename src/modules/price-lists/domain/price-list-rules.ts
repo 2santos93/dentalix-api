@@ -23,6 +23,8 @@ export const PRICE_LIST_CURRENCY_UNKNOWN_MESSAGE = 'Moneda no válida.';
 export const PRICE_LIST_LOCATION_NOT_FOUND_MESSAGE = 'Sede no encontrada.';
 export const PRICE_LIST_CATALOG_ITEMS_MESSAGE =
   'Hay prestaciones que no existen en el catálogo de esta clínica.';
+export const PRICE_LIST_NOT_PRICEABLE_MESSAGE =
+  'Solo se pueden fijar precios de procedimientos activos.';
 export const PRICE_LIST_DUPLICATED_ITEMS_MESSAGE =
   'Una prestación aparece más de una vez en el lote.';
 

@@ -38,6 +38,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
   let whitelist: CurrencyWhitelist;
   let locations: LocationRepository;
   let catalog: DentalCatalogRepository;
+  const unpriceableIds = new Set<string>();
   let list: ListPriceListsUseCase;
   let create: CreatePriceListUseCase;
   let update: UpdatePriceListUseCase;
@@ -61,7 +62,14 @@ describe('casos de uso de listas de precios (DX-105)', () => {
         Promise.resolve(
           ids
             .filter((id) => knownCatalogIds.has(id))
-            .map((id) => ({ id }) as never),
+            .map(
+              (id) =>
+                ({
+                  id,
+                  active: !unpriceableIds.has(id),
+                  kind: 'PROCEDURE',
+                }) as never,
+            ),
         ),
     } as unknown as DentalCatalogRepository;
     list = new ListPriceListsUseCase(repo);
@@ -392,6 +400,26 @@ describe('casos de uso de listas de precios (DX-105)', () => {
       );
       expect(repo.replaceCalls).toBe(0);
       expect(repo.prices.get(row.id)).toBeUndefined();
+    });
+
+    it('400 y NADA escrito si se fija el precio de un procedimiento inactivo; quitarlo sí vale', async () => {
+      const row = repo.seed();
+      unpriceableIds.add('c1');
+      try {
+        await expect(
+          replace.execute(row.id, [{ catalogItemId: 'c1', price: 1000 }]),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Solo se pueden fijar precios de procedimientos activos.',
+          ),
+        );
+        expect(repo.replaceCalls).toBe(0);
+        await expect(
+          replace.execute(row.id, [{ catalogItemId: 'c1', price: null }]),
+        ).resolves.toEqual({ upserted: 0, removed: 0 });
+      } finally {
+        unpriceableIds.clear();
+      }
     });
 
     it('400 si la misma prestación viene dos veces', async () => {

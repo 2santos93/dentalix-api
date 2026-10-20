@@ -306,6 +306,20 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     expect(content.totals[0].agreementSaving).toBe(150);
   });
 
+  it('el ahorro mide el precio cobrado: un precio tecleado por encima no lo infla', () => {
+    const items = withAgreement().items.slice(0, 1);
+    const typed = (price: number) =>
+      buildQuoteContent(
+        source({ items: [{ ...items[0], price }] }),
+        '2026-10-16',
+      ).totals[0].agreementSaving;
+    // lista 1000, convenio 850: cobrar 1000 no ahorra nada; 900 ahorra 100.
+    expect(typed(1000)).toBe(0);
+    expect(typed(900)).toBe(100);
+    expect(typed(850)).toBe(150);
+    expect(typed(700)).toBe(150);
+  });
+
   it('sin convenio: agreement null, ahorro 0 y listPrice = precio de catálogo', () => {
     const content = buildQuoteContent(
       source({

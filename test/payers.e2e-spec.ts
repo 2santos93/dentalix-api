@@ -272,7 +272,7 @@ describe('Pagadores (e2e, DX-153)', () => {
       tokens.ADMIN,
     ).expect(409);
     expect((res.body as { message: string }).message).toBe(
-      'Este pagador tiene coberturas asociadas; desactívalo en lugar de retirarlo.',
+      'Este pagador tiene coberturas o convenios asociados; desactívalo en lugar de retirarlo.',
     );
     expect(await names()).toContain('Con cobertura');
   });

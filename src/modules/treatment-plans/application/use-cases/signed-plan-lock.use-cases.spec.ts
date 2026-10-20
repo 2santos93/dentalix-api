@@ -43,7 +43,9 @@ const CATALOG_ITEM: DentalCatalogItem = {
 
 function catalog(): DentalCatalogRepository {
   const findById = (id: string) =>
-    Promise.resolve(id === CATALOG_ITEM.id ? CATALOG_ITEM : null);
+    Promise.resolve(
+      id === CATALOG_ITEM.id ? CATALOG_ITEM : { ...CATALOG_ITEM, id },
+    );
   const unused = () => Promise.reject(new Error('no usado en este spec'));
   return {
     create: unused,

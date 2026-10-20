@@ -358,6 +358,57 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
       expect((await repo.findItemById('b'))!.discount).toBe(0);
     });
 
+    it('alta en un plan cerrado con descuento en una prestación sin descuentos: 409 antes que 400', async () => {
+      const { add, repo } = setup();
+      repo.seedPlan({
+        id: 'plan-closed',
+        patientId: 'p1',
+        currency: 'COP',
+        status: TreatmentPlanStatus.CANCELLED,
+      });
+      await expect(
+        add.execute(
+          'plan-closed',
+          { toothNumber: '11', catalogItemId: 'xray', discount: 1 },
+          ADMIN_ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('edición con el procedimiento fuera del catálogo: cierra por defecto (400)', async () => {
+      const { update, repo } = setup();
+      repo.seedItem({
+        id: 'orphan',
+        planId: 'plan1',
+        catalogItemId: 'retired',
+        catalogPrice: 100_000,
+        price: 100_000,
+      });
+      await expect(
+        update.execute('orphan', { discount: 5_000 }, ADMIN_ACTOR),
+      ).rejects.toThrow(NO_DISCOUNT_ALLOWED_MESSAGE);
+      expect((await repo.findItemById('orphan'))!.discount).toBe(0);
+    });
+
+    it('«Descuento %» al 0 % no salta la prestación sin descuentos: limpia el anterior', async () => {
+      const { bulk, repo } = setup();
+      repo.seedItem({
+        id: 'b',
+        planId: 'plan1',
+        catalogItemId: 'xray',
+        price: 1000,
+        discount: 100,
+      });
+      const result = await bulk.execute(
+        'plan1',
+        { itemIds: ['b'], percent: 0 },
+        ADMIN_ACTOR,
+      );
+      expect(result.skippedNoDiscount).toBe(0);
+      expect(result.items.map((i) => [i.id, i.discount])).toEqual([['b', 0]]);
+      expect((await repo.findItemById('b'))!.discount).toBe(0);
+    });
+
     it('«Descuento %» con todos saltados: nada cambia y no falla', async () => {
       const { bulk, repo } = setup();
       repo.seedItem({

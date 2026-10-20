@@ -85,9 +85,12 @@ export class ApplyBulkDiscountUseCase {
       ({ plan, items }) => {
         assertItemsEditable(plan);
         assertPlanDiscountable(plan);
-        const discountable = items.filter(
-          (item) => !noDiscount.has(item.catalogItemId),
-        );
+        // Al 0 % no se salta ningún ítem: limpia descuentos antiguos y solo
+        // puede bajar el descuento efectivo.
+        const discountable =
+          input.percent > 0
+            ? items.filter((item) => !noDiscount.has(item.catalogItemId))
+            : items;
         skippedNoDiscount = items.length - discountable.length;
         return discountable.map((item): BulkItemDiscount => {
           const discount = discountForPercent(

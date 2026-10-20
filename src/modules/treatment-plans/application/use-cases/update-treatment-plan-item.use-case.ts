@@ -192,10 +192,10 @@ export class UpdateTreatmentPlanItemUseCase {
     });
   }
 
-  /** DX-105: `allowDiscount` del procedimiento (true si no se encuentra). */
+  /** DX-105: `allowDiscount` del procedimiento (false si no se encuentra: cierra por defecto, como el descuento en bloque). */
   private async allowsDiscount(catalogItemId: string): Promise<boolean> {
     const catalogItem = await this.catalog.findById(catalogItemId);
-    return catalogItem?.allowDiscount ?? true;
+    return catalogItem?.allowDiscount ?? false;
   }
 
   /**

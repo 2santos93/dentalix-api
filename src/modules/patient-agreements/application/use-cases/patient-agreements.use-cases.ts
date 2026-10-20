@@ -139,6 +139,9 @@ export class AssignPatientAgreementUseCase {
       }
     }
 
+    // Antes de escribir: si la zona horaria falla, que no haya un 500 tras un
+    // alta ya confirmada.
+    const today = await this.repo.clinicToday(this.clock());
     // El repositorio vuelve a comprobar convenio y cobertura dentro de la
     // transacción, con el candado del paciente tomado.
     const saved = await this.repo.replace(
@@ -152,7 +155,7 @@ export class AssignPatientAgreementUseCase {
       },
       by,
     );
-    return withStatus(saved, await this.repo.clinicToday(this.clock()));
+    return withStatus(saved, today);
   }
 }
 

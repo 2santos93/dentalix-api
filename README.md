@@ -1601,8 +1601,8 @@ coberturas por paciente, una principal. Sustituye al texto libre
   `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
   `insurerEps`, que queda DEPRECADO y de solo lectura: la API ya no lo
   escribe y un cliente antiguo que lo mande no da error.
-- **Demo**: `npm run seed:demo` crea 7 pagadores (Sura EPS, Sanitas,
-  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva) y una cobertura
+- **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
+  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una
   pendiente para ver los tres estados. El seed omite una clínica demo ya creada.
 - **Tests**: `payers.e2e-spec.ts`, `patient-coverages.e2e-spec.ts`,

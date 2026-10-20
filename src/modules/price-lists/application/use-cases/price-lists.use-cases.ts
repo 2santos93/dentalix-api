@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CatalogKind } from '@prisma/client';
 import { PriceList } from '../../domain/entities/price-list.entity';
 import {
   PRICE_LIST_REPOSITORY,
@@ -25,6 +26,7 @@ import {
   PRICE_LIST_LOCATION_NOT_FOUND_MESSAGE,
   PRICE_LIST_LOCATION_TAKEN_MESSAGE,
   PRICE_LIST_NOT_FOUND_MESSAGE,
+  PRICE_LIST_NOT_PRICEABLE_MESSAGE,
   priceListNameKey,
   validatePriceListName,
 } from '../../domain/price-list-rules';
@@ -313,6 +315,19 @@ export class ReplacePriceListItemsUseCase {
       const found = await this.catalog.findByIds(ids);
       if (found.length !== ids.length) {
         throw new BadRequestException(PRICE_LIST_CATALOG_ITEMS_MESSAGE);
+      }
+      // Fijar un precio exige un procedimiento activo (el directorio solo
+      // muestra esos); quitar uno heredado sí se permite.
+      const priced = new Set(
+        items.filter((i) => i.price !== null).map((i) => i.catalogItemId),
+      );
+      if (
+        found.some(
+          (c) =>
+            priced.has(c.id) && (!c.active || c.kind !== CatalogKind.PROCEDURE),
+        )
+      ) {
+        throw new BadRequestException(PRICE_LIST_NOT_PRICEABLE_MESSAGE);
       }
     }
     return this.repo.replaceItems(id, items);

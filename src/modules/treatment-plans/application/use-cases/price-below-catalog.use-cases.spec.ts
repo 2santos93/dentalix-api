@@ -47,7 +47,7 @@ const FREE = {
 
 const catalog = {
   findById: (id: string) =>
-    Promise.resolve([CROWN, FREE].find((c) => c.id === id) ?? null),
+    Promise.resolve([CROWN, FREE].find((c) => c.id === id) ?? { ...CROWN, id }),
   // DX-105: el «Descuento %» mira si cada procedimiento admite descuentos.
   findByIds: (ids: string[]) =>
     Promise.resolve(ids.map((id) => ({ ...CROWN, id }))),

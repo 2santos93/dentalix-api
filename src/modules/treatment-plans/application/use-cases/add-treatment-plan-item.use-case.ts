@@ -109,7 +109,6 @@ export class AddTreatmentPlanItemUseCase {
       reason: input.discountReason ?? null,
       reasonNote: input.discountReasonNote ?? null,
     };
-    assertDiscountAllowed(resolved.allowDiscount, discountInput);
     const discounted = effectiveDiscount(discountInput).total > 0;
     const policy = discounted ? await this.discountPolicy.execute() : null;
     const at = this.now();
@@ -118,6 +117,8 @@ export class AddTreatmentPlanItemUseCase {
     // la transacción del alta.
     return this.repo.addItem(planId, (plan) => {
       assertItemsEditable(plan);
+      // Después del bloqueo: un plan firmado responde 409 antes que este 400.
+      assertDiscountAllowed(resolved.allowDiscount, discountInput);
       if (plan.currency !== current.currency) {
         throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
       }

@@ -459,6 +459,31 @@ describe('Listas de precios (e2e, DX-105)', () => {
       expect(await storedPrices(list.id)).toEqual(before);
     });
 
+    it('un procedimiento inactivo o que no es PROCEDURE da 400 y NO escribe nada', async () => {
+      const before = await storedPrices(list.id);
+      const inactive = await createCatalogItem(clinic, 'INACTIVO-1');
+      await raw.dentalCatalogItem.update({
+        where: { id: inactive },
+        data: { active: false },
+      });
+      const product = await createCatalogItem(clinic, 'DIAG-1');
+      await raw.dentalCatalogItem.update({
+        where: { id: product },
+        data: { kind: 'DIAGNOSIS' },
+      });
+      for (const bad of [inactive, product]) {
+        const res = await putItems(list.id, [
+          { catalogItemId: catalogIds[5], price: 5000 },
+          { catalogItemId: bad, price: 6000 },
+        ]);
+        expect(res.status).toBe(400);
+        expect((res.body as MessageBody).message).toBe(
+          'Solo se pueden fijar precios de procedimientos activos.',
+        );
+      }
+      expect(await storedPrices(list.id)).toEqual(before);
+    });
+
     it('rechaza precio negativo, con 3 decimales, ausente y una prestación repetida', async () => {
       const before = await storedPrices(list.id);
       for (const price of [-1, 10.123]) {

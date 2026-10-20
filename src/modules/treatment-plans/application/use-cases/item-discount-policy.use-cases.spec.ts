@@ -36,7 +36,9 @@ const CATALOG_ITEM = {
 
 const catalog = {
   findById: (id: string) =>
-    Promise.resolve(id === CATALOG_ITEM.id ? CATALOG_ITEM : null),
+    Promise.resolve(
+      id === CATALOG_ITEM.id ? CATALOG_ITEM : { ...CATALOG_ITEM, id },
+    ),
   // DX-105: el «Descuento %» mira si cada procedimiento admite descuentos.
   findByIds: (ids: string[]) =>
     Promise.resolve(ids.map((id) => ({ ...CATALOG_ITEM, id }))),

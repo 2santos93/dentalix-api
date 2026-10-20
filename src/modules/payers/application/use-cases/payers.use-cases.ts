@@ -23,7 +23,7 @@ export const PAYER_DUPLICATE_MESSAGE = 'Ya existe un pagador con ese nombre.';
 export const PAYER_DUPLICATE_INACTIVE_MESSAGE =
   'Ya existe un pagador con ese nombre, pero está desactivado; pídele a administración que lo reactive.';
 export const PAYER_IN_USE_MESSAGE =
-  'Este pagador tiene coberturas asociadas; desactívalo en lugar de retirarlo.';
+  'Este pagador tiene coberturas o convenios asociados; desactívalo en lugar de retirarlo.';
 
 export interface CreatePayerInput {
   name: string;

@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaAgreementRepository } from '../src/modules/agreements/infrastructure/repositories/prisma-agreement.repository';
 import { PrismaPatientAgreementRepository } from '../src/modules/patient-agreements/infrastructure/repositories/prisma-patient-agreement.repository';
 
 // DX-105, capa DB: listas de precios (price_lists, price_list_items), convenios
@@ -720,6 +721,20 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         [assigned.status, retired.status].filter((s) => s === 'fulfilled'),
       ).toHaveLength(1);
     });
+  });
+
+  it('actualizar un convenio retirado no lo reescribe: devuelve null (404)', async () => {
+    const repo = new PrismaAgreementRepository(prisma, tenantContext);
+    const retired = await raw.agreement.create({
+      data: percentAgreement(a, { active: false, deletedAt: new Date() }),
+    });
+    const result = await tenantContext.run(a.tenantId, () =>
+      repo.update(retired.id, { active: true, name: 'Reescrito' }),
+    );
+    expect(result).toBeNull();
+    expect(
+      await raw.agreement.findUniqueOrThrow({ where: { id: retired.id } }),
+    ).toMatchObject({ active: false, name: 'Convenio 10' });
   });
 
   it('el catálogo admite descuento por defecto (allowDiscount)', async () => {

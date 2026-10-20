@@ -178,7 +178,12 @@ export function buildQuoteContent(
       i.agreementName !== null &&
       i.basePrice !== null &&
       i.referencePrice !== null
-        ? sum + Math.max(0, toCents(i.basePrice) - toCents(i.referencePrice))
+        ? sum +
+          Math.max(
+            0,
+            toCents(i.basePrice) -
+              Math.max(toCents(i.price), toCents(i.referencePrice)),
+          )
         : sum,
     0,
   );
