@@ -3,6 +3,7 @@ import { AppointmentStatus } from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
+import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
 import {
   APPOINTMENT_WARNING_CODES,
   type AppointmentWarningCode,
@@ -154,6 +155,7 @@ export class AppointmentWriteDto extends AppointmentDto {
  * paciente (DX-150). El importe (`balance.amounts`) solo llega a ADMIN y
  * RECEPTION; DENTIST y ASSISTANT ven la marca y los días. `coverage` (DX-153)
  * resume la cobertura principal del paciente, sin número de afiliado.
+ * `medicalAlerts` (DX-247): solo banderas de la anamnesis, nunca su contenido.
  */
 export class AppointmentListItemDto extends AppointmentDto {
   @ApiProperty({ type: OverdueBalanceDto })
@@ -161,4 +163,11 @@ export class AppointmentListItemDto extends AppointmentDto {
 
   @ApiProperty({ type: CoverageSummaryDto })
   coverage!: CoverageSummaryDto;
+
+  @ApiProperty({
+    type: MedicalAlertFlagsDto,
+    description:
+      'DX-247: banderas médicas del paciente (alerta, premedicación, anamnesis al día / caducada / ausente). Sin alérgenos, condiciones, medicamentos ni notas.',
+  })
+  medicalAlerts!: MedicalAlertFlagsDto;
 }

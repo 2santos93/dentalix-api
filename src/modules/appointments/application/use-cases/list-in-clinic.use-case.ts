@@ -59,7 +59,7 @@ export interface InClinicItem {
   punctuality: Punctuality;
 }
 
-export interface InClinicView {
+export interface InClinicView<Item extends InClinicItem = InClinicItem> {
   date: string;
   locationId: string;
   timeZone: string;
@@ -67,9 +67,9 @@ export interface InClinicView {
   now: Date;
   /** MINE: solo los pacientes del odontólogo («Te esperan»); LOCATION: la sede. */
   scope: 'MINE' | 'LOCATION';
-  waiting: InClinicItem[];
-  inChair: InClinicItem[];
-  readyForCheckout: InClinicItem[];
+  waiting: Item[];
+  inChair: Item[];
+  readyForCheckout: Item[];
 }
 
 /** Cuándo entró en el grupo en el que está. */
