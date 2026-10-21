@@ -135,9 +135,13 @@ const RESTRICTIVE_POLICIES: Record<
   },
 };
 
-/** La forma exacta que generan las migraciones (ver p. ej. la de patients). */
+/**
+ * La forma exacta de la política de clínica. DX-251 (OPS-037): con NULLIF, un
+ * `app.current_tenant` vacío ('' tras un set_config local en la misma sesión)
+ * compara con NULL y niega la fila, en vez de lanzar 22P02 con `''::uuid`.
+ */
 function tenantPredicate(column: string): string {
-  return `("${column}" = (current_setting('app.current_tenant'::text, true))::uuid)`;
+  return `("${column}" = (NULLIF(current_setting('app.current_tenant'::text, true), ''::text))::uuid)`;
 }
 
 interface TableRls {

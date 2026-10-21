@@ -2110,6 +2110,24 @@ dentalix_email_dispatcher`) o repón la política como en
   `CONCURRENTLY` en otro fichero. Modelo:
   `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
   `test/owner-nosu/migrations-data.owner-spec.ts`.
+- **Políticas con `NULLIF`: `app.current_tenant` puede llegar vacío**
+  (DX-251, OPS-037): tras una transacción con `set_config(…, true)` la
+  variable no vuelve a NULL, queda en `''` el resto de la sesión, y `migrate
+  deploy` aplica todas las migraciones en una sola sesión. Con
+  `current_setting('app.current_tenant', true)::uuid` la política lanzaba
+  22P02 (`''::uuid`) en la siguiente migración que leyera una tabla con FORCE
+  (la FK de `patient_documents` hacia `patients`, tras el relleno de DX-225).
+  Toda política y todo SQL de migración nuevo escribe
+  `"tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid`:
+  con la variable vacía compara con NULL y **niega** la fila, igual que sin
+  clínica fijada. `20261020200050_dx251_rls_tenant_guc_nullif` y
+  `…230000_…_rest` reescribieron las existentes (y la función de las
+  particiones de `audit_events`) sin editar migraciones aplicadas. Lo vigilan
+  el lint `test/migrations/tenant-guc-nullif.spec.ts`,
+  `test/rls-catalog.int-spec.ts` (forma exacta), `test/rls-empty-tenant-guc.int-spec.ts`
+  (0 filas y sin error con la variable vacía) y
+  `test/owner-nosu/tenant-guc-empty.owner-spec.ts` (la FK se valida en esa
+  sesión con el owner sin superusuario).
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …
   REFERENCES` o `VALIDATE CONSTRAINT` necesita `NO FORCE` **en la tabla hija y
@@ -2184,7 +2202,9 @@ dentalix_email_dispatcher`) o repón la política como en
 
   Lo prueba `test/owner-nosu/shared-cluster.owner-spec.ts`.
 - **En local**, con un Postgres aparte (los roles son del clúster; p. ej.
-  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`): crea
+  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`, o sin
+  Docker `initdb` + `pg_ctl -o '-p 55432'` de PostgreSQL 16 como el usuario
+  `postgres`): crea
   el owner y la base como en el paso 1, aplica los pasos 2 a 4, y
   `DIRECT_URL=<owner> DATABASE_URL=<app> OWNER_NOSU_ADMIN_URL=<admin>/postgres
   npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
