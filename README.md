@@ -1687,6 +1687,8 @@ migraciones `20261020200000_dx151_enums`,
   lista (un PNG renombrado `.pdf`), 400 «El contenido del archivo no coincide
   con su tipo.»; `application/octet-stream` o un DICOM sin extensión no dicen
   nada y pasan. Nada rechazado llega al almacén.
+- **Subida**: la web sube DIRECTO al bucket (`upload-url` + `complete`, ver
+  [Subida directa al bucket (DX-259)](#subida-directa-al-bucket-timeouts-de-s3-y-avatares-cacheables-dx-259)).
 - **Límites**: 20 MB por fichero (multer corta antes de leer más) → **413**
   con cuerpo en español «El archivo supera el máximo de 20 MB.»; un solo
   fichero por subida; los demás errores de multipart también salen en
@@ -1926,7 +1928,8 @@ se arman con ids, nunca con datos del paciente o del usuario.
    BD solo queden claves:
    `psql "$DIRECT_URL" -f prisma/migrations/20261019224000_dx084_avatar_keys/migration.sql`.
 
-**Subida de avatares**: PNG, JPEG o WebP de hasta 2 MB. Se comprueba la
+**Subida de avatares**: PNG, JPEG o WebP de hasta 2 MB (clave versionada y
+caché desde DX-259, ver abajo). Se comprueba la
 cabecera real del fichero (no solo el tipo que declara el cliente): lo que no
 sea de verdad la imagen declarada es un 400 y no llega al almacén. El tipo con
 el que se sirve sale de la extensión de la clave, con `nosniff`.
@@ -2008,6 +2011,158 @@ comprueba firmas ni caducidad de las URL prefirmadas, así que el test «una URL
 firmada … caduca al pasar el TTL» falla contra moto (la URL sigue sirviendo)
 aunque el adaptador es correcto; la CI usa MinIO, que sí lo comprueba. El
 resto de los tests de S3 pasan igual contra moto.
+
+## Subida directa al bucket, timeouts de S3 y avatares cacheables (DX-259)
+
+Antes, un documento de 20 MB pasaba entero por la memoria del proxy de Next
+(que aceptaba 25 MB en **cualquier** `/api/v1/*`, de forma anónima) y otra vez
+por un `Buffer` de multer en la API; el cliente S3 no tenía timeouts y los
+avatares hacían un `GetObject` por petición (OPS-038, OPS-039).
+
+**Documentos: el navegador sube directo al bucket.**
+
+1. `POST /patients/:patientId/documents/upload-url` `{ fileName?, mimeType?,
+   sizeBytes, sha256 }` (hex). Comprueba tamaño (1 B – 20 MB; 413 por encima),
+   huella, paciente de la clínica, duplicado vigente (409) y sede, y responde
+   `{ documentId, method: 'POST', url, fields, expiresAt, maxBytes }`: un
+   **POST prefirmado** (`createPresignedPost`) de **5 minutos**
+   (`PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS`) con la clave **exacta** que fija la
+   API, `patient-documents/pending/<tenantId>/<documentId>` (sin
+   `starts-with`: un único objeto), `content-length-range` 1 B – 20 MB,
+   `x-amz-checksum-algorithm: SHA256` + `x-amz-checksum-sha256` (el bucket
+   rechaza otro contenido), `Content-Type: application/octet-stream` fijo, el
+   SSE si hay `S3_SSE` y los metadatos `x-amz-meta-uploaded-by`,
+   `-patient-id`, `-declared-size` y `-sha256` (cambiar cualquiera da 403).
+   No se audita (no toca la ficha).
+2. El navegador envía `fields` (en orden) y el fichero al final en `file` a
+   `url`, por XHR con progreso. No pasa por la web ni por la API.
+3. `POST /patients/:patientId/documents/:id/complete` `{ category,
+   clinicalDate?, toothNumbers?: string[], notes?, fileName?, mimeType? }`:
+   valida el formulario (400 **sin** borrar el objeto: se corrige y se
+   repite); el objeto pendiente tiene que ser de ESTE usuario y paciente (si
+   no, 404 sin tocarlo); `HeadObject` (`ChecksumMode`) da tamaño y SHA-256
+   del bucket, que tienen que cuadrar con lo declarado; el tipo se detecta
+   leyendo **solo los primeros 64 KB con `Range`** (un DOCX, además, el final
+   del ZIP: EOCD y directorio central), con `IfMatch` de la ETag. Mismas
+   reglas que el multipart (lista blanca, declarado vs. detectado, 409
+   duplicado, auditoría CREATE). Si el contenido no vale (tipo, tamaño o
+   huella), **se borra del bucket y responde 400 en español**. Si vale, se
+   copia (`CopyObject` con `CopySourceIfMatch`) a
+   `patient-documents/<tenantId>/<documentId>-<16 hex del sha256>.<ext>` con
+   el tipo detectado, se borra el pendiente y se crea la fila. Repetir
+   `complete` de un documento ya creado lo devuelve (idempotente). Hasta
+   `complete` el objeto no es alcanzable por la API.
+
+**Con `STORAGE_DRIVER=disk`** (desarrollo y tests) el flujo es el mismo:
+`upload-url` responde un formulario equivalente hacia la propia API,
+`FILES_PUBLIC_BASE_URL/uploads` (`POST /files/uploads`, firmado con el HMAC
+del proceso, misma caducidad, tope y SHA-256; multer a un temporal en disco y
+semáforo), que deja el objeto y su checksum/metadatos en `STORAGE_DIR/.meta`.
+Con S3 esa ruta da 404.
+
+**El multipart de siempre** (`POST /patients/:patientId/documents`) sigue,
+para integraciones: multer escribe en un **temporal en disco**
+(`os.tmpdir()/dentalix-uploads`, se borra al cerrar la respuesta), el tipo se
+lee por rangos, la huella se calcula en streaming y la subida a S3 es en
+streaming (`@aws-sdk/lib-storage` `Upload`). Igual el avatar (`POST
+/me/avatar`) y `/files/uploads`.
+
+**Semáforo de subidas por réplica**: `UPLOAD_MAX_CONCURRENCY` (default 4,
+1..256) peticiones que reciben un fichero a la vez (multipart, avatar,
+`/files/uploads`). Sin plaza: **503** «Hay demasiadas subidas en curso…» con
+`Retry-After: 5`, antes de leer el cuerpo.
+
+**Cliente S3** (`createS3Client`): `NodeHttpHandler` con `connectionTimeout`
+`S3_CONNECT_TIMEOUT_MS` (default 3000), `requestTimeout` y `socketTimeout`
+`S3_REQUEST_TIMEOUT_MS` (default 10000; `throwOnRequestTimeout`: corta, no
+solo avisa), agentes con `maxSockets` `S3_MAX_SOCKETS` (default 50) y
+`maxAttempts` `S3_MAX_ATTEMPTS` (default 3). Además cada operación lleva un
+`AbortSignal` con un plazo TOTAL de `S3_REQUEST_TIMEOUT_MS` (reintentos
+incluidos; una subida en partes, uno por parte de 5 MB): al vencer se destruye
+el socket y la API responde **503** «El almacén de archivos no responde.
+Inténtalo de nuevo en unos minutos.» con `Retry-After: 5`
+(`StorageUnavailableError`; también conexión rechazada/cortada y 5xx tras los
+reintentos). 10 s y no los 30 s de la auditoría: `complete` hace hasta cuatro
+operaciones y tiene que caber en los 30 s del proxy de Next. Un valor fuera de
+rango impide arrancar.
+
+**Log `storage.op`**: una línea por operación (`driver`, `op`: put, get,
+range, head, copy, delete, head-bucket; `outcome`: ok, not_found,
+precondition_failed, timeout, unavailable, error; `durationMs`, `bytes` y, si
+falla, el **tipo** del error). Nunca la clave, el nombre del fichero ni nada
+del paciente. **Al arrancar** se hace un `HeadBucket` y, si falla, solo se
+avisa (`storage.unreachable`): la API arranca igual. El `HeadBucket` necesita
+`s3:ListBucket` sobre `arn:aws:s3:::<bucket>` (sin él, el aviso sale siempre).
+
+**Avatares**: clave versionada `avatars/<userId>-<16 hex del sha256>.<ext>`
+(cambiar el avatar cambia la URL) servida con `Cache-Control: public,
+max-age=31536000, immutable` y ETag, en streaming; uno de antes
+(`avatars/<userId>.<ext>`) con `public, max-age=300` y ETag (304 con
+`If-None-Match`). La ruta anónima `GET /files/avatars/:name` tiene su propio
+límite por IP, `RATE_LIMIT_PUBLIC_FILES_LIMIT`/`_TTL_MS` (default 300/min).
+La web reduce en el navegador las fotos de más de 900 KB (el proxy copia 1 MB).
+
+**Bucket en producción (además de lo de DX-084)**:
+
+- **CORS** del bucket solo con los orígenes de la web (los subdominios de
+  clínica y los dominios propios). AWS S3:
+
+  ```json
+  [{
+    "AllowedOrigins": ["https://*.dentalix.app"],
+    "AllowedMethods": ["POST"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3000
+  }]
+  ```
+
+  (`aws s3api put-bucket-cors --bucket <bucket> --cors-configuration
+  file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
+  carga la URL firmada en `<iframe>`/`<img>`, sin CORS). Un dominio propio de
+  clínica (SEC-009) se añade a `AllowedOrigins`. MinIO no tiene CORS por
+  bucket (`PutBucketCors` da NotImplemented): es de todo el servidor,
+  `MINIO_API_CORS_ALLOW_ORIGIN` (en docker-compose, `*`).
+- **Ciclo de vida** de los pendientes: los objetos de
+  `patient-documents/pending/` que no llegaron a `complete` se borran a las
+  24 h. AWS (junto a las reglas de DX-084):
+
+  ```json
+  {"Rules": [{
+    "ID": "pending-24h",
+    "Status": "Enabled",
+    "Filter": {"Prefix": "patient-documents/pending/"},
+    "Expiration": {"Days": 1},
+    "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
+    "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
+  }]}
+  ```
+
+  En R2, una regla de ciclo de vida con el prefijo `patient-documents/pending/`
+  y «Delete after 1 day». En local, `minio_init` la aplica a `dentalix-local`
+  y `dentalix-test` (`mc ilm import`).
+- **Cloudflare R2 no implementa el POST de formulario (PostObject)**: con R2
+  la subida directa no funciona tal cual. O se usa S3/MinIO, o hay que añadir
+  un modo de PUT prefirmado (con `Content-Length` y `x-amz-checksum-sha256`
+  firmados) en `createDirectUpload`; queda como riesgo (informe DX-259).
+- **Web**: `NEXT_PUBLIC_FILES_ORIGIN` = origen del bucket (CSP `connect-src`,
+  `frame-src`, `img-src`).
+- La política IAM de DX-084 sirve (`CopyObject` usa `s3:GetObject` del origen
+  y `s3:PutObject` del destino); añade `s3:ListBucket` sobre el bucket para el
+  `HeadBucket` del arranque.
+
+**Tests**: unitarios (configuración del cliente y del handler, política del
+POST prefirmado, plazo por operación → 503, clasificación de errores, log
+`storage.op` sin clave, semáforo, sniff por rangos igual que con el fichero
+entero, `upload-url`/`complete`); integración contra MinIO
+(`test/storage/s3-direct-upload.int-spec.ts`: política, checksum, tamaño,
+campos manipulados, caducidad, `Range` e `IfMatch`) y contra un servidor TCP
+que acepta y no responde (`test/storage/s3-timeouts.int-spec.ts`: cada
+operación falla en ≤ plazo + 0,7 s y no quedan sockets abiertos; sin docker);
+e2e `test/patient-documents-direct.e2e-spec.ts` (MinIO, 19 MB subidos por
+`curl` con medición del RSS), `test/patient-documents-direct-disk.e2e-spec.ts`
+(disco y semáforo) y `test/storage/s3-unavailable.e2e-spec.ts` (503 a tiempo
+con el almacén colgado).
 
 ## Despliegue: roles de la BD (DX-113)
 
