@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import {
   BadRequestException,
   ConflictException,
@@ -14,6 +17,7 @@ import {
   dicomFixture,
   docxFixture,
   heicFixture,
+  largeDocxFixture,
   pdfFixture,
   pngFixture,
   pngRenamedAsPdf,
@@ -42,6 +46,13 @@ import {
   GetPatientDocumentUseCase,
   ListPatientDocumentsUseCase,
   MISSING_FILE_MESSAGE,
+  CHECKSUM_MISMATCH_MESSAGE,
+  CompletePatientDocumentUploadUseCase,
+  CreatePatientDocumentUploadUseCase,
+  PatientDocumentWriter,
+  SIZE_MISMATCH_MESSAGE,
+  UPLOAD_CHANGED_MESSAGE,
+  UPLOAD_NOT_FOUND_MESSAGE,
   UploadPatientDocumentUseCase,
   VOID_FORBIDDEN_MESSAGE,
   VoidPatientDocumentUseCase,
@@ -56,22 +67,33 @@ const AUTHOR = 'dr-autor';
 const OTHER_DENTIST = 'dr-otro';
 const ADMIN = 'admin-1';
 
+let tempDir: string;
+let tempSeq = 0;
+beforeAll(() => {
+  tempDir = mkdtempSync(path.join(tmpdir(), 'patient-documents-spec-'));
+});
+afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
+
+/** El temporal en disco que deja multer (DX-259: nada en memoria). */
 const file = (
   bytes: Buffer,
   originalname = 'informe.pdf',
   mimetype = 'application/pdf',
-): UploadedDocumentFile => ({
-  buffer: bytes,
-  originalname,
-  mimetype,
-  size: bytes.length,
-});
+): UploadedDocumentFile => {
+  tempSeq += 1;
+  const filePath = path.join(tempDir, `upload-${tempSeq}`);
+  writeFileSync(filePath, bytes);
+  return { path: filePath, originalname, mimetype, size: bytes.length };
+};
 
 describe('Documentos del paciente (DX-151, casos de uso)', () => {
   let repo: InMemoryPatientDocumentRepository;
   let storage: InMemoryFileStorage;
   let ctx: TenantContextService;
+  let writer: PatientDocumentWriter;
   let upload: UploadPatientDocumentUseCase;
+  let createUpload: CreatePatientDocumentUploadUseCase;
+  let complete: CompletePatientDocumentUploadUseCase;
   let list: ListPatientDocumentsUseCase;
   let get: GetPatientDocumentUseCase;
   let url: GetPatientDocumentUrlUseCase;
@@ -100,13 +122,15 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       findById: (id: string) =>
         Promise.resolve(id === PATIENT || id === OTHER_PATIENT ? { id } : null),
     } as unknown as PatientRepository;
-    upload = new UploadPatientDocumentUseCase(
-      repo,
+    writer = new PatientDocumentWriter(repo, patients, storage, ctx, clock);
+    upload = new UploadPatientDocumentUseCase(writer, storage);
+    createUpload = new CreatePatientDocumentUploadUseCase(
+      writer,
       patients,
       storage,
-      ctx,
-      clock,
+      300,
     );
+    complete = new CompletePatientDocumentUploadUseCase(writer, storage);
     list = new ListPatientDocumentsUseCase(repo, patients);
     get = new GetPatientDocumentUseCase(repo, patients);
     url = new GetPatientDocumentUrlUseCase(repo, patients, storage, clock, 300);
@@ -433,6 +457,298 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       expect(line).not.toContain(TENANT_ID);
       expect(line).not.toContain('bucket caído');
       warn.mockRestore();
+    });
+  });
+
+  describe('subida directa al almacén (DX-259)', () => {
+    const sha = (bytes: Buffer) => sha256Hex(bytes);
+    const pendingKey = (id: string) =>
+      `patient-documents/pending/${TENANT_ID}/${id}`;
+
+    const ask = (
+      bytes: Buffer,
+      overrides: Partial<{
+        sizeBytes: number;
+        sha256: string;
+        patientId: string;
+      }> = {},
+      by = AUTHOR,
+    ) =>
+      inTenant(() =>
+        createUpload.execute(
+          overrides.patientId ?? PATIENT,
+          {
+            fileName: 'informe.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: overrides.sizeBytes ?? bytes.length,
+            sha256: overrides.sha256 ?? sha(bytes),
+          },
+          by,
+        ),
+      );
+
+    const finish = (
+      documentId: string,
+      fields: Record<string, unknown> = {},
+      by = AUTHOR,
+      patientId = PATIENT,
+    ) =>
+      inTenant(() =>
+        complete.execute(
+          patientId,
+          documentId,
+          {
+            category: 'REPORT',
+            fileName: 'informe.pdf',
+            mimeType: 'application/pdf',
+            ...fields,
+          },
+          by,
+        ),
+      );
+
+    /** upload-url + lo que haría el navegador con el POST prefirmado. */
+    const uploaded = async (bytes: Buffer): Promise<string> => {
+      const ticket = await ask(bytes);
+      storage.simulateDirectUpload(pendingKey(ticket.documentId), bytes);
+      return ticket.documentId;
+    };
+
+    it('upload-url: clave pending fijada por la API, 1 B–20 MB, SHA-256 y autor/paciente en metadatos; nada en la ficha', async () => {
+      const bytes = pdfFixture();
+      const ticket = await ask(bytes);
+      expect(ticket.documentId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(ticket).toMatchObject({
+        method: 'POST',
+        url: 'memory://bucket',
+        maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+      });
+      const policy = storage.directUploads.get(pendingKey(ticket.documentId));
+      expect(policy).toEqual({
+        maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+        sha256Base64: Buffer.from(sha(bytes), 'hex').toString('base64'),
+        metadata: {
+          'uploaded-by': AUTHOR,
+          'patient-id': PATIENT,
+          'declared-size': String(bytes.length),
+          sha256: sha(bytes),
+        },
+        ttlSeconds: 300,
+      });
+      expect(repo.rows.size).toBe(0);
+      expect(storage.files.size).toBe(0);
+    });
+
+    it.each([
+      [{ sizeBytes: 0 }, new BadRequestException('El archivo está vacío.')],
+      [
+        { sizeBytes: MAX_PATIENT_DOCUMENT_BYTES + 1 },
+        new PayloadTooLargeException(FILE_TOO_LARGE_MESSAGE),
+      ],
+      [
+        { sizeBytes: 1.5 },
+        new BadRequestException('El tamaño del archivo no es válido.'),
+      ],
+      [
+        { sha256: 'abc' },
+        new BadRequestException('La huella SHA-256 del archivo no es válida.'),
+      ],
+    ])('upload-url %j → %p sin autorizar nada', async (overrides, error) => {
+      await expect(ask(pdfFixture(), overrides)).rejects.toThrow(error);
+      expect(storage.directUploads.size).toBe(0);
+    });
+
+    it('upload-url: paciente ajeno → 404, duplicado vigente → 409, sede no permitida → su error; sin autorizar', async () => {
+      await expect(ask(pdfFixture(), { patientId: 'ajeno' })).rejects.toThrow(
+        NotFoundException,
+      );
+      await uploadPdf();
+      await expect(ask(pdfFixture())).rejects.toThrow(
+        new ConflictException(DUPLICATE_DOCUMENT_MESSAGE),
+      );
+      const denied = new ForbiddenException('Sede no permitida');
+      repo.failResolveLocation = denied;
+      await expect(ask(pngFixture())).rejects.toBe(denied);
+      expect(storage.directUploads.size).toBe(0);
+    });
+
+    it('complete: 19 MB leyendo solo los primeros 64 KB; se mueve a su clave definitiva y se crea la fila', async () => {
+      const bytes = Buffer.concat([
+        pdfFixture(),
+        Buffer.alloc(19 * 1024 * 1024 - pdfFixture().length, 0x20),
+      ]);
+      const id = await uploaded(bytes);
+      const doc = await finish(id, {
+        toothNumbers: ['11', '21'],
+        clinicalDate: '2026-10-01',
+        notes: ' Control ',
+      });
+      expect(doc).toMatchObject({
+        id,
+        patientId: PATIENT,
+        locationId: LOCATION_ID,
+        category: 'REPORT',
+        originalName: 'informe.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: bytes.length,
+        sha256: sha(bytes),
+        toothNumbers: ['11', '21'],
+        clinicalDate: '2026-10-01',
+        notes: 'Control',
+        uploadedById: AUTHOR,
+      });
+      expect(storage.ranges).toEqual([[pendingKey(id), 0, 64 * 1024]]);
+      const finalKey = `patient-documents/${TENANT_ID}/${id}-${sha(bytes).slice(0, 16)}.pdf`;
+      expect(repo.rows.get(id)?.storageKey).toBe(finalKey);
+      expect([...storage.files.keys()]).toEqual([finalKey]);
+      expect(storage.files.get(finalKey)?.contentType).toBe('application/pdf');
+    });
+
+    it('complete: un DOCX grande se reconoce leyendo por rango el final (EOCD), no el fichero entero', async () => {
+      const bytes = largeDocxFixture(300 * 1024);
+      const ticket = await inTenant(() =>
+        createUpload.execute(
+          PATIENT,
+          { sizeBytes: bytes.length, sha256: sha(bytes) },
+          AUTHOR,
+        ),
+      );
+      storage.simulateDirectUpload(pendingKey(ticket.documentId), bytes);
+      const doc = await finish(ticket.documentId, {
+        fileName: 'informe.docx',
+        mimeType: '',
+      });
+      expect(doc.mimeType).toBe(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+      const read = storage.ranges.reduce((n, [, a, b]) => n + (b - a), 0);
+      expect(read).toBeLessThan(bytes.length / 2);
+    });
+
+    it.each([
+      [
+        'SVG',
+        svgFake(),
+        'dibujo.svg',
+        'image/svg+xml',
+        UNSUPPORTED_TYPE_MESSAGE,
+      ],
+      [
+        'PNG como .pdf',
+        pngFixture(),
+        'informe.pdf',
+        'application/pdf',
+        TYPE_MISMATCH_MESSAGE,
+      ],
+    ])(
+      'complete: %s → 400 en español, el objeto se borra y no hay fila',
+      async (_label, bytes, fileName, mimeType, message) => {
+        const id = await uploaded(bytes);
+        await expect(finish(id, { fileName, mimeType })).rejects.toThrow(
+          new BadRequestException(message),
+        );
+        expect(storage.deleted).toEqual([pendingKey(id)]);
+        expect(storage.files.size).toBe(0);
+        expect(repo.rows.size).toBe(0);
+      },
+    );
+
+    it('complete: tamaño distinto del declarado → 400, se borra y no hay fila', async () => {
+      const declared = pdfFixture();
+      const ticket = await ask(declared);
+      storage.simulateDirectUpload(
+        pendingKey(ticket.documentId),
+        Buffer.concat([declared, Buffer.from('más')]),
+      );
+      await expect(finish(ticket.documentId)).rejects.toThrow(
+        new BadRequestException(SIZE_MISMATCH_MESSAGE),
+      );
+      expect(storage.files.size).toBe(0);
+      expect(repo.rows.size).toBe(0);
+    });
+
+    it.each([
+      ['sin checksum del almacén', null],
+      ['con otro checksum', Buffer.alloc(32, 7).toString('base64')],
+    ])(
+      'complete: objeto %s → 400, se borra y no hay fila',
+      async (_label, sha256Base64) => {
+        const bytes = pdfFixture();
+        const ticket = await ask(bytes);
+        storage.simulateDirectUpload(pendingKey(ticket.documentId), bytes, {
+          sha256Base64,
+        });
+        await expect(finish(ticket.documentId)).rejects.toThrow(
+          new BadRequestException(CHECKSUM_MISMATCH_MESSAGE),
+        );
+        expect(storage.files.size).toBe(0);
+        expect(repo.rows.size).toBe(0);
+      },
+    );
+
+    it('complete: sin objeto, de otro usuario o de otro paciente → 404 y el objeto ajeno no se toca', async () => {
+      await expect(
+        finish('9b0f6a52-6f0e-4d51-8a39-2c1f3c6b8d10'),
+      ).rejects.toThrow(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE));
+      const id = await uploaded(pdfFixture());
+      await expect(finish(id, {}, OTHER_DENTIST)).rejects.toThrow(
+        new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE),
+      );
+      await expect(finish(id, {}, AUTHOR, OTHER_PATIENT)).rejects.toThrow(
+        new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE),
+      );
+      expect(storage.deleted).toEqual([]);
+      expect(storage.files.has(pendingKey(id))).toBe(true);
+    });
+
+    it('complete: un error del formulario es 400 y conserva el objeto para corregir y reintentar', async () => {
+      const id = await uploaded(pdfFixture());
+      await expect(finish(id, { category: 'SELFIE' })).rejects.toThrow(
+        new BadRequestException('La categoría no es válida.'),
+      );
+      expect(storage.deleted).toEqual([]);
+      await expect(finish(id)).resolves.toMatchObject({ id });
+    });
+
+    it('complete: el mismo contenido ya vigente → 409 y se borra el pendiente', async () => {
+      const id = await uploaded(pdfFixture());
+      await uploadPdf();
+      await expect(finish(id)).rejects.toThrow(
+        new ConflictException(DUPLICATE_DOCUMENT_MESSAGE),
+      );
+      expect(storage.files.has(pendingKey(id))).toBe(false);
+    });
+
+    it('complete: si el objeto cambia entre la comprobación y la copia → 400 y no hay fila', async () => {
+      const bytes = pdfFixture();
+      const id = await uploaded(bytes);
+      const promote = jest
+        .spyOn(storage, 'promote')
+        .mockImplementationOnce(() => {
+          storage.simulateDirectUpload(pendingKey(id), bytes);
+          return InMemoryFileStorage.prototype.promote.call(
+            storage,
+            pendingKey(id),
+            'patient-documents/x/y.pdf',
+            'application/pdf',
+            '"stale"',
+          );
+        });
+      await expect(finish(id)).rejects.toThrow(
+        new BadRequestException(UPLOAD_CHANGED_MESSAGE),
+      );
+      expect(promote).toHaveBeenCalled();
+      expect(repo.rows.size).toBe(0);
+    });
+
+    it('complete repetido devuelve el documento ya creado sin tocar el almacén', async () => {
+      const id = await uploaded(pdfFixture());
+      const first = await finish(id);
+      const saved = [...storage.saved];
+      const second = await finish(id);
+      expect(second).toEqual(first);
+      expect(storage.saved).toEqual(saved);
+      expect(repo.rows.size).toBe(1);
     });
   });
 

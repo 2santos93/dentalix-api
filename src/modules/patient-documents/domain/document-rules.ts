@@ -18,6 +18,13 @@ export class PatientDocumentRuleError extends Error {
 /** Las URL firmadas para ver o descargar viven 5 minutos. */
 export const PATIENT_DOCUMENT_URL_TTL_SECONDS = 300;
 
+/**
+ * DX-259: la autorización para subir el fichero directamente al almacén
+ * (POST prefirmado) vale 5 minutos; S3 la comprueba al EMPEZAR la subida, así
+ * que una subida lenta que empezó a tiempo termina.
+ */
+export const PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS = 300;
+
 export const MAX_ORIGINAL_NAME_LENGTH = 255;
 export const MAX_TOOTH_NUMBERS = 8;
 export const MAX_NOTES_LENGTH = 500;
@@ -196,6 +203,26 @@ export function sha256Hex(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+export const INVALID_SHA256_MESSAGE =
+  'La huella SHA-256 del archivo no es válida.';
+
+/**
+ * Huella que declara el cliente al pedir la subida directa (DX-259): 64
+ * dígitos hex (se normaliza a minúsculas). El almacén rechaza un contenido
+ * con otra huella, y `complete` la vuelve a comprobar.
+ */
+export function validateSha256Hex(value: unknown): string {
+  if (typeof value === 'string' && /^[0-9a-fA-F]{64}$/.test(value.trim())) {
+    return value.trim().toLowerCase();
+  }
+  throw new PatientDocumentRuleError(INVALID_SHA256_MESSAGE);
+}
+
+/** La misma huella en base64, como la guarda S3 (`x-amz-checksum-sha256`). */
+export function sha256HexToBase64(hex: string): string {
+  return Buffer.from(hex, 'hex').toString('base64');
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
@@ -207,9 +234,34 @@ export function storageKeyFor(
   tenantId: string,
   documentId: string,
   type: DetectedType,
+  sha256?: string,
 ): string {
   if (!UUID.test(tenantId) || !UUID.test(documentId)) {
     throw new Error('storageKeyFor: tenantId y documentId deben ser uuid');
   }
-  return `patient-documents/${tenantId}/${documentId}.${extensionOf(type)}`;
+  if (sha256 !== undefined && !/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new Error('storageKeyFor: sha256 debe ser hex de 64');
+  }
+  // DX-259: con la huella (subida directa), `<id>-<16 hex>`: dos `complete`
+  // a la vez del mismo id con contenidos distintos no pisan el mismo objeto.
+  const name = sha256 ? `${documentId}-${sha256.slice(0, 16)}` : documentId;
+  return `patient-documents/${tenantId}/${name}.${extensionOf(type)}`;
+}
+
+/**
+ * DX-259: clave donde el navegador deja el fichero antes de `complete`:
+ * `patient-documents/pending/<tenantId>/<documentId>`. La API no la sirve
+ * nunca; un objeto que se queda aquí lo borra el ciclo de vida del bucket a
+ * las 24 h (README, «Subida directa al bucket»).
+ */
+export function pendingStorageKeyFor(
+  tenantId: string,
+  documentId: string,
+): string {
+  if (!UUID.test(tenantId) || !UUID.test(documentId)) {
+    throw new Error(
+      'pendingStorageKeyFor: tenantId y documentId deben ser uuid',
+    );
+  }
+  return `patient-documents/pending/${tenantId}/${documentId}`;
 }

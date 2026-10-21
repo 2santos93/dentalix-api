@@ -76,6 +76,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // URL firmada del adaptador de disco (solo desarrollo; la firma HMAC es la
   // autorización, y con S3 responde 404): loop/informes/DX-084.md.
   'GET /files/signed': PUBLIC,
+  // Subida directa del adaptador de disco (solo desarrollo; la firma HMAC del
+  // formulario es la autorización, y con S3 responde 404): DX-259.
+  'POST /files/uploads': PUBLIC,
 
   // --- Auth (sesión) -------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-login-drop-subdomain-host-tenant.md,
@@ -261,6 +264,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // (recepción escanea remisiones y consentimientos). Anular: la ruta admite
   // los 4, pero solo el autor o un ADMIN (403 del caso de uso).
   'POST /patients/:patientId/documents': EVERY_ROLE,
+  // DX-259: subida directa al almacén (autorización y fin de la subida).
+  'POST /patients/:patientId/documents/upload-url': EVERY_ROLE,
+  'POST /patients/:patientId/documents/:id/complete': EVERY_ROLE,
   'GET /patients/:patientId/documents': EVERY_ROLE,
   'GET /patients/:patientId/documents/:id': EVERY_ROLE,
   'GET /patients/:patientId/documents/:id/url/inline': EVERY_ROLE,

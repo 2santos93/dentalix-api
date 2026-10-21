@@ -29,6 +29,7 @@ import {
   ApiOperation,
   ApiParam,
   ApiPayloadTooLargeResponse,
+  ApiServiceUnavailableResponse,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
@@ -40,11 +41,14 @@ import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
+  CompletePatientDocumentUploadUseCase,
+  CreatePatientDocumentUploadUseCase,
   GetPatientDocumentUrlUseCase,
   GetPatientDocumentUseCase,
   ListPatientDocumentsUseCase,
   UploadPatientDocumentUseCase,
   VoidPatientDocumentUseCase,
+  type PatientDocumentUploadTicket,
   type PatientDocumentUrl,
   type PatientDocumentView,
 } from '../application/use-cases/patient-documents.use-cases';
@@ -53,13 +57,22 @@ import {
   MAX_PATIENT_DOCUMENT_BYTES,
 } from '../domain/document-content';
 import {
+  CompletePatientDocumentUploadDto,
+  CreatePatientDocumentUploadDto,
   ListPatientDocumentsQueryDto,
   PatientDocumentDto,
+  PatientDocumentUploadDto,
   PatientDocumentUrlDto,
   UploadPatientDocumentDto,
   VoidPatientDocumentDto,
 } from './dto/patient-document.dto';
 import { MultipartErrorsFilter } from './multipart-errors.filter';
+import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
+import {
+  UPLOAD_BUSY_MESSAGE,
+  UploadSlotGuard,
+} from '../../../shared/storage/upload-slots';
+import { STORAGE_UNAVAILABLE_MESSAGE } from '../../../shared/storage/storage-errors';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
@@ -90,6 +103,8 @@ const NOT_FOUND = 'Paciente o documento no encontrado en esta clínica';
 export class PatientDocumentsController {
   constructor(
     private readonly uploadDocument: UploadPatientDocumentUseCase,
+    private readonly createUpload: CreatePatientDocumentUploadUseCase,
+    private readonly completeUpload: CompletePatientDocumentUploadUseCase,
     private readonly listDocuments: ListPatientDocumentsUseCase,
     private readonly getDocument: GetPatientDocumentUseCase,
     private readonly documentUrl: GetPatientDocumentUrlUseCase,
@@ -104,9 +119,10 @@ export class PatientDocumentsController {
   })
   @Post()
   @ApiOperation({
-    summary: 'Subir un documento a la ficha del paciente',
+    summary:
+      'Subir un documento a la ficha del paciente (multipart, por la API)',
     description:
-      'PDF, JPG, PNG, HEIC, DOCX o DICOM de hasta 20 MB. El tipo lo decide el contenido; si no cuadra con el nombre o la etiqueta, 400. El mismo contenido vigente dos veces en la ficha, 409.',
+      'PDF, JPG, PNG, HEIC, DOCX o DICOM de hasta 20 MB. El tipo lo decide el contenido; si no cuadra con el nombre o la etiqueta, 400. El mismo contenido vigente dos veces en la ficha, 409. DX-259: el fichero pasa por un temporal en disco y un semáforo de subidas por réplica (503 con Retry-After si no hay plaza); la web usa la subida directa al almacén (`upload-url` + `complete`).',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiConsumes('multipart/form-data')
@@ -144,8 +160,15 @@ export class PatientDocumentsController {
   @ApiConflictResponse({
     description: 'Este archivo ya está en la ficha del paciente.',
   })
+  @ApiServiceUnavailableResponse({
+    description: `${UPLOAD_BUSY_MESSAGE} / ${STORAGE_UNAVAILABLE_MESSAGE} (con Retry-After)`,
+  })
+  @UseGuards(UploadSlotGuard)
   @UseInterceptors(
     FileInterceptor('file', {
+      // DX-259: a un temporal en disco (lo borra UploadSlotGuard al cerrar la
+      // respuesta), no a un Buffer en memoria.
+      dest: UPLOAD_TEMP_DIR,
       // Los navegadores mandan el nombre del fichero en UTF-8 crudo; sin
       // esto multer lo lee como latin1 («RemisiÃ³n.pdf»).
       defParamCharset: 'utf8',
@@ -164,6 +187,77 @@ export class PatientDocumentsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<PatientDocumentView> {
     return this.uploadDocument.execute(patientId, dto, file, req.user.sub);
+  }
+
+  @Post('upload-url')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Autorización para subir un documento directamente al almacén',
+    description:
+      'DX-259: devuelve un POST prefirmado (S3) de pocos minutos para UN fichero: la clave la fija la API, de 1 B a 20 MB y con el SHA-256 declarado (el almacén rechaza otro contenido). El navegador envía `fields` y el fichero (campo `file`, al final) a `url` y después llama a `POST …/:documentId/complete`. Con el almacén en disco (desarrollo) `url` es la propia API (`/files/uploads`), con las mismas reglas. Nada llega a la ficha ni se audita hasta `complete`.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: PatientDocumentUploadDto })
+  @ApiBadRequestResponse({
+    description: 'Tamaño o huella SHA-256 no válidos, o archivo vacío',
+  })
+  @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
+  @ApiNotFoundResponse({
+    description: 'Paciente no encontrado en esta clínica',
+  })
+  @ApiConflictResponse({
+    description: 'Este archivo ya está en la ficha del paciente.',
+  })
+  uploadUrl(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Body() dto: CreatePatientDocumentUploadDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PatientDocumentUploadTicket> {
+    return this.createUpload.execute(patientId, dto, req.user.sub);
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: { response: 'id' },
+    patient: P,
+  })
+  @Post(':id/complete')
+  @ApiOperation({
+    summary:
+      'Terminar la subida directa: comprobar el fichero y crearlo en la ficha',
+    description:
+      'DX-259: comprueba el objeto subido con `upload-url` (de este usuario y paciente): tamaño y SHA-256 del almacén, y el tipo por contenido leyendo los primeros 64 KB con `Range`. Mismas reglas que el multipart: si el contenido no es de la lista blanca, no cuadra con lo declarado, o el tamaño o la huella no cuadran, el objeto se borra y la respuesta es 400 en español; el mismo contenido vigente, 409. Errores del formulario: 400 y el fichero se conserva para reintentar. Repetirlo con un documento ya creado lo devuelve.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiParam({
+    name: 'id',
+    format: 'uuid',
+    description: 'El `documentId` de `upload-url`',
+  })
+  @ApiCreatedResponse({ type: PatientDocumentDto })
+  @ApiBadRequestResponse({
+    description:
+      'Tipo no admitido, contenido que no coincide con su tipo, tamaño o huella que no cuadran, o campos del formulario inválidos (mensaje en español)',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente no encontrado, o subida inexistente, caducada o de otra persona',
+  })
+  @ApiConflictResponse({
+    description: 'Este archivo ya está en la ficha del paciente.',
+  })
+  @ApiServiceUnavailableResponse({
+    description: `${STORAGE_UNAVAILABLE_MESSAGE} (con Retry-After)`,
+  })
+  complete(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CompletePatientDocumentUploadDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PatientDocumentView> {
+    return this.completeUpload.execute(patientId, id, dto, req.user.sub);
   }
 
   @Audit({

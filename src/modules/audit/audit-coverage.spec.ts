@@ -400,6 +400,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
   },
+  // DX-259: la subida directa se audita al completarla (crea la fila); pedir
+  // la autorización (`upload-url`) no toca la ficha y no deja evento.
+  'POST /patients/:patientId/documents/:id/complete': {
+    action: 'CREATE',
+    resource: 'PATIENT_DOCUMENT',
+    resourceId: RES,
+    patient: P,
+  },
   'GET /patients/:patientId/documents': {
     action: 'VIEW',
     resource: 'PATIENT_DOCUMENT',
