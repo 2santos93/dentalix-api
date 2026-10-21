@@ -57,9 +57,11 @@ CREATE INDEX "medical_history_reviews_tenant_version_idx"
   ON "medical_history_reviews"("tenantId", "medicalHistoryVersionId");
 
 ALTER TABLE "medical_history_reviews" ENABLE ROW LEVEL SECURITY;
+-- NULLIF (DX-251): sin tenant en la sesión, la GUC vacía es NULL y no se ve
+-- ninguna fila (en vez de un error de cast).
 CREATE POLICY tenant_isolation ON "medical_history_reviews"
-  USING ("tenantId" = current_setting('app.current_tenant', true)::uuid)
-  WITH CHECK ("tenantId" = current_setting('app.current_tenant', true)::uuid);
+  USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+  WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 ALTER TABLE "medical_history_reviews" FORCE ROW LEVEL SECURITY;
 
 -- Inalterable (DX-038): reutiliza la función de la historia clínica.
