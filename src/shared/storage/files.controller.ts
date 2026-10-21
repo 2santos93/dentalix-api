@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  Body,
   Controller,
   ForbiddenException,
   Get,
@@ -14,17 +13,22 @@ import {
   Req,
   Res,
   StreamableFile,
-  UploadedFile,
+  UseFilters,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { RateLimit } from '../security/rate-limit.decorator';
 import { contentTypeOf, isServableContentType } from './content-type';
 import { DiskFileStorage } from './disk-file-storage';
-import { UPLOAD_TEMP_DIR } from './local-file';
+import {
+  DIRECT_UPLOAD_FORBIDDEN_MESSAGE,
+  DiskDirectUploadInterceptor,
+  DiskDriverOnlyGuard,
+  type DirectUploadRequest,
+} from './disk-direct-upload';
+import { MultipartErrorsFilter } from '../../modules/patient-documents/presentation/multipart-errors.filter';
 import { avatarCacheControl } from './public-file-cache';
 import { UploadSlotGuard } from './upload-slots';
 import { isFileKey } from './file-key';
@@ -33,11 +37,6 @@ import type { FileStoragePort, SignedUrlOptions } from './file-storage.port';
 
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 
-/** Tope de la subida directa del disco: el de los documentos (20 MB). */
-const DISK_DIRECT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
-
-export const DIRECT_UPLOAD_FORBIDDEN_MESSAGE =
-  'La autorización de subida no es válida o caducó. Vuelve a intentarlo.';
 export const DIRECT_UPLOAD_MISSING_FILE_MESSAGE = 'Falta el archivo.';
 export const DIRECT_UPLOAD_PROBLEMS: Record<
   'empty' | 'too_large' | 'checksum_mismatch',
@@ -125,34 +124,25 @@ export class FilesController {
    * DX-259: la «subida directa» del adaptador de DISCO (solo desarrollo y
    * tests): recibe el mismo formulario que el POST prefirmado de S3 (los
    * campos firmados por `createDirectUpload` y el fichero al final, en
-   * `file`), lo escribe con multer en un temporal en disco y lo guarda bajo
-   * su clave si el tamaño y el SHA-256 cuadran. Pasa por el semáforo de
-   * subidas. Con S3 esta ruta no existe (404): el navegador sube al bucket.
+   * `file`). Orden: con S3, 404 antes de nada (`DiskDriverOnlyGuard`); plaza
+   * del semáforo con plazos (`UploadSlotGuard`); firma comprobada antes de
+   * aceptar el fichero (`DiskDirectUploadInterceptor`, 403 sin escribirlo);
+   * y se guarda bajo su clave si el tamaño y el SHA-256 cuadran. Errores de
+   * multer en español (`MultipartErrorsFilter`).
    */
   @Post('uploads')
   @HttpCode(204)
   @ApiExcludeEndpoint()
   @Header('Cache-Control', 'no-store')
-  @UseGuards(UploadSlotGuard)
-  @UseInterceptors(
-    FileInterceptor('file', {
-      dest: UPLOAD_TEMP_DIR,
-      limits: {
-        fileSize: DISK_DIRECT_UPLOAD_MAX_BYTES,
-        files: 1,
-        fields: 10,
-        fieldSize: 8 * 1024,
-      },
-    }),
-  )
-  async directUpload(
-    @Body() body: Record<string, unknown>,
-    @UploadedFile() file: Express.Multer.File | undefined,
-  ): Promise<void> {
+  @UseGuards(DiskDriverOnlyGuard, UploadSlotGuard)
+  @UseInterceptors(DiskDirectUploadInterceptor)
+  @UseFilters(MultipartErrorsFilter)
+  async directUpload(@Req() req: DirectUploadRequest): Promise<void> {
+    const upload = req.directUpload;
+    const file = req.file;
     if (!(this.storage instanceof DiskFileStorage)) {
       throw new NotFoundException();
     }
-    const upload = this.storage.verifyDirectUpload(body);
     if (!upload) throw new ForbiddenException(DIRECT_UPLOAD_FORBIDDEN_MESSAGE);
     if (!file) {
       throw new BadRequestException(DIRECT_UPLOAD_MISSING_FILE_MESSAGE);

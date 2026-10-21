@@ -8,9 +8,17 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { FILE_STORAGE, type FileStoragePort } from './file-storage.port';
 import { DiskFileStorage } from './disk-file-storage';
+import {
+  DiskDirectUploadInterceptor,
+  DiskDriverOnlyGuard,
+} from './disk-direct-upload';
 import { FilesController } from './files.controller';
 import { S3FileStorage, createS3Client } from './s3-file-storage';
-import { loadStorageConfig, loadUploadMaxConcurrency } from './storage-config';
+import {
+  loadStorageConfig,
+  loadUploadMaxConcurrency,
+  loadUploadTimeouts,
+} from './storage-config';
 import { errorName } from './storage-op-log';
 import { UPLOAD_SLOTS, UploadSlotGuard, UploadSlots } from './upload-slots';
 
@@ -67,9 +75,12 @@ export class StorageStartupCheck implements OnApplicationBootstrap {
       useFactory: (config: ConfigService) =>
         new UploadSlots(
           loadUploadMaxConcurrency((key) => config.get<string>(key)),
+          loadUploadTimeouts((key) => config.get<string>(key)),
         ),
     },
     UploadSlotGuard,
+    DiskDriverOnlyGuard,
+    DiskDirectUploadInterceptor,
     StorageStartupCheck,
   ],
   exports: [FILE_STORAGE, UPLOAD_SLOTS, UploadSlotGuard],

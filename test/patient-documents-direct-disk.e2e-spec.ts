@@ -15,6 +15,7 @@ import {
 import { createE2eApp } from './support/create-e2e-app';
 import { pdfFixture, pngFixture } from './support/document-fixtures';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
+import { tempFilesCreatedDuring } from './support/temp-dir-watch';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -220,5 +221,31 @@ describe('Documentos: subida directa con el almacén en disco (DX-259, e2e)', ()
     )
       .send({ category: 'REPORT' })
       .expect(201);
+  });
+
+  it('firma inválida → 403 SIN escribir el fichero en disco; un error de multer sale en español', async () => {
+    const bytes = Buffer.concat([pdfFixture(), Buffer.alloc(512 * 1024, 0x20)]);
+    const ticket = await ask(bytes);
+    let status = 0;
+    const created = await tempFilesCreatedDuring(async () => {
+      status = (await post(ticket, bytes, { signature: 'ab'.repeat(32) }))
+        .status;
+    });
+    expect(status).toBe(403);
+    expect(created).toEqual([]);
+    expect(slots.active).toBe(0);
+
+    // Dos ficheros: el error de multer, en español.
+    let req = request(app.getHttpServer()).post('/api/v1/files/uploads');
+    for (const [name, value] of Object.entries(ticket.fields)) {
+      req = req.field(name, value);
+    }
+    const res = await req
+      .attach('file', bytes, { filename: 'a' })
+      .attach('file', bytes, { filename: 'b' })
+      .expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      'Solo se admite un archivo por subida.',
+    );
   });
 });

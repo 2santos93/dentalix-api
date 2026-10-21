@@ -159,3 +159,25 @@ export function loadUploadMaxConcurrency(
     ) ?? UPLOAD_MAX_CONCURRENCY_LIMITS.fallback
   );
 }
+
+/** DX-259: plazos de las subidas que pasan por la API (`UploadSlotGuard`). */
+export const UPLOAD_TIMEOUT_LIMITS = {
+  UPLOAD_IDLE_TIMEOUT_MS: { range: [1_000, 300_000], fallback: 15_000 },
+  UPLOAD_MAX_DURATION_MS: { range: [5_000, 3_600_000], fallback: 120_000 },
+} as const satisfies Record<
+  string,
+  { range: readonly [number, number]; fallback: number }
+>;
+
+export function loadUploadTimeouts(get: (key: string) => string | undefined): {
+  idleTimeoutMs: number;
+  maxDurationMs: number;
+} {
+  const int = (key: keyof typeof UPLOAD_TIMEOUT_LIMITS): number =>
+    boundedInt(get(key), UPLOAD_TIMEOUT_LIMITS[key].range) ??
+    UPLOAD_TIMEOUT_LIMITS[key].fallback;
+  return {
+    idleTimeoutMs: int('UPLOAD_IDLE_TIMEOUT_MS'),
+    maxDurationMs: int('UPLOAD_MAX_DURATION_MS'),
+  };
+}

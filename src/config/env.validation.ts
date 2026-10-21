@@ -38,6 +38,7 @@ import {
   S3_SSE_VALUES,
   STORAGE_DRIVERS,
   UPLOAD_MAX_CONCURRENCY_LIMITS,
+  UPLOAD_TIMEOUT_LIMITS,
   boundedInt,
   storageDriverOf,
 } from '../shared/storage/storage-config';
@@ -568,6 +569,14 @@ function storageProblems(env: Env, isProd: boolean): string[] {
     problems.push(
       `UPLOAD_MAX_CONCURRENCY debe ser un entero entre ${min} y ${max} (subidas que pasan por la API a la vez en cada réplica).`,
     );
+  }
+  for (const [key, { range }] of Object.entries(UPLOAD_TIMEOUT_LIMITS)) {
+    const value = str(env, key);
+    if (value != null && boundedInt(value, range) == null) {
+      problems.push(
+        `${key} debe ser un entero entre ${range[0]} y ${range[1]} (plazo en ms de las subidas que pasan por la API).`,
+      );
+    }
   }
   for (const [key, { range }] of Object.entries(S3_CLIENT_LIMITS)) {
     const value = str(env, key);

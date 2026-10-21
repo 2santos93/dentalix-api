@@ -16,6 +16,11 @@ import { createE2eApp } from './support/create-e2e-app';
 import { pdfFixture, pngFixture, svgFake } from './support/document-fixtures';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
 import { describeWithMinio, ensureBucket } from './support/minio';
+import { tempFilesCreatedDuring } from './support/temp-dir-watch';
+import {
+  UPLOAD_SLOTS,
+  type UploadSlots,
+} from '../src/shared/storage/upload-slots';
 
 const run = promisify(execFile);
 const raw = new PrismaClient({
@@ -324,6 +329,21 @@ describeWithMinio(
       expect((res.body as { message: string }).message).toBe(
         'El archivo supera el máximo de 20 MB.',
       );
+    });
+
+    it('con S3, POST /files/uploads anónimo → 404 sin ocupar plaza del semáforo ni escribir en disco', async () => {
+      const slots = app.get<UploadSlots>(UPLOAD_SLOTS);
+      let status = 0;
+      const created = await tempFilesCreatedDuring(async () => {
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/files/uploads')
+          .field('key', 'patient-documents/pending/x/y')
+          .attach('file', Buffer.alloc(2 * MB, 1), { filename: 'x' });
+        status = res.status;
+      });
+      expect(status).toBe(404);
+      expect(created).toEqual([]);
+      expect(slots.active).toBe(0);
     });
   },
 );
