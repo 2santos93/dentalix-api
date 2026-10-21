@@ -246,6 +246,14 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
           esAlerta: true,
           nota: 'Controlada',
         },
+        // DX-247: necesita profilaxis antibiótica → «Requiere premedicación».
+        {
+          codigo: 'PROTESIS_VALVULAR',
+          etiqueta: 'Prótesis valvular',
+          estado: 'SI',
+          esAlerta: true,
+          nota: 'Válvula aórtica mecánica (2018)',
+        },
       ],
       medications: [
         {
@@ -2100,6 +2108,22 @@ export const DEMO_LUNCH = {
   startMinute: 12 * 60 + 30,
   endMinute: 13 * 60,
   note: 'Almuerzo del equipo',
+} as const;
+
+/**
+ * DX-247: alertas médicas en la agenda. Jorge Eduardo Ramírez (prótesis
+ * valvular) sale con «Requiere premedicación» y es el primero en entrar hoy al
+ * panel «En clínica»; Ana María Zapata tiene la anamnesis de hace 14 meses
+ * («Anamnesis caducada», vigencia de 12); la de Gustavo Ríos es de hace 13
+ * meses pero la dentista confirmó «Sin cambios hoy» (al día). Los pacientes
+ * sin `medicalHistory` (p. ej. Daniela Montoya) salen «Sin anamnesis».
+ */
+export const DEMO_MEDICAL_ALERTS = {
+  premedicationPatientIndex: 1,
+  backdated: [
+    { patientIndex: 13, monthsAgo: 14, confirmNoChanges: false },
+    { patientIndex: 16, monthsAgo: 13, confirmNoChanges: true },
+  ],
 } as const;
 
 export const DEMO_WAITLIST = {

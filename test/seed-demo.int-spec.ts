@@ -87,6 +87,8 @@ const TENANT_TABLES = [
   'clinical_entries',
   'clinical_note_template_prompts',
   'clinical_note_templates',
+  // DX-247: confirmaciones «Sin cambios hoy» (hijas de medical_history_versions).
+  'medical_history_reviews',
   'medical_history_versions',
   'appointment_confirmations',
   // DX-210: ofertas de huecos (hijas de appointment_waitlist y appointments).
@@ -337,6 +339,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.payers).toBe(7);
     expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
+    // DX-247: una anamnesis antigua confirmada «Sin cambios hoy».
+    expect(firstCounts.medical_history_reviews).toBe(1);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
     expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);

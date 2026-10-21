@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AppointmentStatus,
   ClinicRole,
+  Prisma,
   ScheduleBlockKind,
   TreatmentPlanStatus,
   WaitlistPriority,
@@ -111,6 +112,11 @@ import {
   ListWaitlistUseCase,
 } from '../src/modules/waitlist/application/use-cases/waitlist.use-cases';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import { ConfirmAnamnesisNoChangesUseCase } from '../src/modules/medical-history/application/use-cases/medical-alerts.use-cases';
+import { deriveSafetyFlags } from '../src/modules/medical-history/domain/safety-flags';
+import { addMonthsUtc } from '../src/modules/medical-history/domain/anamnesis-validity';
+import type { MedicalHistoryVersionData } from '../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import {
   ReplaceProviderScheduleUseCase,
   SetProviderOverrideUseCase,
@@ -160,6 +166,7 @@ import {
   DEMO_COLLECTION_NOTES,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
+  DEMO_MEDICAL_ALERTS,
   DEMO_PRICES,
   DEMO_CUPS,
   DEMO_PRINCIPAL_REPS,
@@ -558,6 +565,10 @@ class DemoSeeder {
     );
 
     await this.inTenant(tenantId, undefined, () =>
+      this.createBackdatedAnamneses(tenantId, patientIds, dentists[1]),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
       this.createClinicalRecords(patientIds, dentists, catalog),
     );
 
@@ -830,8 +841,15 @@ class DemoSeeder {
     policyVersionId: string,
   ): Promise<string[]> {
     const ids: string[] = [];
+    const backdated = new Set<number>(
+      DEMO_MEDICAL_ALERTS.backdated.map((b) => b.patientIndex),
+    );
     for (const [index, p] of DEMO_PATIENTS.entries()) {
-      const { city: cityName, birthDate, ...rest } = p;
+      const { city: cityName, birthDate, ...withHistory } = p;
+      // DX-247: la anamnesis antigua la siembra `createBackdatedAnamneses`.
+      const rest = backdated.has(index)
+        ? { ...withHistory, medicalHistory: undefined }
+        : withHistory;
       const city = await this.prisma.city.findFirst({
         where: { countryCode: 'CO', name: cityName },
         orderBy: { id: 'asc' },
@@ -854,7 +872,7 @@ class DemoSeeder {
         // SEC-005: la anamnesis inicial solo la escribe un rol clínico. El
         // paciente que llega con anamnesis lo da de alta el odontólogo; el
         // resto, recepción (mostrador), sin historia clínica.
-        ...(rest.medicalHistory
+        ...(withHistory.medicalHistory
           ? { createdById: dentistId, actorRole: ClinicRole.DENTIST }
           : { createdById: receptionId, actorRole: ClinicRole.RECEPTION }),
       });
@@ -1389,6 +1407,64 @@ class DemoSeeder {
   }
 
   /**
+   * DX-247: anamnesis de hace más de un año, para ver «Anamnesis caducada» en
+   * la agenda y en la ficha. La historia es inalterable (no se puede antedatar
+   * una versión ya guardada), así que la versión 1 se inserta ya con su fecha,
+   * con las banderas derivadas en el dominio como en el alta. Al que la
+   * dentista revisó hoy, «Sin cambios hoy» por el mismo caso de uso que la API
+   * y su evento de auditoría (lo que escribe el `@Audit` de la ruta).
+   */
+  private async createBackdatedAnamneses(
+    tenantId: string,
+    patientIds: string[],
+    dentistId: string,
+  ): Promise<void> {
+    for (const b of DEMO_MEDICAL_ALERTS.backdated) {
+      const patientId = patientIds[b.patientIndex];
+      const data: MedicalHistoryVersionData =
+        DEMO_PATIENTS[b.patientIndex].medicalHistory ?? {};
+      const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
+      await this.prisma.runWithTenant((tx) =>
+        tx.medicalHistoryVersion.create({
+          data: {
+            tenantId,
+            patientId,
+            version: 1,
+            allergies: (data.allergies ??
+              []) as unknown as Prisma.InputJsonValue,
+            conditions: (data.conditions ??
+              []) as unknown as Prisma.InputJsonValue,
+            medications: (data.medications ??
+              []) as unknown as Prisma.InputJsonValue,
+            habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
+            hasCriticalAlert,
+            createdById: dentistId,
+            createdAt: addMonthsUtc(this.now, -b.monthsAgo),
+          },
+        }),
+      );
+      if (!b.confirmNoChanges) continue;
+      const confirmation = await this.use(
+        ConfirmAnamnesisNoChangesUseCase,
+      ).execute(patientId, dentistId);
+      await this.use(RecordAuditEventUseCase).record({
+        tenantId,
+        locationId: null,
+        actor: { kind: 'user', userId: dentistId, role: ClinicRole.DENTIST },
+        action: 'UPDATE',
+        resourceType: 'MEDICAL_HISTORY',
+        resourceId: confirmation.id,
+        patient: { kind: 'patient', id: patientId },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+        metadata: { reason: 'NO_CHANGES_CONFIRMED' },
+      });
+    }
+  }
+
+  /**
    * DX-200: el panel «En clínica» de la sede principal con gente HOY: dos en
    * espera (una llegó antes de su hora, otra 3 min tarde), una en el sillón y
    * otra lista para cobrar, de la primera dentista (o de la segunda si la
@@ -1415,9 +1491,16 @@ class DemoSeeder {
       userAgent: null,
     });
     // Sin la paciente de las opciones A/B: no tiene cita futura (DX-040).
-    const candidates = patientIds.filter(
-      (_, i) => i !== DEMO_PLAN_OPTIONS.patientIndex,
-    );
+    // DX-247: el paciente que requiere premedicación entra primero, para ver
+    // su alerta en el panel.
+    const premedicated =
+      patientIds[DEMO_MEDICAL_ALERTS.premedicationPatientIndex];
+    const candidates = [
+      premedicated,
+      ...patientIds.filter(
+        (id, i) => i !== DEMO_PLAN_OPTIONS.patientIndex && id !== premedicated,
+      ),
+    ];
     const used = new Set<string>();
     await this.inTenant(tenantId, locations.principal, async () => {
       const create = this.use(CreateAppointmentUseCase);

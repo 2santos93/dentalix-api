@@ -629,6 +629,46 @@ hasta 1 h (SEC-028).
   `scheduleChange: { before, after }` con los tramos (sedes, días o fechas y
   minutos; nada de pacientes).
 
+## Alertas médicas en la agenda (DX-247)
+
+- **Solo banderas** (`medicalAlerts`, `domain/medical-alert-flags.ts`): cada
+  cita de `GET /appointments` y cada persona de `GET /appointments/in-clinic`
+  traen `hasCriticalAlert`, `requiresPremedication` (profilaxis antibiótica),
+  `anamnesisStatus` (`CURRENT` / `EXPIRED` / `MISSING`: «Sin anamnesis» no es
+  «sin alertas»), `alerts` (códigos de las banderas derivadas en el orden del
+  banner de la ficha; `alergiaMarcada` = otra alergia marcada como alerta, sin
+  el alérgeno) y `anamnesisReviewedAt`. Nunca alergias, condiciones,
+  medicamentos ni notas (Ley 1581 / RGPD); los leen los cuatro roles que ven
+  la agenda. Por lote: una lectura de la vigencia y UNA consulta (versión
+  vigente + última confirmación por paciente, con `LATERAL ... LIMIT 1` sobre
+  `mhv_tenant_patient_version_key` y `medical_history_reviews_tenant_patient_idx`).
+  `GET /appointments/:id` sigue sin banderas (la web usa la cita de la lista).
+- **Ficha**: `GET /patients/:patientId/medical-alerts` (los cuatro roles): las
+  mismas banderas con `validityMonths`, `anamnesisExpiresAt` y `lastReview`
+  (`UPDATED` o `NO_CHANGES`, fecha y quién). 404 para un paciente de otra
+  clínica.
+- **Vigencia** (`tenants.anamnesisValidityMonths`, 12 por defecto, CHECK
+  1..60): la anamnesis caduca a los N meses de calendario de la última versión
+  o de la última confirmación, la más reciente. `GET /medical-history/settings`
+  (cuatro roles) y `PUT` (solo ADMIN, 400 fuera de 1..60), auditado como
+  `MEDICAL_HISTORY` sin paciente con `reason` `ANAMNESIS_VALIDITY_SETTINGS` y
+  `statusChange` `MONTHS_12 → MONTHS_6`.
+- **«Sin cambios hoy»**: `POST /patients/:patientId/medical-history/no-changes`
+  (DENTIST, ASSISTANT, ADMIN; recepción 403) guarda en
+  `medical_history_reviews` quién, en qué sede y cuándo (hora del servidor de
+  BD, trigger) sobre la versión vigente; no crea una versión. Sin anamnesis,
+  409. Queda en la auditoría (`MEDICAL_HISTORY`, `UPDATE`, `reason`
+  `NO_CHANGES_CONFIRMED`, el paciente y el id de la confirmación; nada
+  clínico). Tabla con RLS FORCE, FK compuestas al paciente y a
+  `(tenantId, patientId, id)` de la versión (índice
+  `mhv_tenant_patient_id_key`, creado CONCURRENTLY) e inalterable como la
+  historia (DX-038).
+- **Seed demo**: Jorge Eduardo Ramírez (prótesis valvular) requiere
+  premedicación y entra primero en «En clínica» hoy; Ana María Zapata tiene la
+  anamnesis de hace 14 meses (caducada); la de Gustavo Ríos es de hace 13
+  meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
+  tienen anamnesis (p. ej. Daniela Montoya).
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`
