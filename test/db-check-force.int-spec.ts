@@ -45,6 +45,22 @@ describe('db:check-force (DX-134)', () => {
     expect(status).toBe(0);
   }, 60_000);
 
+  it('DX-236: detecta permisos de escritura reintroducidos en referencia global', async () => {
+    await raw.$executeRawUnsafe(
+      'GRANT UPDATE ON public.icd10_codes TO dentalix_app',
+    );
+    try {
+      const { status, out } = checkForce();
+      expect(status).toBe(1);
+      expect(out).toContain('"reference_writes":["icd10_codes:UPDATE"]');
+    } finally {
+      await raw.$executeRawUnsafe(
+        'REVOKE UPDATE ON public.icd10_codes FROM dentalix_app',
+      );
+    }
+    expect(checkForce().status).toBe(0);
+  }, 60_000);
+
   it('una tabla de public con RLS y sin FORCE: sale con 1 y la nombra', async () => {
     await raw.$executeRawUnsafe(
       `CREATE TABLE public."${TABLE}" ("id" int PRIMARY KEY)`,

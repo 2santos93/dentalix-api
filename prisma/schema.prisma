@@ -675,6 +675,8 @@ model ClinicalEntryDiagnosis {
   patientId       String                @db.Uuid
   clinicalEntryId String                @db.Uuid
   icd10Code       String
+  // DX-236: snapshot autoritativo del trigger BEFORE INSERT, nunca del cliente.
+  labelEs         String                @default(dbgenerated())
   kind            ClinicalDiagnosisKind
   // Diente FDI opcional (mismo patrón que el odontograma).
   toothFdi        String?

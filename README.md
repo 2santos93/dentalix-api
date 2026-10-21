@@ -2078,6 +2078,25 @@ FORCE y `npm run test:owner-nosu`).
 | `dentalix_email_dispatcher` (DX-113) | NOLOGIN | dueño de `email_outbox_claim/_settle/_enqueue_platform` y, desde DX-144, de `email_outbox_enqueue_platform_capped/_platform_allowed/_purge_platform`; `SELECT/INSERT/UPDATE/DELETE` de `email_outbox` con su política permisiva y, para DELETE, una RESTRICTIVA que lo limita a filas de plataforma | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT`, DELETE sin su política restrictiva |
 | `dentalix_membership_lookup` (DX-143) | NOLOGIN | dueño de `dx_user_has_other_active_memberships`; `SELECT` de 3 columnas (`userId`, `tenantId`, `deletedAt`) de `clinic_memberships` y su política de solo `SELECT` | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
 
+DX-236: `dentalix_app` solo tiene `SELECT` en las referencias globales
+`icd10_codes`, `currencies`, `countries` y `cities`. La migración revoca
+`INSERT`, `UPDATE`, `DELETE` y `TRUNCATE`; repetir `create-app-role.sql`
+conserva esta restricción. `exchange_rate_snapshots` sigue siendo escribible.
+Si la migración avisa que no puede revocar o quedan permisos heredados, un
+admin debe corregir los grants y ejecutar `npm run db:check-force` antes de
+arrancar la API; `reference_writes` identifica tabla y privilegio efectivos.
+
+Cada diagnóstico guarda `clinical_entry_diagnoses."labelEs"`, copiada por
+un trigger al insertar aunque el cliente mande otro texto. Ficha y DTO leen
+esa copia; la preparación RDA no consulta etiquetas del catálogo. El backfill
+único usa el texto disponible al migrar: no reconstruye etiquetas históricas.
+Se ejecuta en transacción explícita y bajo bloqueo exclusivo, suspende solo
+el trigger de UPDATE y FORCE de esa tabla, y restaura ambos antes del COMMIT;
+un fallo revierte todos los cambios, también con owner sin superusuario.
+La siembra CIE-10 añade códigos nuevos y conserva todas las etiquetas ya
+existentes, incluso las de códigos sin uso. Sus correcciones requieren una
+migración explícita con el owner; nunca reescriben la copia clínica guardada.
+
 Pasos (el `psql` no acepta el `?schema=public` de las URL de Prisma:
 `"${DIRECT_URL%%\?*}"` lo quita):
 

@@ -95,6 +95,20 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dentalix_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dentalix_app;
 
+-- DX-236: repetir el bootstrap sobre una base migrada no puede reabrir DML
+-- sobre referencia global. En una base nueva las crea/revoca la migración.
+DO $$
+DECLARE
+  reference_table text;
+BEGIN
+  FOREACH reference_table IN ARRAY ARRAY['icd10_codes', 'currencies', 'countries', 'cities'] LOOP
+    IF pg_catalog.to_regclass('public.' || reference_table) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', reference_table);
+    END IF;
+  END LOOP;
+END;
+$$;
+
 -- Las funciones del despachador de email (email_outbox_*: reclamar, cerrar,
 -- encolar de plataforma con su tope y purgar, DX-088/DX-113/DX-144) las
 -- concede a dentalix_app cada migración, y solo si el rol ya existía. Si esta

@@ -237,6 +237,31 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
       ]);
     });
 
+    it('DX-236: ficha y preparación RDA conservan el diagnóstico tras cambiar su referencia', async () => {
+      const before = await readiness(a, entry.id, dentist.token).expect(200);
+      await raw.icd10Code.update({
+        where: { code: 'K02.1' },
+        data: { labelEs: 'Referencia corregida posteriormente' },
+      });
+      try {
+        const list = await call(
+          a,
+          'get',
+          entries(patient),
+          dentist.token,
+        ).expect(200);
+        const saved = (list.body as Entry[]).find((e) => e.id === entry.id);
+        expect(saved?.diagnoses[0].labelEs).toBe('Caries de la dentina');
+        const after = await readiness(a, entry.id, dentist.token).expect(200);
+        expect(after.body).toEqual(before.body);
+      } finally {
+        await raw.icd10Code.update({
+          where: { code: 'K02.1' },
+          data: { labelEs: 'Caries de la dentina' },
+        });
+      }
+    });
+
     it('la evolución con diagnósticos no se edita ni se borra (405)', async () => {
       await call(
         a,

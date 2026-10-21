@@ -54,6 +54,12 @@ const CLUSTER_ROLES = [
 const DISPATCHER_ROLE = 'dentalix_email_dispatcher';
 const APP_ROLE = 'dentalix_app';
 const REQUIRED_TIMEZONE = 'UTC';
+const READ_ONLY_REFERENCES = [
+  'icd10_codes',
+  'currencies',
+  'countries',
+  'cities',
+];
 
 const TIMEZONE_MESSAGE =
   'La zona horaria de dentalix_app no es UTC: la hora del servidor tiene que ser UTC. ' +
@@ -155,6 +161,14 @@ async function main(): Promise<number> {
               AND p.roles = ARRAY[${DISPATCHER_ROLE}]::name[]
               AND p.qual = '("tenantId" IS NULL)')
        ORDER BY 1`;
+    const referenceWrites = await prisma.$queryRaw<{ name: string }[]>`
+      SELECT c.relname || ':' || p.privilege AS name
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN unnest(ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) AS p(privilege)
+       WHERE n.nspname = 'public' AND c.relname = ANY(${READ_ONLY_REFERENCES})
+         AND CASE WHEN to_regrole(${APP_ROLE}) IS NULL THEN false
+                  ELSE has_table_privilege(${APP_ROLE}, c.oid, p.privilege) END
+       ORDER BY 1`;
     const timezone = new Set<string>();
     const configured = await catalogTimezone(prisma);
     if (configured === null) {
@@ -175,6 +189,7 @@ async function main(): Promise<number> {
       members: members.map((r) => r.name),
       dispatcher_delete: dispatcherDelete.map((r) => r.name),
       timezone: [...timezone],
+      reference_writes: referenceWrites.map((r) => r.name),
     };
     if (Object.values(result).some((list) => list.length > 0)) {
       console.error(
