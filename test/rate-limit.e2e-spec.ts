@@ -27,6 +27,7 @@ const LOW_LIMITS: RateLimitConfig = {
   refresh: { limit: 4, ttlMs: 60_000 },
   'invitation-email': { limit: 2, ttlMs: 60_000 },
   'password-reset': { limit: 2, ttlMs: 60_000 },
+  'public-files': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el

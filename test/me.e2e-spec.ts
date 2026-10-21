@@ -6,6 +6,10 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import {
+  FILE_STORAGE,
+  type FileStoragePort,
+} from '../src/shared/storage/file-storage.port';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -148,7 +152,10 @@ describe('Me (e2e)', () => {
       where: { email: 'perfil@e2e.com' },
       select: { id: true, avatarKey: true },
     });
-    expect(stored.avatarKey).toBe(`avatars/${stored.id}.png`);
+    // DX-259: con la versión del contenido en la clave (`-<16 hex>`).
+    expect(stored.avatarKey).toMatch(
+      new RegExp(`^avatars/${stored.id}-[0-9a-f]{16}\\.png$`),
+    );
     expect(avatarUrl).toBe(
       `${process.env.FILES_PUBLIC_BASE_URL}/${stored.avatarKey}`,
     );
@@ -161,9 +168,28 @@ describe('Me (e2e)', () => {
 
     // El path servible es lo que va después de FILES_PUBLIC_BASE_URL.
     const name = avatarUrl.split('/files/avatars/')[1];
-    await request(app.getHttpServer())
+    const served = await request(app.getHttpServer())
       .get(`/api/v1/files/avatars/${name}`)
       .expect(200);
+    // DX-259 (OPS-039): versionado → el navegador lo guarda sin revalidar.
+    expect(served.headers['cache-control']).toBe(
+      'public, max-age=31536000, immutable',
+    );
+
+    // Cambiar el avatar cambia su URL (otra versión), y el anterior se borra.
+    const next = await request(app.getHttpServer())
+      .post('/api/v1/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .attach('file', Buffer.concat([png, Buffer.from('v2')]), {
+        filename: 'b.png',
+        contentType: 'image/png',
+      })
+      .expect(200);
+    const nextUrl = (next.body as { avatarUrl: string }).avatarUrl;
+    expect(nextUrl).not.toBe(avatarUrl);
+    await request(app.getHttpServer())
+      .get(`/api/v1/files/avatars/${name}`)
+      .expect(404);
   });
 
   it('DX-084: an existing avatar saved as an absolute URL of another domain is still served', async () => {
@@ -172,6 +198,14 @@ describe('Me (e2e)', () => {
       where: { email: 'perfil@e2e.com' },
       select: { id: true },
     });
+    // Un avatar de antes de DX-259: clave sin versión, en el almacén.
+    await app
+      .get<FileStoragePort>(FILE_STORAGE)
+      .save(
+        `avatars/${user.id}.png`,
+        Buffer.from('89504e470d0a1a0a', 'hex'),
+        'image/png',
+      );
     await raw.user.update({
       where: { id: user.id },
       data: {
@@ -186,9 +220,17 @@ describe('Me (e2e)', () => {
     expect(avatarUrl).toBe(
       `${process.env.FILES_PUBLIC_BASE_URL}/avatars/${user.id}.png`,
     );
-    await request(app.getHttpServer())
+    const served = await request(app.getHttpServer())
       .get(new URL(avatarUrl).pathname)
       .expect(200);
+    // Sin versión en el nombre: 5 minutos y luego revalida con la ETag.
+    expect(served.headers['cache-control']).toBe('public, max-age=300');
+    const etag = served.headers['etag'];
+    expect(etag).toBeTruthy();
+    await request(app.getHttpServer())
+      .get(new URL(avatarUrl).pathname)
+      .set('If-None-Match', etag)
+      .expect(304);
   });
 
   it('removes the avatar (204) and nulls it on GET /me', async () => {

@@ -22,8 +22,15 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOkResponse,
+  ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
+import { STORAGE_UNAVAILABLE_MESSAGE } from '../../../shared/storage/storage-errors';
+import {
+  UPLOAD_BUSY_MESSAGE,
+  UploadSlotGuard,
+} from '../../../shared/storage/upload-slots';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import {
   JwtPayload,
@@ -153,8 +160,17 @@ export class MeController {
     description:
       'Falta el fichero, tipo no admitido o el contenido no es la imagen declarada',
   })
+  @ApiServiceUnavailableResponse({
+    description: `${UPLOAD_BUSY_MESSAGE} / ${STORAGE_UNAVAILABLE_MESSAGE} (con Retry-After)`,
+  })
+  // DX-259 (OPS-038): semáforo de subidas por réplica y multer a un temporal
+  // en disco (lo borra UploadSlotGuard al cerrar la respuesta), no a memoria.
+  @UseGuards(UploadSlotGuard)
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: MAX_AVATAR_BYTES } }),
+    FileInterceptor('file', {
+      dest: UPLOAD_TEMP_DIR,
+      limits: { fileSize: MAX_AVATAR_BYTES, files: 1 },
+    }),
   )
   uploadAvatar(
     @Req() req: AuthenticatedRequest,
@@ -165,7 +181,7 @@ export class MeController {
     }
     return this.setMyAvatar.execute({
       userId: req.user.sub,
-      buffer: file.buffer,
+      filePath: file.path,
       contentType: file.mimetype,
     });
   }

@@ -33,6 +33,10 @@
  *                  (DX-010); por IP (enumeración de tokens y bombardeo de
  *                  emails). Los topes por destinatario del email están en la
  *                  BD y no se notan en la respuesta (siempre 202).
+ * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
+ *                  (DX-259). Ruta anónima que llega al bucket; con la caché
+ *                  del navegador (clave versionada, `immutable`) el uso
+ *                  normal es bajo, así que frena a quien pida nombres al azar.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -42,7 +46,8 @@ export type RateLimitPolicy =
   | 'confirmation'
   | 'refresh'
   | 'invitation-email'
-  | 'password-reset';
+  | 'password-reset'
+  | 'public-files';
 
 export interface RateLimitRule {
   limit: number;
@@ -65,6 +70,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   refresh: { limit: 120, ttlMs: MINUTE },
   'invitation-email': { limit: 10, ttlMs: MINUTE },
   'password-reset': { limit: 10, ttlMs: 15 * MINUTE },
+  'public-files': { limit: 300, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -99,5 +105,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     refresh: rule('refresh'),
     'invitation-email': rule('invitation-email'),
     'password-reset': rule('password-reset'),
+    'public-files': rule('public-files'),
   };
 }

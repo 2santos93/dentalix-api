@@ -82,6 +82,7 @@ function throttlers(
         ),
     },
     strict('password-reset'),
+    strict('public-files'),
   ];
 }
 
