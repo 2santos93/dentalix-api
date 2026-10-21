@@ -1,4 +1,8 @@
-import { loadStorageConfig } from './storage-config';
+import {
+  loadS3Tuning,
+  loadStorageConfig,
+  loadUploadMaxConcurrency,
+} from './storage-config';
 
 const from =
   (env: Record<string, string>) =>
@@ -41,6 +45,12 @@ describe('loadStorageConfig (DX-084)', () => {
         secretAccessKey: 'secreto-ejemplo',
       },
       serverSideEncryption: 'aws:kms',
+      tuning: {
+        connectTimeoutMs: 3000,
+        requestTimeoutMs: 10000,
+        maxSockets: 50,
+        maxAttempts: 3,
+      },
     });
   });
 
@@ -56,5 +66,35 @@ describe('loadStorageConfig (DX-084)', () => {
       credentials: undefined,
       serverSideEncryption: undefined,
     });
+  });
+
+  it('DX-259: timeouts, sockets y tentativas del cliente S3 del entorno; fuera de rango, el default', () => {
+    expect(
+      loadS3Tuning(
+        from({
+          S3_CONNECT_TIMEOUT_MS: '1500',
+          S3_REQUEST_TIMEOUT_MS: ' 20000 ',
+          S3_MAX_SOCKETS: '8',
+          S3_MAX_ATTEMPTS: '1',
+        }),
+      ),
+    ).toEqual({
+      connectTimeoutMs: 1500,
+      requestTimeoutMs: 20000,
+      maxSockets: 8,
+      maxAttempts: 1,
+    });
+    expect(
+      loadS3Tuning(
+        from({ S3_REQUEST_TIMEOUT_MS: '0', S3_MAX_SOCKETS: 'muchos' }),
+      ),
+    ).toMatchObject({ requestTimeoutMs: 10000, maxSockets: 50 });
+  });
+
+  it('DX-259: UPLOAD_MAX_CONCURRENCY por defecto 4', () => {
+    expect(loadUploadMaxConcurrency(from({}))).toBe(4);
+    expect(
+      loadUploadMaxConcurrency(from({ UPLOAD_MAX_CONCURRENCY: '2' })),
+    ).toBe(2);
   });
 });

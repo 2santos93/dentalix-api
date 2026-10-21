@@ -1,10 +1,18 @@
-import { Module } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Module,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { FILE_STORAGE, FileStoragePort } from './file-storage.port';
+import { FILE_STORAGE, type FileStoragePort } from './file-storage.port';
 import { DiskFileStorage } from './disk-file-storage';
 import { FilesController } from './files.controller';
 import { S3FileStorage, createS3Client } from './s3-file-storage';
-import { loadStorageConfig } from './storage-config';
+import { loadStorageConfig, loadUploadMaxConcurrency } from './storage-config';
+import { errorName } from './storage-op-log';
+import { UPLOAD_SLOTS, UploadSlotGuard, UploadSlots } from './upload-slots';
 
 /**
  * Elige el adaptador según `STORAGE_DRIVER` (DX-084): `s3` (S3, R2, MinIO) o
@@ -17,6 +25,32 @@ export function createFileStorage(config: ConfigService): FileStoragePort {
     : new DiskFileStorage(cfg);
 }
 
+/**
+ * DX-259 (OPS-039): al arrancar se comprueba el bucket (`HeadBucket`) y, si
+ * no responde o las credenciales no valen, se AVISA en el log
+ * (`storage.unreachable`); la API arranca igual (la readiness no mira el
+ * almacén a propósito: una caída de S3 no debe sacar las réplicas) y no
+ * espera a la comprobación.
+ */
+@Injectable()
+export class StorageStartupCheck implements OnApplicationBootstrap {
+  private readonly logger = new Logger('Storage');
+
+  constructor(
+    @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    void this.storage.checkReachable().catch((err: unknown) => {
+      this.logger.warn({
+        event: 'storage.unreachable',
+        error: errorName(err),
+        cause: errorName((err as { cause?: unknown })?.cause),
+      });
+    });
+  }
+}
+
 // ConfigModule es @Global (isGlobal: true en ConfigModule), así que ConfigService
 // se inyecta sin importarlo aquí.
 @Module({
@@ -27,7 +61,17 @@ export function createFileStorage(config: ConfigService): FileStoragePort {
       inject: [ConfigService],
       useFactory: createFileStorage,
     },
+    {
+      provide: UPLOAD_SLOTS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        new UploadSlots(
+          loadUploadMaxConcurrency((key) => config.get<string>(key)),
+        ),
+    },
+    UploadSlotGuard,
+    StorageStartupCheck,
   ],
-  exports: [FILE_STORAGE],
+  exports: [FILE_STORAGE, UPLOAD_SLOTS, UploadSlotGuard],
 })
 export class StorageModule {}

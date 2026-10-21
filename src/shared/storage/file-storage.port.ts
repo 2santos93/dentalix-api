@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream';
 import { isServableContentType } from './content-type';
 
 export const FILE_STORAGE = Symbol('FILE_STORAGE');
@@ -25,6 +26,63 @@ export interface StoredFile {
   contentType: string | null;
 }
 
+/** Un fichero guardado, para servirlo en streaming (avatares). */
+export interface StoredFileStream {
+  stream: Readable;
+  /** Bytes, si el almacén los dice. */
+  size: number | null;
+  /** ETag del objeto (con comillas, como la da S3), si la hay. */
+  etag: string | null;
+}
+
+/** Lo que el almacén sabe de un objeto sin leerlo (`HeadObject`). */
+export interface StoredObjectInfo {
+  size: number;
+  /**
+   * SHA-256 del contenido en base64, calculado y comprobado por el almacén
+   * al recibirlo (`x-amz-checksum-sha256`); null si se subió sin él.
+   */
+  sha256Base64: string | null;
+  /** Identifica ESTA versión del objeto: las lecturas siguientes la exigen. */
+  etag: string;
+  /** Metadatos `x-amz-meta-*` (nombres en minúscula, sin el prefijo). */
+  metadata: Record<string, string>;
+}
+
+/**
+ * Condiciones de una subida directa del navegador al almacén (DX-259): la
+ * CLAVE la fija quien la crea (la API), el tamaño va acotado, el checksum
+ * SHA-256 es obligatorio y los metadatos quedan fijados; el cliente no puede
+ * cambiar nada de eso sin invalidar la firma.
+ */
+export interface DirectUploadPolicy {
+  /** Tamaño máximo en bytes (el mínimo es 1). */
+  maxBytes: number;
+  /** SHA-256 del contenido en base64: el almacén rechaza otro contenido. */
+  sha256Base64: string;
+  /** `x-amz-meta-*` fijados (nombre en minúscula → valor ASCII). */
+  metadata: Record<string, string>;
+  /** Vida de la autorización, en segundos. */
+  ttlSeconds: number;
+}
+
+/**
+ * Formulario de la subida directa: un `POST` multipart a `url` con `fields`
+ * en ese orden y el fichero al final, en el campo `file` (el formato del POST
+ * prefirmado de S3; el disco lo imita en `/files/uploads`).
+ */
+export interface DirectUploadTarget {
+  method: 'POST';
+  url: string;
+  fields: Record<string, string>;
+  expiresAt: Date;
+}
+
+export interface SaveFileOptions {
+  /** `Cache-Control` con el que el almacén guarda el objeto. */
+  cacheControl?: string;
+}
+
 /**
  * Almacén de ficheros (DX-084). Trabaja con CLAVES (`avatars/u1.png`, ver
  * `file-key.ts`); lo que se guarda en la BD es la clave, nunca una URL.
@@ -34,6 +92,61 @@ export interface StoredFile {
 export interface FileStoragePort {
   /** Persiste `bytes` bajo `key` (reemplaza si ya existe). */
   save(key: string, bytes: Buffer, contentType: string): Promise<void>;
+
+  /**
+   * Persiste el fichero LOCAL `filePath` bajo `key` en streaming, sin cargarlo
+   * en memoria (DX-259: lo que llega por multer a un temporal en disco).
+   */
+  saveFile(
+    key: string,
+    filePath: string,
+    contentType: string,
+    options?: SaveFileOptions,
+  ): Promise<void>;
+
+  /** Abre `key` para servirlo en streaming, o null si no existe. */
+  openRead(key: string): Promise<StoredFileStream | null>;
+
+  /** Metadatos de `key` sin leerlo, o null si no existe. */
+  stat(key: string): Promise<StoredObjectInfo | null>;
+
+  /**
+   * Bytes `[start, end)` de la versión `etag` de `key`. Si el objeto ya no es
+   * esa versión, `StorageObjectChangedError`.
+   */
+  readRange(
+    key: string,
+    start: number,
+    end: number,
+    etag: string,
+  ): Promise<Buffer>;
+
+  /**
+   * Mueve la versión `etag` de `from` a `to` con el tipo `contentType` (copia
+   * en el propio almacén y borra `from`). Si `from` ya no es esa versión,
+   * `StorageObjectChangedError` y nada cambia.
+   */
+  promote(
+    from: string,
+    to: string,
+    contentType: string,
+    etag: string,
+  ): Promise<void>;
+
+  /**
+   * Autorización para que el navegador suba UN objeto a `key` directamente
+   * al almacén (DX-259), sin pasar por la API ni por el proxy de la web.
+   */
+  createDirectUpload(
+    key: string,
+    policy: DirectUploadPolicy,
+  ): Promise<DirectUploadTarget>;
+
+  /**
+   * Comprueba que el almacén responde y que el bucket existe y es accesible
+   * (`HeadBucket`). Se usa al arrancar, solo para avisar.
+   */
+  checkReachable(): Promise<void>;
 
   /** Lee `key`, o null si no existe. */
   read(key: string): Promise<StoredFile | null>;
