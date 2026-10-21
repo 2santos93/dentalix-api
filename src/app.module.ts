@@ -16,7 +16,10 @@ import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
 import { PayersModule } from './modules/payers/payers.module';
+import { PriceListsModule } from './modules/price-lists/price-lists.module';
+import { AgreementsModule } from './modules/agreements/agreements.module';
 import { PatientCoveragesModule } from './modules/patient-coverages/patient-coverages.module';
+import { PatientAgreementsModule } from './modules/patient-agreements/patient-agreements.module';
 import { ScheduleBlocksModule } from './modules/schedule-blocks/schedule-blocks.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { AppointmentConfirmationsModule } from './modules/appointment-confirmations/appointment-confirmations.module';
@@ -38,6 +41,7 @@ import { DataConsentsModule } from './modules/data-consents/data-consents.module
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
+import { ProviderScheduleModule } from './modules/provider-schedule/provider-schedule.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
@@ -79,7 +83,10 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AppointmentsModule,
     AppointmentTypesModule,
     PayersModule,
+    PriceListsModule,
+    AgreementsModule,
     PatientCoveragesModule,
+    PatientAgreementsModule,
     ScheduleBlocksModule,
     WaitlistModule,
     AppointmentConfirmationsModule,
@@ -102,6 +109,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     InventoryModule,
     LocationsModule,
     LocationScheduleModule,
+    // DX-233: horario de cada profesional por sede y cuadrante.
+    ProviderScheduleModule,
     PlatformModule,
     // Accesos de soporte (break-glass) visibles para el ADMIN (SEC-008).
     SupportAccessesModule,

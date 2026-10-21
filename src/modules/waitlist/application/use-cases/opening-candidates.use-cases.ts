@@ -62,6 +62,7 @@ import {
 import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 
 /** Reloj de las ofertas (el día de hoy en la zona de la sede); los tests lo fijan. */
 export const OPENING_CLOCK = Symbol('OPENING_CLOCK');
@@ -114,6 +115,11 @@ export interface OpeningCandidatesView {
   start: Date;
   end: Date;
   timeZone: string;
+  /**
+   * DX-233: el profesional del hueco no trabaja todo ese hueco en la sede
+   * (según su horario); entonces no hay candidatos. Sin profesional, false.
+   */
+  providerOffSchedule: boolean;
   /** Tope de ofertas por paciente y día (configurable). */
   offerCap: number;
   items: OpeningCandidate[];
@@ -197,6 +203,8 @@ export class ListOpeningCandidatesUseCase {
     @Inject(OPENING_CLOCK)
     private readonly clock: OpeningClock,
     private readonly tenantContext: TenantContextService,
+    // DX-233: solo candidatos que caben en el horario de su profesional.
+    private readonly availability: ProviderAvailabilityService,
   ) {}
 
   async execute(
@@ -238,7 +246,31 @@ export class ListOpeningCandidatesUseCase {
         providerId: slot.providerId,
       }),
     ]);
-    const ranked = rankOpeningCandidates(slot, { entries, appointments });
+    const slotDay = offerDayFor(input.start, timeZone);
+    const canAttend = await this.availability.attendancePredicate(
+      [
+        ...new Set(
+          [
+            slot.providerId,
+            ...entries.map((e) => e.providerId),
+            ...appointments.map((a) => a.providerId),
+          ].filter((id): id is string => id !== null),
+        ),
+      ],
+      location.id,
+      timeZone,
+      slotDay,
+      slotDay,
+    );
+    const providerOffSchedule =
+      slot.providerId !== null &&
+      !canAttend(slot.providerId, input.start, input.end);
+    const ranked = rankOpeningCandidates(
+      slot,
+      { entries, appointments },
+      undefined,
+      canAttend,
+    );
     const summary = await this.repo.offersSummary({
       patientIds: [...new Set(ranked.items.map((i) => i.source.patient.id))],
       offerDay: offerDayFor(now, timeZone),
@@ -301,6 +333,7 @@ export class ListOpeningCandidatesUseCase {
       start: input.start,
       end: input.end,
       timeZone,
+      providerOffSchedule,
       offerCap: this.config.offersPerPatientPerDay,
       items,
       truncated: ranked.truncated,

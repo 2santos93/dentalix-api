@@ -1,6 +1,7 @@
 import { PrismaClient, ClinicRole } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para fixtures (seed/cleanup
 // entre tests) — usa DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS
@@ -35,9 +36,7 @@ describe('RLS cross-tenant isolation', () => {
 
   beforeAll(async () => {
     await prisma.onModuleInit();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     tenantA = await seedTenant('clinica-a');
     tenantB = await seedTenant('clinica-b');
   });
@@ -69,9 +68,7 @@ describe('runWithTenant resolves tenant from TenantContextService', () => {
 
   beforeAll(async () => {
     await prisma.onModuleInit();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     tenantA = await seedTenant('clinica-ctx-a');
     tenantB = await seedTenant('clinica-ctx-b');
   });

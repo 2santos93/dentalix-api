@@ -41,6 +41,31 @@ export interface AuditMetadata {
    * anular su abono). Solo códigos de estado.
    */
   statusChange?: AuditStatusChange;
+  /**
+   * DX-233: horario de un profesional antes y después (semanal o una
+   * excepción por fecha). Solo ids de sede, días, fechas y minutos: es
+   * configuración de la agenda, sin datos de pacientes. Un lado vacío = no
+   * había (o ya no hay) nada.
+   */
+  scheduleChange?: AuditScheduleChange;
+}
+
+/** Un tramo del horario de un profesional en la auditoría (DX-233). */
+export interface AuditScheduleEntry {
+  locationId: string;
+  /** Tramo semanal: día 0–6. */
+  weekday?: number;
+  /** Excepción: fecha civil YYYY-MM-DD. */
+  date?: string;
+  startMinute?: number;
+  endMinute?: number;
+  /** Excepción «no trabaja» (sin tramos). */
+  off?: true;
+}
+
+export interface AuditScheduleChange {
+  before: AuditScheduleEntry[];
+  after: AuditScheduleEntry[];
 }
 
 /** Estado antes y después (códigos), DX-215. */
@@ -80,7 +105,10 @@ const CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** Lote o REF de un producto sanitario: alfanumérico con . _ - / y espacios. */
 const PRODUCT_CODE = /^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,79}$/;
+const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_FIELDS = 50;
+/** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
+const MAX_SCHEDULE_ENTRIES = 500;
 const MAX_PARAMS = 10;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,6 +188,66 @@ function statusChange(value: unknown): AuditStatusChange | null {
   return { from, to };
 }
 
+function minute(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 1440
+  );
+}
+
+/** Un tramo con la forma admitida, o `null`. */
+function scheduleEntry(value: unknown): AuditScheduleEntry | null {
+  if (!isRecord(value)) return null;
+  const { locationId, weekday, date, startMinute, endMinute, off } = value;
+  if (typeof locationId !== 'string' || !UUID.test(locationId)) return null;
+  const out: AuditScheduleEntry = { locationId: locationId.toLowerCase() };
+  if (weekday !== undefined) {
+    if (
+      typeof weekday !== 'number' ||
+      !Number.isInteger(weekday) ||
+      weekday < 0 ||
+      weekday > 6
+    ) {
+      return null;
+    }
+    out.weekday = weekday;
+  }
+  if (date !== undefined) {
+    if (typeof date !== 'string' || !CIVIL_DATE.test(date)) return null;
+    out.date = date;
+  }
+  if ((out.weekday === undefined) === (out.date === undefined)) return null;
+  if (off === true) {
+    if (out.date === undefined) return null;
+    out.off = true;
+    return out;
+  }
+  if (!minute(startMinute) || !minute(endMinute)) return null;
+  out.startMinute = startMinute;
+  out.endMinute = endMinute;
+  return out;
+}
+
+function scheduleSide(value: unknown): AuditScheduleEntry[] | null {
+  if (!Array.isArray(value) || value.length > MAX_SCHEDULE_ENTRIES) {
+    return null;
+  }
+  const entries = value.map(scheduleEntry);
+  return entries.every((e): e is AuditScheduleEntry => e !== null)
+    ? entries
+    : null;
+}
+
+/** Los dos lados con la forma admitida, o nada. */
+function scheduleChange(value: unknown): AuditScheduleChange | null {
+  if (!isRecord(value)) return null;
+  const before = scheduleSide(value.before);
+  const after = scheduleSide(value.after);
+  return before && after ? { before, after } : null;
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -185,5 +273,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (searched) out.search = searched;
   const change = statusChange(input.statusChange);
   if (change) out.statusChange = change;
+  const schedule = scheduleChange(input.scheduleChange);
+  if (schedule) out.scheduleChange = schedule;
   return out;
 }

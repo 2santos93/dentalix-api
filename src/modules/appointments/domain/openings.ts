@@ -1,5 +1,9 @@
 import type { ScheduleRange } from '../../location-schedule/application/business-hours';
 import {
+  intersectRanges,
+  type MinuteRange,
+} from '../../provider-schedule/domain/provider-availability';
+import {
   addCivilDays,
   civilDaysInclusive,
   civilWeekday,
@@ -31,6 +35,13 @@ export interface OpeningsQuery {
   now: Date;
   /** Como mucho estos huecos; por defecto `MAX_OPENINGS`. */
   limit?: number;
+  /**
+   * DX-233: tramos del profesional en esta sede cada día (`null` = ese día
+   * sin restricción). Se cruzan con los de la sede: solo se proponen huecos
+   * donde la sede está abierta Y el profesional trabaja allí. Sin la función,
+   * como antes (solo el horario de la sede).
+   */
+  providerRangesOn?: (day: string) => readonly MinuteRange[] | null;
 }
 
 export interface OpeningsResult {
@@ -69,7 +80,8 @@ function subtract(interval: Interval, busy: readonly Interval[]): Interval[] {
 
 /**
  * Huecos libres de un profesional (DX-122, «Buscar hueco»): los tramos del
- * horario de la sede de cada día del rango —en la zona de la sede, con su
+ * horario de la sede —cruzados con los del profesional en esa sede, DX-233—
+ * de cada día del rango —en la zona de la sede, con su
  * cambio de hora— menos lo ocupado (citas y bloqueos), sin el pasado y con
  * el inicio alineado a 5 min. Solo quedan los huecos donde cabe la duración.
  *
@@ -88,9 +100,14 @@ export function findOpenings(query: OpeningsQuery): OpeningsResult {
   for (let i = 0; i < days; i++) {
     const day = addCivilDays(query.fromDay, i);
     const weekday = civilWeekday(day);
-    const ranges = query.ranges
+    const locationRanges = query.ranges
       .filter((r) => r.weekday === weekday)
       .sort((a, b) => a.startMinute - b.startMinute);
+    const providerRanges = query.providerRangesOn?.(day) ?? null;
+    const ranges =
+      providerRanges === null
+        ? locationRanges
+        : intersectRanges(locationRanges, providerRanges);
     for (const range of ranges) {
       const open: Interval = {
         start: zonedWallTime(day, range.startMinute, query.timeZone),

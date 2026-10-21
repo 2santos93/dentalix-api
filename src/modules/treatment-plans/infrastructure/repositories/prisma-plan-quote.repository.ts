@@ -149,6 +149,10 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
             catalogItemId: true,
             price: true,
             discount: true,
+            basePrice: true,
+            catalogPrice: true,
+            agreementId: true,
+            agreementName: true,
           },
         },
         acceptance: {
@@ -192,6 +196,22 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
       ],
     );
     const labels = new Map(catalog.map((c) => [c.id, c.labelEs]));
+    // DX-105: el pagador de cada convenio, una consulta por los ids distintos
+    // (no una por ítem). El nombre del convenio es el de la foto del ítem; el
+    // pagador se lee vivo porque la foto no lo guarda.
+    const agreementIds = [
+      ...new Set(
+        plan.items.flatMap((i) => (i.agreementId ? [i.agreementId] : [])),
+      ),
+    ];
+    const agreements =
+      agreementIds.length === 0
+        ? []
+        : await tx.agreement.findMany({
+            where: { id: { in: agreementIds } },
+            select: { id: true, payer: { select: { name: true } } },
+          });
+    const payerNames = new Map(agreements.map((a) => [a.id, a.payer.name]));
     const { patient, acceptance } = plan;
 
     return {
@@ -208,6 +228,12 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         procedure: labels.get(item.catalogItemId) ?? PROCEDURE_FALLBACK,
         price: item.price.toNumber(),
         discount: item.discount.toNumber(),
+        basePrice: item.basePrice?.toNumber() ?? null,
+        referencePrice: item.catalogPrice?.toNumber() ?? null,
+        agreementName: item.agreementName,
+        agreementPayerName: item.agreementId
+          ? requirePayerName(payerNames, item.agreementId, plan.id)
+          : null,
       })),
       patient: {
         firstName: patient.firstName,
@@ -233,4 +259,23 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         : null,
     };
   }
+}
+
+/**
+ * El pagador del convenio de un ítem tiene que existir: sellar un presupuesto
+ * con el pagador en blanco lo dejaría firmado sin remedio, así que se falla
+ * (500 con mensaje interno claro) antes de sellar.
+ */
+function requirePayerName(
+  payerNames: Map<string, string>,
+  agreementId: string,
+  planId: string,
+): string {
+  const name = payerNames.get(agreementId);
+  if (!name) {
+    throw new Error(
+      `Plan ${planId}: el convenio ${agreementId} de un ítem no tiene pagador; no se puede sellar el presupuesto.`,
+    );
+  }
+  return name;
 }

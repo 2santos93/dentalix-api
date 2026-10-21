@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
+import { providerWorksAt } from '../src/modules/provider-schedule/domain/provider-availability';
 import {
   DEMO_EMAIL_DOMAIN,
   DEMO_PASSWORD,
@@ -35,6 +36,11 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-233: horario de los profesionales (hijas de locations, en orden de FK).
+  'provider_schedule_override_ranges',
+  'provider_schedule_overrides',
+  'provider_schedule_ranges',
+  'provider_schedules',
   // DX-222: entregas (hijas de appointments, patients, locations y plantillas)
   // y vínculos (hijos de plantillas y de appointment_types).
   'post_op_instruction_deliveries',
@@ -42,9 +48,11 @@ const TENANT_TABLES = [
   'post_op_instruction_templates',
   // DX-203: responsables (hijos de patients).
   'patient_responsible_parties',
-  // DX-153: coberturas (hijas de patients y payers) y pagadores.
+  // DX-105: asignaciones de convenio (hijas de patients, convenios y coberturas).
+  'patient_agreements',
+  // DX-153: coberturas (hijas de patients y payers). Los pagadores van más abajo
+  // (los convenios los referencian).
   'patient_coverages',
-  'payers',
   'patient_implants',
   // DX-151: documentos (hijos de patients y locations).
   'patient_documents',
@@ -72,6 +80,13 @@ const TENANT_TABLES = [
   'cash_sessions',
   'treatment_plan_acceptances',
   'treatment_plan_items',
+  // DX-105: tras treatment_plan_items (agreementId, RESTRICT): precios de lista,
+  // convenios (hijos de payers y listas), listas (hijas de locations) y, al fin,
+  // los pagadores (DX-153).
+  'price_list_items',
+  'agreements',
+  'price_lists',
+  'payers',
   'treatment_plans',
   'tooth_records',
   'patient_dentition_events',
@@ -81,6 +96,8 @@ const TENANT_TABLES = [
   'clinical_entries',
   'clinical_note_template_prompts',
   'clinical_note_templates',
+  // DX-247: confirmaciones «Sin cambios hoy» (hijas de medical_history_versions).
+  'medical_history_reviews',
   'medical_history_versions',
   'appointment_confirmations',
   // DX-210: ofertas de huecos (hijas de appointment_waitlist y appointments).
@@ -327,10 +344,19 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patients).toBe(25);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
-    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora.
-    expect(firstCounts.payers).toBe(7);
+    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
+    // DX-105 añade «Empresa Alfa» (8).
+    expect(firstCounts.payers).toBe(8);
     expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
+    // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
+    // convenios (Sura −15 % y Empresa Alfa lista) y tres pacientes asignados.
+    expect(firstCounts.price_lists).toBe(2);
+    expect(firstCounts.price_list_items).toBe(8);
+    expect(firstCounts.agreements).toBe(2);
+    expect(firstCounts.patient_agreements).toBe(3);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
+    // DX-247: una anamnesis antigua confirmada «Sin cambios hoy».
+    expect(firstCounts.medical_history_reviews).toBe(1);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
     expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);
@@ -525,6 +551,81 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(open.filter((e) => e.sourceAppointmentId === null)).toEqual([
       expect.objectContaining({ priority: 'URGENT' }),
     ]);
+  });
+
+  it('deja la rotación de la segunda dentista en dos sedes, una excepción y sus citas dentro (DX-233)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const schedules = await raw.providerSchedule.findMany({
+      where: { tenantId, deletedAt: null },
+      include: {
+        location: { select: { name: true } },
+        ranges: { where: { deletedAt: null } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(new Set(schedules.map((s) => s.providerId)).size).toBe(1);
+    const weekdays = Object.fromEntries(
+      schedules.map((s) => [
+        s.location.name,
+        [...new Set(s.ranges.map((r) => r.weekday))].sort(),
+      ]),
+    );
+    expect(weekdays).toEqual({
+      'Sede principal': [1, 3, 5],
+      'Sede Norte': [2, 4],
+    });
+    const overrides = await raw.providerScheduleOverride.findMany({
+      where: { tenantId, deletedAt: null },
+      include: { ranges: { where: { deletedAt: null } } },
+    });
+    expect(overrides).toHaveLength(2);
+    expect(new Set(overrides.map((o) => o.date.toISOString())).size).toBe(1);
+    expect(overrides.map((o) => o.ranges.length).sort()).toEqual([0, 1]);
+    await expect(
+      raw.auditEvent.count({
+        where: { tenantId, resourceType: 'PROVIDER_SCHEDULE' },
+      }),
+    ).resolves.toBe(3);
+
+    // Las citas de la rotación (salvo las de «En clínica» de hoy, mejor
+    // esfuerzo) caen en su horario.
+    const providerId = schedules[0].providerId;
+    const snapshot = {
+      providerId,
+      configured: true,
+      weekly: schedules.flatMap((s) =>
+        s.ranges.map((r) => ({
+          locationId: s.locationId,
+          weekday: r.weekday,
+          startMinute: r.startMinute,
+          endMinute: r.endMinute,
+        })),
+      ),
+      overrides: [],
+    };
+    // «Hoy» es el día civil de la clínica (Bogotá), no el de UTC: entre las
+    // 19:00 y las 24:00 de Bogotá ya es mañana en UTC (DX-251).
+    const civilDay = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(
+        d,
+      );
+    const today = civilDay(new Date());
+    const theirs = await raw.appointment.findMany({
+      where: { tenantId, providerId, deletedAt: null },
+    });
+    expect(theirs.length).toBeGreaterThan(0);
+    const outside = theirs.filter(
+      (a) =>
+        civilDay(a.start) !== today &&
+        !providerWorksAt(
+          snapshot,
+          a.locationId,
+          a.start,
+          a.end,
+          'America/Bogota',
+        ),
+    );
+    expect(outside).toEqual([]);
   });
 
   it('la sede principal tiene recordatorios por email activos a 48 h y 2 h (DX-026)', async () => {

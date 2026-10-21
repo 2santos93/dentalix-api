@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y para
 // limpiar entre tenants — mismo criterio que payment-plans.e2e-spec.ts.
@@ -77,20 +78,7 @@ interface StatementBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.appointment.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.installment.deleteMany();
-  await raw.paymentPlan.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)', () => {

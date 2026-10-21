@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -60,18 +61,7 @@ async function registerAndLogin(
 }
 
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.appointment.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.inventoryMovement.deleteMany();
-  await raw.inventoryItem.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Locations / multi-sede (e2e)', () => {

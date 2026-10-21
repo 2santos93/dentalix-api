@@ -5,6 +5,10 @@ import { ToothSurface } from '@prisma/client';
 export const QUOTE_VALIDITY_DAYS = 30;
 
 const QUOTE_HASH_VERSION = 'dentalix-plan-quote-v1';
+/** DX-105: el hash v2 sella además el convenio, el precio de lista y el ahorro. */
+export const QUOTE_HASH_VERSION_V2 = 'dentalix-plan-quote-v2';
+/** Separador de los nombres cuando un plan mezcla varios convenios. */
+const AGREEMENT_NAMES_SEPARATOR = ' · ';
 const ACCEPTANCE_HASH_VERSION = 'dentalix-plan-acceptance-v1';
 
 /** Lo que hace falta para componer el presupuesto de un plan. */
@@ -27,6 +31,14 @@ export interface QuoteSourceItem {
   procedure: string;
   price: number;
   discount: number;
+  /** Precio de catálogo congelado en el ítem (`basePrice`); `null` en ítems anteriores a DX-105. */
+  basePrice: number | null;
+  /** Precio de referencia resuelto (`catalogPrice`); `null` en ítems anteriores a DX-105. */
+  referencePrice: number | null;
+  /** Nombre del convenio con que se fijó el precio; `null` si no lo hubo. */
+  agreementName: string | null;
+  /** Pagador de ese convenio; `null` si no hubo convenio. */
+  agreementPayerName: string | null;
 }
 
 export interface QuoteLocation {
@@ -55,6 +67,10 @@ export interface QuoteItem {
   unitPrice: number;
   discount: number;
   subtotal: number;
+  /** Precio de catálogo (v2); `null` si el ítem no lo guardó. */
+  listPrice: number | null;
+  /** Convenio con que se fijó el precio (v2). */
+  agreementName: string | null;
 }
 
 export interface QuoteTotal {
@@ -62,6 +78,14 @@ export interface QuoteTotal {
   gross: number;
   discount: number;
   net: number;
+  /** Σ max(0, precio de lista − precio de referencia) de los ítems con convenio (v2). */
+  agreementSaving: number;
+}
+
+/** El convenio del presupuesto: el del primer ítem que lo tiene. */
+export interface QuoteAgreement {
+  name: string;
+  payerName: string;
 }
 
 /**
@@ -70,7 +94,12 @@ export interface QuoteTotal {
  * contenido) ni el estado del plan.
  */
 export interface QuoteContent {
-  version: 1;
+  /**
+   * 2 = presupuesto con convenio y ahorro (DX-105), el único que se compone
+   * hoy. 1 = fotos firmadas antes de DX-105: se leen con `agreement: null`,
+   * `listPrice`/`agreementName` nulos y ahorro 0, y su hash sigue siendo el v1.
+   */
+  version: 1 | 2;
   planId: string;
   patientId: string;
   currency: string;
@@ -78,6 +107,8 @@ export interface QuoteContent {
   location: QuoteLocation;
   patient: QuotePatient;
   professionalName: string | null;
+  /** Convenio aplicado a los ítems; `null` si ninguno lo tiene. */
+  agreement: QuoteAgreement | null;
   /** `YYYY-MM-DD` en la zona de la sede. */
   issuedOn: string;
   validUntil: string;
@@ -102,6 +133,24 @@ function addDays(date: string, days: number): string {
 }
 
 /**
+ * El convenio del presupuesto: el del primer ítem que lo tiene. Si hay varios
+ * convenios distintos, el nombre junta todos (en orden de aparición) y el
+ * pagador es el del primero.
+ */
+function agreementOf(items: QuoteSourceItem[]): QuoteAgreement | null {
+  const withAgreement = items.filter(
+    (i): i is QuoteSourceItem & { agreementName: string } =>
+      i.agreementName !== null,
+  );
+  if (withAgreement.length === 0) return null;
+  const names = [...new Set(withAgreement.map((i) => i.agreementName))];
+  return {
+    name: names.join(AGREEMENT_NAMES_SEPARATOR),
+    payerName: withAgreement[0].agreementPayerName ?? '',
+  };
+}
+
+/**
  * Compone el presupuesto. El dinero se suma en céntimos enteros, así que el
  * total nunca arrastra deriva de coma flotante; un plan sin ítems da totales
  * en cero.
@@ -119,11 +168,27 @@ export function buildQuoteContent(
     unitPrice: item.price,
     discount: item.discount,
     subtotal: fromCents(toCents(item.price) - toCents(item.discount)),
+    listPrice: item.basePrice,
+    agreementName: item.agreementName,
   }));
   const gross = items.reduce((sum, i) => sum + toCents(i.unitPrice), 0);
   const discount = items.reduce((sum, i) => sum + toCents(i.discount), 0);
+  const saving = source.items.reduce(
+    (sum, i) =>
+      i.agreementName !== null &&
+      i.basePrice !== null &&
+      i.referencePrice !== null
+        ? sum +
+          Math.max(
+            0,
+            toCents(i.basePrice) -
+              Math.max(toCents(i.price), toCents(i.referencePrice)),
+          )
+        : sum,
+    0,
+  );
   return {
-    version: 1,
+    version: 2,
     planId: source.planId,
     patientId: source.patientId,
     currency: source.currency,
@@ -131,6 +196,7 @@ export function buildQuoteContent(
     location: { ...source.location },
     patient: { ...source.patient },
     professionalName: source.professionalName,
+    agreement: agreementOf(source.items),
     issuedOn,
     validUntil: addDays(issuedOn, QUOTE_VALIDITY_DAYS),
     validityDays: QUOTE_VALIDITY_DAYS,
@@ -141,6 +207,7 @@ export function buildQuoteContent(
         gross: fromCents(gross),
         discount: fromCents(discount),
         net: fromCents(gross - discount),
+        agreementSaving: fromCents(saving),
       },
     ],
   };
@@ -156,7 +223,16 @@ const money = (value: number): string => (toCents(value) / 100).toFixed(2);
  * como texto con 2 decimales, no como el float que haya quedado.
  */
 export function computeQuoteHash(content: QuoteContent): string {
-  const canonical = JSON.stringify([
+  const canonical =
+    content.version === 1
+      ? canonicalQuoteV1(content)
+      : canonicalQuoteV2(content);
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/** Serialización v1, intacta: los presupuestos firmados antes de DX-105 la usan. */
+function canonicalQuoteV1(content: QuoteContent): string {
+  return JSON.stringify([
     QUOTE_HASH_VERSION,
     content.planId,
     content.patientId,
@@ -185,7 +261,45 @@ export function computeQuoteHash(content: QuoteContent): string {
       money(t.net),
     ]),
   ]);
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/** v2: v1 más el convenio, el precio de lista por línea y el ahorro. */
+function canonicalQuoteV2(content: QuoteContent): string {
+  return JSON.stringify([
+    QUOTE_HASH_VERSION_V2,
+    content.planId,
+    content.patientId,
+    content.currency,
+    content.clinicName,
+    [content.location.id, content.location.name, content.location.address],
+    [content.patient.name, content.patient.document],
+    content.professionalName,
+    content.agreement
+      ? [content.agreement.name, content.agreement.payerName]
+      : null,
+    content.issuedOn,
+    content.validUntil,
+    content.validityDays,
+    content.items.map((i) => [
+      i.id,
+      i.toothNumber,
+      i.surfaces,
+      i.procedure,
+      i.quantity,
+      money(i.unitPrice),
+      money(i.discount),
+      money(i.subtotal),
+      i.listPrice === null ? null : money(i.listPrice),
+      i.agreementName,
+    ]),
+    content.totals.map((t) => [
+      t.currency,
+      money(t.gross),
+      money(t.discount),
+      money(t.net),
+      money(t.agreementSaving),
+    ]),
+  ]);
 }
 
 export interface AcceptanceHashInput {
@@ -237,6 +351,20 @@ function num(record: JsonRecord, key: string): number {
   return value;
 }
 
+function numOrNull(record: JsonRecord, key: string): number | null {
+  if (record[key] === null) return null;
+  return num(record, key);
+}
+
+function agreementFrom(record: JsonRecord): QuoteAgreement | null {
+  if (record.agreement === null) return null;
+  const agreement = rec(record, 'agreement');
+  return {
+    name: str(agreement, 'name'),
+    payerName: str(agreement, 'payerName'),
+  };
+}
+
 function rec(record: JsonRecord, key: string): JsonRecord {
   const value = record[key];
   if (!isRecord(value)) throw new Error(key);
@@ -267,11 +395,15 @@ function surfacesOf(item: JsonRecord): ToothSurface[] {
  */
 export function parseQuoteContent(value: unknown): QuoteContent {
   try {
-    if (!isRecord(value) || value.version !== 1) throw new Error('version');
+    if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
+      throw new Error('version');
+    }
+    const version = value.version;
+    const v2 = version === 2;
     const location = rec(value, 'location');
     const patient = rec(value, 'patient');
     return {
-      version: 1,
+      version,
       planId: str(value, 'planId'),
       patientId: str(value, 'patientId'),
       currency: str(value, 'currency'),
@@ -286,6 +418,7 @@ export function parseQuoteContent(value: unknown): QuoteContent {
         document: strOrNull(patient, 'document'),
       },
       professionalName: strOrNull(value, 'professionalName'),
+      agreement: v2 ? agreementFrom(value) : null,
       issuedOn: str(value, 'issuedOn'),
       validUntil: str(value, 'validUntil'),
       validityDays: num(value, 'validityDays'),
@@ -298,12 +431,15 @@ export function parseQuoteContent(value: unknown): QuoteContent {
         unitPrice: num(item, 'unitPrice'),
         discount: num(item, 'discount'),
         subtotal: num(item, 'subtotal'),
+        listPrice: v2 ? numOrNull(item, 'listPrice') : null,
+        agreementName: v2 ? strOrNull(item, 'agreementName') : null,
       })),
       totals: list(value, 'totals').map((total) => ({
         currency: str(total, 'currency'),
         gross: num(total, 'gross'),
         discount: num(total, 'discount'),
         net: num(total, 'net'),
+        agreementSaving: v2 ? num(total, 'agreementSaving') : 0,
       })),
     };
   } catch (error) {

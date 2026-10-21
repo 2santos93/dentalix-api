@@ -80,6 +80,15 @@ export class CreateCatalogItemDto {
   @IsString()
   cupsCode?: string | null;
 
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'DX-105: false = la prestación no admite descuentos. Por defecto true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowDiscount?: boolean;
+
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   @IsBoolean()

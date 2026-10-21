@@ -108,7 +108,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
-   el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), planes de tratamiento en todos
+   el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
    el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
@@ -574,6 +574,100 @@ hasta 1 h (SEC-028).
   hueco: la EXCLUDE por profesional deja una y la otra recibe 409.
 - El texto del `wa.me` lo arma la web solo con nombre de pila, fecha, hora,
   sede y profesional (nunca motivo ni tratamiento).
+
+## Horario de cada profesional por sede (DX-233)
+
+- **Modelo** (migración `20261020220100_dx233_provider_schedules`):
+  `provider_schedules` (un horario vivo por profesional y sede: único
+  PARCIAL), `provider_schedule_ranges` (tramos semanales: día 0–6, minutos de
+  pared de la sede), `provider_schedule_overrides` (excepción por fecha civil
+  de una sede, una viva por profesional, sede y fecha) y
+  `provider_schedule_override_ranges` (sus tramos; sin tramos = «no
+  trabaja»). RLS FORCE y FK compuestas por tenant a la sede y entre tablas;
+  `providerId` sin FK, como `appointments` (la API exige un miembro activo
+  DENTIST o ADMIN). CHECK: minutos múltiplos de 5, `0 <= inicio < fin <=
+  1440`. EXCLUDE: dos tramos vivos del mismo profesional no se solapan el
+  mismo día de la semana (o la misma fecha, en las excepciones) en ninguna
+  sede. Todo se retira en blando. Las ausencias siguen siendo bloqueos
+  VACATION (DX-122).
+- **Regla** (`domain/provider-availability.ts`, `providerWorksAt`): sin
+  horario configurado = sin restricción (como una sede sin horario). Con
+  horario, la cita cabe completa en un tramo del profesional en ESA sede ese
+  día, en la zona vigente de la sede (cambio de hora incluido); la excepción
+  de la fecha prevalece sobre el semanal de esa sede. Nunca cruza medianoche.
+  El horario de la sede se sigue comprobando aparte (422).
+- **Endpoints**: `GET/PUT /providers/:providerId/schedule` (todas sus sedes
+  en un cuerpo; lista vacía = sin horario), `GET/POST/DELETE
+  /providers/:providerId/schedule-overrides` (POST crea o reemplaza la de esa
+  sede y fecha, de hoy a dos años), `GET /schedule/roster?weekStart&days&locationId`
+  (cuadrante profesional × día; con `locationId`, `worksAtLocation` y
+  `locationRanges` para sombrear la agenda) y `GET/PUT /schedule/settings`
+  (`strictProviderSchedule`). Leen los cuatro roles de agenda; escribe ADMIN.
+  Validación en español: ≤ 7 tramos por día y sede, sin solapes, y ningún
+  tramo el mismo día en dos sedes (también contra las excepciones). La
+  validación y la escritura van en la misma transacción con un candado por
+  profesional.
+- **Agenda**: crear o mover una cita fuera del horario del profesional la deja
+  agendar con el aviso en `warnings` y `warningCodes: ["PROVIDER_OFF_SCHEDULE"]`
+  (`warningCodes[i]` es el código de `warnings[i]`; los bloqueos que dejan
+  agendar llevan `SCHEDULE_BLOCK`). Con `tenants.providerScheduleStrict`
+  (modo estricto), 409 en español. «Buscar hueco» cruza el horario de la sede
+  con el del profesional cada día; «Ocupar este hueco» (DX-210) deja fuera a
+  quien caería fuera del horario de su profesional y trae
+  `providerOffSchedule`.
+- **Sedes permitidas (DX-089)**: a un profesional acotado a ciertas sedes no
+  se le pone horario semanal ni excepciones en las demás (400 en español;
+  quitarle una sede, sin tramos, siempre se puede). Un miembro acotado que lee
+  el horario, las excepciones o el cuadrante solo ve sus sedes, y en el
+  cuadrante solo a quien atiende en alguna de ellas; un `locationId` fuera de
+  las suyas es 403, como en la agenda. Con `locationId`, quien no atiende en
+  esa sede sale con `worksAtLocation: false`. El aviso de una cita sin
+  cabecera mira la sede donde se escribe (`writeLocationId`).
+- **Auditoría**: `PROVIDER_SCHEDULE` con `reason`
+  `PROVIDER_SCHEDULE_REPLACED`, `PROVIDER_SCHEDULE_OVERRIDE_SET`,
+  `PROVIDER_SCHEDULE_OVERRIDE_DELETED` o `PROVIDER_SCHEDULE_SETTINGS`, autor y
+  `scheduleChange: { before, after }` con los tramos (sedes, días o fechas y
+  minutos; nada de pacientes).
+
+## Alertas médicas en la agenda (DX-247)
+
+- **Solo banderas** (`medicalAlerts`, `domain/medical-alert-flags.ts`): cada
+  cita de `GET /appointments` y cada persona de `GET /appointments/in-clinic`
+  traen `hasCriticalAlert`, `requiresPremedication` (profilaxis antibiótica),
+  `anamnesisStatus` (`CURRENT` / `EXPIRED` / `MISSING`: «Sin anamnesis» no es
+  «sin alertas»), `alerts` (códigos de las banderas derivadas en el orden del
+  banner de la ficha; `alergiaMarcada` = otra alergia marcada como alerta, sin
+  el alérgeno) y `anamnesisReviewedAt`. Nunca alergias, condiciones,
+  medicamentos ni notas (Ley 1581 / RGPD); los leen los cuatro roles que ven
+  la agenda. Por lote: una lectura de la vigencia y UNA consulta (versión
+  vigente + última confirmación por paciente, con `LATERAL ... LIMIT 1` sobre
+  `mhv_tenant_patient_version_key` y `medical_history_reviews_tenant_patient_idx`).
+  `GET /appointments/:id` sigue sin banderas (la web usa la cita de la lista).
+- **Ficha**: `GET /patients/:patientId/medical-alerts` (los cuatro roles): las
+  mismas banderas con `validityMonths`, `anamnesisExpiresAt` y `lastReview`
+  (`UPDATED` o `NO_CHANGES`, fecha y quién). 404 para un paciente de otra
+  clínica.
+- **Vigencia** (`tenants.anamnesisValidityMonths`, 12 por defecto, CHECK
+  1..60): la anamnesis caduca a los N meses de calendario de la última versión
+  o de la última confirmación, la más reciente. `GET /medical-history/settings`
+  (cuatro roles) y `PUT` (solo ADMIN, 400 fuera de 1..60), auditado como
+  `MEDICAL_HISTORY` sin paciente con `reason` `ANAMNESIS_VALIDITY_SETTINGS` y
+  `statusChange` `MONTHS_12 → MONTHS_6`.
+- **«Sin cambios hoy»**: `POST /patients/:patientId/medical-history/no-changes`
+  (DENTIST, ASSISTANT, ADMIN; recepción 403) guarda en
+  `medical_history_reviews` quién, en qué sede y cuándo (hora del servidor de
+  BD, trigger) sobre la versión vigente; no crea una versión. Sin anamnesis,
+  409. Queda en la auditoría (`MEDICAL_HISTORY`, `UPDATE`, `reason`
+  `NO_CHANGES_CONFIRMED`, el paciente y el id de la confirmación; nada
+  clínico). Tabla con RLS FORCE, FK compuestas al paciente y a
+  `(tenantId, patientId, id)` de la versión (índice
+  `mhv_tenant_patient_id_key`, creado CONCURRENTLY) e inalterable como la
+  historia (DX-038).
+- **Seed demo**: Jorge Eduardo Ramírez (prótesis valvular) requiere
+  premedicación y entra primero en «En clínica» hoy; Ana María Zapata tiene la
+  anamnesis de hace 14 meses (caducada); la de Gustavo Ríos es de hace 13
+  meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
+  tienen anamnesis (p. ej. Daniela Montoya).
 
 ## Flujo del paciente en la clínica (DX-200)
 
@@ -1547,13 +1641,65 @@ coberturas por paciente, una principal. Sustituye al texto libre
   `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
   `insurerEps`, que queda DEPRECADO y de solo lectura: la API ya no lo
   escribe y un cliente antiguo que lo mande no da error.
-- **Demo**: `npm run seed:demo` crea 7 pagadores (Sura EPS, Sanitas,
-  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva) y una cobertura
+- **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
+  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una
   pendiente para ver los tres estados. El seed omite una clínica demo ya creada.
 - **Tests**: `payers.e2e-spec.ts`, `patient-coverages.e2e-spec.ts`,
   `appointments-coverage.e2e-spec.ts`, `patient-coverages.int-spec.ts` (RLS,
   FK compuestas, relleno) y los recuentos de `seed-demo.int-spec.ts`.
+
+## Convenios y listas de precios (DX-105)
+
+Precio de lista por sede y convenios por pagador (descuento porcentual o lista
+de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
+`price-lists`, `agreements` y `patient-agreements`; migraciones
+`20261020230000_dx105_enums` a `20261020230500_dx105_plan_item_pricing_location_fk`.
+
+- **Tablas**: `price_lists` (nombre, moneda, sede o toda la clínica, activa),
+  `price_list_items` (lista, prestación del catálogo, precio), `agreements`
+  (nombre, pagador, `kind` PERCENT_DISCOUNT | PRICE_LIST, `percent`,
+  `percentByCategory` en JSONB, lista, sede, vigencia, activo) y
+  `patient_agreements` (una asignación viva por paciente; el historial son las
+  retiradas; puede enlazar una cobertura del mismo pagador). Todas con RLS
+  FORCE y FK compuestas por `tenantId`. Los ítems del plan guardan una foto
+  inmutable: `basePrice`, `catalogPrice`, `priceSource`, `agreementId`,
+  `agreementName` y `pricingLocationId`. Cambiar o quitar el convenio después
+  no re-precia nada. El catálogo trae `allowDiscount`: sin él, el ítem no
+  admite descuento y el descuento masivo lo salta.
+- **Orden de resolución** al añadir un ítem sin `price`: convenio vigente del
+  paciente (porcentaje por categoría, luego general; o su lista de precios),
+  lista activa de la sede de escritura, precio de catálogo. Una lista de otra
+  moneda que la del plan se ignora y se pasa al siguiente paso. «Hoy» es el
+  día civil de la sede. `GET /patients/:id/price-quote` devuelve la misma
+  resolución sin escribir.
+- **Semántica de `catalogPrice` (R1)**: es la referencia resuelta (la del
+  convenio, la lista o el catálogo), no el precio de catálogo; `basePrice`
+  guarda siempre el de catálogo. Un precio por debajo de `catalogPrice` cuenta
+  como descuento discrecional; la rebaja del convenio no.
+- **Roles**: leer convenios, los 4 roles; listas de precios, ADMIN y rol
+  clínico; crear, editar y retirar ambos, ADMIN. Asignar convenio al paciente,
+  los 4 roles. `price-quote`, roles clínicos.
+- **Auditoría**: recursos `AGREEMENT` y `PRICE_LIST`; la asignación se audita
+  como `PATIENT` con `reason` `AGREEMENT_ASSIGNED|AGREEMENT_REMOVED`. La
+  metadata lleva nombres de campos, nunca importes ni datos del paciente.
+- **Presupuesto v2**: `GET …/quote` devuelve `version: 2` con `agreement`
+  (`{name, payerName}` del primer ítem con convenio; con varios, los nombres
+  unidos por « · »), `listPrice` y `agreementName` por línea y
+  `agreementSaving` en los totales (Σ max(0, `basePrice` − `catalogPrice`) de
+  los ítems con convenio). El hash es `dentalix-plan-quote-v2`; el v1 se
+  conserva intacto, `parseQuoteContent` lee ambos y una aceptación firmada
+  compara con el hash de su propia versión, así que las firmadas antes
+  siguen con `integrityOk: true`.
+- **Demo**: `npm run seed:demo` crea las listas «Tarifa Sede Norte» (5
+  precios, sede Norte) y «Convenio Alfa» (3), el pagador «Empresa Alfa», los
+  convenios «Sura EPS −15 %» y «Empresa Alfa lista» y los asigna a tres
+  pacientes. Se crean al final para no cambiar los precios de los planes de la
+  demo.
+- **Tests**: `plan-quote.spec.ts`, `price-lists.e2e-spec.ts`,
+  `agreements.e2e-spec.ts`, `patient-agreements.e2e-spec.ts`,
+  `treatment-plans-pricing.e2e-spec.ts`, `treatment-plan-quote.e2e-spec.ts`,
+  `price-lists-agreements.int-spec.ts` y los recuentos de `seed-demo.int-spec.ts`.
 
 ## Documentos del paciente (DX-151)
 
@@ -2056,6 +2202,24 @@ dentalix_email_dispatcher`) o repón la política como en
   `CONCURRENTLY` en otro fichero. Modelo:
   `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
   `test/owner-nosu/migrations-data.owner-spec.ts`.
+- **Políticas con `NULLIF`: `app.current_tenant` puede llegar vacío**
+  (DX-251, OPS-037): tras una transacción con `set_config(…, true)` la
+  variable no vuelve a NULL, queda en `''` el resto de la sesión, y `migrate
+  deploy` aplica todas las migraciones en una sola sesión. Con
+  `current_setting('app.current_tenant', true)::uuid` la política lanzaba
+  22P02 (`''::uuid`) en la siguiente migración que leyera una tabla con FORCE
+  (la FK de `patient_documents` hacia `patients`, tras el relleno de DX-225).
+  Toda política y todo SQL de migración nuevo escribe
+  `"tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid`:
+  con la variable vacía compara con NULL y **niega** la fila, igual que sin
+  clínica fijada. `20261020200050_dx251_rls_tenant_guc_nullif` y
+  `…230000_…_rest` reescribieron las existentes (y la función de las
+  particiones de `audit_events`) sin editar migraciones aplicadas. Lo vigilan
+  el lint `test/migrations/tenant-guc-nullif.spec.ts`,
+  `test/rls-catalog.int-spec.ts` (forma exacta), `test/rls-empty-tenant-guc.int-spec.ts`
+  (0 filas y sin error con la variable vacía) y
+  `test/owner-nosu/tenant-guc-empty.owner-spec.ts` (la FK se valida en esa
+  sesión con el owner sin superusuario).
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …
   REFERENCES` o `VALIDATE CONSTRAINT` necesita `NO FORCE` **en la tabla hija y
@@ -2130,7 +2294,9 @@ dentalix_email_dispatcher`) o repón la política como en
 
   Lo prueba `test/owner-nosu/shared-cluster.owner-spec.ts`.
 - **En local**, con un Postgres aparte (los roles son del clúster; p. ej.
-  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`): crea
+  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`, o sin
+  Docker `initdb` + `pg_ctl -o '-p 55432'` de PostgreSQL 16 como el usuario
+  `postgres`): crea
   el owner y la base como en el paso 1, aplica los pasos 2 a 4, y
   `DIRECT_URL=<owner> DATABASE_URL=<app> OWNER_NOSU_ADMIN_URL=<admin>/postgres
   npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
@@ -2148,6 +2314,20 @@ $ npm run test:e2e
 # test coverage
 $ npm run test:cov
 ```
+
+**Limpieza entre ficheros e2e/int (DX-251).** Cada `*.e2e-spec.ts` /
+`*.int-spec.ts` limpia con `await resetDatabase(raw)`
+(`test/support/e2e-fixtures.ts`: `TRUNCATE … CASCADE` de todas las tablas de
+datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
+hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
+fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
+
+**CI.** `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
+su MinIO): un rojo en `test:int` no oculta la e2e. El MinIO de prueba es
+`cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
+y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
+si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
+el resto de la suite sigue corriendo.
 
 ## Deployment
 

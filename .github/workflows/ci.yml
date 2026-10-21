@@ -5,10 +5,13 @@ on:
     branches: [main]
   pull_request:
 
-# Un push nuevo a la misma rama/PR cancela la ejecución anterior.
+# En un PR, un push nuevo cancela la ejecución anterior. En `main` NO (DX-251,
+# TST-028): cada merge tiene su propia run completa. El grupo lleva el sha en
+# los push para que una run de main tampoco quede «pendiente» y se cancele al
+# entrar el siguiente merge.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -46,8 +49,11 @@ jobs:
       - name: Comprobar la entrada de start:prod
         run: test -f dist/main.js
 
+  # DX-251 (TST-028): integración y e2e en jobs SEPARADOS, cada uno con su
+  # Postgres y su S3: un rojo en `test:int` ya no impide ver la e2e, y los dos
+  # informan su resultado en cada run.
   integration:
-    name: Integración y e2e (Postgres 16)
+    name: Integración (Postgres 16)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -83,9 +89,9 @@ jobs:
       TRUST_PROXY: 'false'
       STORAGE_DIR: ./storage-test
       FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
-      # DX-084: MinIO del paso «Levantar MinIO». Con REQUIRE_S3_TESTS=1 los
-      # tests de S3 (int y e2e) fallan si falta S3_TEST_ENDPOINT en vez de
-      # saltarse. Credenciales SOLO de test, las de docker-compose.
+      # DX-084: S3 de prueba (MinIO) del paso «Levantar S3 de prueba». Con
+      # REQUIRE_S3_TESTS=1 los tests de S3 fallan si falta S3_TEST_ENDPOINT en
+      # vez de saltarse. Credenciales SOLO de test, las de docker-compose.
       S3_TEST_ENDPOINT: http://localhost:9000
       S3_TEST_BUCKET: dentalix-test
       S3_TEST_ACCESS_KEY_ID: dentalix-minio
@@ -102,31 +108,26 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
 
-      # DX-084: MinIO para los tests de S3. Como paso y no como `services:`:
-      # la imagen necesita el comando `server /data`, que un servicio de
-      # Actions no puede pasar. Los tests crean el bucket si no existe.
-      - name: Levantar MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_TEST_ACCESS_KEY_ID" \
-            -e MINIO_ROOT_PASSWORD="$S3_TEST_SECRET_ACCESS_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 30); do
-            curl -fsS http://localhost:9000/minio/health/live && exit 0
-            sleep 2
-          done
-          docker logs minio
-          exit 1
+      # DX-084/DX-251: MinIO como paso y no como `services:` (la imagen necesita
+      # `server /data`, que un servicio de Actions no puede pasar). Imagen fijada
+      # por digest en el script. Si no se puede descargar o no arranca, el paso
+      # queda en ROJO con un error que lo dice, pero los pasos siguientes corren
+      # igual: solo los tests de S3 fallan por ello, el resto informa.
+      - name: Levantar S3 de prueba (MinIO)
+        id: s3
+        run: .github/scripts/start-test-s3.sh
 
       # Los servicios de Actions no montan /docker-entrypoint-initdb.d: se aplica
       # a mano el mismo script que usa docker-compose (rol RLS + default privileges).
       - name: Crear el rol de la app (docker/db-init)
+        if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
         env:
           PGPASSWORD: dentalix
         run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix -d dentalix_test -f docker/db-init/01-app-role.sql
 
       # Los scripts de test leen `.env.test` (dotenv -e); se genera desde el env del job.
       - name: Generar .env.test
+        if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
         run: |
           for k in DATABASE_URL DIRECT_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET \
                    JWT_ACCESS_TTL JWT_REFRESH_TTL EXCHANGE_APP_ID EXCHANGE_BASE_URL \
@@ -136,12 +137,110 @@ jobs:
             printf '%s="%s"\n' "$k" "${!k}"
           done > .env.test
 
-      - run: npm run db:test:setup
+      - name: Migrar y sembrar la base de test (db:test:setup)
+        id: db
+        if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
+        run: npm run db:test:setup
       # DX-134: la comprobación del runbook tras desplegar (README).
       - name: Comprobar FORCE tras migrar (db:check-force)
+        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         run: npm run db:check-force
-      - run: npm run test:int
-      - run: npm run test:e2e
+      - name: test:int
+        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        run: npm run test:int
+
+  e2e:
+    name: E2E (Postgres 16)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dentalix
+          POSTGRES_PASSWORD: dentalix
+          POSTGRES_DB: dentalix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dentalix -d dentalix_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Valores SOLO de test, ficticios: no son secretos reales ni deben serlo.
+      # Misma forma que el `.env.test` local (owner `dentalix` para migrar,
+      # rol `dentalix_app` sin privilegios para que la app corra bajo RLS).
+      DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_test?schema=public
+      DIRECT_URL: postgresql://dentalix:dentalix@localhost:5432/dentalix_test?schema=public
+      # Secretos JWT ficticios y públicos: ≥32 caracteres y distintos para pasar
+      # la validación del arranque; la marca "solo-test" hace que la API los
+      # rechace con NODE_ENV=production.
+      JWT_ACCESS_SECRET: solo-test-ci-access-4f1d9b2e7a6c3058e1b4d7a0c9f2e6b3
+      JWT_REFRESH_SECRET: solo-test-ci-refresh-8c2a5e9f1b7d4063a2e5c8f1b4d7a0e9
+      JWT_ACCESS_TTL: 900s
+      JWT_REFRESH_TTL: 30d
+      EXCHANGE_APP_ID: ''
+      EXCHANGE_BASE_URL: https://openexchangerates.org/api
+      TENANT_BASE_DOMAINS: dentalix.app,localhost
+      TRUST_PROXY: 'false'
+      STORAGE_DIR: ./storage-test
+      FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
+      # DX-084: S3 de prueba (MinIO) del paso «Levantar S3 de prueba». Con
+      # REQUIRE_S3_TESTS=1 los tests de S3 fallan si falta S3_TEST_ENDPOINT en
+      # vez de saltarse. Credenciales SOLO de test, las de docker-compose.
+      S3_TEST_ENDPOINT: http://localhost:9000
+      S3_TEST_BUCKET: dentalix-test
+      S3_TEST_ACCESS_KEY_ID: dentalix-minio
+      S3_TEST_SECRET_ACCESS_KEY: dentalix-minio-local
+      REQUIRE_S3_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      # DX-084/DX-251: MinIO como paso y no como `services:` (la imagen necesita
+      # `server /data`, que un servicio de Actions no puede pasar). Imagen fijada
+      # por digest en el script. Si no se puede descargar o no arranca, el paso
+      # queda en ROJO con un error que lo dice, pero los pasos siguientes corren
+      # igual: solo los tests de S3 fallan por ello, el resto informa.
+      - name: Levantar S3 de prueba (MinIO)
+        id: s3
+        run: .github/scripts/start-test-s3.sh
+
+      # Los servicios de Actions no montan /docker-entrypoint-initdb.d: se aplica
+      # a mano el mismo script que usa docker-compose (rol RLS + default privileges).
+      - name: Crear el rol de la app (docker/db-init)
+        if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
+        env:
+          PGPASSWORD: dentalix
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix -d dentalix_test -f docker/db-init/01-app-role.sql
+
+      # Los scripts de test leen `.env.test` (dotenv -e); se genera desde el env del job.
+      - name: Generar .env.test
+        if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
+        run: |
+          for k in DATABASE_URL DIRECT_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET \
+                   JWT_ACCESS_TTL JWT_REFRESH_TTL EXCHANGE_APP_ID EXCHANGE_BASE_URL \
+                   TENANT_BASE_DOMAINS TRUST_PROXY STORAGE_DIR FILES_PUBLIC_BASE_URL \
+                   S3_TEST_ENDPOINT S3_TEST_BUCKET S3_TEST_ACCESS_KEY_ID \
+                   S3_TEST_SECRET_ACCESS_KEY; do
+            printf '%s="%s"\n' "$k" "${!k}"
+          done > .env.test
+
+      - name: Migrar y sembrar la base de test (db:test:setup)
+        id: db
+        if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
+        run: npm run db:test:setup
+      - name: test:e2e
+        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        run: npm run test:e2e
 
   # DX-113: en un Postgres gestionado (RDS, Cloud SQL…) el owner de las tablas
   # NO es superusuario ni tiene BYPASSRLS, y con RLS FORCE queda sujeto a la

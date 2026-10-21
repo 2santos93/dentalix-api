@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DX-036 / DB-003: las EXCLUDE anti-solape de citas se evalúan SALTANDO la RLS.
 // Antes no incluían `tenantId`, así que un profesional que trabaja en dos
@@ -113,15 +114,7 @@ function book(
 }
 
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.appointment.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.locationScheduleRange.deleteMany();
-  await raw.locationSchedule.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.location.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {

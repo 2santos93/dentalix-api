@@ -24,6 +24,7 @@ function fakeItemFrom(
     color: input.color,
     defaultPrice: input.defaultPrice ?? null,
     cupsCode: input.cupsCode ?? null,
+    allowDiscount: input.allowDiscount ?? true,
     active: input.active ?? true,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -38,6 +39,7 @@ function makeRepo(
       Promise.resolve(fakeItemFrom('c1', input)),
     findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),
     list: (): Promise<DentalCatalogItem[]> => Promise.resolve([]),
+    findByIds: () => Promise.resolve([]),
     listDirectory: () =>
       Promise.reject(new Error('not implemented in this fake')),
     update: (): Promise<DentalCatalogItem> =>
@@ -62,6 +64,31 @@ describe('CreateCatalogItemUseCase', () => {
     expect(result.code).toBe('CAR-001');
     expect(result.kind).toBe(CatalogKind.DIAGNOSIS);
     expect(result.color).toBe('#FF0000');
+  });
+
+  it('allowDiscount: false llega al repositorio; omitido, no se envía (el default es true en la BD)', async () => {
+    const captured: CreateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      create: (input) => {
+        captured.push(input);
+        return Promise.resolve(fakeItemFrom('c3', input));
+      },
+    });
+    const uc = new CreateCatalogItemUseCase(repo);
+    const base = {
+      code: 'PRO-001',
+      kind: CatalogKind.PROCEDURE,
+      labelEs: 'Limpieza',
+      color: '#00FF00',
+    };
+
+    const off = await uc.execute({ ...base, allowDiscount: false });
+    const unset = await uc.execute(base);
+
+    expect(captured[0].allowDiscount).toBe(false);
+    expect(off.allowDiscount).toBe(false);
+    expect(captured[1].allowDiscount).toBeUndefined();
+    expect(unset.allowDiscount).toBe(true);
   });
 
   it('normalizes code (trim) before persisting', async () => {

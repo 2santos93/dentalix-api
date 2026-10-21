@@ -89,7 +89,8 @@
     "rootDir": "src",
     "roots": [
       "<rootDir>",
-      "<rootDir>/../test/migrations"
+      "<rootDir>/../test/migrations",
+      "<rootDir>/../test/invariants"
     ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {

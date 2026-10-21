@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // SEC-005 — POST /patients con `medicalHistory` crea la anamnesis v1, que es
 // historia clínica (CLINICAL_ROLES). Recepción crea pacientes, pero sin ese
@@ -32,13 +33,7 @@ const MEDICAL_HISTORY = {
 };
 
 async function cleanup(): Promise<void> {
-  await raw.medicalHistoryVersion.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Alta de paciente con anamnesis inicial según rol — POST /patients (e2e)', () => {

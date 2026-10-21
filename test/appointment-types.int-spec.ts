@@ -5,6 +5,8 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaScheduleBlockRepository } from '../src/modules/schedule-blocks/infrastructure/repositories/prisma-schedule-block.repository';
 import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
+import { ProviderAvailabilityService } from '../src/modules/provider-schedule/application/provider-availability.service';
+import { PrismaProviderScheduleRepository } from '../src/modules/provider-schedule/infrastructure/prisma-provider-schedule.repository';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
 import type { LocationScheduleRepository } from '../src/modules/location-schedule/domain/ports/location-schedule-repository.port';
@@ -21,6 +23,12 @@ const raw = new PrismaClient({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
+// DX-233: la regla real del horario del profesional (aquí nadie tiene
+// horario: sin restricción, como antes).
+const availability = new ProviderAvailabilityService(
+  new PrismaProviderScheduleRepository(prisma, tenantContext),
+  new PrismaLocationRepository(prisma, tenantContext),
+);
 
 const SUBDOMAINS = ['dx121-a', 'dx121-b', 'dx121-volumen'];
 
@@ -269,6 +277,7 @@ describe('tipos de cita y agenda en columnas (int, DX-121)', () => {
         new PrismaScheduleBlockRepository(prisma, tenantContext),
         new PrismaLocationRepository(prisma, tenantContext),
         tenantContext,
+        availability,
       );
 
       const move = (id: string) =>

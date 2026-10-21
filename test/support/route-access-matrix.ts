@@ -163,6 +163,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // periodontograma: loop/informes/DX-007.md.
   'GET /patients/:patientId/medical-history': CLINICAL,
   'PUT /patients/:patientId/medical-history': CLINICAL,
+  // DX-247: «Sin cambios hoy» es de quien ve la anamnesis; las banderas
+  // mínimas, de los roles que ven la agenda (recepción prepara la visita).
+  'POST /patients/:patientId/medical-history/no-changes': CLINICAL,
+  'GET /patients/:patientId/medical-alerts': EVERY_ROLE,
+  'GET /medical-history/settings': EVERY_ROLE,
+  'PUT /medical-history/settings': ADMIN_ONLY,
   'POST /patients/:patientId/clinical-entries': CLINICAL,
   'GET /patients/:patientId/clinical-entries': CLINICAL,
   // DX-038: adendas; PATCH/PUT/DELETE solo responden 405 (HC inalterable).
@@ -321,6 +327,24 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /payers': roles('ADMIN', 'RECEPTION'),
   'PATCH /payers/:id': ADMIN_ONLY,
   'DELETE /payers/:id': ADMIN_ONLY,
+  // DX-105: listas de precios (leerlas: quien arma el plan; escribirlas: ADMIN).
+  'GET /price-lists': CLINICAL,
+  'POST /price-lists': ADMIN_ONLY,
+  'PATCH /price-lists/:id': ADMIN_ONLY,
+  'DELETE /price-lists/:id': ADMIN_ONLY,
+  'GET /price-lists/:id/items': CLINICAL,
+  'PUT /price-lists/:id/items': ADMIN_ONLY,
+  // DX-105: convenios (leerlos: los 4 roles; escribirlos: ADMIN).
+  'GET /agreements': EVERY_ROLE,
+  'POST /agreements': ADMIN_ONLY,
+  'PATCH /agreements/:id': ADMIN_ONLY,
+  'DELETE /agreements/:id': ADMIN_ONLY,
+  // DX-105: convenio del paciente (PATIENT_ROLES).
+  'GET /patients/:patientId/agreement': EVERY_ROLE,
+  'PUT /patients/:patientId/agreement': EVERY_ROLE,
+  'DELETE /patients/:patientId/agreement': EVERY_ROLE,
+  // DX-105: precio resuelto de un ítem nuevo (CLINICAL_ROLES, R15).
+  'GET /patients/:patientId/price-quote': CLINICAL,
   // DX-153: coberturas del paciente (PATIENT_ROLES).
   'GET /patients/:patientId/coverages': EVERY_ROLE,
   'POST /patients/:patientId/coverages': EVERY_ROLE,
@@ -434,6 +458,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /locations/:id': ADMIN_ONLY,
   'GET /locations/schedule': EVERY_ROLE,
   'PUT /locations/schedule': ADMIN_ONLY,
+  // Horario de cada profesional por sede (DX-233, loop/informes/DX-233.md):
+  // lo leen los 4 roles de agenda (editor, cuadrante, sombreado); lo cambia
+  // solo ADMIN, igual que el horario de la sede.
+  'GET /providers/:providerId/schedule': EVERY_ROLE,
+  'PUT /providers/:providerId/schedule': ADMIN_ONLY,
+  'GET /providers/:providerId/schedule-overrides': EVERY_ROLE,
+  'POST /providers/:providerId/schedule-overrides': ADMIN_ONLY,
+  'DELETE /providers/:providerId/schedule-overrides/:overrideId': ADMIN_ONLY,
+  'GET /schedule/roster': EVERY_ROLE,
+  'GET /schedule/settings': EVERY_ROLE,
+  'PUT /schedule/settings': ADMIN_ONLY,
   // Ajustes → Recordatorios por sede (DX-026): solo ADMIN, también para leer.
   'GET /reminder-settings': ADMIN_ONLY,
   'PUT /reminder-settings/:locationId': ADMIN_ONLY,

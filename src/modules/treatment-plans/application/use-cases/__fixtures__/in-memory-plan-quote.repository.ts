@@ -25,6 +25,10 @@ export function quoteSource(
         procedure: 'Implante',
         price: 3500000,
         discount: 350000,
+        basePrice: null,
+        referencePrice: null,
+        agreementName: null,
+        agreementPayerName: null,
       },
       {
         id: 'item-2',
@@ -33,6 +37,10 @@ export function quoteSource(
         procedure: 'Resina',
         price: 180000,
         discount: 0,
+        basePrice: null,
+        referencePrice: null,
+        agreementName: null,
+        agreementPayerName: null,
       },
     ],
     patient: {

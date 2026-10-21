@@ -40,10 +40,16 @@ import {
   type CoverageSummary,
 } from '../../patient-coverages/application/patient-coverage-flags';
 import type { OverdueBalance } from '../../collections/domain/overdue-balance';
+import { PatientMedicalAlertFlags } from '../../medical-history/application/patient-medical-alert-flags';
+import {
+  NO_ANAMNESIS_FLAGS,
+  type MedicalAlertFlags,
+} from '../../medical-history/domain/medical-alert-flags';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
 import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
 import {
   ListInClinicUseCase,
+  type InClinicItem,
   type InClinicView,
 } from '../application/use-cases/list-in-clinic.use-case';
 import {
@@ -113,6 +119,8 @@ export class AppointmentsController {
     private readonly balanceFlags: PatientBalanceFlags,
     // DX-153: resumen de cobertura del paciente en las tarjetas.
     private readonly coverageFlags: PatientCoverageFlags,
+    // DX-247: banderas médicas mínimas (nunca la historia) en las tarjetas.
+    private readonly medicalAlertFlags: PatientMedicalAlertFlags,
     private readonly audit: RecordAuditEventUseCase,
     private readonly listInClinic: ListInClinicUseCase,
   ) {}
@@ -194,7 +202,7 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: [AppointmentListItemDto],
     description:
-      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Y con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote.',
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica.',
   })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
@@ -203,7 +211,11 @@ export class AppointmentsController {
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    (Appointment & { balance: OverdueBalance; coverage: CoverageSummary })[]
+    (Appointment & {
+      balance: OverdueBalance;
+      coverage: CoverageSummary;
+      medicalAlerts: MedicalAlertFlags;
+    })[]
   > {
     const appointments = await this.listAppointments.execute({
       from: new Date(query.from),
@@ -218,6 +230,8 @@ export class AppointmentsController {
     );
     const patientIds = appointments.map((a) => a.patientId);
     const coverage = await this.coverageFlags.forPatients(patientIds);
+    // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
+    const medical = await this.medicalAlertFlags.forAppointments(appointments);
     return appointments.map((a) => ({
       ...a,
       balance: flags.get(a.patientId) ?? {
@@ -225,6 +239,7 @@ export class AppointmentsController {
         overdueDays: null,
       },
       coverage: coverage.get(a.patientId) ?? NO_COVERAGE,
+      medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
     }));
   }
 
@@ -258,22 +273,43 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: InClinicViewDto,
     description:
-      'DX-200 panel «En clínica» de la sede del request (X-Location-Id): en espera, en sillón y listo para cobrar de un día civil en la zona de la sede, con los minutos calculados con el reloj del servidor y la puntualidad de la llegada. Solo nombre y horas (nada clínico). DENTIST: solo sus pacientes («Te esperan»); RECEPTION, ASSISTANT y ADMIN: toda la sede.',
+      'DX-200 panel «En clínica» de la sede del request (X-Location-Id): en espera, en sillón y listo para cobrar de un día civil en la zona de la sede, con los minutos calculados con el reloj del servidor y la puntualidad de la llegada. Solo nombre, horas y, desde DX-247, las banderas médicas mínimas (`medicalAlerts`), nunca la historia. DENTIST: solo sus pacientes («Te esperan»); RECEPTION, ASSISTANT y ADMIN: toda la sede.',
   })
   @ApiBadRequestResponse({
     description:
       'Sin sede (X-Location-Id), sede de otra clínica o fecha inválida',
   })
-  inClinic(
+  async inClinic(
     @Query() query: InClinicQueryDto,
     @Req() req: { user: JwtPayload },
-  ): Promise<InClinicView> {
-    return this.listInClinic.execute({
+  ): Promise<
+    InClinicView<InClinicItem & { medicalAlerts: MedicalAlertFlags }>
+  > {
+    const view = await this.listInClinic.execute({
       locationId: this.tenantContext.getLocationId(),
       date: query.date,
       role: isTenantPayload(req.user) ? req.user.role : null,
       userId: req.user.sub,
     });
+    // DX-247: la misma alerta que la agenda, en una sola lectura por lote,
+    // evaluada el día del panel en la zona de la sede.
+    const medical = await this.medicalAlertFlags.forPatients(
+      [...view.waiting, ...view.inChair, ...view.readyForCheckout].map(
+        (i) => i.patientId,
+      ),
+      { date: view.date, timeZone: view.timeZone },
+    );
+    const withAlerts = (items: InClinicItem[]) =>
+      items.map((i) => ({
+        ...i,
+        medicalAlerts: medical.get(i.patientId) ?? NO_ANAMNESIS_FLAGS,
+      }));
+    return {
+      ...view,
+      waiting: withAlerts(view.waiting),
+      inChair: withAlerts(view.inChair),
+      readyForCheckout: withAlerts(view.readyForCheckout),
+    };
   }
 
   @Get(':id')

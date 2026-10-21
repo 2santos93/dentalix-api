@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es la conexión de ADMINISTRACIÓN (DIRECT_URL, superuser) para
 // sembrar y limpiar: con RLS aplicado, una conexión sin contexto de tenant no
@@ -27,6 +28,7 @@ interface CatalogItemBody {
   labelEs: string;
   kind: 'DIAGNOSIS' | 'PROCEDURE';
   active: boolean;
+  allowDiscount: boolean;
 }
 interface DirectoryBody {
   items: CatalogItemBody[];
@@ -35,16 +37,11 @@ interface DirectoryBody {
   pageSize: number;
 }
 
+// `resetDatabase` vacía todas las tablas de clínica: borrar a mano en orden de
+// FK falla en cuanto otro spec (role-matrix, aislamiento...) dejó abonos, listas
+// de precios u otras filas colgando de los planes.
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
@@ -86,7 +83,12 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
     // sean exactos y legibles: si no, cada aserción tendría que ir contra una
     // línea base que cambia cada vez que alguien añade un procedimiento al
     // catálogo semilla, y el test fallaría por un motivo que no es el suyo.
-    await raw.dentalCatalogItem.deleteMany();
+    // Solo el catálogo de ESTA clínica (DX-251: sin deleteMany() a ciegas).
+    const { id: tenantId } = await raw.tenant.findUniqueOrThrow({
+      where: { subdomain: SUBDOMAIN },
+      select: { id: true },
+    });
+    await raw.dentalCatalogItem.deleteMany({ where: { tenantId } });
 
     // 25 procedimientos + 1 diagnóstico inactivo. 25 pasa del tamaño de página
     // por defecto (20) a propósito: sin eso, "paginado" y "sin paginar" darían
@@ -231,5 +233,65 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
     // del que dependen el odontograma y el plan de tratamiento.
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body as CatalogItemBody[]).toHaveLength(26);
+  });
+
+  it('allowDiscount (DX-105): nace en true, el PATCH lo apaga y el directorio y el listado lo devuelven', async () => {
+    const created = await auth(
+      request(app.getHttpServer()).post('/api/v1/catalog/items'),
+    )
+      .send({
+        code: 'P-NODESC',
+        kind: 'PROCEDURE',
+        labelEs: 'Prestación sin descuento',
+        color: '#0E7490',
+      })
+      .expect(201);
+    const item = created.body as CatalogItemBody;
+    expect(item.allowDiscount).toBe(true);
+
+    const patched = await auth(
+      request(app.getHttpServer()).patch(`/api/v1/catalog/items/${item.id}`),
+    )
+      .send({ allowDiscount: false })
+      .expect(200);
+    expect((patched.body as CatalogItemBody).allowDiscount).toBe(false);
+
+    const directory = await auth(
+      request(app.getHttpServer()).get(
+        '/api/v1/catalog/items/directory?query=P-NODESC',
+      ),
+    ).expect(200);
+    expect((directory.body as DirectoryBody).items[0].allowDiscount).toBe(
+      false,
+    );
+
+    const list = await auth(
+      request(app.getHttpServer()).get('/api/v1/catalog/items'),
+    ).expect(200);
+    expect(
+      (list.body as CatalogItemBody[]).find((i) => i.id === item.id)
+        ?.allowDiscount,
+    ).toBe(false);
+
+    await auth(
+      request(app.getHttpServer()).patch(`/api/v1/catalog/items/${item.id}`),
+    )
+      .send({ allowDiscount: 'no' })
+      .expect(400);
+  });
+
+  it('allowDiscount: false en el alta se respeta', async () => {
+    const created = await auth(
+      request(app.getHttpServer()).post('/api/v1/catalog/items'),
+    )
+      .send({
+        code: 'P-NODESC2',
+        kind: 'PROCEDURE',
+        labelEs: 'Otra sin descuento',
+        color: '#0E7490',
+        allowDiscount: false,
+      })
+      .expect(201);
+    expect((created.body as CatalogItemBody).allowDiscount).toBe(false);
   });
 });

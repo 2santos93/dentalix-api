@@ -8,6 +8,8 @@ import type { LocationRepository } from '../../../locations/domain/ports/locatio
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
+import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
 
 // Un martes futuro (para que "ahora" no recorte nada), en Bogotá (UTC−5).
 function nextTuesday(): string {
@@ -51,6 +53,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     appointments = new InMemoryAppointmentRepository(),
     blocks = new InMemoryScheduleBlockRepository(),
     hours: BusinessHours | null = HOURS,
+    providerSchedules = new InMemoryProviderScheduleRepository(),
   ) {
     return new FindOpeningsUseCase(
       appointments,
@@ -60,6 +63,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       staff,
       patients,
       new TenantContextService(),
+      inMemoryAvailability(providerSchedules),
     );
   }
 
@@ -164,5 +168,73 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     await expect(uc.execute({ ...query, providerId: 'rec1' })).rejects.toThrow(
       BadRequestException,
     );
+  });
+
+  describe('con el horario del profesional (DX-233)', () => {
+    // Martes: el profesional solo 10:00–12:00 en loc1 (la sede, 9–13).
+    function withSchedule() {
+      const repo = new InMemoryProviderScheduleRepository();
+      repo.weekly.set('prov1', [
+        { locationId: 'loc1', weekday: 2, startMinute: 600, endMinute: 720 },
+        { locationId: 'loc2', weekday: 4, startMinute: 540, endMinute: 780 },
+      ]);
+      return repo;
+    }
+
+    it('solo propone huecos dentro de su horario en esa sede', async () => {
+      const appointments = new InMemoryAppointmentRepository();
+      appointments.seed({
+        providerId: 'prov1',
+        start: z('16:00'),
+        end: z('16:30'),
+      });
+      const result = await build(
+        appointments,
+        undefined,
+        HOURS,
+        withSchedule(),
+      ).execute(query);
+      expect(result.openings.map((o) => [o.start, o.end])).toEqual([
+        [z('15:00'), z('16:00')],
+        [z('16:30'), z('17:00')],
+      ]);
+    });
+
+    it('con una excepción «no trabaja» ese día no devuelve nada', async () => {
+      const repo = withSchedule();
+      repo.overrides.set('prov1', [
+        { id: 'o1', locationId: 'loc1', date: DAY, ranges: [], note: null },
+      ]);
+      const result = await build(undefined, undefined, HOURS, repo).execute(
+        query,
+      );
+      expect(result.openings).toEqual([]);
+    });
+
+    it('con una excepción de otro horario, los huecos de la excepción', async () => {
+      const repo = withSchedule();
+      repo.overrides.set('prov1', [
+        {
+          id: 'o1',
+          locationId: 'loc1',
+          date: DAY,
+          ranges: [{ startMinute: 540, endMinute: 600 }],
+          note: null,
+        },
+      ]);
+      const result = await build(undefined, undefined, HOURS, repo).execute(
+        query,
+      );
+      expect(result.openings.map((o) => [o.start, o.end])).toEqual([
+        [z('14:00'), z('15:00')],
+      ]);
+    });
+
+    it('sin horario configurado, exactamente como antes (regresión)', async () => {
+      const plain = await build().execute(query);
+      expect(plain.openings.map((o) => [o.start, o.end])).toEqual([
+        [z('14:00'), z('18:00')],
+      ]);
+    });
   });
 });

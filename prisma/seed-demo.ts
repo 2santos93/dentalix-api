@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AppointmentStatus,
   ClinicRole,
+  Prisma,
   ScheduleBlockKind,
   TreatmentPlanStatus,
   WaitlistPriority,
@@ -33,6 +34,19 @@ import {
   BusinessHours,
   fitsBusinessHours,
 } from '../src/modules/location-schedule/application/business-hours';
+import {
+  CreatePriceListUseCase,
+  ListPriceListsUseCase,
+  ReplacePriceListItemsUseCase,
+} from '../src/modules/price-lists/application/use-cases/price-lists.use-cases';
+import {
+  CreateAgreementUseCase,
+  ListAgreementsUseCase,
+} from '../src/modules/agreements/application/use-cases/agreements.use-cases';
+import {
+  AssignPatientAgreementUseCase,
+  GetPatientAgreementUseCase,
+} from '../src/modules/patient-agreements/application/use-cases/patient-agreements.use-cases';
 import { UpdateCatalogItemUseCase } from '../src/modules/dental-catalog/application/use-cases/update-catalog-item.use-case';
 import { CreatePatientUseCase } from '../src/modules/patients/application/use-cases/create-patient.use-case';
 import { CreateResponsiblePartyUseCase } from '../src/modules/patients/application/use-cases/responsible-parties.use-cases';
@@ -100,6 +114,7 @@ import {
   daysAgoAt,
   daysUntilMondayAfterNext,
   daysUntilNextWeekday,
+  daysUntilRotationCover,
   planAppointments,
   planInClinicToday,
 } from './demo/calendar';
@@ -110,6 +125,14 @@ import {
   ListWaitlistUseCase,
 } from '../src/modules/waitlist/application/use-cases/waitlist.use-cases';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import { ConfirmAnamnesisNoChangesUseCase } from '../src/modules/medical-history/application/use-cases/medical-alerts.use-cases';
+import { deriveSafetyFlags } from '../src/modules/medical-history/domain/safety-flags';
+import type { MedicalHistoryVersionData } from '../src/modules/medical-history/domain/ports/medical-history-repository.port';
+import {
+  ReplaceProviderScheduleUseCase,
+  SetProviderOverrideUseCase,
+} from '../src/modules/provider-schedule/application/use-cases/provider-schedule.use-cases';
 import {
   LoadSamplePostOpTemplatesUseCase,
   UpdatePostOpTemplateUseCase,
@@ -133,6 +156,7 @@ import {
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
+  DEMO_ROTATION,
   DEMO_VACATION,
   DEMO_WAITLIST,
   DEMO_PERIO,
@@ -154,7 +178,12 @@ import {
   DEMO_COLLECTION_NOTES,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
+  DEMO_MEDICAL_ALERTS,
   DEMO_PRICES,
+  DEMO_ALFA_PAYER,
+  DEMO_PRICE_LISTS,
+  DEMO_AGREEMENTS,
+  DEMO_PATIENT_AGREEMENTS,
   DEMO_CUPS,
   DEMO_PRINCIPAL_REPS,
   DEMO_PRINCIPAL_PHONE,
@@ -342,6 +371,13 @@ export async function seedDemo(
   } finally {
     await app.close();
   }
+}
+
+/** El mismo instante `months` meses de calendario antes (DX-247: anamnesis antigua). */
+function monthsBefore(date: Date, months: number): Date {
+  const out = new Date(date.getTime());
+  out.setUTCMonth(out.getUTCMonth() - months);
+  return out;
 }
 
 class DemoSeeder {
@@ -552,11 +588,20 @@ class DemoSeeder {
     );
 
     await this.inTenant(tenantId, undefined, () =>
+      this.createBackdatedAnamneses(tenantId, patientIds, dentists[1]),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
       this.createClinicalRecords(patientIds, dentists, catalog),
     );
 
     const typeByReason = await this.inTenant(tenantId, undefined, () =>
       this.createAppointmentTypes(ownerId),
+    );
+
+    // DX-233: antes de las citas, para que las suyas caigan en su horario.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createProviderRotation(tenantId, locations, dentists, ownerId),
     );
 
     const attended = await this.createAppointments(
@@ -638,6 +683,13 @@ class DemoSeeder {
 
     await this.inTenant(tenantId, undefined, () =>
       this.createImplants(patientIds, dentists),
+    );
+
+    // DX-105 al final: una lista activa en la Sede Norte o un convenio asignado
+    // re-precian los ítems que se añadan después, y los planes de la demo ya
+    // están fijados con sus precios de catálogo.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createAgreements(locations, patientIds, catalog, receptionId),
     );
 
     return this.requestConfirmations(tenantId, receptionId);
@@ -780,6 +832,100 @@ class DemoSeeder {
     return { principal: await read('principal'), norte: await read('norte') };
   }
 
+  /**
+   * DX-105: listas de precios, convenios y su asignación a tres pacientes, por
+   * los mismos casos de uso que la API. Idempotente: lista, convenio y
+   * pagador se buscan por nombre y la asignación se salta si el paciente ya
+   * tiene una viva.
+   */
+  private async createAgreements(
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    catalog: Map<string, string>,
+    receptionId: string,
+  ): Promise<void> {
+    const payers = await this.use(ListPayersUseCase).execute({
+      includeInactive: true,
+    });
+    const alfaPayer =
+      payers.find((p) => p.name === DEMO_ALFA_PAYER.name) ??
+      (await this.use(CreatePayerUseCase).execute(
+        {
+          name: DEMO_ALFA_PAYER.name,
+          type: DEMO_ALFA_PAYER.type,
+          country: 'CO',
+        },
+        receptionId,
+      ));
+    const payerIds = new Map(payers.map((p) => [p.name, p.id]));
+    payerIds.set(alfaPayer.name, alfaPayer.id);
+
+    const existingLists = await this.use(ListPriceListsUseCase).execute({
+      includeInactive: true,
+    });
+    const listIds = new Map<string, string>();
+    for (const spec of DEMO_PRICE_LISTS) {
+      let id = existingLists.find((l) => l.name === spec.name)?.id;
+      if (!id) {
+        const created = await this.use(CreatePriceListUseCase).execute(
+          {
+            name: spec.name,
+            currency: DEMO_CURRENCY,
+            locationId: spec.locationKey ? locations[spec.locationKey] : null,
+          },
+          receptionId,
+        );
+        id = created.id;
+        await this.use(ReplacePriceListItemsUseCase).execute(
+          id,
+          Object.entries(spec.prices).map(([code, price]) => ({
+            catalogItemId: catalogId(catalog, code),
+            price,
+          })),
+        );
+      }
+      listIds.set(spec.key, id);
+    }
+
+    const existingAgreements = await this.use(ListAgreementsUseCase).execute({
+      includeInactive: true,
+    });
+    const agreementIds = new Map<string, string>();
+    for (const spec of DEMO_AGREEMENTS) {
+      const id =
+        existingAgreements.find((a) => a.name === spec.name)?.id ??
+        (
+          await this.use(CreateAgreementUseCase).execute(
+            {
+              name: spec.name,
+              payerId: payerIds.get(spec.payerName) as string,
+              kind: spec.kind,
+              percent: spec.percent,
+              priceListId: spec.priceListKey
+                ? (listIds.get(spec.priceListKey) as string)
+                : null,
+            },
+            receptionId,
+          )
+        ).id;
+      agreementIds.set(spec.key, id);
+    }
+
+    for (const a of DEMO_PATIENT_AGREEMENTS) {
+      const patientId = patientIds[a.patientIndex];
+      const current = await this.use(GetPatientAgreementUseCase).execute(
+        patientId,
+        false,
+      );
+      if (current.current) continue;
+      await this.use(AssignPatientAgreementUseCase).execute(
+        patientId,
+        { agreementId: agreementIds.get(a.agreementKey) as string },
+        receptionId,
+      );
+    }
+  }
+
   /** Tarifas COP en el catálogo por defecto; devuelve código → id. */
   private async priceCatalog(tenantId: string): Promise<Map<string, string>> {
     const items = await this.prisma.runWithTenant(tenantId, (tx) =>
@@ -819,8 +965,15 @@ class DemoSeeder {
     policyVersionId: string,
   ): Promise<string[]> {
     const ids: string[] = [];
+    const backdated = new Set<number>(
+      DEMO_MEDICAL_ALERTS.backdated.map((b) => b.patientIndex),
+    );
     for (const [index, p] of DEMO_PATIENTS.entries()) {
-      const { city: cityName, birthDate, ...rest } = p;
+      const { city: cityName, birthDate, ...withHistory } = p;
+      // DX-247: la anamnesis antigua la siembra `createBackdatedAnamneses`.
+      const rest = backdated.has(index)
+        ? { ...withHistory, medicalHistory: undefined }
+        : withHistory;
       const city = await this.prisma.city.findFirst({
         where: { countryCode: 'CO', name: cityName },
         orderBy: { id: 'asc' },
@@ -843,7 +996,7 @@ class DemoSeeder {
         // SEC-005: la anamnesis inicial solo la escribe un rol clínico. El
         // paciente que llega con anamnesis lo da de alta el odontólogo; el
         // resto, recepción (mostrador), sin historia clínica.
-        ...(rest.medicalHistory
+        ...(withHistory.medicalHistory
           ? { createdById: dentistId, actorRole: ClinicRole.DENTIST }
           : { createdById: receptionId, actorRole: ClinicRole.RECEPTION }),
       });
@@ -1044,6 +1197,64 @@ class DemoSeeder {
       for (const reason of spec.reasons) typeByReason.set(reason, type.id);
     }
     return typeByReason;
+  }
+
+  /**
+   * DX-233: la segunda dentista rota entre las dos sedes (lun, mié y vie en
+   * la principal; mar y jue en la Norte) y, el lunes que vuelve de
+   * vacaciones, no va a la principal y cubre la Norte por la mañana. El ADMIN
+   * lo guarda con los mismos casos de uso que /settings/horarios (auditado).
+   */
+  private async createProviderRotation(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    dentists: string[],
+    ownerId: string,
+  ): Promise<void> {
+    const ctx: AuditRequestContext = {
+      tenantId,
+      locationId: null,
+      actor: { userId: ownerId, role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+    const providerId = dentists[DEMO_ROTATION.dentistIndex];
+    const keys: DemoLocationKey[] = ['principal', 'norte'];
+    await this.use(ReplaceProviderScheduleUseCase).execute(
+      providerId,
+      {
+        locations: keys.map((key) => ({
+          locationId: locations[key],
+          ranges: DEMO_ROTATION.weekdays[key].flatMap((weekday) =>
+            DEMO_ROTATION.ranges[key].map((r) => ({ weekday, ...r })),
+          ),
+        })),
+      },
+      ctx,
+    );
+    const cover = civilDateIn(
+      daysAgoAt(this.now, -daysUntilRotationCover(this.now), 12 * 60),
+      DEMO_TIMEZONE,
+    );
+    const overrides = this.use(SetProviderOverrideUseCase);
+    // Primero «no trabaja» en la principal: si no, la mañana de la Norte se
+    // solaparía con su lunes en la principal.
+    await overrides.execute(
+      providerId,
+      { locationId: locations.principal, date: cover, ranges: [] },
+      ctx,
+    );
+    await overrides.execute(
+      providerId,
+      {
+        locationId: locations.norte,
+        date: cover,
+        ranges: [...DEMO_ROTATION.cover.ranges],
+        note: DEMO_ROTATION.cover.note,
+      },
+      ctx,
+    );
   }
 
   private async createAppointments(
@@ -1320,6 +1531,64 @@ class DemoSeeder {
   }
 
   /**
+   * DX-247: anamnesis de hace más de un año, para ver «Anamnesis caducada» en
+   * la agenda y en la ficha. La historia es inalterable (no se puede antedatar
+   * una versión ya guardada), así que la versión 1 se inserta ya con su fecha,
+   * con las banderas derivadas en el dominio como en el alta. Al que la
+   * dentista revisó hoy, «Sin cambios hoy» por el mismo caso de uso que la API
+   * y su evento de auditoría (lo que escribe el `@Audit` de la ruta).
+   */
+  private async createBackdatedAnamneses(
+    tenantId: string,
+    patientIds: string[],
+    dentistId: string,
+  ): Promise<void> {
+    for (const b of DEMO_MEDICAL_ALERTS.backdated) {
+      const patientId = patientIds[b.patientIndex];
+      const data: MedicalHistoryVersionData =
+        DEMO_PATIENTS[b.patientIndex].medicalHistory ?? {};
+      const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
+      await this.prisma.runWithTenant((tx) =>
+        tx.medicalHistoryVersion.create({
+          data: {
+            tenantId,
+            patientId,
+            version: 1,
+            allergies: (data.allergies ??
+              []) as unknown as Prisma.InputJsonValue,
+            conditions: (data.conditions ??
+              []) as unknown as Prisma.InputJsonValue,
+            medications: (data.medications ??
+              []) as unknown as Prisma.InputJsonValue,
+            habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
+            hasCriticalAlert,
+            createdById: dentistId,
+            createdAt: monthsBefore(this.now, b.monthsAgo),
+          },
+        }),
+      );
+      if (!b.confirmNoChanges) continue;
+      const confirmation = await this.use(
+        ConfirmAnamnesisNoChangesUseCase,
+      ).execute(patientId, dentistId);
+      await this.use(RecordAuditEventUseCase).record({
+        tenantId,
+        locationId: null,
+        actor: { kind: 'user', userId: dentistId, role: ClinicRole.DENTIST },
+        action: 'UPDATE',
+        resourceType: 'MEDICAL_HISTORY',
+        resourceId: confirmation.id,
+        patient: { kind: 'patient', id: patientId },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+        metadata: { reason: 'NO_CHANGES_CONFIRMED' },
+      });
+    }
+  }
+
+  /**
    * DX-200: el panel «En clínica» de la sede principal con gente HOY: dos en
    * espera (una llegó antes de su hora, otra 3 min tarde), una en el sillón y
    * otra lista para cobrar, de la primera dentista (o de la segunda si la
@@ -1346,9 +1615,16 @@ class DemoSeeder {
       userAgent: null,
     });
     // Sin la paciente de las opciones A/B: no tiene cita futura (DX-040).
-    const candidates = patientIds.filter(
-      (_, i) => i !== DEMO_PLAN_OPTIONS.patientIndex,
-    );
+    // DX-247: el paciente que requiere premedicación entra primero, para ver
+    // su alerta en el panel.
+    const premedicated =
+      patientIds[DEMO_MEDICAL_ALERTS.premedicationPatientIndex];
+    const candidates = [
+      premedicated,
+      ...patientIds.filter(
+        (id, i) => i !== DEMO_PLAN_OPTIONS.patientIndex && id !== premedicated,
+      ),
+    ];
     const used = new Set<string>();
     await this.inTenant(tenantId, locations.principal, async () => {
       const create = this.use(CreateAppointmentUseCase);

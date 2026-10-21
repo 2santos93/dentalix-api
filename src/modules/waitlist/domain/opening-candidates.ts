@@ -127,9 +127,32 @@ function byAge(
 }
 
 /**
+ * DX-233: «¿este profesional atiende `[start, end)` en la sede del hueco?»
+ * (horario del profesional por sede; sin horario, siempre sí).
+ */
+export type CanAttend = (providerId: string, start: Date, end: Date) => boolean;
+
+/** El candidato ocuparía `[slot.start, slot.start + su duración)`. */
+function attends(
+  canAttend: CanAttend | undefined,
+  providerId: string | null,
+  slot: CandidateSlot,
+  minutes: number,
+): boolean {
+  if (!canAttend || providerId === null) return true;
+  return canAttend(
+    providerId,
+    slot.start,
+    new Date(slot.start.getTime() + minutes * MINUTE),
+  );
+}
+
+/**
  * Filtra y ordena: primero los pendientes URGENT, luego el resto de
  * pendientes, luego las citas a adelantar (la más lejana primero, que es a
- * quien más le sirve); a igualdad, la más antigua. Tope de 50.
+ * quien más le sirve); a igualdad, la más antigua. Tope de 50. Con
+ * `canAttend` (DX-233) se quedan fuera los que caerían fuera del horario de
+ * su profesional (el del hueco o el suyo) en esa sede.
  */
 export function rankOpeningCandidates<
   E extends EntryCandidateSource,
@@ -138,16 +161,35 @@ export function rankOpeningCandidates<
   slot: CandidateSlot,
   sources: { entries: readonly E[]; appointments: readonly A[] },
   limit = OPENING_CANDIDATES_LIMIT,
+  canAttend?: CanAttend,
 ): RankedCandidates<E, A> {
   const entries = sources.entries
-    .filter((e) => entryFits(slot, e))
+    .filter(
+      (e) =>
+        entryFits(slot, e) &&
+        attends(
+          canAttend,
+          slot.providerId ?? e.providerId,
+          slot,
+          e.durationMinutes,
+        ),
+    )
     .sort(
       (a, b) =>
         Number(b.priority === 'URGENT') - Number(a.priority === 'URGENT') ||
         byAge(a, b),
     );
   const appointments = sources.appointments
-    .filter((a) => appointmentFits(slot, a))
+    .filter(
+      (a) =>
+        appointmentFits(slot, a) &&
+        attends(
+          canAttend,
+          a.providerId,
+          slot,
+          (a.end.getTime() - a.start.getTime()) / MINUTE,
+        ),
+    )
     .sort((a, b) => b.start.getTime() - a.start.getTime() || byAge(a, b));
   const all: RankedCandidate<E, A>[] = [
     ...entries.map((source) => ({ kind: 'WAITLIST' as const, source })),

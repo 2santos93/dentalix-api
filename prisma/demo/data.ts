@@ -246,6 +246,14 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
           esAlerta: true,
           nota: 'Controlada',
         },
+        // DX-247: necesita profilaxis antibiótica → «Requiere premedicación».
+        {
+          codigo: 'PROTESIS_VALVULAR',
+          etiqueta: 'Prótesis valvular',
+          estado: 'SI',
+          esAlerta: true,
+          nota: 'Válvula aórtica mecánica (2018)',
+        },
       ],
       medications: [
         {
@@ -716,6 +724,70 @@ export const DEMO_PAYERS = [
   name: string;
   type: 'EPS_CO' | 'PREPAGADA_CO';
 }[];
+
+/** DX-105: pagador extra de la demo, para el convenio de lista de precios. */
+export const DEMO_ALFA_PAYER = {
+  name: 'Empresa Alfa',
+  type: 'EMPRESA',
+} as const;
+
+/**
+ * DX-105: listas de precios (COP). «Tarifa Sede Norte» es la lista activa de la
+ * Sede Norte (5 precios); «Convenio Alfa» es de toda la clínica y solo la usa
+ * el convenio «Empresa Alfa lista» (3 precios). Los códigos son los de
+ * `DEMO_PRICES`, y todos los precios quedan por debajo del de catálogo.
+ */
+export const DEMO_PRICE_LISTS = [
+  {
+    key: 'norte',
+    name: 'Tarifa Sede Norte',
+    locationKey: 'norte',
+    prices: {
+      'IMG-CONSULTA': 75000,
+      'PREV-PROFILAXIS': 110000,
+      'OP-RESINA-1': 140000,
+      'ENDO-UNI': 420000,
+      'URG-CONSULTA': 85000,
+    },
+  },
+  {
+    key: 'alfa',
+    name: 'Convenio Alfa',
+    locationKey: null,
+    prices: {
+      'PREV-PROFILAXIS': 90000,
+      'OP-RESINA-1': 120000,
+      'IMG-RX-PERIAPICAL': 28000,
+    },
+  },
+] as const;
+
+/** DX-105: los dos convenios de la demo. */
+export const DEMO_AGREEMENTS = [
+  {
+    key: 'sura',
+    name: 'Sura EPS −15 %',
+    payerName: 'Sura EPS',
+    kind: 'PERCENT_DISCOUNT',
+    percent: 15,
+    priceListKey: null,
+  },
+  {
+    key: 'alfa',
+    name: 'Empresa Alfa lista',
+    payerName: 'Empresa Alfa',
+    kind: 'PRICE_LIST',
+    percent: null,
+    priceListKey: 'alfa',
+  },
+] as const;
+
+/** DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su cobertura— y uno con Alfa). */
+export const DEMO_PATIENT_AGREEMENTS = [
+  { patientIndex: 0, agreementKey: 'sura' },
+  { patientIndex: 4, agreementKey: 'sura' },
+  { patientIndex: 2, agreementKey: 'alfa' },
+] as const;
 
 export interface DemoCoverage {
   patientIndex: number;
@@ -2070,10 +2142,52 @@ export const DEMO_VACATION = {
   note: 'Vacaciones de mitad de año',
 } as const;
 
+/**
+ * DX-233: rotación de ejemplo de la segunda dentista entre las dos sedes:
+ * lunes, miércoles y viernes en la principal (su horario completo) y martes y
+ * jueves en la Norte (el de la Norte). Sus citas demo siguen esta rotación
+ * (ver `planAppointments`). Y una excepción tras sus vacaciones: ese lunes no
+ * va a la principal y cubre la Norte por la mañana.
+ */
+export const DEMO_ROTATION = {
+  dentistIndex: 1,
+  weekdays: { principal: [1, 3, 5], norte: [2, 4] },
+  ranges: {
+    principal: [
+      { startMinute: 9 * 60, endMinute: 13 * 60 },
+      { startMinute: 15 * 60, endMinute: 19 * 60 },
+    ],
+    norte: [
+      { startMinute: 7 * 60, endMinute: 12 * 60 },
+      { startMinute: 13 * 60, endMinute: 17 * 60 },
+    ],
+  },
+  cover: {
+    ranges: [{ startMinute: 7 * 60, endMinute: 12 * 60 }],
+    note: 'Cubre la Sede Norte',
+  },
+} as const;
+
 export const DEMO_LUNCH = {
   startMinute: 12 * 60 + 30,
   endMinute: 13 * 60,
   note: 'Almuerzo del equipo',
+} as const;
+
+/**
+ * DX-247: alertas médicas en la agenda. Jorge Eduardo Ramírez (prótesis
+ * valvular) sale con «Requiere premedicación» y es el primero en entrar hoy al
+ * panel «En clínica»; Ana María Zapata tiene la anamnesis de hace 14 meses
+ * («Anamnesis caducada», vigencia de 12); la de Gustavo Ríos es de hace 13
+ * meses pero la dentista confirmó «Sin cambios hoy» (al día). Los pacientes
+ * sin `medicalHistory` (p. ej. Daniela Montoya) salen «Sin anamnesis».
+ */
+export const DEMO_MEDICAL_ALERTS = {
+  premedicationPatientIndex: 1,
+  backdated: [
+    { patientIndex: 13, monthsAgo: 14, confirmNoChanges: false },
+    { patientIndex: 16, monthsAgo: 13, confirmNoChanges: true },
+  ],
 } as const;
 
 export const DEMO_WAITLIST = {

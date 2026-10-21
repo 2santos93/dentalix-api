@@ -8,6 +8,7 @@ import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
 // un contexto de tenant los triggers de inmutabilidad dejan borrar.
@@ -54,13 +55,7 @@ interface ExamBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.perioExam.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
@@ -189,6 +184,15 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
     await app.close();
     await raw.$disconnect();
   });
+
+  // DX-251: los tests de permisos y aislamiento crean su propio examen (en
+  // DRAFT, el estado escribible) para pasar también ejecutados solos (-t).
+  async function draftExamOfA(): Promise<string> {
+    const res = await as(clinicA, dentistA.token)
+      .post(path(patientA), { examDate: '2026-04-12', notes: 'Propio' })
+      .expect(201);
+    return (res.body as ExamBody).id;
+  }
 
   it('el dentista crea un DRAFT; el autor sale del token', async () => {
     const res = await as(clinicA, dentistA.token)
@@ -360,6 +364,7 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
   });
 
   it('RECEPTION recibe 403 en todas las rutas', async () => {
+    const examId = await draftExamOfA();
     await as(clinicA, receptionA).get(path(patientA)).expect(403);
     await as(clinicA, receptionA).post(path(patientA)).expect(403);
     await as(clinicA, receptionA)
@@ -374,6 +379,7 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
   });
 
   it('aislamiento: la clínica B no lee ni escribe exámenes de pacientes de A', async () => {
+    const examId = await draftExamOfA();
     await as(clinicB).get(path(patientA)).expect(404);
     await as(clinicB).post(path(patientA)).expect(404);
     await as(clinicB)

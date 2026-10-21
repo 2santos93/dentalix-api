@@ -44,7 +44,7 @@ export interface PayerRepository {
   update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null>;
   /**
    * Retira el pagador (`deletedAt` y `active = false`) si ninguna cobertura
-   * viva lo usa. Recuento y retiro van en UNA transacción con el pagador
+   * ni convenio vivo lo usa. Recuento y retiro van en UNA transacción con el pagador
    * bloqueado, así una cobertura que se crea a la vez o espera (y falla con
    * «Pagador no encontrado») o se cuenta aquí (`IN_USE`).
    */

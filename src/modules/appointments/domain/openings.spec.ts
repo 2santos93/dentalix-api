@@ -154,3 +154,32 @@ describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
     expect(findOpenings(query()).truncated).toBe(false);
   });
 });
+
+describe('findOpenings con el horario del profesional (DX-233)', () => {
+  it('solo propone huecos donde la sede está abierta Y el profesional trabaja allí', () => {
+    // Martes: el profesional solo 12:00–16:00 en esta sede.
+    const result = findOpenings(
+      query({
+        providerRangesOn: (day) =>
+          day === TUESDAY ? [{ startMinute: 12 * 60, endMinute: 16 * 60 }] : [],
+      }),
+    );
+    expect(asIso(result)).toEqual([
+      // 12:00–13:00 (la sede cierra a las 13) y 15:00–16:00.
+      ['2026-10-20T17:00:00.000Z', '2026-10-20T18:00:00.000Z'],
+      ['2026-10-20T20:00:00.000Z', '2026-10-20T21:00:00.000Z'],
+    ]);
+  });
+
+  it('un día sin tramos del profesional (no trabaja) no devuelve nada', () => {
+    expect(
+      findOpenings(query({ providerRangesOn: () => [] })).openings,
+    ).toEqual([]);
+  });
+
+  it('null (sin restricción) se comporta exactamente como sin la función', () => {
+    expect(
+      asIso(findOpenings(query({ providerRangesOn: () => null }))),
+    ).toEqual(asIso(findOpenings(query())));
+  });
+});

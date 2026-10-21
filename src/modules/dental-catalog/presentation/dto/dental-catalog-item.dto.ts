@@ -45,6 +45,12 @@ export class DentalCatalogItemDto {
   })
   cupsCode!: string | null;
 
+  @ApiProperty({
+    description:
+      'DX-105: false = la prestación no admite descuentos (ni % de convenio ni discrecionales).',
+  })
+  allowDiscount!: boolean;
+
   @ApiProperty()
   active!: boolean;
 

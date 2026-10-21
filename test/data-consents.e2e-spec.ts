@@ -6,6 +6,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol, mirar
 // filas y limpiar — mismo criterio que account-statement.e2e-spec.ts.
@@ -66,18 +67,7 @@ interface PatientBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.dataProcessingConsent.deleteMany();
-  await raw.privacyPolicyVersion.deleteMany();
-  await raw.medicalHistoryVersion.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.locationScheduleRange.deleteMany();
-  await raw.locationSchedule.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 function stateOf(body: ConsentsBody): Record<string, boolean | null> {

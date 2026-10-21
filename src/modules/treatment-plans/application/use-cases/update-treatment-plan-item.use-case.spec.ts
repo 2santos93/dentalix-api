@@ -37,6 +37,11 @@ function fakeItem(
     surfaces: [],
     catalogItemId: 'cat1',
     catalogPrice: null,
+    basePrice: null,
+    priceSource: null,
+    agreementId: null,
+    agreementName: null,
+    pricingLocationId: null,
     price: 200,
     discount: 0,
     discountReason: null,
@@ -84,6 +89,7 @@ function makeCatalogRepo(
     create: (): Promise<DentalCatalogItem> =>
       Promise.reject(new Error('not implemented in this fake')),
     list: (): Promise<DentalCatalogItem[]> => Promise.resolve([]),
+    findByIds: () => Promise.resolve([]),
     listDirectory: () =>
       Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<DentalCatalogItem | null> => Promise.resolve(null),

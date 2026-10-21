@@ -18,6 +18,7 @@ import {
   SafetyFlags,
 } from '../../domain/entities/medical-history.entity';
 import { deriveSafetyFlags } from '../../domain/safety-flags';
+import { lockPatientAnamnesis } from './anamnesis-lock';
 
 type PrismaMedicalHistoryVersion = Prisma.MedicalHistoryVersionGetPayload<
   Record<string, never>
@@ -105,7 +106,9 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
       // row is left completely untouched by this write (the partial unique
       // index (tenantId, patientId, version) WHERE deletedAt IS NULL is the
       // last-resort guard against a concurrent double-insert of the same
-      // version).
+      // version). DX-247: bajo el mismo candado por paciente que «Sin cambios
+      // hoy», que así nunca confirma una versión a punto de ser reemplazada.
+      await lockPatientAnamnesis(tx, tenantId, patientId);
       const latest = await tx.medicalHistoryVersion.findFirst({
         where: { patientId, deletedAt: null },
         orderBy: { version: 'desc' },

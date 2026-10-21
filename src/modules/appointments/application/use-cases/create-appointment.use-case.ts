@@ -31,6 +31,8 @@ import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import { collectWarnings } from '../appointment-warnings';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -84,6 +86,9 @@ export class CreateAppointmentUseCase {
     @Inject(SCHEDULE_BLOCK_REPOSITORY)
     private readonly blocks: ScheduleBlockRepository,
     private readonly tenantContext: TenantContextService,
+    // DX-233: fuera del horario del profesional en la sede → aviso, o 409 si
+    // la clínica activó el modo estricto.
+    private readonly availability: ProviderAvailabilityService,
   ) {}
 
   async execute(
@@ -200,14 +205,27 @@ export class CreateAppointmentUseCase {
       );
     }
 
-    // DX-122: bloqueos de la agenda del profesional o de la sede. Uno que no
-    // deja agendar es un 409; uno que sí (almuerzo), un aviso en la respuesta.
-    const warnings = await checkScheduleBlocks(this.blocks, {
+    // DX-233: horario del profesional en la sede de la cita (`target`, la
+    // misma en la que se escribe; DX-089). Sin horario configurado no cambia
+    // nada; fuera de él, aviso (o 409 en modo estricto).
+    const offSchedule = await this.availability.warnOrReject({
       providerId: input.providerId,
+      locationId: target,
       start: input.start,
       end: input.end,
-      locationId: input.locationId,
     });
+
+    // DX-122: bloqueos de la agenda del profesional o de la sede. Uno que no
+    // deja agendar es un 409; uno que sí (almuerzo), un aviso en la respuesta.
+    const warnings = collectWarnings(
+      await checkScheduleBlocks(this.blocks, {
+        providerId: input.providerId,
+        start: input.start,
+        end: input.end,
+        locationId: input.locationId,
+      }),
+      offSchedule,
+    );
 
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff
     // s1 < e2 AND s2 < e1 — enforced by the repository's findOverlapping
@@ -252,7 +270,7 @@ export class CreateAppointmentUseCase {
         waitlistEntryId: input.waitlistEntryId,
         wantsEarlier: input.wantsEarlier,
       });
-      return { ...created, warnings };
+      return { ...created, ...warnings };
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {

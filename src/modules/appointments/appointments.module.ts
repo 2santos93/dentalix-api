@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
 import { JwtModule } from '@nestjs/jwt';
 import { AppointmentsController } from './presentation/appointments.controller';
 import { CreateAppointmentUseCase } from './application/use-cases/create-appointment.use-case';
@@ -21,6 +22,7 @@ import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-c
 import { ListInClinicUseCase } from './application/use-cases/list-in-clinic.use-case';
 
 import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
+import { MedicalHistoryModule } from '../medical-history/medical-history.module';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
@@ -43,6 +45,10 @@ import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.m
     CollectionsModule,
     // DX-153: resumen `coverage` de las tarjetas, por lote.
     PatientCoveragesModule,
+    // DX-233: horario de cada profesional por sede.
+    ProviderScheduleModule,
+    // DX-247: banderas médicas mínimas de las tarjetas y de «En clínica».
+    MedicalHistoryModule,
   ],
   controllers: [AppointmentsController],
   providers: [

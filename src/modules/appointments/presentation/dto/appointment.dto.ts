@@ -3,6 +3,11 @@ import { AppointmentStatus } from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
+import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
+import {
+  APPOINTMENT_WARNING_CODES,
+  type AppointmentWarningCode,
+} from '../../domain/entities/appointment.entity';
 
 // Response shape for Appointment endpoints — documents the Appointment
 // entity contract for Swagger (same convention as BrandingDto /
@@ -128,8 +133,21 @@ export class AppointmentDto {
  * permite agendar: Almuerzo (13:00–14:00).»). Vacío si no hay ninguno.
  */
 export class AppointmentWriteDto extends AppointmentDto {
-  @ApiProperty({ type: [String] })
+  @ApiProperty({
+    type: [String],
+    description:
+      'Avisos en español que no impiden la operación (p. ej. «Fuera del horario del profesional en Sede Norte (jueves 22/10: 14:00–19:00).»).',
+  })
   warnings!: string[];
+
+  @ApiProperty({
+    enum: APPOINTMENT_WARNING_CODES,
+    enumName: 'AppointmentWarningCode',
+    isArray: true,
+    description:
+      'DX-233: código de cada aviso, en el mismo orden que `warnings`: SCHEDULE_BLOCK (bloqueo que deja agendar, DX-122) o PROVIDER_OFF_SCHEDULE (fuera del horario del profesional en la sede).',
+  })
+  warningCodes!: AppointmentWarningCode[];
 }
 
 /**
@@ -137,6 +155,7 @@ export class AppointmentWriteDto extends AppointmentDto {
  * paciente (DX-150). El importe (`balance.amounts`) solo llega a ADMIN y
  * RECEPTION; DENTIST y ASSISTANT ven la marca y los días. `coverage` (DX-153)
  * resume la cobertura principal del paciente, sin número de afiliado.
+ * `medicalAlerts` (DX-247): solo banderas de la anamnesis, nunca su contenido.
  */
 export class AppointmentListItemDto extends AppointmentDto {
   @ApiProperty({ type: OverdueBalanceDto })
@@ -144,4 +163,11 @@ export class AppointmentListItemDto extends AppointmentDto {
 
   @ApiProperty({ type: CoverageSummaryDto })
   coverage!: CoverageSummaryDto;
+
+  @ApiProperty({
+    type: MedicalAlertFlagsDto,
+    description:
+      'DX-247: banderas médicas del paciente (alerta, premedicación, anamnesis al día / caducada / ausente). Sin alérgenos, condiciones, medicamentos ni notas.',
+  })
+  medicalAlerts!: MedicalAlertFlagsDto;
 }
