@@ -22,6 +22,7 @@ import {
   accountKeyHash,
   type LoginLockoutConfig,
 } from '../src/modules/auth/domain/login-lockout';
+import { LoginLockoutService } from '../src/modules/auth/application/login-lockout.service';
 import { loadSecuritySettings } from '../src/shared/security/security-settings';
 
 /**
@@ -50,6 +51,10 @@ const raw = new PrismaClient({
 const RUN = Date.now().toString(36);
 const CLINIC_IP = '198.51.100.10';
 const WRONG = 'Mala-clave-1';
+/** Intentos simultáneos al acabar la espera (DX-048). */
+const CONCURRENT_ATTEMPTS = 10;
+/** Intentos que, como mínimo, deben coincidir dentro del servicio (DX-252). */
+const MIN_OVERLAP = 2;
 
 function lockoutApp(
   cfg: Partial<LoginLockoutConfig>,
@@ -161,7 +166,8 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
   beforeAll(async () => {
     app = await lockoutApp({ ipFailureLimit: 100_000 });
-    api = await listenOnEphemeralPort(app);
+    // Tantos sockets como intentos simultáneos lanza el test de la carrera.
+    api = await listenOnEphemeralPort(app, CONCURRENT_ATTEMPTS);
     clinicA = await registerClinic(app, `lock-a-${RUN}`);
     clinicB = await registerClinic(app, `lock-b-${RUN}`);
     dentistaB = await seedMember(raw, clinicB, ClinicRole.DENTIST);
@@ -186,7 +192,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
   afterAll(async () => {
     await clearThrottles();
-    await api.close();
+    await (api ? api.close() : app?.close());
   });
 
   it('10 logins correctos seguidos del mismo usuario desde la misma IP nunca dan 429', async () => {
@@ -236,14 +242,39 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
   it('intentos simultáneos al acabar la espera no esquivan el backoff: solo uno llega a probar la contraseña', async () => {
     for (let i = 0; i < 5; i++) await login(doctora.email, WRONG);
     await expireAccountWait(doctora.email);
-    const results = await settleAll(
-      Array.from({ length: 10 }, (_, i) =>
-        login(doctora.email, WRONG, `203.0.113.${100 + i}`),
-      ),
-    );
-    const statuses = results.map((r) => r.status).sort();
-    expect(statuses.filter((s) => s === 401)).toHaveLength(1);
-    expect(statuses.filter((s) => s === 429)).toHaveLength(9);
+    // DX-252: cuántos intentos están a la vez dentro del control del servicio
+    // (lectura de la espera + cobro atómico). Sin solape real, el test no
+    // probaría la carrera.
+    const lockout = app.get(LoginLockoutService, { strict: false });
+    const original = lockout.assertCanAttempt.bind(lockout);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const spy = jest
+      .spyOn(lockout, 'assertCanAttempt')
+      .mockImplementation(async (email, ip) => {
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+        try {
+          return await original(email, ip);
+        } finally {
+          inFlight--;
+        }
+      });
+    try {
+      const results = await settleAll(
+        Array.from({ length: CONCURRENT_ATTEMPTS }, (_, i) =>
+          login(doctora.email, WRONG, `203.0.113.${100 + i}`),
+        ),
+      );
+      const statuses = results.map((r) => r.status).sort();
+      expect(statuses.filter((s) => s === 401)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 429)).toHaveLength(
+        CONCURRENT_ATTEMPTS - 1,
+      );
+      expect(spy).toHaveBeenCalledTimes(CONCURRENT_ATTEMPTS);
+      expect(maxInFlight).toBeGreaterThanOrEqual(MIN_OVERLAP);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('sin enumeración: mismo 401 y mismo 429 (cuerpo y Retry-After) exista o no el email, sin diferencia de tiempo apreciable', async () => {
@@ -606,7 +637,7 @@ describe('Balde por IP del login (DX-048, e2e)', () => {
 
   afterAll(async () => {
     await clearThrottles();
-    await api.close();
+    await (api ? api.close() : app?.close());
   });
 
   it('solo cuenta los fallos: los aciertos desde la IP de la clínica no la bloquean', async () => {

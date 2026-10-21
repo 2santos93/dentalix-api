@@ -18,11 +18,14 @@ export interface ListeningApp {
  * (`listen(0)`, solo 127.0.0.1) y todas las peticiones pasan por un agente
  * HTTP sin keep-alive (sin carreras con el `keepAliveTimeout` del servidor)
  * con `maxSockets` acotado: las de más esperan turno en el agente en vez de
- * abrir conexiones sin límite.
+ * abrir conexiones sin límite. El ECONNRESET venía del servidor por
+ * petición, no del número de sockets: un test de concurrencia pasa
+ * `maxSockets` igual a las peticiones que lanza a la vez para no recortar el
+ * solape que quiere probar.
  */
 export async function listenOnEphemeralPort(
   app: INestApplication<App>,
-  maxSockets = 5,
+  maxSockets = 10,
 ): Promise<ListeningApp> {
   await app.listen(0, '127.0.0.1');
   const server = app.getHttpServer() as Server;
