@@ -53,6 +53,18 @@ function anyMatch(haystacks: string[], keywords: string[]): boolean {
 }
 
 /**
+ * DX-247: ¿el alérgeno ya sale como bandera propia (anestésico, penicilina o
+ * látex)? La agenda nombra esas banderas y deja el resto de alergias marcadas
+ * como alerta en una genérica, sin el texto del alérgeno.
+ */
+export function isFlaggedAllergen(alergeno: string): boolean {
+  return anyMatch(
+    [alergeno],
+    [...ANESTHETIC_KW, ...PENICILLIN_KW, ...LATEX_KW],
+  );
+}
+
+/**
  * Deriva las banderas de seguridad y `hasCriticalAlert` a partir de la entrada
  * estructurada. NUNCA confía en flags provistas por el cliente: siempre
  * recalcula. `embarazo`/`semanasEmbarazo` son la única entrada directa (no se
