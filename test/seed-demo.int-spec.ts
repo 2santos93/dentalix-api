@@ -583,14 +583,20 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ),
       overrides: [],
     };
-    const today = new Date().toISOString().slice(0, 10);
+    // «Hoy» es el día civil de la clínica (Bogotá), no el de UTC: entre las
+    // 19:00 y las 24:00 de Bogotá ya es mañana en UTC (DX-251).
+    const civilDay = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(
+        d,
+      );
+    const today = civilDay(new Date());
     const theirs = await raw.appointment.findMany({
       where: { tenantId, providerId, deletedAt: null },
     });
     expect(theirs.length).toBeGreaterThan(0);
     const outside = theirs.filter(
       (a) =>
-        a.start.toISOString().slice(0, 10) !== today &&
+        civilDay(a.start) !== today &&
         !providerWorksAt(
           snapshot,
           a.locationId,
