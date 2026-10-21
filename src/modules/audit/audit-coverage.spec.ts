@@ -165,6 +165,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
   },
+  'POST /patients/:patientId/medical-history/no-changes': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY',
+    resourceId: RES,
+    patient: P,
+    reason: 'NO_CHANGES_CONFIRMED',
+  },
 
   'POST /patients/:patientId/clinical-entries': {
     action: 'CREATE',

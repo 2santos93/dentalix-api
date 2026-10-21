@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Post,
   Put,
   Req,
   UseGuards,
@@ -11,6 +12,8 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
+  ApiCreatedResponse,
   ApiExtraModels,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -23,6 +26,9 @@ import { GetMedicalHistoryUseCase } from '../application/use-cases/get-medical-h
 import { SaveMedicalHistoryUseCase } from '../application/use-cases/save-medical-history.use-case';
 import { MedicalHistory } from '../domain/entities/medical-history.entity';
 import { MedicalHistoryDto } from './dto/medical-history.dto';
+import { AnamnesisConfirmationDto } from './dto/medical-alerts.dto';
+import { ConfirmAnamnesisNoChangesUseCase } from '../application/use-cases/medical-alerts.use-cases';
+import type { AnamnesisConfirmation } from '../domain/ports/medical-alerts-repository.port';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -46,6 +52,7 @@ export class MedicalHistoryController {
   constructor(
     private readonly getMedicalHistory: GetMedicalHistoryUseCase,
     private readonly saveMedicalHistory: SaveMedicalHistoryUseCase,
+    private readonly confirmNoChanges: ConfirmAnamnesisNoChangesUseCase,
   ) {}
 
   // Returns the latest version, or `null` when the patient has none yet —
@@ -93,5 +100,36 @@ export class MedicalHistoryController {
     @Req() req: AuthenticatedRequest,
   ): Promise<MedicalHistory> {
     return this.saveMedicalHistory.execute(patientId, dto, req.user.sub);
+  }
+
+  // DX-247 «Sin cambios hoy»: el paciente dice que nada cambió desde la
+  // versión vigente. Guarda quién y cuándo (reloj del servidor) y reinicia la
+  // vigencia; no crea una versión. El evento lleva el autor, el paciente y el
+  // id de la confirmación, nunca contenido clínico.
+  @Audit({
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY',
+    resourceId: { response: 'id' },
+    patient: { param: 'patientId' },
+    reason: 'NO_CHANGES_CONFIRMED',
+  })
+  @Post('no-changes')
+  @ApiCreatedResponse({
+    type: AnamnesisConfirmationDto,
+    description:
+      'Confirmación «Sin cambios hoy» sobre la versión vigente: autor, sede y hora del servidor. Queda en la auditoría (`NO_CHANGES_CONFIRMED`).',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
+  })
+  @ApiConflictResponse({
+    description: 'El paciente no tiene anamnesis que confirmar.',
+  })
+  confirm(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<AnamnesisConfirmation> {
+    return this.confirmNoChanges.execute(patientId, req.user.sub);
   }
 }
