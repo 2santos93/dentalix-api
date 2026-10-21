@@ -179,4 +179,46 @@ describe('Documentos: subida directa con el almacén en disco (DX-259, e2e)', ()
     }
     expect(slots.active).toBe(0);
   });
+
+  it('otra clínica: upload-url y complete del paciente o del documento de A → 404, sin tocar nada', async () => {
+    const bytes = Buffer.concat([pdfFixture(), Buffer.from('% f\n')]);
+    const ticket = await ask(bytes);
+    await post(ticket, bytes).expect(204);
+    const other = await registerClinic(app, 'docs-disco-b');
+    const asB = (url: string) =>
+      request(app.getHttpServer())
+        .post(`/api/v1${url}`)
+        .set('X-Tenant-Host', other.host)
+        .set('Authorization', `Bearer ${other.adminToken}`);
+    await asB(`/patients/${patientId}/documents/upload-url`)
+      .send({ sizeBytes: bytes.length, sha256: hex(bytes) })
+      .expect(404);
+    await asB(`/patients/${patientId}/documents/${ticket.documentId}/complete`)
+      .send({ category: 'REPORT' })
+      .expect(404);
+    const patientB = (
+      await asB('/patients')
+        .send({
+          firstName: 'Otra',
+          lastName: 'Clínica',
+          docType: 'CC',
+          docNumber: '59200002',
+          sex: 'F',
+        })
+        .expect(201)
+    ).body as { id: string };
+    // Con un paciente propio, el id de A no existe en su prefijo: 404.
+    await asB(
+      `/patients/${patientB.id}/documents/${ticket.documentId}/complete`,
+    )
+      .send({ category: 'REPORT' })
+      .expect(404);
+    // El de A sigue pendiente y A lo completa.
+    await api(
+      'post',
+      `/patients/${patientId}/documents/${ticket.documentId}/complete`,
+    )
+      .send({ category: 'REPORT' })
+      .expect(201);
+  });
 });

@@ -309,7 +309,10 @@ describe('Observabilidad (e2e, DX-023)', () => {
         message: 'dependencia caída',
         requestId: res.headers['x-request-id'],
       });
-      const problems = lines.filter((l) => l.context !== 'Access');
+      // DX-259: el HeadBucket del arranque deja su `storage.op` (info).
+      const problems = lines.filter(
+        (l) => l.context !== 'Access' && l.context !== 'Storage',
+      );
       expect(problems).toHaveLength(1);
       expect(problems[0]).toMatchObject({
         level: 'warn',
@@ -393,7 +396,10 @@ describe('Observabilidad sin base de datos (e2e, DX-023)', () => {
     expect(res.text).not.toContain('127.0.0.1');
     // Una sola línea warn por fallo (más la de acceso), con el tipo de la
     // causa, sin stack ni el mensaje del driver (lleva la URL de la base).
-    const problems = lines.filter((l) => l.context !== 'Access');
+    // DX-259: el HeadBucket del arranque deja su `storage.op` (info).
+    const problems = lines.filter(
+      (l) => l.context !== 'Access' && l.context !== 'Storage',
+    );
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatchObject({
       level: 'warn',
