@@ -251,13 +251,21 @@ export class PatientDocumentsController {
   @ApiServiceUnavailableResponse({
     description: `${STORAGE_UNAVAILABLE_MESSAGE} (con Retry-After)`,
   })
-  complete(
+  async complete(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CompletePatientDocumentUploadDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuthenticatedRequest & { skipAudit?: boolean },
   ): Promise<PatientDocumentView> {
-    return this.completeUpload.execute(patientId, id, dto, req.user.sub);
+    const { view, created } = await this.completeUpload.execute(
+      patientId,
+      id,
+      dto,
+      req.user.sub,
+    );
+    // Una repetición devuelve el documento ya creado: CREATE ya se auditó.
+    if (!created) req.skipAudit = true;
+    return view;
   }
 
   @Audit({

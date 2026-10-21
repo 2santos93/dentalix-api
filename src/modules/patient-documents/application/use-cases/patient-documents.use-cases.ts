@@ -140,6 +140,15 @@ export interface PatientDocumentUrl {
   disposition: 'inline' | 'attachment';
 }
 
+/**
+ * La fila de un documento recién guardado: `created` es false si otra
+ * petición ya la había creado (la repetición no se vuelve a auditar).
+ */
+export interface InsertedDocument {
+  view: PatientDocumentView;
+  created: boolean;
+}
+
 /** Campos del formulario ya validados. */
 interface ValidatedDocumentFields {
   category: PatientDocumentCategory;
@@ -316,9 +325,7 @@ export class PatientDocumentWriter {
    * `complete` a la vez), se devuelve esa y solo se borra el objeto propio
    * cuando no es el de esa fila.
    */
-  async insert(
-    input: CreatePatientDocumentInput,
-  ): Promise<PatientDocumentView> {
+  async insert(input: CreatePatientDocumentInput): Promise<InsertedDocument> {
     let created: PatientDocument;
     try {
       created = await this.repo.create(input);
@@ -336,13 +343,13 @@ export class PatientDocumentWriter {
       if (winner?.storageKey !== input.storageKey) {
         await this.discardObject(input.storageKey);
       }
-      if (winner) return this.view(winner);
+      if (winner) return { view: await this.view(winner), created: false };
       if (error instanceof DuplicateActivePatientDocumentError) {
         throw new ConflictException(DUPLICATE_DOCUMENT_MESSAGE);
       }
       throw error;
     }
-    return this.view(created);
+    return { view: await this.view(created), created: true };
   }
 
   async view(doc: PatientDocument): Promise<PatientDocumentView> {
@@ -431,7 +438,7 @@ export class UploadPatientDocumentUseCase {
     const id = randomUUID();
     const storageKey = storageKeyFor(this.writer.tenantId(), id, detected);
     await this.storage.saveFile(storageKey, file.path, detected);
-    return this.writer.insert({
+    const { view } = await this.writer.insert({
       id,
       patientId,
       locationId,
@@ -443,6 +450,7 @@ export class UploadPatientDocumentUseCase {
       storageKey,
       uploadedById,
     });
+    return view;
   }
 }
 
@@ -574,21 +582,26 @@ export class CompletePatientDocumentUploadUseCase {
    * primeros 64 KB con `Range`) → duplicado → sede → se mueve a su clave
    * definitiva → fila. Si el contenido no vale (tipo, tamaño o huella), el
    * objeto se borra y la respuesta es 400 en español; un duplicado, 409.
-   * Repetir `complete` de un documento ya creado lo devuelve sin más.
+   * Repetir `complete` de un documento ya creado (el mismo usuario) lo
+   * devuelve con `created: false` (no se vuelve a auditar); otro usuario, 404.
    */
   async execute(
     patientId: string,
     documentId: string,
     fields: CompletePatientDocumentFields,
     uploadedById: string,
-  ): Promise<PatientDocumentView> {
+  ): Promise<InsertedDocument> {
     const valid = await this.writer.validateFields(
       patientId,
       fields,
       fields.toothNumbers,
     );
-    const existing = await this.writer.findById(patientId, documentId);
-    if (existing) return this.writer.view(existing);
+    const existing = await this.alreadyCompleted(
+      patientId,
+      documentId,
+      uploadedById,
+    );
+    if (existing) return existing;
 
     const pendingKey = pendingStorageKeyFor(this.writer.tenantId(), documentId);
     const info = await this.storage.stat(pendingKey);
@@ -660,6 +673,14 @@ export class CompletePatientDocumentUploadUseCase {
       await this.storage.promote(pendingKey, storageKey, detected, info.etag);
     } catch (error) {
       if (error instanceof StorageObjectChangedError) {
+        // Dos `complete` a la vez: el otro ya movió el pendiente y creó la
+        // fila. Se devuelve esa, sin volver a auditar.
+        const winner = await this.alreadyCompleted(
+          patientId,
+          documentId,
+          uploadedById,
+        );
+        if (winner) return winner;
         return reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE));
       }
       throw error;
@@ -676,6 +697,23 @@ export class CompletePatientDocumentUploadUseCase {
       storageKey,
       uploadedById,
     });
+  }
+
+  /**
+   * El documento ya creado por ESTE usuario (repetir `complete` lo devuelve,
+   * `created: false`); de otro usuario, 404 como si no existiera la subida.
+   */
+  private async alreadyCompleted(
+    patientId: string,
+    documentId: string,
+    uploadedById: string,
+  ): Promise<InsertedDocument | null> {
+    const existing = await this.writer.findById(patientId, documentId);
+    if (!existing) return null;
+    if (existing.uploadedById !== uploadedById) {
+      throw new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE);
+    }
+    return { view: await this.writer.view(existing), created: false };
   }
 }
 

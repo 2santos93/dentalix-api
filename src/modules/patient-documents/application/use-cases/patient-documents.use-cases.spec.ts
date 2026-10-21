@@ -494,17 +494,19 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       patientId = PATIENT,
     ) =>
       inTenant(() =>
-        complete.execute(
-          patientId,
-          documentId,
-          {
-            category: 'REPORT',
-            fileName: 'informe.pdf',
-            mimeType: 'application/pdf',
-            ...fields,
-          },
-          by,
-        ),
+        complete
+          .execute(
+            patientId,
+            documentId,
+            {
+              category: 'REPORT',
+              fileName: 'informe.pdf',
+              mimeType: 'application/pdf',
+              ...fields,
+            },
+            by,
+          )
+          .then((r) => r.view),
       );
 
     /** upload-url + lo que haría el navegador con el POST prefirmado. */
@@ -741,13 +743,57 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       expect(repo.rows.size).toBe(0);
     });
 
-    it('complete repetido devuelve el documento ya creado sin tocar el almacén', async () => {
+    it('complete repetido por el mismo usuario devuelve el documento (created: false) sin tocar el almacén; otro usuario, 404', async () => {
       const id = await uploaded(pdfFixture());
-      const first = await finish(id);
+      const first = await inTenant(() =>
+        complete.execute(
+          PATIENT,
+          id,
+          { category: 'REPORT', fileName: 'informe.pdf' },
+          AUTHOR,
+        ),
+      );
+      expect(first.created).toBe(true);
       const saved = [...storage.saved];
-      const second = await finish(id);
-      expect(second).toEqual(first);
+      const again = await inTenant(() =>
+        complete.execute(PATIENT, id, { category: 'REPORT' }, AUTHOR),
+      );
+      expect(again).toEqual({ view: first.view, created: false });
       expect(storage.saved).toEqual(saved);
+      await expect(finish(id, {}, OTHER_DENTIST)).rejects.toThrow(
+        new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE),
+      );
+      expect(repo.rows.size).toBe(1);
+    });
+
+    it('dos complete a la vez: el que pierde la copia devuelve la fila del que ganó (created: false), no un 400', async () => {
+      const bytes = pdfFixture();
+      const id = await uploaded(bytes);
+      const original = storage.promote.bind(storage);
+      jest
+        .spyOn(storage, 'promote')
+        .mockImplementationOnce(async (from, to, type, etag) => {
+          // El otro `complete` gana: mueve el pendiente y crea la fila.
+          await inTenant(() =>
+            complete.execute(
+              PATIENT,
+              id,
+              { category: 'REPORT', fileName: 'informe.pdf' },
+              AUTHOR,
+            ),
+          );
+          return original(from, to, type, etag);
+        });
+      const loser = await inTenant(() =>
+        complete.execute(
+          PATIENT,
+          id,
+          { category: 'REPORT', fileName: 'informe.pdf' },
+          AUTHOR,
+        ),
+      );
+      expect(loser.created).toBe(false);
+      expect(loser.view.id).toBe(id);
       expect(repo.rows.size).toBe(1);
     });
   });

@@ -127,6 +127,25 @@ describe('Documentos: subida directa con el almacén en disco (DX-259, e2e)', ()
       toothNumbers: ['11'],
     });
     expect(slots.active).toBe(0);
+
+    // Repetir `complete` devuelve el mismo documento y no audita otro CREATE.
+    const again = await api(
+      'post',
+      `/patients/${patientId}/documents/${ticket.documentId}/complete`,
+    )
+      .send({ category: 'REPORT' })
+      .expect(201);
+    expect((again.body as { id: string }).id).toBe(ticket.documentId);
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: clinic.tenantId,
+          action: 'CREATE',
+          resourceType: 'PATIENT_DOCUMENT',
+          resourceId: ticket.documentId,
+        },
+      }),
+    ).toBe(1);
   });
 
   it('formulario manipulado → 403; contenido con otra huella → 400 en español; sin objeto', async () => {
