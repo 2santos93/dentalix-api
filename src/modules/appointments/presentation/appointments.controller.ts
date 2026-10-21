@@ -1,3 +1,4 @@
+import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   Body,
   Controller,
@@ -132,6 +133,13 @@ export class AppointmentsController {
     return auditRequestContext(req, this.tenantContext);
   }
 
+  @Audit({
+    action: 'CREATE',
+    resource: 'APPOINTMENT',
+    resourceId: { response: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'APPOINTMENT_PLAN_ITEMS',
+  })
   @Post()
   @ApiCreatedResponse({
     type: AppointmentWriteDto,
@@ -174,6 +182,7 @@ export class AppointmentsController {
       createdById: req.user.sub,
       appointmentTypeId: dto.appointmentTypeId,
       wantsEarlier: dto.wantsEarlier,
+      planItemIds: dto.planItemIds,
     });
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.
     if (created.wantsEarlier && ctx) {
@@ -318,6 +327,13 @@ export class AppointmentsController {
     return this.getAppointment.execute(id);
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'APPOINTMENT_PLAN_ITEMS',
+  })
   @Patch(':id')
   @ApiOkResponse({ type: AppointmentWriteDto })
   @ApiBadRequestResponse({ description: 'Datos inválidos o al pasado' })
@@ -350,6 +366,7 @@ export class AppointmentsController {
         reason: dto.reason,
         notes: dto.notes,
         wantsEarlier: dto.wantsEarlier,
+        planItemIds: dto.planItemIds,
       },
       this.auditContext(req),
     );

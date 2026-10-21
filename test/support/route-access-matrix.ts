@@ -303,6 +303,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,
   // que llama al paciente desde la lista de seguimiento (ADMIN y recepción).
   'GET /treatment-plans/pending-follow-up': BILLING,
+  'GET /treatment-plans/unscheduled': EVERY_ROLE,
+  'GET /treatment-plans/:id/visits': EVERY_ROLE,
+  'PATCH /treatment-plans/:id/visits': PLAN_DECIDERS,
   'POST /treatment-plans/:id/present': PLAN_DECIDERS,
   'POST /treatment-plans/:id/reject': PLAN_REJECTERS,
   'POST /treatment-plans/:id/alternatives': CLINICAL,

@@ -1,3 +1,5 @@
+import { PlanVisitsService } from './application/plan-visits.service';
+import { PlanVisitsController } from './presentation/plan-visits.controller';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TreatmentPlansController } from './presentation/treatment-plans.controller';
@@ -70,6 +72,7 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
   controllers: [
+    PlanVisitsController,
     PlanFollowUpController,
     TreatmentPlansController,
     PlanQuoteController,
@@ -77,6 +80,7 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     PriceQuoteController,
   ],
   providers: [
+    PlanVisitsService,
     CreateTreatmentPlanUseCase,
     ListTreatmentPlansUseCase,
     GetTreatmentPlanUseCase,

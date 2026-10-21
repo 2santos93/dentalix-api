@@ -43,6 +43,9 @@ type PrismaTreatmentPlanWithItems = Prisma.TreatmentPlanGetPayload<{
 
 export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
   return {
+    visitIntervals: plan.visitIntervals as Record<string, number>,
+    acceptedAt: plan.acceptedAt,
+    acceptedLocationId: plan.acceptedLocationId,
     id: plan.id,
     tenantId: plan.tenantId,
     patientId: plan.patientId,
@@ -67,6 +70,8 @@ export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
 // `PrismaDentalCatalogRepository.mapToEntity` for `defaultPrice`.
 function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
   return {
+    visit: item.visit,
+    visitLabel: item.visitLabel,
     id: item.id,
     tenantId: item.tenantId,
     planId: item.planId,
@@ -258,6 +263,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           locked,
           change.acceptedAt,
           change.acceptedById ?? null,
+          await this.tenantContext.writeLocationId(tx),
         );
       }
       if (change.cancellation) {

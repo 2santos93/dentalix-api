@@ -906,6 +906,7 @@ model Appointment {
   updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
 
+  planItems        AppointmentPlanItem[]
   confirmations    AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
   waitlistOffers   WaitlistOffer[]
@@ -1306,18 +1307,21 @@ enum TreatmentPlanItemStatus {
 }
 
 model TreatmentPlan {
-  id          String              @id @default(uuid()) @db.Uuid
-  tenantId    String              @db.Uuid
-  patientId   String              @db.Uuid
-  status      TreatmentPlanStatus @default(DRAFT)
+  visitIntervals     Json                @default("{}")
+  acceptedAt         DateTime?
+  acceptedLocationId String?             @db.Uuid
+  id                 String              @id @default(uuid()) @db.Uuid
+  tenantId           String              @db.Uuid
+  patientId          String              @db.Uuid
+  status             TreatmentPlanStatus @default(DRAFT)
   // Moneda del plan: monto a pagar/saldo se calculan en esta moneda; un abono
   // en otra moneda se convierte por su fecha (ver Payment/ConvertAmountUseCase).
-  currency    String              @default("USD")
-  notes       String?
-  createdById String?             @db.Uuid
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  deletedAt   DateTime?
+  currency           String              @default("USD")
+  notes              String?
+  createdById        String?             @db.Uuid
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
 
   // Alternativas A/B (DX-040). `optionGroupId` es el id del plan que abrió el
   // grupo (ese plan apunta a sí mismo); null = plan suelto. `optionLabel`
@@ -1369,6 +1373,10 @@ model TreatmentPlan {
 }
 
 model TreatmentPlanItem {
+  visit             Int                     @default(1)
+  visitLabel        String?                 @db.VarChar(60)
+  patientId         String                  @default(dbgenerated()) @db.Uuid
+  appointmentLinks  AppointmentPlanItem[]
   id                String                  @id @default(uuid()) @db.Uuid
   tenantId          String                  @db.Uuid
   planId            String                  @db.Uuid
@@ -1421,6 +1429,7 @@ model TreatmentPlanItem {
   // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
   pricingLocation  Location?     @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
 
+  @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
   @@index([tenantId, planId])
   @@index([tenantId, agreementId], map: "treatment_plan_items_tenant_agreement_idx")
   @@index([tenantId, pricingLocationId], map: "treatment_plan_items_tenant_pricing_location_idx")
@@ -3804,4 +3813,21 @@ model PostOpInstructionDelivery {
   @@index([tenantId, patientId, deliveredAt(sort: Desc)], map: "post_op_instruction_deliveries_tenant_patient_idx")
   @@index([tenantId, appointmentId], map: "post_op_instruction_deliveries_tenant_appointment_idx")
   @@map("post_op_instruction_deliveries")
+}
+
+// DX-256: historial de ítems agendados; active se mantiene con triggers.
+model AppointmentPlanItem {
+  deletedAt     DateTime?
+  tenantId      String            @db.Uuid
+  patientId     String            @db.Uuid
+  appointmentId String            @db.Uuid
+  planItemId    String            @db.Uuid
+  active        Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  appointment   Appointment       @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Cascade)
+  planItem      TreatmentPlanItem @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict)
+
+  @@id([tenantId, appointmentId, planItemId])
+  @@index([tenantId, planItemId, appointmentId])
+  @@map("appointment_plan_items")
 }

@@ -57,6 +57,7 @@ export interface PlanQuoteAcceptanceView {
 
 /** El presupuesto para verlo o imprimirlo. */
 export interface PlanQuoteDocument extends QuoteContent {
+  visitOrganization?: PlanQuoteSource['visitOrganization'];
   planStatus: TreatmentPlanStatus;
   clinicLogoUrl: string | null;
   contentHash: string;
@@ -120,6 +121,14 @@ function liveContent(source: PlanQuoteSource, now: Date): QuoteContent {
  */
 function toDocument(source: PlanQuoteSource, now: Date): PlanQuoteDocument {
   const base = {
+    visitOrganization:
+      source.visitOrganization ??
+      source.items.map((i) => ({
+        itemId: i.id,
+        visit: 1,
+        label: null,
+        minDaysAfterPrevious: 0,
+      })),
     planStatus: source.plan.status,
     clinicLogoUrl: source.clinic.logoUrl,
   };

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ToothSurface, TreatmentPlanStatus } from '@prisma/client';
 import { IsString, Matches, MaxLength } from 'class-validator';
 
@@ -163,7 +163,19 @@ export class PlanQuoteAcceptanceDto {
  * Presupuesto imprimible del plan (DX-012). Sin aceptación, es el plan VIVO
  * emitido hoy; aceptado, es la foto firmada (no cambia aunque cambie el plan).
  */
+export class PlanQuoteVisitDto {
+  @ApiProperty({ format: 'uuid' }) itemId!: string;
+  @ApiProperty() visit!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty() minDaysAfterPrevious!: number;
+}
 export class PlanQuoteDocumentDto {
+  @ApiPropertyOptional({
+    type: [PlanQuoteVisitDto],
+    description: 'Organización clínica actual; separada del contenido firmado.',
+  })
+  visitOrganization?: PlanQuoteVisitDto[];
+
   @ApiProperty({
     enum: [1, 2],
     description:
