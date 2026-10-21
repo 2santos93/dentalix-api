@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, OmitType } from '@nestjs/swagger';
 import { AppointmentStatus } from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
@@ -157,7 +157,9 @@ export class AppointmentWriteDto extends AppointmentDto {
  * resume la cobertura principal del paciente, sin número de afiliado.
  * `medicalAlerts` (DX-247): solo banderas de la anamnesis, nunca su contenido.
  */
-export class AppointmentListItemDto extends AppointmentDto {
+export class AppointmentListItemDto extends OmitType(AppointmentDto, [
+  'notes',
+] as const) {
   @ApiProperty({ type: OverdueBalanceDto })
   balance!: OverdueBalanceDto;
 

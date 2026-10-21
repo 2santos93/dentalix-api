@@ -202,7 +202,7 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: [AppointmentListItemDto],
     description:
-      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica.',
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica ni las notas de la cita (disponibles en GET /appointments/:id).',
   })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
@@ -211,7 +211,7 @@ export class AppointmentsController {
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    (Appointment & {
+    (Omit<Appointment, 'notes'> & {
       balance: OverdueBalance;
       coverage: CoverageSummary;
       medicalAlerts: MedicalAlertFlags;
@@ -232,7 +232,7 @@ export class AppointmentsController {
     const coverage = await this.coverageFlags.forPatients(patientIds);
     // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
     const medical = await this.medicalAlertFlags.forAppointments(appointments);
-    return appointments.map((a) => ({
+    return appointments.map(({ notes: _notes, ...a }) => ({
       ...a,
       balance: flags.get(a.patientId) ?? {
         hasOverdue: false,
