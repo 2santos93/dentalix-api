@@ -44,6 +44,30 @@ function setup() {
 }
 
 describe('GetPlanQuoteUseCase (DX-012)', () => {
+  it('entrega organización separada del contenido sellado (DX-256)', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    const source = quoteSource();
+    Object.assign(source, {
+      visitOrganization: [
+        {
+          itemId: 'item-1',
+          visit: 2,
+          label: 'Corona',
+          minDaysAfterPrevious: 90,
+        },
+        { itemId: 'item-2', visit: 1, label: null, minDaysAfterPrevious: 0 },
+      ],
+    });
+    repo.add(source);
+    const get = new GetPlanQuoteUseCase(repo, () => NOW);
+    const doc = await get.execute('patient-1', 'plan-1');
+    expect(doc).toHaveProperty('visitOrganization', [
+      { itemId: 'item-1', visit: 2, label: 'Corona', minDaysAfterPrevious: 90 },
+      { itemId: 'item-2', visit: 1, label: null, minDaysAfterPrevious: 0 },
+    ]);
+    expect(doc.contentHash).toBe(computeQuoteHash(doc));
+  });
+
   it('compone el presupuesto con la fecha de hoy en la zona de la sede y su hash', async () => {
     const { get } = setup();
     // 23:30 del 15 en Bogotá = 04:30 UTC del 16: el presupuesto es del 15.

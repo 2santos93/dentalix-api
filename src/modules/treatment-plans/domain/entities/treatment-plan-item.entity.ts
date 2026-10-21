@@ -14,6 +14,8 @@ import {
  * `defaultPrice`).
  */
 export interface TreatmentPlanItem {
+  visit?: number;
+  visitLabel?: string | null;
   id: string;
   tenantId: string;
   planId: string;

@@ -103,6 +103,7 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
           tenantId,
           patientId: source.patientId,
           currency: source.currency,
+          visitIntervals: source.visitIntervals ?? {},
           notes: source.notes,
           createdById: decision.createdById,
           optionGroupId: groupId,
@@ -114,6 +115,8 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
           data: source.items.map((item) => ({
             tenantId,
             planId: created.id,
+            visit: item.visit,
+            visitLabel: item.visitLabel,
             toothNumber: item.toothNumber,
             surfaces: item.surfaces,
             catalogItemId: item.catalogItemId,
