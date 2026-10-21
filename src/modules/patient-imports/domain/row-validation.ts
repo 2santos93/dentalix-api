@@ -31,6 +31,9 @@ export interface ValidatedRow {
   issues: RowIssue[];
 }
 
+export const EXTRA_CELLS_MESSAGE =
+  'La fila tiene más celdas que la cabecera: revisa el separador o las comillas de algún dato (p. ej. una dirección con «;»).';
+
 /** Lo que se copia de la celda en el informe. */
 export const MAX_ISSUE_VALUE_LENGTH = 80;
 
@@ -96,10 +99,8 @@ function aliasKey(raw: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-/** Clave de comparación de un documento: mayúsculas, solo letras y dígitos. */
-export function docKey(docNumber: string): string {
-  return docNumber.toUpperCase().replace(/[^0-9A-Z]/g, '');
-}
+/** Clave de comparación del documento (la misma que usa el alta manual). */
+export { docKey } from '../../patients/domain/doc-key';
 
 export function parseDocType(raw: string): DocType | null {
   const key = aliasKey(raw);
@@ -331,6 +332,15 @@ export function validateRow(
     return value;
   };
 
+  if (row.extraCells) {
+    issues.push({
+      row: row.rowNumber,
+      column: null,
+      kind: 'ERROR',
+      message: EXTRA_CELLS_MESSAGE,
+      value: null,
+    });
+  }
   const firstName = text('firstName', 'Nombres', true);
   const lastName = text('lastName', 'Apellidos', true);
 

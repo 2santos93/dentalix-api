@@ -1,4 +1,3 @@
-import { deflateRawSync } from 'node:zlib';
 import {
   decodeCsv,
   detectDelimiter,
@@ -9,12 +8,19 @@ import {
   EXTENSION_MISMATCH_MESSAGE,
   LEGACY_XLS_MESSAGE,
   NO_ROWS_MESSAGE,
+  UNREADABLE_MESSAGE,
   UNSUPPORTED_EXTENSION_MESSAGE,
   readImportFile,
 } from './read-import-file';
-import { ImportFileError, toTable } from './tabular-file';
 import {
-  MAX_XLSX_PART_BYTES,
+  ImportFileError,
+  MAX_COLUMNS,
+  MAX_PHYSICAL_ROWS,
+  toTable,
+  type RawRecord,
+} from './tabular-file';
+import {
+  MAX_XLSX_TOTAL_BYTES,
   decodeXmlText,
   excelSerialToDate,
   readXlsx,
@@ -24,6 +30,34 @@ import { TOO_MANY_ROWS_MESSAGE } from './import-fields';
 
 const csvBytes = (text: string, encoding: BufferEncoding = 'utf8') =>
   Buffer.from(text, encoding);
+
+const WB =
+  '<workbook><sheets><sheet name="a" r:id="rId1"/></sheets></workbook>';
+const RELS =
+  '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>';
+
+/** Libro a mano con la hoja tal cual (para XML raro o malicioso). */
+function rawBook(
+  sheet: string,
+  extra: { name: string; data: Buffer }[] = [],
+  store = false,
+): Buffer {
+  return zip([
+    { name: 'xl/workbook.xml', data: Buffer.from(WB) },
+    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(RELS) },
+    { name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheet), store },
+    ...extra,
+  ]);
+}
+
+const inline = (ref: string, text: string) =>
+  `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
+
+async function records(bytes: Buffer): Promise<RawRecord[]> {
+  return [...(await readXlsx(bytes))].filter((r) =>
+    r.cells.some((c) => c !== ''),
+  );
+}
 
 describe('CSV (DX-107)', () => {
   it('detecta UTF-8 con y sin BOM y Windows-1252 (Latin-1)', () => {
@@ -43,7 +77,7 @@ describe('CSV (DX-107)', () => {
     const parsed = parseCsv(bytes);
     expect(parsed.encoding).toBe('utf-16le');
     expect(parsed.delimiter).toBe('\t');
-    expect(parsed.records[1].cells).toEqual(['Ana', 'Pérez']);
+    expect([...parsed.records][1].cells).toEqual(['Ana', 'Pérez']);
   });
 
   it('rechaza un binario que no es texto', () => {
@@ -52,17 +86,21 @@ describe('CSV (DX-107)', () => {
     );
   });
 
-  it('elige el separador de la cabecera: «;» (Excel en español), «,» o tabulador', () => {
+  it('elige el separador de las primeras líneas: «;» (Excel en español), «,» o tabulador', () => {
     expect(detectDelimiter('nombres;apellidos;documento\nA,B;C;D')).toBe(';');
     expect(detectDelimiter('nombres,apellidos\nA;B,C')).toBe(',');
     expect(detectDelimiter('"a;b",c,d\n')).toBe(',');
     expect(detectDelimiter('solo')).toBe(',');
+    // Un título sin separadores encima de la cabecera no decide.
+    expect(
+      detectDelimiter('Pacientes 2026\nnombres;apellidos;doc\nA;B;C'),
+    ).toBe(';');
   });
 
   it('respeta la pista «sep=» de Excel y numera las filas como la hoja', () => {
     const parsed = parseCsv(csvBytes('sep=;\nnombres;apellidos\nAna;Pérez\n'));
     expect(parsed.delimiter).toBe(';');
-    expect(parsed.records).toEqual([
+    expect([...parsed.records]).toEqual([
       { rowNumber: 2, cells: ['nombres', 'apellidos'] },
       { rowNumber: 3, cells: ['Ana', 'Pérez'] },
     ]);
@@ -74,9 +112,24 @@ describe('CSV (DX-107)', () => {
       ['1', '2', '3'],
     ]);
   });
+
+  it('no guarda más de 100 campos por registro: lo que sobra solo se anota', () => {
+    const [record] = [...parseCsv(csvBytes(';'.repeat(500_000) + 'x')).records];
+    expect(record.cells).toHaveLength(MAX_COLUMNS);
+    expect(record.overflow).toBe(true);
+  });
+
+  it('una comilla sin cerrar no se vuelve cuadrática ni guarda celdas enormes', () => {
+    const started = Date.now();
+    const [, record] = [
+      ...parseCsv(csvBytes(`a,b\n"${'x'.repeat(4_000_000)}`)).records,
+    ];
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(record.cells[0].length).toBeLessThanOrEqual(10_000);
+  });
 });
 
-describe('toTable', () => {
+describe('TableBuilder / toTable', () => {
   const rows = (cells: string[][]) =>
     cells.map((c, i) => ({ rowNumber: i + 1, cells: c }));
 
@@ -92,30 +145,65 @@ describe('toTable', () => {
     expect(table.rows).toEqual([{ rowNumber: 3, cells: ['Ana', 'Pérez'] }]);
   });
 
-  it('rechaza cabeceras repetidas y más de 10.000 filas', () => {
+  it('un título de una celda encima de la cabecera se salta', () => {
+    const table = toTable(
+      rows([
+        ['Listado de pacientes'],
+        [],
+        ['nombres', 'apellidos'],
+        ['Ana', 'Pérez'],
+      ]),
+    );
+    expect(table.headers).toEqual(['nombres', 'apellidos']);
+    expect(table.rows).toEqual([{ rowNumber: 4, cells: ['Ana', 'Pérez'] }]);
+  });
+
+  it('una fila con algo escrito más allá de la cabecera queda marcada (error de fila)', () => {
+    const table = toTable([
+      { rowNumber: 1, cells: ['nombres', 'apellidos'] },
+      { rowNumber: 2, cells: ['Ana', 'Pérez', 'Calle 1'] },
+      { rowNumber: 3, cells: ['Luis', 'Gil', ''] },
+      { rowNumber: 4, cells: ['Eva', 'Paz'], overflow: true },
+    ]);
+    expect(table.rows.map((r) => [r.rowNumber, r.extraCells ?? false])).toEqual(
+      [
+        [2, true],
+        [3, false],
+        [4, true],
+      ],
+    );
+  });
+
+  it('rechaza cabeceras repetidas, más de 10.000 filas con datos y demasiadas filas físicas', () => {
     expect(() => toTable(rows([['a', 'A']]))).toThrow(/aparece dos veces/);
     const many = [
-      ['a'],
-      ...Array.from({ length: 10_001 }, (_, i) => [`x${i}`]),
+      ['a', 'b'],
+      ...Array.from({ length: 10_001 }, (_, i) => [`x${i}`, 'y']),
     ];
     expect(() => toTable(rows(many))).toThrow(TOO_MANY_ROWS_MESSAGE);
     const exact = [
-      ['a'],
-      ...Array.from({ length: 10_000 }, (_, i) => [`x${i}`]),
+      ['a', 'b'],
+      ...Array.from({ length: 10_000 }, (_, i) => [`x${i}`, 'y']),
     ];
     expect(toTable(rows(exact)).rows).toHaveLength(10_000);
+    const blanks = Array.from(
+      { length: MAX_PHYSICAL_ROWS + 1 },
+      () => [] as string[],
+    );
+    expect(() => toTable(rows(blanks))).toThrow(
+      /filas \(contando las vacías\)/,
+    );
   });
 });
 
 describe('XLSX', () => {
-  it('lee cadenas compartidas, en línea, números sin notación científica y fechas', () => {
+  it('lee cadenas compartidas, en línea, números sin notación científica y fechas', async () => {
     const book = buildXlsx([
       ['nombres', 'documento', 'nacimiento', 'telefono'],
       ['Ana & Eva <x>', 1020304050, { date: 32874 }, null],
       ['Luis', 12345678901, { date: 45000 }, 3101234567],
     ]);
-    const sheet = readXlsx(book);
-    expect(sheet.records).toEqual([
+    expect(await records(book)).toEqual([
       {
         rowNumber: 1,
         cells: ['nombres', 'documento', 'nacimiento', 'telefono'],
@@ -126,7 +214,7 @@ describe('XLSX', () => {
         cells: ['Luis', '12345678901', '2023-03-15', '3101234567'],
       },
     ]);
-    const inline = readXlsx(
+    const inlined = await records(
       buildXlsx(
         [
           ['a', 'b'],
@@ -135,23 +223,80 @@ describe('XLSX', () => {
         { inline: true },
       ),
     );
-    expect(inline.records[1].cells).toEqual(['ñ', 'é']);
+    expect(inlined[1].cells).toEqual(['ñ', 'é']);
   });
 
-  it('sigue la relación del libro hasta la hoja aunque no sea sheet1.xml', () => {
-    const book = buildXlsx([['a'], ['b']], {
-      sheetPath: 'worksheets/hoja-pacientes.xml',
-    });
-    expect(readXlsx(book).records[1].cells).toEqual(['b']);
+  it('sigue la relación del libro hasta la hoja aunque no sea sheet1.xml', async () => {
+    const book = buildXlsx(
+      [
+        ['a', 'z'],
+        ['b', 'y'],
+      ],
+      { sheetPath: 'worksheets/hoja-pacientes.xml' },
+    );
+    expect((await records(book))[1].cells).toEqual(['b', 'y']);
   });
 
-  it('serie de Excel → fecha civil (incluido el 29/02/1900 que no existió)', () => {
+  it('prefijos de espacio de nombres, comillas simples y celdas de error vacías', async () => {
+    const sheet =
+      "<x:worksheet xmlns:x='m'><x:sheetData><x:row r='1'><x:c r='A1' t='inlineStr'><x:is><x:t>nombres</x:t></x:is></x:c>" +
+      "<x:c r='B1' t='inlineStr'><x:is><x:t>doc</x:t></x:is></x:c></x:row>" +
+      "<x:row r='2'><x:c r='A2' t='str'><x:v>Ana</x:v></x:c><x:c r='B2' t='e'><x:v>#N/A</x:v></x:c></x:row></x:sheetData></x:worksheet>";
+    expect(await records(rawBook(sheet))).toEqual([
+      { rowNumber: 1, cells: ['nombres', 'doc'] },
+      { rowNumber: 2, cells: ['Ana', ''] },
+    ]);
+  });
+
+  it('una etiqueta sin cerrar es un error del fichero, en tiempo lineal', async () => {
+    const started = Date.now();
+    const book = rawBook('<sheetData>' + '<row>'.repeat(1_000_000), [], true);
+    await expect(readXlsx(book).then((r) => [...r])).rejects.toThrow(
+      ImportFileError,
+    );
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('número de fila: entero de 1 a 1.048.576 y creciente; si no, el siguiente', async () => {
+    const sheet =
+      `<sheetData><row r="1">${inline('A1', 'nombres')}${inline('B1', 'doc')}</row>` +
+      `<row r="abc">${inline('A2', 'x')}</row><row r="99999999">${inline('A3', 'y')}</row>` +
+      `<row r="20000">${inline('A4', 'z')}</row><row r="7">${inline('A5', 'w')}</row></sheetData>`;
+    expect((await records(rawBook(sheet))).map((r) => r.rowNumber)).toEqual([
+      1, 2, 3, 20000, 20001,
+    ]);
+  });
+
+  it('una celda en la columna XFD no reserva 16.384 celdas: se anota como desbordada', async () => {
+    const one = '<row><c r="XFD1" t="inlineStr"><is><t>1</t></is></c></row>';
+    const all = [
+      ...(await readXlsx(
+        rawBook(`<sheetData>${one.repeat(1000)}</sheetData>`),
+      )),
+    ];
+    expect(all[0]).toEqual({ rowNumber: 1, cells: [], overflow: true });
+  });
+
+  it('serie de Excel → fecha civil; fuera de rango (1e12) no revienta', () => {
     expect(excelSerialToDate(1)).toBe('1900-01-01');
     expect(excelSerialToDate(59)).toBe('1900-02-28');
     expect(excelSerialToDate(61)).toBe('1900-03-01');
     expect(excelSerialToDate(25569)).toBe('1970-01-01');
     expect(excelSerialToDate(0, true)).toBeNull();
     expect(excelSerialToDate(1, true)).toBe('1904-01-02');
+    expect(excelSerialToDate(2_958_465)).toBe('9999-12-31');
+    expect(excelSerialToDate(2_958_466)).toBeNull();
+    expect(excelSerialToDate(1e12)).toBeNull();
+  });
+
+  it('una fecha enorme con estilo de fecha sale como número, no como 500', async () => {
+    const styles =
+      '<styleSheet><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>';
+    const sheet = `<sheetData><row r="1">${inline('A1', 'nombres')}${inline('B1', 'nac')}</row><row r="2">${inline('A2', 'Ana')}<c r="B2" s="1"><v>1e12</v></c></row></sheetData>`;
+    const rows = await records(
+      rawBook(sheet, [{ name: 'xl/styles.xml', data: Buffer.from(styles) }]),
+    );
+    expect(rows[1].cells).toEqual(['Ana', '1000000000000']);
   });
 
   it('decodifica entidades y el escape _xHHHH_ sin expandir DTD', () => {
@@ -159,27 +304,30 @@ describe('XLSX', () => {
     expect(decodeXmlText('&ent;')).toBe('&ent;');
   });
 
-  it('corta una «zip bomb» por el tope de salida', () => {
-    const big = Buffer.alloc(MAX_XLSX_PART_BYTES + 1024, 0x20);
+  it('zip bomb: corta por el tope TOTAL aunque la cabecera mienta sobre el tamaño', async () => {
+    const big = Buffer.alloc(MAX_XLSX_TOTAL_BYTES + 1024, 0x20);
     const bomb = zip([
-      {
-        name: 'xl/workbook.xml',
-        data: Buffer.from(
-          '<workbook><sheets><sheet r:id="rId1"/></sheets></workbook>',
-        ),
-      },
-      { name: 'xl/worksheets/sheet1.xml', data: big },
+      { name: 'xl/workbook.xml', data: Buffer.from(WB) },
+      { name: 'xl/worksheets/sheet1.xml', data: big, declaredSize: 10 },
     ]);
-    expect(bomb.length).toBeLessThan(MAX_XLSX_PART_BYTES / 100);
-    expect(() => readXlsx(bomb)).toThrow(/demasiado grande/);
-    expect(deflateRawSync(Buffer.from('x')).length).toBeGreaterThan(0);
+    expect(bomb.length).toBeLessThan(MAX_XLSX_TOTAL_BYTES / 100);
+    await expect(readXlsx(bomb)).rejects.toThrow(/demasiado grande/);
+    // Dos partes de 20 MB: cada una cabe sola, juntas no.
+    const half = Buffer.alloc(20 * 1024 * 1024, 0x20);
+    const twoParts = zip([
+      { name: 'xl/workbook.xml', data: Buffer.from(WB) },
+      { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(RELS) },
+      { name: 'xl/worksheets/sheet1.xml', data: half, declaredSize: 10 },
+      { name: 'xl/sharedStrings.xml', data: half, declaredSize: 10 },
+    ]);
+    await expect(readXlsx(twoParts)).rejects.toThrow(/demasiado grande/);
   });
 
-  it('un ZIP que no es un libro es un error del fichero', () => {
-    expect(() =>
+  it('un ZIP que no es un libro es un error del fichero', async () => {
+    await expect(
       readXlsx(zip([{ name: 'a.txt', data: Buffer.from('hola') }])),
-    ).toThrow(ImportFileError);
-    expect(() => readXlsx(Buffer.from('PK\u0003\u0004basura'))).toThrow(
+    ).rejects.toThrow(ImportFileError);
+    await expect(readXlsx(Buffer.from('PK\u0003\u0004basura'))).rejects.toThrow(
       ImportFileError,
     );
   });
@@ -190,8 +338,8 @@ describe('readImportFile', () => {
     0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0,
   ]);
 
-  it('decide el formato por el contenido y exige que cuadre con la extensión', () => {
-    const csv = readImportFile(
+  it('decide el formato por el contenido y exige que cuadre con la extensión', async () => {
+    const csv = await readImportFile(
       csvBytes('nombres;apellidos\nAna;Pérez'),
       'pacientes.csv',
     );
@@ -200,24 +348,84 @@ describe('readImportFile', () => {
       delimiter: ';',
       encoding: 'utf-8',
     });
-    const book = readImportFile(
-      buildXlsx([['nombres'], ['Ana']]),
+    const book = await readImportFile(
+      buildXlsx([
+        ['nombres', 'doc'],
+        ['Ana', '1'],
+      ]),
       'Pacientes.XLSX',
     );
     expect(book.format).toBe('XLSX');
-    expect(() => readImportFile(buildXlsx([['a'], ['b']]), 'p.csv')).toThrow(
+    await expect(
+      readImportFile(
+        buildXlsx([
+          ['a', 'z'],
+          ['b', 'y'],
+        ]),
+        'p.csv',
+      ),
+    ).rejects.toThrow(EXTENSION_MISMATCH_MESSAGE);
+    await expect(readImportFile(csvBytes('a\nb'), 'p.xlsx')).rejects.toThrow(
       EXTENSION_MISMATCH_MESSAGE,
     );
-    expect(() => readImportFile(csvBytes('a\nb'), 'p.xlsx')).toThrow(
-      EXTENSION_MISMATCH_MESSAGE,
+    await expect(readImportFile(xls, 'p.xls')).rejects.toThrow(
+      LEGACY_XLS_MESSAGE,
     );
-    expect(() => readImportFile(xls, 'p.xls')).toThrow(LEGACY_XLS_MESSAGE);
-    expect(() => readImportFile(xls, 'p.xlsx')).toThrow(LEGACY_XLS_MESSAGE);
-    expect(() => readImportFile(csvBytes('a\nb'), 'p.pdf')).toThrow(
+    await expect(readImportFile(xls, 'p.xlsx')).rejects.toThrow(
+      LEGACY_XLS_MESSAGE,
+    );
+    await expect(readImportFile(csvBytes('a\nb'), 'p.pdf')).rejects.toThrow(
       UNSUPPORTED_EXTENSION_MESSAGE,
     );
-    expect(() => readImportFile(csvBytes('nombres\n\n'), 'p.csv')).toThrow(
-      NO_ROWS_MESSAGE,
+    await expect(
+      readImportFile(csvBytes('nombres;doc\n\n'), 'p.csv'),
+    ).rejects.toThrow(NO_ROWS_MESSAGE);
+  });
+
+  it('CSV de 5 MB de saltos de línea o de «;»: error claro sin agotar la memoria', async () => {
+    const before = process.memoryUsage().rss;
+    const newlines = Buffer.alloc(5 * 1024 * 1024 - 10, 0x0a);
+    newlines.write('a,b\n', 0);
+    await expect(readImportFile(newlines, 'x.csv')).rejects.toThrow(
+      ImportFileError,
     );
+    const semis = Buffer.alloc(5 * 1024 * 1024 - 10, 0x3b);
+    semis.write('a\n', 0);
+    await expect(readImportFile(semis, 'x.csv')).rejects.toThrow(
+      ImportFileError,
+    );
+    expect(process.memoryUsage().rss - before).toBeLessThan(400 * 1024 * 1024);
+  });
+
+  it('XLSX de filas vacías comprimidas: no guarda filas ni pasa el tope de memoria', async () => {
+    const one = '<row><c/></row>';
+    const book = rawBook(
+      '<sheetData>' +
+        one.repeat(Math.floor((20 * 1024 * 1024) / one.length)) +
+        '</sheetData>',
+    );
+    await expect(readImportFile(book, 'x.xlsx')).rejects.toThrow(
+      /filas \(contando las vacías\)|no tiene cabecera/,
+    );
+  });
+
+  it('un fallo inesperado del lector es un 400 genérico en español, nunca un 500', async () => {
+    const book = buildXlsx([
+      ['nombres', 'doc'],
+      ['Ana', '1'],
+    ]);
+    // Un error que no es del fichero dentro del lector (aquí, simulado).
+    const spy = jest
+      .spyOn(Buffer.prototype, 'toString')
+      .mockImplementationOnce(() => {
+        throw new TypeError('boom');
+      });
+    try {
+      const err = await readImportFile(book, 'x.xlsx').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ImportFileError);
+      expect((err as Error).message).toBe(UNREADABLE_MESSAGE);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

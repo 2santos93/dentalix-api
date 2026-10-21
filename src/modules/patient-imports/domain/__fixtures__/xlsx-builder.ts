@@ -12,8 +12,11 @@ interface ZipFile {
   name: string;
   data: Buffer;
   store?: boolean;
+  /** Tamaño descomprimido que DICE la cabecera (para mentir, como una bomba). */
+  declaredSize?: number;
 }
 
+/** ZIP mínimo (stored o deflate) para las pruebas. */
 export function zip(files: readonly ZipFile[]): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
@@ -28,7 +31,7 @@ export function zip(files: readonly ZipFile[]): Buffer {
     local.writeUInt16LE(file.store ? 0 : 8, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(body.length, 18);
-    local.writeUInt32LE(file.data.length, 22);
+    local.writeUInt32LE(file.declaredSize ?? file.data.length, 22);
     local.writeUInt16LE(name.length, 26);
     locals.push(local, name, body);
     const central = Buffer.alloc(46);
@@ -38,7 +41,7 @@ export function zip(files: readonly ZipFile[]): Buffer {
     central.writeUInt16LE(file.store ? 0 : 8, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(body.length, 20);
-    central.writeUInt32LE(file.data.length, 24);
+    central.writeUInt32LE(file.declaredSize ?? file.data.length, 24);
     central.writeUInt16LE(name.length, 28);
     central.writeUInt32LE(offset, 42);
     centrals.push(central, name);

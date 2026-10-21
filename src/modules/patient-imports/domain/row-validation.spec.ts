@@ -388,3 +388,22 @@ describe('CSV de la plantilla y del informe', () => {
     });
   });
 });
+
+describe('fila con más celdas que la cabecera', () => {
+  it('es un error de la fila, sin columna, y no se importa', () => {
+    const mapping = resolveMapping(['doc', 'nom', 'ape'], {
+      columns: { docNumber: 'doc', firstName: 'nom', lastName: 'ape' },
+      defaultDocType: 'CC',
+    });
+    const r = validateRow(
+      { rowNumber: 5, cells: ['1020', 'Ana', 'Pérez'], extraCells: true },
+      mapping,
+      { countryCode: 'CO', today: TODAY },
+    );
+    expect(r.data).toBeNull();
+    expect(r.issues).toEqual([
+      expect.objectContaining({ row: 5, column: null, kind: 'ERROR' }),
+    ]);
+    expect(r.issues[0].message).toMatch(/más celdas que la cabecera/);
+  });
+});
