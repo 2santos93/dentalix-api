@@ -29,7 +29,6 @@ const APPOINTMENT_SUMMARY = {
 /** DX-212: diagnósticos con su texto CIE-10, el principal primero. */
 const DIAGNOSES = {
   orderBy: { position: 'asc' },
-  include: { icd10: { select: { labelEs: true } } },
 } as const;
 
 type PrismaClinicalEntry = Prisma.ClinicalEntryGetPayload<{
@@ -67,7 +66,7 @@ function mapToEntity(
     diagnoses: row.diagnoses.map((d) => ({
       id: d.id,
       icd10Code: d.icd10Code,
-      labelEs: d.icd10.labelEs,
+      labelEs: d.labelEs,
       kind: d.kind,
       toothFdi: d.toothFdi,
       position: d.position,

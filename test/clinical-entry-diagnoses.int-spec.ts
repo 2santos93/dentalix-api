@@ -137,7 +137,56 @@ describe('diagnósticos CIE-10 de la evolución (DX-212, int)', () => {
     });
   }
 
+  it('DX-236: copia el texto de referencia y conserva la copia tras un cambio del owner', async () => {
+    await raw.icd10Code.update({
+      where: { code: 'K02.1' },
+      data: { labelEs: 'Etiqueta de referencia posterior' },
+    });
+    try {
+      const [snapshot] = await raw.$queryRaw<{ labelEs: string }[]>`
+        SELECT "labelEs" FROM clinical_entry_diagnoses WHERE id = ${a.diagnosisId}::uuid`;
+      expect(snapshot.labelEs).toBe('Caries de la dentina');
+      await seedIcd10Codes(raw);
+      expect(
+        (await raw.icd10Code.findUniqueOrThrow({ where: { code: 'K02.1' } }))
+          .labelEs,
+      ).toBe('Etiqueta de referencia posterior');
+    } finally {
+      await raw.icd10Code.update({
+        where: { code: 'K02.1' },
+        data: { labelEs: 'Caries de la dentina' },
+      });
+    }
+  });
+
+  it('DX-236: la BD ignora una etiqueta proporcionada por el cliente al insertar', async () => {
+    const [saved] = await asA(async (tx) => {
+      const entry = await tx.clinicalEntry.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId: a.patientId,
+          notes: 'Snapshot seguro',
+          entryDate: new Date('2026-10-21T00:00:00Z'),
+          performedById: authorId,
+        },
+      });
+      return tx.$queryRaw<{ labelEs: string }[]>`
+        INSERT INTO clinical_entry_diagnoses (id, "tenantId", "patientId", "clinicalEntryId", "icd10Code", kind, position, "labelEs")
+        VALUES (gen_random_uuid(), ${a.tenantId}::uuid, ${a.patientId}::uuid, ${entry.id}::uuid, 'K02.1', 'PRINCIPAL', 0, 'Texto falsificado')
+        RETURNING "labelEs"`;
+    });
+    expect(saved.labelEs).toBe('Caries de la dentina');
+  });
+
   describe('inalterable (DX-038)', () => {
+    it('DX-236: rechaza el UPDATE de la nueva etiqueta como app', async () => {
+      await expect(
+        asAppRole(
+          `UPDATE clinical_entry_diagnoses SET "labelEs" = 'Falsificado' WHERE id = $1::uuid`,
+          a.diagnosisId,
+        ),
+      ).rejects.toThrow(IMMUTABLE);
+    });
     it('rechaza el UPDATE como rol de la app', async () => {
       await expect(
         asAppRole(

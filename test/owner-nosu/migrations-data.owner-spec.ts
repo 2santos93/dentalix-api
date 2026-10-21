@@ -250,7 +250,20 @@ const STEPS: Step[] = [
   { until: '20261020100000', fixture: FIXTURE_AVATARS },
   // dx225: claves generadas de implantes, "phoneTail" con su trigger, relleno
   // por lotes con la clínica fijada (sin NO FORCE) e índice CONCURRENTLY.
-  { until: '99999999999999', fixture: FIXTURE_DX225 },
+  { until: '20261021120000', fixture: FIXTURE_DX225 },
+  {
+    until: '99999999999999',
+    fixture: [
+      `INSERT INTO icd10_codes (code, label_es) VALUES ('K02.1', 'Texto anterior al backfill')`,
+      `WITH e AS (
+       INSERT INTO clinical_entries (id, "tenantId", "patientId", "entryDate", notes, "performedById")
+       VALUES (gen_random_uuid(), '${T_A}', '${P_A}', now(), 'DX236 A', '${U_A}'),
+              (gen_random_uuid(), '${T_B}', '${P_B}', now(), 'DX236 B', '${U_B}')
+       RETURNING id, "tenantId", "patientId"
+     ) INSERT INTO clinical_entry_diagnoses (id, "tenantId", "patientId", "clinicalEntryId", "icd10Code", kind, position)
+       SELECT gen_random_uuid(), "tenantId", "patientId", id, 'K02.1', 'PRINCIPAL', 0 FROM e`,
+    ],
+  },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -621,6 +634,32 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE relname = 'patients_tenant_phone_tail_live_idx'`,
       ),
     ).toBe(0);
+  }, 180_000);
+
+  it('DX-236: backfill copia las etiquetas de las dos clínicas con owner sin superusuario', async () => {
+    await run(STEPS[15]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("tenantId"::text || ':' || "labelEs", ',' ORDER BY "tenantId") AS v FROM clinical_entry_diagnoses`,
+      ),
+    ).toBe(
+      `${T_A}:Texto anterior al backfill,${T_B}:Texto anterior al backfill`,
+    );
+    expect(
+      await scalar<boolean>(
+        `SELECT attnotnull AS v FROM pg_attribute WHERE attrelid = 'clinical_entry_diagnoses'::regclass AND attname = 'labelEs'`,
+      ),
+    ).toBe(true);
+    expect(
+      await scalar<string>(
+        `SELECT tgenabled::text AS v FROM pg_trigger WHERE tgrelid = 'clinical_entry_diagnoses'::regclass AND tgname = 'clinical_entry_diagnoses_immutable'`,
+      ),
+    ).toBe('O');
+    expect(
+      await scalar<boolean>(
+        `SELECT has_table_privilege('dentalix_app', 'icd10_codes', 'UPDATE') AS v`,
+      ),
+    ).toBe(false);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {
