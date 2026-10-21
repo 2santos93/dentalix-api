@@ -28,6 +28,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'invitation-email': { limit: 2, ttlMs: 60_000 },
   'password-reset': { limit: 2, ttlMs: 60_000 },
   'public-files': { limit: 2, ttlMs: 60_000 },
+  'direct-upload': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -246,6 +247,28 @@ describe('Rate limiting (e2e)', () => {
         expect((await resend('admin-1', 'clinica-1')).status).toBe(401);
       }
       expectTooMany(await resend('admin-1', 'clinica-1'));
+    });
+
+    it('DX-259: pedir la subida directa (upload-url): 429 por clínica+usuario, no por IP', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const ask = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post(
+            '/api/v1/patients/00000000-0000-4000-8000-000000000000/documents/upload-url',
+          )
+          .set('Authorization', bearer(sub, tenantId))
+          .send({ sizeBytes: 10, sha256: 'a'.repeat(64) });
+      for (let i = 0; i < LOW_LIMITS['direct-upload'].limit; i++) {
+        expect((await ask('dr-1', 'clinica-1')).status).toBe(401);
+      }
+      expectTooMany(await ask('dr-1', 'clinica-1'));
+      expect((await ask('dr-2', 'clinica-1')).status).toBe(401);
     });
 
     it('health nunca se limita (@SkipThrottle)', async () => {

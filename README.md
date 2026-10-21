@@ -2025,7 +2025,7 @@ avatares hacían un `GetObject` por petición (OPS-038, OPS-039).
    sizeBytes, sha256 }` (hex). Comprueba tamaño (1 B – 20 MB; 413 por encima),
    huella, paciente de la clínica, duplicado vigente (409) y sede, y responde
    `{ documentId, method: 'POST', url, fields, expiresAt, maxBytes }`: un
-   **POST prefirmado** (`createPresignedPost`) de **5 minutos**
+   **POST prefirmado** (`createPresignedPost`) de **15 minutos**
    (`PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS`) con la clave **exacta** que fija la
    API, `patient-documents/pending/<tenantId>/<documentId>` (sin
    `starts-with`: un único objeto), `content-length-range` 1 B – 20 MB,
@@ -2033,7 +2033,8 @@ avatares hacían un `GetObject` por petición (OPS-038, OPS-039).
    rechaza otro contenido), `Content-Type: application/octet-stream` fijo, el
    SSE si hay `S3_SSE` y los metadatos `x-amz-meta-uploaded-by`,
    `-patient-id`, `-declared-size` y `-sha256` (cambiar cualquiera da 403).
-   No se audita (no toca la ficha).
+   No se audita (no toca la ficha). Límite propio por clínica + usuario,
+   `RATE_LIMIT_DIRECT_UPLOAD_LIMIT`/`_TTL_MS` (default 60/min).
 2. El navegador envía `fields` (en orden) y el fichero al final en `file` a
    `url`, por XHR con progreso. No pasa por la web ni por la API.
 3. `POST /patients/:patientId/documents/:id/complete` `{ category,
@@ -2050,15 +2051,22 @@ avatares hacían un `GetObject` por petición (OPS-038, OPS-039).
    copia (`CopyObject` con `CopySourceIfMatch`) a
    `patient-documents/<tenantId>/<documentId>-<16 hex del sha256>.<ext>` con
    el tipo detectado, se borra el pendiente y se crea la fila. Repetir
-   `complete` de un documento ya creado lo devuelve (idempotente). Hasta
-   `complete` el objeto no es alcanzable por la API.
+   `complete` de un documento ya creado por el mismo usuario lo devuelve
+   (idempotente) **sin** volver a auditar CREATE; otro usuario recibe 404. Si
+   dos `complete` del mismo documento se cruzan, el que pierde la copia
+   devuelve la fila del que ganó. Hasta `complete` el objeto no es alcanzable
+   por la API.
 
 **Con `STORAGE_DRIVER=disk`** (desarrollo y tests) el flujo es el mismo:
 `upload-url` responde un formulario equivalente hacia la propia API,
 `FILES_PUBLIC_BASE_URL/uploads` (`POST /files/uploads`, firmado con el HMAC
-del proceso, misma caducidad, tope y SHA-256; multer a un temporal en disco y
-semáforo), que deja el objeto y su checksum/metadatos en `STORAGE_DIR/.meta`.
-Con S3 esa ruta da 404.
+del proceso, misma caducidad, tope y SHA-256), que deja el objeto y su
+checksum/metadatos en `STORAGE_DIR/.meta`. Orden de la ruta: con S3, **404
+antes de nada** (`DiskDriverOnlyGuard`: ni plaza del semáforo ni disco);
+plaza del semáforo con plazos; la firma se comprueba **antes de aceptar el
+fichero** (`fileFilter` de multer: los campos llegan antes que `file`), así
+que una firma mala o caducada es 403 sin escribir nada; errores de multer en
+español (`MultipartErrorsFilter`).
 
 **El multipart de siempre** (`POST /patients/:patientId/documents`) sigue,
 para integraciones: multer escribe en un **temporal en disco**
@@ -2070,7 +2078,13 @@ streaming (`@aws-sdk/lib-storage` `Upload`). Igual el avatar (`POST
 **Semáforo de subidas por réplica**: `UPLOAD_MAX_CONCURRENCY` (default 4,
 1..256) peticiones que reciben un fichero a la vez (multipart, avatar,
 `/files/uploads`). Sin plaza: **503** «Hay demasiadas subidas en curso…» con
-`Retry-After: 5`, antes de leer el cuerpo.
+`Retry-After: 5`, antes de leer el cuerpo. Cada subida tiene un plazo de
+inactividad `UPLOAD_IDLE_TIMEOUT_MS` (default 15000) y uno total
+`UPLOAD_MAX_DURATION_MS` (default 120000): al vencer, **408** «La subida tardó
+demasiado…», se corta la conexión y la plaza queda libre (si no, unos pocos
+clientes a 10 B/s retendrían todas las plazas hasta los 300 s del
+`requestTimeout` de Node). Con el default, un multipart de 20 MB por la API
+necesita ≥ 1,4 Mbit/s; la web no usa esa ruta (sube directo al bucket).
 
 **Cliente S3** (`createS3Client`): `NodeHttpHandler` con `connectionTimeout`
 `S3_CONNECT_TIMEOUT_MS` (default 3000), `requestTimeout` y `socketTimeout`
@@ -2097,8 +2111,9 @@ avisa (`storage.unreachable`): la API arranca igual. El `HeadBucket` necesita
 **Avatares**: clave versionada `avatars/<userId>-<16 hex del sha256>.<ext>`
 (cambiar el avatar cambia la URL) servida con `Cache-Control: public,
 max-age=31536000, immutable` y ETag, en streaming; uno de antes
-(`avatars/<userId>.<ext>`) con `public, max-age=300` y ETag (304 con
-`If-None-Match`). La ruta anónima `GET /files/avatars/:name` tiene su propio
+(`avatars/<userId>.<ext>`) con `public, max-age=300` y ETag. Una
+revalidación con `If-None-Match` hace solo un `HeadObject` y responde 304 sin
+descargar el objeto. La ruta anónima `GET /files/avatars/:name` tiene su propio
 límite por IP, `RATE_LIMIT_PUBLIC_FILES_LIMIT`/`_TTL_MS` (default 300/min).
 La web reduce en el navegador las fotos de más de 900 KB (el proxy copia 1 MB).
 
@@ -2141,10 +2156,12 @@ La web reduce en el navegador las fotos de más de 900 KB (el proxy copia 1 MB).
   En R2, una regla de ciclo de vida con el prefijo `patient-documents/pending/`
   y «Delete after 1 day». En local, `minio_init` la aplica a `dentalix-local`
   y `dentalix-test` (`mc ilm import`).
-- **Cloudflare R2 no implementa el POST de formulario (PostObject)**: con R2
-  la subida directa no funciona tal cual. O se usa S3/MinIO, o hay que añadir
-  un modo de PUT prefirmado (con `Content-Length` y `x-amz-checksum-sha256`
-  firmados) en `createDirectUpload`; queda como riesgo (informe DX-259).
+- **Decisión: Cloudflare R2 no está soportado para la subida directa.** R2 no
+  implementa el POST de formulario (PostObject), así que con R2 la web no
+  puede subir documentos. Hoy la subida directa exige AWS S3 o MinIO. Si se
+  pasa a R2, hay que implementar antes un modo de PUT prefirmado (con
+  `Content-Length` y `x-amz-checksum-sha256` firmados) en
+  `createDirectUpload` (tarea aparte del tech lead; informe DX-259).
 - **Web**: `NEXT_PUBLIC_FILES_ORIGIN` = origen del bucket (CSP `connect-src`,
   `frame-src`, `img-src`).
 - La política IAM de DX-084 sirve (`CopyObject` usa `s3:GetObject` del origen

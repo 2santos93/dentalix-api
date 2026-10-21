@@ -101,18 +101,21 @@ export class FilesController {
     if (!SAFE_NAME.test(name) || !isFileKey(key)) {
       throw new BadRequestException('Invalid file name');
     }
+    res.set('Cache-Control', avatarCacheControl(name));
+    // Revalidación (If-None-Match): basta un HeadObject; el objeto solo se
+    // descarga si cambió. `req.fresh` (Express) compara If-None-Match con la
+    // ETag puesta y, sin cuerpo, el `send()` de Express responde 304.
+    if (req.headers['if-none-match']) {
+      const info = await this.storage.stat(key);
+      if (!info) throw new NotFoundException('File not found');
+      if (info.etag) res.set('ETag', info.etag);
+      if (info.etag && req.fresh) return undefined;
+    }
     const file = await this.storage.openRead(key);
     if (!file) {
       throw new NotFoundException('File not found');
     }
-    res.set('Cache-Control', avatarCacheControl(name));
     if (file.etag) res.set('ETag', file.etag);
-    // `req.fresh` (Express) compara If-None-Match con la ETag de arriba. Sin
-    // cuerpo, el `send()` de Express responde 304.
-    if (file.etag && req.fresh) {
-      file.stream.destroy();
-      return undefined;
-    }
     // El tipo sale de la extensión (la fija el caso de uso), no de lo
     // guardado: nunca se sirve como HTML algo subido como avatar.
     res.set('Content-Type', contentTypeOf(key));

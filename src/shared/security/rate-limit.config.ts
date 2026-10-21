@@ -33,6 +33,10 @@
  *                  (DX-010); por IP (enumeración de tokens y bombardeo de
  *                  emails). Los topes por destinatario del email están en la
  *                  BD y no se notan en la respuesta (siempre 202).
+ * - direct-upload: pedir la autorización de subida directa al bucket
+ *                  (`POST …/documents/upload-url`, DX-259), por clínica +
+ *                  usuario, como invitation-email: cada una firma un POST
+ *                  para subir hasta 20 MB.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -47,7 +51,8 @@ export type RateLimitPolicy =
   | 'refresh'
   | 'invitation-email'
   | 'password-reset'
-  | 'public-files';
+  | 'public-files'
+  | 'direct-upload';
 
 export interface RateLimitRule {
   limit: number;
@@ -71,6 +76,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'invitation-email': { limit: 10, ttlMs: MINUTE },
   'password-reset': { limit: 10, ttlMs: 15 * MINUTE },
   'public-files': { limit: 300, ttlMs: MINUTE },
+  'direct-upload': { limit: 60, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -106,5 +112,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'invitation-email': rule('invitation-email'),
     'password-reset': rule('password-reset'),
     'public-files': rule('public-files'),
+    'direct-upload': rule('direct-upload'),
   };
 }

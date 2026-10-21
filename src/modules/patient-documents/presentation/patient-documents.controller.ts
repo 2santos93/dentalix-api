@@ -40,6 +40,7 @@ import { PATIENT_DOCUMENT_ROLES } from '../../auth/presentation/guards/clinic-ro
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import {
   CompletePatientDocumentUploadUseCase,
   CreatePatientDocumentUploadUseCase,
@@ -190,6 +191,9 @@ export class PatientDocumentsController {
   }
 
   @Post('upload-url')
+  // DX-259: cada autorización firma una subida de hasta 20 MB al bucket; tope
+  // por clínica + usuario (RATE_LIMIT_DIRECT_UPLOAD_*, 60/min por defecto).
+  @RateLimit('direct-upload')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   @ApiOperation({

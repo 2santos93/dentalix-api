@@ -17,6 +17,7 @@ for (const policy of [
   'INVITATION_EMAIL',
   'PASSWORD_RESET',
   'PUBLIC_FILES',
+  'DIRECT_UPLOAD',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

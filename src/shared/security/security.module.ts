@@ -83,6 +83,14 @@ function throttlers(
     },
     strict('password-reset'),
     strict('public-files'),
+    {
+      ...strict('direct-upload'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(
+          routePrefix(context, name),
+          request(context).headers.authorization,
+        ),
+    },
   ];
 }
 

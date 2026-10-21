@@ -20,10 +20,11 @@ export const PATIENT_DOCUMENT_URL_TTL_SECONDS = 300;
 
 /**
  * DX-259: la autorización para subir el fichero directamente al almacén
- * (POST prefirmado) vale 5 minutos; S3 la comprueba al EMPEZAR la subida, así
- * que una subida lenta que empezó a tiempo termina.
+ * (POST prefirmado) vale 15 minutos: con 3 subidas a la vez desde un móvil
+ * lento, la última de la cola puede empezar varios minutos después de pedirla.
+ * S3 la comprueba al EMPEZAR la subida, así que una que empezó a tiempo termina.
  */
-export const PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS = 300;
+export const PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS = 15 * 60;
 
 export const MAX_ORIGINAL_NAME_LENGTH = 255;
 export const MAX_TOOTH_NUMBERS = 8;
