@@ -80,6 +80,9 @@ model Tenant {
   providerScheduleOverrides ProviderScheduleOverride[]
   // DX-247: confirmaciones «Sin cambios hoy» de la anamnesis.
   medicalHistoryReviews     MedicalHistoryReview[]
+  // DX-107: lotes de importación de pacientes y sus filas.
+  patientImportBatches      PatientImportBatch[]
+  patientImportRows         PatientImportRow[]
 
   @@map("tenants")
 }
@@ -202,6 +205,8 @@ model Location {
   patientImplants           PatientImplant[]
   // DX-151: documentos del paciente subidos en la sede.
   patientDocuments          PatientDocument[]
+  // DX-107: lotes de importación de pacientes con esta sede por defecto.
+  patientImportBatches      PatientImportBatch[]
   planAcceptances           TreatmentPlanAcceptance[]
   presentedPlans            TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
@@ -398,7 +403,14 @@ model Patient {
   // DX-225: últimos 8 dígitos del teléfono (dx_phone_tail). Lo mantiene el
   // trigger `patients_phone_tail`; la app solo lo lee en SQL (BAJA por móvil).
   phoneTail                    String?               @ignore
+  // DX-107: lote de importación que CREÓ al paciente (NULL si se dio de alta a
+  // mano). «Deshacer lote» retira en blando solo los de su lote. FK compuesta
+  // por tenant (patients_import_batch_fkey).
+  importBatchId                String?               @map("import_batch_id") @db.Uuid
 
+  importBatch            PatientImportBatch?         @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
+  // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
+  importRows             PatientImportRow[]
   medicalHistoryVersions MedicalHistoryVersion[]
   // DX-247: confirmaciones «Sin cambios hoy» de su anamnesis.
   medicalHistoryReviews  MedicalHistoryReview[]
@@ -457,6 +469,9 @@ model Patient {
   //   patients_tenant_phone_tail_idx ("tenantId", "phoneTail")
   //     WHERE "deletedAt" IS NULL AND "phoneTail" IS NOT NULL
   //     -> pacientes de un móvil que respondió «BAJA» (DX-128, DX-225).
+  //   patients_tenant_import_batch_idx ("tenantId", import_batch_id)
+  //     WHERE import_batch_id IS NOT NULL
+  //     -> pacientes de un lote (deshacer, DX-107) y lado hijo de su FK.
   @@map("patients")
 }
 
@@ -2390,6 +2405,9 @@ enum AuditResourceType {
   // DX-233: horario semanal de un profesional, sus excepciones por fecha y el
   // modo estricto de la clínica.
   PROVIDER_SCHEDULE
+  // DX-107: lote de importación de pacientes (validar, confirmar, deshacer,
+  // descargar el informe de errores).
+  PATIENT_IMPORT_BATCH
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3597,4 +3615,133 @@ model PostOpInstructionDelivery {
   @@index([tenantId, patientId, deliveredAt(sort: Desc)], map: "post_op_instruction_deliveries_tenant_patient_idx")
   @@index([tenantId, appointmentId], map: "post_op_instruction_deliveries_tenant_appointment_idx")
   @@map("post_op_instruction_deliveries")
+}
+
+// ---------------------------------------------------------------------------
+// Importación de pacientes desde CSV/XLSX (DX-107)
+// ---------------------------------------------------------------------------
+
+/// Estado de un lote: VALIDATED (dry-run hecho, sin escribir pacientes) →
+/// QUEUED (confirmado, en la cola) → RUNNING → COMPLETED | FAILED; UNDONE tras
+/// «Deshacer lote»; EXPIRED si nadie lo confirmó a tiempo (o se subió otro).
+enum PatientImportStatus {
+  VALIDATED
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  UNDONE
+  EXPIRED
+}
+
+/// Qué hacer con un paciente que ya existe (mismo tipo y nº de documento).
+enum PatientImportDuplicateMode {
+  /// No tocarlo.
+  SKIP
+  /// Rellenar SOLO los campos que tiene vacíos; nunca pisa un dato.
+  FILL_EMPTY
+}
+
+enum PatientImportFileFormat {
+  CSV
+  XLSX
+}
+
+/// Resultado de una fila preparada del lote.
+enum PatientImportRowOutcome {
+  PENDING
+  CREATED
+  FILLED
+  SKIPPED
+  FAILED
+}
+
+/// Un fichero subido por un ADMIN y su resultado. NO guarda el fichero: su
+/// nombre, tamaño y SHA-256, el mapeo de columnas, los totales y los errores
+/// por fila (lo que necesita el informe). RLS FORCE por tenant.
+model PatientImportBatch {
+  id            String                      @id @default(uuid()) @db.Uuid
+  tenantId      String                      @db.Uuid
+  /// Puntero suave a User (quién subió el fichero), como `createdById` de Patient.
+  createdById   String                      @db.Uuid
+  /// Sede por defecto del lote: la activa al subirlo (o la de escritura). Da
+  /// el indicativo del país para normalizar los teléfonos y la usarán las
+  /// citas futuras importadas (DX-263). El paciente no es de ninguna sede.
+  locationId    String                      @db.Uuid
+  fileName      String
+  /// SHA-256 en hex del fichero tal como llegó.
+  fileSha256    String                      @db.Char(64)
+  fileFormat    PatientImportFileFormat
+  fileSizeBytes Int
+  status        PatientImportStatus         @default(VALIDATED)
+  /// Se elige al confirmar.
+  duplicateMode PatientImportDuplicateMode?
+  /// Campo de Dentalix → cabecera del fichero, y el tipo de documento por defecto.
+  columnMapping Json
+  totalRows     Int
+  /// Filas nuevas que se pueden crear.
+  validRows     Int
+  /// Ya existen en la clínica (BD) o se repiten en el propio fichero.
+  duplicateRows Int
+  errorRows     Int
+  /// Filas que el trabajo procesará: las válidas y las duplicadas contra la BD.
+  preparedRows  Int
+  /// Filas preparadas (válidas + duplicadas contra la BD) ya procesadas por el trabajo.
+  processedRows Int                         @default(0)
+  createdCount  Int                         @default(0)
+  updatedCount  Int                         @default(0)
+  skippedCount  Int                         @default(0)
+  failedCount   Int                         @default(0)
+  /// Errores y duplicados por fila: [{ row, column, kind, message, value }].
+  issues        Json                        @default("[]")
+  confirmedById String?                     @db.Uuid
+  confirmedAt   DateTime?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  undoneById    String?                     @db.Uuid
+  undoneAt      DateTime?
+  /// Cuántos pacientes retiró y cuántos rellenados revirtió el deshacer.
+  undoneCreated Int?
+  undoneFilled  Int?
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
+  rows     PatientImportRow[]
+  patients Patient[]
+
+  @@unique([tenantId, id], map: "patient_import_batches_tenant_id_key")
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)], map: "patient_import_batches_tenant_created_idx")
+  @@index([tenantId, locationId], map: "patient_import_batches_tenant_location_idx")
+  // Índice único PARCIAL que Prisma no expresa (no se declara):
+  //   patient_import_batches_one_active_key ("tenantId")
+  //     WHERE status IN ('QUEUED', 'RUNNING')
+  //     -> una importación en marcha por clínica.
+  @@map("patient_import_batches")
+}
+
+/// Fila preparada del lote: lo que el trabajo va a crear o rellenar. `data`
+/// (los valores normalizados) se vacía al procesarla o al caducar el lote;
+/// `filledValues` guarda solo lo que rellenó en un paciente existente, para
+/// poder revertirlo al deshacer.
+model PatientImportRow {
+  id           String                  @id @default(uuid()) @db.Uuid
+  tenantId     String                  @db.Uuid
+  batchId      String                  @db.Uuid
+  /// Fila del fichero (1 = cabecera).
+  rowNumber    Int
+  data         Json?
+  outcome      PatientImportRowOutcome @default(PENDING)
+  patientId    String?                 @db.Uuid
+  filledValues Json?
+  processedAt  DateTime?
+
+  tenant  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  batch   PatientImportBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_rows_batch_fkey")
+  patient Patient?           @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_rows_patient_fkey")
+
+  @@unique([tenantId, batchId, rowNumber], map: "patient_import_rows_tenant_batch_row_key")
+  @@index([tenantId, patientId], map: "patient_import_rows_tenant_patient_idx")
+  @@map("patient_import_rows")
 }
