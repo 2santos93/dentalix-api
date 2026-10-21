@@ -14,6 +14,9 @@
 --                       Sede por defecto del lote (la activa al subirlo):
 --                       indicativo del país para normalizar teléfonos y sede
 --                       de las citas futuras importadas (DX-263).
+--                       Los errores (llevan valores del fichero) se vacían al
+--                       caducar el lote y a los 90 días de terminado o
+--                       deshecho ("issuesPurgedAt").
 --   patients.import_batch_id  el lote que CREÓ al paciente (NULL = alta a
 --                       mano). «Deshacer lote» retira en blando solo esos.
 --
@@ -64,6 +67,7 @@ CREATE TABLE "patient_import_batches" (
     "undoneAt" TIMESTAMP(3),
     "undoneCreated" INTEGER,
     "undoneFilled" INTEGER,
+    "issuesPurgedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -128,7 +132,7 @@ CREATE TABLE "patient_import_rows" (
     CONSTRAINT "patient_import_rows_patient_fkey"
       FOREIGN KEY ("tenantId", "patientId") REFERENCES "patients"("tenantId", "id")
       ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT "patient_import_rows_row_check" CHECK ("rowNumber" BETWEEN 2 AND 10001),
+    CONSTRAINT "patient_import_rows_row_check" CHECK ("rowNumber" BETWEEN 1 AND 1048576),
     -- Creada o rellenada ⇒ con su paciente; rellenada ⇒ con lo rellenado.
     CONSTRAINT "patient_import_rows_outcome_check" CHECK (
       ("outcome" NOT IN ('CREATED', 'FILLED') OR "patientId" IS NOT NULL)

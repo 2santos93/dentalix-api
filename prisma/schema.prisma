@@ -3660,51 +3660,54 @@ enum PatientImportRowOutcome {
 /// nombre, tamaño y SHA-256, el mapeo de columnas, los totales y los errores
 /// por fila (lo que necesita el informe). RLS FORCE por tenant.
 model PatientImportBatch {
-  id            String                      @id @default(uuid()) @db.Uuid
-  tenantId      String                      @db.Uuid
+  id             String                      @id @default(uuid()) @db.Uuid
+  tenantId       String                      @db.Uuid
   /// Puntero suave a User (quién subió el fichero), como `createdById` de Patient.
-  createdById   String                      @db.Uuid
+  createdById    String                      @db.Uuid
   /// Sede por defecto del lote: la activa al subirlo (o la de escritura). Da
   /// el indicativo del país para normalizar los teléfonos y la usarán las
   /// citas futuras importadas (DX-263). El paciente no es de ninguna sede.
-  locationId    String                      @db.Uuid
-  fileName      String
+  locationId     String                      @db.Uuid
+  fileName       String
   /// SHA-256 en hex del fichero tal como llegó.
-  fileSha256    String                      @db.Char(64)
-  fileFormat    PatientImportFileFormat
-  fileSizeBytes Int
-  status        PatientImportStatus         @default(VALIDATED)
+  fileSha256     String                      @db.Char(64)
+  fileFormat     PatientImportFileFormat
+  fileSizeBytes  Int
+  status         PatientImportStatus         @default(VALIDATED)
   /// Se elige al confirmar.
-  duplicateMode PatientImportDuplicateMode?
+  duplicateMode  PatientImportDuplicateMode?
   /// Campo de Dentalix → cabecera del fichero, y el tipo de documento por defecto.
-  columnMapping Json
-  totalRows     Int
+  columnMapping  Json
+  totalRows      Int
   /// Filas nuevas que se pueden crear.
-  validRows     Int
+  validRows      Int
   /// Ya existen en la clínica (BD) o se repiten en el propio fichero.
-  duplicateRows Int
-  errorRows     Int
+  duplicateRows  Int
+  errorRows      Int
   /// Filas que el trabajo procesará: las válidas y las duplicadas contra la BD.
-  preparedRows  Int
+  preparedRows   Int
   /// Filas preparadas (válidas + duplicadas contra la BD) ya procesadas por el trabajo.
-  processedRows Int                         @default(0)
-  createdCount  Int                         @default(0)
-  updatedCount  Int                         @default(0)
-  skippedCount  Int                         @default(0)
-  failedCount   Int                         @default(0)
+  processedRows  Int                         @default(0)
+  createdCount   Int                         @default(0)
+  updatedCount   Int                         @default(0)
+  skippedCount   Int                         @default(0)
+  failedCount    Int                         @default(0)
   /// Errores y duplicados por fila: [{ row, column, kind, message, value }].
-  issues        Json                        @default("[]")
-  confirmedById String?                     @db.Uuid
-  confirmedAt   DateTime?
-  startedAt     DateTime?
-  finishedAt    DateTime?
-  undoneById    String?                     @db.Uuid
-  undoneAt      DateTime?
+  issues         Json                        @default("[]")
+  confirmedById  String?                     @db.Uuid
+  confirmedAt    DateTime?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  undoneById     String?                     @db.Uuid
+  undoneAt       DateTime?
   /// Cuántos pacientes retiró y cuántos rellenados revirtió el deshacer.
-  undoneCreated Int?
-  undoneFilled  Int?
-  createdAt     DateTime                    @default(now())
-  updatedAt     DateTime                    @updatedAt
+  undoneCreated  Int?
+  undoneFilled   Int?
+  /// Cuándo se vaciaron los errores por fila (caducado o 90 días después de
+  /// terminar o deshacer): el informe ya no está disponible.
+  issuesPurgedAt DateTime?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
 
   tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   location Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
@@ -3729,7 +3732,7 @@ model PatientImportRow {
   id           String                  @id @default(uuid()) @db.Uuid
   tenantId     String                  @db.Uuid
   batchId      String                  @db.Uuid
-  /// Fila del fichero (1 = cabecera).
+  /// Fila del fichero tal como la numera la hoja (1..1.048.576).
   rowNumber    Int
   data         Json?
   outcome      PatientImportRowOutcome @default(PENDING)
