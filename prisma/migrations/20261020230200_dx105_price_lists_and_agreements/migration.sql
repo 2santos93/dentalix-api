@@ -239,24 +239,24 @@ CREATE INDEX "patient_agreements_tenant_coverage_idx"
 -- ---------------------------------------------------------------------------
 ALTER TABLE "price_lists" ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON "price_lists"
-  USING ("tenantId" = current_setting('app.current_tenant', true)::uuid)
-  WITH CHECK ("tenantId" = current_setting('app.current_tenant', true)::uuid);
+  USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+  WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 ALTER TABLE "price_lists" FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE "price_list_items" ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON "price_list_items"
-  USING ("tenantId" = current_setting('app.current_tenant', true)::uuid)
-  WITH CHECK ("tenantId" = current_setting('app.current_tenant', true)::uuid);
+  USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+  WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 ALTER TABLE "price_list_items" FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE "agreements" ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON "agreements"
-  USING ("tenantId" = current_setting('app.current_tenant', true)::uuid)
-  WITH CHECK ("tenantId" = current_setting('app.current_tenant', true)::uuid);
+  USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+  WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 ALTER TABLE "agreements" FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE "patient_agreements" ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON "patient_agreements"
-  USING ("tenantId" = current_setting('app.current_tenant', true)::uuid)
-  WITH CHECK ("tenantId" = current_setting('app.current_tenant', true)::uuid);
+  USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+  WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 ALTER TABLE "patient_agreements" FORCE ROW LEVEL SECURITY;

@@ -143,7 +143,9 @@ describe('Listas de precios (e2e, DX-105)', () => {
 
     // Una clínica nace con el catálogo por defecto: se vacía para que los
     // totales del directorio sean exactos.
-    await raw.dentalCatalogItem.deleteMany();
+    await raw.dentalCatalogItem.deleteMany({
+      where: { tenantId: { in: [clinic.tenantId, other.tenantId] } },
+    });
     catalogIds = [];
     for (let i = 1; i <= 25; i++) {
       catalogIds.push(

@@ -116,7 +116,9 @@ describe('Convenios (e2e, DX-105)', () => {
     }
 
     // Catálogo propio de la clínica con dos categorías conocidas.
-    await raw.dentalCatalogItem.deleteMany();
+    await raw.dentalCatalogItem.deleteMany({
+      where: { tenantId: { in: [clinic.tenantId, other.tenantId] } },
+    });
     for (const [code, category] of [
       ['OP-1', 'Operatoria'],
       ['CX-1', 'Cirugía oral'],
