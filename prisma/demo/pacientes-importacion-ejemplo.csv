@@ -1,0 +1,26 @@
+Tipo Doc;Cédula;Nombre;Apellidos;Fecha de nacimiento;Sexo;Celular;Correo;Dirección;Observaciones
+CC;1.090.500.100;Valentina;Ríos Cárdenas;01/01/1960;F;310 5500 1000;valentina0@example.com;Calle 10 # 1-20;Importado de la hoja anterior
+CC;1.090.501.101;Santiago;Mejía López;02/02/1962;M;310 5501 1001;santiago1@example.com;Calle 11 # 2-20;Importado de la hoja anterior
+CC;1.090.502.102;Isabella;Moreno Díaz;03/03/1964;F;310 5502 1002;isabella2@example.com;Calle 12 # 3-20;Importado de la hoja anterior
+CC;1.090.503.103;Mateo;Castaño Ruiz;04/04/1966;M;310 5503 1003;mateo3@example.com;Calle 13 # 4-20;Importado de la hoja anterior
+CC;1.090.504.104;Mariana;Ospina Vélez;05/05/1968;F;310 5504 1004;mariana4@example.com;Calle 14 # 5-20;Importado de la hoja anterior
+CC;1.090.505.105;Samuel;Restrepo Gil;06/06/1970;M;310 5505 1005;samuel5@example.com;Calle 15 # 6-20;Importado de la hoja anterior
+CC;1.090.506.106;Sofía;Zapata Arango;07/07/1972;F;310 5506 1006;sofia6@example.com;Calle 16 # 7-20;Importado de la hoja anterior
+CC;1.090.507.107;Emiliano;Quintero Salazar;08/08/1974;M;310 5507 1007;emiliano7@example.com;Calle 17 # 8-20;Importado de la hoja anterior
+CC;1.090.508.108;Gabriela;Henao Duque;09/09/1976;F;310 5508 1008;gabriela8@example.com;Calle 18 # 9-20;Importado de la hoja anterior
+CC;1.090.509.109;Tomás;Muñoz Rendón;10/10/1978;M;310 5509 1009;tomas9@example.com;Calle 19 # 10-20;Importado de la hoja anterior
+CC;1.090.510.110;Antonella;Giraldo Toro;11/11/1980;F;310 5510 1010;antonella10@example.com;Calle 20 # 11-20;Importado de la hoja anterior
+CC;1.090.511.111;Martín;Arias Bedoya;12/12/1982;M;310 5511 1011;martin11@example.com;Calle 21 # 12-20;Importado de la hoja anterior
+CC;1.090.512.112;Luciana;Cardona Mesa;13/01/1984;F;310 5512 1012;luciana12@example.com;Calle 22 # 13-20;Importado de la hoja anterior
+CC;1.090.513.113;Jerónimo;Vargas Pineda;14/02/1986;M;310 5513 1013;jeronimo13@example.com;Calle 23 # 14-20;Importado de la hoja anterior
+CC;1.090.514.114;Salomé;Montoya Uribe;15/03/1988;F;310 5514 1014;salome14@example.com;Calle 24 # 15-20;Importado de la hoja anterior
+CC;1.090.515.115;Daniel;Agudelo Ramírez;16/04/1990;M;310 5515 1015;daniel15@example.com;Calle 25 # 16-20;Importado de la hoja anterior
+CC;1.090.516.116;Emma;Correa Gómez;17/05/1992;F;310 5516 1016;emma16@example.com;Calle 26 # 17-20;Importado de la hoja anterior
+CC;1.090.517.117;Juan José;Hoyos Ochoa;18/06/1994;M;310 5517 1017;juan.jose17@example.com;Calle 27 # 18-20;Importado de la hoja anterior
+CC;1.090.518.118;Victoria;Patiño Lara;19/07/1996;F;310 5518 1018;victoria18@example.com;Calle 28 # 19-20;Importado de la hoja anterior
+CC;1.090.519.119;Simón;Escobar Ríos;20/08/1998;M;310 5519 1019;simon19@example.com;Calle 29 # 20-20;Importado de la hoja anterior
+CC;1090500100;Valentina;Ríos Cárdenas;;F;;;;Repetida: mismo documento que la fila 2
+CC;1020456789;Paciente;De la demo;;;;;;Ya existe en la clínica demo
+CC;1090600001;;SinNombre;31/02/1990;Q;llamar;no-es-un-correo;;Fila con errores
+PASAPORTE;AB123456;Lucas;Ferreira;1985-07-12;M;+55 11 91234 5678;lucas@example.com;;Extranjero con pasaporte
+CC;1,09E+09;Notación;Científica;;;;;;Documento en notación científica
