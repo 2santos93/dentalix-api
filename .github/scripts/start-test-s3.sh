@@ -14,8 +14,16 @@
 # del entorno; publica la API en el puerto de S3_TEST_ENDPOINT, 9000 por defecto).
 set -euo pipefail
 
+for var in S3_TEST_ACCESS_KEY_ID S3_TEST_SECRET_ACCESS_KEY; do
+  if [ -z "${!var:-}" ]; then
+    echo "::error title=S3 de prueba sin configurar::Falta ${var} en el entorno del job (ver env de ci.yml)."
+    exit 1
+  fi
+done
+
 IMAGE="${TEST_S3_IMAGE:-cgr.dev/chainguard/minio:latest@sha256:cff197fef764642223ef9f4444c903d51aee9b544a7be8bc007fef6b7b00d136}"
-PORT="${S3_TEST_ENDPOINT##*:}"
+PORT="${S3_TEST_ENDPOINT:-}"
+PORT="${PORT##*:}"
 PORT="${PORT%%/*}"
 PORT="${PORT:-9000}"
 
