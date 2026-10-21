@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // Same admin/superuser connection convention as payments.e2e-spec.ts /
 // dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts: DIRECT_URL bypasses RLS
@@ -187,25 +188,7 @@ async function loginAs(
 }
 
 async function cleanup(): Promise<void> {
-  // FK-safe order: Payment -> Installment -> PaymentPlan (onDelete: Restrict
-  // on TreatmentPlan) -> TreatmentPlanItem -> DentalCatalogItem -> Patient ->
-  // ClinicMembership -> User -> Tenant. Same convention as
-  // payments.e2e-spec.ts / dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts.
-  // tooth_records referencia patients (y plan items): marcar un ítem de plan
-  // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-  // patients falla por FK y hace reventar el afterAll (contaminando las
-  // suites siguientes).
-  await raw.toothRecord.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.installment.deleteMany();
-  await raw.paymentPlan.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Payment plans / cuotas (e2e)', () => {

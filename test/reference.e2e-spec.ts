@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -45,19 +46,13 @@ describe('reference endpoints (e2e)', () => {
     );
     await app.init();
 
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenantDomain.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
 
     ({ token, sub } = await registerAndLogin(app));
   });
 
   afterAll(async () => {
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenantDomain.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
 
     await app.close();
     await raw.$disconnect();

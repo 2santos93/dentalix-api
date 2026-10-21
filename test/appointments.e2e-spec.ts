@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // Las horas de este spec son un `HH:MM` fijo sobre un día SIEMPRE FUTURO:
 // CreateAppointmentUseCase rechaza un `start` en el pasado, así que una fecha
@@ -205,29 +206,11 @@ describe('Appointments (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
-    // FK-safe order: appointments -> patients (FK) -> memberships -> users ->
-    // tenants (same convention as odontogram.e2e-spec.ts / role-matrix.e2e-spec.ts).
-    // tooth_records referencia patients: marcar un ítem de plan como DONE crea
-    // un ToothRecord, así que se borra ANTES o el delete de patients falla por
-    // FK y revienta el afterAll (contaminando las suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.appointment.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
   });
 
   afterAll(async () => {
-    // tooth_records referencia patients: marcar un ítem de plan como DONE crea
-    // un ToothRecord, así que se borra ANTES o el delete de patients falla por
-    // FK y revienta el afterAll (contaminando las suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.appointment.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
   });

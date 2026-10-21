@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es la conexión de ADMINISTRACIÓN (DIRECT_URL, owner `dentalix`) solo
 // para sembrar y limpiar: con RLS, el rol de la app sin tenant en contexto ve
@@ -110,19 +111,7 @@ async function seedRoledMember(
 }
 
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.appointment.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.inventoryMovement.deleteMany();
-  await raw.inventoryItem.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Caja — GET /payments (e2e)', () => {

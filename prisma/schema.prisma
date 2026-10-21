@@ -24,6 +24,9 @@ model Tenant {
   // DX-233: cita fuera del horario del profesional. false (defecto) = se
   // agenda con el aviso PROVIDER_OFF_SCHEDULE; true = 409.
   providerScheduleStrict    Boolean                         @default(false)
+  // DX-247: meses que vale una anamnesis (o su última confirmación «Sin
+  // cambios hoy») antes de salir «Anamnesis caducada». CHECK 1..60 en la BD.
+  anamnesisValidityMonths   Int                             @default(12)
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -80,6 +83,8 @@ model Tenant {
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
   providerSchedules         ProviderSchedule[]
   providerScheduleOverrides ProviderScheduleOverride[]
+  // DX-247: confirmaciones «Sin cambios hoy» de la anamnesis.
+  medicalHistoryReviews     MedicalHistoryReview[]
 
   @@map("tenants")
 }
@@ -405,6 +410,8 @@ model Patient {
   phoneTail                    String?               @ignore
 
   medicalHistoryVersions MedicalHistoryVersion[]
+  // DX-247: confirmaciones «Sin cambios hoy» de su anamnesis.
+  medicalHistoryReviews  MedicalHistoryReview[]
   clinicalEntries        ClinicalEntry[]
   clinicalEntryAddenda   ClinicalEntryAddendum[]
   dentitionEvents        PatientDentitionEvent[]
@@ -490,12 +497,42 @@ model MedicalHistoryVersion {
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
-  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  patient Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  // DX-247: confirmaciones «Sin cambios hoy» sobre esta versión.
+  reviews MedicalHistoryReview[]
 
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
+  // DX-247: destino de la FK compuesta de medical_history_reviews (misma
+  // clínica y mismo paciente que la versión confirmada).
+  @@unique([tenantId, patientId, id], map: "mhv_tenant_patient_id_key")
   @@index([tenantId, patientId])
   @@index([tenantId, hasCriticalAlert])
   @@map("medical_history_versions")
+}
+
+/// DX-247: confirmación «Sin cambios hoy» de la anamnesis: el paciente dice
+/// que su salud y su medicación no cambiaron desde la versión vigente. No crea
+/// una versión nueva (no hay datos nuevos): deja quién, cuándo y en qué sede lo
+/// confirmó, y reinicia la vigencia. APPEND-ONLY: la app nunca la cambia.
+model MedicalHistoryReview {
+  id                      String   @id @default(uuid()) @db.Uuid
+  tenantId                String   @db.Uuid
+  patientId               String   @db.Uuid
+  /// La versión vigente que se confirmó (misma clínica y mismo paciente).
+  medicalHistoryVersionId String   @db.Uuid
+  /// Puntero suave a User, como `MedicalHistoryVersion.createdById`.
+  reviewedById            String   @db.Uuid
+  /// Sede del request (o la de escritura de la sesión); sin FK, es contexto.
+  locationId              String?  @db.Uuid
+  reviewedAt              DateTime @default(now())
+
+  tenant  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient               @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "medical_history_reviews_patient_fkey")
+  version MedicalHistoryVersion @relation(fields: [tenantId, patientId, medicalHistoryVersionId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_reviews_version_fkey")
+
+  @@index([tenantId, patientId, reviewedAt(sort: Desc)], map: "medical_history_reviews_tenant_patient_idx")
+  @@index([tenantId, medicalHistoryVersionId], map: "medical_history_reviews_tenant_version_idx")
+  @@map("medical_history_reviews")
 }
 
 model ClinicalEntry {

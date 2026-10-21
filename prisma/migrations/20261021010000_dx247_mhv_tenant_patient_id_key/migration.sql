@@ -1,0 +1,12 @@
+-- DX-247: destino de la FK compuesta de medical_history_reviews.
+--
+-- medical_history_reviews apunta a (tenantId, patientId, id) de la versión
+-- confirmada: así la BD exige que la versión sea de la MISMA clínica y del
+-- MISMO paciente que la confirmación (SEC-004). El índice único que ya hay
+-- (tenantId, patientId, version) es PARCIAL y no sirve de destino de una FK.
+--
+-- CONCURRENTLY para no bloquear las escrituras de la anamnesis; única
+-- sentencia (no puede ir en transacción). Aditivo: el código anterior no lo
+-- usa. Si se corta, deja un índice INVALID: el IF NOT EXISTS no lo repara; hay
+-- que DROP INDEX CONCURRENTLY y repetirla.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "mhv_tenant_patient_id_key" ON "medical_history_versions" ("tenantId", "patientId", "id");

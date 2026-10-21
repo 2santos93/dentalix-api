@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // SEC-013 — DELETE /payments/:id exige motivo, guarda quién/cuándo/por qué y
 // limita a recepción a sus propios abonos del día. DIRECT_URL (superusuario,
@@ -28,18 +29,7 @@ interface Session {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.toothRecord.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.locationScheduleRange.deleteMany();
-  await raw.locationSchedule.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)', () => {

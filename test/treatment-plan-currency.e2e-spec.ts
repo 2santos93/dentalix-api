@@ -6,6 +6,7 @@ import { DocType, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para cleanup -- usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -26,24 +27,7 @@ interface PatientResponseBody {
 }
 
 async function cleanup(): Promise<void> {
-  // FK-safe order: Payment -> TreatmentPlanItem -> TreatmentPlan -> Patient
-  // -> ClinicMembership -> User -> TenantDomain -> Tenant (same convention
-  // as payments.e2e-spec.ts / patients-location.e2e-spec.ts). This suite
-  // never creates a payment or a plan item, but the deletes are harmless
-  // no-ops when there are no rows, so the full order is kept for safety.
-  // tooth_records referencia patients (y plan items): marcar un ítem de plan
-  // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-  // patients falla por FK y hace reventar el afterAll (contaminando las
-  // suites siguientes).
-  await raw.toothRecord.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('treatment plan currency whitelist (e2e)', () => {

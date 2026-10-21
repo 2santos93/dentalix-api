@@ -163,6 +163,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // periodontograma: loop/informes/DX-007.md.
   'GET /patients/:patientId/medical-history': CLINICAL,
   'PUT /patients/:patientId/medical-history': CLINICAL,
+  // DX-247: «Sin cambios hoy» es de quien ve la anamnesis; las banderas
+  // mínimas, de los roles que ven la agenda (recepción prepara la visita).
+  'POST /patients/:patientId/medical-history/no-changes': CLINICAL,
+  'GET /patients/:patientId/medical-alerts': EVERY_ROLE,
+  'GET /medical-history/settings': EVERY_ROLE,
+  'PUT /medical-history/settings': ADMIN_ONLY,
   'POST /patients/:patientId/clinical-entries': CLINICAL,
   'GET /patients/:patientId/clinical-entries': CLINICAL,
   // DX-038: adendas; PATCH/PUT/DELETE solo responden 405 (HC inalterable).

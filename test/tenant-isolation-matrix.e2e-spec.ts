@@ -722,6 +722,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 200,
       responseBody: empty,
     })),
+    // DX-247: las banderas médicas y «Sin cambios hoy» del paciente de A.
+    {
+      name: 'GET /patients/:patientId/medical-alerts',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/medical-alerts`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/medical-history/no-changes',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/medical-history/no-changes`,
+      body: () => ({}),
+      status: 404,
+    },
     // --- appointments ---
     {
       name: 'GET /appointments/:id',

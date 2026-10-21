@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner, superuser). Ver
@@ -57,16 +58,7 @@ describe('Exchange (e2e)', () => {
     );
     await app.init();
 
-    // FK-safe order, same as patients.e2e-spec.ts.
-    // tooth_records referencia patients (y plan items): marcar un ítem de plan
-    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-    // patients falla por FK y hace reventar el afterAll (contaminando las
-    // suites siguientes).
-    await raw.toothRecord.deleteMany();
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
+    await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
 
     // Seed the snapshot directly via DIRECT_URL so GetRatesForDateUseCase's
@@ -103,16 +95,8 @@ describe('Exchange (e2e)', () => {
   });
 
   afterAll(async () => {
-    // tooth_records referencia patients (y plan items): marcar un ítem de plan
-    // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-    // patients falla por FK y hace reventar el afterAll (contaminando las
-    // suites siguientes).
-    await raw.toothRecord.deleteMany();
+    await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
-    await raw.patient.deleteMany();
-    await raw.clinicMembership.deleteMany();
-    await raw.user.deleteMany();
-    await raw.tenant.deleteMany();
     await app.close();
     await raw.$disconnect();
   });

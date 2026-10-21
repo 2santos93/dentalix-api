@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup -- usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -182,23 +183,7 @@ async function loginAs(
 }
 
 async function cleanup(): Promise<void> {
-  // FK-safe order: Payment -> TreatmentPlan (onDelete: Restrict) ->
-  // TreatmentPlanItem -> DentalCatalogItem -> Patient -> ClinicMembership ->
-  // User -> Tenant, plus the exchange snapshot this suite seeds directly
-  // (same convention as dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts).
-  // tooth_records referencia patients (y plan items): marcar un ítem de plan
-  // como DONE crea un ToothRecord, así que se borran ANTES o el delete de
-  // patients falla por FK y hace reventar el afterAll (contaminando las
-  // suites siguientes).
-  await raw.toothRecord.deleteMany();
-  await raw.payment.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
   await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
 }
 

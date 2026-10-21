@@ -96,6 +96,8 @@ const TENANT_TABLES = [
   'clinical_entries',
   'clinical_note_template_prompts',
   'clinical_note_templates',
+  // DX-247: confirmaciones «Sin cambios hoy» (hijas de medical_history_versions).
+  'medical_history_reviews',
   'medical_history_versions',
   'appointment_confirmations',
   // DX-210: ofertas de huecos (hijas de appointment_waitlist y appointments).
@@ -353,6 +355,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.agreements).toBe(2);
     expect(firstCounts.patient_agreements).toBe(3);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
+    // DX-247: una anamnesis antigua confirmada «Sin cambios hoy».
+    expect(firstCounts.medical_history_reviews).toBe(1);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
     expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);
@@ -599,14 +603,20 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ),
       overrides: [],
     };
-    const today = new Date().toISOString().slice(0, 10);
+    // «Hoy» es el día civil de la clínica (Bogotá), no el de UTC: entre las
+    // 19:00 y las 24:00 de Bogotá ya es mañana en UTC (DX-251).
+    const civilDay = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(
+        d,
+      );
+    const today = civilDay(new Date());
     const theirs = await raw.appointment.findMany({
       where: { tenantId, providerId, deletedAt: null },
     });
     expect(theirs.length).toBeGreaterThan(0);
     const outside = theirs.filter(
       (a) =>
-        a.start.toISOString().slice(0, 10) !== today &&
+        civilDay(a.start) !== today &&
         !providerWorksAt(
           snapshot,
           a.locationId,

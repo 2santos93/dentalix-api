@@ -300,3 +300,6 @@ export const PATIENT_DOCUMENT_ROLES: ClinicRole[] = [
 // Escribir el semanal, las excepciones por fecha y el modo estricto de la
 // clínica: solo gestión.
 export const PROVIDER_SCHEDULE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Vigencia de la anamnesis de la clínica (DX-247) — LEERLA: los cuatro roles
+// de agenda (APPOINTMENT_ROLES). Cambiarla: solo gestión.
+export const ANAMNESIS_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

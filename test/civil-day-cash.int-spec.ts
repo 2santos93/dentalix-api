@@ -304,6 +304,14 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         for (const statement of statements) {
           await tx.$executeRawUnsafe(statement);
         }
+        // La migración recrea la política con el cast directo; DX-251 la dejó
+        // con NULLIF. Se restaura para que rls-catalog vea la BD como queda
+        // tras todas las migraciones, sea cual sea el orden de los ficheros.
+        await tx.$executeRawUnsafe(
+          `ALTER POLICY "tenant_isolation" ON "payments_paidat_backfill_dx097"
+             USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+             WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)`,
+        );
       });
 
     it('mueve las medianoches UTC (días del formulario) al mediodía de la sede, deja rastro y no toca los instantes reales', async () => {

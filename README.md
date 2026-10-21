@@ -629,6 +629,46 @@ hasta 1 h (SEC-028).
   `scheduleChange: { before, after }` con los tramos (sedes, días o fechas y
   minutos; nada de pacientes).
 
+## Alertas médicas en la agenda (DX-247)
+
+- **Solo banderas** (`medicalAlerts`, `domain/medical-alert-flags.ts`): cada
+  cita de `GET /appointments` y cada persona de `GET /appointments/in-clinic`
+  traen `hasCriticalAlert`, `requiresPremedication` (profilaxis antibiótica),
+  `anamnesisStatus` (`CURRENT` / `EXPIRED` / `MISSING`: «Sin anamnesis» no es
+  «sin alertas»), `alerts` (códigos de las banderas derivadas en el orden del
+  banner de la ficha; `alergiaMarcada` = otra alergia marcada como alerta, sin
+  el alérgeno) y `anamnesisReviewedAt`. Nunca alergias, condiciones,
+  medicamentos ni notas (Ley 1581 / RGPD); los leen los cuatro roles que ven
+  la agenda. Por lote: una lectura de la vigencia y UNA consulta (versión
+  vigente + última confirmación por paciente, con `LATERAL ... LIMIT 1` sobre
+  `mhv_tenant_patient_version_key` y `medical_history_reviews_tenant_patient_idx`).
+  `GET /appointments/:id` sigue sin banderas (la web usa la cita de la lista).
+- **Ficha**: `GET /patients/:patientId/medical-alerts` (los cuatro roles): las
+  mismas banderas con `validityMonths`, `anamnesisExpiresAt` y `lastReview`
+  (`UPDATED` o `NO_CHANGES`, fecha y quién). 404 para un paciente de otra
+  clínica.
+- **Vigencia** (`tenants.anamnesisValidityMonths`, 12 por defecto, CHECK
+  1..60): la anamnesis caduca a los N meses de calendario de la última versión
+  o de la última confirmación, la más reciente. `GET /medical-history/settings`
+  (cuatro roles) y `PUT` (solo ADMIN, 400 fuera de 1..60), auditado como
+  `MEDICAL_HISTORY` sin paciente con `reason` `ANAMNESIS_VALIDITY_SETTINGS` y
+  `statusChange` `MONTHS_12 → MONTHS_6`.
+- **«Sin cambios hoy»**: `POST /patients/:patientId/medical-history/no-changes`
+  (DENTIST, ASSISTANT, ADMIN; recepción 403) guarda en
+  `medical_history_reviews` quién, en qué sede y cuándo (hora del servidor de
+  BD, trigger) sobre la versión vigente; no crea una versión. Sin anamnesis,
+  409. Queda en la auditoría (`MEDICAL_HISTORY`, `UPDATE`, `reason`
+  `NO_CHANGES_CONFIRMED`, el paciente y el id de la confirmación; nada
+  clínico). Tabla con RLS FORCE, FK compuestas al paciente y a
+  `(tenantId, patientId, id)` de la versión (índice
+  `mhv_tenant_patient_id_key`, creado CONCURRENTLY) e inalterable como la
+  historia (DX-038).
+- **Seed demo**: Jorge Eduardo Ramírez (prótesis valvular) requiere
+  premedicación y entra primero en «En clínica» hoy; Ana María Zapata tiene la
+  anamnesis de hace 14 meses (caducada); la de Gustavo Ríos es de hace 13
+  meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
+  tienen anamnesis (p. ej. Daniela Montoya).
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`
@@ -2162,6 +2202,24 @@ dentalix_email_dispatcher`) o repón la política como en
   `CONCURRENTLY` en otro fichero. Modelo:
   `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
   `test/owner-nosu/migrations-data.owner-spec.ts`.
+- **Políticas con `NULLIF`: `app.current_tenant` puede llegar vacío**
+  (DX-251, OPS-037): tras una transacción con `set_config(…, true)` la
+  variable no vuelve a NULL, queda en `''` el resto de la sesión, y `migrate
+  deploy` aplica todas las migraciones en una sola sesión. Con
+  `current_setting('app.current_tenant', true)::uuid` la política lanzaba
+  22P02 (`''::uuid`) en la siguiente migración que leyera una tabla con FORCE
+  (la FK de `patient_documents` hacia `patients`, tras el relleno de DX-225).
+  Toda política y todo SQL de migración nuevo escribe
+  `"tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid`:
+  con la variable vacía compara con NULL y **niega** la fila, igual que sin
+  clínica fijada. `20261020200050_dx251_rls_tenant_guc_nullif` y
+  `…230000_…_rest` reescribieron las existentes (y la función de las
+  particiones de `audit_events`) sin editar migraciones aplicadas. Lo vigilan
+  el lint `test/migrations/tenant-guc-nullif.spec.ts`,
+  `test/rls-catalog.int-spec.ts` (forma exacta), `test/rls-empty-tenant-guc.int-spec.ts`
+  (0 filas y sin error con la variable vacía) y
+  `test/owner-nosu/tenant-guc-empty.owner-spec.ts` (la FK se valida en esa
+  sesión con el owner sin superusuario).
 - **Añadir o validar una FOREIGN KEY también cuenta como leer filas** (DX-134):
   `ALTER TABLE … ADD … FOREIGN KEY` (sin `NOT VALID`), `ADD COLUMN … DEFAULT …
   REFERENCES` o `VALIDATE CONSTRAINT` necesita `NO FORCE` **en la tabla hija y
@@ -2236,7 +2294,9 @@ dentalix_email_dispatcher`) o repón la política como en
 
   Lo prueba `test/owner-nosu/shared-cluster.owner-spec.ts`.
 - **En local**, con un Postgres aparte (los roles son del clúster; p. ej.
-  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`): crea
+  `docker run -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16`, o sin
+  Docker `initdb` + `pg_ctl -o '-p 55432'` de PostgreSQL 16 como el usuario
+  `postgres`): crea
   el owner y la base como en el paso 1, aplica los pasos 2 a 4, y
   `DIRECT_URL=<owner> DATABASE_URL=<app> OWNER_NOSU_ADMIN_URL=<admin>/postgres
   npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
@@ -2254,6 +2314,20 @@ $ npm run test:e2e
 # test coverage
 $ npm run test:cov
 ```
+
+**Limpieza entre ficheros e2e/int (DX-251).** Cada `*.e2e-spec.ts` /
+`*.int-spec.ts` limpia con `await resetDatabase(raw)`
+(`test/support/e2e-fixtures.ts`: `TRUNCATE … CASCADE` de todas las tablas de
+datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
+hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
+fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
+
+**CI.** `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
+su MinIO): un rojo en `test:int` no oculta la e2e. El MinIO de prueba es
+`cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
+y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
+si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
+el resto de la suite sigue corriendo.
 
 ## Deployment
 

@@ -17,6 +17,7 @@ import { MAX_SIGNATURE_BYTES } from '../src/modules/consents/domain/signature-im
 import { hostFor } from './support/tenant-host';
 import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { registerVerified } from './support/register-verified';
+import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
@@ -84,17 +85,7 @@ interface DocumentBody extends ConsentBody {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.patientConsent.deleteMany();
-  await raw.consentTemplate.deleteMany();
-  await raw.treatmentPlanItem.deleteMany();
-  await raw.treatmentPlan.deleteMany();
-  await raw.dentalCatalogItem.deleteMany();
-  await raw.patient.deleteMany();
-  await raw.location.deleteMany();
-  await raw.clinicMembership.deleteMany();
-  await raw.user.deleteMany();
-  await raw.tenantDomain.deleteMany();
-  await raw.tenant.deleteMany();
+  await resetDatabase(raw);
 }
 
 describe('Consentimientos informados — /consent-templates y /patients/:id/consents (e2e)', () => {

@@ -83,7 +83,12 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
     // sean exactos y legibles: si no, cada aserción tendría que ir contra una
     // línea base que cambia cada vez que alguien añade un procedimiento al
     // catálogo semilla, y el test fallaría por un motivo que no es el suyo.
-    await raw.dentalCatalogItem.deleteMany();
+    // Solo el catálogo de ESTA clínica (DX-251: sin deleteMany() a ciegas).
+    const { id: tenantId } = await raw.tenant.findUniqueOrThrow({
+      where: { subdomain: SUBDOMAIN },
+      select: { id: true },
+    });
+    await raw.dentalCatalogItem.deleteMany({ where: { tenantId } });
 
     // 25 procedimientos + 1 diagnóstico inactivo. 25 pasa del tamaño de página
     // por defecto (20) a propósito: sin eso, "paginado" y "sin paginar" darían
