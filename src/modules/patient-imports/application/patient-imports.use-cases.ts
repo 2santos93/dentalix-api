@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  GoneException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -31,16 +32,25 @@ import {
 } from '../domain/import-fields';
 import { readImportFile } from '../domain/read-import-file';
 import { docKey, validateRow, type RowIssue } from '../domain/row-validation';
-import { ImportFileError } from '../domain/tabular-file';
 import {
+  ImportFileError,
+  YIELD_EVERY,
+  yieldToEventLoop,
+} from '../domain/tabular-file';
+import {
+  BatchLocationError,
   BatchStateError,
   PrismaPatientImportRepository,
   UndoBlockedError,
+  importJobKey,
+  type ConfirmResult,
 } from '../infrastructure/prisma-patient-import.repository';
 
 export const PROCESS_IMPORT_JOB = 'patient-imports.process';
 /** Horas que vale un dry-run sin confirmar; después hay que volver a subirlo. */
 export const VALIDATION_TTL_HOURS = 24;
+/** Días que se conservan los errores por fila (con valores del fichero). */
+export const ISSUES_RETENTION_DAYS = 90;
 /** Errores y duplicados que viajan en la respuesta; el resto, en errors.csv. */
 export const MAX_ISSUES_IN_RESPONSE = 200;
 /** Filas del fichero que enseña la previsualización del dry-run. */
@@ -54,6 +64,9 @@ export const ACTIVE_IMPORT_MESSAGE =
 export const EXPIRED_MESSAGE = `La validación caducó (más de ${VALIDATION_TTL_HOURS} h o subiste otro archivo): vuelve a subir el archivo.`;
 export const NOTHING_TO_IMPORT_MESSAGE =
   'No hay filas que importar: corrige los errores del archivo y vuelve a subirlo.';
+export const REPORT_GONE_MESSAGE = `El informe de errores ya no está disponible: se borra al caducar la validación y a los ${ISSUES_RETENTION_DAYS} días de terminar o deshacer la importación.`;
+export const LOCATION_MESSAGE =
+  'La sede activa no está disponible: elige una sede activa y vuelve a subir el archivo.';
 export const MISSING_FILE_MESSAGE =
   'Falta el archivo: adjúntalo en el campo «file».';
 
@@ -152,9 +165,9 @@ function requireFile(file: UploadedFile | undefined): UploadedFile {
   return file;
 }
 
-function readFile(file: UploadedFile) {
+async function readFile(file: UploadedFile) {
   try {
-    return readImportFile(file.buffer, file.originalname);
+    return await readImportFile(file.buffer, file.originalname);
   } catch (err) {
     if (err instanceof ImportFileError)
       throw new BadRequestException(err.message);
@@ -198,9 +211,9 @@ export class PatientImportsService {
   }
 
   /** Cabeceras, mapeo sugerido y unas filas, sin escribir nada. */
-  inspect(file: UploadedFile | undefined): InspectResult {
+  async inspect(file: UploadedFile | undefined): Promise<InspectResult> {
     const f = requireFile(file);
-    const parsed = readFile(f);
+    const parsed = await readFile(f);
     return {
       fileName: safeFileName(f.originalname),
       fileFormat: parsed.format,
@@ -225,7 +238,7 @@ export class PatientImportsService {
     actorId: string,
   ): Promise<BatchDetail> {
     const f = requireFile(file);
-    const parsed = readFile(f);
+    const parsed = await readFile(f);
     const input: MappingInput = {
       columns: mapping.columns ?? suggestMapping(parsed.table.headers),
       defaultDocType: mapping.defaultDocType,
@@ -238,7 +251,15 @@ export class PatientImportsService {
         throw new BadRequestException(err.message);
       throw err;
     }
-    const location = await this.repo.batchLocation();
+    let location: { id: string; country: string };
+    try {
+      location = await this.repo.batchLocation();
+    } catch (err) {
+      if (err instanceof BatchLocationError) {
+        throw new BadRequestException(LOCATION_MESSAGE);
+      }
+      throw err;
+    }
     const ctx = {
       countryCode: location.country,
       today: civilDateIn(
@@ -250,7 +271,10 @@ export class PatientImportsService {
     const issues: RowIssue[] = [];
     const candidates: CandidateRow[] = [];
     let errorRows = 0;
+    let n = 0;
     for (const row of parsed.table.rows) {
+      // Cede el hilo: validar 10.000 filas no para al resto de la API.
+      if (++n % YIELD_EVERY === 0) await yieldToEventLoop();
       const validated = validateRow(row, resolved, ctx);
       if (validated.data)
         candidates.push({ rowNumber: row.rowNumber, data: validated.data });
@@ -319,15 +343,17 @@ export class PatientImportsService {
     if (current.status === 'VALIDATED' && current.preparedRows === 0) {
       throw new ConflictException(NOTHING_TO_IMPORT_MESSAGE);
     }
+    // Un lote anterior atascado (su trabajo murió) no bloquea la clínica.
+    await this.repo.reapStuck();
     const active = await this.repo.activeBatchId();
     if (active && active !== id)
       throw new ConflictException(ACTIVE_IMPORT_MESSAGE);
     const validatedAfter = new Date(
       Date.now() - VALIDATION_TTL_HOURS * 3_600_000,
     );
-    let batch: PatientImportBatch | null;
+    let result: ConfirmResult | null;
     try {
-      batch = await this.repo.confirm(id, {
+      result = await this.repo.confirm(id, {
         mode,
         confirmedById: actorId,
         validatedAfter,
@@ -335,7 +361,7 @@ export class PatientImportsService {
           await this.jobs.enqueue(
             PROCESS_IMPORT_JOB,
             { batchId: id },
-            { tx, idempotencyKey: `patient-import:${id}` },
+            { tx, idempotencyKey: importJobKey(id) },
           );
         },
       });
@@ -351,11 +377,17 @@ export class PatientImportsService {
       }
       throw err;
     }
-    if (!batch) throw new NotFoundException(NOT_FOUND_MESSAGE);
-    return this.detail(batch);
+    if (!result) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    if (result.kind === 'expired') {
+      // En su propia transacción: la del confirmar no se desharía con él.
+      await this.repo.expireBatch(id);
+      throw new ConflictException(EXPIRED_MESSAGE);
+    }
+    return this.detail(result.batch);
   }
 
   async get(id: string): Promise<BatchDetail> {
+    await this.repo.reapStuck();
     const batch = await this.repo.findBatch(id);
     if (!batch) throw new NotFoundException(NOT_FOUND_MESSAGE);
     return this.detail(batch);
@@ -370,6 +402,7 @@ export class PatientImportsService {
     page: number;
     pageSize: number;
   }> {
+    await this.repo.reapStuck();
     const { items, total } = await this.repo.listBatches(
       pageSize,
       (page - 1) * pageSize,
@@ -386,6 +419,9 @@ export class PatientImportsService {
   async errorsCsv(id: string): Promise<{ fileName: string; csv: string }> {
     const batch = await this.repo.findBatch(id);
     if (!batch) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    if (batch.issuesPurgedAt || batch.status === 'EXPIRED') {
+      throw new GoneException(REPORT_GONE_MESSAGE);
+    }
     const base =
       batch.fileName
         .replace(/\.[^.]*$/, '')

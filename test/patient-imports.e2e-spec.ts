@@ -4,7 +4,10 @@ import { createHash } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
-import { buildXlsx } from '../src/modules/patient-imports/domain/__fixtures__/xlsx-builder';
+import {
+  buildXlsx,
+  zip,
+} from '../src/modules/patient-imports/domain/__fixtures__/xlsx-builder';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -707,6 +710,94 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       createdCount: 3_000,
     });
   }, 120_000);
+
+  it('sep=; con un título encima, filas en blanco y 10.000 pacientes: 201 con los números de fila de la hoja', async () => {
+    const lines = ['sep=;', 'Listado de pacientes 2026', '', HEADER];
+    for (let i = 0; i < 10_000; i += 1) {
+      if (i % 1000 === 0) lines.push('');
+      lines.push(`CC;9${String(i).padStart(7, '0')};Nombre ${i};Hoja;;;;;`);
+    }
+    const res = await upload(
+      '',
+      Buffer.from(lines.join('\n'), 'utf8'),
+      'con-titulo.csv',
+    ).expect(201);
+    const batch = res.body as Batch;
+    expect(batch.totals).toEqual({
+      totalRows: 10_000,
+      validRows: 10_000,
+      duplicateRows: 0,
+      errorRows: 0,
+    });
+    // Fila 1 = sep=, 2 = título, 3 = vacía, 4 = cabecera, 5 = vacía, 6 = primer paciente.
+    expect(batch.preview[0].rowNumber).toBe(6);
+  }, 90_000);
+
+  it('XLSX raro: fila r="20000", número enorme con formato de fecha y fila con celdas de más → 201 con errores de fila, nunca 500', async () => {
+    const styles =
+      '<styleSheet><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>';
+    const cell = (ref: string, text: string) =>
+      `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
+    const sheet =
+      '<worksheet><sheetData>' +
+      `<row r="1">${cell('A1', 'nombres')}${cell('B1', 'apellidos')}${cell('C1', 'numero_documento')}${cell('D1', 'fecha_nacimiento')}</row>` +
+      `<row r="20000">${cell('A20000', 'Ana')}${cell('B20000', 'Hoja')}${cell('C20000', '81818181')}<c r="D20000" s="1"><v>1e12</v></c></row>` +
+      `<row r="20001">${cell('A20001', 'Luis')}${cell('B20001', 'Hoja')}${cell('C20001', '81818182')}${cell('E20001', 'sobra')}</row>` +
+      '</sheetData></worksheet>';
+    const book = zip([
+      {
+        name: 'xl/workbook.xml',
+        data: Buffer.from(
+          '<workbook><sheets><sheet name="a" r:id="rId1"/></sheets></workbook>',
+        ),
+      },
+      {
+        name: 'xl/_rels/workbook.xml.rels',
+        data: Buffer.from(
+          '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        ),
+      },
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheet) },
+      { name: 'xl/styles.xml', data: Buffer.from(styles) },
+    ]);
+    const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
+      .field('defaultDocType', 'CC')
+      .attach('file', book, {
+        filename: 'raro.xlsx',
+        contentType: 'application/octet-stream',
+      })
+      .expect(201);
+    const batch = res.body as Batch;
+    expect(batch.totals).toMatchObject({
+      totalRows: 2,
+      errorRows: 2,
+      validRows: 0,
+    });
+    expect(batch.issues.map((i) => i.row)).toEqual([20000, 20001]);
+    expect(batch.issues[0].message).toMatch(
+      /Fecha de nacimiento no reconocida|no existe|futura/,
+    );
+    expect(batch.issues[1].message).toMatch(/más celdas que la cabecera/);
+  });
+
+  it('el informe de un dry-run caducado ya no está: 410 en español', async () => {
+    const first = (await upload('', bulkCsv(3, '3'), 'uno.csv').expect(201))
+      .body as Batch;
+    await upload('', bulkCsv(3, '2'), 'dos.csv').expect(201);
+    const gone = await as(
+      api().get(`/api/v1/patient-imports/${first.id}/errors.csv`),
+      a.adminToken,
+    ).expect(410);
+    expect((gone.body as { message: string }).message).toMatch(
+      /ya no está disponible/,
+    );
+    await as(
+      api().post(`/api/v1/patient-imports/${first.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(409);
+  });
 
   it('una sola importación en curso por clínica', async () => {
     const one = (await upload('', bulkCsv(5, '7'), 'uno.csv').expect(201))

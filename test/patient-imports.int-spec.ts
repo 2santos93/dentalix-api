@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
 import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
 
@@ -34,6 +35,8 @@ async function purge(): Promise<void> {
   if (ids.length > 0) {
     const where = { tenantId: { in: ids } };
     await raw.appointment.deleteMany({ where });
+    await raw.patientDentitionEvent.deleteMany({ where });
+    await raw.job.deleteMany({ where });
     await raw.patientImportRow.deleteMany({ where });
     await raw.patient.updateMany({ where, data: { importBatchId: null } });
     await raw.patientImportBatch.deleteMany({ where });
@@ -131,7 +134,8 @@ async function prepared(
       validatedAfter: new Date(Date.now() - 3_600_000),
       enqueue: () => Promise.resolve(),
     });
-    return repo.start(confirmed!.id);
+    if (confirmed?.kind !== 'confirmed') throw new Error('no confirmado');
+    return repo.start(confirmed.batch.id);
   });
 }
 
@@ -412,5 +416,243 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       (await raw.patient.findUniqueOrThrow({ where: { id: created.id } }))
         .deletedAt,
     ).toBeNull();
+  });
+
+  it('rowNumber admite la fila 1.048.576 de Excel (CHECK), no más', async () => {
+    const batch = await raw.patientImportBatch.create({ data: batchData(a) });
+    await raw.patientImportRow.create({
+      data: { tenantId: a.tenantId, batchId: batch.id, rowNumber: 1, data: {} },
+    });
+    await raw.patientImportRow.create({
+      data: {
+        tenantId: a.tenantId,
+        batchId: batch.id,
+        rowNumber: 1_048_576,
+        data: {},
+      },
+    });
+    await expect(
+      raw.patientImportRow.create({
+        data: {
+          tenantId: a.tenantId,
+          batchId: batch.id,
+          rowNumber: 1_048_577,
+          data: {},
+        },
+      }),
+    ).rejects.toThrow(/patient_import_rows_row_check/);
+  });
+
+  it('deshacer mira TODAS las tablas con FK a pacientes (catálogo): ninguna nueva sin revisar', async () => {
+    const refs = await repo.patientReferences();
+    // Si este test falla, una tabla nueva apunta a pacientes: el deshacer ya
+    // la mira sola; revisa que deba bloquearlo y añádela aquí.
+    expect(refs.map((r) => `${r.table}.${r.column}`)).toEqual([
+      'appointment_waitlist.patientId',
+      'appointments.patientId',
+      'clinical_entries.patientId',
+      'clinical_entry_addenda.patientId',
+      'collection_notes.patientId',
+      'data_processing_consents.patientId',
+      'medical_history_reviews.patientId',
+      'medical_history_versions.patientId',
+      'patient_consents.patientId',
+      'patient_coverages.patientId',
+      'patient_dentition_events.patientId',
+      'patient_documents.patientId',
+      'patient_implants.patientId',
+      'patient_responsible_parties.patientId',
+      'patient_responsible_parties.responsiblePatientId',
+      'patient_retention_actions.patientId',
+      'payment_promises.patientId',
+      'perio_exams.patientId',
+      'post_op_instruction_deliveries.patientId',
+      'prescriptions.patientId',
+      'reminder_opt_out_links.patientId',
+      'tooth_records.patientId',
+      'treatment_plans.patientId',
+      'waitlist_offers.patientId',
+    ]);
+    const batch = await prepared(a, [person('8881')]);
+    await runAll(a, batch!.id);
+    const created = await raw.patient.findFirstOrThrow({
+      where: { importBatchId: batch!.id },
+    });
+    await raw.patientDentitionEvent.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: created.id,
+        position: '11',
+        dentition: 'PERMANENT',
+        reason: 'MANUAL',
+        performedById: a.userId,
+      },
+    });
+    await expect(
+      inTenant(a, () => repo.undo(batch!.id, a.userId)),
+    ).rejects.toMatchObject({ patients: 1 });
+  });
+
+  it('alta manual con el mismo documento escrito distinto: 409, también si la importación ya lo creó', async () => {
+    const batch = await prepared(a, [person('9.191.919')]);
+    await runAll(a, batch!.id);
+    const manual = new PrismaPatientRepository(prisma, tenantContext);
+    await expect(
+      inTenant(a, () =>
+        manual.create({
+          firstName: 'Otra',
+          lastName: 'Alta',
+          docType: 'CC',
+          docNumber: '9191919',
+          sex: 'F',
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    // Y al revés: la importación no crea otro si el alta manual llegó antes con puntos.
+    await inTenant(a, () =>
+      manual.create({
+        firstName: 'Manual',
+        lastName: 'Puntos',
+        docType: 'CC',
+        docNumber: '7.272.727',
+        sex: 'M',
+      }),
+    );
+    const second = await prepared(a, [person('7272727')]);
+    await runAll(a, second!.id);
+    expect(
+      await raw.patient.count({
+        where: {
+          tenantId: a.tenantId,
+          deletedAt: null,
+          docNumber: { in: ['7.272.727', '7272727'] },
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('una fila con un error suyo queda FAILED y el resto del lote se importa', async () => {
+    const batch = await prepared(a, [
+      person('6161'),
+      person('6162', { docType: 'NO-EXISTE' as never }),
+      person('6163'),
+    ]);
+    await runAll(a, batch!.id);
+    const done = await raw.patientImportBatch.findUniqueOrThrow({
+      where: { id: batch!.id },
+    });
+    expect(done).toMatchObject({
+      status: 'COMPLETED',
+      processedRows: 3,
+      createdCount: 2,
+      failedCount: 1,
+    });
+    const rows = await raw.patientImportRow.findMany({
+      where: { batchId: batch!.id },
+      orderBy: { rowNumber: 'asc' },
+    });
+    expect(rows.map((r) => r.outcome)).toEqual([
+      'CREATED',
+      'FAILED',
+      'CREATED',
+    ]);
+  });
+
+  it('lote atascado (su trabajo murió o no existe) pasa a FAILED y deja de bloquear', async () => {
+    const stuck = await prepared(a, [person('5151')]);
+    expect(stuck!.status).toBe('RUNNING');
+    // Un lote con su trabajo vivo NO se toca.
+    const alive = await prepared(b, [person('5252')]);
+    await raw.job.create({
+      data: {
+        name: 'patient-imports.process',
+        tenantId: b.tenantId,
+        idempotencyKey: `patient-import:${alive!.id}`,
+        state: 'RUNNING',
+      },
+    });
+    expect(await inTenant(a, () => repo.reapStuck())).toBe(1);
+    expect(await repo.reapStuck(b.tenantId)).toBe(0);
+    expect(
+      (
+        await raw.patientImportBatch.findUniqueOrThrow({
+          where: { id: stuck!.id },
+        })
+      ).status,
+    ).toBe('FAILED');
+    expect(
+      (
+        await raw.patientImportBatch.findUniqueOrThrow({
+          where: { id: alive!.id },
+        })
+      ).status,
+    ).toBe('RUNNING');
+    expect(await inTenant(a, () => repo.activeBatchId())).toBeNull();
+    await raw.patientImportBatch.update({
+      where: { id: alive!.id },
+      data: { status: 'COMPLETED' },
+    });
+  });
+
+  it('retención: caducar borra las filas preparadas y vacía los errores; a los 90 días, los de lotes terminados', async () => {
+    const issues = [
+      { row: 2, column: 'doc', kind: 'ERROR', message: 'x', value: 'CC 123' },
+    ];
+    const dry = await inTenant(a, () =>
+      repo.createBatch({
+        createdById: a.userId,
+        locationId: a.locationId,
+        fileName: 'viejo.csv',
+        fileSha256: sha('viejo'),
+        fileFormat: 'CSV',
+        fileSizeBytes: 10,
+        columnMapping: { columns: {} },
+        totalRows: 2,
+        validRows: 1,
+        duplicateRows: 0,
+        errorRows: 1,
+        issues: issues as never,
+        rows: [{ rowNumber: 3, data: person('4141') }],
+      }),
+    );
+    await raw.patientImportBatch.update({
+      where: { id: dry.id },
+      data: { createdAt: new Date(Date.now() - 2 * 86_400_000) },
+    });
+    expect(
+      await repo.expireStale(a.tenantId, new Date(Date.now() - 86_400_000)),
+    ).toBeGreaterThanOrEqual(1);
+    const expired = await raw.patientImportBatch.findUniqueOrThrow({
+      where: { id: dry.id },
+    });
+    expect(expired).toMatchObject({ status: 'EXPIRED', issues: [] });
+    expect(expired.issuesPurgedAt).not.toBeNull();
+    expect(
+      await raw.patientImportRow.count({ where: { batchId: dry.id } }),
+    ).toBe(0);
+
+    const old = await raw.patientImportBatch.create({
+      data: batchData(a, {
+        status: 'COMPLETED',
+        duplicateMode: 'SKIP',
+        confirmedById: a.userId,
+        confirmedAt: new Date(),
+        finishedAt: new Date(Date.now() - 91 * 86_400_000),
+        issues,
+      }),
+    });
+    expect(
+      await repo.purgeIssues(
+        a.tenantId,
+        new Date(Date.now() - 90 * 86_400_000),
+      ),
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (
+        await raw.patientImportBatch.findUniqueOrThrow({
+          where: { id: old.id },
+        })
+      ).issues,
+    ).toEqual([]);
   });
 });

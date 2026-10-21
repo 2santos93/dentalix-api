@@ -1758,16 +1758,26 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
 | `POST /:id/undo` | Deshacer el lote |
 | `GET /` | Historial (sin los dry-run sin confirmar) |
 
-- **Ficheros**: CSV o .xlsx de hasta **5 MB** (413) y **10.000 filas** (400).
-  El formato lo decide el contenido y debe cuadrar con la extensión; un .xls
-  antiguo o un Excel con contraseña se rechazan con el arreglo. CSV en UTF-8
-  (con o sin BOM), Windows-1252/Latin-1 o UTF-16 LE con BOM; separador `;`,
-  `,` o tabulador (el que más aparece en la cabecera, o la pista `sep=`). El
-  .xlsx lo lee un lector propio sin dependencias (`domain/xlsx-reader.ts`):
-  primera hoja, cadenas compartidas/en línea, números sin notación científica
-  y fechas por su estilo; sin DTD/entidades externas (XXE) y con tope de 64 MB
-  por parte descomprimida (zip bomb). **El fichero no se guarda**: solo su
-  nombre, tamaño, SHA-256, el mapeo y lo que necesita el informe.
+- **Ficheros**: CSV o .xlsx de hasta **5 MB** (413) y **10.000 filas** con
+  datos (400); como mucho 50.000 filas físicas (vacías incluidas) y 100
+  columnas. El formato lo decide el contenido y debe cuadrar con la
+  extensión; un .xls antiguo o un Excel con contraseña se rechazan con el
+  arreglo. CSV en UTF-8 (con o sin BOM), Windows-1252/Latin-1 o UTF-16 LE con
+  BOM; separador `;`, `,` o tabulador (el que más aparece en las primeras
+  líneas, o la pista `sep=`). La cabecera es la primera fila con al menos dos
+  celdas escritas (un título encima se salta); los números de fila son los de
+  la hoja. El .xlsx lo lee un lector propio sin dependencias
+  (`domain/xlsx-reader.ts`): escáner LINEAL con cursor (nunca regex sobre la
+  hoja; una etiqueta sin cerrar es un 400 al momento), primera hoja, cadenas
+  compartidas/en línea, prefijos de espacio de nombres, números sin notación
+  científica y fechas por su estilo (serie fuera de rango = número, no 500);
+  sin DTD/entidades externas (XXE) y con un tope de **32 MB descomprimidos
+  entre todas las partes**, aunque la cabecera del ZIP mienta (zip bomb). No
+  se guardan filas vacías ni celdas más allá de la columna 100, y la lectura
+  y la validación ceden el hilo cada 500 filas (zlib asíncrono): un fichero
+  grande no para la API. Cualquier fallo inesperado del lector es un 400
+  genérico en español. **El fichero no se guarda**: solo su nombre, tamaño,
+  SHA-256, el mapeo y lo que necesita el informe.
 - **Validación por fila** (motivo en español, columna tal como se llama en el
   fichero): nombres y apellidos obligatorios; tipo de documento por alias (CC,
   «cédula», TI, CE, PASAPORTE, RC→OTRO…) o el de por defecto; nº de documento
@@ -1781,25 +1791,42 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   de la clínica, el existente se **salta** o se le **rellenan solo los campos
   vacíos** (nunca nombre ni documento; nunca pisa un dato). El mismo número con
   OTRO tipo es un error (la BD ya impone un paciente vivo por nº de documento,
-  `patients_tenant_doc_key`). El trabajo vuelve a comprobarlo bajo bloqueo en
-  cada bloque e inserta con `ON CONFLICT DO NOTHING`: un alta manual simultánea
-  gana y la fila se salta.
+  `patients_tenant_doc_key`, pero compara el texto tal cual). Por eso el alta
+  y la edición manual de un paciente y cada bloque de la importación toman un
+  candado de transacción por (clínica, documento normalizado)
+  (`pg_advisory_xact_lock(hashtextextended('patient-doc:<clínica>:<clave>'))`,
+  `patients/infrastructure/patient-doc-lock.ts`) y buscan por la clave
+  normalizada: «1.111.111» y «1111111» nunca dan dos pacientes, y el alta
+  manual de un documento ya existente escrito distinto da 409.
 - **Trabajo por bloques** (DX-085): 250 filas por transacción corta; la
   clínica sigue operando (solo se bloquean las filas del bloque, nunca la tabla
   `patients`). Idempotente (retoma desde las filas `PENDING`); al agotar los 5
-  intentos el lote queda `FAILED` con lo hecho. Una importación en cola o en
-  curso por clínica (índice único parcial; 409). Un dry-run caduca a las 24 h
-  o al subir otro (`EXPIRED`, tarea `patient-imports.expire-validated.daily`)
-  y se vacían sus filas preparadas.
+  intentos el lote queda `FAILED` con lo hecho. Una fila con un error suyo
+  (no pasajero) queda `FAILED` y el resto sigue; un fallo pasajero (BD,
+  conexión, interbloqueo) sube y lo reintenta la cola. Una importación en cola
+  o en curso por clínica (índice único parcial; 409). Un lote cuyo trabajo
+  murió (intentos agotados, arriendo vencido o purgado) pasa a `FAILED` al
+  consultar o confirmar en la clínica y en la tarea
+  `patient-imports.reap-stuck.hourly`: nunca deja la clínica bloqueada.
+- **Retención (datos del fichero)**: un dry-run caduca a las 24 h o al subir
+  otro (`EXPIRED`): se BORRAN sus filas preparadas y se vacían sus errores.
+  Los errores por fila de los lotes terminados o deshechos se vacían a los
+  **90 días** (`issuesPurgedAt`), en la tarea diaria
+  `patient-imports.expire-validated.daily`; desde entonces `errors.csv` da
+  **410**. `filledValues` (lo rellenado) se conserva mientras se pueda
+  deshacer.
 - **Ley 1581 / RGPD (DX-037)**: los importados nacen **sin** autorización de
   datos registrada (`data_processing_consents` vacía, `dataConsentAccepted`
   false) y la ficha la marca «Pendiente». La importación no inventa
   consentimientos. `patients.import_batch_id` dice qué lote creó a cada uno.
 - **Deshacer**: retira en blando solo los pacientes que creó el lote y revierte
   los campos que rellenó si siguen con el valor del lote. Se niega (409) si
-  alguno de los creados ya tiene citas, lista de espera, planes, pagos,
-  historia clínica, odontograma, periodoncia, recetas, documentos,
-  consentimientos, implantes, coberturas, responsables o cobranza.
+  alguno de los creados aparece en CUALQUIER tabla con FK a `patients` (leída
+  de `pg_constraint`: citas, lista de espera, planes, pagos, historia,
+  odontograma, dentición, periodoncia, recetas, documentos, consentimientos,
+  implantes, coberturas, responsables, cobranza, indicaciones…), salvo las
+  filas del lote y `patient_ledgers`. Una tabla nueva queda cubierta sola; el
+  int-spec la enumera para que se revise.
 - **Cartera (DX-155)**: el INSERT de pacientes no dispara el refresco de
   `patient_ledgers` (solo su UPDATE de `deletedAt`); el deshacer retira por
   sentencias de 1.000 pacientes, cada una refrescando su resumen, con

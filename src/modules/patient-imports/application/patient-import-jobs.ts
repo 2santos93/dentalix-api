@@ -3,12 +3,15 @@ import { JobRegistry } from '../../jobs/application/job-registry';
 import type { JobContext } from '../../jobs/domain/job';
 import { PrismaPatientImportRepository } from '../infrastructure/prisma-patient-import.repository';
 import {
+  ISSUES_RETENTION_DAYS,
   PROCESS_IMPORT_JOB,
   VALIDATION_TTL_HOURS,
 } from './patient-imports.use-cases';
 
 export const EXPIRE_IMPORTS_JOB = 'patient-imports.expire-validated';
 export const EXPIRE_IMPORTS_SCHEDULE = 'patient-imports.expire-validated.daily';
+export const REAP_IMPORTS_JOB = 'patient-imports.reap-stuck';
+export const REAP_IMPORTS_SCHEDULE = 'patient-imports.reap-stuck.hourly';
 /** Filas por bloque: cada bloque es una transacción corta. */
 export const IMPORT_CHUNK_SIZE = 250;
 const MAX_ATTEMPTS = 5;
@@ -55,17 +58,42 @@ export class PatientImportJobs implements OnModuleInit {
       maxAttempts: 3,
       handle: async () => {
         const before = new Date(Date.now() - VALIDATION_TTL_HOURS * 3_600_000);
+        const purgeBefore = new Date(
+          Date.now() - ISSUES_RETENTION_DAYS * 86_400_000,
+        );
         let expired = 0;
+        let purged = 0;
         for (const tenantId of await this.repo.tenantIds()) {
           expired += await this.repo.expireStale(tenantId, before);
+          purged += await this.repo.purgeIssues(tenantId, purgeBefore);
         }
-        this.logger.log({ event: 'patient_imports.expired', expired });
+        this.logger.log({ event: 'patient_imports.expired', expired, purged });
       },
     });
     this.registry.schedule({
       name: EXPIRE_IMPORTS_SCHEDULE,
       cron: '47 4 * * *',
       job: EXPIRE_IMPORTS_JOB,
+    });
+    // Lotes cuyo trabajo murió (intentos agotados, arriendo vencido): FAILED,
+    // para que no bloqueen otra importación ni el deshacer. También se hace
+    // al consultar o confirmar en la clínica.
+    this.registry.register({
+      name: REAP_IMPORTS_JOB,
+      maxAttempts: 3,
+      handle: async () => {
+        let reaped = 0;
+        for (const tenantId of await this.repo.tenantIds()) {
+          reaped += await this.repo.reapStuck(tenantId);
+        }
+        if (reaped > 0)
+          this.logger.warn({ event: 'patient_imports.reaped', reaped });
+      },
+    });
+    this.registry.schedule({
+      name: REAP_IMPORTS_SCHEDULE,
+      cron: '13 * * * *',
+      job: REAP_IMPORTS_JOB,
     });
   }
 

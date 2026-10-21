@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { lockPatientDocs } from '../../patients/infrastructure/patient-doc-lock';
 import type { ExistingPatientDoc } from '../domain/dedupe';
 import {
   fieldsToRevert,
@@ -24,10 +25,24 @@ type Tx = Prisma.TransactionClient;
 
 /** Interactiva larga: el dry-run inserta hasta 10.000 filas preparadas. */
 const LONG_TX = { timeout: 120_000, maxWait: 10_000 } as const;
+/** Un bloque de la importación: 250 filas con sus candados. */
+const CHUNK_TX = { timeout: 60_000, maxWait: 10_000 } as const;
 /** Filas por INSERT (Postgres admite 65.535 parámetros por sentencia). */
 const INSERT_CHUNK = 2_000;
 /** Pacientes por UPDATE al deshacer (cada sentencia refresca su cartera). */
 const UNDO_CHUNK = 1_000;
+/** Clave de idempotencia del trabajo de un lote (la usa también el barrido). */
+export const importJobKey = (batchId: string) => `patient-import:${batchId}`;
+
+/**
+ * Tablas con FK a `patients` que NO cuentan como «actividad» del paciente al
+ * deshacer un lote: las filas del propio lote y el resumen de cartera (lo
+ * mantiene la BD). Cualquier otra tabla que apunte a un paciente lo bloquea.
+ */
+export const UNDO_IGNORED_TABLES: ReadonlySet<string> = new Set([
+  'patient_import_rows',
+  'patient_ledgers',
+]);
 
 /** Lo que el dry-run deja preparado: una fila por paciente a crear o a rellenar. */
 export interface PreparedRow {
@@ -59,6 +74,14 @@ export interface ChunkResult {
   failed: number;
 }
 
+const EMPTY_RESULT: ChunkResult = {
+  processed: 0,
+  created: 0,
+  updated: 0,
+  skipped: 0,
+  failed: 0,
+};
+
 /** Pacientes del lote con algo registrado después: el deshacer se niega. */
 export class UndoBlockedError extends Error {
   constructor(readonly patients: number) {
@@ -72,9 +95,63 @@ export class BatchStateError extends Error {
   }
 }
 
+/** La sede del lote no existe o está inactiva. */
+export class BatchLocationError extends Error {
+  constructor() {
+    super('batch location unavailable');
+  }
+}
+
 export interface UndoResult {
   undoneCreated: number;
   undoneFilled: number;
+}
+
+/** Una columna que apunta a `patients.id` (de `pg_constraint`). */
+export interface PatientReference {
+  table: string;
+  column: string;
+}
+
+export type ConfirmResult =
+  { kind: 'confirmed'; batch: PatientImportBatch } | { kind: 'expired' };
+
+/**
+ * ¿Es un fallo pasajero (BD caída, conexión cortada, interbloqueo, tiempo de
+ * la transacción)? Entonces el bloque entero se reintenta más tarde (la
+ * cola); si no, es un fallo de la fila y la fila queda FAILED.
+ */
+export function isTransientError(err: unknown): boolean {
+  if (
+    err instanceof Prisma.PrismaClientInitializationError ||
+    err instanceof Prisma.PrismaClientRustPanicError
+  ) {
+    return true;
+  }
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    return [
+      'P1001',
+      'P1002',
+      'P1008',
+      'P1017',
+      'P2024',
+      'P2028',
+      'P2034',
+    ].includes(err.code);
+  }
+  const code = (err as { code?: unknown } | null)?.code;
+  return (
+    typeof code === 'string' &&
+    [
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'EPIPE',
+      '57P01',
+      '40001',
+      '40P01',
+    ].includes(code)
+  );
 }
 
 /** Columnas que se rellenan, en el formato de Prisma. */
@@ -104,27 +181,7 @@ function revertPatch(
   return patch;
 }
 
-/** Tablas cuya fila de un paciente impide deshacer su alta (DX-107). */
-const ACTIVITY_TABLES = [
-  'appointments',
-  'appointment_waitlist',
-  'treatment_plans',
-  'payments',
-  'payment_plans',
-  'medical_history_versions',
-  'clinical_entries',
-  'tooth_records',
-  'perio_exams',
-  'prescriptions',
-  'patient_documents',
-  'patient_consents',
-  'data_processing_consents',
-  'patient_implants',
-  'patient_coverages',
-  'patient_responsible_parties',
-  'collection_notes',
-  'payment_promises',
-] as const;
+const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 /**
  * Persistencia de la importación de pacientes (DX-107). Todo bajo
@@ -132,6 +189,8 @@ const ACTIVITY_TABLES = [
  */
 @Injectable()
 export class PrismaPatientImportRepository {
+  private references: Promise<PatientReference[]> | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
@@ -143,14 +202,15 @@ export class PrismaPatientImportRepository {
     return id;
   }
 
-  /** Sede del lote (la de escritura del request) y su país. */
+  /** Sede del lote (la de escritura del request), activa, y su país. */
   async batchLocation(): Promise<{ id: string; country: string }> {
     return this.prisma.runWithTenant(async (tx) => {
       const id = await this.tenantContext.writeLocationId(tx);
-      const location = await tx.location.findFirstOrThrow({
-        where: { id, deletedAt: null },
+      const location = await tx.location.findFirst({
+        where: { id, deletedAt: null, isActive: true },
         select: { id: true, country: true },
       });
+      if (!location) throw new BatchLocationError();
       return location;
     });
   }
@@ -174,8 +234,7 @@ export class PrismaPatientImportRepository {
 
   /**
    * Guarda el dry-run: el lote VALIDATED y sus filas preparadas. Los lotes
-   * VALIDATED anteriores del mismo usuario caducan (se subió otro fichero) y
-   * se vacían sus datos.
+   * VALIDATED anteriores del mismo usuario caducan (se subió otro fichero).
    */
   async createBatch(input: NewBatch): Promise<PatientImportBatch> {
     const tenantId = this.tenantId();
@@ -214,16 +273,19 @@ export class PrismaPatientImportRepository {
   }
 
   /**
-   * VALIDATED → EXPIRED (con sus datos vaciados): los de un usuario al subir
-   * otro fichero, o los anteriores a `before` en el barrido diario.
+   * VALIDATED → EXPIRED: se BORRAN sus filas preparadas (nunca crearon nada:
+   * son datos del fichero que ya no hacen falta) y se vacían sus errores.
+   * Los de un usuario al subir otro fichero, uno concreto o los anteriores a
+   * `before` en el barrido diario.
    */
   private async expireValidated(
     tx: Tx,
-    where: { createdById?: string; before?: Date },
+    where: { createdById?: string; before?: Date; id?: string },
   ): Promise<number> {
     const stale = await tx.patientImportBatch.findMany({
       where: {
         status: 'VALIDATED',
+        ...(where.id ? { id: where.id } : {}),
         ...(where.createdById ? { createdById: where.createdById } : {}),
         ...(where.before ? { createdAt: { lt: where.before } } : {}),
       },
@@ -231,15 +293,22 @@ export class PrismaPatientImportRepository {
     });
     if (stale.length === 0) return 0;
     const ids = stale.map((b) => b.id);
-    await tx.patientImportRow.updateMany({
-      where: { batchId: { in: ids } },
-      data: { data: Prisma.DbNull },
+    // Housekeeping de filas de un dry-run caducado (allowlist en
+    // no-hard-delete.ts): no las referencia nada y no son datos de negocio.
+    // eslint-disable-next-line no-restricted-syntax -- filas preparadas de un dry-run caducado
+    await tx.patientImportRow.deleteMany({
+      where: { batchId: { in: ids }, outcome: 'PENDING', patientId: null },
     });
     await tx.patientImportBatch.updateMany({
       where: { id: { in: ids }, status: 'VALIDATED' },
-      data: { status: 'EXPIRED' },
+      data: { status: 'EXPIRED', issues: [], issuesPurgedAt: new Date() },
     });
     return ids.length;
+  }
+
+  /** Caduca UN lote (fuera de cualquier otra transacción). */
+  async expireBatch(id: string): Promise<void> {
+    await this.prisma.runWithTenant((tx) => this.expireValidated(tx, { id }));
   }
 
   /** Barrido diario: lotes sin confirmar de más de `before`, clínica a clínica. */
@@ -247,6 +316,63 @@ export class PrismaPatientImportRepository {
     return this.prisma.runWithTenant(tenantId, (tx) =>
       this.expireValidated(tx, { before }),
     );
+  }
+
+  /**
+   * Retención del informe (DX-107): los errores por fila (llevan valores del
+   * fichero) de los lotes terminados o deshechos antes de `before` se vacían.
+   */
+  async purgeIssues(tenantId: string, before: Date): Promise<number> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const r = await tx.patientImportBatch.updateMany({
+        where: {
+          issuesPurgedAt: null,
+          OR: [
+            {
+              status: { in: ['COMPLETED', 'FAILED'] },
+              finishedAt: { lt: before },
+            },
+            { status: 'UNDONE', undoneAt: { lt: before } },
+          ],
+        },
+        data: { issues: [], issuesPurgedAt: new Date() },
+      });
+      return r.count;
+    });
+  }
+
+  /**
+   * Lotes QUEUED/RUNNING cuyo trabajo ya no está vivo (agotó los intentos,
+   * el arriendo venció sin reintentos o se purgó): pasan a FAILED con lo
+   * hecho, para no dejar bloqueada la clínica (una importación en marcha) ni
+   * el deshacer. `tenantId` explícito en el barrido; si no, el del contexto.
+   */
+  async reapStuck(tenantId?: string): Promise<number> {
+    const run = async (tx: Tx) => {
+      const reaped = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE "patient_import_batches" b
+           SET "status" = 'FAILED', "finishedAt" = now(), "updatedAt" = now()
+         WHERE b."status" IN ('QUEUED', 'RUNNING')
+           AND NOT EXISTS (
+             SELECT 1 FROM "jobs" j
+              WHERE j."tenantId" = b."tenantId"
+                AND j."idempotencyKey" = 'patient-import:' || b."id"::text
+                AND j."state" IN ('PENDING', 'RUNNING'))
+        RETURNING b."id"`;
+      if (reaped.length > 0) {
+        await tx.patientImportRow.updateMany({
+          where: {
+            batchId: { in: reaped.map((r) => r.id) },
+            outcome: 'PENDING',
+          },
+          data: { data: Prisma.DbNull },
+        });
+      }
+      return reaped.length;
+    };
+    return tenantId
+      ? this.prisma.runWithTenant(tenantId, run)
+      : this.prisma.runWithTenant(run);
   }
 
   async tenantIds(): Promise<string[]> {
@@ -297,7 +423,9 @@ export class PrismaPatientImportRepository {
 
   /**
    * Confirma un lote VALIDATED: pasa a QUEUED con el modo elegido y encola
-   * el trabajo en la MISMA transacción (outbox). `enqueue` recibe la tx.
+   * el trabajo en la MISMA transacción (outbox). Un lote caducado NO se toca
+   * aquí (la transacción se desharía con el error): se devuelve `expired` y
+   * quien llama lo caduca en la suya.
    */
   async confirm(
     id: string,
@@ -307,7 +435,7 @@ export class PrismaPatientImportRepository {
       validatedAfter: Date;
       enqueue: (tx: Tx) => Promise<void>;
     },
-  ): Promise<PatientImportBatch | null> {
+  ): Promise<ConfirmResult | null> {
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await tx.$queryRaw<
         { status: PatientImportStatus; createdAt: Date }[]
@@ -317,8 +445,7 @@ export class PrismaPatientImportRepository {
       if (locked.length === 0) return null;
       const { status, createdAt } = locked[0];
       if (status === 'VALIDATED' && createdAt < input.validatedAfter) {
-        await this.expireValidated(tx, { before: input.validatedAfter });
-        throw new BatchStateError('EXPIRED');
+        return { kind: 'expired' as const };
       }
       if (status !== 'VALIDATED') throw new BatchStateError(status);
       const batch = await tx.patientImportBatch.update({
@@ -331,7 +458,7 @@ export class PrismaPatientImportRepository {
         },
       });
       await input.enqueue(tx);
-      return batch;
+      return { kind: 'confirmed' as const, batch };
     });
   }
 
@@ -375,9 +502,9 @@ export class PrismaPatientImportRepository {
    * Procesa el siguiente bloque de filas PENDING del lote en SU transacción
    * (nunca una transacción por todo el fichero: cada bloque bloquea solo sus
    * filas y libera al confirmar). Idempotente: una fila ya procesada no
-   * vuelve a salir. Si el bloque falla entero, se reintenta fila a fila y la
-   * que siga fallando queda FAILED; si fallan todas, el error sube (corte de
-   * BD: lo reintenta la cola).
+   * vuelve a salir. Un fallo PASAJERO (BD, conexión, interbloqueo) sube y lo
+   * reintenta la cola; cualquier otro se reintenta fila a fila y la fila que
+   * siga fallando queda FAILED: el resto del lote sigue.
    */
   async processChunk(
     batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
@@ -392,58 +519,51 @@ export class PrismaPatientImportRepository {
         select: { id: true, rowNumber: true, data: true },
       }),
     );
-    if (pending.length === 0) {
-      return { processed: 0, created: 0, updated: 0, skipped: 0, failed: 0 };
-    }
+    if (pending.length === 0) return { ...EMPTY_RESULT };
     try {
-      return await this.prisma.runWithTenant((tx) =>
-        this.applyRows(tx, batch, pending, channel),
+      return await this.prisma.runWithTenant(
+        (tx) => this.applyRows(tx, batch, pending, channel),
+        CHUNK_TX,
       );
     } catch (chunkError) {
-      const total: ChunkResult = {
-        processed: 0,
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        failed: 0,
-      };
+      if (isTransientError(chunkError)) throw chunkError;
+      const total: ChunkResult = { ...EMPTY_RESULT };
       for (const row of pending) {
+        let one: ChunkResult;
         try {
-          const one = await this.prisma.runWithTenant((tx) =>
-            this.applyRows(tx, batch, [row], channel),
+          one = await this.prisma.runWithTenant(
+            (tx) => this.applyRows(tx, batch, [row], channel),
+            CHUNK_TX,
           );
-          total.processed += one.processed;
-          total.created += one.created;
-          total.updated += one.updated;
-          total.skipped += one.skipped;
-        } catch {
-          total.failed += 1;
+        } catch (rowError) {
+          if (isTransientError(rowError)) throw rowError;
+          one = await this.failRow(batch.id, row.id);
         }
-      }
-      if (total.failed === pending.length) throw chunkError;
-      if (total.failed > 0) {
-        const failedIds = pending.map((r) => r.id);
-        await this.prisma.runWithTenant(async (tx) => {
-          const n = await tx.patientImportRow.updateMany({
-            where: { id: { in: failedIds }, outcome: 'PENDING' },
-            data: {
-              outcome: 'FAILED',
-              data: Prisma.DbNull,
-              processedAt: new Date(),
-            },
-          });
-          await this.bumpCounters(tx, batch.id, {
-            processed: n.count,
-            created: 0,
-            updated: 0,
-            skipped: 0,
-            failed: n.count,
-          });
-        });
-        total.processed += total.failed;
+        total.processed += one.processed;
+        total.created += one.created;
+        total.updated += one.updated;
+        total.skipped += one.skipped;
+        total.failed += one.failed;
       }
       return total;
     }
+  }
+
+  /** La fila no se pudo importar por un error suyo: FAILED y se sigue. */
+  private async failRow(batchId: string, rowId: string): Promise<ChunkResult> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const n = await tx.patientImportRow.updateMany({
+        where: { id: rowId, outcome: 'PENDING' },
+        data: {
+          outcome: 'FAILED',
+          data: Prisma.DbNull,
+          processedAt: new Date(),
+        },
+      });
+      const result = { ...EMPTY_RESULT, processed: n.count, failed: n.count };
+      await this.bumpCounters(tx, batchId, result);
+      return result;
+    });
   }
 
   private async applyRows(
@@ -456,6 +576,13 @@ export class PrismaPatientImportRepository {
     const items = rows
       .filter((r) => r.data !== null)
       .map((r) => ({ ...r, data: r.data as unknown as ImportPatientData }));
+    // Candado por documento normalizado (el mismo del alta manual): un alta
+    // a la vez con «1.111.111» y la importación con «1111111» se serializan.
+    await lockPatientDocs(
+      tx,
+      tenantId,
+      items.map((i) => i.data.docNumber),
+    );
     const keys = [...new Set(items.map((r) => docKey(r.data.docNumber)))];
     // Los pacientes que YA existen, bloqueados: rellenar sus vacíos no
     // compite con una edición a la vez.
@@ -480,13 +607,6 @@ export class PrismaPatientImportRepository {
       filled: string | null;
     }[] = [];
     const fresh: typeof items = [];
-    const result: ChunkResult = {
-      processed: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-    };
 
     for (const item of items) {
       const match = byKey.get(docKey(item.data.docNumber));
@@ -495,17 +615,14 @@ export class PrismaPatientImportRepository {
         continue;
       }
       // Otro tipo con el mismo número (creado tras el dry-run): no se toca.
-      if (
-        match.docType !== item.data.docType ||
-        batch.duplicateMode !== 'FILL_EMPTY'
-      ) {
+      const sameType = match.docType === item.data.docType;
+      if (!sameType || batch.duplicateMode !== 'FILL_EMPTY') {
         outcomes.push({
           id: item.id,
           outcome: 'SKIPPED',
-          patientId: match.docType === item.data.docType ? match.id : null,
+          patientId: sameType ? match.id : null,
           filled: null,
         });
-        result.skipped += 1;
         continue;
       }
       const filled = fillEmpty(match, item.data);
@@ -516,7 +633,6 @@ export class PrismaPatientImportRepository {
           patientId: match.id,
           filled: null,
         });
-        result.skipped += 1;
         continue;
       }
       await tx.patient.update({
@@ -529,13 +645,12 @@ export class PrismaPatientImportRepository {
         patientId: match.id,
         filled: JSON.stringify(filled),
       });
-      result.updated += 1;
     }
 
     if (fresh.length > 0) {
       const now = new Date();
-      // ON CONFLICT DO NOTHING (patients_tenant_doc_key): si alguien da de
-      // alta el mismo documento a la vez, gana su alta y la fila se salta.
+      // ON CONFLICT DO NOTHING (patients_tenant_doc_key): dos filas del mismo
+      // documento en el bloque (no debería: el dry-run las quita) crean uno.
       const created = await tx.patient.createManyAndReturn({
         skipDuplicates: true,
         select: { id: true, docNumber: true },
@@ -575,7 +690,6 @@ export class PrismaPatientImportRepository {
             patientId,
             filled: null,
           });
-          result.created += 1;
         } else {
           outcomes.push({
             id: r.id,
@@ -583,7 +697,6 @@ export class PrismaPatientImportRepository {
             patientId: null,
             filled: null,
           });
-          result.skipped += 1;
         }
       }
     }
@@ -595,10 +708,10 @@ export class PrismaPatientImportRepository {
         patientId: null,
         filled: null,
       });
-      result.skipped += 1;
     }
 
-    await tx.$executeRaw`
+    // Solo cuenta lo que de verdad pasó de PENDING a su resultado.
+    const done = await tx.$queryRaw<{ outcome: string }[]>`
       UPDATE "patient_import_rows" r
          SET "outcome" = v.outcome::"PatientImportRowOutcome",
              "patientId" = v.patient_id,
@@ -609,8 +722,16 @@ export class PrismaPatientImportRepository {
                      unnest(${outcomes.map((o) => o.outcome)}::text[]) AS outcome,
                      unnest(${outcomes.map((o) => o.patientId)}::uuid[]) AS patient_id,
                      unnest(${outcomes.map((o) => o.filled)}::text[]) AS filled) v
-       WHERE r."id" = v.id AND r."outcome" = 'PENDING'`;
-    result.processed = outcomes.length;
+       WHERE r."id" = v.id AND r."outcome" = 'PENDING'
+      RETURNING v.outcome`;
+    const count = (o: string) => done.filter((d) => d.outcome === o).length;
+    const result: ChunkResult = {
+      processed: done.length,
+      created: count('CREATED'),
+      updated: count('FILLED'),
+      skipped: count('SKIPPED'),
+      failed: 0,
+    };
     await this.bumpCounters(tx, batch.id, result);
     return result;
   }
@@ -620,6 +741,7 @@ export class PrismaPatientImportRepository {
     batchId: string,
     r: ChunkResult,
   ): Promise<void> {
+    if (r.processed === 0) return;
     await tx.patientImportBatch.update({
       where: { id: batchId },
       data: {
@@ -649,14 +771,39 @@ export class PrismaPatientImportRepository {
   }
 
   /**
+   * Columnas que apuntan a `patients.id`, leídas del catálogo (`pg_constraint`)
+   * una vez por proceso: una tabla nueva con FK a pacientes bloquea el
+   * deshacer sin tocar este código. Excluye `UNDO_IGNORED_TABLES`.
+   */
+  patientReferences(): Promise<PatientReference[]> {
+    this.references ??= this.prisma.$queryRaw<PatientReference[]>`
+      SELECT cl.relname AS "table", a.attname AS "column"
+        FROM pg_constraint c
+        JOIN pg_class cl ON cl.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = cl.relnamespace AND n.nspname = 'public'
+        CROSS JOIN LATERAL unnest(c.conkey, c.confkey) AS k(con, conf)
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.con
+        JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = k.conf
+       WHERE c.contype = 'f'
+         AND c.confrelid = 'public.patients'::regclass
+         AND fa.attname = 'id'
+       ORDER BY 1, 2`.then((rows) =>
+      rows.filter((r) => !UNDO_IGNORED_TABLES.has(r.table)),
+    );
+    return this.references;
+  }
+
+  /**
    * «Deshacer lote»: retira en blando los pacientes que CREÓ el lote y
    * revierte lo que rellenó en los existentes (solo los campos que siguen con
-   * el valor del lote). Se niega si alguno de los creados ya tiene citas,
-   * historia, planes, pagos, documentos, consentimientos… Todo en una
-   * transacción que bloquea solo las filas del lote.
+   * el valor del lote). Se niega si alguno de los creados aparece en
+   * CUALQUIER tabla que apunte a pacientes (citas, historia, planes, pagos,
+   * documentos, consentimientos…). Una transacción que bloquea solo las
+   * filas del lote.
    */
   async undo(id: string, undoneById: string): Promise<UndoResult> {
     const tenantId = this.tenantId();
+    const references = await this.patientReferences();
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
         SELECT "status" FROM "patient_import_batches" WHERE "id" = ${id}::uuid FOR UPDATE`;
@@ -672,18 +819,16 @@ export class PrismaPatientImportRepository {
          ORDER BY "id"
          FOR UPDATE`;
       const ids = created.map((p) => p.id);
-      if (ids.length > 0) {
-        const checks = ACTIVITY_TABLES.map(
-          (t) =>
-            Prisma.sql`SELECT "patientId" AS id FROM ${Prisma.raw(`"${t}"`)}
-                        WHERE "tenantId" = ${tenantId}::uuid AND "patientId" = ANY(${ids}::uuid[])`,
+      if (ids.length > 0 && references.length > 0) {
+        const checks = references.map(
+          (ref) =>
+            Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
+                         FROM ${Prisma.raw(quoteIdent(ref.table))}
+                        WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${ids}::uuid[])`,
         );
         const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
           SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
-        const [{ r }] = await tx.$queryRaw<{ r: number }[]>`
-          SELECT count(DISTINCT "responsiblePatientId")::int AS r FROM "patient_responsible_parties"
-           WHERE "tenantId" = ${tenantId}::uuid AND "responsiblePatientId" = ANY(${ids}::uuid[])`;
-        if (n + r > 0) throw new UndoBlockedError(n + r);
+        if (n > 0) throw new UndoBlockedError(n);
       }
       for (let i = 0; i < ids.length; i += UNDO_CHUNK) {
         await tx.$executeRaw`

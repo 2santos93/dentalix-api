@@ -25,6 +25,7 @@ import {
   ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiGoneResponse,
   ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -55,6 +56,7 @@ import {
   ACTIVE_IMPORT_MESSAGE,
   NOT_FOUND_MESSAGE,
   PatientImportsService,
+  REPORT_GONE_MESSAGE,
   type BatchDetail,
   type InspectResult,
 } from '../application/patient-imports.use-cases';
@@ -192,7 +194,7 @@ export class PatientImportsController {
   @UseInterceptors(FILE_INTERCEPTOR)
   inspect(
     @UploadedFile() file: Express.Multer.File | undefined,
-  ): InspectResult {
+  ): Promise<InspectResult> {
     return this.imports.inspect(file);
   }
 
@@ -285,6 +287,7 @@ export class PatientImportsController {
     content: { 'text/csv': { schema: { type: 'string' } } },
   })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiGoneResponse({ description: REPORT_GONE_MESSAGE })
   async errors(
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) res: Response,
