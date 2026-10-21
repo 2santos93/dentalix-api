@@ -44,18 +44,25 @@ export interface MedicalAlertsRepository {
 
   /** `tenants.anamnesisValidityMonths` de la clínica del contexto. */
   getValidityMonths(): Promise<number>;
-  setValidityMonths(months: number): Promise<number>;
+  /**
+   * Cambia la vigencia y devuelve la de antes y la de después, leídas y
+   * escritas en la MISMA transacción con la fila de la clínica bloqueada: dos
+   * ADMIN a la vez no dejan un «antes» que no fue real.
+   */
+  setValidityMonths(months: number): Promise<{ before: number; after: number }>;
 
   /** Quién y cuándo revisó por última vez (versión o confirmación). */
   lastReview(patientId: string): Promise<AnamnesisLastReview | null>;
 
   /**
-   * Guarda la confirmación sobre la versión `medicalHistoryVersionId`, en la
-   * sede del request (o ninguna, en la vista consolidada).
+   * Guarda la confirmación sobre la versión VIGENTE, en la sede del request (o
+   * ninguna, en la vista consolidada). Lee la versión y escribe en la misma
+   * transacción, bajo el candado por paciente que también toma el alta de una
+   * versión: no se confirma «sin cambios» una versión que otra persona está
+   * reemplazando. `null` si el paciente no tiene anamnesis.
    */
   createConfirmation(input: {
     patientId: string;
-    medicalHistoryVersionId: string;
     reviewedById: string;
-  }): Promise<AnamnesisConfirmation>;
+  }): Promise<AnamnesisConfirmation | null>;
 }

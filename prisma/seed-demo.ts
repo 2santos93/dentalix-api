@@ -115,7 +115,6 @@ import type { AuditRequestContext } from '../src/modules/audit/domain/audit-requ
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { ConfirmAnamnesisNoChangesUseCase } from '../src/modules/medical-history/application/use-cases/medical-alerts.use-cases';
 import { deriveSafetyFlags } from '../src/modules/medical-history/domain/safety-flags';
-import { addMonthsUtc } from '../src/modules/medical-history/domain/anamnesis-validity';
 import type { MedicalHistoryVersionData } from '../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import {
   ReplaceProviderScheduleUseCase,
@@ -355,6 +354,13 @@ export async function seedDemo(
   } finally {
     await app.close();
   }
+}
+
+/** El mismo instante `months` meses de calendario antes (DX-247: anamnesis antigua). */
+function monthsBefore(date: Date, months: number): Date {
+  const out = new Date(date.getTime());
+  out.setUTCMonth(out.getUTCMonth() - months);
+  return out;
 }
 
 class DemoSeeder {
@@ -1440,7 +1446,7 @@ class DemoSeeder {
             safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
             hasCriticalAlert,
             createdById: dentistId,
-            createdAt: addMonthsUtc(this.now, -b.monthsAgo),
+            createdAt: monthsBefore(this.now, b.monthsAgo),
           },
         }),
       );

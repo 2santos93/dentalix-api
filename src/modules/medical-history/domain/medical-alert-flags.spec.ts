@@ -7,7 +7,7 @@ import {
 } from './medical-alert-flags';
 import type { Allergy, Condition } from './entities/medical-history.entity';
 
-const NOW = new Date('2026-10-20T15:00:00.000Z');
+const AT = { date: '2026-10-20', timeZone: 'America/Bogota' };
 const RECENT = new Date('2026-09-01T12:00:00.000Z');
 const OLD = new Date('2025-01-15T12:00:00.000Z');
 
@@ -41,7 +41,7 @@ const valvulopatia: Condition = {
 
 describe('deriveMedicalAlertFlags (DX-247)', () => {
   it('sin anamnesis: MISSING y sin alertas, nunca «al día»', () => {
-    expect(deriveMedicalAlertFlags(null, null, 12, NOW)).toEqual(
+    expect(deriveMedicalAlertFlags(null, null, 12, AT)).toEqual(
       NO_ANAMNESIS_FLAGS,
     );
     expect(NO_ANAMNESIS_FLAGS).toEqual({
@@ -58,7 +58,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
       snapshot({ conditions: [valvulopatia] }),
       null,
       12,
-      NOW,
+      AT,
     );
     expect(flags).toEqual({
       hasCriticalAlert: true,
@@ -70,7 +70,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
   });
 
   it('una anamnesis limpia y al día no tiene alertas', () => {
-    const flags = deriveMedicalAlertFlags(snapshot({}), null, 12, NOW);
+    const flags = deriveMedicalAlertFlags(snapshot({}), null, 12, AT);
     expect(flags.hasCriticalAlert).toBe(false);
     expect(flags.alerts).toEqual([]);
     expect(flags.anamnesisStatus).toBe('CURRENT');
@@ -107,7 +107,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
       }),
       null,
       12,
-      NOW,
+      AT,
     );
     expect(flags.alerts).toEqual([
       'embarazo',
@@ -139,7 +139,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
       }),
       null,
       12,
-      NOW,
+      AT,
     );
     expect(flags.hasCriticalAlert).toBe(true);
     expect(flags.alerts).toEqual(['alergiaMarcada']);
@@ -160,7 +160,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
       }),
       null,
       12,
-      NOW,
+      AT,
     );
     expect(flags.alerts).toEqual(['alergiaPenicilina']);
   });
@@ -170,16 +170,34 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
       snapshot({ conditions: [valvulopatia] }, OLD),
       null,
       12,
-      NOW,
+      AT,
     );
     expect(flags.anamnesisStatus).toBe('EXPIRED');
     expect(flags.anamnesisReviewedAt).toEqual(OLD);
     expect(flags.requiresPremedication).toBe(true);
   });
 
+  it('se evalúa el día de la cita: la del jueves ve lo que valdrá el jueves', () => {
+    const reviewed = new Date('2025-10-25T15:00:00.000Z');
+    const snap = snapshot({}, reviewed);
+    const tz = 'America/Bogota';
+    expect(
+      deriveMedicalAlertFlags(snap, null, 12, {
+        date: '2026-10-21',
+        timeZone: tz,
+      }).anamnesisStatus,
+    ).toBe('CURRENT');
+    expect(
+      deriveMedicalAlertFlags(snap, null, 12, {
+        date: '2026-10-28',
+        timeZone: tz,
+      }).anamnesisStatus,
+    ).toBe('EXPIRED');
+  });
+
   it('«Sin cambios hoy» posterior reinicia la vigencia', () => {
     const reviewed = new Date('2026-10-20T14:00:00.000Z');
-    const flags = deriveMedicalAlertFlags(snapshot({}, OLD), reviewed, 12, NOW);
+    const flags = deriveMedicalAlertFlags(snapshot({}, OLD), reviewed, 12, AT);
     expect(flags.anamnesisStatus).toBe('CURRENT');
     expect(flags.anamnesisReviewedAt).toEqual(reviewed);
   });
@@ -201,7 +219,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
       },
       null,
       12,
-      NOW,
+      AT,
     );
     expect(flags.hasCriticalAlert).toBe(true);
     expect(flags.requiresPremedication).toBe(false);

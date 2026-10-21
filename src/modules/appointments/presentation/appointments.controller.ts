@@ -202,7 +202,7 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: [AppointmentListItemDto],
     description:
-      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente y los códigos de alerta), nunca la historia médica.',
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica.',
   })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
@@ -230,7 +230,8 @@ export class AppointmentsController {
     );
     const patientIds = appointments.map((a) => a.patientId);
     const coverage = await this.coverageFlags.forPatients(patientIds);
-    const medical = await this.medicalAlertFlags.forPatients(patientIds);
+    // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
+    const medical = await this.medicalAlertFlags.forAppointments(appointments);
     return appointments.map((a) => ({
       ...a,
       balance: flags.get(a.patientId) ?? {
@@ -238,7 +239,7 @@ export class AppointmentsController {
         overdueDays: null,
       },
       coverage: coverage.get(a.patientId) ?? NO_COVERAGE,
-      medicalAlerts: medical.get(a.patientId) ?? NO_ANAMNESIS_FLAGS,
+      medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
     }));
   }
 
@@ -290,11 +291,13 @@ export class AppointmentsController {
       role: isTenantPayload(req.user) ? req.user.role : null,
       userId: req.user.sub,
     });
-    // DX-247: la misma alerta que la agenda, en una sola lectura por lote.
+    // DX-247: la misma alerta que la agenda, en una sola lectura por lote,
+    // evaluada el día del panel en la zona de la sede.
     const medical = await this.medicalAlertFlags.forPatients(
       [...view.waiting, ...view.inChair, ...view.readyForCheckout].map(
         (i) => i.patientId,
       ),
+      { date: view.date, timeZone: view.timeZone },
     );
     const withAlerts = (items: InClinicItem[]) =>
       items.map((i) => ({

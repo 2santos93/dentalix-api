@@ -196,6 +196,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     patients.none = await createPatient(clinic, 'Sinanamnesis');
     patients.clean = await createPatient(clinic, 'Limpia');
     patients.north = await createPatient(clinic, 'Norte');
+    patients.soon = await createPatient(clinic, 'Pronto');
     patients.foreign = await createPatient(other, 'Ajena');
 
     await saveHistory(patients.premed, {
@@ -233,6 +234,18 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
       },
     });
     await saveHistory(patients.clean, {});
+    // «Pronto»: revisada hace un año menos un día → hoy al día, caduca mañana.
+    await raw.medicalHistoryVersion.create({
+      data: {
+        tenantId: clinic.tenantId,
+        patientId: patients.soon,
+        version: 1,
+        safetyFlags: {},
+        hasCriticalAlert: false,
+        createdById: clinic.adminUserId,
+        createdAt: new Date(Date.now() - 364 * 86_400_000),
+      },
+    });
     await saveHistory(patients.north, {
       allergies: [
         {
@@ -249,6 +262,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     await book('none', mainId, 16);
     await book('clean', mainId, 17);
     await book('north', northId, 18);
+    await book('soon', mainId, 19);
   }, 60_000);
 
   afterAll(async () => {
@@ -260,7 +274,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
   it('GET /appointments trae SOLO banderas: ningún campo ni texto clínico', async () => {
     const res = await listDay(reception, mainId);
     const items = res.body as ListItem[];
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(5);
     for (const item of items) {
       expect(Object.keys(item.medicalAlerts).sort()).toEqual(FLAG_KEYS);
     }
@@ -298,6 +312,25 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
       anamnesisStatus: 'CURRENT',
       alerts: [],
     });
+  });
+
+  it('la anamnesis se evalúa el día de la cita: hoy al día, la cita de la semana que viene ya caducada', async () => {
+    const list = (await listDay(reception, mainId)).body as ListItem[];
+    expect(
+      list.find((a) => a.patientId === patients.soon)?.medicalAlerts
+        .anamnesisStatus,
+    ).toBe('EXPIRED');
+    const today = await as(
+      api().get(`/api/v1/patients/${patients.soon}/medical-alerts`),
+      reception,
+      { locationId: mainId },
+    ).expect(200);
+    expect(today.body).toMatchObject({
+      anamnesisStatus: 'CURRENT',
+      timeZone: 'America/Bogota',
+    });
+    const body = today.body as { today: string; anamnesisExpiresOn: string };
+    expect(body.anamnesisExpiresOn > body.today).toBe(true);
   });
 
   it('respeta la sede: la Sede Norte solo trae su cita, con su alerta', async () => {

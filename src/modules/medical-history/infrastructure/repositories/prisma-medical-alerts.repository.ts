@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { SafetyFlags } from '../../domain/entities/medical-history.entity';
+import { lockPatientAnamnesis } from './anamnesis-lock';
 import type {
   AnamnesisConfirmation,
   AnamnesisLastReview,
@@ -43,6 +44,9 @@ export class PrismaMedicalAlertsRepository implements MedicalAlertsRepository {
     // medical_history_reviews_tenant_patient_idx (LIMIT 1 por paciente). De
     // las alergias solo se leen los alérgenos marcados como alerta, para
     // decidir la bandera genérica: no salen de aquí.
+    // El tenant también va explícito en cada LATERAL: el plan usa los índices
+    // por (tenantId, patientId) sin depender de cómo se escriba la política.
+    const tenantId = this.tenantId();
     const rows = await this.prisma.runWithTenant(
       (tx) => tx.$queryRaw<ReviewStateRow[]>`
         SELECT p.id::text AS "patientId",
@@ -65,14 +69,17 @@ export class PrismaMedicalAlertsRepository implements MedicalAlertsRepository {
             SELECT mhv.id, mhv."safetyFlags", mhv."hasCriticalAlert",
                    mhv."createdAt", mhv."allergies"
               FROM "medical_history_versions" mhv
-             WHERE mhv."patientId" = p.id AND mhv."deletedAt" IS NULL
+             WHERE mhv."tenantId" = ${tenantId}::uuid
+               AND mhv."patientId" = p.id
+               AND mhv."deletedAt" IS NULL
              ORDER BY mhv."version" DESC
              LIMIT 1
           ) v ON true
           LEFT JOIN LATERAL (
             SELECT mhr."reviewedAt"
               FROM "medical_history_reviews" mhr
-             WHERE mhr."patientId" = p.id
+             WHERE mhr."tenantId" = ${tenantId}::uuid
+               AND mhr."patientId" = p.id
              ORDER BY mhr."reviewedAt" DESC
              LIMIT 1
           ) r ON true`,
@@ -101,13 +108,22 @@ export class PrismaMedicalAlertsRepository implements MedicalAlertsRepository {
     return tenant.anamnesisValidityMonths;
   }
 
-  async setValidityMonths(months: number): Promise<number> {
-    const tenant = await this.prisma.tenant.update({
-      where: { id: this.tenantId() },
-      data: { anamnesisValidityMonths: months },
-      select: { anamnesisValidityMonths: true },
+  async setValidityMonths(
+    months: number,
+  ): Promise<{ before: number; after: number }> {
+    const id = this.tenantId();
+    // Lectura con la fila bloqueada y escritura en la misma transacción.
+    return this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<{ months: number }[]>`
+        SELECT "anamnesisValidityMonths" AS months
+          FROM "tenants" WHERE "id" = ${id}::uuid FOR UPDATE`;
+      const tenant = await tx.tenant.update({
+        where: { id },
+        data: { anamnesisValidityMonths: months },
+        select: { anamnesisValidityMonths: true },
+      });
+      return { before: locked.months, after: tenant.anamnesisValidityMonths };
     });
-    return tenant.anamnesisValidityMonths;
   }
 
   async lastReview(patientId: string): Promise<AnamnesisLastReview | null> {
@@ -145,16 +161,25 @@ export class PrismaMedicalAlertsRepository implements MedicalAlertsRepository {
 
   async createConfirmation(input: {
     patientId: string;
-    medicalHistoryVersionId: string;
     reviewedById: string;
-  }): Promise<AnamnesisConfirmation> {
+  }): Promise<AnamnesisConfirmation | null> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // Mismo candado por paciente que el alta de una versión (ver
+      // PrismaMedicalHistoryRepository.createVersion): si alguien guarda una
+      // versión a la vez, esta espera y confirma la que quede vigente.
+      await lockPatientAnamnesis(tx, tenantId, input.patientId);
+      const version = await tx.medicalHistoryVersion.findFirst({
+        where: { patientId: input.patientId, deletedAt: null },
+        orderBy: { version: 'desc' },
+        select: { id: true },
+      });
+      if (!version) return null;
       const row = await tx.medicalHistoryReview.create({
         data: {
           tenantId,
           patientId: input.patientId,
-          medicalHistoryVersionId: input.medicalHistoryVersionId,
+          medicalHistoryVersionId: version.id,
           reviewedById: input.reviewedById,
           locationId: this.tenantContext.getLocationId() ?? null,
         },

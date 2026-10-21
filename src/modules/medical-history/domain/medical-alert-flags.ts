@@ -35,6 +35,12 @@ export interface MedicalAlertFlags {
   anamnesisReviewedAt: Date | null;
 }
 
+/** El día civil (YYYY-MM-DD) en la zona de una sede al que se evalúa el estado. */
+export interface CivilDayInZone {
+  date: string;
+  timeZone: string;
+}
+
 /** La versión vigente de la anamnesis, reducida a lo que hace falta aquí. */
 export interface AnamnesisSnapshot {
   versionId: string;
@@ -68,7 +74,7 @@ export function deriveMedicalAlertFlags(
   snapshot: AnamnesisSnapshot | null,
   lastConfirmedAt: Date | null,
   validityMonths: number,
-  now: Date,
+  at: CivilDayInZone,
 ): MedicalAlertFlags {
   if (!snapshot) return NO_ANAMNESIS_FLAGS;
   const flags = snapshot.safetyFlags;
@@ -82,7 +88,12 @@ export function deriveMedicalAlertFlags(
   return {
     hasCriticalAlert: snapshot.hasCriticalAlert,
     requiresPremedication: flags?.profilaxisAntibiotica === true,
-    anamnesisStatus: anamnesisStatus(reviewedAt, validityMonths, now),
+    anamnesisStatus: anamnesisStatus(
+      reviewedAt,
+      validityMonths,
+      at.date,
+      at.timeZone,
+    ),
     alerts,
     anamnesisReviewedAt: reviewedAt,
   };

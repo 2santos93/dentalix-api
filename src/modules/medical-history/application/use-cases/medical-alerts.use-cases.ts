@@ -11,7 +11,7 @@ import { RecordAuditEventUseCase } from '../../../audit/application/record-audit
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import {
   ANAMNESIS_VALIDITY_MESSAGE,
-  anamnesisExpiresAt,
+  anamnesisExpiresOn,
   isValidAnamnesisValidity,
 } from '../../domain/anamnesis-validity';
 import type { MedicalAlertFlags } from '../../domain/medical-alert-flags';
@@ -21,10 +21,7 @@ import {
   type AnamnesisLastReview,
   type MedicalAlertsRepository,
 } from '../../domain/ports/medical-alerts-repository.port';
-import {
-  MEDICAL_ALERTS_CLOCK,
-  PatientMedicalAlertFlags,
-} from '../patient-medical-alert-flags';
+import { PatientMedicalAlertFlags } from '../patient-medical-alert-flags';
 
 export const NO_ANAMNESIS_TO_CONFIRM_MESSAGE =
   'Este paciente no tiene anamnesis: regístrala antes de confirmar que no hay cambios.';
@@ -32,8 +29,14 @@ export const NO_ANAMNESIS_TO_CONFIRM_MESSAGE =
 /** Las banderas de un paciente con la vigencia y la última revisión (ficha). */
 export interface PatientMedicalAlertsView extends MedicalAlertFlags {
   validityMonths: number;
-  /** Desde cuándo sale «Anamnesis caducada»; null sin anamnesis. */
-  anamnesisExpiresAt: Date | null;
+  /**
+   * Primer día civil (YYYY-MM-DD, zona de la sede) en que sale «Anamnesis
+   * caducada»; null sin anamnesis.
+   */
+  anamnesisExpiresOn: string | null;
+  /** Hoy (YYYY-MM-DD) en la sede con la que se evaluó, y su zona IANA. */
+  today: string;
+  timeZone: string;
   lastReview: AnamnesisLastReview | null;
 }
 
@@ -55,22 +58,28 @@ export class GetPatientMedicalAlertsUseCase {
     private readonly repo: MedicalAlertsRepository,
     @Inject(PATIENT_REPOSITORY)
     private readonly patients: PatientRepository,
-    @Inject(MEDICAL_ALERTS_CLOCK) private readonly now: () => Date,
   ) {}
 
   async execute(patientId: string): Promise<PatientMedicalAlertsView> {
     await assertPatientInClinic(this.patients, patientId);
+    const today = await this.flags.todayInSede();
     const [flags, validityMonths, lastReview] = await Promise.all([
-      this.flags.forPatient(patientId),
+      this.flags.forPatient(patientId, today),
       this.repo.getValidityMonths(),
       this.repo.lastReview(patientId),
     ]);
     return {
       ...flags,
       validityMonths,
-      anamnesisExpiresAt: flags.anamnesisReviewedAt
-        ? anamnesisExpiresAt(flags.anamnesisReviewedAt, validityMonths)
+      anamnesisExpiresOn: flags.anamnesisReviewedAt
+        ? anamnesisExpiresOn(
+            flags.anamnesisReviewedAt,
+            validityMonths,
+            today.timeZone,
+          )
         : null,
+      today: today.date,
+      timeZone: today.timeZone,
       lastReview,
     };
   }
@@ -96,13 +105,14 @@ export class ConfirmAnamnesisNoChangesUseCase {
     reviewedById: string,
   ): Promise<AnamnesisConfirmation> {
     await assertPatientInClinic(this.patients, patientId);
-    const state = (await this.repo.reviewStates([patientId])).get(patientId);
-    if (!state) throw new ConflictException(NO_ANAMNESIS_TO_CONFIRM_MESSAGE);
-    return this.repo.createConfirmation({
+    const confirmation = await this.repo.createConfirmation({
       patientId,
-      medicalHistoryVersionId: state.snapshot.versionId,
       reviewedById,
     });
+    if (!confirmation) {
+      throw new ConflictException(NO_ANAMNESIS_TO_CONFIRM_MESSAGE);
+    }
+    return confirmation;
   }
 }
 
@@ -134,8 +144,7 @@ export class UpdateAnamnesisSettingsUseCase {
     if (!isValidAnamnesisValidity(input.anamnesisValidityMonths)) {
       throw new BadRequestException(ANAMNESIS_VALIDITY_MESSAGE);
     }
-    const before = await this.repo.getValidityMonths();
-    const after = await this.repo.setValidityMonths(
+    const { before, after } = await this.repo.setValidityMonths(
       input.anamnesisValidityMonths,
     );
     await this.audit.record({

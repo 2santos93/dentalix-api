@@ -24,6 +24,8 @@ import { PrismaMedicalHistoryRepository } from './infrastructure/repositories/pr
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
+// DX-247: zona de cada sede para evaluar la anamnesis por día civil.
+import { LocationsModule } from '../locations/locations.module';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/DentalCatalogModule:
@@ -31,7 +33,7 @@ import { PatientsModule } from '../patients/patients.module';
   // be available here since the guard is applied on this module's controller.
   // PatientsModule exporta PATIENT_REPOSITORY: el use-case de alta valida que el
   // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
-  imports: [JwtModule.register({}), PatientsModule],
+  imports: [JwtModule.register({}), PatientsModule, LocationsModule],
   controllers: [
     MedicalHistoryController,
     // DX-247: banderas del paciente y vigencia de la anamnesis.

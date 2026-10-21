@@ -60,9 +60,12 @@ export class InMemoryMedicalAlertsRepository implements MedicalAlertsRepository 
     return Promise.resolve(this.validityMonths);
   }
 
-  setValidityMonths(months: number): Promise<number> {
+  setValidityMonths(
+    months: number,
+  ): Promise<{ before: number; after: number }> {
+    const before = this.validityMonths;
     this.validityMonths = months;
-    return Promise.resolve(months);
+    return Promise.resolve({ before, after: months });
   }
 
   lastReview(patientId: string): Promise<AnamnesisLastReview | null> {
@@ -85,12 +88,14 @@ export class InMemoryMedicalAlertsRepository implements MedicalAlertsRepository 
 
   createConfirmation(input: {
     patientId: string;
-    medicalHistoryVersionId: string;
     reviewedById: string;
-  }): Promise<AnamnesisConfirmation> {
+  }): Promise<AnamnesisConfirmation | null> {
+    const snapshot = this.snapshots.get(input.patientId);
+    if (!snapshot) return Promise.resolve(null);
     const confirmation: AnamnesisConfirmation = {
       id: randomUUID(),
       ...input,
+      medicalHistoryVersionId: snapshot.versionId,
       reviewedByName: this.names.get(input.reviewedById) ?? null,
       locationId: null,
       reviewedAt: this.now(),

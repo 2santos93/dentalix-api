@@ -35,7 +35,7 @@ export class MedicalAlertFlagsDto implements MedicalAlertFlags {
     enum: ANAMNESIS_STATUSES,
     enumName: 'AnamnesisStatus',
     description:
-      'CURRENT: al día. EXPIRED: la última versión o confirmación «Sin cambios hoy» es más antigua que la vigencia de la clínica. MISSING: sin anamnesis (no es «sin alertas»).',
+      'CURRENT: al día. EXPIRED: el día civil evaluado (el de la cita en la zona de su sede; hoy en la ficha y en «En clínica») ya es el día en que se cumple la vigencia desde la última versión o confirmación «Sin cambios hoy». MISSING: sin anamnesis (no es «sin alertas»).',
   })
   anamnesisStatus!: AnamnesisStatus;
 
@@ -86,11 +86,25 @@ export class PatientMedicalAlertsDto extends MedicalAlertFlagsDto {
 
   @ApiProperty({
     type: String,
-    format: 'date-time',
     nullable: true,
-    description: 'Desde cuándo sale «Anamnesis caducada»; null sin anamnesis.',
+    example: '2027-10-21',
+    description:
+      'Primer día civil (AAAA-MM-DD, zona de la sede) en que sale «Anamnesis caducada»; null sin anamnesis.',
   })
-  anamnesisExpiresAt!: Date | null;
+  anamnesisExpiresOn!: string | null;
+
+  @ApiProperty({
+    example: '2026-10-21',
+    description:
+      'Hoy (AAAA-MM-DD) en la sede con la que se evaluó: la del request o, en la vista consolidada, la principal.',
+  })
+  today!: string;
+
+  @ApiProperty({
+    example: 'America/Bogota',
+    description: 'Zona IANA de esa sede.',
+  })
+  timeZone!: string;
 
   @ApiProperty({ type: AnamnesisLastReviewDto, nullable: true })
   lastReview!: AnamnesisLastReviewDto | null;

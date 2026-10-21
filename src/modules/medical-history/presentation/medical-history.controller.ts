@@ -15,6 +15,7 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiExtraModels,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiParam,
@@ -125,6 +126,10 @@ export class MedicalHistoryController {
   })
   @ApiConflictResponse({
     description: 'El paciente no tiene anamnesis que confirmar.',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo DENTIST, ASSISTANT y ADMIN (los que ven la anamnesis); recepción recibe 403.',
   })
   confirm(
     @Param('patientId', ParseUUIDPipe) patientId: string,

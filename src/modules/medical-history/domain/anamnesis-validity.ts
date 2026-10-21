@@ -1,3 +1,5 @@
+import { civilDateIn, parseCivilDate } from '../../../shared/time/civil-day';
+
 /**
  * Vigencia de la anamnesis (DX-247). La AAOM pide la historia completa al
  * menos una vez al año; la ADA, preguntar en cada visita si algo cambió. Cada
@@ -28,36 +30,50 @@ export function isValidAnamnesisValidity(months: number): boolean {
 }
 
 /**
- * Suma meses de calendario (UTC) conservando la hora. Si el día no existe en
- * el mes de destino (31 de enero + 1 mes), queda en el último día de ese mes.
+ * `day` (YYYY-MM-DD) más `months` meses de calendario (negativo resta). Si el
+ * día no existe en el mes de destino (31 de enero + 1 mes, 29 de febrero + 12
+ * meses), queda en el último día de ese mes.
  */
-export function addMonthsUtc(date: Date, months: number): Date {
-  const year = date.getUTCFullYear();
-  const month = date.getUTCMonth() + months;
-  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const result = new Date(date.getTime());
-  result.setUTCFullYear(year, month, Math.min(date.getUTCDate(), lastDay));
-  return result;
-}
-
-/** Primer instante en que una anamnesis revisada en `reviewedAt` deja de valer. */
-export function anamnesisExpiresAt(reviewedAt: Date, months: number): Date {
-  return addMonthsUtc(reviewedAt, months);
+export function addCivilMonths(day: string, months: number): string {
+  if (parseCivilDate(day) === null) {
+    throw new RangeError(`Invalid civil date: ${day}`);
+  }
+  const [y, m, d] = day.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${pad(target.getUTCFullYear(), 4)}-${pad(target.getUTCMonth() + 1)}-${pad(Math.min(d, lastDay))}`;
 }
 
 /**
- * `MISSING` si nunca se registró; `EXPIRED` desde el instante en que se
- * cumple la vigencia; `CURRENT` antes. Se compara en instantes: a 12 meses, la
- * zona de la sede mueve el corte unas horas, no un día de consulta.
+ * Primer día civil (en la zona de la sede) en que una anamnesis revisada en
+ * `reviewedAt` ya no vale: el día de la revisión allí más la vigencia.
+ */
+export function anamnesisExpiresOn(
+  reviewedAt: Date,
+  months: number,
+  timeZone: string,
+): string {
+  return addCivilMonths(civilDateIn(reviewedAt, timeZone), months);
+}
+
+/**
+ * Estado de la anamnesis el día civil `asOf` (YYYY-MM-DD) de la sede:
+ * `MISSING` si nunca se registró; `EXPIRED` desde el día en que se cumple la
+ * vigencia (todo ese día, no desde la hora de la revisión); `CURRENT` antes.
+ * La agenda lo evalúa con el día de CADA cita: preparar la visita del jueves
+ * debe ver lo que valdrá el jueves.
  */
 export function anamnesisStatus(
   lastReviewedAt: Date | null,
   validityMonths: number,
-  now: Date,
+  asOf: string,
+  timeZone: string,
 ): AnamnesisStatus {
   if (!lastReviewedAt) return 'MISSING';
-  return now.getTime() >=
-    anamnesisExpiresAt(lastReviewedAt, validityMonths).getTime()
+  return asOf >= anamnesisExpiresOn(lastReviewedAt, validityMonths, timeZone)
     ? 'EXPIRED'
     : 'CURRENT';
 }

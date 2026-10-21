@@ -6,6 +6,7 @@ import { App } from 'supertest/types';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaMedicalAlertsRepository } from '../src/modules/medical-history/infrastructure/repositories/prisma-medical-alerts.repository';
+import { lockPatientAnamnesis } from '../src/modules/medical-history/infrastructure/repositories/anamnesis-lock';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   registerClinic,
@@ -172,10 +173,10 @@ describe('DX-247 · banderas médicas y «Sin cambios hoy» en la BD (int)', () 
     const confirmation = await asClinic(a.tenantId, () =>
       repo.createConfirmation({
         patientId: a.withHistory,
-        medicalHistoryVersionId: a.currentVersion,
         reviewedById: reviewer,
       }),
     );
+    if (!confirmation) throw new Error('sin confirmación');
     expect(confirmation).toMatchObject({
       patientId: a.withHistory,
       medicalHistoryVersionId: a.currentVersion,
@@ -198,6 +199,66 @@ describe('DX-247 · banderas médicas y «Sin cambios hoy» en la BD (int)', () 
       kind: 'NO_CHANGES',
       at: confirmation.reviewedAt,
     });
+  });
+
+  it('«Sin cambios hoy» sin anamnesis no escribe nada; de otra clínica, tampoco', async () => {
+    await expect(
+      asClinic(a.tenantId, () =>
+        repo.createConfirmation({
+          patientId: a.withoutHistory,
+          reviewedById: reviewer,
+        }),
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      asClinic(a.tenantId, () =>
+        repo.createConfirmation({
+          patientId: b.withHistory,
+          reviewedById: reviewer,
+        }),
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('la confirmación espera a la versión que se está guardando y confirma esa (candado por paciente)', async () => {
+    // T1 toma el candado por paciente, inserta la versión 4 y tarda en
+    // confirmar; la confirmación que llega mientras tanto tiene que esperar y
+    // apuntar a la versión 4, no a la 2 que ya no será la vigente.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => (locked = r));
+    let v4 = '';
+    const saving = prisma.runWithTenant(a.tenantId, async (tx) => {
+      await lockPatientAnamnesis(tx, a.tenantId, a.withHistory);
+      v4 = (
+        await tx.medicalHistoryVersion.create({
+          data: {
+            tenantId: a.tenantId,
+            patientId: a.withHistory,
+            version: 4,
+            safetyFlags: {},
+            hasCriticalAlert: false,
+          },
+        })
+      ).id;
+      locked();
+      await held;
+    });
+    await lockTaken;
+    const confirming = asClinic(a.tenantId, () =>
+      repo.createConfirmation({
+        patientId: a.withHistory,
+        reviewedById: reviewer,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await saving;
+    const confirmation = await confirming;
+    expect(confirmation?.medicalHistoryVersionId).toBe(v4);
+    await owner.$executeRaw`DELETE FROM "medical_history_reviews" WHERE "id" = ${confirmation!.id}::uuid`;
+    await owner.$executeRaw`DELETE FROM "medical_history_versions" WHERE "id" = ${v4}::uuid`;
   });
 
   it('la otra clínica no ve la confirmación de A (RLS)', async () => {
@@ -287,8 +348,10 @@ describe('DX-247 · banderas médicas y «Sin cambios hoy» en la BD (int)', () 
     ).rejects.toThrow(/inalterable/);
   });
 
-  it('la vigencia de la clínica va de 1 a 60 meses (CHECK)', async () => {
-    await asClinic(a.tenantId, () => repo.setValidityMonths(6));
+  it('la vigencia de la clínica va de 1 a 60 meses (CHECK) y devuelve antes y después', async () => {
+    await expect(
+      asClinic(a.tenantId, () => repo.setValidityMonths(6)),
+    ).resolves.toEqual({ before: 12, after: 6 });
     await expect(
       asClinic(a.tenantId, () => repo.getValidityMonths()),
     ).resolves.toBe(6);

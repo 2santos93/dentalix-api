@@ -10,6 +10,8 @@ import { deriveSafetyFlags } from '../domain/safety-flags';
 import { NO_ANAMNESIS_FLAGS } from '../domain/medical-alert-flags';
 import { InMemoryMedicalAlertsRepository } from './__fixtures__/in-memory-medical-alerts';
 import { PatientMedicalAlertFlags } from './patient-medical-alert-flags';
+import type { LocationRepository } from '../../locations/domain/ports/location-repository.port';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
   ConfirmAnamnesisNoChangesUseCase,
   GetAnamnesisSettingsUseCase,
@@ -19,6 +21,35 @@ import {
 } from './use-cases/medical-alerts.use-cases';
 
 const NOW = new Date('2026-10-20T15:00:00.000Z');
+const TODAY = { date: '2026-10-20', timeZone: 'America/Bogota' };
+
+/** Dos sedes: la principal en Bogotá y otra en Madrid. */
+function fakeLocations(): LocationRepository & { calls: number } {
+  const fake = {
+    calls: 0,
+    list() {
+      fake.calls++;
+      return Promise.resolve([
+        { id: 'bog', timeZone: 'America/Bogota' },
+        { id: 'mad', timeZone: 'Europe/Madrid' },
+      ]);
+    },
+  };
+  return fake as unknown as LocationRepository & { calls: number };
+}
+
+function flagsService(
+  repo: InMemoryMedicalAlertsRepository,
+  locations = fakeLocations(),
+  tenantContext = new TenantContextService(),
+) {
+  return new PatientMedicalAlertFlags(
+    repo,
+    locations,
+    tenantContext,
+    () => NOW,
+  );
+}
 const premedication = deriveSafetyFlags({
   conditions: [
     {
@@ -36,7 +67,7 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
 
   beforeEach(() => {
     repo = new InMemoryMedicalAlertsRepository();
-    flags = new PatientMedicalAlertFlags(repo, () => NOW);
+    flags = flagsService(repo);
   });
 
   const callsOf = (name: string) => repo.calls.filter((c) => c === name).length;
@@ -44,38 +75,106 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
   it('300 ids son UNA lectura de anamnesis y UNA de la vigencia (sin N+1)', async () => {
     const ids = Array.from({ length: 300 }, (_, i) => `p-${i}`);
     repo.seedSnapshot('p-1', { ...premedication });
-    const map = await flags.forPatients(ids);
+    const map = await flags.forPatients(ids, TODAY);
     expect(map.size).toBe(300);
     expect(callsOf('reviewStates')).toBe(1);
     expect(callsOf('getValidityMonths')).toBe(1);
   });
 
   it('sin ids no consulta nada; ids repetidos cuentan una vez', async () => {
-    expect((await flags.forPatients([])).size).toBe(0);
+    expect((await flags.forPatients([], TODAY)).size).toBe(0);
     expect(repo.calls).toEqual([]);
-    expect((await flags.forPatients(['a', 'a'])).size).toBe(1);
+    expect((await flags.forPatients(['a', 'a'], TODAY)).size).toBe(1);
   });
 
   it('paciente sin anamnesis → MISSING (no «sin alertas»)', async () => {
-    const map = await flags.forPatients(['nuevo']);
+    const map = await flags.forPatients(['nuevo'], TODAY);
     expect(map.get('nuevo')).toEqual(NO_ANAMNESIS_FLAGS);
   });
 
   it('profilaxis antibiótica → requiresPremedication', async () => {
     repo.seedSnapshot('p-1', { ...premedication });
-    const flag = (await flags.forPatients(['p-1'])).get('p-1');
+    const flag = (await flags.forPatients(['p-1'], TODAY)).get('p-1');
     expect(flag?.requiresPremedication).toBe(true);
     expect(flag?.hasCriticalAlert).toBe(true);
     expect(flag?.alerts).toEqual(['profilaxisAntibiotica']);
+  });
+
+  it('cada cita se evalúa el día civil de su inicio en la zona de su sede, sin N+1', async () => {
+    const locations = fakeLocations();
+    flags = flagsService(repo, locations);
+    // Revisada el 25/10/2025: caduca el 25/10/2026 en Bogotá.
+    repo.seedSnapshot('p-1', {
+      createdAt: new Date('2025-10-25T15:00:00.000Z'),
+    });
+    const map = await flags.forAppointments([
+      {
+        id: 'hoy',
+        patientId: 'p-1',
+        start: new Date('2026-10-21T14:00:00.000Z'),
+        locationId: 'bog',
+      },
+      {
+        id: 'jueves',
+        patientId: 'p-1',
+        start: new Date('2026-10-29T14:00:00.000Z'),
+        locationId: 'bog',
+      },
+      // 24/10 a las 23:30 en Bogotá es el 25/10 en UTC: sigue al día.
+      {
+        id: 'noche',
+        patientId: 'p-1',
+        start: new Date('2026-10-25T04:30:00.000Z'),
+        locationId: 'bog',
+      },
+      // La misma hora en Madrid ya es el 25/10 allí.
+      {
+        id: 'madrid',
+        patientId: 'p-1',
+        start: new Date('2026-10-25T04:30:00.000Z'),
+        locationId: 'mad',
+      },
+      {
+        id: 'nuevo',
+        patientId: 'p-2',
+        start: new Date('2026-10-21T14:00:00.000Z'),
+        locationId: 'bog',
+      },
+    ]);
+    expect(map.get('hoy')?.anamnesisStatus).toBe('CURRENT');
+    expect(map.get('jueves')?.anamnesisStatus).toBe('EXPIRED');
+    expect(map.get('noche')?.anamnesisStatus).toBe('CURRENT');
+    expect(map.get('madrid')?.anamnesisStatus).toBe('EXPIRED');
+    expect(map.get('nuevo')).toEqual(NO_ANAMNESIS_FLAGS);
+    expect(callsOf('reviewStates')).toBe(1);
+    expect(callsOf('getValidityMonths')).toBe(1);
+    expect(locations.calls).toBe(1);
+  });
+
+  it('hoy en la sede del request o, sin sede, en la principal', async () => {
+    const tenantContext = new TenantContextService();
+    flags = flagsService(repo, fakeLocations(), tenantContext);
+    // 15:00 UTC del 20/10: ya es 20/10 en Bogotá y en Madrid.
+    await expect(flags.todayInSede()).resolves.toEqual({
+      date: '2026-10-20',
+      timeZone: 'America/Bogota',
+    });
+    await expect(
+      tenantContext.run('t-1', 'mad', () => flags.todayInSede()),
+    ).resolves.toEqual({ date: '2026-10-20', timeZone: 'Europe/Madrid' });
   });
 
   it('la vigencia de la clínica decide «caducada»', async () => {
     repo.seedSnapshot('p-1', {
       createdAt: new Date('2026-03-01T00:00:00.000Z'),
     });
-    expect((await flags.forPatient('p-1')).anamnesisStatus).toBe('CURRENT');
+    expect((await flags.forPatient('p-1', TODAY)).anamnesisStatus).toBe(
+      'CURRENT',
+    );
     repo.validityMonths = 6;
-    expect((await flags.forPatient('p-1')).anamnesisStatus).toBe('EXPIRED');
+    expect((await flags.forPatient('p-1', TODAY)).anamnesisStatus).toBe(
+      'EXPIRED',
+    );
   });
 });
 
@@ -100,10 +199,9 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
   describe('GetPatientMedicalAlertsUseCase', () => {
     const uc = () =>
       new GetPatientMedicalAlertsUseCase(
-        new PatientMedicalAlertFlags(repo, () => NOW),
+        flagsService(repo),
         repo,
         patientsInClinic('p-1', 'p-2'),
-        () => NOW,
       );
 
     it('paciente de otra clínica (o inexistente) → 404', async () => {
@@ -122,7 +220,9 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
         requiresPremedication: true,
         anamnesisStatus: 'CURRENT',
         validityMonths: 12,
-        anamnesisExpiresAt: new Date('2026-11-01T10:00:00.000Z'),
+        anamnesisExpiresOn: '2026-11-01',
+        today: '2026-10-20',
+        timeZone: 'America/Bogota',
         lastReview: {
           kind: 'UPDATED',
           at: new Date('2025-11-01T10:00:00.000Z'),
@@ -134,7 +234,7 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
       const view = await uc().execute('p-2');
       expect(view).toMatchObject({
         anamnesisStatus: 'MISSING',
-        anamnesisExpiresAt: null,
+        anamnesisExpiresOn: null,
         lastReview: null,
       });
     });
@@ -161,10 +261,7 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
         reviewedAt: NOW,
       });
       // Y reinicia la vigencia: deja de estar caducada.
-      const after = await new PatientMedicalAlertFlags(
-        repo,
-        () => NOW,
-      ).forPatient('p-1');
+      const after = await flagsService(repo).forPatient('p-1', TODAY);
       expect(after.anamnesisStatus).toBe('CURRENT');
       expect(after.anamnesisReviewedAt).toEqual(NOW);
     });
