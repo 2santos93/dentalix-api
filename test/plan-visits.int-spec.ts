@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 const db = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -257,6 +257,79 @@ describe('DX-256 integridad real y concurrencia', () => {
         where: { planItemId: itemId, active: true },
       }),
     ).toBe(1);
+  });
+  it('sirve la lista con índices parciales y un número constante de consultas por página', async () => {
+    await owner.appointment.updateMany({
+      where: { tenantId },
+      data: { status: 'CANCELLED' },
+    });
+    const source = await owner.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: itemId },
+    });
+    const second = await owner.treatmentPlan.create({
+      data: {
+        tenantId,
+        patientId,
+        status: 'ACCEPTED',
+        currency: 'USD',
+        acceptedAt: new Date(),
+        acceptedLocationId: locationId,
+      },
+    });
+    await owner.treatmentPlanItem.create({
+      data: {
+        tenantId,
+        planId: second.id,
+        catalogItemId: source.catalogItemId,
+        toothNumber: '47',
+        price: 200,
+        status: 'ACCEPTED',
+      },
+    });
+    const explain = await run(() =>
+      prisma.runWithTenant(async (tx) => {
+        await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
+        return tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
+          `EXPLAIN SELECT id FROM treatment_plans WHERE "tenantId"='${tenantId}'::uuid AND "acceptedLocationId"='${locationId}'::uuid AND status='ACCEPTED' AND "deletedAt" IS NULL ORDER BY id LIMIT 50`,
+        );
+      }),
+    );
+    expect(explain.map((r) => r['QUERY PLAN']).join(' ')).toContain(
+      'treatment_plans_unscheduled_idx',
+    );
+    let queryCount = 0;
+    const observed = new PrismaClient({
+      log: [{ emit: 'event', level: 'query' }],
+    });
+    observed.$on('query', (event) => {
+      if (event.query.startsWith('SELECT')) queryCount += 1;
+    });
+    const adapter = {
+      runWithTenant: <T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) =>
+        observed.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
+          return fn(tx);
+        }),
+    } as PrismaService;
+    const listing = new PlanVisitsService(adapter, context);
+    try {
+      queryCount = 0;
+      const first = await run(() =>
+        listing.unscheduled({ locationId, limit: 1 }),
+      );
+      const one = queryCount;
+      queryCount = 0;
+      const both = await run(() =>
+        listing.unscheduled({ locationId, limit: 50 }),
+      );
+      const many = queryCount;
+      expect(first.items).toHaveLength(1);
+      expect(both.items).toHaveLength(2);
+      expect(many).toBe(one);
+      expect(both.items.map((p) => p.currency).sort()).toEqual(['COP', 'USD']);
+    } finally {
+      await observed.$disconnect();
+    }
   });
   it('RLS FORCE y GUC vacío no filtran ni devuelven datos de otra clínica', async () => {
     const foreign = await context.run(otherTenant, () =>
