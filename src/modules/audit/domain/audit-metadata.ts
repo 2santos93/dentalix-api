@@ -48,6 +48,24 @@ export interface AuditMetadata {
    * había (o ya no hay) nada.
    */
   scheduleChange?: AuditScheduleChange;
+  /**
+   * DX-107: lote de importación de pacientes — SHA-256 del fichero, modo de
+   * duplicados y totales (solo números). Ni el nombre del fichero ni filas.
+   */
+  importBatch?: AuditImportBatch;
+}
+
+export interface AuditImportBatch {
+  fileSha256: string;
+  mode?: 'SKIP' | 'FILL_EMPTY';
+  rows?: number;
+  valid?: number;
+  duplicates?: number;
+  errors?: number;
+  created?: number;
+  updated?: number;
+  undoneCreated?: number;
+  undoneFilled?: number;
 }
 
 /** Un tramo del horario de un profesional en la auditoría (DX-233). */
@@ -173,6 +191,32 @@ function search(value: unknown): AuditSearch | null {
   return out;
 }
 
+const SHA256 = /^[0-9a-f]{64}$/;
+const IMPORT_COUNTS = [
+  'rows',
+  'valid',
+  'duplicates',
+  'errors',
+  'created',
+  'updated',
+  'undoneCreated',
+  'undoneFilled',
+] as const;
+
+/** Hash con formato y contadores enteros ≥ 0 (el resto se descarta); sin hash, nada. */
+function importBatch(value: unknown): AuditImportBatch | null {
+  if (!isRecord(value)) return null;
+  const { fileSha256, mode } = value;
+  if (typeof fileSha256 !== 'string' || !SHA256.test(fileSha256)) return null;
+  const out: AuditImportBatch = { fileSha256 };
+  if (mode === 'SKIP' || mode === 'FILL_EMPTY') out.mode = mode;
+  for (const key of IMPORT_COUNTS) {
+    const n = value[key];
+    if (typeof n === 'number' && Number.isInteger(n) && n >= 0) out[key] = n;
+  }
+  return out;
+}
+
 /** Los dos estados con formato de código, o nada. */
 function statusChange(value: unknown): AuditStatusChange | null {
   if (!isRecord(value)) return null;
@@ -275,5 +319,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (change) out.statusChange = change;
   const schedule = scheduleChange(input.scheduleChange);
   if (schedule) out.scheduleChange = schedule;
+  const batch = importBatch(input.importBatch);
+  if (batch) out.importBatch = batch;
   return out;
 }

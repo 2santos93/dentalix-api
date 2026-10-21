@@ -48,6 +48,7 @@ import {
   PatientImplantsController,
 } from '../implants/presentation/implants.controller';
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
+import { PatientImportsController } from '../patient-imports/presentation/patient-imports.controller';
 import {
   ProviderScheduleController,
   ScheduleRosterController,
@@ -394,6 +395,36 @@ const EXPECTED: Record<string, AuditOptions> = {
 
   // DX-151: documentos del paciente. Ver la URL en línea es VIEW y descargar
   // es EXPORT; la metadata solo lleva el código, nunca el nombre del fichero.
+  // DX-107: lotes de importación de pacientes. `GET /patient-imports/:id`
+  // fuera a propósito: la pantalla lo consulta cada pocos segundos mientras
+  // importa (su informe, errors.csv, sí se audita).
+  'POST /patient-imports': {
+    action: 'CREATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: RES,
+    reason: 'IMPORT_VALIDATED',
+    importBatch: true,
+  },
+  'GET /patient-imports/:id/errors.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_ERRORS',
+  },
+  'POST /patient-imports/:id/confirm': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_CONFIRMED',
+    importBatch: true,
+  },
+  'POST /patient-imports/:id/undo': {
+    action: 'DELETE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_UNDONE',
+    importBatch: true,
+  },
   'POST /patients/:patientId/documents': {
     action: 'CREATE',
     resource: 'PATIENT_DOCUMENT',
@@ -829,6 +860,7 @@ const CONTROLLERS: Type[] = [
   PatientImplantsController,
   ImplantsController,
   PatientDocumentsController,
+  PatientImportsController,
   PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,

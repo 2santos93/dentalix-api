@@ -47,6 +47,9 @@ function spanishMulterMessage(message: unknown): string | null {
  */
 @Catch(PayloadTooLargeException, BadRequestException)
 export class MultipartErrorsFilter implements ExceptionFilter {
+  /** El 413 en español; otro controlador con otro tope lo cambia (DX-107). */
+  protected readonly tooLargeMessage: string = FILE_TOO_LARGE_MESSAGE;
+
   catch(
     exception: PayloadTooLargeException | BadRequestException,
     host: ArgumentsHost,
@@ -60,7 +63,7 @@ export class MultipartErrorsFilter implements ExceptionFilter {
       res.status(HttpStatus.PAYLOAD_TOO_LARGE).json({
         statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
         error: 'Payload Too Large',
-        message: FILE_TOO_LARGE_MESSAGE,
+        message: this.tooLargeMessage,
       });
       return;
     }

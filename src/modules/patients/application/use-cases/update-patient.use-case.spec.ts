@@ -46,6 +46,7 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
     retentionUntil: null,
     underRetention: false,
     partiallySuppressedAt: null,
+    importBatchId: null,
     contactChannel: 'EMAIL',
     whatsappOptInAt: null,
     whatsappOptInSource: null,

@@ -99,6 +99,7 @@ function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
       until instanceof Date ? until.toISOString().slice(0, 10) : null,
     underRetention: isUnderRetention(until, now),
     partiallySuppressedAt: patient.partiallySuppressedAt,
+    importBatchId: patient.importBatchId,
     contactChannel: patient.contactChannel,
     whatsappOptInAt: patient.whatsappOptInAt,
     whatsappOptInSource: patient.whatsappOptInSource,

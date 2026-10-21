@@ -54,6 +54,8 @@ export interface Patient {
   underRetention: boolean;
   /** DX-039: cuándo se vaciaron los datos no clínicos (supresión parcial). */
   partiallySuppressedAt: Date | null;
+  /** DX-107: lote de importación que creó al paciente (null = alta a mano). */
+  importBatchId: string | null;
   /**
    * DX-128: canal de los avisos automáticos, opt-in de WhatsApp y baja de los
    * recordatorios (van en la ficha, y así en la exportación y el derecho de

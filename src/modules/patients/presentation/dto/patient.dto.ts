@@ -182,6 +182,15 @@ export class PatientDto {
   partiallySuppressedAt!: Date | null;
 
   @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    type: String,
+    description:
+      'DX-107: lote de importación que creó al paciente (null = alta a mano). Un paciente importado nace SIN autorización de datos (Ley 1581): la ficha la marca pendiente.',
+  })
+  importBatchId!: string | null;
+
+  @ApiProperty({
     enum: ContactChannel,
     enumName: 'ContactChannel',
     description:
