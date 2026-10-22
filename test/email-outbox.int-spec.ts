@@ -390,13 +390,19 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
+    // El caso requiere una fila vencida antes de cada reclamo: enqueue usa
+    // el reloj del cliente, pero claimDue decide con el de PostgreSQL. Fijar esa
+    // precondición con UTC de la BD evita depender del desfase entre ambos.
+    const makeDue = () => owner.$executeRaw`
+      UPDATE "email_outbox"
+         SET "nextAttemptAt" = timezone('utc', clock_timestamp()) - interval '1 second'
+       WHERE "id" = ${id}::uuid`;
+    await makeDue();
     const [first] = await repo.claimDue(1, 300);
-    await owner.emailOutbox.update({
-      where: { id },
-      data: { nextAttemptAt: new Date(Date.now() - 1000) },
-    });
+    expect(first).toMatchObject({ id, attempts: 1 });
+    await makeDue();
     const [second] = await repo.claimDue(1, 300);
-    expect([first.attempts, second.attempts]).toEqual([1, 2]);
+    expect(second).toMatchObject({ id, attempts: 2 });
 
     expect(await repo.settle(id, first.attempts, { status: 'SENT' })).toBe(
       false,
