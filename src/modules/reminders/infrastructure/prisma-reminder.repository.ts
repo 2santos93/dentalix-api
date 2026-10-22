@@ -303,17 +303,22 @@ export class PrismaReminderRepository implements ReminderRepository {
   async attachOutbound(
     reminderId: string,
     outboundMessageId: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      tx.appointmentReminder.updateMany({
+    const attach = async (transaction: Prisma.TransactionClient) => {
+      const { count } = await transaction.appointmentReminder.updateMany({
         where: {
           id: reminderId,
           status: AppointmentReminderStatus.SENDING,
           outboundMessageId: null,
         },
         data: { outboundMessageId },
-      }),
-    );
+      });
+      // No sustituir un mensaje ya asociado ni tocar estados finales/otro tenant.
+      if (count !== 1) throw new Error('ReminderOutboundNotAttachable');
+    };
+    if (tx) await attach(tx);
+    else await this.prisma.runWithTenant(attach);
   }
 
   async emailQueuedFor(outboundMessageId: string): Promise<boolean> {
@@ -338,7 +343,6 @@ export class PrismaReminderRepository implements ReminderRepository {
     start: Date,
     errorCode: string,
     now: Date,
-    outboundMessageId?: string,
   ): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
       // Un fallo al leer contexto puede ocurrir antes de claim. Solo una cita
@@ -357,7 +361,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           AND "appointmentStart" = ${utc(start)} AND "status" = 'SENDING'
         FOR UPDATE`;
       if (!reminder) return;
-      const outboundId = reminder.outboundMessageId ?? outboundMessageId;
+      const outboundId = reminder.outboundMessageId;
       const queued = outboundId
         ? (await tx.emailOutbox.count({
             where: { referenceId: outboundId },
@@ -366,7 +370,6 @@ export class PrismaReminderRepository implements ReminderRepository {
       await tx.appointmentReminder.update({
         where: { id: reminder.id },
         data: {
-          ...(outboundId ? { outboundMessageId: outboundId } : {}),
           ...(queued
             ? { status: 'SENT', sentAt: now }
             : { status: 'FAILED', failureReason: errorCode }),

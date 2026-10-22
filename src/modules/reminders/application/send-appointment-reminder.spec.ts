@@ -1,3 +1,5 @@
+import type { AttachOutboundMessage } from '../../notifications/outbound/application/outbound-messages.service';
+import type { Prisma } from '@prisma/client';
 import type { ReminderSendContext } from '../domain/ports/reminder-repository.port';
 import { FakeReminderRepository } from './__fixtures__/fake-reminder.repository';
 import { SendAppointmentReminder } from './send-appointment-reminder';
@@ -68,7 +70,12 @@ describe('SendAppointmentReminder (DX-026)', () => {
       }),
     };
     outbound = {
-      record: jest.fn().mockResolvedValue({ id: 'out-1' }),
+      record: jest.fn(
+        async (_input: unknown, attach?: AttachOutboundMessage) => {
+          await attach?.('out-1', {} as Prisma.TransactionClient);
+          return { id: 'out-1' };
+        },
+      ),
       settle: jest.fn().mockResolvedValue(true),
     };
     email = {
@@ -105,13 +112,16 @@ describe('SendAppointmentReminder (DX-026)', () => {
       appointmentId: APPT,
       automatic: true,
     });
-    expect(outbound.record).toHaveBeenCalledWith({
-      channel: 'EMAIL',
-      template: 'appointment-reminder',
-      recipient: 'ana@example.com',
-      recipientKind: 'PATIENT',
-      appointmentId: APPT,
-    });
+    expect(outbound.record).toHaveBeenCalledWith(
+      {
+        channel: 'EMAIL',
+        template: 'appointment-reminder',
+        recipient: 'ana@example.com',
+        recipientKind: 'PATIENT',
+        appointmentId: APPT,
+      },
+      expect.any(Function),
+    );
     expect(email.enqueue).toHaveBeenCalledWith({
       tenantId: TENANT,
       to: 'ana@example.com',
@@ -173,6 +183,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
         recipient: 'maria@example.com',
         recipientKind: 'RESPONSIBLE',
       }),
+      expect.any(Function),
     );
     const [input] = email.enqueue.mock.calls[0] as [
       {
@@ -255,6 +266,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(input.vars.guardianName).toBe('María');
     expect(outbound.record).toHaveBeenCalledWith(
       expect.objectContaining({ recipientKind: 'PATIENT' }),
+      expect.any(Function),
     );
   });
 

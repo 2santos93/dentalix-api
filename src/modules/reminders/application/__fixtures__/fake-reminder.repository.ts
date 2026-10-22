@@ -150,7 +150,6 @@ export class FakeReminderRepository implements ReminderRepository {
     start: Date,
     errorCode: string,
     now: Date,
-    outboundMessageId?: string,
   ): Promise<void> {
     if (
       !this.find(appointmentId, leadHours, start) &&
@@ -160,7 +159,6 @@ export class FakeReminderRepository implements ReminderRepository {
     }
     const row = this.find(appointmentId, leadHours, start);
     if (row?.status !== 'SENDING') return;
-    row.outboundMessageId ??= outboundMessageId ?? null;
     if (row.outboundMessageId && this.queuedEmails.has(row.outboundMessageId)) {
       row.status = 'SENT';
       row.sentAt = now;
