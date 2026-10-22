@@ -96,14 +96,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'APPOINTMENT',
     resourceId: RES,
     patient: { response: 'patientId' },
-    reason: 'APPOINTMENT_PLAN_ITEMS',
   },
   'PATCH /appointments/:id': {
     action: 'UPDATE',
     resource: 'APPOINTMENT',
     resourceId: { param: 'id' },
     patient: { response: 'patientId' },
-    reason: 'APPOINTMENT_PLAN_ITEMS',
   },
 
   'POST /auth/login': { action: 'LOGIN', resource: 'SESSION' },
