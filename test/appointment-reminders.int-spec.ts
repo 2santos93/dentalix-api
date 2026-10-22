@@ -1,3 +1,4 @@
+import { OutboundMessages } from '../src/modules/notifications/outbound/application/outbound-messages.service';
 import { PrismaAppointmentConfirmationRepository } from '../src/modules/appointment-confirmations/infrastructure/repositories/prisma-appointment-confirmation.repository';
 import type { RespondOutcome } from '../src/modules/appointment-confirmations/domain/ports/appointment-confirmation-repository.port';
 import { GetAppointmentRemindersUseCase } from '../src/modules/reminders/application/use-cases/get-appointment-reminders.use-case';
@@ -763,7 +764,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
   });
 
   it.each(['loadSendContext', 'attachOutbound'] as const)(
-    'DX-160 fix I2: último fallo en %s cierra reminder y todo outbound existente',
+    'DX-160 fix I2: último fallo en %s deja FAILED sin mensajes huérfanos',
     async (boundary) => {
       await configure(clinicA, [2]);
       const start = new Date(Date.now() + 2 * HOUR);
@@ -804,14 +805,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
         const outbound = await owner.outboundMessage.findMany({
           where: { appointmentId: id },
         });
-        expect(outbound).toHaveLength(boundary === 'attachOutbound' ? 1 : 0);
-        if (outbound.length) {
-          expect(outbound[0]).toMatchObject({
-            status: 'FAILED',
-            lastError: 'Error ECONNRESET',
-          });
-          expect((await records(id))[0].outboundMessageId).toBe(outbound[0].id);
-        }
+        expect(outbound).toHaveLength(0);
         const view = await a
           .get(TenantContextService)
           .run(clinicA.tenantId, () =>
@@ -827,6 +821,242 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       }
     },
   );
+
+  it.each([false, true])(
+    'DX-160 fix2: attach falla y el retry termina con éxito=%s sin mensajes huérfanos',
+    async (retrySucceeds) => {
+      await configure(clinicA, [2]);
+      const start = new Date(Date.now() + 2 * HOUR);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'ana@example.com'),
+        start,
+      );
+      const error = Object.assign(new Error('private ana@example.com'), {
+        code: 'ECONNRESET',
+      });
+      const failures = [a, b].map((app) => {
+        const attach = jest.spyOn(
+          app.get<ReminderRepository>(REMINDER_REPOSITORY),
+          'attachOutbound',
+        );
+        return retrySucceeds
+          ? attach.mockRejectedValueOnce(error)
+          : attach.mockRejectedValue(error);
+      });
+      try {
+        await a
+          .get(JobQueue)
+          .enqueue(
+            SEND_REMINDER_JOB,
+            { appointmentId: id, leadHours: 2, start: start.toISOString() },
+            { tenantId: clinicA.tenantId, maxAttempts: 2 },
+          );
+        // Un worker fijo permite fallar una única vez sin depender del ganador.
+        await a.get(JobWorker).drain();
+        expect((await records(id))[0]).toMatchObject({
+          status: 'SENDING',
+          outboundMessageId: null,
+        });
+        expect(
+          await owner.outboundMessage.findMany({
+            where: { appointmentId: id },
+          }),
+        ).toEqual([]);
+        expect(await reminderEmails(clinicA.tenantId)).toBe(0);
+        await owner.job.updateMany({
+          where: {
+            tenantId: clinicA.tenantId,
+            name: SEND_REMINDER_JOB,
+            state: 'PENDING',
+          },
+          data: { runAt: new Date(Date.now() - MIN) },
+        });
+        await a.get(JobWorker).drain();
+        const rows = await records(id);
+        const messages = await owner.outboundMessage.findMany({
+          where: { appointmentId: id },
+        });
+        expect(rows).toHaveLength(1);
+        if (retrySucceeds) {
+          expect(rows[0]).toMatchObject({
+            status: 'SENT',
+            failureReason: null,
+          });
+          expect(messages).toHaveLength(1);
+          expect(messages[0].status).not.toBe('FAILED');
+          expect(rows[0].outboundMessageId).toBe(messages[0].id);
+          expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        } else {
+          expect(rows[0]).toMatchObject({
+            status: 'FAILED',
+            failureReason: 'Error ECONNRESET',
+            outboundMessageId: null,
+          });
+          expect(messages).toEqual([]);
+          expect(await reminderEmails(clinicA.tenantId)).toBe(0);
+        }
+      } finally {
+        failures.forEach((failure) => failure.mockRestore());
+      }
+    },
+  );
+
+  it('DX-160 fix2: asociar recordatorio de otro tenant revierte la creación del mensaje', async () => {
+    const start = new Date(Date.now() + 2 * HOUR);
+    const idA = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const idB = await appointment(
+      clinicB,
+      await patient(clinicB, 'bea@example.com'),
+      start,
+    );
+    const tenant = a.get(TenantContextService);
+    const repo = a.get<ReminderRepository>(REMINDER_REPOSITORY);
+    const claimB = await tenant.run(clinicB.tenantId, () =>
+      repo.claim(idB, 2, start),
+    );
+    const outbound = a.get(OutboundMessages);
+    await expect(
+      tenant.run(clinicA.tenantId, () =>
+        outbound.record(
+          {
+            channel: 'EMAIL',
+            template: 'appointment-reminder',
+            recipient: 'ana@example.com',
+            appointmentId: idA,
+          },
+          (id: string, tx: Prisma.TransactionClient) =>
+            repo.attachOutbound(claimB.id, id, tx),
+        ),
+      ),
+    ).rejects.toThrow('ReminderOutboundNotAttachable');
+    expect(
+      await owner.outboundMessage.count({
+        where: { appointmentId: { in: [idA, idB] } },
+      }),
+    ).toBe(0);
+    expect((await records(idB))[0]).toMatchObject({
+      status: 'SENDING',
+      outboundMessageId: null,
+    });
+  });
+
+  it.each(['SENT', 'SKIPPED', 'FAILED'] as const)(
+    'DX-160 fix2: asociar a estado final %s revierte el nuevo outbound y conserva el estado',
+    async (status) => {
+      const start = new Date(Date.now() + 2 * HOUR);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'ana@example.com'),
+        start,
+      );
+      const tenant = a.get(TenantContextService);
+      const repo = a.get<ReminderRepository>(REMINDER_REPOSITORY);
+      const outbound = a.get(OutboundMessages);
+      const existing =
+        status === 'SENT'
+          ? await tenant.run(clinicA.tenantId, () =>
+              outbound.record({
+                channel: 'EMAIL',
+                template: 'appointment-reminder',
+                recipient: 'ana@example.com',
+                appointmentId: id,
+              }),
+            )
+          : null;
+      const reminder = await owner.appointmentReminder.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          appointmentId: id,
+          leadHours: 2,
+          appointmentStart: start,
+          status,
+          outboundMessageId: existing?.id,
+          sentAt: status === 'SENT' ? new Date() : null,
+          skipReason: status === 'SKIPPED' ? 'DISABLED' : null,
+          failureReason: status === 'FAILED' ? 'Error ECONNRESET' : null,
+        },
+      });
+      await expect(
+        tenant.run(clinicA.tenantId, () =>
+          outbound.record(
+            {
+              channel: 'EMAIL',
+              template: 'appointment-reminder',
+              recipient: 'ana@example.com',
+              appointmentId: id,
+            },
+            (outboundId: string, tx: Prisma.TransactionClient) =>
+              repo.attachOutbound(reminder.id, outboundId, tx),
+          ),
+        ),
+      ).rejects.toThrow('ReminderOutboundNotAttachable');
+      expect(
+        await owner.outboundMessage.count({ where: { appointmentId: id } }),
+      ).toBe(existing ? 1 : 0);
+      expect(
+        await owner.appointmentReminder.findUniqueOrThrow({
+          where: { id: reminder.id },
+        }),
+      ).toEqual(reminder);
+    },
+  );
+
+  it('DX-160 fix2: dos snapshots SENDING sin outbound solo asocian un mensaje y revierten el otro', async () => {
+    const start = new Date(Date.now() + 2 * HOUR);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const tenant = a.get(TenantContextService);
+    const repo = a.get<ReminderRepository>(REMINDER_REPOSITORY);
+    const claim = await tenant.run(clinicA.tenantId, () =>
+      repo.claim(id, 2, start),
+    );
+    expect(claim.outboundMessageId).toBeNull();
+    const outbound = a.get(OutboundMessages);
+    let arrived = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const create = () =>
+      tenant.run(clinicA.tenantId, () =>
+        outbound.record(
+          {
+            channel: 'EMAIL',
+            template: 'appointment-reminder',
+            recipient: 'ana@example.com',
+            appointmentId: id,
+          },
+          async (outboundId: string, tx: Prisma.TransactionClient) => {
+            if (++arrived === 2) release();
+            await barrier;
+            await repo.attachOutbound(claim.id, outboundId, tx);
+          },
+        ),
+      );
+    const results = await Promise.allSettled([create(), create()]);
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === 'rejected'),
+    ).toHaveLength(1);
+    const messages = await owner.outboundMessage.findMany({
+      where: { appointmentId: id },
+    });
+    expect(messages).toHaveLength(1);
+    expect((await records(id))[0]).toMatchObject({
+      status: 'SENDING',
+      outboundMessageId: messages[0].id,
+    });
+  });
 
   it('no envía a canceladas ni a pacientes sin email, y registra el motivo', async () => {
     await configure(clinicA, [2]);

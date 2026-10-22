@@ -3,6 +3,7 @@ import type {
   AppointmentReminderStatus,
   AppointmentStatus,
   ClinicCountry,
+  Prisma,
 } from '@prisma/client';
 import type { ReminderSettingsInput } from '../reminder-lead-hours';
 import type { ReminderRecord } from '../reminder-timeline';
@@ -104,7 +105,12 @@ export interface ReminderRepository {
     leadHours: number,
     start: Date,
   ): Promise<ReminderClaim>;
-  attachOutbound(reminderId: string, outboundMessageId: string): Promise<void>;
+  /** tx explícita permite crear y asociar el outbound en un único commit. */
+  attachOutbound(
+    reminderId: string,
+    outboundMessageId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void>;
   /** ¿Ya hay un email en email_outbox para ese mensaje? */
   emailQueuedFor(outboundMessageId: string): Promise<boolean>;
   markSent(reminderId: string, sentAt: Date): Promise<void>;
@@ -115,7 +121,6 @@ export interface ReminderRepository {
     start: Date,
     errorCode: string,
     now: Date,
-    outboundMessageId?: string,
   ): Promise<void>;
 
   /** null si la cita no existe (o está retirada) en la clínica del contexto. */
