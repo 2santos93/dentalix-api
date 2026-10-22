@@ -259,6 +259,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: { lookup: 'clinicalEntry', param: 'id' },
     reason: 'RDA_READINESS',
   },
+  'GET /patients/:patientId/clinical-entries/rda-readiness': {
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY',
+    patient: P,
+    reason: 'RDA_READINESS',
+  },
   'POST /catalog/items': {
     action: 'CREATE',
     resource: 'DENTAL_CATALOG_ITEM',
