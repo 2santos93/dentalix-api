@@ -187,12 +187,98 @@ describe('DX-256 visitas y agenda', () => {
     expect((duplicate.body as { message: string }).message).toContain(
       'otra cita',
     );
+    const linkEvents = () =>
+      raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          resourceType: 'APPOINTMENT',
+          resourceId: id,
+          metadata: { path: ['reason'], equals: 'APPOINTMENT_PLAN_ITEMS' },
+        },
+        select: {
+          action: true,
+          actorRole: true,
+          patientId: true,
+          metadata: true,
+        },
+      });
+    // Una cita sin selección no genera motivo de vínculos; un PATCH que
+    // pierde contra la reserva anterior tampoco registra un éxito.
+    const withoutItems = await call(
+      'post',
+      '/appointments',
+      {
+        ...create(101),
+        planItemIds: undefined,
+      },
+      reception,
+    ).expect(201);
+    const withoutItemsId = (withoutItems.body as { id: string }).id;
+    await call(
+      'patch',
+      `/appointments/${withoutItemsId}`,
+      {
+        planItemIds: [itemIds[1]],
+      },
+      reception,
+    ).expect(409);
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: a.tenantId,
+          resourceId: withoutItemsId,
+          metadata: { path: ['reason'], equals: 'APPOINTMENT_PLAN_ITEMS' },
+        },
+      }),
+    ).toBe(0);
+    // Ni el POST ni el PATCH rechazados dejan una traza de vínculos exitosa.
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: a.tenantId,
+          resourceType: 'APPOINTMENT',
+          metadata: { path: ['reason'], equals: 'APPOINTMENT_PLAN_ITEMS' },
+        },
+      }),
+    ).toBe(1);
+    for (const planItemIds of [[itemIds[1]], [], [itemIds[1], itemIds[2]]]) {
+      await call(
+        'patch',
+        `/appointments/${id}`,
+        { planItemIds },
+        reception,
+      ).expect(200);
+    }
+    expect(await linkEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'CREATE',
+          actorRole: 'RECEPTION',
+          patientId,
+          metadata: {
+            reason: 'APPOINTMENT_PLAN_ITEMS',
+            changedFields: ['planItemIds'],
+          },
+        }),
+        expect.objectContaining({
+          action: 'UPDATE',
+          actorRole: 'RECEPTION',
+          patientId,
+          metadata: {
+            reason: 'APPOINTMENT_PLAN_ITEMS',
+            changedFields: ['planItemIds'],
+          },
+        }),
+      ]),
+    );
+    expect(await linkEvents()).toHaveLength(4);
     await call(
       'patch',
       `/appointments/${id}`,
       { status: 'CANCELLED' },
       reception,
     ).expect(200);
+    expect(await linkEvents()).toHaveLength(4); // Cancelar no solicita editar vínculos.
     await call('post', '/appointments', create(102), reception).expect(201);
   });
   it('reorganiza un plan firmado sin alterar snapshot ni hash de precios', async () => {

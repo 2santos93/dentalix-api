@@ -133,12 +133,37 @@ export class AppointmentsController {
     return auditRequestContext(req, this.tenantContext);
   }
 
+  /** La escritura explícita de vínculos es distinta de la traza HTTP genérica. */
+  private async auditPlanItems(
+    appointment: AppointmentWriteResult,
+    planItemIds: string[] | undefined,
+    action: 'CREATE' | 'UPDATE',
+    ctx: AppointmentAuditContext | undefined,
+  ): Promise<void> {
+    if (planItemIds === undefined || !ctx) return;
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action,
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'APPOINTMENT_PLAN_ITEMS',
+        changedFields: ['planItemIds'],
+      },
+    });
+  }
+
   @Audit({
     action: 'CREATE',
     resource: 'APPOINTMENT',
     resourceId: { response: 'id' },
     patient: { response: 'patientId' },
-    reason: 'APPOINTMENT_PLAN_ITEMS',
   })
   @Post()
   @ApiCreatedResponse({
@@ -204,6 +229,7 @@ export class AppointmentsController {
         metadata: { reason: 'WANTS_EARLIER_ON' },
       });
     }
+    await this.auditPlanItems(created, dto.planItemIds, 'CREATE', ctx);
     return created;
   }
 
@@ -332,7 +358,6 @@ export class AppointmentsController {
     resource: 'APPOINTMENT',
     resourceId: { param: 'id' },
     patient: { response: 'patientId' },
-    reason: 'APPOINTMENT_PLAN_ITEMS',
   })
   @Patch(':id')
   @ApiOkResponse({ type: AppointmentWriteDto })
@@ -351,12 +376,13 @@ export class AppointmentsController {
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
   })
-  update(
+  async update(
     @Param('id') id: string,
     @Body() dto: UpdateAppointmentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
-    return this.updateAppointment.execute(
+    const ctx = this.auditContext(req);
+    const updated = await this.updateAppointment.execute(
       id,
       {
         start: dto.start !== undefined ? new Date(dto.start) : undefined,
@@ -368,8 +394,10 @@ export class AppointmentsController {
         wantsEarlier: dto.wantsEarlier,
         planItemIds: dto.planItemIds,
       },
-      this.auditContext(req),
+      ctx,
     );
+    await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
+    return updated;
   }
 
   @Post(':id/undo-arrival')
