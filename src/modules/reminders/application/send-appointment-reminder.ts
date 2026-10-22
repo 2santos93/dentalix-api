@@ -22,6 +22,10 @@ import { civilDateIn } from '../../../shared/time/civil-day';
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+interface ReminderAttempt {
+  outboundMessageId?: string;
+}
+
 interface ParsedPayload {
   appointmentId: string;
   leadHours: number;
@@ -74,8 +78,9 @@ export class SendAppointmentReminder {
 
   async handle(payload: JobPayload, context?: JobContext): Promise<void> {
     const parsed = parsePayload(payload);
+    const attempt: ReminderAttempt = {};
     try {
-      await this.send(parsed);
+      await this.send(parsed, attempt);
     } catch (error) {
       if (
         context &&
@@ -88,6 +93,7 @@ export class SendAppointmentReminder {
           parsed.start,
           describeJobError(error),
           this.clock.now(),
+          attempt.outboundMessageId,
         );
       }
       // El worker persiste el fallo del job con la misma descripción segura.
@@ -95,11 +101,10 @@ export class SendAppointmentReminder {
     }
   }
 
-  private async send({
-    appointmentId,
-    leadHours,
-    start,
-  }: ParsedPayload): Promise<void> {
+  private async send(
+    { appointmentId, leadHours, start }: ParsedPayload,
+    attempt: ReminderAttempt,
+  ): Promise<void> {
     const ctx = await this.repo.loadSendContext(appointmentId);
     if (!ctx) {
       this.logger.warn({
@@ -189,6 +194,8 @@ export class SendAppointmentReminder {
           appointmentId,
         })
       ).id;
+    // Conservarlo antes del attach: su fallo no debe dejar el mensaje huérfano.
+    attempt.outboundMessageId = outboundId;
     if (!claim.outboundMessageId) {
       await this.repo.attachOutbound(claim.id, outboundId);
     }

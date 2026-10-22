@@ -144,15 +144,23 @@ export class FakeReminderRepository implements ReminderRepository {
     return Promise.resolve();
   }
 
-  markFailed(
+  async markFailed(
     appointmentId: string,
     leadHours: number,
     start: Date,
     errorCode: string,
     now: Date,
+    outboundMessageId?: string,
   ): Promise<void> {
+    if (
+      !this.find(appointmentId, leadHours, start) &&
+      this.contexts.has(appointmentId)
+    ) {
+      await this.claim(appointmentId, leadHours, start);
+    }
     const row = this.find(appointmentId, leadHours, start);
-    if (row?.status !== 'SENDING') return Promise.resolve();
+    if (row?.status !== 'SENDING') return;
+    row.outboundMessageId ??= outboundMessageId ?? null;
     if (row.outboundMessageId && this.queuedEmails.has(row.outboundMessageId)) {
       row.status = 'SENT';
       row.sentAt = now;
@@ -160,7 +168,6 @@ export class FakeReminderRepository implements ReminderRepository {
       row.status = 'FAILED';
       row.failureReason = errorCode;
     }
-    return Promise.resolve();
   }
 
   findAppointmentReminders(): Promise<AppointmentRemindersSnapshot | null> {

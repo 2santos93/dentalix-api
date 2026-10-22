@@ -338,8 +338,17 @@ export class PrismaReminderRepository implements ReminderRepository {
     start: Date,
     errorCode: string,
     now: Date,
+    outboundMessageId?: string,
   ): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
+      // Un fallo al leer contexto puede ocurrir antes de claim. Solo una cita
+      // visible bajo RLS permite crear este registro; nunca una cita ajena.
+      await tx.$executeRaw`
+        INSERT INTO "appointment_reminders"
+          ("id", "tenantId", "appointmentId", "leadHours", "appointmentStart", "status", "updatedAt")
+        SELECT gen_random_uuid(), "tenantId", "id", ${leadHours}, ${utc(start)}, 'SENDING', CURRENT_TIMESTAMP
+          FROM "appointments" WHERE "id" = ${appointmentId}::uuid AND "deletedAt" IS NULL
+        ON CONFLICT ("tenantId", "appointmentId", "leadHours", "appointmentStart") DO NOTHING`;
       const [reminder] = await tx.$queryRaw<
         { id: string; outboundMessageId: string | null }[]
       >`
@@ -348,21 +357,25 @@ export class PrismaReminderRepository implements ReminderRepository {
           AND "appointmentStart" = ${utc(start)} AND "status" = 'SENDING'
         FOR UPDATE`;
       if (!reminder) return;
-      const queued = reminder.outboundMessageId
+      const outboundId = reminder.outboundMessageId ?? outboundMessageId;
+      const queued = outboundId
         ? (await tx.emailOutbox.count({
-            where: { referenceId: reminder.outboundMessageId },
+            where: { referenceId: outboundId },
           })) > 0
         : false;
       await tx.appointmentReminder.update({
         where: { id: reminder.id },
-        data: queued
-          ? { status: 'SENT', sentAt: now }
-          : { status: 'FAILED', failureReason: errorCode },
+        data: {
+          ...(outboundId ? { outboundMessageId: outboundId } : {}),
+          ...(queued
+            ? { status: 'SENT', sentAt: now }
+            : { status: 'FAILED', failureReason: errorCode }),
+        },
       });
-      if (reminder.outboundMessageId) {
+      if (outboundId) {
         await tx.outboundMessage.updateMany({
           where: {
-            id: reminder.outboundMessageId,
+            id: outboundId,
             status: { in: queued ? ['PENDING'] : ['PENDING', 'QUEUED'] },
           },
           data: queued
