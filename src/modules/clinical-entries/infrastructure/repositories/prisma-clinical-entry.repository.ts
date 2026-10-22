@@ -6,9 +6,9 @@ import {
   loadLocationTimeZones,
   timeZoneForCountry,
 } from '../../../../shared/locations/location-time-zone';
+import { civilDayRange } from '../../../../shared/time/civil-day';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type { RdaFacts } from '../../domain/rda-readiness';
-import { performedItemsOf } from './performed-items';
 import {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
@@ -128,10 +128,22 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     // on this repository at all — immutability enforced at the interface
     // level, not just by convention.
     return this.prisma.runWithTenant(async (tx) => {
+      // La cita ya fue validada por el caso de uso; conserva su sede aunque
+      // el request tenga otra sede activa. Sin cita usa el contexto seguro.
+      const appointment = input.appointmentId
+        ? await tx.appointment.findFirstOrThrow({
+            where: { id: input.appointmentId, patientId: input.patientId },
+            select: { locationId: true },
+          })
+        : null;
+      const locationId =
+        appointment?.locationId ??
+        (await this.tenantContext.writeLocationId(tx));
       const row = await tx.clinicalEntry.create({
         data: {
           tenantId,
           patientId: input.patientId,
+          locationId,
           entryDate: input.entryDate ?? new Date(),
           reason: input.reason,
           notes: input.notes,
@@ -235,26 +247,25 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     return new Set(rows.map((r) => r.code));
   }
 
-  /**
-   * DX-212. Todo bajo RLS, en una transacción:
-   * - sede: la de la cita ligada o, sin cita, la principal de la clínica
-   *   (la primera activa; la evolución no guarda sede);
-   * - día de la atención: la fecha civil de `entryDate` (la que muestra la
-   *   ficha, en UTC);
-   * - procedimientos realizados: registros del odontograma del paciente de
-   *   tipo PROCEDURE, COMPLETED y hechos en esta clínica, ligados a la
-   *   evolución o registrados ese día en la zona de la sede, sin los anulados
-   *   ni las anulaciones (lo hecho en un plan se espeja ahí al marcarlo DONE);
-   * - autor: su membresía en esta clínica (registro profesional y nombre),
-   *   aunque ya no sea miembro.
-   */
+  /** El unitario usa exactamente la misma carga y reglas que los lotes. */
   async loadRdaFacts(id: string): Promise<RdaFacts | null> {
+    return (await this.loadRdaFactsBatch([id])).get(id.toLowerCase()) ?? null;
+  }
+
+  /** DX-232: número fijo de consultas, independientemente del tamaño del lote. */
+  async loadRdaFactsBatch(
+    ids: string[],
+    patientId?: string,
+  ): Promise<Map<string, RdaFacts>> {
+    const canonicalIds = [...new Set(ids.map((id) => id.toLowerCase()))];
+    if (canonicalIds.length === 0) return new Map<string, RdaFacts>();
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const entry = await tx.clinicalEntry.findFirst({
-        where: { id, deletedAt: null },
+      const entries = await tx.clinicalEntry.findMany({
+        where: { id: { in: canonicalIds }, patientId, deletedAt: null },
         select: {
           id: true,
+          locationId: true,
           entryDate: true,
           performedById: true,
           patient: { select: { id: true, docNumber: true } },
@@ -262,61 +273,163 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           diagnoses: { where: { kind: 'PRINCIPAL' }, select: { id: true } },
         },
       });
-      if (!entry) return null;
-
-      const locationSelect = {
-        id: true,
-        name: true,
-        country: true,
-        repsHabilitationCode: true,
-      } as const;
-      const location = entry.appointment
-        ? await tx.location.findFirst({
-            where: { id: entry.appointment.locationId },
-            select: locationSelect,
+      // Un lote incompleto no carga más datos clínicos; el use-case da404.
+      if (entries.length !== canonicalIds.length)
+        return new Map<string, RdaFacts>();
+      const explicitIds = [
+        ...new Set(
+          entries.flatMap(
+            (e) => e.locationId ?? e.appointment?.locationId ?? [],
+          ),
+        ),
+      ];
+      const locations = await tx.location.findMany({
+        where: {
+          OR: [
+            { id: { in: explicitIds } },
+            { deletedAt: null, isActive: true },
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          country: true,
+          repsHabilitationCode: true,
+          deletedAt: true,
+          isActive: true,
+        },
+      });
+      const byLocation = new Map(locations.map((l) => [l.id, l]));
+      const fallback = locations.find((l) => l.isActive && !l.deletedAt);
+      const zones = await loadLocationTimeZones(
+        tx,
+        tenantId,
+        locations.map((l) => l.id),
+      );
+      const visits = entries.flatMap((e) => {
+        const locationId = e.locationId ?? e.appointment?.locationId;
+        const location = locationId ? byLocation.get(locationId) : fallback;
+        if (!location) return [];
+        const timeZone =
+          zones.get(location.id) ?? timeZoneForCountry(location.country);
+        return [
+          {
+            entry: e,
+            location,
+            range: civilDayRange(attentionDay(e.entryDate, timeZone), timeZone),
+          },
+        ];
+      });
+      if (visits.length !== entries.length) return new Map<string, RdaFacts>();
+      const authors = await tx.clinicMembership.findMany({
+        where: {
+          userId: {
+            in: [...new Set(entries.flatMap((e) => e.performedById ?? []))],
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          userId: true,
+          professionalLicense: true,
+          user: { select: { fullName: true } },
+        },
+      });
+      const byAuthor = new Map<string, (typeof authors)[number]>();
+      for (const author of authors)
+        if (!byAuthor.has(author.userId)) byAuthor.set(author.userId, author);
+      const records = await tx.toothRecord.findMany({
+        where: {
+          deletedAt: null,
+          kind: 'PROCEDURE',
+          status: 'COMPLETED',
+          origin: 'THIS_CLINIC',
+          voidsRecordId: null,
+          catalogItemId: { not: null },
+          OR: visits.map(({ entry, range }) => ({
+            patientId: entry.patient.id,
+            OR: [
+              { clinicalEntryId: entry.id },
+              { recordedAt: { gte: range.start, lt: range.end } },
+            ],
+          })),
+        },
+        orderBy: { recordedAt: 'asc' },
+        select: {
+          id: true,
+          patientId: true,
+          clinicalEntryId: true,
+          recordedAt: true,
+          catalogItemId: true,
+        },
+      });
+      const voids = records.length
+        ? await tx.toothRecord.findMany({
+            where: { voidsRecordId: { in: records.map((r) => r.id) } },
+            select: { voidsRecordId: true },
           })
-        : await tx.location.findFirst({
-            where: { deletedAt: null, isActive: true },
-            orderBy: { createdAt: 'asc' },
-            select: locationSelect,
-          });
-      if (!location) return null;
-
-      const zones = await loadLocationTimeZones(tx, tenantId, [location.id]);
-      const timeZone =
-        zones.get(location.id) ?? timeZoneForCountry(location.country);
-      const day = attentionDay(entry.entryDate, timeZone);
-
-      const [performedItems, author] = await Promise.all([
-        performedItemsOf(tx, entry.patient.id, [entry.id], day, timeZone),
-        entry.performedById
-          ? tx.clinicMembership.findFirst({
-              where: { userId: entry.performedById },
-              orderBy: { createdAt: 'desc' },
-              select: {
-                professionalLicense: true,
-                user: { select: { fullName: true } },
+        : [];
+      const voided = new Set(voids.map((r) => r.voidsRecordId));
+      const live = records.filter((r) => !voided.has(r.id));
+      const catalog = live.length
+        ? await tx.dentalCatalogItem.findMany({
+            where: {
+              id: { in: [...new Set(live.map((r) => r.catalogItemId!))] },
+            },
+            select: { id: true, labelEs: true, cupsCode: true },
+          })
+        : [];
+      const byCatalog = new Map(catalog.map((c) => [c.id, c]));
+      return new Map(
+        visits.map(({ entry, location, range }) => {
+          const itemIds = [
+            ...new Set(
+              live
+                .filter(
+                  (r) =>
+                    r.patientId === entry.patient.id &&
+                    (r.clinicalEntryId === entry.id ||
+                      (r.recordedAt >= range.start &&
+                        r.recordedAt < range.end)),
+                )
+                .map((r) => r.catalogItemId!),
+            ),
+          ];
+          const author = entry.performedById
+            ? byAuthor.get(entry.performedById)
+            : null;
+          return [
+            entry.id,
+            {
+              country: location.country,
+              location: {
+                id: location.id,
+                name: location.name,
+                repsHabilitationCode: location.repsHabilitationCode,
               },
-            })
-          : null,
-      ]);
-
-      return {
-        country: location.country,
-        location: {
-          id: location.id,
-          name: location.name,
-          repsHabilitationCode: location.repsHabilitationCode,
-        },
-        patient: entry.patient,
-        hasPrincipalDiagnosis: entry.diagnoses.length > 0,
-        performedItems,
-        author: {
-          userId: entry.performedById,
-          name: author?.user.fullName ?? null,
-          professionalLicense: author?.professionalLicense ?? null,
-        },
-      };
+              patient: entry.patient,
+              hasPrincipalDiagnosis: entry.diagnoses.length > 0,
+              performedItems: itemIds.flatMap((catalogItemId) => {
+                const item = byCatalog.get(catalogItemId);
+                return item
+                  ? [
+                      {
+                        catalogItemId,
+                        name: item.labelEs,
+                        cupsCode: item.cupsCode,
+                      },
+                    ]
+                  : [];
+              }),
+              author: {
+                userId: entry.performedById,
+                name: author?.user.fullName ?? null,
+                professionalLicense: author?.professionalLicense ?? null,
+              },
+            },
+          ];
+        }),
+      );
     });
   }
 }

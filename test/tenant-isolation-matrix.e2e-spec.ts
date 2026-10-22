@@ -1544,6 +1544,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
    */
   const COVERED_ELSEWHERE: Record<string, string> = {
+    // DX-256: «guarda dos visitas; recepción no organiza y clínica ajena no
+    // encuentra el plan» prueba GET/PATCH B → 404 y snapshot de plan, ítems,
+    // intervalos, aceptación y hash del presupuesto de A sin cambios.
+    'GET /treatment-plans/:id/visits': 'plan-visits.e2e-spec.ts',
+    'PATCH /treatment-plans/:id/visits': 'plan-visits.e2e-spec.ts',
     'POST /patients/:patientId/treatment-plans':
       'patient-tenant-fk.e2e-spec.ts',
     'PUT /patients/:patientId/medical-history': 'patient-tenant-fk.e2e-spec.ts',
@@ -1608,6 +1613,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
     // DX-212: B → 404 sobre la evolución de A.
     'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
+    'GET /patients/:patientId/clinical-entries/rda-readiness':
+      'rda-codes.e2e-spec.ts',
   };
 
   it('cubre toda ruta de clínica con :param (aquí o en el spec citado)', () => {

@@ -96,14 +96,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'APPOINTMENT',
     resourceId: RES,
     patient: { response: 'patientId' },
-    reason: 'APPOINTMENT_PLAN_ITEMS',
   },
   'PATCH /appointments/:id': {
     action: 'UPDATE',
     resource: 'APPOINTMENT',
     resourceId: { param: 'id' },
     patient: { response: 'patientId' },
-    reason: 'APPOINTMENT_PLAN_ITEMS',
   },
 
   'POST /auth/login': { action: 'LOGIN', resource: 'SESSION' },
@@ -257,6 +255,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CLINICAL_ENTRY',
     resourceId: { param: 'id' },
     patient: { lookup: 'clinicalEntry', param: 'id' },
+    reason: 'RDA_READINESS',
+  },
+  'GET /patients/:patientId/clinical-entries/rda-readiness': {
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY',
+    patient: P,
     reason: 'RDA_READINESS',
   },
   'POST /catalog/items': {

@@ -62,6 +62,7 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
   issue(input: IssueConfirmationInput): Promise<void> {
     for (const c of this.confirmations) {
       if (
+        input.revokePrevious !== false &&
         c.appointmentId === input.appointmentId &&
         !c.respondedAt &&
         !c.revokedAt
@@ -117,13 +118,22 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
     const appointment = this.appointments.get(input.appointmentId);
     if (
       !appointment ||
+      confirmation.expiresAt.getTime() <= input.now.getTime() ||
       appointment.start.getTime() !== input.expectedStart.getTime() ||
       appointment.status !== input.expectedStatus
     ) {
       return Promise.resolve('STALE');
     }
-    confirmation.respondedAt = input.now;
-    confirmation.response = input.response;
+    for (const link of this.confirmations) {
+      if (
+        link.appointmentId === input.appointmentId &&
+        !link.respondedAt &&
+        !link.revokedAt
+      ) {
+        link.respondedAt = input.now;
+        link.response = input.response;
+      }
+    }
     if (input.response === 'CONFIRM') appointment.status = 'CONFIRMED';
     if (input.response === 'CANCEL') appointment.status = 'CANCELLED';
     if (input.response === 'CALL_ME')

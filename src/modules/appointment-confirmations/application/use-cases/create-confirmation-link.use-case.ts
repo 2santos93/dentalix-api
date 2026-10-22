@@ -47,7 +47,7 @@ export interface CreateConfirmationLinkResult {
 /**
  * Recepción pide el enlace de confirmación de una cita. El token caduca al
  * inicio de la cita y queda atado a su hora y estado actuales: reagendarla o
- * cambiarle el estado lo deja sin efecto. Emitir uno nuevo revoca el anterior.
+ * cambiarle el estado lo deja sin efecto. Recepción reemplaza los anteriores; el automático los conserva.
  */
 @Injectable()
 export class CreateConfirmationLinkUseCase {
@@ -85,6 +85,7 @@ export class CreateConfirmationLinkUseCase {
       appointmentStatus: appointment.status,
       createdById: input.createdById,
       keepCallbackRequest: input.automatic === true,
+      revokePrevious: input.automatic !== true,
       now,
     });
 
