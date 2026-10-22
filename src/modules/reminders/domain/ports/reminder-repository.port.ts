@@ -108,6 +108,14 @@ export interface ReminderRepository {
   /** ¿Ya hay un email en email_outbox para ese mensaje? */
   emailQueuedFor(outboundMessageId: string): Promise<boolean>;
   markSent(reminderId: string, sentAt: Date): Promise<void>;
+  /** Último fallo: cierra SENDING y su outbound juntos; recupera SENT si ya hay outbox. */
+  markFailed(
+    appointmentId: string,
+    leadHours: number,
+    start: Date,
+    errorCode: string,
+    now: Date,
+  ): Promise<void>;
 
   /** null si la cita no existe (o está retirada) en la clínica del contexto. */
   findAppointmentReminders(

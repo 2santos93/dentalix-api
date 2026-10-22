@@ -1,3 +1,18 @@
+import {
+  REMINDER_REPOSITORY,
+  type ReminderRepository,
+} from '../src/modules/reminders/domain/ports/reminder-repository.port';
+import { ConflictException } from '@nestjs/common';
+import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
+import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
+import {
+  APPOINTMENT_CONFIRMATION_REPOSITORY,
+  type AppointmentConfirmationRepository,
+} from '../src/modules/appointment-confirmations/domain/ports/appointment-confirmation-repository.port';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
+import { SendAppointmentReminder } from '../src/modules/reminders/application/send-appointment-reminder';
+import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -316,6 +331,335 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
         where: { tenantId: clinicA.tenantId },
       }),
     ).toBe(2);
+  });
+
+  it('DX-160: manual y recordatorios de 48h/2h siguen vivos, y responder cierra todos', async () => {
+    await configure(clinicA, [48, 2]);
+    const start = new Date(Date.now() + 48 * HOUR + 5 * MIN);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const manual = await a
+      .get(TenantContextService)
+      .run(clinicA.tenantId, () =>
+        a.get(CreateConfirmationLinkUseCase).execute({ appointmentId: id }),
+      );
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+    clock.current = new Date(start.getTime() - 2 * HOUR - MIN);
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+    const links = await owner.appointmentConfirmation.findMany({
+      where: { appointmentId: id },
+    });
+    expect(links).toHaveLength(3);
+    expect(
+      links.every(
+        (link) => link.revokedAt === null && link.respondedAt === null,
+      ),
+    ).toBe(true);
+    expect(
+      links.every((link) => link.expiresAt.getTime() === start.getTime()),
+    ).toBe(true);
+    expect(
+      links.find(
+        (link) => link.tokenHash === hashConfirmationToken(manual.token),
+      ),
+    ).toBeDefined();
+    await a
+      .get(TenantContextService)
+      .run(clinicA.tenantId, () =>
+        a.get(RespondConfirmationUseCase).execute(manual.token, 'confirm'),
+      );
+    const closed = await owner.appointmentConfirmation.findMany({
+      where: { appointmentId: id },
+    });
+    expect(
+      closed.every(
+        (link) => link.response === 'CONFIRM' && link.respondedAt !== null,
+      ),
+    ).toBe(true);
+  });
+
+  it('DX-160: fallo enqueue no revoca enlaces previos', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const tenant = a.get(TenantContextService);
+    const manual = await tenant.run(clinicA.tenantId, () =>
+      a.get(CreateConfirmationLinkUseCase).execute({ appointmentId: id }),
+    );
+    const enqueue = jest
+      .spyOn(a.get(EmailOutbox), 'enqueue')
+      .mockRejectedValueOnce(new Error('private patient email'));
+    try {
+      await expect(
+        tenant.run(clinicA.tenantId, () =>
+          a.get(SendAppointmentReminder).handle({
+            appointmentId: id,
+            leadHours: 2,
+            start: start.toISOString(),
+          }),
+        ),
+      ).rejects.toThrow('private patient email');
+      const links = await owner.appointmentConfirmation.findMany({
+        where: { appointmentId: id },
+      });
+      expect(links).toHaveLength(2);
+      expect(links.every((link) => link.revokedAt === null)).toBe(true);
+      await expect(
+        tenant.run(clinicA.tenantId, () =>
+          a.get(RespondConfirmationUseCase).execute(manual.token, 'confirm'),
+        ),
+      ).resolves.toMatchObject({ status: 'RESPONDED' });
+    } finally {
+      enqueue.mockRestore();
+    }
+  });
+
+  it.each([
+    ['SCHEDULED', 'confirm', 'CONFIRM'],
+    ['SCHEDULED', 'cancel', 'CANCEL'],
+    ['SCHEDULED', 'call_me', 'CALL_ME'],
+    ['CONFIRMED', 'confirm', 'CONFIRM'],
+    ['CONFIRMED', 'cancel', 'CANCEL'],
+    ['CONFIRMED', 'call_me', 'CALL_ME'],
+  ] as const)(
+    'DX-160: dos tokens distintos %s/%s solo aceptan una respuesta',
+    async (status, action, response) => {
+      const start = new Date(Date.now() + 2 * HOUR);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'ana@example.com'),
+        start,
+        status,
+      );
+      const tenant = a.get(TenantContextService);
+      const create = a.get(CreateConfirmationLinkUseCase);
+      const first = await tenant.run(clinicA.tenantId, () =>
+        create.execute({ appointmentId: id }),
+      );
+      const second = await tenant.run(clinicA.tenantId, () =>
+        create.execute({ appointmentId: id, automatic: true }),
+      );
+      // La barrera deja que ambos lean el estado antes de disputar la escritura.
+      const repo = a.get<AppointmentConfirmationRepository>(
+        APPOINTMENT_CONFIRMATION_REPOSITORY,
+      );
+      const respond = repo.respond.bind(repo);
+      let arrived = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const gate = jest
+        .spyOn(repo, 'respond')
+        .mockImplementation(async (input) => {
+          if (++arrived === 2) release();
+          await barrier;
+          return respond(input);
+        });
+      try {
+        const result = await Promise.allSettled(
+          [first.token, second.token].map((token) =>
+            tenant.run(clinicA.tenantId, () =>
+              a.get(RespondConfirmationUseCase).execute(token, action),
+            ),
+          ),
+        );
+        expect(
+          result.filter((item) => item.status === 'fulfilled'),
+        ).toHaveLength(1);
+        const rejected = result.filter((item) => item.status === 'rejected');
+        expect(rejected).toHaveLength(1);
+        expect(rejected[0].reason).toBeInstanceOf(ConflictException);
+        const closed = await owner.appointmentConfirmation.findMany({
+          where: { appointmentId: id },
+        });
+        expect(
+          closed.every(
+            (link) => link.response === response && link.respondedAt !== null,
+          ),
+        ).toBe(true);
+      } finally {
+        gate.mockRestore();
+      }
+    },
+  );
+
+  it('DX-160: worker agota intento y cierra reminder/outbound con motivo sin PII', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const error = Object.assign(new Error('ana@example.com private'), {
+      code: 'ECONNRESET',
+    });
+    const spies = [a, b].map((app) =>
+      jest.spyOn(app.get(EmailOutbox), 'enqueue').mockRejectedValue(error),
+    );
+    try {
+      await a
+        .get(JobQueue)
+        .enqueue(
+          SEND_REMINDER_JOB,
+          { appointmentId: id, leadHours: 2, start: start.toISOString() },
+          { tenantId: clinicA.tenantId, maxAttempts: 2 },
+        );
+      await drainBoth();
+      expect(
+        await owner.job.findFirstOrThrow({
+          where: { tenantId: clinicA.tenantId, name: SEND_REMINDER_JOB },
+        }),
+      ).toMatchObject({
+        state: 'PENDING',
+        attempts: 1,
+        lastError: 'Error ECONNRESET',
+      });
+      expect((await records(id))[0]).toMatchObject({
+        status: 'SENDING',
+        failureReason: null,
+      });
+      await releaseDue(clinicA.tenantId);
+      expect(
+        await owner.job.findFirstOrThrow({
+          where: { tenantId: clinicA.tenantId, name: SEND_REMINDER_JOB },
+        }),
+      ).toMatchObject({
+        state: 'FAILED',
+        attempts: 2,
+        lastError: 'Error ECONNRESET',
+      });
+      expect((await records(id))[0]).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'Error ECONNRESET',
+        sentAt: null,
+      });
+      expect(
+        await owner.outboundMessage.findFirstOrThrow({
+          where: { appointmentId: id },
+        }),
+      ).toMatchObject({ status: 'FAILED', lastError: 'Error ECONNRESET' });
+      expect(await reminderEmails(clinicA.tenantId)).toBe(0);
+      await a.get(TenantContextService).run(clinicA.tenantId, () =>
+        a.get(SendAppointmentReminder).handle({
+          appointmentId: id,
+          leadHours: 2,
+          start: start.toISOString(),
+        }),
+      );
+      expect(await records(id)).toHaveLength(1);
+      expect(
+        await owner.outboundMessage.findFirstOrThrow({
+          where: { appointmentId: id },
+        }),
+      ).toMatchObject({
+        status: 'FAILED',
+        attempts: 1,
+        lastError: 'Error ECONNRESET',
+      });
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+
+  it('DX-160: fallo de cierre tras encolar recupera SENT desde el outbox real', async () => {
+    await configure(clinicA, [2]);
+    const start = new Date(Date.now() + 2 * HOUR);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const repo = a.get<ReminderRepository>(REMINDER_REPOSITORY);
+    const markSent = jest
+      .spyOn(repo, 'markSent')
+      .mockRejectedValueOnce(new Error('temporary'));
+    try {
+      await expect(
+        a.get(TenantContextService).run(clinicA.tenantId, () =>
+          a.get(SendAppointmentReminder).handle(
+            { appointmentId: id, leadHours: 2, start: start.toISOString() },
+            {
+              jobId: 'last-job',
+              attempt: 5,
+              maxAttempts: 5,
+              tenantId: clinicA.tenantId,
+              signal: new AbortController().signal,
+            },
+          ),
+        ),
+      ).rejects.toThrow('temporary');
+      expect(await records(id)).toEqual([
+        expect.objectContaining({
+          status: 'SENT',
+          failureReason: null,
+          sentAt: expect.any(Date) as Date,
+        }),
+      ]);
+      expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+      const outbound = await owner.outboundMessage.findFirstOrThrow({
+        where: { appointmentId: id },
+      });
+      expect(outbound.status).not.toBe('FAILED');
+      await a.get(TenantContextService).run(clinicA.tenantId, () =>
+        a.get(SendAppointmentReminder).handle({
+          appointmentId: id,
+          leadHours: 2,
+          start: start.toISOString(),
+        }),
+      );
+      expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+    } finally {
+      markSent.mockRestore();
+    }
+  });
+
+  it('DX-160: escritura rechaza token ya caducado aunque lectura haya sido pendiente', async () => {
+    const start = new Date(Date.now() + 2 * HOUR);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'ana@example.com'),
+      start,
+    );
+    const tenant = a.get(TenantContextService);
+    await tenant.run(clinicA.tenantId, () =>
+      a.get(CreateConfirmationLinkUseCase).execute({ appointmentId: id }),
+    );
+    const link = await owner.appointmentConfirmation.findFirstOrThrow({
+      where: { appointmentId: id },
+    });
+    const repo = a.get<AppointmentConfirmationRepository>(
+      APPOINTMENT_CONFIRMATION_REPOSITORY,
+    );
+    const outcome = await tenant.run(clinicA.tenantId, () =>
+      repo.respond({
+        confirmationId: link.id,
+        appointmentId: id,
+        response: 'CONFIRM',
+        now: start,
+        expectedStart: start,
+        expectedStatus: 'SCHEDULED',
+      }),
+    );
+    expect(outcome).toBe('STALE');
+    expect(
+      await owner.appointment.findUniqueOrThrow({ where: { id } }),
+    ).toMatchObject({ status: 'SCHEDULED' });
+    expect(
+      await owner.appointmentConfirmation.findUniqueOrThrow({
+        where: { id: link.id },
+      }),
+    ).toMatchObject({ respondedAt: null });
   });
 
   it('no envía a canceladas ni a pacientes sin email, y registra el motivo', async () => {

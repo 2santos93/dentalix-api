@@ -21,6 +21,7 @@ interface StoredReminder {
   skipReason: AppointmentReminderSkipReason | null;
   outboundMessageId: string | null;
   sentAt: Date | null;
+  failureReason?: string | null;
 }
 
 /** Repositorio en memoria para los unit tests de los casos de uso (DX-026). */
@@ -139,6 +140,25 @@ export class FakeReminderRepository implements ReminderRepository {
     if (row?.status === 'SENDING') {
       row.status = 'SENT';
       row.sentAt = sentAt;
+    }
+    return Promise.resolve();
+  }
+
+  markFailed(
+    appointmentId: string,
+    leadHours: number,
+    start: Date,
+    errorCode: string,
+    now: Date,
+  ): Promise<void> {
+    const row = this.find(appointmentId, leadHours, start);
+    if (row?.status !== 'SENDING') return Promise.resolve();
+    if (row.outboundMessageId && this.queuedEmails.has(row.outboundMessageId)) {
+      row.status = 'SENT';
+      row.sentAt = now;
+    } else {
+      row.status = 'FAILED';
+      row.failureReason = errorCode;
     }
     return Promise.resolve();
   }
