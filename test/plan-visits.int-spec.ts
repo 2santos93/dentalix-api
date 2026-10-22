@@ -594,4 +594,62 @@ describe('DX-256 carreras de edición de vínculos', () => {
       }),
     ).toBe(1);
   });
+  it('una sesión de Bogotá no desplaza la aceptación ni el historial ni convierte una cita pasada en reserva futura', async () => {
+    await run(() =>
+      prisma.runWithTenant(async (tx) => {
+        await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'America/Bogota'");
+        const [{ utcNow }] = await tx.$queryRaw<
+          { utcNow: Date }[]
+        >`SELECT timezone('UTC',now()) AS "utcNow"`;
+        const source = await tx.treatmentPlanItem.findUniqueOrThrow({
+          where: { id: itemId },
+        });
+        const original = await tx.appointment.findUniqueOrThrow({
+          where: { id: cancelled },
+        });
+        const draft = await tx.treatmentPlan.create({
+          data: { tenantId, patientId, currency: 'COP' },
+        });
+        const freshItem = await tx.treatmentPlanItem.create({
+          data: {
+            tenantId,
+            planId: draft.id,
+            catalogItemId: source.catalogItemId,
+            toothNumber: '48',
+            price: 100,
+            status: 'ACCEPTED',
+          },
+        });
+        const past = await tx.appointment.create({
+          data: {
+            tenantId,
+            patientId,
+            providerId: original.providerId,
+            locationId: original.locationId,
+            start: new Date(utcNow.getTime() - 3600000),
+            end: new Date(utcNow.getTime() - 1800000),
+          },
+        });
+        // Omit createdAt at SQL level: Prisma may synthesize @default(now())
+        // on the client, which would test elapsed wall time rather than the DB default.
+        const [link] = await tx.$queryRaw<
+          { active: boolean; createdAt: Date }[]
+        >`
+          INSERT INTO appointment_plan_items ("tenantId","patientId","appointmentId","planItemId")
+          VALUES (${tenantId}::uuid,${patientId}::uuid,${past.id}::uuid,${freshItem.id}::uuid)
+          RETURNING active,"createdAt"`;
+        const accepted = await tx.treatmentPlan.update({
+          where: { id: draft.id },
+          data: { status: 'ACCEPTED' },
+        });
+        expect(link.active).toBe(false);
+        expect(
+          Math.abs(link.createdAt.getTime() - utcNow.getTime()),
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(accepted.acceptedAt!.getTime() - utcNow.getTime()),
+        ).toBeLessThanOrEqual(1);
+      }),
+    );
+  });
 });
