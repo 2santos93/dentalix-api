@@ -249,7 +249,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
 
   /** El unitario usa exactamente la misma carga y reglas que los lotes. */
   async loadRdaFacts(id: string): Promise<RdaFacts | null> {
-    return (await this.loadRdaFactsBatch([id])).get(id) ?? null;
+    return (await this.loadRdaFactsBatch([id])).get(id.toLowerCase()) ?? null;
   }
 
   /** DX-232: número fijo de consultas, independientemente del tamaño del lote. */
@@ -257,11 +257,12 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     ids: string[],
     patientId?: string,
   ): Promise<Map<string, RdaFacts>> {
-    if (ids.length === 0) return new Map<string, RdaFacts>();
+    const canonicalIds = [...new Set(ids.map((id) => id.toLowerCase()))];
+    if (canonicalIds.length === 0) return new Map<string, RdaFacts>();
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const entries = await tx.clinicalEntry.findMany({
-        where: { id: { in: ids }, patientId, deletedAt: null },
+        where: { id: { in: canonicalIds }, patientId, deletedAt: null },
         select: {
           id: true,
           locationId: true,
@@ -273,7 +274,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
         },
       });
       // Un lote incompleto no carga más datos clínicos; el use-case da404.
-      if (entries.length !== new Set(ids).size)
+      if (entries.length !== canonicalIds.length)
         return new Map<string, RdaFacts>();
       const explicitIds = [
         ...new Set(
