@@ -518,6 +518,129 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
     });
   });
 
+  describe('DX-232: readiness por lotes y sede persistida', () => {
+    it('40 evoluciones: una respuesta equivalente y un único evento de auditoría', async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 40; i++) {
+        ids.push(
+          ((await createEntry(dentist.token, {}).expect(201)).body as Entry).id,
+        );
+      }
+      const expected = (await readiness(a, ids[0], dentist.token).expect(200))
+        .body as Readiness;
+      const before = await raw.auditEvent.count({
+        where: {
+          tenantId: a.tenantId,
+          action: 'VIEW',
+          metadata: { path: ['reason'], equals: 'RDA_READINESS' },
+        },
+      });
+      const res = await call(
+        a,
+        'get',
+        `${entries(patient)}/rda-readiness?ids=${ids.join(',')}`,
+        dentist.token,
+      ).expect(200);
+      expect(res.body).toEqual(
+        ids.map((entryId) => ({ entryId, ...expected })),
+      );
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          action: 'VIEW',
+          metadata: { path: ['reason'], equals: 'RDA_READINESS' },
+        },
+      });
+      expect(events).toHaveLength(before + 1);
+      const batch = events.find(
+        (e) => e.resourceId === null && e.patientId === patient,
+      );
+      expect(batch?.actorUserId).toBe(dentist.userId);
+      expect(JSON.stringify(batch?.metadata)).not.toContain(ids[0]);
+    });
+    it('400 por51 IDs, vacío o inválido;403 recepción y404 si cualquier id es ajeno', async () => {
+      const own = (
+        (await createEntry(dentist.token, {}).expect(201)).body as Entry
+      ).id;
+      const foreign = (
+        (await createEntry(b.adminToken, {}, b, patientB).expect(201))
+          .body as Entry
+      ).id;
+      const endpoint = `${entries(patient)}/rda-readiness?ids=`;
+      await call(
+        a,
+        'get',
+        endpoint + Array(51).fill(own).join(','),
+        dentist.token,
+      ).expect(400);
+      await call(a, 'get', endpoint, dentist.token).expect(400);
+      await call(a, 'get', endpoint + 'invalid', dentist.token).expect(400);
+      await call(a, 'get', endpoint + own, reception).expect(403);
+      await call(
+        a,
+        'get',
+        endpoint + [own, foreign].join(','),
+        dentist.token,
+      ).expect(404);
+      const other = await raw.patient.create({
+        data: { tenantId: a.tenantId, firstName: 'Otro', lastName: 'Paciente' },
+      });
+      await call(
+        a,
+        'get',
+        `${entries(other.id)}/rda-readiness?ids=${own}`,
+        dentist.token,
+      ).expect(404);
+      await call(b, 'get', endpoint + own, b.adminToken).expect(404);
+    });
+    it('sin cita en sedeB guarda B y usa su REPS; la cita prevalece sobre la cabecera', async () => {
+      const second = await raw.location.create({
+        data: {
+          tenantId: a.tenantId,
+          name: 'Sede B DX232',
+          repsHabilitationCode: null,
+        },
+      });
+      const res = await createEntry(dentist.token, {})
+        .set('X-Location-Id', second.id)
+        .expect(201);
+      const id = (res.body as Entry).id;
+      expect(
+        (await raw.clinicalEntry.findUniqueOrThrow({ where: { id } }))
+          .locationId,
+      ).toBe(second.id);
+      const read = await readiness(a, id, dentist.token).expect(200);
+      expect((read.body as Readiness).missing).toContainEqual({
+        code: 'LOCATION_REPS',
+        label: 'Código de habilitación (REPS) de «Sede B DX232»',
+        resourceId: second.id,
+      });
+      const appointment = await raw.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId: patient,
+          providerId: dentist.userId,
+          locationId: location.id,
+          start: new Date(),
+          end: new Date(Date.now() + 1800000),
+          status: 'CONFIRMED',
+        },
+      });
+      const linked = await createEntry(dentist.token, {
+        appointmentId: appointment.id,
+      })
+        .set('X-Location-Id', second.id)
+        .expect(201);
+      expect(
+        (
+          await raw.clinicalEntry.findUniqueOrThrow({
+            where: { id: (linked.body as Entry).id },
+          })
+        ).locationId,
+      ).toBe(location.id);
+    });
+  });
+
   describe('aislamiento entre clínicas', () => {
     let entryA: string;
 

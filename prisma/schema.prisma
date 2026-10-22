@@ -198,6 +198,7 @@ model Location {
   updatedAt            DateTime      @updatedAt
   deletedAt            DateTime?
 
+  clinicalEntries           ClinicalEntry[]
   appointments              Appointment[]
   payments                  Payment[]
   inventoryItems            InventoryItem[]
@@ -547,6 +548,8 @@ model ClinicalEntry {
   // las anteriores) y la plantilla con la que se redactó. El texto compuesto
   // vive en `notes`: cambiar o desactivar la plantilla no toca la evolución.
   appointmentId String?   @db.Uuid
+  // DX-232: sede de la atención; null solo para registros legacy.
+  locationId    String?   @db.Uuid
   templateId    String?   @db.Uuid
   createdAt     DateTime  @default(now())
   deletedAt     DateTime?
@@ -563,6 +566,7 @@ model ClinicalEntry {
   // clínica Y del MISMO paciente. RESTRICT en las dos acciones: la evolución
   // es inalterable (DX-038) y nada puede reescribirla en cascada.
   appointment Appointment?             @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
+  location    Location? @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
   template    ClinicalNoteTemplate?    @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
 
   // DX-038: INALTERABLE en la BD (trigger: ni UPDATE ni DELETE para el rol de
