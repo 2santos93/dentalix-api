@@ -1,4 +1,8 @@
 import {
+  replaceAppointmentPlanItems,
+  translatePlanItemConflict,
+} from '../appointment-plan-items';
+import {
   ConflictException,
   Injectable,
   NotFoundException,
@@ -37,6 +41,7 @@ type PrismaAppointment = Prisma.AppointmentGetPayload<Record<string, never>>;
  * label it without fetching the patient list (see `Appointment.patientFirstName`).
  */
 const INCLUDE_PATIENT_NAME = {
+  planItems: { where: { deletedAt: null }, select: { planItemId: true } },
   patient: { select: { firstName: true, lastName: true } },
   // DX-121: el tipo embebido, aunque esté desactivado o retirado (la cita no
   // cambia por eso). La FK compuesta garantiza que es de la misma clínica.
@@ -51,6 +56,7 @@ const INCLUDE_PATIENT_NAME = {
  * entity's name fields come back null there.
  */
 type PrismaAppointmentWithPatient = PrismaAppointment & {
+  planItems?: { planItemId: string }[];
   patient?: { firstName: string; lastName: string };
   appointmentType?: {
     id: string;
@@ -62,6 +68,7 @@ type PrismaAppointmentWithPatient = PrismaAppointment & {
 
 function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
   return {
+    planItemIds: appointment.planItems?.map((i) => i.planItemId) ?? [],
     id: appointment.id,
     tenantId: appointment.tenantId,
     locationId: appointment.locationId,
@@ -120,53 +127,67 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
 
   async create(input: CreateAppointmentRepoInput): Promise<Appointment> {
     const tenantId = this.requireTenantId();
-    const appointment = await this.prisma.runWithTenant(async (tx) => {
-      if (input.waitlistEntryId !== undefined) {
-        // Dos INSERT simultáneos pueden esperarse mutuamente dentro de EXCLUDE
-        // (40P01), antes de producir el solape 23P01. Ordenar las asignaciones
-        // del mismo profesional evita ese ciclo; la constraint sigue arbitrando
-        // el horario y el caso de uso conserva su 409 específico.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+    const appointment = await this.prisma
+      .runWithTenant(async (tx) => {
+        if (input.waitlistEntryId !== undefined) {
+          // Dos INSERT simultáneos pueden esperarse mutuamente dentro de EXCLUDE
+          // (40P01), antes de producir el solape 23P01. Ordenar las asignaciones
+          // del mismo profesional evita ese ciclo; la constraint sigue arbitrando
+          // el horario y el caso de uso conserva su 409 específico.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(
           hashtext('dx_waitlist_assignment:' || ${tenantId}),
           hashtext(${input.providerId})
         )`;
-      }
-      const created = await tx.appointment.create({
-        data: {
-          // Sede explícita del caso de uso (DX-122: la de la entrada de
-          // pendientes, ya permitida); si no, la del request o, sin cabecera,
-          // la de escritura de la sesión (DX-089: la primera permitida del
-          // restringido, la principal para los demás).
-          locationId:
-            input.locationId ?? (await this.tenantContext.writeLocationId(tx)),
-          tenantId,
-          patientId: input.patientId,
-          providerId: input.providerId,
-          start: input.start,
-          end: input.end,
-          reason: input.reason,
-          notes: input.notes,
-          createdById: input.createdById,
-          appointmentTypeId: input.appointmentTypeId,
-          wantsEarlier: input.wantsEarlier,
-        },
-        include: INCLUDE_PATIENT_NAME,
-      });
-      // DX-122: «Agendar aquí» desde pendientes. Si otra persona ya la agendó o
-      // la descartó, el 409 deshace también la cita (misma transacción).
-      if (
-        input.waitlistEntryId !== undefined &&
-        !(await markWaitlistEntryScheduled(
-          tx,
-          input.waitlistEntryId,
-          created.id,
-          input.createdById ?? null,
-        ))
-      ) {
-        throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
-      }
-      return created;
-    });
+        }
+        const created = await tx.appointment.create({
+          data: {
+            // Sede explícita del caso de uso (DX-122: la de la entrada de
+            // pendientes, ya permitida); si no, la del request o, sin cabecera,
+            // la de escritura de la sesión (DX-089: la primera permitida del
+            // restringido, la principal para los demás).
+            locationId:
+              input.locationId ??
+              (await this.tenantContext.writeLocationId(tx)),
+            tenantId,
+            patientId: input.patientId,
+            providerId: input.providerId,
+            start: input.start,
+            end: input.end,
+            reason: input.reason,
+            notes: input.notes,
+            createdById: input.createdById,
+            appointmentTypeId: input.appointmentTypeId,
+            wantsEarlier: input.wantsEarlier,
+          },
+          include: INCLUDE_PATIENT_NAME,
+        });
+        // DX-122: «Agendar aquí» desde pendientes. Si otra persona ya la agendó o
+        // la descartó, el 409 deshace también la cita (misma transacción).
+        if (
+          input.waitlistEntryId !== undefined &&
+          !(await markWaitlistEntryScheduled(
+            tx,
+            input.waitlistEntryId,
+            created.id,
+            input.createdById ?? null,
+          ))
+        ) {
+          throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
+        }
+        if (input.planItemIds !== undefined)
+          await replaceAppointmentPlanItems(
+            tx,
+            tenantId,
+            input.patientId,
+            created.id,
+            input.planItemIds,
+          );
+        return tx.appointment.findUniqueOrThrow({
+          where: { id: created.id },
+          include: INCLUDE_PATIENT_NAME,
+        });
+      })
+      .catch(translatePlanItemConflict);
     return mapToEntity(appointment);
   }
 
@@ -291,95 +312,127 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     id: string,
     patch: UpdateAppointmentRepoInput,
   ): Promise<AppointmentUpdate> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.appointment.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!existing) {
-        throw new NotFoundException('Appointment not found');
-      }
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        // Incluso PATCH solo planItemIds debe bloquear: Prisma puede omitir un UPDATE vacío.
+        await tx.$queryRaw`SELECT id FROM appointments WHERE id=${id}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
 
-      const {
-        revokeConfirmations,
-        enqueueWaitlist,
-        resolveWaitlist,
-        requireWantsEarlier,
-        expectStatus,
-        ...data
-      } = patch;
-      // DX-200: paso del flujo en la clínica. Condición (el estado leído) y
-      // cambio en la MISMA sentencia: el UPDATE bloquea la fila, así que si dos
-      // personas cambian el estado a la vez la segunda no cumple la condición.
-      // Todo el cambio va junto: la CHECK de horas se mira por sentencia.
-      if (expectStatus !== undefined) {
-        const { count } = await tx.appointment.updateMany({
-          where: { id, deletedAt: null, status: expectStatus },
-          data,
+        const existing = await tx.appointment.findFirst({
+          where: { id, deletedAt: null },
+          select: { id: true },
         });
-        if (count === 0) {
-          throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+        if (!existing) {
+          throw new NotFoundException('Appointment not found');
         }
-      }
-      // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
-      // bloquea la fila: si dos personas la mueven a la vez, la segunda
-      // re-evalúa la condición tras el COMMIT de la primera y no la cumple.
-      if (requireWantsEarlier) {
-        const { count } = await tx.appointment.updateMany({
-          where: {
+
+        const {
+          planItemIds,
+          revokeConfirmations,
+          enqueueWaitlist,
+          resolveWaitlist,
+          requireWantsEarlier,
+          expectStatus,
+          ...data
+        } = patch;
+        // Retirar excluidos ANTES de reactivar/reagendar: el trigger no debe
+        // intentar reservar los vínculos antiguos que esta misma petición quita.
+        if (planItemIds !== undefined) {
+          await tx.appointmentPlanItem.updateMany({
+            where: {
+              appointmentId: id,
+              deletedAt: null,
+              planItemId: { notIn: planItemIds },
+            },
+            data: { deletedAt: new Date() },
+          });
+        }
+        // DX-200: paso del flujo en la clínica. Condición (el estado leído) y
+        // cambio en la MISMA sentencia: el UPDATE bloquea la fila, así que si dos
+        // personas cambian el estado a la vez la segunda no cumple la condición.
+        // Todo el cambio va junto: la CHECK de horas se mira por sentencia.
+        if (expectStatus !== undefined) {
+          const { count } = await tx.appointment.updateMany({
+            where: { id, deletedAt: null, status: expectStatus },
+            data,
+          });
+          if (count === 0) {
+            throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+          }
+        }
+        // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
+        // bloquea la fila: si dos personas la mueven a la vez, la segunda
+        // re-evalúa la condición tras el COMMIT de la primera y no la cumple.
+        if (requireWantsEarlier) {
+          const { count } = await tx.appointment.updateMany({
+            where: {
+              id,
+              deletedAt: null,
+              wantsEarlier: true,
+              status: { in: [...MOVABLE_STATUSES] },
+            },
+            data: { wantsEarlier: false },
+          });
+          if (count === 0) {
+            throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
+          }
+        }
+        const appointment =
+          expectStatus !== undefined
+            ? await tx.appointment.findFirstOrThrow({
+                where: { id },
+                include: INCLUDE_PATIENT_NAME,
+              })
+            : await tx.appointment.update({
+                where: { id },
+                data,
+                include: INCLUDE_PATIENT_NAME,
+              });
+        if (planItemIds !== undefined) {
+          await replaceAppointmentPlanItems(
+            tx,
+            this.requireTenantId(),
+            appointment.patientId,
             id,
-            deletedAt: null,
-            wantsEarlier: true,
-            status: { in: [...MOVABLE_STATUSES] },
-          },
-          data: { wantsEarlier: false },
-        });
-        if (count === 0) {
-          throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
+            planItemIds,
+          );
         }
-      }
-      const appointment =
-        expectStatus !== undefined
-          ? await tx.appointment.findFirstOrThrow({
+        if (revokeConfirmations) {
+          await tx.appointmentConfirmation.updateMany({
+            where: { appointmentId: id, revokedAt: null, respondedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        // DX-122: cancelada o no-show → «Pendientes por agendar», en esta misma
+        // transacción (si algo falla, ni la cita cambia ni aparece la entrada).
+        const enqueued = enqueueWaitlist
+          ? await enqueueWaitlistFromAppointment(
+              tx,
+              id,
+              enqueueWaitlist.createdById,
+            )
+          : null;
+        // DX-122 (revisión H1): reactivada → su entrada sale de la lista.
+        const resolvedWaitlistEntryId = resolveWaitlist
+          ? await resolveWaitlistForReactivated(
+              tx,
+              id,
+              resolveWaitlist.resolvedById,
+            )
+          : null;
+        return {
+          appointment: mapToEntity(
+            await tx.appointment.findUniqueOrThrow({
               where: { id },
               include: INCLUDE_PATIENT_NAME,
-            })
-          : await tx.appointment.update({
-              where: { id },
-              data,
-              include: INCLUDE_PATIENT_NAME,
-            });
-      if (revokeConfirmations) {
-        await tx.appointmentConfirmation.updateMany({
-          where: { appointmentId: id, revokedAt: null, respondedAt: null },
-          data: { revokedAt: new Date() },
-        });
-      }
-      // DX-122: cancelada o no-show → «Pendientes por agendar», en esta misma
-      // transacción (si algo falla, ni la cita cambia ni aparece la entrada).
-      const enqueued = enqueueWaitlist
-        ? await enqueueWaitlistFromAppointment(
-            tx,
-            id,
-            enqueueWaitlist.createdById,
-          )
-        : null;
-      // DX-122 (revisión H1): reactivada → su entrada sale de la lista.
-      const resolvedWaitlistEntryId = resolveWaitlist
-        ? await resolveWaitlistForReactivated(
-            tx,
-            id,
-            resolveWaitlist.resolvedById,
-          )
-        : null;
-      return {
-        appointment: mapToEntity(appointment),
-        waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
-        reopenedWaitlistEntryId:
-          enqueued && enqueued.reopened ? enqueued.id : null,
-        resolvedWaitlistEntryId,
-      };
-    });
+            }),
+          ),
+          waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
+          reopenedWaitlistEntryId:
+            enqueued && enqueued.reopened ? enqueued.id : null,
+          resolvedWaitlistEntryId,
+        };
+      })
+      .catch(translatePlanItemConflict);
   }
 
   async undoArrival(id: string): Promise<Appointment | null> {

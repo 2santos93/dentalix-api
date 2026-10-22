@@ -7,6 +7,7 @@ import type { AppointmentTypeSummary } from '../../../appointment-types/domain/e
  * (same convention as Patient / ToothRecord).
  */
 export interface Appointment {
+  planItemIds?: string[];
   id: string;
   tenantId: string;
   /** Sede donde ocurre la cita: su horario es el que vale al reagendarla. */

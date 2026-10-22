@@ -1,3 +1,5 @@
+import { PlanVisitsController } from '../treatment-plans/presentation/plan-visits.controller';
+import { AppointmentsController } from '../appointments/presentation/appointments.controller';
 import { RequestMethod, Type } from '@nestjs/common';
 import {
   INTERCEPTORS_METADATA,
@@ -72,6 +74,38 @@ const RES = { response: 'id' } as const;
 const plan = (param = 'id') => ({ lookup: 'treatmentPlan', param }) as const;
 
 const EXPECTED: Record<string, AuditOptions> = {
+  'GET /treatment-plans/unscheduled': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+  },
+  'GET /treatment-plans/:id/visits': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+  },
+  'PATCH /treatment-plans/:id/visits': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+    reason: 'PLAN_VISITS',
+  },
+  'POST /appointments': {
+    action: 'CREATE',
+    resource: 'APPOINTMENT',
+    resourceId: RES,
+    patient: { response: 'patientId' },
+    reason: 'APPOINTMENT_PLAN_ITEMS',
+  },
+  'PATCH /appointments/:id': {
+    action: 'UPDATE',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'APPOINTMENT_PLAN_ITEMS',
+  },
+
   'POST /auth/login': { action: 'LOGIN', resource: 'SESSION' },
 
   'POST /patients': {
@@ -891,6 +925,8 @@ const CONTROLLERS: Type[] = [
   PatientImplantsController,
   ImplantsController,
   PatientDocumentsController,
+  PlanVisitsController,
+  AppointmentsController,
   PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,

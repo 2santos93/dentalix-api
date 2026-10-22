@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   DiscountReason,
   PriceSource,
@@ -13,6 +13,10 @@ import {
 // class exists purely for `@ApiProperty` documentation, not for input
 // validation.
 export class TreatmentPlanItemDto {
+  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  visit!: number;
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: 60 })
+  visitLabel!: string | null;
   @ApiProperty({ format: 'uuid' })
   id!: string;
 

@@ -104,7 +104,13 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         }
         // Misma aceptación que el PATCH (DX-109): hermanas rechazadas, plan
         // ACCEPTED e ítems PROPOSED → ACCEPTED, en esta transacción.
-        await acceptPlanInTx(tx, locked, row.acceptedAt, row.acceptedById);
+        await acceptPlanInTx(
+          tx,
+          locked,
+          row.acceptedAt,
+          row.acceptedById,
+          row.locationId,
+        );
 
         const accepted = await this.readSource(tx, tenantId, patientId, planId);
         if (!accepted) return { kind: 'NOT_FOUND' } as const;
@@ -129,6 +135,7 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         patientId: true,
         status: true,
         currency: true,
+        visitIntervals: true,
         createdById: true,
         patient: {
           select: {
@@ -144,6 +151,8 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: {
             id: true,
+            visit: true,
+            visitLabel: true,
             toothNumber: true,
             surfaces: true,
             catalogItemId: true,
@@ -215,6 +224,13 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     const { patient, acceptance } = plan;
 
     return {
+      visitOrganization: plan.items.map((i) => ({
+        itemId: i.id,
+        visit: i.visit,
+        label: i.visitLabel,
+        minDaysAfterPrevious:
+          (plan.visitIntervals as Record<string, number>)[String(i.visit)] ?? 0,
+      })),
       plan: {
         id: plan.id,
         patientId: plan.patientId,

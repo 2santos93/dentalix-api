@@ -16,6 +16,8 @@ import {
 // ../../domain/entities/appointment.entity.ts); this class exists purely
 // for `@ApiProperty` documentation, not for input validation.
 export class AppointmentDto {
+  @ApiProperty({ type: [String], format: 'uuid' })
+  planItemIds!: string[];
   @ApiProperty({ format: 'uuid' })
   id!: string;
 

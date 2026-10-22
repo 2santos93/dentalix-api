@@ -7,6 +7,7 @@ import { Appointment } from '../entities/appointment.entity';
 // starts at the schema default (SCHEDULED) on create; there is no way to
 // create an appointment in any other status.
 export interface CreateAppointmentRepoInput {
+  planItemIds?: string[];
   patientId: string;
   providerId: string;
   start: Date;
@@ -32,6 +33,7 @@ export interface CreateAppointmentRepoInput {
 }
 
 export interface UpdateAppointmentRepoInput {
+  planItemIds?: string[];
   start?: Date;
   end?: Date;
   /** DX-121: mover la cita a otro profesional (ya validado por el use-case). */
