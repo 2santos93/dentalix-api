@@ -519,6 +519,67 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
   });
 
   describe('DX-232: readiness por lotes y sede persistida', () => {
+    describe('UUID canónico (regresión de revisión)', () => {
+      const id = 'abcdefab-1234-4abc-8abc-abcdefabcdef';
+      beforeAll(async () => {
+        await raw.clinicalEntry.create({
+          data: {
+            id,
+            tenantId: a.tenantId,
+            patientId: patient,
+            performedById: dentist.userId,
+            entryDate: new Date(),
+            notes: 'UUID de prueba',
+          },
+        });
+      });
+      it('acepta mayúsculas en el endpoint unitario', async () => {
+        const lower = await readiness(a, id, dentist.token).expect(200);
+        const upper = await readiness(
+          a,
+          id.toUpperCase(),
+          dentist.token,
+        ).expect(200);
+        expect(upper.body).toEqual(lower.body);
+      });
+      it('acepta mayúsculas en el lote y devuelve entryId canónico', async () => {
+        const lower = await readiness(a, id, dentist.token).expect(200);
+        const result = await call(
+          a,
+          'get',
+          `${entries(patient)}/rda-readiness?ids=${id.toUpperCase()}`,
+          dentist.token,
+        ).expect(200);
+        expect(result.body).toEqual([
+          { entryId: id, ...(lower.body as Readiness) },
+        ]);
+      });
+      it('deduplica casing mixto pero conserva400 para51 entradas y404 para ids ajenos', async () => {
+        const result = await call(
+          a,
+          'get',
+          `${entries(patient)}/rda-readiness?ids=${id.toUpperCase()},${id}`,
+          dentist.token,
+        ).expect(200);
+        expect(result.body).toHaveLength(1);
+        expect((result.body as { entryId: string }[])[0].entryId).toBe(id);
+        const tooMany = Array.from({ length: 51 }, (_, i) =>
+          i % 2 ? id : id.toUpperCase(),
+        );
+        await call(
+          a,
+          'get',
+          `${entries(patient)}/rda-readiness?ids=${tooMany.join(',')}`,
+          dentist.token,
+        ).expect(400);
+        await call(
+          b,
+          'get',
+          `${entries(patientB)}/rda-readiness?ids=${id.toUpperCase()}`,
+          b.adminToken,
+        ).expect(404);
+      });
+    });
     it('40 evoluciones: una respuesta equivalente y un único evento de auditoría', async () => {
       const ids: string[] = [];
       for (let i = 0; i < 40; i++) {

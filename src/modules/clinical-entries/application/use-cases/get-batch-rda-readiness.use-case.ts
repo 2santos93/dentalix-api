@@ -37,7 +37,9 @@ export class GetBatchRdaReadinessUseCase {
       throw new BadRequestException('Envía entre 1 y 50 evoluciones');
     }
     await assertPatientInClinic(this.patients, patientId);
-    const uniqueIds = [...new Set(ids)];
+    // UUID PostgreSQL se representa en minúsculas, aunque la entrada válida
+    // use mayúsculas. El límite anterior cuenta entradas, antes de deduplicar.
+    const uniqueIds = [...new Set(ids.map((id) => id.toLowerCase()))];
     const facts = await this.repo.loadRdaFactsBatch(uniqueIds, patientId);
     if (uniqueIds.some((id) => !facts.has(id))) {
       throw new NotFoundException(RDA_ENTRY_NOT_FOUND_MESSAGE);

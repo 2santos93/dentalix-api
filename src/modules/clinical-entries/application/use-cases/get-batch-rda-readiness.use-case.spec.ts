@@ -33,6 +33,28 @@ describe('GetBatchRdaReadinessUseCase (DX-232)', () => {
       },
     ]);
   });
+  it('normaliza UUID en mayúsculas antes de consultar y devuelve ID canónico', async () => {
+    const { repo, useCase } = setup();
+    const id = 'abcdefab-1234-4abc-8abc-abcdefabcdef';
+    repo.rdaFacts.set(id, facts);
+    await expect(useCase.execute('p1', [id.toUpperCase()])).resolves.toEqual([
+      expect.objectContaining({ entryId: id }),
+    ]);
+  });
+  it('deduplica el mismo UUID con distinto casing sin evadir el límite de entrada', async () => {
+    const { repo, useCase } = setup();
+    const id = 'abcdefab-1234-4abc-8abc-abcdefabcdef';
+    repo.rdaFacts.set(id, facts);
+    await expect(
+      useCase.execute('p1', [id.toUpperCase(), id]),
+    ).resolves.toEqual([expect.objectContaining({ entryId: id })]);
+    await expect(
+      useCase.execute(
+        'p1',
+        Array.from({ length: 51 }, (_, i) => (i % 2 ? id : id.toUpperCase())),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
   it('rechaza más de50 ids incluso duplicados y vacíos', async () => {
     const { useCase } = setup();
     await expect(
