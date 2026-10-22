@@ -115,6 +115,7 @@ export interface ReminderRepository {
     start: Date,
     errorCode: string,
     now: Date,
+    outboundMessageId?: string,
   ): Promise<void>;
 
   /** null si la cita no existe (o está retirada) en la clínica del contexto. */

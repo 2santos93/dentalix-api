@@ -46,6 +46,10 @@ const CONFIRMATION_SELECT = {
   revokedAt: true,
 } as const satisfies Prisma.AppointmentConfirmationSelect;
 
+/** Prisma DateTime usa TIMESTAMP UTC sin zona en PostgreSQL. */
+const utc = (date: Date) =>
+  Prisma.sql`(${date.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+
 /** Qué le hace a la cita cada respuesta del paciente. */
 function appointmentPatchFor(
   response: AppointmentConfirmationResponse,
@@ -213,8 +217,26 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
         });
         if (!confirmation || confirmation.respondedAt || confirmation.revokedAt)
           return 'ALREADY_USED';
-        if (confirmation.expiresAt.getTime() <= input.now.getTime())
-          return 'STALE';
+        // El instante del request puede ser anterior a la espera del lock.
+        // Reclamar con el reloj actual y clock_timestamp() verifica el plazo
+        // en la propia escritura, incluso si otra sentencia hizo esperar.
+        const now = new Date(Math.max(input.now.getTime(), Date.now()));
+        const [claimed] = await tx.$queryRaw<{ respondedAt: Date }[]>`
+          WITH response_time AS MATERIALIZED (
+            SELECT GREATEST(${utc(now)}, clock_timestamp() AT TIME ZONE 'UTC') AS at
+          )
+          UPDATE "appointment_confirmations" AS confirmation
+             SET "respondedAt" = response_time.at,
+                 "response" = ${input.response}::"AppointmentConfirmationResponse",
+                 "updatedAt" = response_time.at
+            FROM response_time
+           WHERE confirmation."id" = ${input.confirmationId}::uuid
+             AND confirmation."appointmentId" = ${input.appointmentId}::uuid
+             AND confirmation."respondedAt" IS NULL
+             AND confirmation."revokedAt" IS NULL
+             AND confirmation."expiresAt" > response_time.at
+          RETURNING confirmation."respondedAt"`;
+        if (!claimed) return 'STALE';
 
         // La cita solo se toca si sigue como al emitir el enlace; si no,
         // no se registra ninguna respuesta.
@@ -225,7 +247,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
             start: input.expectedStart,
             status: input.expectedStatus,
           },
-          data: appointmentPatchFor(input.response, input.now),
+          data: appointmentPatchFor(input.response, claimed.respondedAt),
         });
         if (updated.count === 0) throw new StaleAppointmentError();
         // Una respuesta cierra todos los enlaces vivos en el mismo COMMIT.
@@ -235,7 +257,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
             respondedAt: null,
             revokedAt: null,
           },
-          data: { respondedAt: input.now, response: input.response },
+          data: { respondedAt: claimed.respondedAt, response: input.response },
         });
         // DX-122: el paciente canceló desde el enlace → «Pendientes por
         // agendar», en esta misma transacción (sin autor: lo hizo el paciente).

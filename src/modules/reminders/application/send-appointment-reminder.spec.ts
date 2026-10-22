@@ -325,6 +325,31 @@ describe('SendAppointmentReminder (DX-026)', () => {
     },
   );
 
+  it('DX-160 fix I2: último fallo anterior al claim registra FAILED sin destinatario', async () => {
+    repo.contexts.set(APPT, context());
+    const error = Object.assign(new Error('private ana@example.com'), {
+      code: 'ECONNRESET',
+    });
+    jest.spyOn(repo, 'loadSendContext').mockRejectedValueOnce(error);
+    await expect(
+      handler.handle(payload, {
+        jobId: 'job-1',
+        attempt: 5,
+        maxAttempts: 5,
+        tenantId: TENANT,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBe(error);
+    expect(repo.reminders).toEqual([
+      expect.objectContaining({
+        status: 'FAILED',
+        failureReason: 'Error ECONNRESET',
+        outboundMessageId: null,
+      }),
+    ]);
+    expect(outbound.record).not.toHaveBeenCalled();
+  });
+
   it('DX-160: fallo al cerrar después del outbox se recupera SENT en el último intento', async () => {
     repo.contexts.set(APPT, context());
     outbound.settle.mockRejectedValueOnce(new Error('transient'));
