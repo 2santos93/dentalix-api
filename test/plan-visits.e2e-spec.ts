@@ -116,13 +116,6 @@ describe('DX-256 visitas y agenda', () => {
       body,
       reception,
     ).expect(403);
-    await call(
-      'patch',
-      `/treatment-plans/${planId}/visits`,
-      body,
-      b.adminToken,
-      b,
-    ).expect(404);
     const r = await call(
       'patch',
       `/treatment-plans/${planId}/visits`,
@@ -133,6 +126,43 @@ describe('DX-256 visitas y agenda', () => {
         .map((i) => i.visit)
         .sort(),
     ).toEqual([1, 2, 2]);
+    const snapshot = async () => {
+      const plan = await raw.treatmentPlan.findUniqueOrThrow({
+        where: { id: planId },
+        include: { items: { orderBy: { id: 'asc' } }, acceptance: true },
+      });
+      const quote = await call(
+        'get',
+        `/patients/${patientId}/treatment-plans/${planId}/quote`,
+      ).expect(200);
+      const contentHash = (quote.body as { contentHash: string }).contentHash;
+      expect(contentHash).toMatch(/^[a-f0-9]{64}$/);
+      return { plan, contentHash };
+    };
+    const before = await snapshot();
+    await call(
+      'get',
+      `/treatment-plans/${planId}/visits`,
+      undefined,
+      b.adminToken,
+      b,
+    ).expect(404);
+    // B intenta sobrescribir las dos visitas y el intervalo de 90 días de A.
+    await call(
+      'patch',
+      `/treatment-plans/${planId}/visits`,
+      {
+        items: itemIds.map((itemId) => ({
+          itemId,
+          visit: 1,
+          visitLabel: 'Ajena',
+        })),
+        visitIntervals: {},
+      },
+      b.adminToken,
+      b,
+    ).expect(404);
+    expect(await snapshot()).toEqual(before);
     await call('patch', `/treatment-plans/${planId}`, {
       status: 'ACCEPTED',
     }).expect(200);
