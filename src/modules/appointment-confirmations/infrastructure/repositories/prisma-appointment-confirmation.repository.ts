@@ -121,15 +121,19 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
   async issue(input: IssueConfirmationInput): Promise<void> {
     const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
-      // "Reenviar" = sustituir: solo el último enlace de la cita es válido.
-      await tx.appointmentConfirmation.updateMany({
-        where: {
-          appointmentId: input.appointmentId,
-          respondedAt: null,
-          revokedAt: null,
-        },
-        data: { revokedAt: input.now },
-      });
+      // Mismo orden de locks que respond: primero cita, después enlaces.
+      await tx.$queryRaw`SELECT "id" FROM "appointments"
+        WHERE "id" = ${input.appointmentId}::uuid FOR UPDATE`;
+      // Recepción sustituye; los automáticos conservan lo ya enviado.
+      if (input.revokePrevious !== false)
+        await tx.appointmentConfirmation.updateMany({
+          where: {
+            appointmentId: input.appointmentId,
+            respondedAt: null,
+            revokedAt: null,
+          },
+          data: { revokedAt: input.now },
+        });
       await tx.appointmentConfirmation.create({
         data: {
           tenantId,
@@ -196,21 +200,24 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
   async respond(input: RespondConfirmationInput): Promise<RespondOutcome> {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
-        // Un solo uso, a prueba de carreras: el UPDATE condicional "reclama" el
-        // enlace. Si dos clics llegan a la vez, el segundo espera al COMMIT del
-        // primero, re-evalúa el WHERE (ya con respondedAt) y no toca nada.
-        const claimed = await tx.appointmentConfirmation.updateMany({
+        // Serializa todos los enlaces de la cita, incluso CALL_ME o una cita
+        // ya CONFIRMED, cuyas respuestas no cambian el status.
+        await tx.$queryRaw`SELECT "id" FROM "appointments"
+          WHERE "id" = ${input.appointmentId}::uuid FOR UPDATE`;
+        const confirmation = await tx.appointmentConfirmation.findFirst({
           where: {
             id: input.confirmationId,
-            respondedAt: null,
-            revokedAt: null,
+            appointmentId: input.appointmentId,
           },
-          data: { respondedAt: input.now, response: input.response },
+          select: CONFIRMATION_SELECT,
         });
-        if (claimed.count === 0) return 'ALREADY_USED';
+        if (!confirmation || confirmation.respondedAt || confirmation.revokedAt)
+          return 'ALREADY_USED';
+        if (confirmation.expiresAt.getTime() <= input.now.getTime())
+          return 'STALE';
 
-        // La cita solo se toca si sigue como al emitir el enlace; si no, se
-        // revierte también el "reclamo" de arriba.
+        // La cita solo se toca si sigue como al emitir el enlace; si no,
+        // no se registra ninguna respuesta.
         const updated = await tx.appointment.updateMany({
           where: {
             id: input.appointmentId,
@@ -221,6 +228,15 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           data: appointmentPatchFor(input.response, input.now),
         });
         if (updated.count === 0) throw new StaleAppointmentError();
+        // Una respuesta cierra todos los enlaces vivos en el mismo COMMIT.
+        await tx.appointmentConfirmation.updateMany({
+          where: {
+            appointmentId: input.appointmentId,
+            respondedAt: null,
+            revokedAt: null,
+          },
+          data: { respondedAt: input.now, response: input.response },
+        });
         // DX-122: el paciente canceló desde el enlace → «Pendientes por
         // agendar», en esta misma transacción (sin autor: lo hizo el paciente).
         if (input.response === AppointmentConfirmationResponse.CANCEL) {

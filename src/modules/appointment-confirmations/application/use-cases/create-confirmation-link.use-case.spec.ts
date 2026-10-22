@@ -84,6 +84,15 @@ describe('CreateConfirmationLinkUseCase', () => {
     expect(repo.confirmations[1].revokedAt).toBeNull();
   });
 
+  it('automático conserva tanto el manual como el recordatorio anterior', async () => {
+    const appointment = repo.addAppointment();
+    await uc.execute({ appointmentId: appointment.id });
+    await uc.execute({ appointmentId: appointment.id, automatic: true });
+    await uc.execute({ appointmentId: appointment.id, automatic: true });
+    expect(repo.confirmations).toHaveLength(3);
+    expect(repo.confirmations.every((c) => c.revokedAt === null)).toBe(true);
+  });
+
   it('también vale para una cita ya CONFIRMED (reenviar)', async () => {
     const appointment = repo.addAppointment({ status: 'CONFIRMED' });
     await expect(

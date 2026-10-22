@@ -296,6 +296,51 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
   });
 
+  it.each([1, 5])(
+    'DX-160: intento %i fallido conserva SENDING hasta agotar los cinco',
+    async (attempt) => {
+      repo.contexts.set(APPT, context());
+      const error = Object.assign(new Error('private ana@example.com'), {
+        code: 'ECONNRESET',
+      });
+      email.enqueue.mockRejectedValueOnce(error);
+      await expect(
+        handler.handle(payload, {
+          jobId: 'job-1',
+          attempt,
+          maxAttempts: 5,
+          tenantId: TENANT,
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toBe(error);
+      expect(repo.reminders[0]).toMatchObject(
+        attempt === 5
+          ? {
+              status: 'FAILED',
+              failureReason: 'Error ECONNRESET',
+              outboundMessageId: 'out-1',
+            }
+          : { status: 'SENDING' },
+      );
+    },
+  );
+
+  it('DX-160: fallo al cerrar después del outbox se recupera SENT en el último intento', async () => {
+    repo.contexts.set(APPT, context());
+    outbound.settle.mockRejectedValueOnce(new Error('transient'));
+    await expect(
+      handler.handle(payload, {
+        jobId: 'job-1',
+        attempt: 5,
+        maxAttempts: 5,
+        tenantId: TENANT,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('transient');
+    expect(repo.reminders[0]).toMatchObject({ status: 'SENT', sentAt: NOW });
+    expect(email.enqueue).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [
       'sin email',

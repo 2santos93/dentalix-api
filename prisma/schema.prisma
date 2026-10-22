@@ -2810,6 +2810,7 @@ enum AppointmentReminderStatus {
   SENDING
   SENT
   SKIPPED
+  FAILED
 }
 
 enum AppointmentReminderSkipReason {
@@ -2840,6 +2841,8 @@ model AppointmentReminder {
   appointmentStart  DateTime
   status            AppointmentReminderStatus      @default(SENDING)
   skipReason        AppointmentReminderSkipReason?
+  /// Solo describeJobError: tipo/código, nunca mensaje ni datos del paciente.
+  failureReason     String?                        @db.VarChar(200)
   outboundMessageId String?                        @db.Uuid
   sentAt            DateTime?
   createdAt         DateTime                       @default(now())

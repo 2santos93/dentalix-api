@@ -332,6 +332,51 @@ export class PrismaReminderRepository implements ReminderRepository {
     );
   }
 
+  async markFailed(
+    appointmentId: string,
+    leadHours: number,
+    start: Date,
+    errorCode: string,
+    now: Date,
+  ): Promise<void> {
+    await this.prisma.runWithTenant(async (tx) => {
+      const [reminder] = await tx.$queryRaw<
+        { id: string; outboundMessageId: string | null }[]
+      >`
+        SELECT "id", "outboundMessageId" FROM "appointment_reminders"
+        WHERE "appointmentId" = ${appointmentId}::uuid AND "leadHours" = ${leadHours}
+          AND "appointmentStart" = ${utc(start)} AND "status" = 'SENDING'
+        FOR UPDATE`;
+      if (!reminder) return;
+      const queued = reminder.outboundMessageId
+        ? (await tx.emailOutbox.count({
+            where: { referenceId: reminder.outboundMessageId },
+          })) > 0
+        : false;
+      await tx.appointmentReminder.update({
+        where: { id: reminder.id },
+        data: queued
+          ? { status: 'SENT', sentAt: now }
+          : { status: 'FAILED', failureReason: errorCode },
+      });
+      if (reminder.outboundMessageId) {
+        await tx.outboundMessage.updateMany({
+          where: {
+            id: reminder.outboundMessageId,
+            status: { in: queued ? ['PENDING'] : ['PENDING', 'QUEUED'] },
+          },
+          data: queued
+            ? { status: 'QUEUED' }
+            : {
+                status: 'FAILED',
+                lastError: errorCode,
+                attempts: { increment: 1 },
+              },
+        });
+      }
+    });
+  }
+
   findAppointmentReminders(
     appointmentId: string,
   ): Promise<AppointmentRemindersSnapshot | null> {
@@ -358,6 +403,7 @@ export class PrismaReminderRepository implements ReminderRepository {
             appointmentStart: true,
             status: true,
             skipReason: true,
+            failureReason: true,
             sentAt: true,
             outboundMessageId: true,
             outboundMessage: { select: { recipientKind: true } },
@@ -397,6 +443,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           appointmentStart: r.appointmentStart,
           status: r.status,
           skipReason: r.skipReason,
+          failureReason: r.failureReason,
           sentAt: r.sentAt,
           emailDelivery: r.outboundMessageId
             ? (delivery.get(r.outboundMessageId) ?? null)
