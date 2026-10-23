@@ -6,6 +6,8 @@ import {
   isInlineViewable,
   MAX_PATIENT_DOCUMENT_BYTES,
   sniffDocument,
+  sniffDocumentFrom,
+  SNIFF_HEAD_BYTES,
   TYPE_MISMATCH_MESSAGE,
   UNSUPPORTED_TYPE_MESSAGE,
 } from './document-content';
@@ -16,6 +18,7 @@ import {
   heicFixture,
   htmlFake,
   jpegFixture,
+  largeDocxFixture,
   pdfFixture,
   pngFixture,
   pngRenamedAsPdf,
@@ -173,5 +176,64 @@ describe('extensionOf / isInlineViewable / mensajes', () => {
     expect(FILE_TOO_LARGE_MESSAGE).toBe(
       'El archivo supera el máximo de 20 MB.',
     );
+  });
+});
+
+describe('sniffDocumentFrom: el tipo leyendo por rangos (DX-259)', () => {
+  /** Fuente por rangos que apunta lo que se lee. */
+  const source = (bytes: Buffer) => {
+    const reads: [number, number][] = [];
+    return {
+      reads,
+      src: {
+        size: bytes.length,
+        read: (start: number, end: number) => {
+          reads.push([start, end]);
+          return Promise.resolve(Buffer.from(bytes.subarray(start, end)));
+        },
+      },
+    };
+  };
+  const padded = (bytes: Buffer, size: number) =>
+    Buffer.concat([bytes, Buffer.alloc(size - bytes.length, 0x20)]);
+
+  it.each([
+    ['PDF pequeño', pdfFixture()],
+    ['PNG', pngFixture()],
+    ['JPEG', jpegFixture()],
+    ['HEIC', heicFixture()],
+    ['DOCX pequeño', docxFixture()],
+    ['DICOM', dicomFixture()],
+    [
+      'DICOM con PK en el preámbulo',
+      dicomFixture(Buffer.from('PK\x03\x04', 'latin1')),
+    ],
+    ['SVG', svgFake()],
+    ['XLSX', xlsxLikeZipFake()],
+    ['ZIP que menciona word/document.xml', zipMentioningDocxFake()],
+    ['PDF de 19 MB', padded(pdfFixture(), 19 * 1024 * 1024)],
+    ['DOCX de 300 KB', largeDocxFixture(300 * 1024)],
+    [
+      'DICOM con PK de 200 KB',
+      padded(dicomFixture(Buffer.from('PK\x03\x04', 'latin1')), 200 * 1024),
+    ],
+  ])('%s: mismo resultado que con el fichero entero', async (_label, bytes) => {
+    const { src } = source(bytes);
+    await expect(sniffDocumentFrom(src)).resolves.toBe(sniffDocument(bytes));
+  });
+
+  it('un PDF de 19 MB solo lee los primeros 64 KB', async () => {
+    const { src, reads } = source(padded(pdfFixture(), 19 * 1024 * 1024));
+    await expect(sniffDocumentFrom(src)).resolves.toBe('application/pdf');
+    expect(reads).toEqual([[0, SNIFF_HEAD_BYTES]]);
+  });
+
+  it('un DOCX grande lee la cabecera y el final (EOCD + directorio central), no el medio', async () => {
+    const bytes = largeDocxFixture(300 * 1024);
+    const { src, reads } = source(bytes);
+    await expect(sniffDocumentFrom(src)).resolves.toBe(DOCX);
+    const total = reads.reduce((n, [a, b]) => n + (b - a), 0);
+    expect(total).toBeLessThan(200 * 1024);
+    expect(reads[0]).toEqual([0, SNIFF_HEAD_BYTES]);
   });
 });

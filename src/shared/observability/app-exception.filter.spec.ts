@@ -9,11 +9,16 @@ import { Prisma } from '@prisma/client';
 import { AppExceptionFilter } from './app-exception.filter';
 import { AppLogger, LogSink } from './app-logger';
 import { requestContext } from './request-context';
+import {
+  STORAGE_UNAVAILABLE_MESSAGE,
+  StorageUnavailableError,
+} from '../storage/storage-errors';
 
 interface Sent {
   status?: number;
   body?: unknown;
   ended?: boolean;
+  headers?: Record<string, string>;
 }
 
 function setup(): {
@@ -45,6 +50,9 @@ function setup(): {
           end() {
             sent.ended = true;
           },
+          setHeader(name: string, value: string) {
+            sent.headers = { ...sent.headers, [name]: value };
+          },
           status(code: number) {
             sent.status = code;
             return {
@@ -63,6 +71,25 @@ const inRequest = (fn: () => void): void =>
   requestContext.run({ requestId: 'req-abcdef12' }, fn);
 
 describe('AppExceptionFilter', () => {
+  it('DX-259: el almacén que no responde es un 503 en español con Retry-After y una línea warn con el tipo de la causa', () => {
+    const { filter, lines, host, sent } = setup();
+    const cause = Object.assign(new Error('patient-documents/t/d.pdf'), {
+      name: 'TimeoutError',
+    });
+    inRequest(() => filter.catch(new StorageUnavailableError(cause), host()));
+    expect(sent.status).toBe(503);
+    expect(sent.headers).toEqual({ 'Retry-After': '5' });
+    expect(sent.body).toMatchObject({
+      statusCode: 503,
+      message: STORAGE_UNAVAILABLE_MESSAGE,
+      requestId: 'req-abcdef12',
+    });
+    expect(lines).toEqual([
+      expect.objectContaining({ level: 'warn', cause: 'TimeoutError' }),
+    ]);
+    expect(JSON.stringify(lines)).not.toContain('patient-documents');
+  });
+
   it('un 4xx sale igual que con el filtro de Nest y no se registra como error', () => {
     const { filter, lines, host, sent } = setup();
     const exception = new BadRequestException(['firstName must be a string']);

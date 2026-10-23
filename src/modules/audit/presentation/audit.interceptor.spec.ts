@@ -107,6 +107,20 @@ describe('AuditInterceptor (DX-009)', () => {
     expect(JSON.stringify(drafts)).not.toContain('Penicilina');
   });
 
+  it('DX-259: si el handler marca la petición como ya auditada (repetición idempotente), no escribe otro evento', async () => {
+    const { recorder, run } = setup();
+    const req = clinicalReq();
+    await expect(
+      run(req, VIEW_HISTORY, {
+        handle: () => {
+          req.skipAudit = true;
+          return of('ok');
+        },
+      }),
+    ).resolves.toBe('ok');
+    expect(recorder.record).not.toHaveBeenCalled();
+  });
+
   it('la respuesta espera a que el evento quede escrito (orden determinista)', async () => {
     const { recorder, run } = setup();
     let written = false;

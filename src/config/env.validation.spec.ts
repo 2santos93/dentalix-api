@@ -242,6 +242,38 @@ describe('validateEnv', () => {
   });
 
   describe('almacén de ficheros (DX-084)', () => {
+    it('DX-259: timeouts, sockets, tentativas y subidas a la vez, enteros en rango', () => {
+      const msg = errorOf(
+        baseEnv({
+          S3_CONNECT_TIMEOUT_MS: '0',
+          S3_REQUEST_TIMEOUT_MS: '10s',
+          S3_MAX_SOCKETS: '100000',
+          S3_MAX_ATTEMPTS: '11',
+          UPLOAD_MAX_CONCURRENCY: '0',
+        }),
+      );
+      for (const key of [
+        'S3_CONNECT_TIMEOUT_MS',
+        'S3_REQUEST_TIMEOUT_MS',
+        'S3_MAX_SOCKETS',
+        'S3_MAX_ATTEMPTS',
+        'UPLOAD_MAX_CONCURRENCY',
+      ]) {
+        expect(msg).toContain(`${key} debe ser un entero`);
+      }
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            S3_CONNECT_TIMEOUT_MS: '3000',
+            S3_REQUEST_TIMEOUT_MS: '10000',
+            S3_MAX_SOCKETS: '50',
+            S3_MAX_ATTEMPTS: '3',
+            UPLOAD_MAX_CONCURRENCY: '4',
+          }),
+        ),
+      ).not.toThrow();
+    });
+
     it('producción con STORAGE_DRIVER=disk no arranca, con un mensaje claro', () => {
       const msg = errorOf(prodEnv({ STORAGE_DRIVER: 'disk' }));
       expect(msg).toContain('Configuración inválida; la API no arranca');

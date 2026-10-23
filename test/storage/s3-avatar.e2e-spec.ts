@@ -1,6 +1,7 @@
 import './s3-avatar-env';
 import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { S3FileStorage } from '../../src/shared/storage/s3-file-storage';
@@ -78,9 +79,19 @@ describeWithMinio('Avatar con S3 y dos réplicas (e2e)', (cfg) => {
     userId = reg.body.userId;
   });
 
+  /** DX-259: clave versionada con los 16 hex del SHA-256 del contenido. */
+  const versioned = (bytes: Buffer, ext: string): string =>
+    `avatars/${userId}-${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.${ext}`;
+  const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
+  const JPG = Buffer.from('ffd8ffe000104a464946', 'hex');
+
   afterAll(async () => {
-    for (const ext of ['png', 'jpg', 'webp']) {
-      await bucket.delete(`avatars/${userId}.${ext}`);
+    for (const key of [
+      versioned(PNG, 'png'),
+      versioned(JPG, 'jpg'),
+      `avatars/${userId}.webp`,
+    ]) {
+      await bucket.delete(key);
     }
     await cleanup();
     await replicaA?.close();
@@ -90,7 +101,7 @@ describeWithMinio('Avatar con S3 y dos réplicas (e2e)', (cfg) => {
 
   it('sube en la réplica A, la BD guarda la clave y la réplica B lo sirve', async () => {
     const token = await login(replicaA);
-    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const png = PNG;
     const up = await request(replicaA.getHttpServer())
       .post('/api/v1/me/avatar')
       .set('Authorization', `Bearer ${token}`)
@@ -98,32 +109,35 @@ describeWithMinio('Avatar con S3 y dos réplicas (e2e)', (cfg) => {
       .expect(200);
     const avatarUrl = (up.body as { avatarUrl: string }).avatarUrl;
     expect(avatarUrl).toBe(
-      `${process.env.FILES_PUBLIC_BASE_URL}/avatars/${userId}.png`,
+      `${process.env.FILES_PUBLIC_BASE_URL}/${versioned(png, 'png')}`,
     );
-    expect(await storedKey()).toBe(`avatars/${userId}.png`);
-    expect((await bucket.read(`avatars/${userId}.png`))?.bytes).toEqual(png);
+    expect(await storedKey()).toBe(versioned(png, 'png'));
+    expect((await bucket.read(versioned(png, 'png')))?.bytes).toEqual(png);
 
     const served = await request(replicaB.getHttpServer())
       .get(pathOf(avatarUrl))
       .expect(200);
     expect(served.headers['content-type']).toContain('image/png');
+    expect(served.headers['cache-control']).toBe(
+      'public, max-age=31536000, immutable',
+    );
     expect(served.body as Buffer).toEqual(png);
   });
 
   it('reemplaza en la réplica B: el antiguo se borra del bucket y A sirve el nuevo', async () => {
     const token = await login(replicaB);
-    const jpg = Buffer.from('ffd8ffe000104a464946', 'hex');
+    const jpg = JPG;
     const up = await request(replicaB.getHttpServer())
       .post('/api/v1/me/avatar')
       .set('Authorization', `Bearer ${token}`)
       .attach('file', jpg, { filename: 'b.jpg', contentType: 'image/jpeg' })
       .expect(200);
     const avatarUrl = (up.body as { avatarUrl: string }).avatarUrl;
-    expect(await storedKey()).toBe(`avatars/${userId}.jpg`);
-    expect(await bucket.read(`avatars/${userId}.png`)).toBeNull();
+    expect(await storedKey()).toBe(versioned(jpg, 'jpg'));
+    expect(await bucket.read(versioned(PNG, 'png'))).toBeNull();
 
     await request(replicaA.getHttpServer())
-      .get(`/api/v1/files/avatars/${userId}.png`)
+      .get(`/api/v1/files/${versioned(PNG, 'png')}`)
       .expect(404);
     const served = await request(replicaA.getHttpServer())
       .get(pathOf(avatarUrl))
