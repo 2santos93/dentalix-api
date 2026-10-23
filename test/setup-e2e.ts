@@ -18,6 +18,7 @@ for (const policy of [
   'PASSWORD_RESET',
   'PUBLIC_FILES',
   'DIRECT_UPLOAD',
+  'PATIENT_IMPORT',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

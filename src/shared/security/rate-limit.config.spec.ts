@@ -28,6 +28,18 @@ describe('loadRateLimitConfig', () => {
     expect(cfg.refresh).toEqual({ limit: 120, ttlMs: 60_000 });
     // DX-088: invitar/reenviar, por clínica + usuario.
     expect(cfg['invitation-email']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // SEC-046: leer un fichero de importación, por clínica + usuario.
+    expect(cfg['patient-import']).toEqual({ limit: 10, ttlMs: 60_000 });
+  });
+
+  it('SEC-046: lee RATE_LIMIT_PATIENT_IMPORT_LIMIT/_TTL_MS', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_PATIENT_IMPORT_LIMIT: '3',
+        RATE_LIMIT_PATIENT_IMPORT_TTL_MS: '30000',
+      }),
+    );
+    expect(cfg['patient-import']).toEqual({ limit: 3, ttlMs: 30_000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {

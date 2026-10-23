@@ -29,6 +29,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'password-reset': { limit: 2, ttlMs: 60_000 },
   'public-files': { limit: 2, ttlMs: 60_000 },
   'direct-upload': { limit: 2, ttlMs: 60_000 },
+  'patient-import': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el

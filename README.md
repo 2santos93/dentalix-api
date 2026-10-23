@@ -1934,6 +1934,45 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   grande no para la API. Cualquier fallo inesperado del lector es un 400
   genérico en español. **El fichero no se guarda**: solo su nombre, tamaño,
   SHA-256, el mapeo y lo que necesita el informe.
+- **Tope de lecturas y throttle (SEC-046)**: leer un fichero (inspect,
+  dry-run `POST /` y hoja de saldos `POST /:id/balances`) puede ocupar ~30–85
+  MB y segundos de CPU, y cualquiera que se registre es ADMIN de su clínica.
+  Por eso:
+  - **Recepción del cuerpo, con un semáforo de subidas propio**: las tres
+    rutas llevan `ImportUploadSlotGuard` + `UploadSlotInterceptor`: el guard
+    de DX-259 sobre un semáforo SOLO de importaciones, con el mismo tope
+    (`UPLOAD_MAX_CONCURRENCY`) y plazos (`UPLOAD_IDLE_TIMEOUT_MS` y
+    `UPLOAD_MAX_DURATION_MS`, 408 al vencer). Así una ráfaga de
+    importaciones, o quien gotea sus cuerpos, no deja sin plaza el avatar,
+    los documentos ni `/files/uploads` de las demás clínicas (y al revés).
+    Multer escribe el fichero en el temporal de las subidas
+    (`os.tmpdir()/dentalix-uploads`), no en memoria.
+  - **Plazas de lectura** (`ImportReadSlotInterceptor`, detrás del
+    `FileInterceptor`): se toman **con el fichero ya en disco**, así que un
+    cliente que gotea el cuerpo no retiene ninguna. Como mucho
+    `PATIENT_IMPORT_MAX_CONCURRENCY` lecturas a la vez en cada réplica
+    (default **2**, 1..64) y `PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC` por
+    clínica (default **1**, 1..64). Sin plaza, **503** al momento (sin cola)
+    con `Retry-After: 5`: «Ya se está leyendo otro archivo de importación de
+    esta clínica…» o «Hay otras importaciones leyéndose ahora mismo…»; el
+    temporal se borra igual. Todo corre después de `JwtAuthGuard` y
+    `RolesGuard`: un anónimo (401) o un no-ADMIN (403) no ocupa plaza de
+    subida ni de lectura.
+  - **Liberación**: la plaza de lectura vuelve al terminar el handler (bien
+    o con error); la de subida y el temporal, al terminar también (o al
+    abortar el cliente a mitad del cuerpo: `UploadSlotInterceptor`).
+  - **Rate limit `patient-import`**: 10 lecturas por minuto por clínica +
+    usuario (`RATE_LIMIT_PATIENT_IMPORT_LIMIT`/`_TTL_MS`), con **un balde
+    común** para las tres rutas (no uno por ruta); **429** en español con
+    `Retry-After`. Corre antes que las plazas: un 429 no ocupa ninguna; un
+    503 sí gasta una unidad del balde (con `Retry-After: 5`, un reintento a
+    mano no lo agota).
+  - Prueba de carga (lenta: no corre por defecto; en CI, en su propio paso):
+    `RUN_SLOW_TESTS=1 npm run test:e2e -- test/patient-imports-load`. 20
+    lecturas en paralelo del XLSX de la auditoría: el pico de RSS crece < 300
+    MB (medido: +26 MB una clínica, +62 MB veinte clínicas; sin el tope, +916
+    MB). A medio plazo: `readImportFile` en un `worker_thread` con
+    `resourceLimits`.
 - **Validación por fila** (motivo en español, columna tal como se llama en el
   fichero): nombres y apellidos obligatorios; tipo de documento por alias (CC,
   «cédula», TI, CE, PASAPORTE, RC→OTRO…) o el de por defecto; nº de documento
