@@ -13,7 +13,7 @@ import {
   type ExpenseTestKit,
 } from '../__fixtures__/expense-test-kit';
 import { OTHER_LOCATION_ID, USER_ID } from '../__fixtures__/in-memory-expenses';
-import { UNKNOWN_CURRENCY_MESSAGE } from './create-expense.use-case';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../domain/expense-rules';
 import { UpdateExpenseUseCase } from './update-expense.use-case';
 
 describe('edición de un gasto (DX-274)', () => {

@@ -47,7 +47,8 @@ interface AuthenticatedRequest {
 }
 
 // Categorías de gastos (DX-274). Leerlas para el selector: ADMIN y recepción
-// (la salida de caja las usa). Crear y retirar las propias: solo ADMIN. Las
+// (la salida de caja las usa). Crear y retirar las propias: solo ADMIN, auditado
+// SIN `resourceId` (el id de una categoría no es el de un gasto). Las
 // predefinidas son constantes y no se tocan.
 @ApiTags('expense-categories')
 @ApiBearerAuth()
@@ -76,7 +77,6 @@ export class ExpenseCategoriesController {
   @Audit({
     action: 'CREATE',
     resource: 'EXPENSE',
-    resourceId: { response: 'id' },
     reason: 'EXPENSE_CATEGORY_ADDED',
   })
   @Post()
@@ -97,7 +97,6 @@ export class ExpenseCategoriesController {
   @Audit({
     action: 'DELETE',
     resource: 'EXPENSE',
-    resourceId: { param: 'id' },
     reason: 'EXPENSE_CATEGORY_REMOVED',
   })
   @Delete(':id')

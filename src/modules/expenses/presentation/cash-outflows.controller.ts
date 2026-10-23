@@ -29,9 +29,12 @@ import type { ExpenseDetailView } from '../application/expense-view';
 import { CreateCashOutflowUseCase } from '../application/use-cases/create-cash-outflow.use-case';
 import { CreateCashOutflowDto } from './dto/expense-requests.dto';
 import { ExpenseDetailDto } from './dto/expense.dto';
+import type { IdempotencySignals } from '../application/idempotency-guard';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
+  /** La repetición de una petición idempotente no escribe: no se audita. */
+  skipAudit?: boolean;
 }
 
 // Salida de caja menor (DX-274, R8): la registra quien tiene la caja abierta
@@ -83,11 +86,19 @@ export class CashOutflowsController {
     description: 'La Idempotency-Key ya se usó con otros datos',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
-  create(
+  async create(
     @Body() dto: CreateCashOutflowDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<ExpenseDetailView> {
-    return this.createOutflow.execute(dto, req.user.sub, idempotencyKey);
+    const signals: IdempotencySignals = {};
+    const created = await this.createOutflow.execute(
+      dto,
+      req.user.sub,
+      idempotencyKey,
+      signals,
+    );
+    if (signals.replayed) req.skipAudit = true;
+    return created;
   }
 }

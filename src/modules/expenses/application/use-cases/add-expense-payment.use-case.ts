@@ -5,7 +5,6 @@ import {
   Injectable,
   NotFoundException,
   Optional,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   expensePaymentFingerprint,
@@ -15,7 +14,6 @@ import {
   EXPENSE_NOT_FOUND_MESSAGE,
   EXPENSE_VOIDED_MESSAGE,
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
-  IDEMPOTENCY_KEY_REUSED_MESSAGE,
   validateAmount,
 } from '../../domain/expense-rules';
 import {
@@ -29,6 +27,10 @@ import {
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
 import { guarded, rule } from '../guarded';
+import {
+  type IdempotencySignals,
+  assertSamePayment,
+} from '../idempotency-guard';
 import { type PaymentCashRequest, planPaymentCash } from '../payment-cash-mode';
 
 /**
@@ -59,6 +61,7 @@ export class AddExpensePaymentUseCase {
     input: AddExpensePaymentInput,
     createdById: string,
     idempotencyHeader?: string,
+    signals?: IdempotencySignals,
   ): Promise<ExpenseDetailView> {
     const key = parseIdempotencyKey(idempotencyHeader);
     if (key === null) {
@@ -69,11 +72,16 @@ export class AddExpensePaymentUseCase {
       : undefined;
     const now = this.clock();
     if (key) {
-      const existing = await this.repo.findPaymentByIdempotencyKey(key);
+      const existing = await guarded(() =>
+        this.repo.findPaymentByIdempotencyKey(key),
+      );
       if (existing) {
-        this.assertSame(existing, expenseId, fingerprint);
+        assertSamePayment(existing, expenseId, fingerprint);
         const detail = await this.repo.findById(existing.expenseId, now);
-        if (detail) return detailViewOf(this.repo, detail);
+        if (detail) {
+          if (signals) signals.replayed = true;
+          return detailViewOf(this.repo, detail);
+        }
       }
     }
 
@@ -104,27 +112,13 @@ export class AddExpensePaymentUseCase {
       ),
     );
     if (!result.created) {
-      this.assertSame(
+      assertSamePayment(
         { expenseId: result.detail.id, fingerprint: result.fingerprint },
         expenseId,
         fingerprint,
       );
+      if (signals) signals.replayed = true;
     }
     return detailViewOf(this.repo, result.detail);
-  }
-
-  private assertSame(
-    stored: { expenseId: string; fingerprint: string | null },
-    expenseId: string,
-    fingerprint: string | undefined,
-  ): void {
-    if (
-      stored.expenseId !== expenseId ||
-      (stored.fingerprint !== null &&
-        fingerprint !== undefined &&
-        stored.fingerprint !== fingerprint)
-    ) {
-      throw new UnprocessableEntityException(IDEMPOTENCY_KEY_REUSED_MESSAGE);
-    }
   }
 }

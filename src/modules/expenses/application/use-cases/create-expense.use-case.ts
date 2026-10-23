@@ -3,7 +3,6 @@ import {
   Inject,
   Injectable,
   Optional,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
@@ -14,7 +13,7 @@ import {
 } from '../../domain/expense-idempotency';
 import {
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
-  IDEMPOTENCY_KEY_REUSED_MESSAGE,
+  UNKNOWN_CURRENCY_MESSAGE,
   paymentCapDenial,
   toCents,
   validateAmount,
@@ -37,9 +36,11 @@ import { ExpenseReceiptUploads } from '../expense-receipt-uploads';
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
 import { guarded, rule } from '../guarded';
+import {
+  type IdempotencySignals,
+  assertSameRequest,
+} from '../idempotency-guard';
 import { type PaymentCashRequest, planPaymentCash } from '../payment-cash-mode';
-
-export const UNKNOWN_CURRENCY_MESSAGE = 'La moneda no es válida.';
 
 /**
  * Pago opcional en el mismo alta: fuera de caja (día por defecto, hoy en la
@@ -60,16 +61,6 @@ export interface CreateExpenseInput {
   dueDate?: string | null;
   payment?: InitialPaymentInput;
   attachmentUploadId?: string;
-}
-
-/** ¿Es el mismo cuerpo que creó la fila? Si no, la clave se reutilizó mal. */
-export function assertSameRequest(
-  stored: string | null,
-  current: string | undefined,
-): void {
-  if (stored !== null && current !== undefined && stored !== current) {
-    throw new UnprocessableEntityException(IDEMPOTENCY_KEY_REUSED_MESSAGE);
-  }
 }
 
 @Injectable()
@@ -95,13 +86,14 @@ export class CreateExpenseUseCase {
     input: CreateExpenseInput,
     createdById: string,
     idempotencyHeader?: string,
+    signals?: IdempotencySignals,
   ): Promise<ExpenseDetailView> {
     const key = parseIdempotencyKey(idempotencyHeader);
     if (key === null) {
       throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
     }
     const fingerprint = key ? expenseRequestFingerprint(input) : undefined;
-    return this.createIdempotent(input, createdById, key, fingerprint);
+    return this.createIdempotent(input, createdById, key, fingerprint, signals);
   }
 
   /**
@@ -114,12 +106,16 @@ export class CreateExpenseUseCase {
     createdById: string,
     key: string | undefined,
     fingerprint: string | undefined,
+    signals?: IdempotencySignals,
   ): Promise<ExpenseDetailView> {
     const now = this.clock();
     if (key) {
-      const existing = await this.repo.findByIdempotencyKey(key, now);
+      const existing = await guarded(() =>
+        this.repo.findByIdempotencyKey(key, now),
+      );
       if (existing) {
         assertSameRequest(existing.fingerprint, fingerprint);
+        if (signals) signals.replayed = true;
         return detailViewOf(this.repo, existing.detail);
       }
     }
@@ -153,23 +149,25 @@ export class CreateExpenseUseCase {
       : undefined;
     let result;
     try {
-      result = await this.repo.create(
-        {
-          locationId,
-          category,
-          supplier,
-          description,
-          amount,
-          currency,
-          invoiceDate,
-          dueDate,
-          attachment: receipt?.attachment ?? null,
-          createdById,
-          idempotencyKey: key,
-          idempotencyFingerprint: fingerprint,
-        },
-        payment,
-        now,
+      result = await guarded(() =>
+        this.repo.create(
+          {
+            locationId,
+            category,
+            supplier,
+            description,
+            amount,
+            currency,
+            invoiceDate,
+            dueDate,
+            attachment: receipt?.attachment ?? null,
+            createdById,
+            idempotencyKey: key,
+            idempotencyFingerprint: fingerprint,
+          },
+          payment,
+          now,
+        ),
       );
     } catch (error) {
       // Si la BD ni responde, el objeto se conserva (la fila pudo crearse).
@@ -184,7 +182,10 @@ export class CreateExpenseUseCase {
       if (result.created) void this.receipts.discard(receipt.pendingKey);
       else await this.discardUnused(receipt.attachment);
     }
-    if (!result.created) assertSameRequest(result.fingerprint, fingerprint);
+    if (!result.created) {
+      assertSameRequest(result.fingerprint, fingerprint);
+      if (signals) signals.replayed = true;
+    }
     return detailViewOf(this.repo, result.detail);
   }
 

@@ -10,6 +10,7 @@ import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/cu
 import {
   EXPENSE_NOT_FOUND_MESSAGE,
   EXPENSE_VOIDED_EDIT_MESSAGE,
+  UNKNOWN_CURRENCY_MESSAGE,
   validateAmount,
   validateDescription,
   validateDueDate,
@@ -25,7 +26,6 @@ import { ExpenseCategoryResolver } from '../expense-category-resolver';
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
 import { guarded, rule } from '../guarded';
-import { UNKNOWN_CURRENCY_MESSAGE } from './create-expense.use-case';
 
 /** Ausente = no se toca; `null` vacía proveedor, descripción y vencimiento. */
 export interface UpdateExpenseInput {

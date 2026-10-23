@@ -19,6 +19,7 @@ import {
   EXPENSE_ALREADY_VOIDED_MESSAGE,
   EXPENSE_NOT_FOUND_MESSAGE,
   EXPENSE_VOIDED_MESSAGE,
+  IDEMPOTENCY_KEY_REUSED_MESSAGE,
   ExpenseRuleError,
   FROM_CASH_METHOD_MESSAGE,
   LOCATION_INVALID_MESSAGE,
@@ -90,6 +91,9 @@ function cashRejection(error: unknown): ExpenseRuleError | null {
 
 const notFound = () =>
   new ExpenseRuleError(EXPENSE_NOT_FOUND_MESSAGE, 'NOT_FOUND');
+/** La clave ya se usó para algo que esta sede no ve: 409 en español, no un 500. */
+const keyUsedElsewhere = () =>
+  new ExpenseRuleError(IDEMPOTENCY_KEY_REUSED_MESSAGE, 'CONFLICT');
 const conflict = (message: string) => new ExpenseRuleError(message, 'CONFLICT');
 
 interface LockedExpense {
@@ -247,15 +251,16 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     now: Date,
   ): Promise<{ detail: ExpenseDetail; fingerprint: string | null } | null> {
     return this.prisma.runWithTenant(async (tx) => {
+      // Por clínica, no por sede: la clave ya usada con otra sede no puede
+      // llegar a un INSERT que chocaría con el único (500).
       const row = await tx.expense.findFirst({
-        where: { idempotencyKey: key, ...this.tenantContext.locationScope() },
+        where: { idempotencyKey: key },
         select: { id: true, idempotencyFingerprint: true },
       });
       if (!row) return null;
       const detail = await this.detailIn(tx, row.id, now);
-      return detail
-        ? { detail, fingerprint: row.idempotencyFingerprint }
-        : null;
+      if (!detail) throw keyUsedElsewhere();
+      return { detail, fingerprint: row.idempotencyFingerprint };
     });
   }
 
@@ -264,15 +269,18 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   ): Promise<{ expenseId: string; fingerprint: string | null } | null> {
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.expensePayment.findFirst({
-        where: {
-          idempotencyKey: key,
-          expense: this.tenantContext.locationScope(),
-        },
+        where: { idempotencyKey: key },
         select: { expenseId: true, idempotencyFingerprint: true },
       });
-      return row
-        ? { expenseId: row.expenseId, fingerprint: row.idempotencyFingerprint }
-        : null;
+      if (!row) return null;
+      const visible = await tx.expense.count({
+        where: { id: row.expenseId, ...this.tenantContext.locationScope() },
+      });
+      if (visible === 0) throw keyUsedElsewhere();
+      return {
+        expenseId: row.expenseId,
+        fingerprint: row.idempotencyFingerprint,
+      };
     });
   }
 
@@ -566,6 +574,27 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     });
   }
 
+  /** El pago ya creado con esta Idempotency-Key, si la hay (misma transacción). */
+  private async replayedPayment(
+    tx: Prisma.TransactionClient,
+    input: CreateExpensePaymentRepoInput,
+    now: Date,
+  ): Promise<IdempotentWrite | null> {
+    if (!input.idempotencyKey) return null;
+    const stored = await tx.expensePayment.findFirst({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: { expenseId: true, idempotencyFingerprint: true },
+    });
+    if (!stored) return null;
+    const detail = await this.detailIn(tx, stored.expenseId, now);
+    if (!detail) throw keyUsedElsewhere();
+    return {
+      detail,
+      created: false,
+      fingerprint: stored.idempotencyFingerprint,
+    };
+  }
+
   async addPayment(
     expenseId: string,
     input: CreateExpensePaymentRepoInput,
@@ -574,6 +603,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
         const locked = await this.lockExpense(tx, expenseId);
+        // Con el gasto bloqueado: si otra petición con la misma clave ya
+        // pagó (p. ej. el doble clic en «pagar todo»), esa es la respuesta,
+        // no un 400 del tope.
+        const replay = await this.replayedPayment(tx, input, now);
+        if (replay) return replay;
         if (locked.voidedAt) throw conflict(EXPENSE_VOIDED_MESSAGE);
         const { liveCents } = await this.paymentTotals(tx, expenseId);
         const denial = paymentCapDenial({

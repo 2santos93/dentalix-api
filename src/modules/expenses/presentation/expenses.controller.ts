@@ -53,6 +53,7 @@ import { UpdateExpenseUseCase } from '../application/use-cases/update-expense.us
 import { VoidExpensePaymentUseCase } from '../application/use-cases/void-expense-payment.use-case';
 import { VoidExpenseUseCase } from '../application/use-cases/void-expense.use-case';
 import type { ExpenseDetailView } from '../application/expense-view';
+import type { IdempotencySignals } from '../application/idempotency-guard';
 import {
   AddExpensePaymentDto,
   AttachExpenseReceiptDto,
@@ -73,6 +74,8 @@ import {
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
+  /** La repetición de una petición idempotente no escribe: no se audita. */
+  skipAudit?: boolean;
   ip?: string;
   headers: Record<string, string | string[] | undefined>;
 }
@@ -194,12 +197,20 @@ export class ExpensesController {
     description: 'La Idempotency-Key ya se usó con otros datos',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN, o sede no permitida' })
-  create(
+  async create(
     @Body() dto: CreateExpenseDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<ExpenseDetailView> {
-    return this.createExpense.execute(dto, req.user.sub, idempotencyKey);
+    const signals: IdempotencySignals = {};
+    const created = await this.createExpense.execute(
+      dto,
+      req.user.sub,
+      idempotencyKey,
+      signals,
+    );
+    if (signals.replayed) req.skipAudit = true;
+    return created;
   }
 
   @Audit({ action: 'VIEW', resource: 'EXPENSE', resourceId: E })
@@ -278,13 +289,22 @@ export class ExpensesController {
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otros datos',
   })
-  pay(
+  async pay(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddExpensePaymentDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<ExpenseDetailView> {
-    return this.addPayment.execute(id, dto, req.user.sub, idempotencyKey);
+    const signals: IdempotencySignals = {};
+    const paid = await this.addPayment.execute(
+      id,
+      dto,
+      req.user.sub,
+      idempotencyKey,
+      signals,
+    );
+    if (signals.replayed) req.skipAudit = true;
+    return paid;
   }
 
   @Audit({

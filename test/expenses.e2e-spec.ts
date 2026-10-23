@@ -715,6 +715,80 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     });
   });
 
+  describe('idempotencia: carreras y repeticiones (ronda de revisión 1)', () => {
+    it('tres pagos simultáneos del TOTAL con la misma clave: 201 los tres y una sola fila', async () => {
+      const e = await createExpense({ amount: 100000 });
+      const key = '6ba7b814-9dad-41d1-80b4-00c04fd430c8';
+      const results = await Promise.all(
+        [0, 1, 2].map(() => pay(e.id, { amount: 100000, method: 'CARD' }, key)),
+      );
+      expect(results.map((r) => r.status)).toEqual([201, 201, 201]);
+      for (const r of results) {
+        expect((r.body as ExpenseBody).payments).toHaveLength(1);
+      }
+      expect(
+        await raw.expensePayment.count({ where: { expenseId: e.id } }),
+      ).toBe(1);
+      expect((await detail(e.id)).status).toBe('PAID');
+    });
+
+    it('una repetición no escribe una segunda fila de auditoría (alta y pago)', async () => {
+      const key = '6ba7b815-9dad-41d1-80b4-00c04fd430c8';
+      const payload = body({ supplier: 'Auditoría única SA' });
+      const first = (
+        await call('post', '/expenses')
+          .set('Idempotency-Key', key)
+          .send(payload)
+          .expect(201)
+      ).body as ExpenseBody;
+      await call('post', '/expenses')
+        .set('Idempotency-Key', key)
+        .send(payload)
+        .expect(201);
+      const payKey = '6ba7b816-9dad-41d1-80b4-00c04fd430c8';
+      await pay(first.id, { amount: 1000, method: 'CARD' }, payKey).expect(201);
+      await pay(first.id, { amount: 1000, method: 'CARD' }, payKey).expect(201);
+      const events = await auditEvents(first.id);
+      expect(events.map((x) => x.action)).toEqual(['CREATE', 'CREATE']);
+      expect(
+        events.filter((x) =>
+          JSON.stringify(x.metadata).includes('PAYMENT_ADDED'),
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('la misma clave bajo otra X-Location-Id es un 4xx en español, no un 500', async () => {
+      const key = '6ba7b817-9dad-41d1-80b4-00c04fd430c8';
+      const payload = body({ supplier: 'Sede de la clave' });
+      const first = (
+        await call('post', '/expenses')
+          .set('Idempotency-Key', key)
+          .set('X-Location-Id', loc1)
+          .send(payload)
+          .expect(201)
+      ).body as ExpenseBody;
+      const other2 = await call('post', '/expenses')
+        .set('Idempotency-Key', key)
+        .set('X-Location-Id', loc2)
+        .send(payload);
+      expect(other2.status).toBe(409);
+      expect(messageOf(other2)).toBe(IDEMPOTENCY_KEY_REUSED_MESSAGE);
+      // Lo mismo con un pago.
+      const payKey = '6ba7b818-9dad-41d1-80b4-00c04fd430c8';
+      await call('post', `/expenses/${first.id}/payments`)
+        .set('Idempotency-Key', payKey)
+        .set('X-Location-Id', loc1)
+        .send({ amount: 1000, method: 'CARD' })
+        .expect(201);
+      const again = await call('post', `/expenses/${first.id}/payments`)
+        .set('Idempotency-Key', payKey)
+        .set('X-Location-Id', loc2)
+        .send({ amount: 1000, method: 'CARD' });
+      expect(again.status).toBe(409);
+      expect(messageOf(again)).toBe(IDEMPOTENCY_KEY_REUSED_MESSAGE);
+    });
+  });
+
   describe('edición', () => {
     it('cambia los datos de un gasto sin pagos y null vacía los opcionales', async () => {
       const e = await createExpense({

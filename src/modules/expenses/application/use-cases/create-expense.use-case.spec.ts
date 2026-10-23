@@ -20,6 +20,7 @@ import {
   DUE_BEFORE_INVOICE_MESSAGE,
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
+  UNKNOWN_CURRENCY_MESSAGE,
   INVOICE_DATE_FUTURE_MESSAGE,
   LOCATION_INVALID_MESSAGE,
   PAID_ON_FUTURE_MESSAGE,
@@ -41,7 +42,6 @@ import {
   type CreateExpenseInput,
   CreateExpenseUseCase,
   type InitialPaymentInput,
-  UNKNOWN_CURRENCY_MESSAGE,
 } from './create-expense.use-case';
 
 const KEY = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';

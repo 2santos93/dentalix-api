@@ -1,9 +1,8 @@
 import {
   type ByteRangeSource,
-  type DetectedType,
   MAX_PATIENT_DOCUMENT_BYTES,
-  sniffDocumentFrom,
-} from '../../patient-documents/domain/document-content';
+  sniffRestrictedFrom,
+} from '../../../shared/storage/document-content';
 import {
   RECEIPT_MIME_TYPES,
   type ReceiptMimeType,
@@ -30,14 +29,14 @@ export function isReceiptType(type: string | null): type is ReceiptMimeType {
 }
 
 /**
- * `sniffDocumentFrom` restringido a la lista blanca del soporte: lo que se
- * reconoce pero no es PDF/JPG/PNG (HEIC, DOCX, DICOM) también es null.
+ * El detector por contenido compartido, restringido a la lista blanca del
+ * soporte: lo que se reconoce pero no es PDF/JPG/PNG (HEIC, DOCX, DICOM)
+ * también es null.
  */
-export async function sniffReceiptFrom(
+export function sniffReceiptFrom(
   source: ByteRangeSource,
 ): Promise<ReceiptMimeType | null> {
-  const detected: DetectedType | null = await sniffDocumentFrom(source);
-  return isReceiptType(detected) ? detected : null;
+  return sniffRestrictedFrom(source, RECEIPT_MIME_TYPES);
 }
 
 const EXTENSIONS: Record<ReceiptMimeType, string> = {

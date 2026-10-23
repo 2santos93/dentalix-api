@@ -25,10 +25,12 @@ import {
 } from '../../domain/ports/expense-repository.port';
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
+import { guarded } from '../guarded';
 import {
+  type IdempotencySignals,
   assertSameRequest,
-  CreateExpenseUseCase,
-} from './create-expense.use-case';
+} from '../idempotency-guard';
+import { CreateExpenseUseCase } from './create-expense.use-case';
 
 export interface CashOutflowInput {
   category: string;
@@ -69,6 +71,7 @@ export class CreateCashOutflowUseCase {
     input: CashOutflowInput,
     createdById: string,
     idempotencyHeader?: string,
+    signals?: IdempotencySignals,
   ): Promise<ExpenseDetailView> {
     const key = parseIdempotencyKey(idempotencyHeader);
     if (key === null) {
@@ -76,9 +79,12 @@ export class CreateCashOutflowUseCase {
     }
     const fingerprint = key ? cashOutflowFingerprint(input) : undefined;
     if (key) {
-      const existing = await this.repo.findByIdempotencyKey(key, this.clock());
+      const existing = await guarded(() =>
+        this.repo.findByIdempotencyKey(key, this.clock()),
+      );
       if (existing) {
         assertSameRequest(existing.fingerprint, fingerprint);
+        if (signals) signals.replayed = true;
         return detailViewOf(this.repo, existing.detail);
       }
     }
@@ -120,6 +126,7 @@ export class CreateCashOutflowUseCase {
       createdById,
       key,
       fingerprint,
+      signals,
     );
   }
 }

@@ -20,6 +20,15 @@ import {
 } from '../../../../shared/storage/local-file';
 import { StorageObjectChangedError } from '../../../../shared/storage/storage-errors';
 import {
+  CHECKSUM_MISMATCH_MESSAGE,
+  EMPTY_FILE_MESSAGE,
+  PENDING_META,
+  SIZE_MISMATCH_MESSAGE,
+  UPLOAD_CHANGED_MESSAGE,
+  UPLOAD_NOT_FOUND_MESSAGE,
+  checkPendingUpload,
+} from '../../../../shared/storage/pending-upload';
+import {
   UPLOAD_STORAGE_BUDGET_MS,
   withStorageBudget,
 } from '../../../../shared/storage/storage-budget';
@@ -80,7 +89,7 @@ export const PATIENT_DOCUMENT_UPLOAD_TTL = Symbol(
 );
 
 export const MISSING_FILE_MESSAGE = 'Falta el archivo.';
-export const EMPTY_FILE_MESSAGE = 'El archivo está vacío.';
+export { EMPTY_FILE_MESSAGE };
 export const INVALID_SIZE_MESSAGE = 'El tamaño del archivo no es válido.';
 export const DUPLICATE_DOCUMENT_MESSAGE =
   'Este archivo ya está en la ficha del paciente.';
@@ -491,18 +500,19 @@ export interface PatientDocumentUploadTicket {
 
 /** Metadatos `x-amz-meta-*` que fija la API en el objeto pendiente. */
 const META = {
-  uploadedBy: 'uploaded-by',
+  ...PENDING_META,
   patientId: 'patient-id',
-  size: 'declared-size',
-  sha256: 'sha256',
 } as const;
 
-export const UPLOAD_NOT_FOUND_MESSAGE =
-  'No encontramos el archivo subido o la subida caducó. Vuelve a subirlo.';
-export const SIZE_MISMATCH_MESSAGE =
-  'El tamaño del archivo subido no coincide con el declarado. Vuelve a subirlo.';
-export const CHECKSUM_MISMATCH_MESSAGE =
-  'El archivo subido no coincide con su huella SHA-256. Vuelve a subirlo.';
+// Los mensajes de la subida directa viven en `shared/storage/pending-upload`
+// (los comparten los soportes de gastos, DX-274); se siguen exponiendo aquí.
+export {
+  CHECKSUM_MISMATCH_MESSAGE,
+  SIZE_MISMATCH_MESSAGE,
+  UPLOAD_CHANGED_MESSAGE,
+  UPLOAD_NOT_FOUND_MESSAGE,
+};
+
 /**
  * QA D3: código del 400 de `complete` cuando el CONTENIDO no vale (vacío, más
  * de 20 MB, tipo no admitido o que no coincide con el declarado). Volver a
@@ -518,9 +528,6 @@ function contentRejected(message: string): BadRequestException {
     message,
   });
 }
-
-export const UPLOAD_CHANGED_MESSAGE =
-  'El archivo cambió mientras se comprobaba. Vuelve a subirlo.';
 
 @Injectable()
 export class CreatePatientDocumentUploadUseCase {
@@ -662,19 +669,6 @@ export class CompletePatientDocumentUploadUseCase {
       (await this.alreadyCompleted(patientId, documentId, uploadedById)) ??
       lost();
 
-    const info = await this.storage.stat(pendingKey);
-    if (
-      !info ||
-      info.metadata[META.uploadedBy] !== uploadedById ||
-      info.metadata[META.patientId] !== patientId
-    ) {
-      // De otro usuario, de otro paciente, caducado o nunca subido: no se
-      // toca (ni se dice cuál de las cosas es).
-      return winnerOr(() =>
-        Promise.reject(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE)),
-      );
-    }
-
     const reject = async (
       error: BadRequestException | ConflictException,
     ): Promise<never> => {
@@ -682,20 +676,22 @@ export class CompletePatientDocumentUploadUseCase {
       throw error;
     };
 
-    if (info.size === 0) return reject(contentRejected(EMPTY_FILE_MESSAGE));
-    if (info.size > MAX_PATIENT_DOCUMENT_BYTES) {
-      return reject(contentRejected(FILE_TOO_LARGE_MESSAGE));
+    const checked = await checkPendingUpload(this.storage, pendingKey, {
+      maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+      tooLargeMessage: FILE_TOO_LARGE_MESSAGE,
+      // De otro usuario o paciente no se toca (ni se dice cuál de las cosas es).
+      isOwner: (meta) =>
+        meta[META.uploadedBy] === uploadedById &&
+        meta[META.patientId] === patientId,
+      contentRejected,
+    });
+    if (!checked.ok && checked.reason === 'NOT_FOUND') {
+      return winnerOr(() =>
+        Promise.reject(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE)),
+      );
     }
-    if (String(info.size) !== info.metadata[META.size]) {
-      return reject(new BadRequestException(SIZE_MISMATCH_MESSAGE));
-    }
-    const declaredSha = info.metadata[META.sha256] ?? '';
-    if (
-      !/^[0-9a-f]{64}$/.test(declaredSha) ||
-      info.sha256Base64 !== sha256HexToBase64(declaredSha)
-    ) {
-      return reject(new BadRequestException(CHECKSUM_MISMATCH_MESSAGE));
-    }
+    if (!checked.ok) return reject(checked.error);
+    const { info, declaredSha } = checked;
 
     let detected: DetectedType;
     try {

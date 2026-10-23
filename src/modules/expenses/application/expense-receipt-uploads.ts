@@ -21,14 +21,21 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import {
   FILE_TOO_LARGE_MESSAGE,
   TYPE_MISMATCH_MESSAGE,
-} from '../../patient-documents/domain/document-content';
+} from '../../../shared/storage/document-content';
 import {
-  INVALID_SHA256_MESSAGE,
+  CHECKSUM_MISMATCH_MESSAGE,
+  EMPTY_FILE_MESSAGE,
+  PENDING_META,
+  SIZE_MISMATCH_MESSAGE,
+  UPLOAD_CHANGED_MESSAGE,
+  UPLOAD_NOT_FOUND_MESSAGE,
+  checkPendingUpload,
+} from '../../../shared/storage/pending-upload';
+import {
+  isSha256Hex,
   normalizeOriginalName,
   sha256HexToBase64,
-  validateSha256Hex,
-  PatientDocumentRuleError,
-} from '../../patient-documents/domain/document-rules';
+} from '../../../shared/storage/upload-names';
 import type { ExpenseAttachment } from '../domain/entities/expense.entity';
 import {
   MAX_RECEIPT_BYTES,
@@ -43,21 +50,20 @@ import {
 import { EXPENSE_RECEIPT_UPLOAD_TTL } from './expense-tokens';
 
 export const INVALID_SIZE_MESSAGE = 'El tamaño del archivo no es válido.';
-export const EMPTY_FILE_MESSAGE = 'El archivo está vacío.';
-export const UPLOAD_NOT_FOUND_MESSAGE =
-  'No encontramos el archivo subido o la subida caducó. Vuelve a subirlo.';
-export const SIZE_MISMATCH_MESSAGE =
-  'El tamaño del archivo subido no coincide con el declarado. Vuelve a subirlo.';
-export const CHECKSUM_MISMATCH_MESSAGE =
-  'El archivo subido no coincide con su huella SHA-256. Vuelve a subirlo.';
-export const UPLOAD_CHANGED_MESSAGE =
-  'El archivo cambió mientras se comprobaba. Vuelve a subirlo.';
+export const INVALID_SHA256_MESSAGE =
+  'La huella SHA-256 del archivo no es válida.';
+// Los mensajes de la subida directa son los de `shared/storage/pending-upload`.
+export {
+  CHECKSUM_MISMATCH_MESSAGE,
+  EMPTY_FILE_MESSAGE,
+  SIZE_MISMATCH_MESSAGE,
+  UPLOAD_CHANGED_MESSAGE,
+  UPLOAD_NOT_FOUND_MESSAGE,
+};
 
 /** Metadatos `x-amz-meta-*` que fija la API en el objeto pendiente. */
 const META = {
-  uploadedBy: 'uploaded-by',
-  size: 'declared-size',
-  sha256: 'sha256',
+  ...PENDING_META,
   mime: 'declared-mime',
   name: 'file-name',
 } as const;
@@ -145,15 +151,10 @@ export class ExpenseReceiptUploads {
       throw new PayloadTooLargeException(FILE_TOO_LARGE_MESSAGE);
     }
     if (size === 0) throw new BadRequestException(EMPTY_FILE_MESSAGE);
-    let sha256: string;
-    try {
-      sha256 = validateSha256Hex(request.sha256);
-    } catch (error) {
-      if (error instanceof PatientDocumentRuleError) {
-        throw new BadRequestException(INVALID_SHA256_MESSAGE);
-      }
-      throw error;
+    if (!isSha256Hex(request.sha256)) {
+      throw new BadRequestException(INVALID_SHA256_MESSAGE);
     }
+    const sha256 = request.sha256.trim().toLowerCase();
     if (
       !declaredLooksLikeReceipt({
         mimeType: request.mimeType,
@@ -218,32 +219,23 @@ export class ExpenseReceiptUploads {
   ): Promise<CompletedReceipt> {
     const tenantId = this.tenantId();
     const pendingKey = pendingReceiptKey(tenantId, uploadId);
-    const info = await this.storage.stat(pendingKey);
-    if (!info || info.metadata[META.uploadedBy] !== uploadedById) {
-      // De otro usuario, caducado o nunca subido: no se toca (ni se dice
-      // cuál de las cosas es).
-      throw new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE);
-    }
-
     const reject = async (error: BadRequestException): Promise<never> => {
       await this.discard(pendingKey);
       throw error;
     };
 
-    if (info.size === 0) return reject(contentRejected(EMPTY_FILE_MESSAGE));
-    if (info.size > MAX_RECEIPT_BYTES) {
-      return reject(contentRejected(FILE_TOO_LARGE_MESSAGE));
+    const checked = await checkPendingUpload(this.storage, pendingKey, {
+      maxBytes: MAX_RECEIPT_BYTES,
+      tooLargeMessage: FILE_TOO_LARGE_MESSAGE,
+      // De otro usuario, caducado o nunca subido: no se toca (ni se dice cuál).
+      isOwner: (meta) => meta[META.uploadedBy] === uploadedById,
+      contentRejected,
+    });
+    if (!checked.ok && checked.reason === 'NOT_FOUND') {
+      throw new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE);
     }
-    if (String(info.size) !== info.metadata[META.size]) {
-      return reject(new BadRequestException(SIZE_MISMATCH_MESSAGE));
-    }
-    const declaredSha = info.metadata[META.sha256] ?? '';
-    if (
-      !/^[0-9a-f]{64}$/.test(declaredSha) ||
-      info.sha256Base64 !== sha256HexToBase64(declaredSha)
-    ) {
-      return reject(new BadRequestException(CHECKSUM_MISMATCH_MESSAGE));
-    }
+    if (!checked.ok) return reject(checked.error);
+    const { info, declaredSha } = checked;
 
     const name = decodeName(info.metadata[META.name]);
     let detected;

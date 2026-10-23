@@ -879,13 +879,11 @@ const EXPECTED: Record<string, AuditOptions> = {
   'POST /expense-categories': {
     action: 'CREATE',
     resource: 'EXPENSE',
-    resourceId: RES,
     reason: 'EXPENSE_CATEGORY_ADDED',
   },
   'DELETE /expense-categories/:id': {
     action: 'DELETE',
     resource: 'EXPENSE',
-    resourceId: { param: 'id' },
     reason: 'EXPENSE_CATEGORY_REMOVED',
   },
 
