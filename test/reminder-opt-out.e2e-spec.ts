@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
+import { ReminderClock } from '../src/modules/reminders/application/reminder-clock';
 import {
   Body,
   Controller,
@@ -76,6 +79,8 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
   let clinic: Clinic;
   let other: Clinic;
   let reception: string;
+  let dentist: string;
+  let assistant: string;
   const mailer = new CapturingMailer();
 
   const api = () => request(app.getHttpServer());
@@ -146,6 +151,12 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
     other = await registerClinic(app, 'dx128-baja-otra');
     const member = await seedMember(raw, clinic, ClinicRole.RECEPTION);
     reception = await loginAs(app, clinic.host, member.email);
+    for (const role of [ClinicRole.DENTIST, ClinicRole.ASSISTANT]) {
+      const staff = await seedMember(raw, clinic, role);
+      const token = await loginAs(app, clinic.host, staff.email);
+      if (role === ClinicRole.DENTIST) dentist = token;
+      else assistant = token;
+    }
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
       .send({ timezone: 'America/Bogota', ranges: [] })
       .expect(200);
@@ -218,7 +229,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       expect(row.reminderOptOutAt).toBeNull();
     });
 
-    it('confirmar registra la baja (origen LINK), es idempotente y queda auditada una vez, sin actor', async () => {
+    it('confirmar registra la baja (origen LINK); repetir da404 y audita una vez, sin actor', async () => {
       const first = await pub(
         api().post(`/api/v1/public/reminder-opt-outs/${token}`),
       )
@@ -228,10 +239,12 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       expect(body.status).toBe('OPTED_OUT');
       expect(body.optedOutAt).not.toBeNull();
 
-      const again = await pub(
-        api().post(`/api/v1/public/reminder-opt-outs/${token}`),
-      ).expect(200);
-      expect(again.body).toEqual(first.body);
+      await pub(api().post(`/api/v1/public/reminder-opt-outs/${token}`)).expect(
+        404,
+      );
+      await pub(api().get(`/api/v1/public/reminder-opt-outs/${token}`)).expect(
+        404,
+      );
 
       const row = await raw.patient.findUniqueOrThrow({
         where: { id: patientId },
@@ -295,6 +308,114 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
     });
   });
 
+  describe('DX-214 vigencia y reactivación', () => {
+    const fixed = new Date('2026-10-23T12:00:00Z');
+    async function issued(
+      patientId: string,
+      token: string,
+      extra: object = {},
+    ) {
+      await raw.reminderOptOutLink.create({
+        data: {
+          tenantId: clinic.tenantId,
+          patientId,
+          tokenHash: hashConfirmationToken(token),
+          createdAt: new Date(fixed.getTime() - 61 * 86400000),
+          expiresAt: new Date(fixed.getTime() - 86400000),
+          ...extra,
+        },
+      });
+    }
+    it('reloj fijo: expirado61d, usado, desconocido y otra clínica dan el mismo404 en GET/POST', async () => {
+      const patient = await createPatient('214100');
+      const expired = 'E'.repeat(43),
+        used = 'U'.repeat(43),
+        active = 'V'.repeat(43);
+      await issued(patient, expired);
+      await issued(patient, used, {
+        expiresAt: new Date(fixed.getTime() + 86400000),
+        usedAt: fixed,
+      });
+      await issued(patient, active, {
+        expiresAt: new Date(fixed.getTime() + 86400000),
+      });
+      const clock = jest
+        .spyOn(app.get(ReminderClock), 'now')
+        .mockReturnValue(fixed);
+      let expected: unknown;
+      try {
+        for (const [token, host] of [
+          [expired, clinic.host],
+          [used, clinic.host],
+          ['Z'.repeat(43), clinic.host],
+          [active, other.host],
+        ]) {
+          for (const method of ['get', 'post'] as const) {
+            const response = await pub(
+              api()[method](`/api/v1/public/reminder-opt-outs/${token}`),
+              host,
+            ).expect(404);
+            const body = response.body as {
+              message: string;
+              error: string;
+              statusCode: number;
+            };
+            const generic = {
+              message: body.message,
+              error: body.error,
+              statusCode: body.statusCode,
+            };
+            expected ??= generic;
+            expect(generic).toEqual(expected);
+            expect(body.message).toBe('Enlace de baja no encontrado');
+          }
+        }
+      } finally {
+        clock.mockRestore();
+      }
+      expect(
+        (await raw.patient.findUniqueOrThrow({ where: { id: patient } }))
+          .reminderOptOutAt,
+      ).toBeNull();
+    });
+    it('reactivar desde ficha invalida antiguo en GET/POST; uno emitido después funciona', async () => {
+      const patient = await createPatient('214101');
+      const old = 'O'.repeat(43),
+        fresh = 'N'.repeat(43);
+      await raw.patient.update({
+        where: { id: patient },
+        data: { reminderOptOutAt: new Date(), reminderOptOutSource: 'STAFF' },
+      });
+      await issued(patient, old, {
+        expiresAt: new Date(Date.now() + 86400000),
+      });
+      await as(
+        api().patch(`/api/v1/patients/${patient}/communication`),
+        reception,
+      )
+        .send({ reminderOptOut: false })
+        .expect(200);
+      for (const method of ['get', 'post'] as const)
+        await pub(
+          api()[method](`/api/v1/public/reminder-opt-outs/${old}`),
+        ).expect(404);
+      expect(
+        (await raw.patient.findUniqueOrThrow({ where: { id: patient } }))
+          .reminderOptOutAt,
+      ).toBeNull();
+      await issued(patient, fresh, {
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 86400000),
+      });
+      await pub(api().get(`/api/v1/public/reminder-opt-outs/${fresh}`)).expect(
+        200,
+      );
+      await pub(api().post(`/api/v1/public/reminder-opt-outs/${fresh}`)).expect(
+        200,
+      );
+    });
+  });
+
   describe('respondiendo «BAJA» por WhatsApp (adaptador fake de DX-126)', () => {
     it('registra la baja al momento, auditada con origen MESSAGE, y el recordatorio ya encolado no sale', async () => {
       const email = 'luisa@example.com';
@@ -354,6 +475,97 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         where: { appointmentId },
       });
       expect(reminder.skipReason).toBe('OPTED_OUT');
+    });
+
+    it('DX214: móvil compartido por6 no desactiva ninguno; por2 desactiva ambos', async () => {
+      const six: string[] = [];
+      for (let i = 0; i < 6; i++)
+        six.push(await createPatient(`21420${i}`, { phone: '+573152229999' }));
+      await api()
+        .post('/api/v1/test/fake-whatsapp-webhook')
+        .send({ tenantId: clinic.tenantId, from: '573152229999', text: 'BAJA' })
+        .expect(200, { isOptOut: true, optedOut: [] });
+      expect(
+        await raw.patient.count({
+          where: { id: { in: six }, reminderOptOutAt: { not: null } },
+        }),
+      ).toBe(0);
+      const durableWarnings = await raw.reminderOptOutMatchWarning.findMany({
+        where: { tenantId: clinic.tenantId, patientId: { in: six } },
+        select: { patientId: true },
+      });
+      expect(durableWarnings.map((w) => w.patientId).sort()).toEqual(
+        [...six].sort(),
+      );
+      const notices = await as(
+        api().get(`/api/v1/patients/${six[0]}/communication/opt-out-warnings`),
+        reception,
+      ).expect(200);
+      const noticeBody = notices.body as {
+        id: string;
+        createdAt: string;
+        matchCount: number;
+        maxMatches: number;
+      }[];
+      expect(noticeBody).toHaveLength(1);
+      expect(noticeBody[0].matchCount).toBe(6);
+      expect(noticeBody[0].maxMatches).toBe(5);
+      expect(typeof noticeBody[0].createdAt).toBe('string');
+      const warningPath = `/api/v1/patients/${six[0]}/communication/opt-out-warnings`;
+      await as(api().get(warningPath), clinic.adminToken).expect(200);
+      const eventsBeforeDenials = await raw.auditEvent.count({
+        where: {
+          tenantId: clinic.tenantId,
+          patientId: six[0],
+          action: 'VIEW',
+          metadata: { path: ['reason'], equals: 'REMINDER_OPT_OUT_WARNINGS' },
+        },
+      });
+      expect(eventsBeforeDenials).toBe(2);
+      for (const staffToken of [dentist, assistant])
+        await as(api().get(warningPath), staffToken).expect(403);
+      await as(api().get(warningPath), other.adminToken, other.host).expect(
+        404,
+      );
+      expect(
+        await raw.auditEvent.count({
+          where: {
+            tenantId: clinic.tenantId,
+            patientId: six[0],
+            action: 'VIEW',
+            metadata: { path: ['reason'], equals: 'REMINDER_OPT_OUT_WARNINGS' },
+          },
+        }),
+      ).toBe(eventsBeforeDenials);
+      await raw.reminderOptOutMatchWarning.createMany({
+        data: Array.from({ length: 22 }, (_, i) => ({
+          id: randomUUID(),
+          tenantId: clinic.tenantId,
+          patientId: six[0],
+          matchCount: 6,
+          maxMatches: 5,
+          createdAt: new Date(Date.now() + i * 1000),
+        })),
+      });
+      const recent = await as(api().get(warningPath), reception).expect(200);
+      expect(recent.body).toHaveLength(20);
+      expect(Object.keys((recent.body as object[])[0]).sort()).toEqual([
+        'createdAt',
+        'id',
+        'matchCount',
+        'maxMatches',
+      ]);
+      const two = await Promise.all([
+        createPatient('214210', { phone: '+573152228888' }),
+        createPatient('214211', { phone: '+573152228888' }),
+      ]);
+      const response = await api()
+        .post('/api/v1/test/fake-whatsapp-webhook')
+        .send({ tenantId: clinic.tenantId, from: '573152228888', text: 'BAJA' })
+        .expect(200);
+      expect((response.body as InboundReplyResult).optedOut.sort()).toEqual(
+        two.sort(),
+      );
     });
 
     it('otro texto, u otra clínica, no da de baja a nadie', async () => {

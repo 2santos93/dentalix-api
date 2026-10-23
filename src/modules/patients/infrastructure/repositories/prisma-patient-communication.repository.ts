@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   PATIENT_NOT_FOUND_MESSAGE,
   type PatientCommunicationPatch,
+  type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -88,6 +89,29 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     });
   }
 
+  optOutWarnings(
+    patientId: string,
+  ): Promise<PatientOptOutMatchWarningView[] | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const patient = await tx.patient.findFirst({
+        where: { id: patientId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!patient) return null;
+      return tx.reminderOptOutMatchWarning.findMany({
+        where: { patientId },
+        take: 20,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          matchCount: true,
+          maxMatches: true,
+        },
+      });
+    });
+  }
+
   async locationCountry(): Promise<string | null> {
     const active = this.tenantContext.getLocationId();
     const location = await this.prisma.runWithTenant((tx) =>
@@ -114,6 +138,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
   update(
     patientId: string,
     patch: PatientCommunicationPatch,
+    invalidateOptOutLinksAt?: Date,
   ): Promise<PatientCommunicationState> {
     return this.prisma.runWithTenant(async (tx) => {
       const { count } = await tx.patient.updateMany({
@@ -121,6 +146,13 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
         data: patch,
       });
       if (count === 0) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+      // El UPDATE anterior bloquea paciente antes que enlaces, igual que emisión/consumo.
+      if (invalidateOptOutLinksAt) {
+        await tx.reminderOptOutLink.updateMany({
+          where: { patientId, usedAt: null },
+          data: { usedAt: invalidateOptOutLinksAt },
+        });
+      }
       const row = await tx.patient.findFirstOrThrow({
         where: { id: patientId },
         select: SELECT,

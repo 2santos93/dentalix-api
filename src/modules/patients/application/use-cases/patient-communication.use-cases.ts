@@ -25,6 +25,7 @@ import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
   type PatientCommunicationPatch,
+  type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -232,17 +233,22 @@ export class UpdatePatientCommunicationUseCase {
       patch.reminderOptOutAt = now;
       patch.reminderOptOutSource = 'STAFF';
       changed.push('reminderOptOutAt');
-    } else if (input.reminderOptOut === false && state.reminderOptOutAt) {
+    } else if (input.reminderOptOut === false) {
       patch.reminderOptOutAt = null;
       patch.reminderOptOutSource = null;
-      changed.push('reminderOptOutAt');
+      if (state.reminderOptOutAt) changed.push('reminderOptOutAt');
     }
 
-    if (changed.length === 0) {
+    if (changed.length === 0 && input.reminderOptOut !== false) {
       return toView(state, country, clinicDefault, now);
     }
 
-    const saved = await this.repo.update(patientId, patch);
+    const saved = await this.repo.update(
+      patientId,
+      patch,
+      input.reminderOptOut === false ? now : undefined,
+    );
+    if (changed.length === 0) return toView(saved, country, clinicDefault, now);
     await this.audit.record({
       tenantId: ctx.tenantId,
       locationId: ctx.locationId,
@@ -261,5 +267,18 @@ export class UpdatePatientCommunicationUseCase {
       },
     });
     return toView(saved, country, clinicDefault, now);
+  }
+}
+
+@Injectable()
+export class GetPatientOptOutWarningsUseCase {
+  constructor(
+    @Inject(PATIENT_COMMUNICATION_REPOSITORY)
+    private readonly repo: PatientCommunicationRepository,
+  ) {}
+  async execute(patientId: string): Promise<PatientOptOutMatchWarningView[]> {
+    const warnings = await this.repo.optOutWarnings(patientId);
+    if (!warnings) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    return warnings;
   }
 }

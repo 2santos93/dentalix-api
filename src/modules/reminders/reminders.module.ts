@@ -1,3 +1,4 @@
+import { ReminderOptOutMaintenance } from './application/reminder-opt-out-maintenance';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
@@ -60,6 +61,7 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
     PlanReminders,
     SendAppointmentReminder,
     RemindersJobs,
+    ReminderOptOutMaintenance,
     ReminderClock,
     TokenService,
     TenantContextInterceptor,

@@ -32,17 +32,30 @@ export const REMINDER_OPT_OUT_REPOSITORY = Symbol(
 export interface ReminderOptOutRepository {
   /** Guarda el hash de un enlace nuevo para el paciente. */
   issueLink(patientId: string, tokenHash: string): Promise<void>;
-  /** null si el hash no es de un enlace de esta clínica (o el paciente se retiró). */
-  findLinkByTokenHash(tokenHash: string): Promise<OptOutLinkLookup | null>;
+  /** null si expiró, se usó, es de otra clínica o el paciente se retiró. */
+  findLinkByTokenHash(
+    tokenHash: string,
+    at: Date,
+  ): Promise<OptOutLinkLookup | null>;
   /**
    * Registra la baja si el paciente vivo no la tenía, y marca el enlace como
    * usado. true solo si ESTA llamada la registró (idempotente y a prueba de
-   * dos clics simultáneos: UPDATE condicional).
+   * dos clics simultáneos: UPDATE condicional). null: enlace no vigente o paciente retirado.
    */
   optOut(
     patientId: string,
     input: { source: ReminderOptOutSource; at: Date; linkId?: string },
-  ): Promise<boolean>;
+  ): Promise<boolean | null>;
+  /** Avisos de todos los pacientes en UNA transacción, sin datos de contacto. */
+  recordMatchWarnings(
+    patientIds: string[],
+    matchCount: number,
+    maxMatches: number,
+  ): Promise<void>;
+  /** Todas las clínicas, incluidas retiradas: solo mantenimiento. */
+  maintenanceTenantIds(): Promise<string[]>;
+  /** Borra solo expirados/usados anteriores al corte, bajo tenant/RLS. */
+  purgeLinks(before: Date): Promise<number>;
   /** Pacientes vivos cuyo teléfono acaba en esos 8 dígitos (prefiltro indexado). */
   findByPhoneTail(tail: string): Promise<MobileCandidate[]>;
   /** País (ClinicCountry) de la sede principal: la viva más antigua. */

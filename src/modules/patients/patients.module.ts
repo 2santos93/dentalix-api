@@ -16,6 +16,7 @@ import { PrismaResponsiblePartyRepository } from './infrastructure/repositories/
 import {
   COMMUNICATION_CLOCK,
   GetPatientCommunicationUseCase,
+  GetPatientOptOutWarningsUseCase,
   UpdatePatientCommunicationUseCase,
 } from './application/use-cases/patient-communication.use-cases';
 import { PATIENT_COMMUNICATION_REPOSITORY } from './domain/ports/patient-communication-repository.port';
@@ -73,6 +74,7 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     { provide: RETENTION_CLOCK, useValue: () => new Date() },
     // DX-128: bloque «Comunicaciones» de la ficha.
     GetPatientCommunicationUseCase,
+    GetPatientOptOutWarningsUseCase,
     UpdatePatientCommunicationUseCase,
     { provide: COMMUNICATION_CLOCK, useValue: () => new Date() },
     // DX-203: bloque «Responsable y familia».
