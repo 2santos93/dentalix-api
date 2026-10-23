@@ -241,6 +241,14 @@ jobs:
       - name: test:e2e
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         run: npm run test:e2e
+      # SEC-046: la prueba de carga de la importación (20 lecturas en paralelo,
+      # pico de RSS < +300 MB) va aparte porque tarda ~1 min; fuera de CI solo
+      # corre con RUN_SLOW_TESTS=1.
+      - name: test:e2e de carga (SEC-046)
+        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        env:
+          RUN_SLOW_TESTS: '1'
+        run: npm run test:e2e -- test/patient-imports-load
 
   # DX-113: en un Postgres gestionado (RDS, Cloud SQL…) el owner de las tablas
   # NO es superusuario ni tiene BYPASSRLS, y con RLS FORCE queda sujeto a la

@@ -15,8 +15,8 @@ import {
 // descomprimidos) y una clínica víctima que lista pacientes cada 250 ms. Mide
 // el pico de RSS del proceso y la latencia de la víctima.
 //
-// No corre por defecto (ni en CI): `RUN_SLOW_TESTS=1 npm run test:e2e --
-// test/patient-imports-load`. Solo usa HTTP, así que la misma suite mide el
+// No corre por defecto: `RUN_SLOW_TESTS=1 npm run test:e2e --
+// test/patient-imports-load`. En CI corre en su propio paso del job e2e. Solo usa HTTP, así que la misma suite mide el
 // código anterior a SEC-046 (sin tope) para comparar.
 const SLOW = process.env.RUN_SLOW_TESTS === '1';
 const describeSlow = SLOW
