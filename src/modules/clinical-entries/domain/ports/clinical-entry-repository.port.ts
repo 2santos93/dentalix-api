@@ -30,6 +30,8 @@ export interface ClinicalEntryAppointmentRef {
   patientId: string;
   status: AppointmentStatus;
   start: Date;
+  /** Sede de la cita: la restricción por sedes (DX-089) se comprueba con ella. */
+  locationId: string;
   /** Zona IANA de la sede de la cita: decide qué es «hoy» para ella. */
   timeZone: string;
 }

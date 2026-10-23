@@ -1,9 +1,14 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { InMemoryClinicalNoteTemplateRepository } from '../../../clinical-note-templates/application/__fixtures__/in-memory-clinical-note-templates';
 import { UpdateNoteTemplateUseCase } from '../../../clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import type { NoteTemplateDraft } from '../../../clinical-note-templates/domain/note-template-rules';
 import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 
 const RESIN: NoteTemplateDraft = {
@@ -31,13 +36,24 @@ function setup() {
   const entries = new InMemoryClinicalEntryRepository();
   const templates = new InMemoryClinicalNoteTemplateRepository();
   const resin = templates.seed(RESIN);
+  const tenantContext = new TenantContextService();
   const uc = new CreateClinicalEntryUseCase(
     entries,
     patientsInClinic('p1', 'p2'),
     templates,
+    tenantContext,
   );
   const [surface, material, remarks] = resin.prompts;
-  return { entries, templates, resin, uc, surface, material, remarks };
+  return {
+    entries,
+    templates,
+    resin,
+    uc,
+    surface,
+    material,
+    remarks,
+    tenantContext,
+  };
 }
 
 describe('CreateClinicalEntryUseCase con plantilla (DX-170)', () => {
@@ -182,6 +198,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     entries.appointments.push({
       id: 'a-hoy',
       patientId: 'p1',
+      locationId: 'loc-1',
       status: 'SCHEDULED',
       start: tonight,
       timeZone,
@@ -200,6 +217,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     entries.appointments.push({
       id: 'a-manana',
       patientId: 'p1',
+      locationId: 'loc-1',
       status: 'SCHEDULED',
       start: new Date('2026-10-18T05:30:00.000Z'),
       timeZone,
@@ -221,6 +239,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     entries.appointments.push({
       id: 'a1',
       patientId: 'p1',
+      locationId: 'loc-1',
       status: 'COMPLETED',
       start,
       timeZone,
@@ -243,6 +262,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     entries.appointments.push({
       id: 'a-noche',
       patientId: 'p1',
+      locationId: 'loc-1',
       status: 'COMPLETED',
       start: new Date('2026-10-17T02:30:00.000Z'),
       timeZone,
@@ -260,6 +280,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     entries.appointments.push({
       id: 'a1',
       patientId: 'p1',
+      locationId: 'loc-1',
       status: 'COMPLETED',
       start,
       timeZone,
@@ -281,11 +302,37 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     expect(entries.rows).toHaveLength(0);
   });
 
+  // SEC-045 (DX-089): la evolución toma la sede de la cita.
+  it('403 si la cita es de una sede que el miembro no tiene (no crea nada)', async () => {
+    const { uc, entries, tenantContext } = setup();
+    entries.appointments.push({
+      id: 'a-sur',
+      patientId: 'p1',
+      locationId: 'loc-sur',
+      status: 'COMPLETED',
+      start,
+      timeZone,
+    });
+    const asMemberOf = (locationIds: string[]) =>
+      tenantContext.run(
+        't1',
+        undefined,
+        () => uc.execute('p1', { notes: 'x', appointmentId: 'a-sur' }, 'd'),
+        locationIds,
+      );
+    await expect(asMemberOf(['loc-norte'])).rejects.toThrow(ForbiddenException);
+    expect(entries.rows).toHaveLength(0);
+    await expect(asMemberOf(['loc-sur'])).resolves.toMatchObject({
+      appointmentId: 'a-sur',
+    });
+  });
+
   it('400 en español si la cita es de otro paciente', async () => {
     const { uc, entries } = setup();
     entries.appointments.push({
       id: 'a2',
       patientId: 'p2',
+      locationId: 'loc-1',
       status: 'COMPLETED',
       start,
       timeZone,
@@ -302,6 +349,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       entries.appointments.push({
         id: 'a3',
         patientId: 'p1',
+        locationId: 'loc-1',
         status,
         start,
         timeZone,
