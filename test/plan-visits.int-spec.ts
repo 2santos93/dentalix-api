@@ -344,7 +344,10 @@ describe('DX-256 integridad real y concurrencia', () => {
   });
 });
 
-import { replaceAppointmentPlanItems } from '../src/modules/appointments/infrastructure/appointment-plan-items';
+import {
+  lockAppointmentForPlanItems,
+  replaceAppointmentPlanItems,
+} from '../src/modules/appointments/infrastructure/appointment-plan-items';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 const appointmentRepo = new PrismaAppointmentRepository(prisma, context);
 describe('DX-256 carreras de edición de vínculos', () => {
@@ -457,15 +460,27 @@ describe('DX-256 carreras de edición de vínculos', () => {
     });
     const transaction = run(() =>
       prisma.runWithTenant(async (tx) => {
-        // DX-271: la cita está cancelada; solo admite ítems en el PATCH que la
-        // reactiva (uno de los dos estados abierto, aquí el del otro lado).
+        // DX-271: una cita cancelada solo admite ítems en el PATCH que la
+        // reactiva. Mismo orden que `PrismaAppointmentRepository.update`: se
+        // bloquea y lee su estado real (CANCELLED), se reactiva y se
+        // reemplazan los enlaces con ese estado previo como `before`.
+        const before = await lockAppointmentForPlanItems(
+          tx,
+          tenantId,
+          cancelled,
+        );
+        expect(before?.status).toBe('CANCELLED');
+        await tx.appointment.update({
+          where: { id: cancelled },
+          data: { status: 'SCHEDULED' },
+        });
         await replaceAppointmentPlanItems(
           tx,
           tenantId,
           patientId,
           cancelled,
           [itemId],
-          { status: 'SCHEDULED', start: new Date(Date.now() + 20 * 86400000) },
+          before!,
         );
         entered();
         await resume;
@@ -483,11 +498,7 @@ describe('DX-256 carreras de edición de vínculos', () => {
       release();
       await transaction;
     }
-    // Reactivar después de la vinculación recalcula la reserva en el trigger.
-    await owner.appointment.update({
-      where: { id: cancelled },
-      data: { status: 'SCHEDULED' },
-    });
+    // Reactivada y vinculada en la misma transacción: la reserva está viva.
     expect(
       await owner.appointmentPlanItem.count({
         where: { appointmentId: cancelled, active: true },
@@ -582,11 +593,13 @@ describe('DX-256 carreras de edición de vínculos', () => {
       where: { id: cancelled },
       data: { status: 'CANCELLED' },
     });
-    // DX-271: a una cita cancelada no se le cambian los ítems por sí solos;
-    // el vínculo retirado de X vuelve aquí directo en la BD.
+    // DX-271: a una cita cancelada no se le cambian los ítems por sí solos,
+    // así que esta precondición (cancelada con X vinculado otra vez) ya no se
+    // puede crear desde la API: el vínculo retirado de X vuelve directo en la
+    // BD, como el que quedara de antes de la cancelación.
     await expect(
       run(() => appointmentRepo.update(cancelled, { planItemIds: [itemId] })),
-    ).rejects.toThrow('Esta cita ya pasó');
+    ).rejects.toThrow('Esta cita está cancelada');
     await owner.appointmentPlanItem.updateMany({
       where: { appointmentId: cancelled, planItemId: itemId },
       data: { deletedAt: null },
