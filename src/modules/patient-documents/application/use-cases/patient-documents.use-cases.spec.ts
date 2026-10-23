@@ -57,6 +57,7 @@ import {
   SIZE_MISMATCH_MESSAGE,
   UPLOAD_CHANGED_MESSAGE,
   UPLOAD_NOT_FOUND_MESSAGE,
+  DOCUMENT_CONTENT_REJECTED_CODE,
   UploadPatientDocumentUseCase,
   VOID_FORBIDDEN_MESSAGE,
   VoidPatientDocumentUseCase,
@@ -650,9 +651,17 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       'complete: %s → 400 en español, el objeto se borra y no hay fila',
       async (_label, bytes, fileName, mimeType, message) => {
         const id = await uploaded(bytes);
-        await expect(finish(id, { fileName, mimeType })).rejects.toThrow(
-          new BadRequestException(message),
+        const err = await finish(id, { fileName, mimeType }).catch(
+          (e: unknown) => e,
         );
+        expect(err).toEqual(new BadRequestException(message));
+        // QA D3: un código estable para que la web no ofrezca «Reintentar»
+        // (el mismo contenido daría el mismo 400).
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          statusCode: 400,
+          code: DOCUMENT_CONTENT_REJECTED_CODE,
+          message,
+        });
         expect(storage.deleted).toEqual([pendingKey(id)]);
         expect(storage.files.size).toBe(0);
         expect(repo.rows.size).toBe(0);
@@ -666,8 +675,11 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
         pendingKey(ticket.documentId),
         Buffer.concat([declared, Buffer.from('más')]),
       );
-      await expect(finish(ticket.documentId)).rejects.toThrow(
-        new BadRequestException(SIZE_MISMATCH_MESSAGE),
+      const err = await finish(ticket.documentId).catch((e: unknown) => e);
+      expect(err).toEqual(new BadRequestException(SIZE_MISMATCH_MESSAGE));
+      // Volver a subir el fichero sí puede salir bien: sin código definitivo.
+      expect((err as BadRequestException).getResponse()).not.toHaveProperty(
+        'code',
       );
       expect(storage.files.size).toBe(0);
       expect(repo.rows.size).toBe(0);

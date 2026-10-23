@@ -503,6 +503,22 @@ export const SIZE_MISMATCH_MESSAGE =
   'El tamaño del archivo subido no coincide con el declarado. Vuelve a subirlo.';
 export const CHECKSUM_MISMATCH_MESSAGE =
   'El archivo subido no coincide con su huella SHA-256. Vuelve a subirlo.';
+/**
+ * QA D3: código del 400 de `complete` cuando el CONTENIDO no vale (vacío, más
+ * de 20 MB, tipo no admitido o que no coincide con el declarado). Volver a
+ * subir el mismo fichero daría lo mismo: la web no ofrece «Reintentar».
+ */
+export const DOCUMENT_CONTENT_REJECTED_CODE = 'DOCUMENT_CONTENT_REJECTED';
+
+function contentRejected(message: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: DOCUMENT_CONTENT_REJECTED_CODE,
+    message,
+  });
+}
+
 export const UPLOAD_CHANGED_MESSAGE =
   'El archivo cambió mientras se comprobaba. Vuelve a subirlo.';
 
@@ -666,10 +682,9 @@ export class CompletePatientDocumentUploadUseCase {
       throw error;
     };
 
-    if (info.size === 0)
-      return reject(new BadRequestException(EMPTY_FILE_MESSAGE));
+    if (info.size === 0) return reject(contentRejected(EMPTY_FILE_MESSAGE));
     if (info.size > MAX_PATIENT_DOCUMENT_BYTES) {
-      return reject(new BadRequestException(FILE_TOO_LARGE_MESSAGE));
+      return reject(contentRejected(FILE_TOO_LARGE_MESSAGE));
     }
     if (String(info.size) !== info.metadata[META.size]) {
       return reject(new BadRequestException(SIZE_MISMATCH_MESSAGE));
@@ -693,7 +708,9 @@ export class CompletePatientDocumentUploadUseCase {
         { mimeType: fields.mimeType, originalName: fields.fileName },
       );
     } catch (error) {
-      if (error instanceof BadRequestException) return reject(error);
+      if (error instanceof BadRequestException) {
+        return reject(contentRejected(error.message));
+      }
       if (error instanceof StorageObjectChangedError) {
         return winnerOr(() =>
           reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE)),

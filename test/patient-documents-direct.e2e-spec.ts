@@ -236,6 +236,10 @@ describeWithMinio(
       expect((res.body as { message: string }).message).toBe(
         'Tipo de archivo no admitido. Se aceptan PDF, JPG, PNG, HEIC, DOCX y DICOM.',
       );
+      // QA D3: definitivo, la web no ofrece «Reintentar».
+      expect((res.body as { code?: string }).code).toBe(
+        'DOCUMENT_CONTENT_REJECTED',
+      );
       expect(
         await raw.patientDocument.count({ where: { id: ticket.documentId } }),
       ).toBe(0);
