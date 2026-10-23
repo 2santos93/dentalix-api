@@ -918,6 +918,34 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(presentable.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('DX-050: los realizados quedan atribuidos (quién, sede, fecha) en las dos sedes, y uno «Sin atribuir»', async () => {
+    const tenantId = await liveDemoTenantId();
+    const done = await raw.treatmentPlanItem.findMany({
+      where: { tenantId, status: 'DONE', deletedAt: null },
+      include: {
+        performedByMembership: { select: { role: true } },
+        performedLocation: { select: { name: true } },
+      },
+    });
+    const attributed = done.filter((i) => i.performedById !== null);
+    const unattributed = done.filter((i) => i.performedById === null);
+    expect(unattributed).toHaveLength(1);
+    expect(unattributed[0]).toMatchObject({
+      performedLocationId: null,
+      completedAt: null,
+    });
+    expect(attributed.length).toBe(done.length - 1);
+    for (const item of attributed) {
+      expect(item.performedByMembership?.role).toBe('DENTIST');
+      expect(item.completedAt).not.toBeNull();
+      expect(item.completedAt!.getTime()).toBeLessThanOrEqual(Date.now());
+    }
+    expect(new Set(attributed.map((i) => i.performedLocation?.name)).size).toBe(
+      2,
+    );
+    expect(new Set(attributed.map((i) => i.performedById)).size).toBe(2);
+  });
+
   it('DX-040: un grupo A/B presentado hace más de 7 días, sin cita futura, sale en «Presupuestos por seguir»', async () => {
     const tenantId = await liveDemoTenantId();
     const options = await raw.treatmentPlan.findMany({

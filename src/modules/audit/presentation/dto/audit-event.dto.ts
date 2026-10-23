@@ -161,6 +161,26 @@ export class AuditImportBatchDto {
   balanceUndoneTotals?: AuditCurrencyTotalDto[];
 }
 
+/** Un lado de la atribución de un ítem realizado (DX-050). */
+export class AuditAttributionSideDto {
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  performedById!: string | null;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  locationId!: string | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  completedAt!: string | null;
+}
+
+export class AuditAttributionChangeDto {
+  @ApiProperty({ type: AuditAttributionSideDto })
+  before!: AuditAttributionSideDto;
+
+  @ApiProperty({ type: AuditAttributionSideDto })
+  after!: AuditAttributionSideDto;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -227,6 +247,13 @@ export class AuditMetadataDto {
       'DX-107: lote de importación de pacientes — hash del archivo, modo de duplicados y totales (solo números).',
   })
   importBatch?: AuditImportBatchDto;
+
+  @ApiPropertyOptional({
+    type: AuditAttributionChangeDto,
+    description:
+      'DX-050: quién realizó un ítem del plan, en qué sede y cuándo, antes y después (`reason` PLAN_ITEM_ATTRIBUTION_CORRECTED o PLAN_ITEM_DONE_REVERTED). Solo ids e instantes.',
+  })
+  attribution?: AuditAttributionChangeDto;
 }
 
 export class AuditEventDto {

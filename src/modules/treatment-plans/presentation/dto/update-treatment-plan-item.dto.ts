@@ -2,9 +2,11 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
   IsEnum,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
 } from 'class-validator';
 import { ToothSurface, TreatmentPlanItemStatus } from '@prisma/client';
@@ -40,10 +42,35 @@ export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @IsMoney()
   discount?: number;
 
-  @ApiPropertyOptional({ enum: TreatmentPlanItemStatus })
+  @ApiPropertyOptional({
+    enum: TreatmentPlanItemStatus,
+    description:
+      'DX-050: pasar a DONE guarda quién lo realizó (`performedById`), la sede del request (`X-Location-Id`) y `completedAt` (hora del servidor). Salir de DONE limpia los tres; solo ADMIN o quien lo realizó (403 si no), y queda auditado',
+  })
   @IsOptional()
   @IsEnum(TreatmentPlanItemStatus)
   status?: TreatmentPlanItemStatus;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-050: usuario que realizó el procedimiento (miembro VIVO de esta clínica que atiende: DENTIST o ADMIN, y que atiende en la sede). Al pasar a DONE: por defecto quien marca si atiende; si no (ASSISTANT), obligatorio (400). Otra clínica o desactivado: 404. En un ítem ya DONE solo un ADMIN lo cambia (403), auditado',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'performedById debe ser un UUID.' })
+  performedById?: string;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description:
+      'DX-050: SOLO para que un ADMIN corrija la fecha de un ítem ya DONE (403 a otro rol, 400 si es futura). Al pasar a DONE la pone el servidor (400 si llega)',
+  })
+  @IsOptional()
+  @IsISO8601(
+    { strict: true },
+    { message: 'completedAt debe ser una fecha y hora ISO 8601.' },
+  )
+  completedAt?: string;
 
   @ApiPropertyOptional({ enum: ToothSurface, isArray: true })
   @IsOptional()

@@ -117,6 +117,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
     await owner.treatmentPlan.deleteMany({ where });
     await owner.dentalCatalogItem.deleteMany({ where });
     await owner.patient.deleteMany({ where });
+    await owner.clinicMembership.deleteMany({ where });
     await owner.location.deleteMany({ where });
     await owner.tenant.deleteMany({
       where: { id: { in: tenants.map((t) => t.id) } },
@@ -193,6 +194,10 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
         },
       })
     ).id;
+    // DX-050: quien marca un ítem realizado es miembro de la clínica.
+    await owner.clinicMembership.create({
+      data: { tenantId, userId, role: ClinicRole.ADMIN },
+    });
     locationId = (
       await owner.location.create({ data: { tenantId, name: 'Sede' } })
     ).id;

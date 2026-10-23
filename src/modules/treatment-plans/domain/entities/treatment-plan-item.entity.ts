@@ -53,6 +53,16 @@ export interface TreatmentPlanItem {
   discountAt: Date | null;
   discountLocationId: string | null;
   status: TreatmentPlanItemStatus;
+  /**
+   * DX-050: quién lo realizó (usuario y su nombre), en qué sede (id y nombre)
+   * y cuándo (hora del servidor). Todo null fuera de DONE y en los DONE
+   * anteriores a DX-050 («Sin atribuir»).
+   */
+  performedById: string | null;
+  performedByName: string | null;
+  performedLocationId: string | null;
+  performedLocationName: string | null;
+  completedAt: Date | null;
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;

@@ -709,6 +709,43 @@ hasta 1 h (SEC-028).
   su hora, otra 3 min tarde), una en el sillón y otra lista para cobrar
   (dentro del horario de hoy; con la sede cerrada, ninguna).
 
+## Producción atribuible: quién realizó cada ítem, dónde y cuándo (DX-050)
+
+- **Columnas** de `treatment_plan_items` (migración
+  `20261023160000_dx050_plan_item_attribution`, aditiva): `performedById` (el
+  usuario, como `appointments.providerId`), `performedByMembershipId` (su
+  membresía en esta clínica), `performedLocationId` y `completedAt`. FK
+  COMPUESTA `("tenantId","performedByMembershipId","performedById")` →
+  `clinic_memberships("tenantId","id","userId")`: quien lo realizó es miembro de
+  la MISMA clínica y la membresía es la de ese usuario; la sede, FK compuesta a
+  `locations`. CHECK: usuario y membresía van juntos, y un ítem que no está
+  DONE no lleva atribución. Los DONE anteriores quedan a NULL («Sin atribuir»);
+  sin backfill.
+- **Marcar DONE** (`PATCH /treatment-plans/:id/items/:itemId` con
+  `status: DONE`, el único camino que realiza un ítem; las reservas por cita
+  no lo hacen): `performedById` opcional si quien marca atiende (DENTIST o
+  ADMIN, se usa él); si no (ASSISTANT), 400 «Indica qué profesional realizó el
+  procedimiento.». El profesional tiene que ser miembro VIVO de esta clínica
+  (otra clínica o desactivado: 404), atender (ASSISTANT/RECEPTION: 400) y, si
+  está restringido a sedes (DX-089), atender en la sede (400). La sede es la de
+  `X-Location-Id` (o la de escritura de la sesión) y `completedAt` la hora del
+  servidor (400 si llega). Todo en la transacción del ítem, con la membresía
+  `FOR SHARE`. El registro del odontograma (`sourcePlanItemId`) lo firma quien
+  lo realizó.
+- **Corregir** quién o cuándo de un DONE: solo ADMIN (403 a los demás), fecha no
+  futura; también en un plan cerrado (el trigger
+  `treatment_plan_items_locked_when_closed` admite ese cambio y nada más). La
+  sede no se corrige. Queda un `audit_event` en la misma transacción con
+  `reason` PLAN_ITEM_ATTRIBUTION_CORRECTED y `metadata.attribution`
+  (`before`/`after`: usuario, sede e instante; solo ids).
+- **Salir de DONE** (a aceptado o propuesto): lo hacen ADMIN o quien lo realizó
+  (un «marcado por error»; 403 a otro, para que nadie se lleve la producción
+  ajena). La atribución se limpia y queda el evento PLAN_ITEM_DONE_REVERTED con
+  el antes.
+- **Respuesta**: cada ítem trae `performedById`, `performedByName`,
+  `performedLocationId`, `performedLocationName` y `completedAt` (null = sin
+  realizar o «Sin atribuir»).
+
 ## Visitas del plan: salida de «Completada» y reservas en otra cita (DX-256, DX-271, DX-273)
 
 - **Intervalo mínimo** (DX-256): la visita N de un plan aceptado no se agenda

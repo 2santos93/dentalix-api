@@ -10,6 +10,7 @@ import {
   ClinicRole,
   Prisma,
   ScheduleBlockKind,
+  TreatmentPlanItemStatus,
   TreatmentPlanStatus,
   WaitlistPriority,
 } from '@prisma/client';
@@ -175,6 +176,8 @@ import {
   DEMO_COVERAGES,
   DEMO_RESPONSIBLES,
   DEMO_PLANS,
+  type DemoPlan,
+  type DemoPlanItem,
   DEMO_COLLECTION_NOTES,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
@@ -1701,6 +1704,34 @@ class DemoSeeder {
     return null;
   }
 
+  /**
+   * DX-050: un realizado de la demo se fecha el día del primer abono del plan
+   * (ningún caso de uso fecha el pasado); uno `unattributed` queda como los
+   * DONE anteriores a DX-050, sin quién, sede ni fecha. Bajo
+   * `app.current_tenant`, como el resto.
+   */
+  private async datePlanItemDone(
+    itemId: string,
+    spec: DemoPlan,
+    item: DemoPlanItem,
+  ): Promise<void> {
+    const firstPaymentDaysAgo = Math.max(
+      0,
+      ...spec.payments.map((p) => p.daysAgo),
+    );
+    const data = item.unattributed
+      ? {
+          performedById: null,
+          performedByMembershipId: null,
+          performedLocationId: null,
+          completedAt: null,
+        }
+      : { completedAt: daysAgoAt(this.now, firstPaymentDaysAgo, 10 * 60) };
+    await this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlanItem.update({ where: { id: itemId }, data }),
+    );
+  }
+
   private async createPlansAndPayments(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
@@ -1737,12 +1768,21 @@ class DemoSeeder {
             item.discountBy === 'owner' ? owner : dentist,
           );
           if (item.status !== 'PROPOSED') {
-            // DONE refleja el ítem en el odontograma (lo hace el caso de uso).
-            await this.use(UpdateTreatmentPlanItemUseCase).execute(
-              added.id,
-              { status: item.status },
-              dentist,
+            // DONE refleja el ítem en el odontograma (lo hace el caso de uso)
+            // y lo atribuye al odontólogo, en la sede del plan (DX-050).
+            await this.inTenant(
+              tenantId,
+              locations[spec.doneAt ?? 'principal'],
+              () =>
+                this.use(UpdateTreatmentPlanItemUseCase).execute(
+                  added.id,
+                  { status: item.status },
+                  dentist,
+                ),
             );
+            if (item.status === TreatmentPlanItemStatus.DONE) {
+              await this.datePlanItemDone(added.id, spec, item);
+            }
           }
         }
         // La máquina de estados (DX-040) no salta de borrador a completado:

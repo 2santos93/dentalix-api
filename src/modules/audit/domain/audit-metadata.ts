@@ -63,6 +63,19 @@ export interface AuditMetadata {
    * `appointment_status_reversals` (`params.reversalId`).
    */
   visitMinimums?: AuditVisitMinimum[];
+  /**
+   * DX-050: quién realizó un ítem del plan, en qué sede y cuándo, antes y
+   * después de que un ADMIN lo corrija o de que el ítem salga de «Realizado».
+   * Solo uuids e instantes ISO (null = sin atribuir).
+   */
+  attribution?: { before: AuditAttributionSide; after: AuditAttributionSide };
+}
+
+/** Un lado de la atribución de un ítem realizado (DX-050). */
+export interface AuditAttributionSide {
+  performedById: string | null;
+  locationId: string | null;
+  completedAt: string | null;
 }
 
 /** Mínimo de una visita del plan antes y después (DX-273). */
@@ -410,6 +423,40 @@ function visitMinimums(value: unknown): AuditVisitMinimum[] {
     .slice(0, MAX_VISIT_MINIMUMS);
 }
 
+function uuidOrNull(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && UUID.test(value));
+}
+
+/** Un lado con exactamente esa forma, o `null`. */
+function attributionSide(value: unknown): AuditAttributionSide | null {
+  if (!isRecord(value)) return null;
+  const { performedById, locationId, completedAt, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    !uuidOrNull(performedById) ||
+    !uuidOrNull(locationId) ||
+    !(
+      completedAt === null ||
+      (typeof completedAt === 'string' && ISO_INSTANT.test(completedAt))
+    )
+  ) {
+    return null;
+  }
+  return {
+    performedById: performedById?.toLowerCase() ?? null,
+    locationId: locationId?.toLowerCase() ?? null,
+    completedAt,
+  };
+}
+
+/** Los dos lados con la forma admitida, o nada. */
+function attribution(value: unknown): AuditMetadata['attribution'] | null {
+  if (!isRecord(value)) return null;
+  const before = attributionSide(value.before);
+  const after = attributionSide(value.after);
+  return before && after ? { before, after } : null;
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -441,5 +488,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (batch) out.importBatch = batch;
   const minimums = visitMinimums(input.visitMinimums);
   if (minimums.length > 0) out.visitMinimums = minimums;
+  const attributed = attribution(input.attribution);
+  if (attributed) out.attribution = attributed;
   return out;
 }
