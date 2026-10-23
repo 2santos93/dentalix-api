@@ -1,19 +1,24 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { CreateConfirmationLinkUseCase } from './create-confirmation-link.use-case';
 import { InMemoryAppointmentConfirmationRepository } from './__fixtures__/in-memory-appointment-confirmation.repository';
 import { hashConfirmationToken } from '../confirmation-token';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 
 describe('CreateConfirmationLinkUseCase', () => {
   let repo: InMemoryAppointmentConfirmationRepository;
   let uc: CreateConfirmationLinkUseCase;
+  let ctx: TenantContextService;
 
   beforeEach(() => {
     repo = new InMemoryAppointmentConfirmationRepository();
-    uc = new CreateConfirmationLinkUseCase(repo);
+    ctx = new TenantContextService();
+    uc = new CreateConfirmationLinkUseCase(repo, ctx);
   });
 
   it('genera un token de un solo uso que caduca al inicio de la cita y guarda SOLO su hash', async () => {
@@ -125,5 +130,39 @@ describe('CreateConfirmationLinkUseCase', () => {
       uc.execute({ appointmentId: appointment.id }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repo.confirmations).toHaveLength(0);
+  });
+
+  // SEC-045: la restricción por sedes de DX-089, como GET /appointments/:id.
+  describe('sedes permitidas', () => {
+    const asMemberOf = <T>(locationIds: string[], fn: () => Promise<T>) =>
+      ctx.run('t-1', undefined, fn, locationIds);
+
+    it('cita de una sede no permitida -> 403 sin revocar el enlace vigente', async () => {
+      const appointment = repo.addAppointment({ locationId: 'loc-sur' });
+      await uc.execute({ appointmentId: appointment.id });
+      const issue = jest.spyOn(repo, 'issue');
+
+      const denied = asMemberOf(['loc-norte'], () =>
+        uc.execute({ appointmentId: appointment.id }),
+      );
+      await expect(denied).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(denied).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+      expect(issue).not.toHaveBeenCalled();
+      expect(repo.confirmations).toHaveLength(1);
+      expect(repo.confirmations[0].revokedAt).toBeNull();
+    });
+
+    it('cita de una sede permitida, o sin restricción -> emite', async () => {
+      const appointment = repo.addAppointment({ locationId: 'loc-norte' });
+      await expect(
+        asMemberOf(['loc-norte'], () =>
+          uc.execute({ appointmentId: appointment.id }),
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        ctx.run('t-1', () => uc.execute({ appointmentId: appointment.id })),
+      ).resolves.toBeDefined();
+      expect(repo.confirmations).toHaveLength(2);
+    });
   });
 });

@@ -452,6 +452,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           status: appointment.status,
           deleted: false,
         },
+        locationId: appointment.locationId,
         settings,
         contact: toContact(appointment.patient),
         records: records.map((r) => ({

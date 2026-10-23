@@ -29,7 +29,7 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
   beforeEach(() => {
     repo = new InMemoryAppointmentConfirmationRepository();
     ctx = new TenantContextService();
-    create = new CreateConfirmationLinkUseCase(repo);
+    create = new CreateConfirmationLinkUseCase(repo, ctx);
     get = new GetPublicConfirmationUseCase(ctx, repo);
     respond = new RespondConfirmationUseCase(ctx, repo);
   });

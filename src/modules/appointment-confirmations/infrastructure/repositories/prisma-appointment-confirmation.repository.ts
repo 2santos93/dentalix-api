@@ -27,6 +27,7 @@ const APPOINTMENT_SELECT = {
   end: true,
   status: true,
   providerId: true,
+  locationId: true,
   patient: { select: { firstName: true, phone: true, countryCode: true } },
   location: { select: { name: true, address: true } },
 } as const satisfies Prisma.AppointmentSelect;
@@ -105,6 +106,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       patientPhone: a.patient.phone,
       patientCountryCode: a.patient.countryCode,
       providerName: membership?.user.fullName ?? null,
+      locationId: a.locationId,
       locationName: a.location.name,
       locationAddress: a.location.address,
     };
