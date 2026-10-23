@@ -3,7 +3,7 @@
 --
 -- DX-102 (audit_events particionada) exige un índice parcial
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType".
--- Va en su PROPIA migración: el valor se añadió en 20261021030000_dx107_enums
+-- Va en su PROPIA migración: el valor se añadió en 20261022130000_dx107_enums
 -- y Postgres no deja usar un valor de enum nuevo en la misma transacción que
 -- lo crea.
 --

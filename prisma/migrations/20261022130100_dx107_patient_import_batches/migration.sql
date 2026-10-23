@@ -24,9 +24,14 @@
 -- ("tenantId") con status QUEUED o RUNNING.
 --
 -- FK COMPUESTAS por tenant (SEC-004). Las de las tablas nuevas van DENTRO del
--- CREATE TABLE (nacen vacías; DX-134). La de patients → lote se añade NOT
--- VALID y se valida con patients en NO FORCE (DX-134: con FORCE, la
--- validación no vería las filas); la columna es nueva y está entera a NULL.
+-- CREATE TABLE (nacen vacías; DX-134). La de patients → lote se añade aquí
+-- NOT VALID: no lee filas, así que NO hace falta NO FORCE (que tomaría ACCESS
+-- EXCLUSIVE sobre patients hasta el COMMIT) y se aplica ya a toda fila nueva
+-- o modificada. La columna es nueva y está entera a NULL. Revisión
+-- 2026-10-23 (I3): el índice de patients va CONCURRENTLY en
+-- 20261022130300_dx107_patients_import_batch_idx y el VALIDATE, que con el
+-- índice parcial ya creado no recorre patients, en
+-- 20261022130400_dx107_patients_import_batch_fk_validate.
 --
 -- Compatible hacia atrás: solo AÑADE (dos tablas vacías, una columna NULL y
 -- sus índices). El código anterior no las conoce; ADD COLUMN sin DEFAULT no
@@ -159,25 +164,18 @@ CREATE POLICY tenant_isolation ON "patient_import_rows"
   USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
   WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 
--- patients.import_batch_id y su FK compuesta. NO FORCE en la hija (patients)
--- mientras se valida (DX-134); la referenciada aún no tiene FORCE.
+-- patients.import_batch_id y su FK compuesta, NOT VALID (no lee filas: sin
+-- NO FORCE ni recorrido de patients). Solo metadatos: el bloqueo de patients
+-- dura lo que tarda en confirmar esta migración (tablas nuevas y vacías).
 ALTER TABLE "patients" ADD COLUMN "import_batch_id" UUID;
-ALTER TABLE "patients" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "patients" ADD CONSTRAINT "patients_import_batch_fkey"
   FOREIGN KEY ("tenantId", "import_batch_id")
   REFERENCES "patient_import_batches"("tenantId", "id")
   ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "patients" VALIDATE CONSTRAINT "patients_import_batch_fkey";
-ALTER TABLE "patients" FORCE ROW LEVEL SECURITY;
 
 -- Lado hijo de la FK de la sede.
 CREATE INDEX "patient_import_batches_tenant_location_idx"
   ON "patient_import_batches"("tenantId", "locationId");
-
--- Pacientes de un lote (deshacer) y lado hijo de la FK.
-CREATE INDEX "patients_tenant_import_batch_idx"
-  ON "patients"("tenantId", "import_batch_id")
-  WHERE "import_batch_id" IS NOT NULL;
 
 ALTER TABLE "patient_import_batches" FORCE ROW LEVEL SECURITY;
 ALTER TABLE "patient_import_rows" FORCE ROW LEVEL SECURITY;

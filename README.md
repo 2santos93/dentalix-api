@@ -1894,6 +1894,20 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
 - **Tablas**: `patient_import_batches` y `patient_import_rows`, RLS FORCE y FK
   compuestas por tenant (sede, lote, paciente). Rendimiento: el dry-run de
   10.000 filas tarda unos segundos (e2e: < 60 s).
+- **Migraciones sin bloqueo largo de `patients`**: `…130100` solo añade
+  `import_batch_id` y la FK `NOT VALID` (no lee filas); el índice parcial va
+  `CONCURRENTLY` en `…130300` y el `VALIDATE` en `…130400`, con `ANALYZE` de
+  la columna antes del `NO FORCE`: con esa estadística la comprobación usa el
+  índice parcial (vacío) y no recorre la tabla (~1 ms con 1 M de pacientes,
+  frente a ~160 ms de recorrido con ACCESS EXCLUSIVE). Lo vigila
+  `test/migrations/dx107-patients-lock.spec.ts`.
+- **Lector de ficheros acotado**: XLSX con ≤ 16.384 celdas por fila, ≤ 64.000
+  estilos, ≤ 1 M de cadenas compartidas y 4 M de pasos del escáner por
+  fichero (400 en español), cediendo el hilo cada 8.192 pasos; CSV
+  Windows-1252 decodificado en nativo.
+- **Supresión parcial (Ley 1581)**: «Actualizar solo campos vacíos» nunca
+  rellena los campos suprimidos de un paciente con `partially_suppressed_at`
+  (el dry-run lo avisa en la fila).
 - **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
   con separador `;`, errores, un repetido y uno de la clínica demo).
 
