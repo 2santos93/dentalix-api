@@ -8,6 +8,7 @@ import {
 import {
   EXTENSION_MISMATCH_MESSAGE,
   LEGACY_XLS_MESSAGE,
+  NOT_A_TABLE_TXT_MESSAGE,
   NO_ROWS_MESSAGE,
   UNREADABLE_MESSAGE,
   UNSUPPORTED_EXTENSION_MESSAGE,
@@ -381,6 +382,23 @@ describe('readImportFile', () => {
     await expect(
       readImportFile(csvBytes('nombres;doc\n\n'), 'p.csv'),
     ).rejects.toThrow(NO_ROWS_MESSAGE);
+  });
+
+  it('un .txt que no es una tabla dice que solo se admiten .csv o .xlsx (QA O2)', async () => {
+    await expect(
+      readImportFile(csvBytes('hola, esto es una nota\n'), 'notas.txt'),
+    ).rejects.toThrow(NOT_A_TABLE_TXT_MESSAGE);
+    await expect(
+      readImportFile(csvBytes('una línea suelta\n'), 'notas.txt'),
+    ).rejects.toThrow(/solo se admiten archivos \.csv o \.xlsx/i);
+    // Un .txt tabulado («Texto Unicode» de Excel) se sigue leyendo.
+    const unicode = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from('nombres\tdoc\r\nAna\t1\r\n', 'utf16le'),
+    ]);
+    expect(
+      (await readImportFile(unicode, 'pacientes.txt')).table.rows,
+    ).toHaveLength(1);
   });
 
   it('CSV de 5 MB de saltos de línea o de «;»: error claro sin agotar la memoria', async () => {

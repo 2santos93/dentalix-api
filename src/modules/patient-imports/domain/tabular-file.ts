@@ -48,7 +48,7 @@ export const MAX_PHYSICAL_ROWS = 50_000;
 /** Una celda más larga no cabe en ningún campo: se guarda recortada. */
 export const MAX_CELL_CHARS = 5_000;
 
-const NO_HEADER_MESSAGE =
+export const NO_HEADER_MESSAGE =
   'El archivo no tiene cabecera: la primera fila con datos debe tener los nombres de las columnas.';
 const TOO_MANY_COLUMNS_MESSAGE = `El archivo tiene más de ${MAX_COLUMNS} columnas: revisa que sea la hoja de pacientes.`;
 const TOO_MANY_PHYSICAL_MESSAGE = `El archivo tiene más de ${MAX_PHYSICAL_ROWS.toLocaleString('es-CO')} filas (contando las vacías). Quita las filas en blanco o divídelo.`;

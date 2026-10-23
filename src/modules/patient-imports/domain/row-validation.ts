@@ -117,10 +117,11 @@ export function normalizeDocNumber(
   type: DocType,
   raw: string,
 ): { value: string } | { error: string } {
-  if (SCIENTIFIC.test(raw.replace(/\s/g, ''))) {
+  const compact = raw.replace(/\s/g, '');
+  if (SCIENTIFIC.test(compact)) {
+    // El valor es el de la fila (QA 2026-10-23, D2), nunca un ejemplo fijo.
     return {
-      error:
-        'El número de documento quedó en notación científica (1,02E+09): en Excel da a la columna formato Texto y vuelve a exportar.',
+      error: `El número de documento quedó en notación científica (${compact.slice(0, 30)}): en Excel da a la columna formato Texto y vuelve a exportar.`,
     };
   }
   const upper = raw.toUpperCase();

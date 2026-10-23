@@ -1,6 +1,11 @@
 import type { PatientImportFileFormat } from '@prisma/client';
 import { parseCsv, type CsvDelimiter, type CsvEncoding } from './csv-parser';
-import { ImportFileError, buildTable, type ParsedTable } from './tabular-file';
+import {
+  ImportFileError,
+  NO_HEADER_MESSAGE,
+  buildTable,
+  type ParsedTable,
+} from './tabular-file';
 import { looksLikeOle, looksLikeZip, readXlsx } from './xlsx-reader';
 
 export const UNSUPPORTED_EXTENSION_MESSAGE =
@@ -25,6 +30,9 @@ function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot < 0 ? '' : name.slice(dot + 1).toLowerCase();
 }
+
+export const NOT_A_TABLE_TXT_MESSAGE =
+  'El archivo .txt no parece una tabla de pacientes. Solo se admiten archivos .csv o .xlsx (Excel): guárdalo desde Excel como «CSV UTF-8» o como .xlsx.';
 
 export const UNREADABLE_MESSAGE =
   'No se pudo leer el archivo. Ábrelo en Excel y guárdalo de nuevo como «CSV UTF-8» o .xlsx.';
@@ -67,8 +75,25 @@ async function read(bytes: Buffer, originalName: string): Promise<ImportFile> {
     return { format: 'XLSX', table };
   }
   const csv = parseCsv(bytes);
-  const table = await buildTable(csv.records);
-  if (table.rows.length === 0) throw new ImportFileError(NO_ROWS_MESSAGE);
+  // Un .txt se admite por el «Texto Unicode» de Excel (tabulado); si no sale
+  // una tabla, el problema es el tipo de archivo, no la cabecera (QA O2).
+  const txt = ext === 'txt';
+  let table: ParsedTable;
+  try {
+    table = await buildTable(csv.records);
+  } catch (err) {
+    if (
+      txt &&
+      err instanceof ImportFileError &&
+      err.message === NO_HEADER_MESSAGE
+    ) {
+      throw new ImportFileError(NOT_A_TABLE_TXT_MESSAGE);
+    }
+    throw err;
+  }
+  if (table.rows.length === 0) {
+    throw new ImportFileError(txt ? NOT_A_TABLE_TXT_MESSAGE : NO_ROWS_MESSAGE);
+  }
   return {
     format: 'CSV',
     table,

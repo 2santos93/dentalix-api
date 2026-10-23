@@ -94,6 +94,10 @@ describe('normalización de campos', () => {
     expect(errorOf(normalizeDocNumber('CC', '1,02E+09'))).toMatch(
       /notación científica.*formato Texto/,
     );
+    // QA 2026-10-23 D2: el valor del mensaje es el de la fila, no uno fijo.
+    const real = errorOf(normalizeDocNumber('CC', ' 1,09E+09 '));
+    expect(real).toContain('(1,09E+09)');
+    expect(real).not.toContain('1,02E+09');
     expect(normalizeDocNumber('PASSPORT', 'ab-12 345')).toEqual({
       value: 'AB12345',
     });
