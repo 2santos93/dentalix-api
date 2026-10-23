@@ -374,3 +374,55 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
     ).toEqual({ importBatch: { fileSha256: sha } });
   });
 });
+
+describe('sanitizeAuditMetadata — mínimo de la visita siguiente (DX-273)', () => {
+  const plan = '0192f1a0-0000-7000-8000-000000000001';
+
+  it('conserva plan, visita y días civiles (o null) antes y después', () => {
+    expect(
+      sanitizeAuditMetadata({
+        visitMinimums: [
+          {
+            planId: plan.toUpperCase(),
+            visit: 2,
+            before: '2027-01-20',
+            after: null,
+          },
+          { planId: plan, visit: 3, before: null, after: '2027-02-01' },
+        ],
+      }),
+    ).toEqual({
+      visitMinimums: [
+        { planId: plan, visit: 2, before: '2027-01-20', after: null },
+        { planId: plan, visit: 3, before: null, after: '2027-02-01' },
+      ],
+    });
+  });
+
+  it('una entrada con otra forma se descarta entera (sin texto libre)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        visitMinimums: [
+          { planId: 'Ana Pérez', visit: 2, before: null, after: null },
+          { planId: plan, visit: 0, before: null, after: null },
+          { planId: plan, visit: 2, before: 'mañana', after: null },
+          { planId: plan, visit: 2, before: null, after: null, note: 'x' },
+          { planId: plan, visit: 2, before: null, after: null },
+        ],
+      }),
+    ).toEqual({
+      visitMinimums: [{ planId: plan, visit: 2, before: null, after: null }],
+    });
+    expect(sanitizeAuditMetadata({ visitMinimums: 'x' })).toEqual({});
+    expect(
+      sanitizeAuditMetadata({
+        visitMinimums: Array.from({ length: 60 }, (_, i) => ({
+          planId: plan,
+          visit: i + 1,
+          before: null,
+          after: null,
+        })),
+      }).visitMinimums,
+    ).toHaveLength(50);
+  });
+});

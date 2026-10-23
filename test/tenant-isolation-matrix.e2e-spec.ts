@@ -1347,6 +1347,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
     },
     {
+      // DX-273 «Traer a esta cita» sobre una cita y un ítem de A.
+      name: 'POST /appointments/:id/plan-items/:planItemId/claim',
+      verb: 'post',
+      path: () =>
+        `/appointments/${a.appointmentId}/plan-items/${a.planItemId}/claim`,
+      status: 404,
+    },
+    {
       // El panel de la sede de A: la sede ajena se rechaza antes del handler.
       name: 'GET /appointments/in-clinic con X-Location-Id de A',
       verb: 'get',

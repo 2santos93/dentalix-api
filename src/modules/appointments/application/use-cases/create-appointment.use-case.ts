@@ -272,7 +272,8 @@ export class CreateAppointmentUseCase {
         wantsEarlier: input.wantsEarlier,
         planItemIds: input.planItemIds,
       });
-      return { ...created, ...warnings };
+      // DX-273: un alta con ítems ya reservados en otra cita es 409; nunca avisa.
+      return { ...created, ...warnings, planItemsReservedElsewhere: [] };
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {

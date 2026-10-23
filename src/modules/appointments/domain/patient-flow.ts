@@ -42,6 +42,33 @@ export const CHAIRSIDE_ROLES: readonly ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+/**
+ * DX-273: sacar una cita de COMPLETED (a agendada, confirmada, cancelada…)
+ * cambia lo que se hizo en esa visita y, con ello, el intervalo mínimo de la
+ * visita siguiente del plan (DX-256). Solo quien responde de la clínica.
+ */
+export const COMPLETED_EXIT_ROLES: readonly ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.DENTIST,
+];
+
+/** Límites del motivo de una salida de COMPLETED, ya recortado. */
+export const STATUS_REASON_MIN = 3;
+export const STATUS_REASON_MAX = 500;
+
+/**
+ * El motivo recortado si tiene entre 3 y 500 caracteres; si no, `null`.
+ */
+export function normalizeStatusReason(
+  raw: string | null | undefined,
+): string | null {
+  const reason = raw?.trim() ?? '';
+  return reason.length >= STATUS_REASON_MIN &&
+    reason.length <= STATUS_REASON_MAX
+    ? reason
+    : null;
+}
+
 export const PATIENT_FLOW_MESSAGES = {
   arriveForbidden:
     'La llegada la marcan recepción, la asistente o la administración.',
@@ -63,10 +90,19 @@ export const PATIENT_FLOW_MESSAGES = {
   moveInClinic:
     'El paciente está en la clínica: completa la cita o deshaz la llegada antes de moverla a otro día.',
   stale: 'La cita cambió mientras tanto. Recarga la agenda.',
+  completedExitForbidden:
+    'Solo el odontólogo o la administración pueden sacar una cita de «Completada».',
+  completedExitReason:
+    'Indica el motivo (de 3 a 500 caracteres) para sacar la cita de «Completada».',
 } as const;
 
 export type TransitionCheck =
-  { ok: true } | { ok: false; kind: 'FORBIDDEN' | 'CONFLICT'; message: string };
+  | { ok: true }
+  | {
+      ok: false;
+      kind: 'FORBIDDEN' | 'CONFLICT' | 'BAD_REQUEST';
+      message: string;
+    };
 
 const OK: TransitionCheck = { ok: true };
 
@@ -76,6 +112,10 @@ function forbidden(message: string): TransitionCheck {
 
 function conflict(message: string): TransitionCheck {
   return { ok: false, kind: 'CONFLICT', message };
+}
+
+function badRequest(message: string): TransitionCheck {
+  return { ok: false, kind: 'BAD_REQUEST', message };
 }
 
 function allowed(
@@ -97,13 +137,24 @@ export interface TransitionInput {
    * una inasistencia.
    */
   arrived?: boolean;
+  /** DX-273: motivo de la salida de COMPLETED (obligatorio para ella). */
+  statusReason?: string | null;
+}
+
+/** ¿El cambio saca la cita de COMPLETED? */
+export function isCompletedExit(
+  from: AppointmentStatus,
+  to: AppointmentStatus,
+): boolean {
+  return from === AppointmentStatus.COMPLETED && to !== from;
 }
 
 /**
  * ¿Se puede pasar la cita de `from` a `to`? Sin saltos imposibles: llegó
  * solo desde agendada/confirmada y el mismo día; sillón solo tras llegar;
  * listo solo desde el sillón. Las transiciones entre los estados de siempre
- * (agendada, confirmada, completada, cancelada, no-show) no cambian.
+ * (agendada, confirmada, completada, cancelada, no-show) no cambian, salvo
+ * la salida de completada (DX-273): solo ADMIN/DENTIST y con motivo.
  * «Deshacer llegada» no pasa por aquí: tiene su propia operación.
  */
 export function checkStatusTransition(input: TransitionInput): TransitionCheck {
@@ -138,6 +189,17 @@ export function checkStatusTransition(input: TransitionInput): TransitionCheck {
   // Llegó (aunque luego se completara o se cancelara): nunca un no-show.
   if (to === AppointmentStatus.NO_SHOW && input.arrived) {
     return conflict(PATIENT_FLOW_MESSAGES.notNoShow);
+  }
+
+  // DX-273: la salida de COMPLETED la deciden el odontólogo o la
+  // administración, y siempre con motivo (queda auditado).
+  if (isCompletedExit(from, to)) {
+    if (!allowed(role, COMPLETED_EXIT_ROLES)) {
+      return forbidden(PATIENT_FLOW_MESSAGES.completedExitForbidden);
+    }
+    return normalizeStatusReason(input.statusReason) === null
+      ? badRequest(PATIENT_FLOW_MESSAGES.completedExitReason)
+      : OK;
   }
 
   if (!isInClinic(from)) return OK;

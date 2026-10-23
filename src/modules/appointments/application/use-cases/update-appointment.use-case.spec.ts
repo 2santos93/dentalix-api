@@ -83,6 +83,9 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
   const { update, ...rest } = overrides;
   return {
     resolveWriteLocationId: () => Promise.resolve('loc1'),
+    findPlanItemsReservedElsewhere: () => Promise.resolve(new Map()),
+    claimPlanItem: () =>
+      Promise.reject(new Error('not implemented in this fake')),
     create: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
@@ -214,7 +217,12 @@ describe('UpdateAppointmentUseCase', () => {
       status: AppointmentStatus.CONFIRMED,
     });
 
-    expect(result).toEqual({ ...updated, warnings: [], warningCodes: [] });
+    expect(result).toEqual({
+      ...updated,
+      warnings: [],
+      warningCodes: [],
+      planItemsReservedElsewhere: [],
+    });
     // DX-005: un cambio de estado limpia los indicadores del enlace de confirmación.
     expect(receivedPatch).toEqual({
       status: AppointmentStatus.CONFIRMED,
@@ -264,7 +272,12 @@ describe('UpdateAppointmentUseCase', () => {
       end: newEnd,
     });
 
-    expect(result).toEqual({ ...updated, warnings: [], warningCodes: [] });
+    expect(result).toEqual({
+      ...updated,
+      warnings: [],
+      warningCodes: [],
+      planItemsReservedElsewhere: [],
+    });
     expect(overlapArgs).toEqual({
       providerId: existing.providerId,
       start: newStart,
