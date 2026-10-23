@@ -38,6 +38,8 @@ export interface ConfirmationAppointment {
   patientPhone: string | null;
   patientCountryCode: string | null;
   providerName: string | null;
+  /** Sede de la cita: la restricción por sedes (DX-089) se comprueba con ella. */
+  locationId: string;
   locationName: string;
   locationAddress: string | null;
 }

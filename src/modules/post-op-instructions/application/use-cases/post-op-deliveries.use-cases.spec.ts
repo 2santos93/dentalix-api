@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Logger,
   NotFoundException,
@@ -10,6 +11,8 @@ import type { RecordAuditEventUseCase } from '../../../audit/application/record-
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { hashPostOpToken } from '../../domain/postop-token';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import { InMemoryPostOpTemplateRepository } from '../__fixtures__/in-memory-post-op-templates';
 import {
   APPOINTMENT_ID,
@@ -62,6 +65,7 @@ function setup() {
       Promise.resolve(id === PATIENT_ID ? { id } : null),
   } as unknown as PatientRepository;
   const clock = () => NOW;
+  const tenantContext = new TenantContextService();
   deliveries.contexts.set(APPOINTMENT_ID, appointmentContext());
   const exo = templates.seed({
     code: 'POI-EXO',
@@ -74,11 +78,13 @@ function setup() {
     email,
     audit,
     clock,
+    tenantContext,
   );
   const suggestions = new GetPostOpSuggestionsUseCase(
     deliveries,
     templates,
     clock,
+    tenantContext,
   );
   const list = new ListPatientPostOpDeliveriesUseCase(deliveries, patients);
   const get = new GetPatientPostOpDeliveryUseCase(deliveries, patients);
@@ -92,6 +98,7 @@ function setup() {
     suggestions,
     list,
     get,
+    tenantContext,
   };
 }
 
@@ -673,5 +680,66 @@ describe('Historial de entregas del paciente (DX-222)', () => {
     await expect(get.execute(PATIENT_ID, 'nada')).rejects.toThrow(
       POSTOP_DELIVERY_NOT_FOUND_MESSAGE,
     );
+  });
+});
+
+// SEC-045: la restricción por sedes de DX-089, como GET /appointments/:id.
+// La cita de los fixtures es de `loc-1`.
+describe('Indicaciones de una cita y sede permitida (SEC-045)', () => {
+  const asMemberOf = <T>(
+    tenantContext: TenantContextService,
+    locationIds: string[],
+    fn: () => Promise<T>,
+  ) => tenantContext.run('t1', undefined, fn, locationIds);
+
+  it('sugerencias de una cita de otra sede: 403', async () => {
+    const { suggestions, tenantContext } = setup();
+    const denied = asMemberOf(tenantContext, ['loc-2'], () =>
+      suggestions.execute(APPOINTMENT_ID),
+    );
+    await expect(denied).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(denied).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+  });
+
+  it('entrega por EMAIL en una cita de otra sede: 403 sin entrega, sin email y sin auditoría', async () => {
+    const { deliver, exo, deliveries, email, audits, tenantContext } = setup();
+    const denied = asMemberOf(tenantContext, ['loc-2'], () =>
+      deliver.execute(
+        APPOINTMENT_ID,
+        { templateId: exo.id, channel: 'EMAIL' },
+        CTX,
+        LINK,
+      ),
+    );
+    await expect(denied).rejects.toBeInstanceOf(ForbiddenException);
+    expect(deliveries.rows).toHaveLength(0);
+    expect(email.sent).toHaveLength(0);
+    expect(audits).toHaveLength(0);
+  });
+
+  it('en una sede permitida, o sin restricción, nada cambia', async () => {
+    const { deliver, suggestions, exo, deliveries, tenantContext } = setup();
+    await expect(
+      asMemberOf(tenantContext, ['loc-1'], () =>
+        suggestions.execute(APPOINTMENT_ID),
+      ),
+    ).resolves.toMatchObject({ patientId: PATIENT_ID });
+    await asMemberOf(tenantContext, ['loc-1'], () =>
+      deliver.execute(
+        APPOINTMENT_ID,
+        { templateId: exo.id, channel: 'PRINT' },
+        CTX,
+        LINK,
+      ),
+    );
+    await tenantContext.run('t1', () =>
+      deliver.execute(
+        APPOINTMENT_ID,
+        { templateId: exo.id, channel: 'PRINT' },
+        CTX,
+        LINK,
+      ),
+    );
+    expect(deliveries.rows).toHaveLength(2);
   });
 });

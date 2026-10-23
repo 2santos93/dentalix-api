@@ -33,6 +33,7 @@ import {
   INACTIVE_NOTE_TEMPLATE_MESSAGE,
   NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
 } from '../../../clinical-note-templates/application/note-template-errors';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export const ENTRY_APPOINTMENT_NOT_FOUND_MESSAGE =
   'Cita no encontrada en esta clínica';
@@ -91,6 +92,7 @@ export class CreateClinicalEntryUseCase {
     // DX-170: la plantilla tiene que ser de ESTA clínica y estar activa.
     @Inject(CLINICAL_NOTE_TEMPLATE_REPOSITORY)
     private readonly templates: ClinicalNoteTemplateRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -188,6 +190,9 @@ export class CreateClinicalEntryUseCase {
     if (!appointment) {
       throw new NotFoundException(ENTRY_APPOINTMENT_NOT_FOUND_MESSAGE);
     }
+    // SEC-045 (DX-089): la evolución toma la sede de la cita; un miembro
+    // acotado no la escribe en una sede que no tiene (403).
+    this.tenantContext.assertLocationAllowed(appointment.locationId);
     if (appointment.patientId !== patientId) {
       throw new BadRequestException(ENTRY_APPOINTMENT_OTHER_PATIENT_MESSAGE);
     }
