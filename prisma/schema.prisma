@@ -234,6 +234,8 @@ model Location {
   planItemDiscounts         TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
   planItemPricings          TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
+  // DX-050: ítems de plan realizados en esta sede.
+  planItemsPerformed        TreatmentPlanItem[]         @relation("TreatmentPlanItemPerformedLocation")
   // DX-027: cajas por turno de la sede y sus ajustes.
   cashSessions              CashSession[]
   cashAdjustments           CashSessionAdjustment[]
@@ -272,6 +274,8 @@ model ClinicMembership {
   user                User                 @relation(fields: [userId], references: [id])
   // DX-089: sedes a las que se restringe el miembro (sin filas = todas).
   locations           MembershipLocation[]
+  // DX-050: procedimientos del plan que realizó.
+  performedPlanItems  TreatmentPlanItem[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -282,6 +286,10 @@ model ClinicMembership {
   // Destino de la FK compuesta (tenantId, membershipId) de membership_locations
   // (SEC-004): la membresía tiene que ser del MISMO tenant.
   @@unique([tenantId, id], map: "clinic_memberships_tenant_id_key")
+  // DX-050: destino de la FK compuesta (tenantId, performedByMembershipId,
+  // performedById) de treatment_plan_items: la membresía es de la MISMA
+  // clínica y del MISMO usuario.
+  @@unique([tenantId, id, userId], map: "clinic_memberships_tenant_id_user_key")
   @@index([tenantId])
   @@map("clinic_memberships")
 }
@@ -1451,14 +1459,30 @@ model TreatmentPlanItem {
   discountAt         DateTime?
   discountLocationId String?         @db.Uuid
 
-  plan             TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
-  discountBy       User?         @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
+  // DX-050: producción atribuible. Quién lo realizó (el usuario, como
+  // `Appointment.providerId`, y su membresía en ESTA clínica), en qué sede y
+  // cuándo (hora del servidor). Se escriben al pasar a DONE, solo un ADMIN
+  // corrige quién o cuándo, y se limpian al salir de DONE (auditado). NULL en
+  // los DONE anteriores a DX-050: «Sin atribuir». CHECK
+  // treatment_plan_items_performed_by_pair: usuario y membresía van juntos.
+  performedById           String?   @db.Uuid
+  performedByMembershipId String?   @db.Uuid
+  performedLocationId     String?   @db.Uuid
+  completedAt             DateTime?
+
+  plan                  TreatmentPlan     @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
+  // FK COMPUESTA (DX-050): quien lo realizó es miembro de la MISMA clínica, y
+  // la membresía es la de ese usuario.
+  performedByMembership ClinicMembership? @relation(fields: [tenantId, performedByMembershipId, performedById], references: [tenantId, id, userId], onDelete: Restrict, map: "treatment_plan_items_performed_by_fkey")
+  // FK COMPUESTA (DX-050): la sede donde se realizó es de la MISMA clínica.
+  performedLocation     Location?         @relation("TreatmentPlanItemPerformedLocation", fields: [tenantId, performedLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_performed_location_fkey")
+  discountBy            User?             @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
   // FK COMPUESTA (SEC-004): la sede del descuento es de la MISMA clínica.
-  discountLocation Location?     @relation("TreatmentPlanItemDiscountLocation", fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
+  discountLocation      Location?         @relation("TreatmentPlanItemDiscountLocation", fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
   // FK COMPUESTA (SEC-004, DX-105): el convenio aplicado es de la MISMA clínica.
-  agreement        Agreement?    @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
+  agreement             Agreement?        @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
   // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
-  pricingLocation  Location?     @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
+  pricingLocation       Location?         @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
 
   @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
   @@index([tenantId, planId])
@@ -1466,6 +1490,9 @@ model TreatmentPlanItem {
   @@index([tenantId, pricingLocationId], map: "treatment_plan_items_tenant_pricing_location_idx")
   @@index([tenantId, discountLocationId])
   @@index([discountById])
+  // DX-050: lados hijos de las FK de quien lo realizó y de la sede.
+  @@index([tenantId, performedByMembershipId, performedById], map: "treatment_plan_items_tenant_performed_by_idx")
+  @@index([tenantId, performedLocationId], map: "treatment_plan_items_tenant_performed_location_idx")
   // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:
   //   treatment_plan_items_tenant_plan_billable_idx ("tenantId", "planId")
   //     INCLUDE (price, discount, status)
