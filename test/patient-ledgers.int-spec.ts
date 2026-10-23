@@ -46,11 +46,13 @@ type Schedule = [
   number,
   [number, number, number][],
 ];
+/** Saldo migrado (DX-262): [id, moneda, importe, 'AAAA-MM-DD', aproximada]. */
+type Opening = [string, string, number, string, boolean];
 interface LedgerRow {
   patientId: string;
   locationId: string | null;
   owing: boolean;
-  ledger: { plans: Plan[]; paymentPlans: Schedule[] };
+  ledger: { plans: Plan[]; paymentPlans: Schedule[]; openings: Opening[] };
 }
 
 let seq = 0;
@@ -140,9 +142,13 @@ const newest = <T extends { id: string }>(
  */
 async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
   const patients = await raw.patient.findMany({
-    where: { tenantId, treatmentPlans: { some: {} } },
+    where: {
+      tenantId,
+      OR: [{ treatmentPlans: { some: {} } }, { openingBalances: { some: {} } }],
+    },
     include: {
       appointments: true,
+      openingBalances: true,
       treatmentPlans: {
         include: {
           items: true,
@@ -217,17 +223,34 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
           .sort((a, b) => a.sequence - b.sequence)
           .map((i) => [i.sequence, ms(i.dueDate), Number(i.amount)]),
       ]);
+    // DX-262: saldos migrados vivos, por fecha de corte; deben enteros y, si
+    // no hay otra, dan la sede de la deuda (la del último).
+    const liveOpenings = pa.openingBalances.filter((o) => o.voidedAt === null);
+    const openings: Opening[] = [...liveOpenings]
+      .sort(
+        (x, y) => ms(x.asOfDate) - ms(y.asOfDate) || x.id.localeCompare(y.id),
+      )
+      .map((o) => [
+        o.id,
+        o.currency,
+        Number(o.amount),
+        o.asOfDate.toISOString().slice(0, 10),
+        o.asOfDateApproximate,
+      ]);
+    const lastOpening = newest(liveOpenings, (o) => ms(o.createdAt));
     return {
       patientId: pa.id,
       locationId:
         visit?.locationId ??
         payment?.locationId ??
         presented?.presentedLocationId ??
+        lastOpening?.locationId ??
         null,
       owing:
         pa.deletedAt === null &&
-        plans.some(([, , , , , billable, own]) => billable > (own ?? 0)),
-      ledger: { plans, paymentPlans },
+        (plans.some(([, , , , , billable, own]) => billable > (own ?? 0)) ||
+          openings.length > 0),
+      ledger: { plans, paymentPlans, openings },
     };
   });
 }

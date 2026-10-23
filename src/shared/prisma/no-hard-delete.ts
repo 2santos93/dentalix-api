@@ -48,6 +48,10 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // hacen falta, nunca crearon ni tocaron un paciente (outcome PENDING, sin
   // patientId) y nada las referencia; el lote queda EXPIRED como rastro.
   'patientImportRow',
+  // DX-262: saldos preparados de la hoja de saldos de un dry-run que caduca,
+  // se reemplaza (otra hoja) o se quita. Solo los PENDING: nunca crearon un
+  // saldo migrado y nada los referencia; el lote guarda hash y totales.
+  'patientImportBalanceRow',
   // DX-105: el precio de un procedimiento en una lista es configuración, sin
   // datos de pacientes y sin nada que lo referencie (el ítem del plan guarda
   // su propia foto del precio al crearse). «Quitar el precio» borra la fila
