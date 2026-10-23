@@ -397,6 +397,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ASSISTANT',
     'RECEPTION',
   ),
+  // DX-273 «Traer a esta cita» (loop/informes/DX-273.md): quien ve la agenda;
+  // que la cita esté en la clínica y la sede de la otra cita los mira el caso
+  // de uso (409 / 403).
+  'POST /appointments/:id/plan-items/:planItemId/claim': EVERY_ROLE,
   'GET /schedule-blocks': EVERY_ROLE,
   'GET /schedule-blocks/affected-appointments': EVERY_ROLE,
   'POST /schedule-blocks': roles('ADMIN', 'DENTIST', 'RECEPTION'),

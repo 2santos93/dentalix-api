@@ -709,6 +709,58 @@ hasta 1 h (SEC-028).
   su hora, otra 3 min tarde), una en el sillón y otra lista para cobrar
   (dentro del horario de hoy; con la sede cerrada, ninguna).
 
+## Visitas del plan: salida de «Completada» y reservas en otra cita (DX-256, DX-271, DX-273)
+
+- **Intervalo mínimo** (DX-256): la visita N de un plan aceptado no se agenda
+  antes de la última cita **COMPLETED** de la visita N−1 más su intervalo
+  (`visitIntervals`), en días civiles de la sede del plan
+  (`GET /treatment-plans/:id/visits` → `minimumDate`/`minimumDay`). Sin cita
+  completada de la visita anterior (o con intervalo 0), el mínimo es hoy.
+- **Salida de COMPLETED** (DX-273): pasar una cita completada a cualquier otro
+  estado (agendada, confirmada, cancelada, no-show) solo lo hacen **ADMIN y
+  DENTIST** (RECEPTION/ASSISTANT: 403 «Solo el odontólogo o la administración
+  pueden sacar una cita de «Completada».»), y con `statusReason` en el
+  `PATCH /appointments/:id` (3–500 caracteres tras recortar; sin él, 400).
+  En la misma transacción:
+  - el motivo se guarda en `appointment_status_reversals` (una fila por
+    salida; la app solo tiene SELECT/INSERT; RLS FORCE por tenant; FK
+    compuesta a la cita con borrado en cascada);
+  - el mínimo de la visita siguiente de cada plan afectado **se recalcula de
+    forma explícita**: con la última cita de la visita anterior que **siga**
+    completada; si ya no queda ninguna, queda **sin mínimo** (se puede agendar
+    desde hoy). No se conserva el mínimo anterior a propósito: si la cita se
+    sacó de «Completada» es porque esa visita no se hizo (o no así), y su
+    intervalo dejaría a la siguiente bloqueada sin motivo clínico. Por eso la
+    salida queda restringida a quien responde de la clínica y con motivo;
+  - la respuesta trae `completedExit: { reversalId, reason, visitMinimums }`
+    con `minimumDayBefore`, `minimumDayAfter` (null = sin mínimo) y
+    `anchorAppointmentIdAfter` por visita;
+  - un `audit_event` (`APPOINTMENT`, `UPDATE`, `reason` `COMPLETED_EXIT`) con
+    `status { from, to }`, `params.reversalId` y `visitMinimums` (plan,
+    visita, día antes y después). El texto del motivo no va en la auditoría
+    (solo admite códigos, DX-009): se llega a él por `reversalId`.
+- **Tratamientos reservados en otra cita** (DX-273, revisión DX-271 I2): con
+  DX-271 «Llegó» no choca si el tratamiento ya lo reserva otra cita viva; la
+  reserva se queda allí. Ahora la respuesta del `PATCH /appointments/:id` (y
+  de «Deshacer llegada», «Asignar» un hueco y «Traer a esta cita») y cada
+  persona de `GET /appointments/in-clinic` traen `planItemsReservedElsewhere:
+  [{ planItemId, name, toothNumber, appointmentId, start, locationId,
+  locationName, timeZone }]`: los tratamientos de la cita con vínculo vivo pero
+  sin reserva que reserva otra cita viva (mismo predicado que el trigger
+  `dx256_link_reservation`). Solo citas de sedes permitidas al usuario
+  (DX-089): las demás se omiten sin dejar rastro. Vacío en una cita cancelada
+  o no-show.
+- **«Traer a esta cita»**: `POST /appointments/:id/plan-items/:planItemId/claim`
+  (los cuatro roles de agenda). Solo con el paciente en la clínica
+  (ARRIVED, IN_CHAIR, READY_FOR_CHECKOUT; si no, 409) y con el tratamiento en
+  la cita (si no, 404). En una transacción bloquea las dos citas en orden de
+  id, retira el vínculo de la otra cita y reescribe el de esta (el trigger le
+  da la reserva), con un `audit_event` `APPOINTMENT_PLAN_ITEMS` en cada cita
+  (`params`: `planItemId`, `fromAppointmentId`, `toAppointmentId`). Si la otra
+  cita es de una sede no permitida, 403 sin decir cuál. Si ya nadie lo
+  reserva (p. ej. se canceló la otra cita), solo recupera la reserva; si ya
+  la tiene, no cambia nada. Si otra cita lo toma a la vez, 409 que dice cuál.
+
 ## Odontograma: dentición, origen y anulación (DX-120)
 
 - **Dentición por posición**: cada una de las 32 posiciones (código FDI
