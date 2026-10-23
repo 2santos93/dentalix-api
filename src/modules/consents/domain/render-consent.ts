@@ -16,7 +16,7 @@ export type ConsentVariable = (typeof CONSENT_VARIABLES)[number];
 export type ConsentVariables = Record<ConsentVariable, string>;
 
 const KNOWN: ReadonlySet<string> = new Set(CONSENT_VARIABLES);
-const VARIABLE_PATTERN = /\{\{\s*([A-Za-z_]+)\s*\}\}/g;
+const VARIABLE_PATTERN = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g;
 
 function isKnown(name: string): name is ConsentVariable {
   return KNOWN.has(name);
