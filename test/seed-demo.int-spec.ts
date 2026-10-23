@@ -63,6 +63,11 @@ const TENANT_TABLES = [
   'cash_session_closing_lines',
   'cash_session_closings',
   'cash_session_floats',
+  // DX-274: pagos de gastos (hijos de expenses y cash_sessions; los ajustes
+  // OUTFLOW_VOID los referencian) y gastos y categorías (hijos de locations).
+  'expense_payments',
+  'expenses',
+  'expense_categories',
   // DX-150: cobranza (hijas de patients y locations).
   'collection_notes',
   'payment_promises',

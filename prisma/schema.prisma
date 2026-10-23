@@ -88,6 +88,10 @@ model Tenant {
   // DX-107: lotes de importación de pacientes y sus filas.
   patientImportBatches      PatientImportBatch[]
   patientImportRows         PatientImportRow[]
+  // DX-274: gastos de la sede, sus pagos y las categorías propias.
+  expenseCategories         ExpenseCategory[]
+  expenses                  Expense[]
+  expensePayments           ExpensePayment[]
 
   @@map("tenants")
 }
@@ -213,6 +217,8 @@ model Location {
   patientDocuments          PatientDocument[]
   // DX-107: lotes de importación de pacientes con esta sede por defecto.
   patientImportBatches      PatientImportBatch[]
+  // DX-274: gastos de la sede y sus pagos (los de caja menor son salidas).
+  expenses                  Expense[]
   planAcceptances           TreatmentPlanAcceptance[]
   presentedPlans            TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
@@ -1610,6 +1616,8 @@ model Currency {
   cashFloats       CashSessionFloat[]
   cashClosingLines CashSessionClosingLine[]
   cashAdjustments  CashSessionAdjustment[]
+  // DX-274: gastos y sus pagos en esa moneda.
+  expenses         Expense[]
   // DX-105: listas de precios en esa moneda.
   priceLists       PriceList[]
 
@@ -2464,6 +2472,8 @@ enum AuditResourceType {
   // DX-107: lote de importación de pacientes (validar, confirmar, deshacer,
   // descargar el informe de errores).
   PATIENT_IMPORT_BATCH
+  // DX-274: gasto de la sede (alta, edición, soporte, pagos, anulación).
+  EXPENSE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3574,6 +3584,9 @@ enum CashAdjustmentKind {
   VOID
   LATE_PAYMENT
   CORRECTION
+  // DX-274: anulación, con la caja ya cerrada, de una salida de caja menor
+  // (suma: devuelve el efectivo que la salida había restado).
+  OUTFLOW_VOID
 }
 
 /// Turno de caja de UN usuario en UNA sede. Una sola abierta por (sede,
@@ -3604,6 +3617,8 @@ model CashSession {
   payments              Payment[]
   adjustments           CashSessionAdjustment[] @relation("CashAdjustmentSession")
   originatedAdjustments CashSessionAdjustment[] @relation("CashAdjustmentOriginal")
+  // DX-274: pagos de gastos hechos desde el cajón (salidas de caja).
+  expensePayments       ExpensePayment[]
 
   @@unique([tenantId, id], map: "cash_sessions_tenant_id_key")
   @@index([tenantId, locationId, openedAt(sort: Desc), id(sort: Desc)], map: "cash_sessions_tenant_location_opened_idx")
@@ -3684,6 +3699,8 @@ model CashSessionAdjustment {
   sessionId         String?            @db.Uuid
   kind              CashAdjustmentKind
   paymentId         String?            @db.Uuid
+  /// DX-274: solo en `OUTFLOW_VOID`, la salida de caja anulada.
+  expensePaymentId  String?            @db.Uuid
   originalSessionId String?            @db.Uuid
   currency          String
   method            PaymentMethod
@@ -3694,12 +3711,16 @@ model CashSessionAdjustment {
   /// La pone el servidor de BD (trigger).
   createdAt         DateTime           @default(now())
 
-  location        Location     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_location_fkey")
-  session         CashSession? @relation("CashAdjustmentSession", fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_session_fkey")
-  originalSession CashSession? @relation("CashAdjustmentOriginal", fields: [tenantId, originalSessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_original_fkey")
-  payment         Payment?     @relation(fields: [paymentId], references: [id], onDelete: Restrict, map: "cash_session_adjustments_payment_fkey")
-  currencyRef     Currency     @relation(fields: [currency], references: [code], map: "cash_session_adjustments_currency_fkey")
+  location        Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_location_fkey")
+  session         CashSession?    @relation("CashAdjustmentSession", fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_session_fkey")
+  originalSession CashSession?    @relation("CashAdjustmentOriginal", fields: [tenantId, originalSessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_original_fkey")
+  payment         Payment?        @relation(fields: [paymentId], references: [id], onDelete: Restrict, map: "cash_session_adjustments_payment_fkey")
+  currencyRef     Currency        @relation(fields: [currency], references: [code], map: "cash_session_adjustments_currency_fkey")
+  expensePayment  ExpensePayment? @relation(fields: [tenantId, expensePaymentId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_expense_payment_fkey")
 
+  // Solo SQL (Prisma no expresa los parciales), DX-274:
+  //   cash_session_adjustments_expense_payment_kind_key  UNIQUE ("expensePaymentId", "kind") WHERE "expensePaymentId" IS NOT NULL
+  //   cash_session_adjustments_kind_check                CHECK reescrito con OUTFLOW_VOID
   @@index([tenantId, locationId, createdAt], map: "cash_session_adjustments_tenant_location_idx")
   @@map("cash_session_adjustments")
 }
@@ -3987,4 +4008,116 @@ model AppointmentPlanItem {
   @@id([tenantId, appointmentId, planItemId])
   @@index([tenantId, planItemId, appointmentId])
   @@map("appointment_plan_items")
+}
+
+/// Categoría PROPIA de gastos de una clínica (DX-274). Las predefinidas son
+/// constantes de código, no filas. `Expense.category` guarda una FOTO del
+/// nombre: renombrar o retirar una categoría no reescribe los históricos.
+/// RLS FORCE por tenant.
+///
+/// Solo SQL (Prisma no expresa los índices parciales):
+///   expense_categories_tenant_name_key  UNIQUE ("tenantId", "name") WHERE "deletedAt" IS NULL
+model ExpenseCategory {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  /// 2 a 60 caracteres, único entre las vivas de la clínica.
+  name        String
+  active      Boolean   @default(true)
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById String    @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@map("expense_categories")
+}
+
+/// Gasto de una sede (DX-274): factura o cuenta por pagar con su soporte. El
+/// estado (PENDING, PARTIAL, PAID, VOIDED) NO se guarda: sale de `voidedAt` y
+/// de la suma de sus pagos vivos. Anular = no borrar (sin DELETE en la BD).
+/// El soporte (`attachment*`) se fija una sola vez (trigger). RLS FORCE.
+///
+/// Solo SQL (Prisma no expresa los CHECK ni los triggers): importes > 0,
+/// `dueDate >= invoiceDate`, soporte completo o vacío, anulación completa o
+/// vacía; triggers `expenses_guard` (sin DELETE, soporte y anulación una vez)
+/// y `expenses_server_created_at` (hora UTC de la BD).
+model Expense {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @db.Uuid
+  locationId       String    @db.Uuid
+  /// Foto del nombre de la categoría al crear o editar (2 a 60).
+  category         String
+  supplier         String?
+  description      String?
+  amount           Decimal   @db.Decimal(14, 2)
+  currency         String
+  invoiceDate      DateTime  @db.Date
+  dueDate          DateTime? @db.Date
+  attachmentKey    String?
+  attachmentMime   String?
+  attachmentSize   Int?
+  attachmentSha256 String?
+  attachmentName   String?
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById      String    @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  voidedAt         DateTime?
+  voidedById       String?   @db.Uuid
+  voidReason       String?
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "expenses_location_fkey")
+  currencyRef Currency         @relation(fields: [currency], references: [code], map: "expenses_currency_fkey")
+  payments    ExpensePayment[]
+
+  /// Destino de la FK de `expense_payments`: su sede y su moneda son las del gasto.
+  @@unique([tenantId, id, locationId, currency], map: "expenses_tenant_id_location_currency_key")
+  @@index([tenantId, locationId, invoiceDate(sort: Desc), id(sort: Desc)], map: "expenses_tenant_location_invoice_idx")
+  @@map("expenses")
+}
+
+/// Pago de un gasto (DX-274). Con `cashSessionId` es una SALIDA DE CAJA
+/// (solo efectivo, solo en una caja ABIERTA de la sede; la caja no cambia
+/// nunca). Sin DELETE; el único UPDATE es la anulación, una sola vez. La FK
+/// compuesta al gasto incluye sede y moneda: un pago no puede tener otras.
+/// RLS FORCE por tenant.
+///
+/// Solo SQL: CHECK `cashSessionId IS NULL OR method = 'CASH'`, importe > 0,
+/// anulación completa o vacía, índice parcial
+/// expense_payments_tenant_cash_session_idx (WHERE "cashSessionId" IS NOT NULL)
+/// y triggers `expense_payments_guard` / `expense_payments_server_created_at`.
+model ExpensePayment {
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId      String        @db.Uuid
+  expenseId     String        @db.Uuid
+  /// La del gasto (FK compuesta).
+  locationId    String        @db.Uuid
+  amount        Decimal       @db.Decimal(14, 2)
+  /// La del gasto (FK compuesta).
+  currency      String
+  method        PaymentMethod
+  paidOn        DateTime      @db.Date
+  cashSessionId String?       @db.Uuid
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById   String        @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt     DateTime      @default(now())
+  voidedAt      DateTime?
+  voidedById    String?       @db.Uuid
+  voidReason    String?
+
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  expense         Expense                 @relation(fields: [tenantId, expenseId, locationId, currency], references: [tenantId, id, locationId, currency], onDelete: Restrict, onUpdate: Restrict, map: "expense_payments_expense_fkey")
+  cashSession     CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "expense_payments_cash_session_fkey")
+  cashAdjustments CashSessionAdjustment[]
+
+  /// Destino de la FK de `cash_session_adjustments.expensePaymentId`.
+  @@unique([tenantId, id], map: "expense_payments_tenant_id_key")
+  @@index([tenantId, expenseId], map: "expense_payments_tenant_expense_idx")
+  @@map("expense_payments")
 }
