@@ -7,7 +7,11 @@ import {
 } from '../../../domain/entities/appointment.entity';
 import type { AuditRequestContext } from '../../../../audit/domain/audit-request-context';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
-import { PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE } from '../../../domain/plan-item-reservation';
+import {
+  heldInClinicToday,
+  PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
+} from '../../../domain/plan-item-reservation';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../../shared/locations/default-business-hours';
 import {
   PATIENT_FLOW_MESSAGES,
   isInClinic,
@@ -387,10 +391,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     if (!row) return Promise.reject(new Error('not found'));
     const items = this.reservedElsewhere.get(appointmentId) ?? [];
     const moved = items.find((i) => i.planItemId === planItemId);
-    // DX-288: como el repositorio real, no se trae desde una cita con el
-    // paciente en la clínica.
+    // DX-288: como el repositorio real, no se trae desde una cita de hoy
+    // con el paciente en la clínica (zona por defecto: el fake no tiene
+    // sedes con zona).
     const holder = moved && this.rows.find((r) => r.id === moved.appointmentId);
-    if (holder && isInClinic(holder.status))
+    if (
+      holder &&
+      heldInClinicToday(holder, DEFAULT_BUSINESS_HOURS_TIMEZONE, new Date())
+    )
       return Promise.reject(
         new ConflictException(PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE),
       );
