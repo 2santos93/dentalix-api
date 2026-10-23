@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -31,6 +32,8 @@ import { PlanBalanceDto } from './dto/plan-balance.dto';
 import { ListCashPaymentsQueryDto } from './dto/list-cash-payments-query.dto';
 import { CashPaymentsResponseDto } from './dto/cash-payments-response.dto';
 import { RecordPaymentUseCase } from '../application/use-cases/record-payment.use-case';
+import { RecordOpeningBalancePaymentUseCase } from '../application/use-cases/record-opening-balance-payment.use-case';
+import { OPENING_BALANCE_NOT_FOUND_MESSAGE } from '../domain/opening-balance-payment';
 import { ListPaymentsUseCase } from '../application/use-cases/list-payments.use-case';
 import { VoidPaymentUseCase } from '../application/use-cases/void-payment.use-case';
 import {
@@ -79,6 +82,7 @@ interface AuthenticatedRequest extends AuditableRequest {
 export class PaymentsController {
   constructor(
     private readonly recordPayment: RecordPaymentUseCase,
+    private readonly recordOpeningBalancePayment: RecordOpeningBalancePaymentUseCase,
     private readonly listPayments: ListPaymentsUseCase,
     private readonly voidPayment: VoidPaymentUseCase,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
@@ -179,6 +183,55 @@ export class PaymentsController {
     // DX-150: si con este abono se cumple el compromiso abierto del paciente,
     // pasa a KEPT ya (auditado con este usuario). Nunca falla la petición: el
     // abono está confirmado y el barrido horario lo recogería.
+    const context = auditRequestContext(req, this.tenantContext);
+    if (context) {
+      await this.settlePromises.afterPayment(payment.patientId, context);
+    }
+    return payment;
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'openingBalance', param: 'id' },
+    reason: 'RECEIPT_ISSUED',
+  })
+  @Post('opening-balances/:id/payments')
+  @ApiOperation({
+    summary: 'Abono contra el saldo migrado de un paciente (DX-262)',
+    description:
+      'Como un abono a un plan (recibo de caja numerado por sede, caja por turno, Idempotency-Key, anulación con DELETE /payments/:id), pero contra el «Saldo migrado» importado. En la moneda del saldo y sin pasar de lo pendiente.',
+  })
+  @ApiCreatedResponse({ type: PaymentDto })
+  @ApiBadRequestResponse({
+    description:
+      'Otra moneda que la del saldo, o el abono supera lo pendiente (mensaje en español)',
+  })
+  @ApiNotFoundResponse({ description: OPENING_BALANCE_NOT_FOUND_MESSAGE })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La Idempotency-Key ya se usó con otro destino u otro cuerpo: genera una clave nueva.',
+  })
+  async createForOpeningBalance(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RecordPaymentDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<Payment> {
+    const payment = await this.recordOpeningBalancePayment.execute(
+      id,
+      {
+        amount: dto.amount,
+        currency: dto.currency,
+        paidAt: dto.paidAt,
+        method: dto.method,
+        notes: dto.notes,
+      },
+      req.user.sub,
+      idempotencyKey,
+    );
+    // DX-150: un abono al saldo migrado también cuenta para el compromiso.
     const context = auditRequestContext(req, this.tenantContext);
     if (context) {
       await this.settlePromises.afterPayment(payment.patientId, context);

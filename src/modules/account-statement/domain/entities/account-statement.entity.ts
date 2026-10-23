@@ -31,7 +31,10 @@ export interface StatementPlanRow {
 
 export interface StatementPaymentRow {
   id: string;
-  treatmentPlanId: string;
+  /** Plan del abono; `null` si es contra un saldo migrado (DX-262). */
+  treatmentPlanId: string | null;
+  /** Saldo migrado del abono (DX-262); `null`/ausente si es a un plan. */
+  openingBalanceId?: string | null;
   amount: number;
   currency: string;
   paidAt: Date;
@@ -78,14 +81,41 @@ export interface StatementPaymentPlanRow {
  */
 export type BalancePaymentRow = Pick<
   StatementPaymentRow,
-  'treatmentPlanId' | 'amount' | 'currency' | 'voidedAt'
+  'treatmentPlanId' | 'openingBalanceId' | 'amount' | 'currency' | 'voidedAt'
 >;
+
+/**
+ * Saldo inicial «Saldo migrado» (DX-262): deuda que la clínica trae de su
+ * programa anterior, importada con el lote de pacientes. Uno por paciente,
+ * moneda y lote. Solo los vivos (no deshechos). Hoy ningún abono se imputa a
+ * él (los abonos van a un plan; la imputación es DX-051): suma entero.
+ */
+export interface StatementOpeningBalanceRow {
+  id: string;
+  currency: string;
+  amount: number;
+  /** Día civil AAAA-MM-DD desde el que cuenta la deuda (fecha de corte). */
+  asOfDate: string;
+  /** La fecha es la de la importación porque el archivo no traía otra. */
+  asOfDateApproximate: boolean;
+  concept: string;
+  importBatchId: string;
+}
+
+/** Lo que necesita el CÁLCULO de un saldo migrado (la cartera no lee más). */
+export type BalanceOpeningRow = Pick<
+  StatementOpeningBalanceRow,
+  'id' | 'currency' | 'amount' | 'asOfDate' | 'asOfDateApproximate'
+> &
+  Partial<Pick<StatementOpeningBalanceRow, 'concept' | 'importBatchId'>>;
 
 /** Entrada mínima de `computeBalances`; `StatementSnapshot` la cumple. */
 export interface BalanceSnapshot {
   plans: StatementPlanRow[];
   payments: readonly BalancePaymentRow[];
   paymentPlans: StatementPaymentPlanRow[];
+  /** Saldos migrados vivos (DX-262); sin ellos, ninguno. */
+  openingBalances?: readonly BalanceOpeningRow[];
 }
 
 export interface StatementSnapshot {
@@ -94,6 +124,8 @@ export interface StatementSnapshot {
   payments: StatementPaymentRow[];
   /** Planes de pago vivos (no cancelados) del paciente. */
   paymentPlans: StatementPaymentPlanRow[];
+  /** Saldos migrados vivos del paciente (DX-262). */
+  openingBalances?: StatementOpeningBalanceRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +144,14 @@ export interface StatementNextInstallment {
 export interface StatementCurrencySummary {
   currency: string;
   budgeted: number;
+  /** Σ saldos migrados vivos de la moneda (DX-262); entra en `balance`. */
+  openingBalance: number;
+  /**
+   * Lo que queda de esos saldos tras sus abonos (QA D5): lo que «Incluye
+   * saldo migrado» del saldo. `openingBalance` sigue siendo el cargo
+   * original, para que `balance = budgeted + openingBalance − paid` cuadre.
+   */
+  openingPending: number;
   paid: number;
   balance: number;
   overdueCount: number;
@@ -145,7 +185,10 @@ export interface StatementMovement {
   currency: string;
   method: PaymentMethod | null;
   location: { id: string; name: string };
-  treatmentPlanId: string;
+  /** `null` si el abono es contra un saldo migrado (DX-262). */
+  treatmentPlanId: string | null;
+  /** Saldo migrado del abono (DX-262), o `null`. */
+  openingBalanceId: string | null;
   /** Quién registró el abono (`null` en abonos antiguos sin autor). */
   createdById: string | null;
   /**
@@ -174,10 +217,20 @@ export interface StatementInstallment {
   status: InstallmentStatus;
 }
 
+/** Línea «Saldo migrado» del estado de cuenta (DX-262). */
+export type StatementOpeningBalanceLine = BalanceOpeningRow & {
+  /** Abonos vivos contra este saldo, en su moneda. */
+  paid: number;
+  /** `amount − paid`: lo que falta por cobrar. */
+  pending: number;
+};
+
 export interface ComputedBalances {
   summary: StatementCurrencySummary[];
   plans: StatementPlanLine[];
   installments: StatementInstallment[];
+  /** Por fecha de corte (la más antigua primero) y moneda. */
+  openingBalances: StatementOpeningBalanceLine[];
 }
 
 export interface ComputedAccountStatement extends ComputedBalances {
@@ -231,6 +284,10 @@ export interface AccountStatement extends ComputedAccountStatement {
 export interface FamilyCurrencyAmounts {
   currency: string;
   budgeted: number;
+  /** Saldo migrado (DX-262), ya incluido en `balance`. */
+  openingBalance: number;
+  /** Lo que queda pendiente de él (QA D5). */
+  openingPending: number;
   paid: number;
   balance: number;
   overdueAmount: number;

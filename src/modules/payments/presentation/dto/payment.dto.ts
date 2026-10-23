@@ -13,8 +13,21 @@ export class PaymentDto {
   @ApiProperty({ format: 'uuid' })
   tenantId!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  treatmentPlanId!: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Plan del abono; null si es contra un saldo migrado (DX-262)',
+  })
+  treatmentPlanId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Saldo migrado del abono (DX-262); null si es a un plan',
+  })
+  openingBalanceId!: string | null;
 
   @ApiProperty({ format: 'uuid' })
   patientId!: string;

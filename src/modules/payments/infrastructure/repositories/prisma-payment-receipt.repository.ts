@@ -13,6 +13,17 @@ import {
   loadNoticeResponsibles,
 } from '../../../patients/infrastructure/notices/notice-context';
 
+const RECEIPT_PATIENT_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  docType: true,
+  docNumber: true,
+  email: true,
+  birthDate: true,
+  emergencyContactName: true,
+} satisfies Prisma.PatientSelect;
+
 const RECEIPT_SOURCE_SELECT = {
   id: true,
   tenantId: true,
@@ -43,18 +54,16 @@ const RECEIPT_SOURCE_SELECT = {
       id: true,
       optionLabel: true,
       createdAt: true,
-      patient: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          docType: true,
-          docNumber: true,
-          email: true,
-          birthDate: true,
-          emergencyContactName: true,
-        },
-      },
+      patient: { select: RECEIPT_PATIENT_SELECT },
+    },
+  },
+  // DX-262: abono contra un saldo migrado (sin plan).
+  openingBalance: {
+    select: {
+      id: true,
+      concept: true,
+      asOfDate: true,
+      patient: { select: RECEIPT_PATIENT_SELECT },
     },
   },
 } satisfies Prisma.PaymentSelect;
@@ -75,7 +84,11 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
         select: RECEIPT_SOURCE_SELECT,
       });
       if (!payment) return null;
-      const { patient } = payment.plan;
+      const patient = payment.plan?.patient ?? payment.openingBalance?.patient;
+      if (!patient) {
+        // payments_target_check: todo abono tiene plan o saldo migrado.
+        throw new Error(`Abono ${payment.id} sin plan ni saldo migrado`);
+      }
       const patientEmail = patient.email?.trim() ? patient.email.trim() : null;
       const [responsibles, location] = await Promise.all([
         loadNoticeResponsibles(tx, patient.id),
@@ -159,11 +172,22 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
               paidAt: payment.paidAt,
               paidOn: civilDateIn(payment.paidAt, zoneOf(payment.locationId)),
             },
-            plan: {
-              id: payment.plan.id,
-              optionLabel: payment.plan.optionLabel,
-              createdAt: payment.plan.createdAt,
-            },
+            plan: payment.plan
+              ? {
+                  id: payment.plan.id,
+                  optionLabel: payment.plan.optionLabel,
+                  createdAt: payment.plan.createdAt,
+                }
+              : null,
+            openingBalance: payment.openingBalance
+              ? {
+                  id: payment.openingBalance.id,
+                  concept: payment.openingBalance.concept,
+                  asOfDate: payment.openingBalance.asOfDate
+                    .toISOString()
+                    .slice(0, 10),
+                }
+              : null,
             cashier,
           },
         },

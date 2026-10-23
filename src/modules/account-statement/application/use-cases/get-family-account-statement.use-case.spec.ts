@@ -63,8 +63,22 @@ function statement(
   };
 }
 
+// DX-262: la madre solo trae un saldo migrado de su programa anterior.
+const MOTHER = statement('mother', 'Claudia', [], []);
+MOTHER.snapshot.openingBalances = [
+  {
+    id: 'ob-1',
+    currency: 'COP',
+    amount: 50000,
+    asOfDate: '2025-11-30',
+    asOfDateApproximate: false,
+    concept: 'Saldo migrado',
+    importBatchId: 'batch-1',
+  },
+];
+
 const DATA: Record<string, AccountStatementData> = {
-  mother: statement('mother', 'Claudia', [], []),
+  mother: MOTHER,
   son: statement(
     'son',
     'Tomás',
@@ -145,6 +159,8 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       {
         currency: 'COP',
         budgeted: 350000.35,
+        openingBalance: 0,
+        openingPending: 0,
         paid: 100000.25,
         balance: 250000.1,
         overdueAmount: 0,
@@ -170,13 +186,17 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       {
         currency: 'COP',
         budgeted: 1550000.55,
+        openingBalance: 50000,
+        openingPending: 50000,
         paid: 550000.3,
-        balance: 1000000.25,
+        balance: 1050000.25,
         overdueAmount: 0,
       },
       {
         currency: 'EUR',
         budgeted: 80.5,
+        openingBalance: 0,
+        openingPending: 0,
         paid: 20.25,
         balance: 60.25,
         overdueAmount: 0,

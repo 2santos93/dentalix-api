@@ -114,8 +114,14 @@ export interface PaymentReceiptEmailVars {
   amountLabel: string;
   paidOnLabel: string;
   methodLabel: string;
+  /** «Plan del …» o, contra el saldo migrado, «Saldo migrado · concepto · corte …». */
   planLabel: string;
-  /** Saldo del plan tras el abono, ya formateado; null si no se conoce. */
+  /**
+   * DX-262 (revisión N1): el abono va a un saldo migrado, no a un plan: el
+   * correo dice «Concepto» y «Saldo pendiente tras este abono».
+   */
+  toOpeningBalance?: boolean;
+  /** Saldo del plan (o pendiente del saldo migrado) tras el abono, ya formateado; null si no se conoce. */
   balanceLabel: string | null;
   cashierName: string | null;
   voided: { dateLabel: string; reason: string } | null;

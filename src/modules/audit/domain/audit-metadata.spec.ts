@@ -327,6 +327,77 @@ describe('sanitizeAuditMetadata — lote de importación (DX-107)', () => {
   });
 });
 
+describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
+  const sha = 'a'.repeat(64);
+  const bsha = 'b'.repeat(64);
+
+  it('deja el hash de la hoja de saldos, sus contadores y los totales por moneda', () => {
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: {
+          fileSha256: sha,
+          balanceFileSha256: bsha,
+          balanceRows: 12,
+          balanceErrors: 2,
+          balancesCreated: 9,
+          balancesUndone: -1,
+          balanceTotals: [
+            { currency: 'COP', rows: 9, amount: 1500000.5, docNumber: '123' },
+            { currency: 'usd', rows: 1, amount: 10 },
+            { currency: 'EUR', rows: 1, amount: 10.555 },
+            { currency: 'USD', rows: 1, amount: 40 },
+          ],
+          balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
+        },
+      }),
+    ).toEqual({
+      importBatch: {
+        fileSha256: sha,
+        balanceFileSha256: bsha,
+        balanceRows: 12,
+        balanceErrors: 2,
+        balancesCreated: 9,
+        balanceTotals: [
+          { currency: 'COP', rows: 9, amount: 1500000.5 },
+          { currency: 'USD', rows: 1, amount: 40 },
+        ],
+        balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
+      },
+    });
+  });
+
+  it('QA D1: «Añadir aunque ya tenga saldo migrado» (solo booleano) y los no creados por eso', () => {
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: {
+          fileSha256: sha,
+          balanceAddToExisting: true,
+          balancesExisting: 2,
+        },
+      }),
+    ).toEqual({
+      importBatch: {
+        fileSha256: sha,
+        balanceAddToExisting: true,
+        balancesExisting: 2,
+      },
+    });
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: { fileSha256: sha, balanceAddToExisting: 'sí' },
+      }),
+    ).toEqual({ importBatch: { fileSha256: sha } });
+  });
+
+  it('un hash de la hoja que no es SHA-256 se descarta', () => {
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: { fileSha256: sha, balanceFileSha256: 'saldos.csv' },
+      }),
+    ).toEqual({ importBatch: { fileSha256: sha } });
+  });
+});
+
 describe('sanitizeAuditMetadata — mínimo de la visita siguiente (DX-273)', () => {
   const plan = '0192f1a0-0000-7000-8000-000000000001';
 

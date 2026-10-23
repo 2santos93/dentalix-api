@@ -25,6 +25,13 @@ export interface ReceiptPlanBalance {
   balance: number;
 }
 
+/** Saldo migrado del recibo (DX-262): concepto y fecha de corte (AAAA-MM-DD). */
+export interface ReceiptOpeningBalance {
+  id: string;
+  concept: string;
+  asOfDate: string;
+}
+
 /** Lo que se lee, en la transacción del abono, para congelar el recibo. */
 export interface ReceiptSnapshotInput {
   clinic: ReceiptClinicData;
@@ -44,8 +51,14 @@ export interface ReceiptSnapshotInput {
     paidAt: Date;
     paidOn: string;
   };
-  plan: { id: string; optionLabel: string | null; createdAt: Date };
-  /** Saldo del plan tras el abono, en su moneda; null si no se pudo calcular. */
+  /** Plan del abono; `null` si es contra un saldo migrado (DX-262). */
+  plan: { id: string; optionLabel: string | null; createdAt: Date } | null;
+  /** Saldo migrado del abono (DX-262); `null`/ausente si es a un plan. */
+  openingBalance?: ReceiptOpeningBalance | null;
+  /**
+   * Saldo del destino tras el abono, en su moneda (el plan; o el saldo
+   * migrado, con `billable` = su importe); null si no se pudo calcular.
+   */
   planBalance: ReceiptPlanBalance | null;
   cashier: { id: string; fullName: string } | null;
 }
@@ -76,7 +89,10 @@ export interface ReceiptSnapshot {
     paidAt: string;
     paidOn: string;
   };
-  plan: { id: string; optionLabel: string | null; createdAt: string };
+  /** `null` en un abono contra un saldo migrado (DX-262). */
+  plan: { id: string; optionLabel: string | null; createdAt: string } | null;
+  /** Saldo migrado (DX-262); ausente en los recibos anteriores. */
+  openingBalance?: ReceiptOpeningBalance | null;
   planBalance: ReceiptPlanBalance | null;
   cashier: { id: string; fullName: string } | null;
   legalNotice: string;
@@ -117,11 +133,14 @@ export function buildReceiptSnapshot(
       paidAt: input.payment.paidAt.toISOString(),
       paidOn: input.payment.paidOn,
     },
-    plan: {
-      id: input.plan.id,
-      optionLabel: input.plan.optionLabel,
-      createdAt: input.plan.createdAt.toISOString(),
-    },
+    plan: input.plan
+      ? {
+          id: input.plan.id,
+          optionLabel: input.plan.optionLabel,
+          createdAt: input.plan.createdAt.toISOString(),
+        }
+      : null,
+    openingBalance: input.openingBalance ?? null,
     planBalance: input.planBalance,
     cashier: input.cashier,
     legalNotice: RECEIPT_LEGAL_NOTICE,

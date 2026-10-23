@@ -88,7 +88,14 @@ const PAYMENT_SELECT = {
   voidedById: true,
   voidReason: true,
   receipt: { select: { seriesPrefix: true, number: true } },
+  // El paciente sale del plan o, en un abono contra un saldo migrado
+  // (DX-262), del saldo.
   plan: {
+    select: {
+      patient: { select: { id: true, firstName: true, lastName: true } },
+    },
+  },
+  openingBalance: {
     select: {
       patient: { select: { id: true, firstName: true, lastName: true } },
     },
@@ -96,6 +103,16 @@ const PAYMENT_SELECT = {
 } satisfies Prisma.PaymentSelect;
 
 type PaymentRow = Prisma.PaymentGetPayload<{ select: typeof PAYMENT_SELECT }>;
+
+/** Paciente del abono: el del plan o el del saldo migrado (CHECK de payments). */
+function patientOf(row: PaymentRow): { id: string; fullName: string } {
+  const patient = row.plan?.patient ?? row.openingBalance?.patient;
+  if (!patient) throw new Error(`Abono ${row.id} sin plan ni saldo migrado`);
+  return {
+    id: patient.id,
+    fullName: `${patient.firstName} ${patient.lastName}`,
+  };
+}
 
 const ADJUSTMENT_SELECT = {
   id: true,
@@ -779,10 +796,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       receiptNumber: row.receipt
         ? formatReceiptNumber(row.receipt.seriesPrefix, row.receipt.number)
         : null,
-      patient: {
-        id: row.plan.patient.id,
-        fullName: `${row.plan.patient.firstName} ${row.plan.patient.lastName}`,
-      },
+      patient: patientOf(row),
       createdBy: row.createdById ? this.staff(row.createdById, names) : null,
     };
   }

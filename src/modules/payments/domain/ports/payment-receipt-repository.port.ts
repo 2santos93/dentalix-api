@@ -45,7 +45,8 @@ export interface ReceiptNoticeData {
 
 interface ReceiptSourceBase {
   paymentId: string;
-  treatmentPlanId: string;
+  /** `null` en un abono contra un saldo migrado (DX-262). */
+  treatmentPlanId: string | null;
   /** Email ACTUAL del paciente (para enviarle el recibo), o null si no tiene. */
   patientEmail: string | null;
   notice: ReceiptNoticeData;

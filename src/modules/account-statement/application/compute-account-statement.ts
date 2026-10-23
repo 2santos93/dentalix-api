@@ -56,6 +56,11 @@ export interface ComputeAccountStatementOptions {
  *   mismo reparto voraz y los mismos estados que GetPaymentPlanUseCase
  *   (deriveStatuses): lo abonado al plan en la moneda del plan de pagos cubre
  *   primero la cuota inicial y luego las cuotas en orden.
+ * - Saldo migrado (DX-262) = deuda traída del programa anterior, por moneda:
+ *   va aparte de lo presupuestado (`openingBalance`) y suma al saldo:
+ *   `balance = budgeted + openingBalance − paid`. Un abono va a un plan O a
+ *   un saldo migrado: el de un saldo cuenta en `paid` de su moneda y en el
+ *   abonado/pendiente de ese saldo, nunca en un plan ni en sus cuotas.
  * - Próxima cuota = la de vencimiento más cercano que todavía no venció ni está
  *   pagada (las vencidas ya se cuentan aparte).
  */
@@ -80,6 +85,8 @@ function isActive(payment: BalancePaymentRow): boolean {
 
 interface CurrencyAccumulator {
   budgetedCents: number;
+  openingCents: number;
+  openingPendingCents: number;
   paidCents: number;
   overdueCount: number;
   overdueCents: number;
@@ -90,6 +97,8 @@ interface CurrencyAccumulator {
 function emptyAccumulator(): CurrencyAccumulator {
   return {
     budgetedCents: 0,
+    openingCents: 0,
+    openingPendingCents: 0,
     paidCents: 0,
     overdueCount: 0,
     overdueCents: 0,
@@ -127,7 +136,7 @@ function paidByPlanAndCurrency(
 ): Map<string, Map<string, number>> {
   const out = new Map<string, Map<string, number>>();
   for (const p of payments) {
-    if (!isActive(p)) continue;
+    if (!isActive(p) || p.treatmentPlanId === null) continue;
     const byCurrency = out.get(p.treatmentPlanId) ?? new Map<string, number>();
     byCurrency.set(
       p.currency,
@@ -194,6 +203,34 @@ export function computeBalances(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
       balance: fromCents((counts ? budgetedCents : 0) - paidCents),
+    };
+  });
+
+  // --- Saldo migrado (DX-262) -----------------------------------------------
+  // Deuda traída del programa anterior: suma al saldo de su moneda; sus
+  // abonos (revisión C1) la reducen como cualquier abono.
+  const openingBalances = [...(snapshot.openingBalances ?? [])].sort(
+    (a, b) =>
+      a.asOfDate.localeCompare(b.asOfDate) ||
+      a.currency.localeCompare(b.currency) ||
+      a.id.localeCompare(b.id),
+  );
+  // Abonos vivos contra cada saldo migrado, en su moneda (revisión C1).
+  const paidByOpening = new Map<string, number>();
+  for (const p of snapshot.payments) {
+    if (!isActive(p) || !p.openingBalanceId) continue;
+    const key = `${p.openingBalanceId}\u0000${p.currency}`;
+    paidByOpening.set(key, (paidByOpening.get(key) ?? 0) + toCents(p.amount));
+  }
+  const openingLines = openingBalances.map((o) => {
+    acc(o.currency).openingCents += toCents(o.amount);
+    const paidCents = paidByOpening.get(`${o.id}\u0000${o.currency}`) ?? 0;
+    const pendingCents = Math.max(0, toCents(o.amount) - paidCents);
+    acc(o.currency).openingPendingCents += pendingCents;
+    return {
+      ...o,
+      paid: fromCents(paidCents),
+      pending: fromCents(pendingCents),
     };
   });
 
@@ -268,27 +305,32 @@ export function computeBalances(
   const summary: StatementCurrencySummary[] = [...currencies.entries()]
     .filter(
       ([, a]) =>
-        a.budgetedCents !== 0 || a.paidCents !== 0 || a.hasInstallments,
+        a.budgetedCents !== 0 ||
+        a.openingCents !== 0 ||
+        a.paidCents !== 0 ||
+        a.hasInstallments,
     )
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([currency, a]) => ({
       currency,
       budgeted: fromCents(a.budgetedCents),
+      openingBalance: fromCents(a.openingCents),
+      openingPending: fromCents(a.openingPendingCents),
       paid: fromCents(a.paidCents),
-      balance: fromCents(a.budgetedCents - a.paidCents),
+      balance: fromCents(a.budgetedCents + a.openingCents - a.paidCents),
       overdueCount: a.overdueCount,
       overdueAmount: fromCents(a.overdueCents),
       nextInstallment: a.next,
     }));
 
-  return { summary, plans, installments };
+  return { summary, plans, installments, openingBalances: openingLines };
 }
 
 export function computeAccountStatement(
   snapshot: StatementSnapshot,
   options: ComputeAccountStatementOptions,
 ): ComputedAccountStatement {
-  const { summary, plans, installments } = computeBalances(
+  const { summary, plans, installments, openingBalances } = computeBalances(
     snapshot,
     options.today,
   );
@@ -309,6 +351,7 @@ export function computeAccountStatement(
       method: p.method,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
+      openingBalanceId: p.openingBalanceId ?? null,
       createdById: p.createdById,
       canVoid:
         p.voidedAt === null &&
@@ -324,5 +367,5 @@ export function computeAccountStatement(
         b.paidAt.getTime() - a.paidAt.getTime() || b.id.localeCompare(a.id),
     );
 
-  return { summary, plans, movements, installments };
+  return { summary, plans, movements, installments, openingBalances };
 }

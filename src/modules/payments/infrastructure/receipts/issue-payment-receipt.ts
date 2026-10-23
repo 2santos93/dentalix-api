@@ -10,7 +10,9 @@ export interface ReceiptPaymentRow {
   id: string;
   tenantId: string;
   locationId: string;
-  treatmentPlanId: string;
+  /** Exactamente uno de los dos (DX-262). */
+  treatmentPlanId: string | null;
+  openingBalanceId: string | null;
   patientId: string;
   amount: number;
   currency: string;
@@ -23,7 +25,8 @@ export interface ReceiptPaymentRow {
 /**
  * Emite el recibo de caja de un abono (DX-136) DENTRO de la transacción que
  * lo inserta:
- *   1. lee clínica, sede (y su serie), paciente, plan y quién cobró;
+ *   1. lee clínica, sede (y su serie), paciente, plan (o saldo migrado,
+ *      DX-262) y quién cobró;
  *   2. avanza el contador de la serie con un UPSERT: la fila del contador
  *      queda bloqueada hasta el COMMIT, así que dos abonos simultáneos de la
  *      misma sede se ordenan (sin duplicados) y un rollback deshace el
@@ -37,36 +40,46 @@ export async function issuePaymentReceipt(
   payment: ReceiptPaymentRow,
   planBalance: ReceiptPlanBalance | null,
 ): Promise<string> {
-  const [location, tenant, patient, plan, cashier] = await Promise.all([
-    tx.location.findFirstOrThrow({
-      where: { id: payment.locationId },
-      select: { id: true, name: true, address: true, receiptPrefix: true },
-    }),
-    tx.tenant.findUniqueOrThrow({
-      where: { id: payment.tenantId },
-      select: { name: true },
-    }),
-    tx.patient.findFirstOrThrow({
-      where: { id: payment.patientId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        docType: true,
-        docNumber: true,
-      },
-    }),
-    tx.treatmentPlan.findFirstOrThrow({
-      where: { id: payment.treatmentPlanId },
-      select: { id: true, optionLabel: true, createdAt: true },
-    }),
-    payment.createdById
-      ? tx.user.findUnique({
-          where: { id: payment.createdById },
-          select: { id: true, fullName: true },
-        })
-      : Promise.resolve(null),
-  ]);
+  const [location, tenant, patient, plan, opening, cashier] = await Promise.all(
+    [
+      tx.location.findFirstOrThrow({
+        where: { id: payment.locationId },
+        select: { id: true, name: true, address: true, receiptPrefix: true },
+      }),
+      tx.tenant.findUniqueOrThrow({
+        where: { id: payment.tenantId },
+        select: { name: true },
+      }),
+      tx.patient.findFirstOrThrow({
+        where: { id: payment.patientId },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          docType: true,
+          docNumber: true,
+        },
+      }),
+      payment.treatmentPlanId
+        ? tx.treatmentPlan.findFirstOrThrow({
+            where: { id: payment.treatmentPlanId },
+            select: { id: true, optionLabel: true, createdAt: true },
+          })
+        : Promise.resolve(null),
+      payment.openingBalanceId
+        ? tx.openingBalance.findFirstOrThrow({
+            where: { id: payment.openingBalanceId },
+            select: { id: true, concept: true, asOfDate: true },
+          })
+        : Promise.resolve(null),
+      payment.createdById
+        ? tx.user.findUnique({
+            where: { id: payment.createdById },
+            select: { id: true, fullName: true },
+          })
+        : Promise.resolve(null),
+    ],
+  );
   if (!location.receiptPrefix) {
     // El trigger de `locations` la pone al crear la sede y la migración la
     // rellenó en las existentes: llegar aquí es un fallo de despliegue.
@@ -100,6 +113,13 @@ export async function issuePaymentReceipt(
       paidOn: payment.paidOn,
     },
     plan,
+    openingBalance: opening
+      ? {
+          id: opening.id,
+          concept: opening.concept,
+          asOfDate: opening.asOfDate.toISOString().slice(0, 10),
+        }
+      : null,
     planBalance,
     cashier,
   });

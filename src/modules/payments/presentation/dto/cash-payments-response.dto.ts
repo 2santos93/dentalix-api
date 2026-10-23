@@ -37,6 +37,14 @@ export class CashTreatmentPlanRefDto {
   createdAt!: Date;
 }
 
+export class CashOpeningBalanceRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Saldo migrado' })
+  concept!: string;
+}
+
 export class CashPaymentDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -108,8 +116,19 @@ export class CashPaymentDto {
   @ApiProperty({ type: CashPatientRefDto })
   patient!: CashPatientRefDto;
 
-  @ApiProperty({ type: CashTreatmentPlanRefDto })
-  treatmentPlan!: CashTreatmentPlanRefDto;
+  @ApiProperty({
+    type: CashTreatmentPlanRefDto,
+    nullable: true,
+    description: 'null si el abono es contra un saldo migrado (DX-262)',
+  })
+  treatmentPlan!: CashTreatmentPlanRefDto | null;
+
+  @ApiProperty({
+    type: CashOpeningBalanceRefDto,
+    nullable: true,
+    description: 'Saldo migrado del abono (DX-262); null si es a un plan',
+  })
+  openingBalance!: CashOpeningBalanceRefDto | null;
 }
 
 export class CashCurrencyTotalDto {

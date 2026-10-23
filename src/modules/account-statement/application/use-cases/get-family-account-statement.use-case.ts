@@ -24,7 +24,14 @@ import {
 // individual), así el total cuadra al céntimo con la suma de los subtotales.
 const cents = (amount: number): number => Math.round(amount * 100);
 
-const FIELDS = ['budgeted', 'paid', 'balance', 'overdueAmount'] as const;
+const FIELDS = [
+  'budgeted',
+  'openingBalance',
+  'openingPending',
+  'paid',
+  'balance',
+  'overdueAmount',
+] as const;
 
 function addInto(
   acc: Map<string, Record<(typeof FIELDS)[number], number>>,
@@ -32,6 +39,8 @@ function addInto(
 ): void {
   const current = acc.get(row.currency) ?? {
     budgeted: 0,
+    openingBalance: 0,
+    openingPending: 0,
     paid: 0,
     balance: 0,
     overdueAmount: 0,
@@ -79,6 +88,8 @@ export class GetFamilyAccountStatementUseCase {
       const rows = summary.map((s) => ({
         currency: s.currency,
         budgeted: s.budgeted,
+        openingBalance: s.openingBalance,
+        openingPending: s.openingPending,
         paid: s.paid,
         balance: s.balance,
         overdueAmount: s.overdueAmount,
@@ -110,6 +121,8 @@ export class GetFamilyAccountStatementUseCase {
         .map(([currency, sum]) => ({
           currency,
           budgeted: sum.budgeted / 100,
+          openingBalance: sum.openingBalance / 100,
+          openingPending: sum.openingPending / 100,
           paid: sum.paid / 100,
           balance: sum.balance / 100,
           overdueAmount: sum.overdueAmount / 100,

@@ -1,3 +1,4 @@
+import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/record-opening-balance-payment.use-case';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { RecordPaymentUseCase } from './application/use-cases/record-payment.use-case';
@@ -51,6 +52,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   controllers: [PaymentsController, PaymentReceiptsController],
   providers: [
     RecordPaymentUseCase,
+    // DX-262: abono contra el saldo migrado.
+    RecordOpeningBalancePaymentUseCase,
     ListPaymentsUseCase,
     VoidPaymentUseCase,
     GetPlanBalanceUseCase,

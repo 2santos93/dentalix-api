@@ -73,6 +73,18 @@ export function paymentRequestFingerprint(
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
 
+/**
+ * El destino de un abono para la idempotencia: el id del plan (como siempre,
+ * así las huellas anteriores siguen valiendo) o `ob:<id>` si es contra un
+ * saldo migrado (DX-262).
+ */
+export function paymentTargetKey(target: {
+  treatmentPlanId: string | null;
+  openingBalanceId: string | null;
+}): string {
+  return target.treatmentPlanId ?? `ob:${target.openingBalanceId ?? ''}`;
+}
+
 /** Un abono ya registrado con una Idempotency-Key y la huella de su petición. */
 export interface IdempotentPayment {
   payment: Payment;
@@ -83,10 +95,11 @@ export interface IdempotentPayment {
 /** ¿Es esta petición una repetición idéntica de la que creó `stored`? */
 export function isSameRequest(
   stored: IdempotentPayment,
+  /** `paymentTargetKey` de la petición (el id del plan para un plan). */
   treatmentPlanId: string,
   requestFingerprint: string,
 ): boolean {
-  if (stored.payment.treatmentPlanId !== treatmentPlanId) return false;
+  if (paymentTargetKey(stored.payment) !== treatmentPlanId) return false;
   return (
     stored.requestFingerprint === null ||
     stored.requestFingerprint === requestFingerprint
