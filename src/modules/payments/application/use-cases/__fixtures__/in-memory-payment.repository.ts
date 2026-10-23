@@ -6,6 +6,7 @@ import {
   CreatePaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
+  OpeningBalanceTarget,
   PaymentRepository,
   PaymentVoidAudit,
   PaymentVoidTarget,
@@ -56,7 +57,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     const row: StoredPayment = {
       id: overrides.id ?? `payment-seed-${++seq}`,
       tenantId: overrides.tenantId ?? 't1',
-      treatmentPlanId: overrides.treatmentPlanId ?? 'plan-1',
+      treatmentPlanId:
+        overrides.treatmentPlanId === undefined
+          ? 'plan-1'
+          : overrides.treatmentPlanId,
+      openingBalanceId: overrides.openingBalanceId ?? null,
       patientId: overrides.patientId ?? 'p1',
       amount: overrides.amount ?? 0,
       currency: overrides.currency ?? 'USD',
@@ -83,6 +88,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       id: row.id,
       tenantId: row.tenantId,
       treatmentPlanId: row.treatmentPlanId,
+      openingBalanceId: row.openingBalanceId,
       patientId: row.patientId,
       amount: row.amount,
       currency: row.currency,
@@ -111,6 +117,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       id: `payment-${++seq}`,
       tenantId: 't1',
       treatmentPlanId: input.treatmentPlanId,
+      openingBalanceId: input.openingBalanceId ?? null,
       patientId: input.patientId,
       amount: input.amount,
       currency: input.currency,
@@ -130,6 +137,38 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     };
     this.payments.push(row);
     return Promise.resolve(this.toEntity(row));
+  }
+
+  /** Test helper: saldos migrados que conoce el fake (DX-262). */
+  readonly openingBalances = new Map<
+    string,
+    { id: string; patientId: string; currency: string; amount: number }
+  >();
+
+  findOpeningBalance(id: string): Promise<OpeningBalanceTarget | null> {
+    const balance = this.openingBalances.get(id);
+    if (!balance) return Promise.resolve(null);
+    const paid = this.payments
+      .filter(
+        (p) =>
+          p.openingBalanceId === id &&
+          p.deletedAt === null &&
+          p.currency === balance.currency,
+      )
+      .reduce((sum, p) => sum + Math.round(p.amount * 100), 0);
+    return Promise.resolve({ ...balance, paid: paid / 100 });
+  }
+
+  listByOpeningBalance(openingBalanceId: string): Promise<Payment[]> {
+    return Promise.resolve(
+      this.payments
+        .filter(
+          (p) =>
+            p.openingBalanceId === openingBalanceId && p.deletedAt === null,
+        )
+        .sort((a, b) => b.paidAt.getTime() - a.paidAt.getTime())
+        .map((p) => this.toEntity(p)),
+    );
   }
 
   findById(id: string): Promise<Payment | null> {

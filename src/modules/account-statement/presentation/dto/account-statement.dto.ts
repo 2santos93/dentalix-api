@@ -76,14 +76,28 @@ export class AccountStatementCurrencySummaryDto {
   budgeted!: number;
 
   @ApiProperty({
+    example: 150000,
+    description:
+      'DX-262: Σ saldos migrados vivos en esta moneda (deuda traída del programa anterior)',
+  })
+  openingBalance!: number;
+
+  @ApiProperty({
+    example: 100000,
+    description:
+      'DX-262 (QA D5): lo que queda pendiente de esos saldos migrados tras sus abonos; es lo que «incluye» el saldo',
+  })
+  openingPending!: number;
+
+  @ApiProperty({
     example: 1200000,
     description: 'Σ abonos no anulados en esta moneda (sin convertir)',
   })
   paid!: number;
 
   @ApiProperty({
-    example: 1800000,
-    description: 'budgeted - paid (negativo = saldo a favor)',
+    example: 1950000,
+    description: 'budgeted + openingBalance - paid (negativo = saldo a favor)',
   })
   balance!: number;
 
@@ -95,6 +109,45 @@ export class AccountStatementCurrencySummaryDto {
 
   @ApiProperty({ type: AccountStatementNextInstallmentDto, nullable: true })
   nextInstallment!: AccountStatementNextInstallmentDto | null;
+}
+
+/** Línea «Saldo migrado» (DX-262). */
+export class AccountStatementOpeningBalanceDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({ example: 150000 })
+  amount!: number;
+
+  @ApiProperty({
+    example: '2026-03-15',
+    description: 'Fecha de corte (día civil AAAA-MM-DD) desde la que cuenta',
+  })
+  asOfDate!: string;
+
+  @ApiProperty({
+    description:
+      'La fecha es la de la importación: el archivo no traía fecha de antigüedad («aprox.»)',
+  })
+  asOfDateApproximate!: boolean;
+
+  @ApiProperty({ example: 'Saldo migrado' })
+  concept!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'Lote de importación' })
+  importBatchId!: string;
+
+  @ApiProperty({
+    example: 50000,
+    description: 'Abonos vivos contra este saldo, en su moneda',
+  })
+  paid!: number;
+
+  @ApiProperty({ example: 100000, description: 'amount − paid: lo pendiente' })
+  pending!: number;
 }
 
 export class AccountStatementOtherCurrencyDto {
@@ -201,8 +254,21 @@ export class AccountStatementMovementDto {
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;
 
-  @ApiProperty({ format: 'uuid' })
-  treatmentPlanId!: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'null si el abono es contra un saldo migrado (DX-262)',
+  })
+  treatmentPlanId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Saldo migrado del abono (DX-262), o null',
+  })
+  openingBalanceId!: string | null;
 
   @ApiProperty({
     type: String,
@@ -322,6 +388,13 @@ export class AccountStatementDto {
 
   @ApiProperty({ type: [AccountStatementInstallmentDto] })
   installments!: AccountStatementInstallmentDto[];
+
+  @ApiProperty({
+    type: [AccountStatementOpeningBalanceDto],
+    description:
+      'DX-262: saldos migrados vivos, de la fecha de corte más antigua a la más reciente',
+  })
+  openingBalances!: AccountStatementOpeningBalanceDto[];
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +407,14 @@ export class FamilyCurrencyAmountsDto {
 
   @ApiProperty({ description: 'Igual que `summary[].budgeted` individual' })
   budgeted!: number;
+
+  @ApiProperty({ description: 'DX-262: saldo migrado, ya incluido en balance' })
+  openingBalance!: number;
+
+  @ApiProperty({
+    description: 'DX-262 (QA D5): lo que queda pendiente del saldo migrado',
+  })
+  openingPending!: number;
 
   @ApiProperty()
   paid!: number;

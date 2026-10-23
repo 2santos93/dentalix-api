@@ -1,4 +1,5 @@
 import type {
+  BalanceOpeningRow,
   StatementPaymentPlanRow,
   StatementPlanRow,
 } from '../../../account-statement/domain/entities/account-statement.entity';
@@ -31,9 +32,13 @@ export interface AgingPlanRow extends StatementPlanRow {
   agingFrom: Date;
 }
 
-/** Abonos VIVOS de un plan en una moneda: ya sumados o sueltos (computeBalances los suma). */
+/**
+ * Abonos VIVOS de un plan (o de un saldo migrado, DX-262) en una moneda: ya
+ * sumados o sueltos (computeBalances los suma).
+ */
 export interface PaidSum {
-  treatmentPlanId: string;
+  treatmentPlanId: string | null;
+  openingBalanceId?: string | null;
   currency: string;
   amount: number;
 }
@@ -47,6 +52,11 @@ export interface PatientLedger {
   paid: PaidSum[];
   /** Planes de pago vivos (no cancelados) de planes vivos. */
   paymentPlans: StatementPaymentPlanRow[];
+  /**
+   * Saldos migrados vivos (DX-262): envejecen desde su fecha de corte
+   * (aproximada si el archivo no la traía).
+   */
+  openings?: BalanceOpeningRow[];
 }
 
 /** Datos de contacto y último abono de un paciente de la página. */

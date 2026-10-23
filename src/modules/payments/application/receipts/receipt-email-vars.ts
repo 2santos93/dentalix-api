@@ -3,6 +3,7 @@ import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.e
 import type { PaymentReceiptEmailVars } from '../../../notifications/email/domain/email-message';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import { formatMoney as money } from '../../../../shared/money/format-money';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Efectivo',
@@ -25,14 +26,21 @@ const civilLabel = (day: string): string => {
   return `${d}/${m}/${y}`;
 };
 
-/** Mismo formato que la web (`formatCurrency`): el email dice lo mismo que la pantalla. */
-function money(amount: number, currency: string): string {
-  return new Intl.NumberFormat('es', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
+/** «Plan del …» o, en un abono contra el saldo migrado (DX-262), su concepto. */
+function targetLabel(
+  plan: PaymentReceiptView['snapshot']['plan'],
+  opening: PaymentReceiptView['snapshot']['openingBalance'] | null,
+  timeZone: string,
+): string {
+  if (!plan) {
+    return opening
+      ? `Saldo migrado · ${opening.concept} · corte ${civilLabel(opening.asOfDate)}`
+      : 'Saldo migrado';
+  }
+  const planDay = civilLabel(civilDateIn(new Date(plan.createdAt), timeZone));
+  return plan.optionLabel
+    ? `Plan del ${planDay} · ${plan.optionLabel}`
+    : `Plan del ${planDay}`;
 }
 
 /**
@@ -49,7 +57,6 @@ export function receiptEmailVars(
 ): PaymentReceiptEmailVars {
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;
-  const planDay = civilDateIn(new Date(plan.createdAt), timeZone);
   return {
     patientName: patient.fullName,
     reference: receipt.reference,
@@ -67,9 +74,8 @@ export function receiptEmailVars(
     methodLabel: payment.method
       ? METHOD_LABELS[payment.method]
       : 'Sin especificar',
-    planLabel: plan.optionLabel
-      ? `Plan del ${civilLabel(planDay)} · ${plan.optionLabel}`
-      : `Plan del ${civilLabel(planDay)}`,
+    planLabel: targetLabel(plan, snapshot.openingBalance ?? null, timeZone),
+    toOpeningBalance: Boolean(snapshot.openingBalance),
     balanceLabel: planBalance
       ? money(planBalance.balance, planBalance.currency)
       : null,

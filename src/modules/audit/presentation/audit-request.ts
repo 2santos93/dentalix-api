@@ -97,7 +97,18 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     progress?: Record<string, unknown>;
     undoneCreated?: unknown;
     undoneFilled?: unknown;
+    balances?: {
+      fileSha256?: unknown;
+      totalRows?: unknown;
+      errorRows?: unknown;
+      validTotals?: unknown;
+      progress?: Record<string, unknown>;
+      addToExisting?: unknown;
+      undoneCount?: unknown;
+      undoneTotals?: unknown;
+    } | null;
   };
+  const sheet = b.balances ?? undefined;
   return {
     fileSha256: b.fileSha256,
     mode: b.duplicateMode,
@@ -109,6 +120,18 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     updated: b.progress?.updatedCount,
     undoneCreated: b.undoneCreated,
     undoneFilled: b.undoneFilled,
+    // DX-262: la hoja de saldos y su total por moneda (lo que se importa).
+    balanceFileSha256: sheet?.fileSha256,
+    balanceRows: sheet?.totalRows,
+    balanceErrors: sheet?.errorRows,
+    balancesCreated: sheet?.progress?.created,
+    balancesUndone: sheet?.undoneCount,
+    balanceTotals: sheet?.validTotals,
+    // Revisión M5: lo que retiró de verdad el deshacer.
+    balanceUndoneTotals: sheet?.undoneTotals,
+    // QA D1: si se pidió añadir a quien ya tenía saldo, y cuántos no se crearon.
+    balanceAddToExisting: sheet?.addToExisting,
+    balancesExisting: sheet?.progress?.existing,
   };
 }
 

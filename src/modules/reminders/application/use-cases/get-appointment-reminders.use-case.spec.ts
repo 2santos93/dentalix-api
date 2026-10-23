@@ -1,16 +1,19 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FakeReminderRepository } from '../__fixtures__/fake-reminder.repository';
 import { GetAppointmentRemindersUseCase } from './get-appointment-reminders.use-case';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 
 const HOUR = 3_600_000;
 const NOW = new Date('2026-10-20T12:00:00.000Z');
 
+const tenantContext = new TenantContextService();
+const useCase = (repo: FakeReminderRepository) =>
+  new GetAppointmentRemindersUseCase(repo, { now: () => NOW }, tenantContext);
+
 describe('GetAppointmentRemindersUseCase (DX-026)', () => {
   it('404 en español si la cita no es de esta clínica', async () => {
-    const uc = new GetAppointmentRemindersUseCase(
-      new FakeReminderRepository(),
-      { now: () => NOW },
-    );
+    const uc = useCase(new FakeReminderRepository());
     await expect(uc.execute('x')).rejects.toThrow(
       new NotFoundException('Cita no encontrada'),
     );
@@ -21,6 +24,7 @@ describe('GetAppointmentRemindersUseCase (DX-026)', () => {
     const start = new Date(NOW.getTime() + 30 * HOUR);
     repo.snapshot = {
       appointment: { start, status: 'SCHEDULED', deleted: false },
+      locationId: 'loc-norte',
       settings: { enabled: true, leadHours: [48, 2] },
       contact: {
         contactChannel: 'EMAIL',
@@ -38,9 +42,7 @@ describe('GetAppointmentRemindersUseCase (DX-026)', () => {
         },
       ],
     };
-    const result = await new GetAppointmentRemindersUseCase(repo, {
-      now: () => NOW,
-    }).execute('a-1');
+    const result = await useCase(repo).execute('a-1');
     expect(result.enabled).toBe(true);
     expect(result.leadHours).toEqual([48, 2]);
     expect(result.patientBlocker).toBeNull();
@@ -71,6 +73,7 @@ describe('GetAppointmentRemindersUseCase (DX-026)', () => {
     };
     repo.snapshot = {
       appointment: { start, status: 'SCHEDULED', deleted: false },
+      locationId: 'loc-norte',
       settings: { enabled: true, leadHours: [48, 2] },
       contact: {
         contactChannel: 'EMAIL',
@@ -80,9 +83,7 @@ describe('GetAppointmentRemindersUseCase (DX-026)', () => {
       },
       records: [sent],
     };
-    const result = await new GetAppointmentRemindersUseCase(repo, {
-      now: () => NOW,
-    }).execute('a-1');
+    const result = await useCase(repo).execute('a-1');
     expect(result.patientBlocker).toBe(why);
     // Lo ya enviado se sigue viendo; lo que faltaba ya no sale.
     expect(result.items.map((i) => [i.leadHours, i.state])).toEqual([
@@ -95,14 +96,42 @@ describe('GetAppointmentRemindersUseCase (DX-026)', () => {
     const start = new Date(NOW.getTime() + 30 * HOUR);
     repo.snapshot = {
       appointment: { start, status: 'SCHEDULED', deleted: false },
+      locationId: 'loc-norte',
       settings: { enabled: true, leadHours: [2] },
       contact: { contactChannel: 'EMAIL', reminderOptOutAt: null, email: null },
       records: [],
     };
-    const result = await new GetAppointmentRemindersUseCase(repo, {
-      now: () => NOW,
-    }).execute('a-1');
+    const result = await useCase(repo).execute('a-1');
     expect(result.patientBlocker).toBeNull();
     expect(result.items.map((i) => i.state)).toEqual(['PENDING']);
+  });
+
+  // SEC-045: la restricción por sedes de DX-089, como GET /appointments/:id.
+  it('403 si la cita es de una sede que el miembro no tiene; 200 en la suya', async () => {
+    const repo = new FakeReminderRepository();
+    repo.snapshot = {
+      appointment: {
+        start: new Date(NOW.getTime() + 30 * HOUR),
+        status: 'SCHEDULED',
+        deleted: false,
+      },
+      locationId: 'loc-sur',
+      settings: { enabled: true, leadHours: [2] },
+      contact: { contactChannel: 'EMAIL', reminderOptOutAt: null, email: null },
+      records: [],
+    };
+    const asMemberOf = (locationIds: string[]) =>
+      tenantContext.run(
+        't-1',
+        undefined,
+        () => useCase(repo).execute('a-1'),
+        locationIds,
+      );
+    const denied = asMemberOf(['loc-norte']);
+    await expect(denied).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(denied).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+    await expect(asMemberOf(['loc-sur'])).resolves.toMatchObject({
+      enabled: true,
+    });
   });
 });

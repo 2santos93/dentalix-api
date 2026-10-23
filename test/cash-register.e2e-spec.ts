@@ -406,6 +406,8 @@ describe('Caja — GET /payments (e2e)', () => {
         status: 'DRAFT',
         createdAt: expect.any(String) as string,
       },
+      // DX-262: abono a un plan, no a un saldo migrado.
+      openingBalance: null,
     });
   });
 

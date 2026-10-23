@@ -22,6 +22,13 @@ export const PLAN_ITEMS_NO_SHOW_MESSAGE =
 export const PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE =
   'Este tratamiento ya está reservado en otra cita de otra sede. Pide en esa sede que lo quiten de esa cita o la cancelen.';
 
+/** DX-273 «Traer a esta cita»: la cita destino no está en la clínica. */
+export const PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE =
+  'Solo se trae un tratamiento a una cita con el paciente en la clínica (llegó, en sillón o listo para cobrar).';
+/** DX-273: el tratamiento no está (vivo) en la cita destino. */
+export const PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE =
+  'Este tratamiento no está en esta cita.';
+
 const CLOSED_STATUSES: ReadonlySet<AppointmentStatus> = new Set([
   AppointmentStatus.COMPLETED,
   AppointmentStatus.CANCELLED,

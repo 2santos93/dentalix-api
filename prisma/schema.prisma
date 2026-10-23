@@ -88,6 +88,9 @@ model Tenant {
   // DX-107: lotes de importación de pacientes y sus filas.
   patientImportBatches      PatientImportBatch[]
   patientImportRows         PatientImportRow[]
+  // DX-262: hoja de saldos del importador y saldos migrados.
+  patientImportBalanceRows  PatientImportBalanceRow[]
+  openingBalances           OpeningBalance[]
 
   @@map("tenants")
 }
@@ -125,31 +128,33 @@ model User {
   deletedAt               DateTime?
   memberships             ClinicMembership[]
 
-  privacyPoliciesPublished PrivacyPolicyVersion[]
-  dataConsentsRecorded     DataProcessingConsent[]
-  perioExamsPerformed      PerioExam[]
-  prescriptionsIssued      Prescription[]              @relation("PrescriptionProfessional")
-  prescriptionsVoided      Prescription[]              @relation("PrescriptionVoidedBy")
+  privacyPoliciesPublished   PrivacyPolicyVersion[]
+  dataConsentsRecorded       DataProcessingConsent[]
+  perioExamsPerformed        PerioExam[]
+  prescriptionsIssued        Prescription[]              @relation("PrescriptionProfessional")
+  prescriptionsVoided        Prescription[]              @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced           PatientImplant[]            @relation("PatientImplantProfessional")
-  implantsVoided           PatientImplant[]            @relation("PatientImplantVoidedBy")
-  implantCardsDelivered    PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced             PatientImplant[]            @relation("PatientImplantProfessional")
+  implantsVoided             PatientImplant[]            @relation("PatientImplantVoidedBy")
+  implantCardsDelivered      PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
-  uploadedPatientDocuments PatientDocument[]           @relation("PatientDocumentUploadedBy")
-  voidedPatientDocuments   PatientDocument[]           @relation("PatientDocumentVoidedBy")
-  planAcceptancesRecorded  TreatmentPlanAcceptance[]
-  tokens                   UserToken[]
-  clinicalEntryAddenda     ClinicalEntryAddendum[]
-  dentitionEventsRecorded  PatientDentitionEvent[]
-  retentionActions         PatientRetentionAction[]
-  platformAccesses         PlatformAccessAudit[]
+  uploadedPatientDocuments   PatientDocument[]           @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments     PatientDocument[]           @relation("PatientDocumentVoidedBy")
+  planAcceptancesRecorded    TreatmentPlanAcceptance[]
+  tokens                     UserToken[]
+  clinicalEntryAddenda       ClinicalEntryAddendum[]
+  dentitionEventsRecorded    PatientDentitionEvent[]
+  retentionActions           PatientRetentionAction[]
+  platformAccesses           PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts        TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
-  discountPoliciesUpdated  DiscountPolicy[]
+  planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
+  discountPoliciesUpdated    DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
-  platformAuditEvents      PlatformAuditEvent[]
+  platformAuditEvents        PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
-  postOpDeliveries         PostOpInstructionDelivery[]
+  postOpDeliveries           PostOpInstructionDelivery[]
+  // DX-273: salidas de citas de COMPLETED (con motivo).
+  appointmentStatusReversals AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
 
   @@map("users")
 }
@@ -213,6 +218,8 @@ model Location {
   patientDocuments          PatientDocument[]
   // DX-107: lotes de importación de pacientes con esta sede por defecto.
   patientImportBatches      PatientImportBatch[]
+  // DX-262: saldos migrados registrados en la sede.
+  openingBalances           OpeningBalance[]
   planAcceptances           TreatmentPlanAcceptance[]
   presentedPlans            TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
@@ -422,6 +429,9 @@ model Patient {
   importBatch            PatientImportBatch?         @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
   importRows             PatientImportRow[]
+  // DX-262: saldos migrados y su hoja de saldos.
+  importBalanceRows      PatientImportBalanceRow[]
+  openingBalances        OpeningBalance[]
   medicalHistoryVersions MedicalHistoryVersion[]
   // DX-247: confirmaciones «Sin cambios hoy» de su anamnesis.
   medicalHistoryReviews  MedicalHistoryReview[]
@@ -926,6 +936,8 @@ model Appointment {
   deletedAt           DateTime?
 
   planItems        AppointmentPlanItem[]
+  // DX-273: salidas de COMPLETED, con su motivo.
+  statusReversals  AppointmentStatusReversal[]
   confirmations    AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
   waitlistOffers   WaitlistOffer[]
@@ -1612,6 +1624,8 @@ model Currency {
   cashAdjustments  CashSessionAdjustment[]
   // DX-105: listas de precios en esa moneda.
   priceLists       PriceList[]
+  // DX-262: saldos migrados en esa moneda.
+  openingBalances  OpeningBalance[]
 
   @@map("currencies")
 }
@@ -1699,7 +1713,10 @@ model Payment {
   id                     String         @id @default(uuid()) @db.Uuid
   tenantId               String         @db.Uuid
   locationId             String         @db.Uuid
-  treatmentPlanId        String         @db.Uuid
+  // DX-262: un abono va a un plan O a un saldo migrado (CHECK
+  // payments_target_check: exactamente uno de los dos).
+  treatmentPlanId        String?        @db.Uuid
+  openingBalanceId       String?        @db.Uuid
   patientId              String         @db.Uuid
   amount                 Decimal        @db.Decimal(14, 2)
   currency               String
@@ -1731,8 +1748,10 @@ model Payment {
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
   // transitividad el paciente también es del tenant (treatment_plans ya tiene
   // su FK compuesta a patients), sin una tercera FK.
-  plan     TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
-  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  plan           TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
+  // DX-262: abono contra el saldo migrado del MISMO paciente y tenant.
+  openingBalance OpeningBalance? @relation(fields: [tenantId, openingBalanceId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payments_opening_balance_fkey")
+  location       Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
@@ -1752,6 +1771,9 @@ model Payment {
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
+  // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
+  //   payments_tenant_opening_balance_idx ("tenantId", "openingBalanceId")
+  //     WHERE "openingBalanceId" IS NOT NULL
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
@@ -3935,10 +3957,48 @@ model PatientImportBatch {
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt
 
-  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  location Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
-  rows     PatientImportRow[]
-  patients Patient[]
+  // DX-262: hoja de saldos («Saldo migrado») del lote, opcional. Se sube con
+  // el lote VALIDATED (dry-run propio) y se importa al confirmar, después de
+  // los pacientes. El fichero tampoco se guarda: nombre, hash y totales.
+  balanceFileName       String?
+  balanceFileSha256     String?                  @db.Char(64)
+  balanceFileFormat     PatientImportFileFormat?
+  balanceFileSizeBytes  Int?
+  balanceTotalRows      Int                      @default(0)
+  /// Filas con error (importe, moneda, fecha, documento inexistente…).
+  balanceErrorRows      Int                      @default(0)
+  /// Filas sumadas a otra del mismo paciente y moneda.
+  balanceMergedRows     Int                      @default(0)
+  /// Saldos a crear (uno por paciente y moneda).
+  balancePreparedRows   Int                      @default(0)
+  balanceProcessedRows  Int                      @default(0)
+  balanceCreatedCount   Int                      @default(0)
+  /// Saldos no creados al importar (su paciente no llegó a existir).
+  balanceSkippedCount   Int                      @default(0)
+  /// [{ currency, rows, cents }]: todas las filas con importe y moneda legibles.
+  balanceFileTotals     Json                     @default("[]")
+  /// [{ currency, rows, cents }]: lo que se importa.
+  balanceValidTotals    Json                     @default("[]")
+  /// Errores y avisos por fila de la hoja (mismo formato que `issues`).
+  balanceIssues         Json                     @default("[]")
+  /// Saldos migrados que retiró el deshacer.
+  balanceUndoneCount    Int?
+  /// [{ currency, rows, cents }] de los saldos que retiró de verdad el deshacer.
+  balanceUndoneTotals   Json                     @default("[]")
+  /// Saldos no creados porque su documento era de varios pacientes vivos.
+  balanceAmbiguousCount Int                      @default(0)
+  /// «Añadir aunque ya tenga saldo migrado» (QA D1): sin marcar, un paciente con
+  /// un saldo migrado vivo de otro lote en esa moneda no recibe otro.
+  balanceAddToExisting  Boolean                  @default(false)
+  /// Saldos no creados al importar porque el paciente ya tenía uno vivo (QA D1).
+  balanceExistingCount  Int                      @default(0)
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location        Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
+  rows            PatientImportRow[]
+  patients        Patient[]
+  balanceRows     PatientImportBalanceRow[]
+  openingBalances OpeningBalance[]
 
   @@unique([tenantId, id], map: "patient_import_batches_tenant_id_key")
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)], map: "patient_import_batches_tenant_created_idx")
@@ -3975,6 +4035,81 @@ model PatientImportRow {
   @@map("patient_import_rows")
 }
 
+/// DX-262: saldo de la hoja de saldos preparado por el dry-run (uno por
+/// paciente y moneda, ya sumadas las filas repetidas). El trabajo lo convierte
+/// en un `OpeningBalance` al importar, buscando al paciente por `docKey`.
+model PatientImportBalanceRow {
+  id          String                  @id @default(uuid()) @db.Uuid
+  tenantId    String                  @db.Uuid
+  batchId     String                  @db.Uuid
+  /// Primera fila del fichero que lo forma.
+  rowNumber   Int
+  /// Clave del documento del paciente (`docKey`: mayúsculas, solo letras y dígitos).
+  docKey      String
+  currency    String
+  amount      Decimal                 @db.Decimal(14, 2)
+  /// NULL: el fichero no traía fecha; se usará el día de la importación.
+  asOfDate    DateTime?               @db.Date
+  concept     String?
+  sourceRows  Int                     @default(1)
+  outcome     PatientImportRowOutcome @default(PENDING)
+  patientId   String?                 @db.Uuid
+  processedAt DateTime?
+
+  tenant  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  batch   PatientImportBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_balance_rows_batch_fkey")
+  patient Patient?           @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_balance_rows_patient_fkey")
+
+  @@unique([tenantId, batchId, docKey, currency], map: "patient_import_balance_rows_tenant_batch_doc_key")
+  @@index([tenantId, batchId, outcome, rowNumber], map: "patient_import_balance_rows_tenant_batch_outcome_idx")
+  @@index([tenantId, patientId], map: "patient_import_balance_rows_tenant_patient_idx")
+  @@map("patient_import_balance_rows")
+}
+
+/// DX-262: saldo inicial «Saldo migrado» de un paciente en una moneda, traído
+/// de su programa anterior con un lote de importación. Entra en el estado de
+/// cuenta (DX-011) y en la cartera por antigüedad (DX-145) desde `asOfDate`.
+/// Inmutable salvo su retirada (`voidedAt`, al deshacer el lote): trigger
+/// `opening_balances_guard`. Hoy ningún abono se le imputa (DX-051).
+model OpeningBalance {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @db.Uuid
+  /// Sede del lote (la activa al subirlo): sede de la deuda si el paciente no
+  /// tiene citas atendidas, abonos ni planes presentados.
+  locationId          String    @db.Uuid
+  patientId           String    @db.Uuid
+  importBatchId       String    @db.Uuid
+  currency            String
+  amount              Decimal   @db.Decimal(14, 2)
+  /// Día civil desde el que cuenta la deuda (fecha de corte).
+  asOfDate            DateTime  @db.Date
+  /// `asOfDate` es el día de la importación: el fichero no traía fecha.
+  asOfDateApproximate Boolean   @default(false)
+  concept             String
+  /// Filas del fichero sumadas en este saldo.
+  sourceRows          Int       @default(1)
+  /// Puntero suave a User (quién confirmó el lote).
+  createdById         String    @db.Uuid
+  createdAt           DateTime  @default(now())
+  voidedAt            DateTime?
+  voidedById          String?   @db.Uuid
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_location_fkey")
+  patient     Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_patient_fkey")
+  batch       PatientImportBatch @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_batch_fkey")
+  currencyRef Currency           @relation(fields: [currency], references: [code], onDelete: Restrict, map: "opening_balances_currency_fkey")
+  /// Abonos registrados contra este saldo (vivos: `deletedAt` NULL).
+  payments    Payment[]
+
+  @@unique([tenantId, id], map: "opening_balances_tenant_id_key")
+  @@unique([tenantId, id, patientId], map: "opening_balances_tenant_id_patient_key")
+  @@unique([tenantId, importBatchId, patientId, currency], map: "opening_balances_tenant_batch_patient_currency_key")
+  @@index([tenantId, patientId], map: "opening_balances_tenant_patient_idx")
+  @@index([tenantId, locationId], map: "opening_balances_tenant_location_idx")
+  @@map("opening_balances")
+}
+
 // DX-256: historial de ítems agendados; active se mantiene con triggers.
 model AppointmentPlanItem {
   deletedAt     DateTime?
@@ -3990,4 +4125,26 @@ model AppointmentPlanItem {
   @@id([tenantId, appointmentId, planItemId])
   @@index([tenantId, planItemId, appointmentId])
   @@map("appointment_plan_items")
+}
+
+// DX-273: cada salida de una cita de COMPLETED (a agendada, cancelada…), con
+// el motivo que escribió ADMIN/DENTIST. El `audit_event` COMPLETED_EXIT
+// apunta aquí por id (`params.reversalId`): la auditoría no guarda texto libre.
+// Solo SELECT/INSERT para la app (evidencia); RLS FORCE por tenant.
+model AppointmentStatusReversal {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  tenantId      String            @db.Uuid
+  patientId     String            @db.Uuid
+  appointmentId String            @db.Uuid
+  fromStatus    AppointmentStatus
+  toStatus      AppointmentStatus
+  reason        String            @db.VarChar(500)
+  actorUserId   String            @db.Uuid
+  createdAt     DateTime          @default(dbgenerated("timezone('UTC'::text, now())"))
+  appointment   Appointment       @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Cascade, map: "appointment_status_reversals_appointment_fkey")
+  actor         User              @relation("AppointmentStatusReversalActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "appointment_status_reversals_actor_fkey")
+
+  @@index([tenantId, appointmentId, createdAt], map: "appointment_status_reversals_appointment_idx")
+  @@index([actorUserId], map: "appointment_status_reversals_actor_idx")
+  @@map("appointment_status_reversals")
 }

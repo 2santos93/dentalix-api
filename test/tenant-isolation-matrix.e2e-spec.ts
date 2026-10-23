@@ -1347,6 +1347,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
     },
     {
+      // DX-273 «Traer a esta cita» sobre una cita y un ítem de A.
+      name: 'POST /appointments/:id/plan-items/:planItemId/claim',
+      verb: 'post',
+      path: () =>
+        `/appointments/${a.appointmentId}/plan-items/${a.planItemId}/claim`,
+      status: 404,
+    },
+    {
       // El panel de la sede de A: la sede ajena se rechaza antes del handler.
       name: 'GET /appointments/in-clinic con X-Location-Id de A',
       verb: 'get',
@@ -1601,6 +1609,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patient-imports/:id/errors.csv': 'patient-imports.e2e-spec.ts',
     'POST /patient-imports/:id/confirm': 'patient-imports.e2e-spec.ts',
     'POST /patient-imports/:id/undo': 'patient-imports.e2e-spec.ts',
+    // DX-262: abonar al saldo migrado de otra clínica → 404.
+    'POST /opening-balances/:id/payments': 'opening-balances.e2e-spec.ts',
+    // DX-262: la hoja de saldos del lote de otra clínica → 404.
+    'POST /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
+    'DELETE /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
+    'POST /patient-imports/:id/balances/undo': 'opening-balances.e2e-spec.ts',
+    'GET /patient-imports/:id/balances/errors.csv':
+      'opening-balances.e2e-spec.ts',
     'POST /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
     'POST /patients/:patientId/documents/upload-url':
       'patient-documents-direct-disk.e2e-spec.ts',

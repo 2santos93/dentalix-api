@@ -520,6 +520,42 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'IMPORT_UNDONE',
     importBatch: true,
   },
+  // DX-262: abono contra el saldo migrado (con su recibo de caja).
+  'POST /opening-balances/:id/payments': {
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: RES,
+    patient: { lookup: 'openingBalance', param: 'id' },
+    reason: 'RECEIPT_ISSUED',
+  },
+  // DX-262: hoja de saldos del lote (dry-run, quitarla y su informe).
+  'POST /patient-imports/:id/balances': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_VALIDATED',
+    importBatch: true,
+  },
+  'POST /patient-imports/:id/balances/undo': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_UNDONE',
+    importBatch: true,
+  },
+  'DELETE /patient-imports/:id/balances': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_REMOVED',
+    importBatch: true,
+  },
+  'GET /patient-imports/:id/balances/errors.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCE_ERRORS',
+  },
 
   // DX-151: documentos del paciente. Ver la URL en línea es VIEW y descargar
   // es EXPORT; la metadata solo lleva el código, nunca el nombre del fichero.

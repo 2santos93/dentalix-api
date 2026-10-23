@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   HttpCode,
@@ -54,6 +55,8 @@ import {
 import type { ColumnMapping } from '../domain/column-mapping';
 import {
   ACTIVE_IMPORT_MESSAGE,
+  BALANCES_NOT_EDITABLE_MESSAGE,
+  BALANCE_REPORT_GONE_MESSAGE,
   NOT_FOUND_MESSAGE,
   PatientImportsService,
   REPORT_GONE_MESSAGE,
@@ -63,6 +66,7 @@ import {
 import {
   ConfirmPatientImportDto,
   CreatePatientImportDto,
+  UploadBalancesDto,
   ListPatientImportsQueryDto,
   PatientImportBatchDetailDto,
   PatientImportInspectDto,
@@ -168,6 +172,23 @@ export class PatientImportsController {
   )
   template(): string {
     return this.imports.template();
+  }
+
+  @Get('balances-template')
+  @ApiOperation({
+    summary: 'Plantilla CSV de la hoja de saldos («Saldo migrado», DX-262)',
+    description:
+      'numero_documento, importe, moneda, fecha_antiguedad (opcional) y concepto (opcional). UTF-8 con BOM; una fila de ejemplo ficticia que hay que borrar.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Plantilla CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="plantilla-saldos.csv"')
+  balanceTemplate(): string {
+    return this.imports.balanceTemplate();
   }
 
   @Post('inspect')
@@ -307,6 +328,130 @@ export class PatientImportsController {
     action: 'UPDATE',
     resource: 'PATIENT_IMPORT_BATCH',
     resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_VALIDATED',
+    importBatch: true,
+  })
+  @Post(':id/balances')
+  @ApiOperation({
+    summary:
+      'Hoja de saldos del lote (DX-262): validar el «Saldo migrado» (dry-run)',
+    description:
+      'Solo con el lote validado y sin confirmar. Valida cada fila (documento del paciente en la clínica o en el archivo de pacientes del lote, importe > 0, moneda admitida, fecha de antigüedad no futura, concepto ≤ 200), suma las filas del mismo paciente y moneda y devuelve el total por moneda del archivo y de lo que se importará. NO crea ningún saldo: se importan al confirmar el lote, después de los pacientes. Volver a subirla la reemplaza.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: FILE_BODY,
+        addToExisting: {
+          type: 'string',
+          enum: ['true', 'false'],
+          description:
+            '«Añadir aunque ya tenga saldo migrado» (QA D1). Por defecto false: un paciente con un saldo migrado vivo en esa moneda de otro lote no recibe otro (error de la fila con el importe, el lote y el corte del existente).',
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({ type: PatientImportBatchDetailDto })
+  @ApiBadRequestResponse({
+    description:
+      'Archivo vacío, de otro formato, sin las columnas de documento, importe o moneda; addToExisting que no es true/false',
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: BALANCES_NOT_EDITABLE_MESSAGE })
+  @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
+  @UseInterceptors(FILE_INTERCEPTOR)
+  balances(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: UploadBalancesDto,
+  ): Promise<BatchDetail> {
+    return this.imports.dryRunBalances(id, file, dto.addToExisting === 'true');
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_REMOVED',
+    importBatch: true,
+  })
+  @Delete(':id/balances')
+  @ApiOperation({
+    summary: 'Quitar la hoja de saldos de un lote aún sin confirmar (DX-262)',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: BALANCES_NOT_EDITABLE_MESSAGE })
+  removeBalances(@Param('id', ParseUUIDPipe) id: string): Promise<BatchDetail> {
+    return this.imports.removeBalances(id);
+  }
+
+  @Audit({
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCE_ERRORS',
+  })
+  @Get(':id/balances/errors.csv')
+  @ApiOperation({
+    summary: 'Informe de errores y avisos de la hoja de saldos (CSV, DX-262)',
+    description:
+      'Fila, columna, tipo, motivo y valor. UTF-8 con BOM; fórmulas neutralizadas (inyección CSV).',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Fichero CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiGoneResponse({ description: BALANCE_REPORT_GONE_MESSAGE })
+  async balanceErrors(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const report = await this.imports.balanceErrorsCsv(id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${report.fileName}"`,
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    return report.csv;
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_UNDONE',
+    importBatch: true,
+  })
+  @Post(':id/balances/undo')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Retirar solo los saldos migrados del lote (DX-262)',
+    description:
+      'Retira en blando los «Saldo migrado» vivos del lote aunque sus pacientes ya tengan citas u otra actividad (el lote sigue importado). Se niega (409) si alguno tiene abonos vivos: hay que anularlos antes.',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({
+    description: 'El lote no está terminado o algún saldo tiene abonos',
+  })
+  undoBalances(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<BatchDetail> {
+    return this.imports.undoBalances(id, req.user.sub);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
     reason: 'IMPORT_CONFIRMED',
     importBatch: true,
   })
@@ -315,7 +460,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Paso 3: confirmar e importar en segundo plano',
     description:
-      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos (Ley 1581) registrada: la ficha la marca pendiente.',
+      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando): primero los pacientes y después, si el lote trae hoja de saldos, un «Saldo migrado» por paciente y moneda (DX-262). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos (Ley 1581) registrada: la ficha la marca pendiente.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
@@ -342,7 +487,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Deshacer el lote',
     description:
-      'Retira en blando SOLO los pacientes que creó el lote y revierte los campos que rellenó (si siguen con el valor del lote). Se niega (409) si alguno de los creados ya tiene citas, historia clínica, planes, pagos u otros datos.',
+      'Retira en blando SOLO los pacientes que creó el lote, revierte los campos que rellenó (si siguen con el valor del lote) y retira sus saldos migrados (DX-262). Se niega (409) si alguno de los creados ya tiene citas, historia clínica, planes, pagos, saldos de otra importación u otros datos, o si algún saldo migrado del lote tiene abonos imputados.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })

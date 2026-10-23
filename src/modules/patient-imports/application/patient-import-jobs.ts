@@ -1,5 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import type { ClinicCountry } from '@prisma/client';
 import { JobRegistry } from '../../jobs/application/job-registry';
+import { civilDateIn } from '../../../shared/time/civil-day';
+import { timeZoneForCountry } from '../../../shared/locations/location-time-zone';
 import type { JobContext } from '../../jobs/domain/job';
 import {
   BatchNotRunningError,
@@ -17,6 +20,8 @@ export const REAP_IMPORTS_JOB = 'patient-imports.reap-stuck';
 export const REAP_IMPORTS_SCHEDULE = 'patient-imports.reap-stuck.hourly';
 /** Filas por bloque: cada bloque es una transacción corta. */
 export const IMPORT_CHUNK_SIZE = 250;
+/** Saldos migrados por bloque (DX-262): un INSERT y su refresco de cartera. */
+export const BALANCE_CHUNK_SIZE = 500;
 const MAX_ATTEMPTS = 5;
 
 class ImportAbortedError extends Error {
@@ -33,8 +38,9 @@ class ImportAbortedError extends Error {
  *
  * - `patient-imports.process`: importa un lote confirmado POR BLOQUES de
  *   250 filas, cada uno en su transacción (la clínica sigue trabajando: solo
- *   se bloquean las filas del bloque). Idempotente: retoma desde las filas
- *   PENDING; al agotar los intentos el lote queda FAILED con lo hecho.
+ *   se bloquean las filas del bloque); después, los saldos migrados de su
+ *   hoja de saldos (DX-262) en bloques de 500. Idempotente: retoma desde las
+ *   filas PENDING; al agotar los intentos el lote queda FAILED con lo hecho.
  * - `patient-imports.expire-validated` (diario): los dry-run sin confirmar de
  *   más de 24 h caducan y se vacían sus datos (el fichero nunca se guardó).
  *
@@ -116,6 +122,24 @@ export class PatientImportJobs implements OnModuleInit {
           channel,
         );
         if (chunk.processed === 0) break;
+      }
+      // DX-262: los saldos, cuando ya existen todos los pacientes del lote.
+      // Sin fecha en el archivo, el «hoy» de la sede del lote (aproximado).
+      if (batch.balancePreparedRows > batch.balanceProcessedRows) {
+        const country = await this.repo.locationCountry(batch.locationId);
+        const today = civilDateIn(
+          new Date(),
+          timeZoneForCountry(country as ClinicCountry),
+        );
+        for (;;) {
+          if (ctx.signal.aborted) throw new ImportAbortedError();
+          const chunk = await this.repo.processBalanceChunk(
+            batch,
+            BALANCE_CHUNK_SIZE,
+            today,
+          );
+          if (chunk.processed === 0) break;
+        }
       }
       await this.repo.finish(batchId, 'COMPLETED');
       this.logger.log({ event: 'patient_imports.completed', batchId });

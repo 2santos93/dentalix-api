@@ -341,4 +341,112 @@ describe('computePatientAging', () => {
     );
     expect(aging.currencies).toEqual([]);
   });
+
+  describe('saldo migrado (DX-262)', () => {
+    it('envejece desde su fecha de corte y suma al saldo del estado de cuenta', () => {
+      const aging = computePatientAging(
+        ledger({
+          plans: [plan('p', { billable: 100 })],
+          openings: [
+            {
+              id: 'ob-1',
+              currency: 'COP',
+              amount: 500,
+              asOfDate: '2026-07-01', // hace 108 días
+              asOfDateApproximate: false,
+            },
+            {
+              id: 'ob-2',
+              currency: 'USD',
+              amount: 30,
+              asOfDate: '2026-09-02', // hace 45 días, fecha aproximada
+              asOfDateApproximate: true,
+            },
+          ],
+        }),
+        { now: NOW, timeZone: BOGOTA },
+      );
+      const [cop, usd] = aging.currencies;
+      expect(cop).toMatchObject({
+        currency: 'COP',
+        balance: 600,
+        debt: 600,
+        oldestAgeDays: 108,
+      });
+      expect(cop.buckets).toMatchObject({ over90: 500, days0to30: 100 });
+      expect(usd).toMatchObject({
+        currency: 'USD',
+        balance: 30,
+        oldestAgeDays: 45,
+        ageApproximate: true,
+      });
+      expect(usd.buckets).toMatchObject({ days31to60: 30 });
+      expect(aging.oldestAgeDays).toBe(108);
+    });
+
+    it('con fecha exacta y sin planes, la fila no es aproximada', () => {
+      const aging = computePatientAging(
+        ledger({
+          openings: [
+            {
+              id: 'ob-1',
+              currency: 'COP',
+              amount: 80,
+              asOfDate: '2026-10-10',
+              asOfDateApproximate: false,
+            },
+          ],
+        }),
+        { now: NOW, timeZone: BOGOTA },
+      );
+      expect(aging.ageApproximate).toBe(false);
+      expect(aging.currencies[0].buckets.days0to30).toBe(80);
+    });
+
+    it('envejece solo lo pendiente; pagado entero, no es deuda (revisión C1)', () => {
+      const aging = computePatientAging(
+        ledger({
+          openings: [
+            {
+              id: 'ob-1',
+              currency: 'COP',
+              amount: 500,
+              asOfDate: '2026-07-01',
+              asOfDateApproximate: false,
+            },
+            {
+              id: 'ob-2',
+              currency: 'USD',
+              amount: 30,
+              asOfDate: '2026-07-01',
+              asOfDateApproximate: false,
+            },
+          ],
+          paid: [
+            {
+              treatmentPlanId: null,
+              openingBalanceId: 'ob-1',
+              currency: 'COP',
+              amount: 200,
+            },
+            {
+              treatmentPlanId: null,
+              openingBalanceId: 'ob-2',
+              currency: 'USD',
+              amount: 30,
+            },
+          ],
+        }),
+        { now: NOW, timeZone: BOGOTA },
+      );
+      expect(aging.currencies).toHaveLength(1);
+      expect(aging.currencies[0]).toMatchObject({
+        currency: 'COP',
+        balance: 300,
+        debt: 300,
+        credit: 0,
+      });
+      expect(aging.currencies[0].buckets.over90).toBe(300);
+    });
+  });
 });

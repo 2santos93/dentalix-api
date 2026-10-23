@@ -24,6 +24,7 @@ import {
   type Punctuality,
 } from '../../domain/patient-flow';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { PlanItemReservedElsewhere } from '../../domain/entities/appointment.entity';
 
 export const IN_CLINIC_NO_LOCATION_MESSAGE =
   'Elige una sede para ver quién está en la clínica.';
@@ -57,6 +58,11 @@ export interface InClinicItem {
   waitedMinutes: number;
   /** Color del chip: llegó a la hora (verde), hasta 5 min tarde, o después. */
   punctuality: Punctuality;
+  /**
+   * DX-273: tratamientos de la cita que reserva OTRA cita viva (solo sedes
+   * permitidas al usuario): el aviso «reservado en la cita del…».
+   */
+  planItemsReservedElsewhere: PlanItemReservedElsewhere[];
 }
 
 export interface InClinicView<Item extends InClinicItem = InClinicItem> {
@@ -81,7 +87,11 @@ function enteredAt(a: InClinicAppointment): Date {
   return a.arrivedAt ?? a.start;
 }
 
-function toItem(a: InClinicAppointment, now: Date): InClinicItem {
+function toItem(
+  a: InClinicAppointment,
+  now: Date,
+  reserved: ReadonlyMap<string, PlanItemReservedElsewhere[]>,
+): InClinicItem {
   const arrived = a.arrivedAt ?? a.start;
   return {
     appointmentId: a.id,
@@ -99,6 +109,7 @@ function toItem(a: InClinicAppointment, now: Date): InClinicItem {
     minutesInStatus: minutesSince(enteredAt(a), now),
     waitedMinutes: minutesSince(arrived, a.seatedAt ?? now),
     punctuality: arrivalPunctuality(a.start, arrived),
+    planItemsReservedElsewhere: reserved.get(a.id) ?? [],
   };
 }
 
@@ -156,7 +167,13 @@ export class ListInClinicUseCase {
       to: range.end,
       ...(mine ? { providerId: input.userId } : {}),
     });
-    const items = [...rows].sort(byEntered).map((r) => toItem(r, now));
+    // DX-273: el aviso de reserva en otra cita, en una consulta por lote.
+    const reserved = await this.repo.findPlanItemsReservedElsewhere(
+      rows.map((r) => r.id),
+    );
+    const items = [...rows]
+      .sort(byEntered)
+      .map((r) => toItem(r, now, reserved));
     const group = (status: InClinicStatus) =>
       items.filter((i) => i.status === status);
 

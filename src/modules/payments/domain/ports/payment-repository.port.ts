@@ -21,7 +21,10 @@ export interface CivilPaidDay {
 }
 
 export interface CreatePaymentRepoInput {
-  treatmentPlanId: string;
+  /** Exactamente uno de los dos (payments_target_check, DX-262). */
+  treatmentPlanId: string | null;
+  /** Abono contra un saldo migrado del paciente (DX-262); sin él, a un plan. */
+  openingBalanceId?: string | null;
   patientId: string;
   amount: number;
   currency: string;
@@ -49,6 +52,16 @@ export interface CreatePaymentRepoInput {
    * pudo calcular (p. ej. sin tasa de cambio): el recibo se emite igual.
    */
   receiptPlanBalance: ReceiptPlanBalance | null;
+}
+
+/** Un saldo migrado vivo (DX-262) con lo que el abono necesita validar. */
+export interface OpeningBalanceTarget {
+  id: string;
+  patientId: string;
+  currency: string;
+  amount: number;
+  /** Abonado vivo en su moneda. */
+  paid: number;
 }
 
 /**
@@ -141,6 +154,15 @@ export interface PaymentRepository {
    * devuelve el abono ORIGINAL en vez de fallar.
    */
   create(input: CreatePaymentRepoInput): Promise<Payment>;
+
+  /**
+   * DX-262: el saldo migrado vivo (no retirado) de esta clínica con lo abonado
+   * en su moneda, o `null` (no existe, retirado u otra clínica por RLS).
+   */
+  findOpeningBalance(id: string): Promise<OpeningBalanceTarget | null>;
+
+  /** Abonos activos contra un saldo migrado (DX-262), por `paidAt` DESC. */
+  listByOpeningBalance(openingBalanceId: string): Promise<Payment[]>;
 
   /**
    * El día civil (YYYY-MM-DD) que tendrá un abono con este `paidAt` en la sede
