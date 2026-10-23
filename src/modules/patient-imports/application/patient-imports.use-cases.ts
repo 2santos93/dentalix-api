@@ -164,6 +164,8 @@ export interface BalancesView {
   mergedRows: number;
   /** Saldos a crear: uno por paciente y moneda. */
   preparedCount: number;
+  /** «Añadir aunque ya tenga saldo migrado» marcado al subir la hoja. */
+  addToExisting: boolean;
   /** Todas las filas con importe y moneda legibles, por moneda. */
   fileTotals: BalanceCurrencyTotal[];
   /** Lo que se importa, por moneda. */
@@ -177,6 +179,8 @@ export interface BalancesView {
     skipped: number;
     /** No creados: su documento era de varios pacientes vivos. */
     ambiguous: number;
+    /** No creados: ya tenía un saldo migrado vivo en esa moneda (QA D1). */
+    existing: number;
   };
   undoneCount: number | null;
   /** Lo que retiró de verdad el deshacer, por moneda. */
@@ -548,10 +552,16 @@ export class PatientImportsService {
    * el archivo de pacientes del lote, suma las filas del mismo paciente y
    * moneda y guarda los saldos preparados con los totales por moneda. NO crea
    * ningún saldo migrado. Volver a subirla la reemplaza.
+   *
+   * Un paciente que ya tiene un saldo migrado vivo en esa moneda de otro
+   * lote no recibe otro (QA D1: subir dos veces la misma hoja duplicaba la
+   * deuda), salvo con `addToExisting` («Añadir aunque ya tenga saldo
+   * migrado»).
    */
   async dryRunBalances(
     id: string,
     file: UploadedFile | undefined,
+    addToExisting = false,
   ): Promise<BatchDetail> {
     const f = requireFile(file);
     const current = await this.repo.findBatch(id);
@@ -567,11 +577,9 @@ export class PatientImportsService {
       throw err;
     }
     const country = await this.repo.locationCountry(current.locationId);
+    const timeZone = timeZoneForCountry(country as ClinicCountry);
     const ctx = {
-      today: civilDateIn(
-        new Date(),
-        timeZoneForCountry(country as ClinicCountry),
-      ),
+      today: civilDateIn(new Date(), timeZone),
       currencies: new Set(await this.repo.currencyCodes()),
       format: parsed.format,
     };
@@ -596,10 +604,16 @@ export class PatientImportsService {
         issues.push(...validated.issues);
       }
     }
-    const docs = await this.repo.knownDocs(id, [
-      ...new Set(candidates.map((c) => c.docKey)),
-    ]);
-    const aggregated = aggregateBalances(candidates, docs, cols.docNumber);
+    const keys = [...new Set(candidates.map((c) => c.docKey))];
+    const docs = await this.repo.knownDocs(id, keys);
+    const existing = await this.repo.existingBalances(id, keys, timeZone);
+    const aggregated = aggregateBalances(
+      candidates,
+      docs,
+      cols.docNumber,
+      existing,
+      addToExisting,
+    );
     issues.push(...aggregated.issues);
     issues.sort((x, y) => x.row - y.row);
 
@@ -617,6 +631,7 @@ export class PatientImportsService {
         validTotals: aggregated.validTotals,
         issues,
         prepared: aggregated.prepared,
+        addToExisting,
       });
     } catch (err) {
       if (err instanceof BatchStateError) {
@@ -791,6 +806,7 @@ export class PatientImportsService {
       errorRows: batch.balanceErrorRows,
       mergedRows: batch.balanceMergedRows,
       preparedCount: batch.balancePreparedRows,
+      addToExisting: batch.balanceAddToExisting,
       fileTotals: toAmounts(batch.balanceFileTotals),
       validTotals: toAmounts(batch.balanceValidTotals),
       imported: (imported.get(batch.id) ?? []).map((t) => ({
@@ -803,6 +819,7 @@ export class PatientImportsService {
         created: batch.balanceCreatedCount,
         skipped: batch.balanceSkippedCount,
         ambiguous: batch.balanceAmbiguousCount,
+        existing: batch.balanceExistingCount,
       },
       undoneCount: batch.balanceUndoneCount,
       undoneTotals: toAmounts(batch.balanceUndoneTotals),

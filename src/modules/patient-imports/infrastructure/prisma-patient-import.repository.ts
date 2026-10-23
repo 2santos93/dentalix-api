@@ -24,6 +24,8 @@ import {
   totalsByCurrency,
   type CurrencyTotal,
   type DocLookup,
+  type ExistingBalance,
+  type ExistingBalanceLookup,
   type PreparedBalance,
 } from '../domain/opening-balance-sheet';
 import { docKey, type RowIssue } from '../domain/row-validation';
@@ -154,6 +156,8 @@ export interface NewBalanceSheet {
   validTotals: CurrencyTotal[];
   issues: RowIssue[];
   prepared: PreparedBalance[];
+  /** «Añadir aunque ya tenga saldo migrado» (QA D1); por defecto, no. */
+  addToExisting?: boolean;
 }
 
 export interface BalanceChunkResult {
@@ -163,6 +167,8 @@ export interface BalanceChunkResult {
   skipped: number;
   /** Su documento era de varios pacientes vivos (no se adivina). */
   ambiguous: number;
+  /** El paciente ya tenía un saldo migrado vivo en esa moneda (QA D1). */
+  existing: number;
 }
 
 /** Saldos migrados vivos de un lote, por moneda (lo importado de verdad). */
@@ -580,6 +586,68 @@ export class PrismaPatientImportRepository {
   }
 
   /**
+   * Saldos migrados VIVOS de los pacientes con esas claves de documento, de
+   * OTROS lotes, por documento y moneda (QA D1): cuántos, su suma y el más
+   * reciente (importe, corte, archivo del lote y día civil de la
+   * importación en `timeZone`). Por conjuntos, como `knownDocs`.
+   */
+  async existingBalances(
+    batchId: string,
+    keys: string[],
+    timeZone: string,
+  ): Promise<ExistingBalanceLookup> {
+    const out = new Map<string, ExistingBalance>();
+    if (keys.length === 0) return out;
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<
+        {
+          docKey: string;
+          currency: string;
+          cents: number;
+          asOfDate: Date;
+          fileName: string;
+          importedOn: string;
+        }[]
+      >`
+        SELECT regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey",
+               o."currency",
+               (o."amount" * 100)::bigint::float8 AS "cents",
+               o."asOfDate",
+               b."fileName",
+               to_char(timezone(${timeZone}, o."createdAt" AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS "importedOn"
+          FROM "opening_balances" o
+          JOIN "patients" p
+            ON p."tenantId" = o."tenantId" AND p."id" = o."patientId"
+          JOIN "patient_import_batches" b
+            ON b."tenantId" = o."tenantId" AND b."id" = o."importBatchId"
+         WHERE o."tenantId" = ${tenantId}::uuid
+           AND o."voidedAt" IS NULL
+           AND o."importBatchId" <> ${batchId}::uuid
+           AND p."deletedAt" IS NULL
+           AND p."docNumber" IS NOT NULL
+           AND regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])
+         ORDER BY o."createdAt", o."id"`,
+      LONG_TX,
+    );
+    for (const r of rows) {
+      const k = `${r.docKey}\u0000${r.currency}`;
+      const prev = out.get(k);
+      out.set(k, {
+        count: (prev?.count ?? 0) + 1,
+        cents: (prev?.cents ?? 0) + r.cents,
+        latest: {
+          cents: r.cents,
+          asOfDate: r.asOfDate.toISOString().slice(0, 10),
+          fileName: r.fileName,
+          importedOn: r.importedOn,
+        },
+      });
+    }
+    return out;
+  }
+
+  /**
    * Guarda (o reemplaza) la hoja de saldos de un lote VALIDATED: sus totales,
    * errores y los saldos preparados. `null` si el lote no es de la clínica;
    * `BatchStateError` si ya no está VALIDATED.
@@ -628,6 +696,7 @@ export class PrismaPatientImportRepository {
           balanceValidTotals:
             input.validTotals as unknown as Prisma.InputJsonArray,
           balanceIssues: input.issues as unknown as Prisma.InputJsonArray,
+          balanceAddToExisting: input.addToExisting ?? false,
         },
       });
     }, LONG_TX);
@@ -655,6 +724,7 @@ export class PrismaPatientImportRepository {
           balanceFileTotals: [],
           balanceValidTotals: [],
           balanceIssues: [],
+          balanceAddToExisting: false,
         },
       });
     });
@@ -688,9 +758,18 @@ export class PrismaPatientImportRepository {
    * no se repite (índice único por lote, paciente y moneda) y una fila ya
    * procesada no vuelve a salir. Un INSERT por bloque: el trigger del
    * resumen de cartera refresca solo a esos pacientes.
+   *
+   * Sin «Añadir aunque ya tenga saldo migrado» (QA D1), un paciente que ya
+   * tiene un saldo migrado vivo de otro lote en esa moneda no recibe otro:
+   * la fila queda SKIPPED y se cuenta en `existing`. El dry-run ya lo avisa;
+   * esto cubre dos lotes validados a la vez con la misma hoja (solo corre un
+   * lote cada vez, así que la comprobación no compite con otra importación).
    */
   async processBalanceChunk(
-    batch: Pick<PatientImportBatch, 'id' | 'confirmedById' | 'locationId'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'confirmedById' | 'locationId' | 'balanceAddToExisting'
+    >,
     size: number,
     today: string,
   ): Promise<BalanceChunkResult> {
@@ -717,7 +796,13 @@ export class PrismaPatientImportRepository {
          LIMIT ${chunk}
          FOR UPDATE SKIP LOCKED`;
       if (pending.length === 0) {
-        return { processed: 0, created: 0, skipped: 0, ambiguous: 0 };
+        return {
+          processed: 0,
+          created: 0,
+          skipped: 0,
+          ambiguous: 0,
+          existing: 0,
+        };
       }
       const keys = [...new Set(pending.map((r) => r.docKey))];
       // Solo una clave con UN paciente vivo: si hay varios, no se adivina
@@ -738,8 +823,27 @@ export class PrismaPatientImportRepository {
       const ambiguousKeys = new Set(
         patients.filter((p) => p.n > 1).map((p) => p.docKey),
       );
+      // Pacientes con un saldo migrado vivo de otro lote en esa moneda.
+      const taken = new Set<string>();
+      const candidates = [...new Set(patientOf.values())];
+      if (!batch.balanceAddToExisting && candidates.length > 0) {
+        const live = await tx.$queryRaw<
+          { patientId: string; currency: string }[]
+        >`
+          SELECT DISTINCT "patientId", "currency"
+            FROM "opening_balances"
+           WHERE "tenantId" = ${tenantId}::uuid
+             AND "patientId" = ANY(${candidates}::uuid[])
+             AND "importBatchId" <> ${batch.id}::uuid
+             AND "voidedAt" IS NULL`;
+        for (const l of live) taken.add(`${l.patientId}\u0000${l.currency}`);
+      }
+      const hasExisting = (r: { docKey: string; currency: string }) =>
+        taken.has(`${patientOf.get(r.docKey)}\u0000${r.currency}`);
       const createdById = batch.confirmedById as string;
-      const toCreate = pending.filter((r) => patientOf.has(r.docKey));
+      const toCreate = pending.filter(
+        (r) => patientOf.has(r.docKey) && !hasExisting(r),
+      );
       if (toCreate.length > 0) {
         await tx.openingBalance.createMany({
           skipDuplicates: true,
@@ -761,7 +865,9 @@ export class PrismaPatientImportRepository {
       const ids = pending.map((r) => r.id);
       const outcomes = pending.map((r) =>
         patientOf.has(r.docKey)
-          ? 'CREATED'
+          ? hasExisting(r)
+            ? 'SKIPPED'
+            : 'CREATED'
           : ambiguousKeys.has(r.docKey)
             ? 'FAILED'
             : 'SKIPPED',
@@ -777,11 +883,15 @@ export class PrismaPatientImportRepository {
                        unnest(${patientIds}::uuid[]) AS patient_id) v
          WHERE r."id" = v.id`;
       const ambiguous = outcomes.filter((o) => o === 'FAILED').length;
+      const existing = pending.filter(
+        (r) => patientOf.has(r.docKey) && hasExisting(r),
+      ).length;
       const result = {
         processed: pending.length,
         created: toCreate.length,
-        skipped: pending.length - toCreate.length - ambiguous,
+        skipped: pending.length - toCreate.length - ambiguous - existing,
         ambiguous,
+        existing,
       };
       await tx.patientImportBatch.update({
         where: { id: batch.id },
@@ -790,6 +900,7 @@ export class PrismaPatientImportRepository {
           balanceCreatedCount: { increment: result.created },
           balanceSkippedCount: { increment: result.skipped },
           balanceAmbiguousCount: { increment: result.ambiguous },
+          balanceExistingCount: { increment: result.existing },
         },
       });
       return result;

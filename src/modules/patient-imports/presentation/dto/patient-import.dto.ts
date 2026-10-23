@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -46,6 +47,21 @@ export class CreatePatientImportDto {
     message: 'El tipo de documento por defecto no es válido.',
   })
   defaultDocType?: DocType;
+}
+
+/** Campos de la subida de la hoja de saldos (DX-262, QA D1). */
+export class UploadBalancesDto {
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    default: 'false',
+    description:
+      '«Añadir aunque ya tenga saldo migrado»: con true, un paciente que ya tiene un saldo migrado vivo en esa moneda de otro lote recibe otro (aviso EXISTING_BALANCE). Sin él, esa fila es un error y no se crea.',
+  })
+  @IsOptional()
+  @IsIn(['true', 'false'], {
+    message: '«Añadir aunque ya tenga saldo migrado» debe ser true o false.',
+  })
+  addToExisting?: 'true' | 'false';
 }
 
 export class ConfirmPatientImportDto {
@@ -185,12 +201,23 @@ export class ImportIssueDto {
   @ApiProperty({ description: 'Fila del archivo (1 = cabecera)' }) row!: number;
   @ApiProperty({ nullable: true, type: String }) column!: string | null;
   @ApiProperty({
-    enum: ['ERROR', 'DUPLICATE_FILE', 'DUPLICATE_EXISTING', 'MERGED'],
+    enum: [
+      'ERROR',
+      'DUPLICATE_FILE',
+      'DUPLICATE_EXISTING',
+      'MERGED',
+      'EXISTING_BALANCE',
+    ],
     enumName: 'PatientImportIssueKind',
     description:
-      'MERGED (DX-262): fila de la hoja de saldos sumada a otra del mismo paciente y moneda (aviso, no error)',
+      'MERGED (DX-262): fila de la hoja de saldos sumada a otra del mismo paciente y moneda (aviso, no error). EXISTING_BALANCE (QA D1): el paciente ya tenía un saldo migrado vivo en esa moneda y se añade otro porque se marcó «Añadir aunque ya tenga saldo migrado» (aviso, no error).',
   })
-  kind!: 'ERROR' | 'DUPLICATE_FILE' | 'DUPLICATE_EXISTING' | 'MERGED';
+  kind!:
+    | 'ERROR'
+    | 'DUPLICATE_FILE'
+    | 'DUPLICATE_EXISTING'
+    | 'MERGED'
+    | 'EXISTING_BALANCE';
   @ApiProperty({ description: 'Motivo en español' }) message!: string;
   @ApiProperty({ nullable: true, type: String }) value!: string | null;
 }
@@ -241,6 +268,11 @@ export class BalanceProgressDto {
       'No creados: su documento era de varios pacientes vivos (ambiguo)',
   })
   ambiguous!: number;
+  @ApiProperty({
+    description:
+      'No creados: el paciente ya tenía un saldo migrado vivo en esa moneda de otro lote (QA D1)',
+  })
+  existing!: number;
 }
 
 /** Hoja de saldos «Saldo migrado» del lote (DX-262). */
@@ -267,6 +299,11 @@ export class PatientImportBalancesDto {
   mergedRows!: number;
   @ApiProperty({ description: 'Saldos a crear: uno por paciente y moneda' })
   preparedCount!: number;
+  @ApiProperty({
+    description:
+      '«Añadir aunque ya tenga saldo migrado» marcado al subir la hoja (QA D1)',
+  })
+  addToExisting!: boolean;
   @ApiProperty({
     type: [BalanceCurrencyTotalDto],
     description:

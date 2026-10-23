@@ -66,6 +66,7 @@ import {
 import {
   ConfirmPatientImportDto,
   CreatePatientImportDto,
+  UploadBalancesDto,
   ListPatientImportsQueryDto,
   PatientImportBatchDetailDto,
   PatientImportInspectDto,
@@ -342,13 +343,21 @@ export class PatientImportsController {
     schema: {
       type: 'object',
       required: ['file'],
-      properties: { file: FILE_BODY },
+      properties: {
+        file: FILE_BODY,
+        addToExisting: {
+          type: 'string',
+          enum: ['true', 'false'],
+          description:
+            '«Añadir aunque ya tenga saldo migrado» (QA D1). Por defecto false: un paciente con un saldo migrado vivo en esa moneda de otro lote no recibe otro (error de la fila con el importe, el lote y el corte del existente).',
+        },
+      },
     },
   })
   @ApiCreatedResponse({ type: PatientImportBatchDetailDto })
   @ApiBadRequestResponse({
     description:
-      'Archivo vacío, de otro formato, sin las columnas de documento, importe o moneda',
+      'Archivo vacío, de otro formato, sin las columnas de documento, importe o moneda; addToExisting que no es true/false',
   })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
   @ApiConflictResponse({ description: BALANCES_NOT_EDITABLE_MESSAGE })
@@ -357,8 +366,9 @@ export class PatientImportsController {
   balances(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: UploadBalancesDto,
   ): Promise<BatchDetail> {
-    return this.imports.dryRunBalances(id, file);
+    return this.imports.dryRunBalances(id, file, dto.addToExisting === 'true');
   }
 
   @Audit({

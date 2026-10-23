@@ -360,6 +360,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       created: 3,
       skipped: 0,
       ambiguous: 0,
+      existing: 0,
     });
     expect(done.balances?.imported).toEqual([
       { currency: 'COP', count: 2, amount: 201000.5 },
@@ -679,6 +680,86 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       b.adminToken,
       b,
     ).expect(404);
+  });
+
+  it('la misma hoja otra vez no duplica la deuda: error por fila con el saldo existente; con «Añadir aunque ya tenga saldo migrado», sí (QA D1)', async () => {
+    const upload = async (file: string, addToExisting?: string) => {
+      const res = await attach(
+        '',
+        csv(PATIENTS_HEADER, ['CC;555555;Dora;Repetida']),
+        file,
+      ).expect(201);
+      const batch = res.body as Batch;
+      let req = attach(
+        `/${batch.id}/balances`,
+        csv(BALANCES_HEADER, ['555555;80.000;COP;01/09/2026;Cartera']),
+        'saldos-dora.csv',
+      );
+      if (addToExisting !== undefined) {
+        req = req.field('addToExisting', addToExisting);
+      }
+      return { batch, res: await req };
+    };
+    const { batch: first } = await upload('dora-1.csv');
+    await as(
+      api().post(`/api/v1/patient-imports/${first.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+
+    // Otra vez la misma hoja: por defecto no se crea, y dice cuál tiene.
+    const again = await upload('dora-2.csv');
+    expect(again.res.status).toBe(201);
+    const body = again.res.body as Batch & {
+      balanceIssues: { row: number; kind: string; message: string }[];
+    };
+    expect(body.balances).toMatchObject({
+      preparedCount: 0,
+      errorRows: 1,
+      addToExisting: false,
+      validTotals: [],
+    });
+    expect(body.balanceIssues).toEqual([
+      expect.objectContaining({
+        row: 2,
+        kind: 'ERROR',
+        message: expect.stringMatching(
+          /^Este paciente ya tiene un saldo migrado vivo de 80\.000,00\sCOP \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+        ) as string,
+      }),
+    ]);
+
+    // Un valor que no es booleano: 400 en español.
+    const bad = await upload('dora-3.csv', 'quizá');
+    expect(bad.res.status).toBe(400);
+    expect(JSON.stringify(bad.res.body)).toContain(
+      '«Añadir aunque ya tenga saldo migrado» debe ser true o false.',
+    );
+
+    // Marcado: se crea otro y se avisa.
+    const added = await upload('dora-4.csv', 'true');
+    expect(added.res.status).toBe(201);
+    const addedBody = added.res.body as Batch & {
+      balanceIssues: { kind: string }[];
+    };
+    expect(addedBody.balances).toMatchObject({
+      preparedCount: 1,
+      addToExisting: true,
+    });
+    expect(addedBody.balanceIssues.map((i) => i.kind)).toEqual([
+      'EXISTING_BALANCE',
+    ]);
+    await as(
+      api().post(`/api/v1/patient-imports/${added.batch.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    const dora = await patientByDoc('555555');
+    expect((await statementOf(dora.id)).openingBalances).toHaveLength(2);
   });
 
   it('quitar la hoja de saldos de un dry-run; en un lote ya importado, 409', async () => {

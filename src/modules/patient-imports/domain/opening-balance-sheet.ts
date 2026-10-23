@@ -8,6 +8,7 @@ import {
   type RowIssue,
 } from './row-validation';
 import { ImportFileError, type TableRow } from './tabular-file';
+import { formatMoney } from '../../../shared/money/format-money';
 
 /*
  * Hoja de saldos del importador (DX-262): un «Saldo migrado» por paciente y
@@ -215,14 +216,17 @@ export function parseAmountCents(
   if (format === 'XLSX' && /^\d+(\.\d+)?$/.test(text)) {
     [intPart, frac = ''] = text.split('.');
     // Una celda calculada con fórmula llega con ruido de coma flotante
-    // («178500.00000000003»): si la diferencia con 2 decimales es solo eso
-    // (≤ 1e-9), se redondea (revisión M6). Un tercer decimal real sigue
-    // siendo error.
+    // («178500.00000000003»): si la diferencia con 2 decimales es solo eso,
+    // se redondea (revisión M6). La tolerancia es relativa (revisión N2):
+    // en COP, `=0,1*3*1000000000` llega como 300000000.00000006. Son 16 ULP
+    // del valor (≈ 1e-6 en 3·10⁸), no |x|·1e-12, que en 2·10⁹ ya tragaría un
+    // tercer decimal real; ese (≥ 0,001) sigue siendo error.
     if (frac.length > 2) {
       const value = Number(text);
       const cents = Math.round(value * 100);
       if (
-        Math.abs(value - cents / 100) <= 1e-9 &&
+        Math.abs(value - cents / 100) <=
+          Math.max(1e-9, Math.abs(value) * Number.EPSILON * 16) &&
         Number.isSafeInteger(cents)
       ) {
         intPart = String(Math.trunc(cents / 100));
@@ -428,6 +432,37 @@ export interface CurrencyTotal {
 /** Cómo está cada documento: un paciente, ninguno o varios con esa clave. */
 export type DocLookup = ReadonlyMap<string, 'FOUND' | 'AMBIGUOUS'>;
 
+/**
+ * Saldos migrados VIVOS que el paciente ya tiene en una moneda, de OTROS
+ * lotes (QA D1). Clave: `docKey\u0000moneda`.
+ */
+export interface ExistingBalance {
+  count: number;
+  /** Σ de sus importes originales. */
+  cents: number;
+  /** El más reciente, para el mensaje. */
+  latest: {
+    cents: number;
+    asOfDate: string;
+    fileName: string;
+    /** Día civil (zona de la clínica) en que se importó. */
+    importedOn: string;
+  };
+}
+export type ExistingBalanceLookup = ReadonlyMap<string, ExistingBalance>;
+
+/** Rótulo de la casilla de la web que deja añadir otro saldo (QA D1). */
+export const ADD_TO_EXISTING_LABEL = 'Añadir aunque ya tenga saldo migrado';
+
+const ddmmyyyy = (day: string): string => day.split('-').reverse().join('/');
+
+function existingDescription(e: ExistingBalance, currency: string): string {
+  const where = `lote «${e.latest.fileName}» del ${ddmmyyyy(e.latest.importedOn)}, corte ${ddmmyyyy(e.latest.asOfDate)}`;
+  return e.count === 1
+    ? `Este paciente ya tiene un saldo migrado vivo de ${formatMoney(e.cents / 100, currency)} (${where})`
+    : `Este paciente ya tiene ${e.count} saldos migrados vivos en ${currency} por ${formatMoney(e.cents / 100, currency)} (el último, ${formatMoney(e.latest.cents / 100, currency)} del ${where})`;
+}
+
 export interface AggregatedBalances {
   prepared: PreparedBalance[];
   issues: RowIssue[];
@@ -461,11 +496,18 @@ export function totalsByCurrency(
  * Busca a cada paciente y junta las filas del mismo paciente y moneda en un
  * solo saldo (suma exacta en céntimos; la fecha más antigua; el primer
  * concepto). Un documento sin paciente, o con varios, es error de la fila.
+ *
+ * Subir dos veces la misma hoja no duplica la deuda (QA D1): si el paciente
+ * ya tiene un saldo migrado vivo en esa moneda de otro lote, cada fila es un
+ * error que dice cuál, salvo que la administradora marque «Añadir aunque ya
+ * tenga saldo migrado» (`addToExisting`); entonces se crea y se avisa.
  */
 export function aggregateBalances(
   candidates: readonly BalanceCandidate[],
   docs: DocLookup,
   docColumn: string,
+  existing: ExistingBalanceLookup = new Map(),
+  addToExisting = false,
 ): AggregatedBalances {
   const issues: RowIssue[] = [];
   const byKey = new Map<string, PreparedBalance>();
@@ -489,7 +531,28 @@ export function aggregateBalances(
       continue;
     }
     const k = `${c.docKey}\u0000${c.currency}`;
+    const already = existing.get(k);
+    if (already && !addToExisting) {
+      errorRows += 1;
+      issues.push({
+        row: c.rowNumber,
+        column: docColumn,
+        kind: 'ERROR',
+        message: `${existingDescription(already, c.currency)}: no se crea otro. Si es otra deuda, marca «${ADD_TO_EXISTING_LABEL}» y vuelve a subir la hoja.`,
+        value: clip(c.docNumber),
+      });
+      continue;
+    }
     const prev = byKey.get(k);
+    if (!prev && already) {
+      issues.push({
+        row: c.rowNumber,
+        column: docColumn,
+        kind: 'EXISTING_BALANCE',
+        message: `${existingDescription(already, c.currency)}: se añadirá otro porque marcaste «${ADD_TO_EXISTING_LABEL}».`,
+        value: clip(c.docNumber),
+      });
+    }
     if (!prev) {
       byKey.set(k, {
         rowNumber: c.rowNumber,

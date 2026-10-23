@@ -56,7 +56,21 @@ describe('importe del saldo migrado (DX-262)', () => {
     expect(parseAmountCents('0.30000000000000004', 'XLSX')).toEqual({
       cents: 30,
     });
-    // Un tercer decimal de verdad sigue siendo error.
+    // Importes grandes en COP: el ruido crece con el valor (QA N2,
+    // `=0,1*3*1000000000`), y la tolerancia es relativa.
+    expect(parseAmountCents('300000000.00000006', 'XLSX')).toEqual({
+      cents: 30_000_000_000,
+    });
+    expect(parseAmountCents('999999999.9900001', 'XLSX')).toEqual({
+      cents: 99_999_999_999,
+    });
+    // Un tercer decimal de verdad sigue siendo error, también en grande.
+    expect(parseAmountCents('300000000.001', 'XLSX')).toEqual({
+      error: 'El importe tiene más de 2 decimales.',
+    });
+    expect(parseAmountCents('2000000000.001', 'XLSX')).toEqual({
+      error: 'El importe tiene más de 2 decimales.',
+    });
     expect(parseAmountCents('10.555', 'XLSX')).toEqual({
       error: 'El importe tiene más de 2 decimales.',
     });
@@ -278,6 +292,117 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         value: '111',
       },
     ]);
+  });
+
+  describe('paciente con un saldo migrado vivo de otro lote (QA D1)', () => {
+    const existing = new Map([
+      [
+        '111\u0000COP',
+        {
+          count: 1,
+          cents: 150_000_000,
+          latest: {
+            cents: 150_000_000,
+            asOfDate: '2026-08-09',
+            fileName: 'existentes.csv',
+            importedOn: '2026-10-22',
+          },
+        },
+      ],
+      [
+        '222\u0000COP',
+        {
+          count: 2,
+          cents: 300_000,
+          latest: {
+            cents: 100_000,
+            asOfDate: '2026-09-01',
+            fileName: 'otra.csv',
+            importedOn: '2026-10-21',
+          },
+        },
+      ],
+    ]);
+    const docs = new Map([
+      ['111', 'FOUND' as const],
+      ['222', 'FOUND' as const],
+      ['333', 'FOUND' as const],
+    ]);
+    const rows = [
+      c(2, '111', 150_000_000, 'COP'),
+      c(3, '111', 1_000, 'COP'),
+      c(4, '111', 4_000, 'USD'),
+      c(5, '222', 7_000, 'COP'),
+      c(6, '333', 9_000, 'COP'),
+    ];
+
+    it('por defecto NO lo crea: error en cada fila, con importe, lote y corte del existente', () => {
+      const result = aggregateBalances(
+        rows,
+        docs,
+        'numero_documento',
+        existing,
+      );
+      // Otra moneda del mismo paciente y otro paciente: sí.
+      expect(result.prepared.map((p) => [p.docKey, p.currency])).toEqual([
+        ['111', 'USD'],
+        ['333', 'COP'],
+      ]);
+      expect(result.errorRows).toBe(3);
+      expect(result.mergedRows).toBe(0);
+      expect(result.issues).toEqual([
+        {
+          row: 2,
+          column: 'numero_documento',
+          kind: 'ERROR',
+          message: expect.stringMatching(
+            /^Este paciente ya tiene un saldo migrado vivo de 1\.500\.000,00\sCOP \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+          ) as string,
+          value: '111',
+        },
+        expect.objectContaining({ row: 3, kind: 'ERROR' }),
+        {
+          row: 5,
+          column: 'numero_documento',
+          kind: 'ERROR',
+          message: expect.stringMatching(
+            /^Este paciente ya tiene 2 saldos migrados vivos en COP por 3000,00\sCOP \(el último, 1000,00\sCOP del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
+          ) as string,
+          value: '222',
+        },
+      ]);
+      expect(result.validTotals).toEqual([
+        { currency: 'COP', rows: 1, cents: 9_000 },
+        { currency: 'USD', rows: 1, cents: 4_000 },
+      ]);
+    });
+
+    it('con «Añadir aunque ya tenga saldo migrado» lo crea y avisa una vez por saldo', () => {
+      const result = aggregateBalances(
+        rows,
+        docs,
+        'numero_documento',
+        existing,
+        true,
+      );
+      expect(
+        result.prepared.map((p) => [p.docKey, p.currency, p.cents]),
+      ).toEqual([
+        ['111', 'COP', 150_001_000],
+        ['111', 'USD', 4_000],
+        ['222', 'COP', 7_000],
+        ['333', 'COP', 9_000],
+      ]);
+      expect(result.errorRows).toBe(0);
+      expect(result.issues.map((i) => [i.row, i.kind])).toEqual([
+        [2, 'EXISTING_BALANCE'],
+        [3, 'MERGED'],
+        [5, 'EXISTING_BALANCE'],
+      ]);
+      expect(result.issues[0].message).toMatch(
+        /: se añadirá otro porque marcaste «Añadir aunque ya tenga saldo migrado»\.$/,
+      );
+    });
   });
 
   it('documento inexistente o ambiguo: error de la fila; no entra en lo que se importa', () => {

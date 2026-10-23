@@ -10,7 +10,11 @@ import type { TableRow } from './tabular-file';
  * paciente y moneda (un saldo migrado por paciente y moneda). No es un error.
  */
 export type IssueKind =
-  'ERROR' | 'DUPLICATE_FILE' | 'DUPLICATE_EXISTING' | 'MERGED';
+  | 'ERROR'
+  | 'DUPLICATE_FILE'
+  | 'DUPLICATE_EXISTING'
+  | 'MERGED'
+  | 'EXISTING_BALANCE';
 
 /** Un problema de una fila, tal como sale en la pantalla y en errors.csv. */
 export interface RowIssue {

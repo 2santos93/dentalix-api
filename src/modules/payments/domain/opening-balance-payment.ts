@@ -3,20 +3,7 @@
  * abono va a un plan O a un saldo migrado (CHECK payments_target_check), en la
  * moneda del saldo y sin pasarse de lo pendiente.
  */
-
-/** Como la web (`formatCurrency`): «150.000,00 COP», con dos decimales. */
-function money(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('es', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
-}
+import { formatMoney as money } from '../../../shared/money/format-money';
 
 export const OPENING_BALANCE_NOT_FOUND_MESSAGE =
   'Saldo migrado no encontrado en esta clínica (o ya retirado).';

@@ -883,6 +883,114 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     ).resolves.toEqual({ undoneBalances: 0 });
   });
 
+  it('saldos vivos de OTROS lotes por documento y moneda: importe, lote y corte (QA D1)', async () => {
+    const { batch, ob } = await importedOpening('3434', 150_000);
+    // Otro saldo (añadido a propósito) y después retirado: no cuenta.
+    const retired = await validated([person('3434')]);
+    await inA(() =>
+      repo.saveBalances(retired.id, {
+        ...sheet([balance(2, '3434', 1_000)]),
+        addToExisting: true,
+      }),
+    );
+    await confirmAndRun(retired.id);
+    await inA(() => repo.undoBalances(retired.id, a.userId));
+    const other = await validated([person('5656')]);
+    const found = await inA(() =>
+      repo.existingBalances(other.id, ['3434', '5656'], 'America/Bogota'),
+    );
+    expect([...found.entries()]).toEqual([
+      [
+        '3434\u0000COP',
+        {
+          count: 1,
+          cents: 150_000,
+          latest: {
+            cents: 150_000,
+            asOfDate: ob.asOfDate.toISOString().slice(0, 10),
+            fileName: 'p.csv',
+            importedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as string,
+          },
+        },
+      ],
+    ]);
+    // El propio lote no se cuenta a sí mismo.
+    expect(
+      (
+        await inA(() =>
+          repo.existingBalances(batch.id, ['3434'], 'America/Bogota'),
+        )
+      ).size,
+    ).toBe(0);
+  });
+
+  it('el primer lote confirmado aún sin importar cuando se valida el segundo: el segundo NO duplica la deuda, salvo «Añadir» (QA D1)', async () => {
+    // Al crear un lote se caducan los VALIDATED: la carrera real es un lote
+    // confirmado (en cola) cuyo saldo aún no existe al validar el siguiente.
+    const queue = async (rows: PreparedBalance[], addToExisting = false) => {
+      const batch = await validated([person('7878')]);
+      await inA(() =>
+        repo.saveBalances(batch.id, { ...sheet(rows), addToExisting }),
+      );
+      return batch;
+    };
+    const first = await queue([balance(2, '7878', 5_000)]);
+    await inA(async () => {
+      const confirmed = await repo.confirm(first.id, {
+        mode: 'SKIP',
+        confirmedById: a.userId,
+        validatedAfter: new Date(Date.now() - 3_600_000),
+        enqueue: () => Promise.resolve(),
+      });
+      if (confirmed?.kind !== 'confirmed') throw new Error('no confirmado');
+    });
+    // El dry-run del segundo aún no ve ningún saldo vivo.
+    const second = await queue([balance(2, '7878', 5_000)]);
+    expect(
+      (
+        await inA(() =>
+          repo.existingBalances(second.id, ['7878'], 'America/Bogota'),
+        )
+      ).size,
+    ).toBe(0);
+    // Corre el primero; después se confirma y corre el segundo.
+    const started = await inA(() => repo.start(first.id));
+    while (
+      (await inA(() => repo.processChunk(started!, 2, 'EMAIL'))).processed
+    );
+    while (
+      (await inA(() => repo.processBalanceChunk(started!, 2, '2026-10-23')))
+        .processed
+    );
+    await inA(() => repo.finish(first.id, 'COMPLETED'));
+    await confirmAndRun(second.id);
+    // Con «Añadir» sí se crea otro.
+    const third = await queue([balance(2, '7878', 700)], true);
+    await confirmAndRun(third.id);
+
+    expect(await inA(() => repo.findBatch(second.id))).toMatchObject({
+      balanceProcessedRows: 1,
+      balanceCreatedCount: 0,
+      balanceSkippedCount: 0,
+      balanceExistingCount: 1,
+      balanceAddToExisting: false,
+    });
+    expect(await inA(() => repo.findBatch(third.id))).toMatchObject({
+      balanceCreatedCount: 1,
+      balanceExistingCount: 0,
+      balanceAddToExisting: true,
+    });
+    const live = await raw.openingBalance.findMany({
+      where: {
+        tenantId: a.tenantId,
+        voidedAt: null,
+        patient: { docNumber: '7878' },
+      },
+      orderBy: { amount: 'desc' },
+    });
+    expect(live.map((o) => o.amount.toNumber())).toEqual([50, 7]);
+  });
+
   it('un documento con varios pacientes vivos al importar se cuenta aparte (ambiguo), no como «sin paciente» (M7)', async () => {
     await raw.patient.createMany({
       data: [

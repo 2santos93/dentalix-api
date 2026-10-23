@@ -3,6 +3,7 @@ import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.e
 import type { PaymentReceiptEmailVars } from '../../../notifications/email/domain/email-message';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import { formatMoney as money } from '../../../../shared/money/format-money';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Efectivo',
@@ -24,16 +25,6 @@ const civilLabel = (day: string): string => {
   const [y, m, d] = day.split('-');
   return `${d}/${m}/${y}`;
 };
-
-/** Mismo formato que la web (`formatCurrency`): el email dice lo mismo que la pantalla. */
-function money(amount: number, currency: string): string {
-  return new Intl.NumberFormat('es', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
 
 /** «Plan del …» o, en un abono contra el saldo migrado (DX-262), su concepto. */
 function targetLabel(

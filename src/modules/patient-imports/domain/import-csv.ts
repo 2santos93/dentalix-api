@@ -63,6 +63,7 @@ export const ISSUE_KIND_LABELS: Record<IssueKind, string> = {
   DUPLICATE_FILE: 'Repetido en el archivo',
   DUPLICATE_EXISTING: 'Ya existe en la clínica',
   MERGED: 'Sumada a otra fila',
+  EXISTING_BALANCE: 'Ya tenía saldo migrado',
 };
 
 export const ISSUES_CSV_HEADER = ['Fila', 'Columna', 'Tipo', 'Motivo', 'Valor'];

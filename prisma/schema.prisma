@@ -3984,6 +3984,11 @@ model PatientImportBatch {
   balanceUndoneTotals   Json                     @default("[]")
   /// Saldos no creados porque su documento era de varios pacientes vivos.
   balanceAmbiguousCount Int                      @default(0)
+  /// «Añadir aunque ya tenga saldo migrado» (QA D1): sin marcar, un paciente con
+  /// un saldo migrado vivo de otro lote en esa moneda no recibe otro.
+  balanceAddToExisting  Boolean                  @default(false)
+  /// Saldos no creados al importar porque el paciente ya tenía uno vivo (QA D1).
+  balanceExistingCount  Int                      @default(0)
 
   tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   location        Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
