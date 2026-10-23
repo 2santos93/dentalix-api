@@ -160,6 +160,8 @@ model User {
   medicalHistorySubmissionsReviewed MedicalHistorySubmission[] @relation("MedicalHistorySubmissionReviewedBy")
   // DX-273: salidas de citas de COMPLETED (con motivo).
   appointmentStatusReversals AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
+  // DX-279: versiones de la política de cancelación que creó.
+  cancellationPolicyVersions CancellationPolicyVersion[]
 
   @@map("users")
 }
@@ -256,6 +258,8 @@ model Location {
   // DX-233: horario de los profesionales en la sede y sus excepciones.
   providerSchedules         ProviderSchedule[]
   providerScheduleOverrides ProviderScheduleOverride[]
+  // DX-279: versiones de la política de cancelación de la sede.
+  cancellationPolicyVersions CancellationPolicyVersion[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1020,6 +1024,22 @@ model Appointment {
   // DX-200: el estado (SCHEDULED o CONFIRMED) al que vuelve «Deshacer
   // llegada». Solo con la cita en ARRIVED.
   preArrivalStatus    AppointmentStatus?
+  // DX-279: cancelación (solo en CANCELLED, CHECK appointments_cancellation_check):
+  // hora del servidor (UTC), quién, motivo del catálogo cerrado y texto
+  // opcional (≤ 500), minutos de aviso (≥ 0) y si fue tardía según la política
+  // vigente de la sede. Hora, quién, aviso y tardía van juntos (todos o
+  // ninguno: las canceladas antiguas no tienen ninguno).
+  cancelledAt         DateTime?
+  cancelledByKind     CancellationByKind?
+  cancelReasonCode    CancellationReasonCode?
+  cancelReasonText    String?            @db.VarChar(500)
+  noticeMinutes       Int?
+  lateCancellation    Boolean?
+  // DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW; null en las antiguas).
+  noShowMarkedAt      DateTime?
+  // DX-279: versión de la política COMUNICADA al paciente (recordatorio o
+  // enlace). La rellena DX-291; hasta entonces, null.
+  policyVersionId     String?            @db.Uuid
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
@@ -1051,6 +1071,8 @@ model Appointment {
   location        Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
   // FK COMPUESTA (DX-121): el tipo tiene que ser del MISMO tenant.
   appointmentType AppointmentType? @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
+  // FK COMPUESTA (DX-279): la versión comunicada es de la MISMA clínica.
+  policyVersion   CancellationPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "appointments_policy_version_fkey")
 
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
@@ -1081,6 +1103,13 @@ model Appointment {
   //     start) WHERE status IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
   //     AND "deletedAt" IS NULL
   //     -> DX-200: panel «En clínica» de la sede.
+  //   appointments_tenant_patient_incidents_idx ("tenantId", "patientId",
+  //     start) INCLUDE ("locationId", status, "lateCancellation") WHERE
+  //     "deletedAt" IS NULL AND (status = 'NO_SHOW' OR "lateCancellation")
+  //     -> DX-279: resumen de asistencia del paciente e insignia de la agenda.
+  //   appointments_tenant_policy_version_idx ("tenantId", "policyVersionId")
+  //     WHERE "policyVersionId" IS NOT NULL
+  //     -> DX-279: lado hijo de la FK compuesta a la versión de la política.
   @@map("appointments")
 }
 
@@ -1738,6 +1767,8 @@ model Currency {
   priceLists       PriceList[]
   // DX-262: saldos migrados en esa moneda.
   openingBalances  OpeningBalance[]
+  // DX-279: importe sugerido de la política de cancelación en esa moneda.
+  cancellationPolicyVersions CancellationPolicyVersion[]
 
   @@map("currencies")
 }
@@ -2601,6 +2632,8 @@ enum AuditResourceType {
   // DX-107: lote de importación de pacientes (validar, confirmar, deshacer,
   // descargar el informe de errores).
   PATIENT_IMPORT_BATCH
+  // DX-279: nueva versión de la política de cancelación de una sede.
+  CANCELLATION_POLICY
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4259,4 +4292,54 @@ model AppointmentStatusReversal {
   @@index([tenantId, appointmentId, createdAt], map: "appointment_status_reversals_appointment_idx")
   @@index([actorUserId], map: "appointment_status_reversals_actor_idx")
   @@map("appointment_status_reversals")
+}
+
+// DX-279: quién canceló una cita. CLINIC nunca cuenta como tardía.
+enum CancellationByKind {
+  PATIENT_LINK
+  STAFF_FOR_PATIENT
+  CLINIC
+}
+
+// DX-279: motivo de la cancelación, catálogo CERRADO (sin datos de salud
+// obligatorios): enfermedad, olvido, costo, transporte, trabajo, la clínica
+// reprograma, otro.
+enum CancellationReasonCode {
+  ILLNESS
+  FORGOT
+  COST
+  TRANSPORT
+  WORK
+  CLINIC_RESCHEDULE
+  OTHER
+}
+
+/// DX-279: política de cancelación de una sede, APPEND-ONLY: editarla crea la
+/// versión siguiente (trigger cancellation_policy_versions_immutable y sin
+/// UPDATE/DELETE para la app). La vigente es la de mayor `version`. Horas de
+/// aviso 0–168, importe sugerido ≥ 0 con su moneda (los dos o ninguno) y el
+/// texto para el paciente (≤ 1000). RLS FORCE por tenant.
+model CancellationPolicyVersion {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  tenantId           String   @db.Uuid
+  locationId         String   @db.Uuid
+  version            Int
+  noticeHours        Int
+  suggestedFee       Decimal? @db.Decimal(14, 2)
+  currency           String?
+  patientText        String   @default("") @db.VarChar(1000)
+  /// Lo usará el cargo por inasistencia (DX-291): RECEPTION también puede generarlo.
+  receptionCanCharge Boolean  @default(false)
+  createdById        String   @db.Uuid
+  createdAt          DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  location     Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_policy_versions_location_fkey")
+  currencyRef  Currency?     @relation(fields: [currency], references: [code], onDelete: Restrict, map: "cancellation_policy_versions_currency_fkey")
+  createdBy    User          @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "cancellation_policy_versions_created_by_fkey")
+  appointments Appointment[]
+
+  @@unique([tenantId, locationId, version], map: "cancellation_policy_versions_location_version_key")
+  @@unique([tenantId, id], map: "cancellation_policy_versions_tenant_id_key")
+  @@index([createdById], map: "cancellation_policy_versions_created_by_idx")
+  @@map("cancellation_policy_versions")
 }
