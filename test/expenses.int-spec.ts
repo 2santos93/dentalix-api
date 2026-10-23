@@ -278,9 +278,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         }),
       ),
     ).rejects.toMatchObject(FK_VIOLATION);
-    const foreign = await raw.expense.findFirstOrThrow({
-      where: { tenantId: b.tenantId },
-    });
+    const foreign = await expense(b);
     await expect(
       asA((tx) =>
         tx.expensePayment.create({
@@ -325,19 +323,21 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
   });
 
   it('CHECK de importes y fechas del gasto y del pago', async () => {
-    await expect(expense(a, { amount: 0 })).rejects.toThrow(/check constraint/);
+    await expect(expense(a, { amount: 0 })).rejects.toThrow(
+      /expenses_amount_check/,
+    );
     await expect(
       expense(a, { dueDate: new Date('2026-10-01T00:00:00.000Z') }),
-    ).rejects.toThrow(/check constraint/);
+    ).rejects.toThrow(/expenses_due_date_check/);
     await expect(expense(a, { category: 'x' })).rejects.toThrow(
-      /check constraint/,
+      /expenses_category_check/,
     );
     const e = await expense(a);
     await expect(
       asA((tx) =>
         tx.expensePayment.create({ data: paymentData(a, e.id, { amount: 0 }) }),
       ),
-    ).rejects.toThrow(/check constraint/);
+    ).rejects.toThrow(/expense_payments_amount_check/);
   });
 
   it('categorías: nombre de 2 a 60 y único entre las vivas de la clínica', async () => {
@@ -347,7 +347,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           data: { tenantId: a.tenantId, name, createdById: userId },
         }),
       );
-    await expect(create('x')).rejects.toThrow(/check constraint/);
+    await expect(create('x')).rejects.toThrow(/expense_categories_name_check/);
     const first = await create('Mantenimiento locativo');
     await expect(create('Mantenimiento locativo')).rejects.toMatchObject({
       code: 'P2002',
@@ -383,7 +383,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
             }),
           }),
         ),
-      ).rejects.toThrow(/check constraint/);
+      ).rejects.toThrow(/expense_payments_cash_method_check/);
       const ok = await asA((tx) =>
         tx.expensePayment.create({
           data: paymentData(a, e.id, {
@@ -490,7 +490,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
             },
           }),
         ),
-      ).rejects.toThrow(/check constraint/);
+      ).rejects.toThrow(/expense_payments_void_check/);
       // Anular y, a la vez, tocar otra cosa: no.
       await expect(
         asA((tx) =>
@@ -610,7 +610,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
             data: { attachmentKey: support.attachmentKey },
           }),
         ),
-      ).rejects.toThrow(/check constraint/);
+      ).rejects.toThrow(/expenses_attachment_check/);
       await asA((tx) =>
         tx.expense.update({ where: { id: e.id }, data: support }),
       );
@@ -664,7 +664,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
             },
           }),
         ),
-      ).rejects.toThrow(/check constraint/);
+      ).rejects.toThrow(/expenses_void_check/);
       await asA((tx) =>
         tx.expense.update({
           where: { id: e.id },
@@ -762,7 +762,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
       ];
       for (const extra of bad) {
         await expect(create(adjustment(p, extra))).rejects.toThrow(
-          /check constraint/,
+          /cash_session_adjustments_kind_check/,
         );
       }
       const plan = await raw.patient.create({
@@ -791,7 +791,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
       });
       await expect(
         create(adjustment(p, { paymentId: abono.id })),
-      ).rejects.toThrow(/check constraint/);
+      ).rejects.toThrow(/cash_session_adjustments_kind_check/);
       // Limpieza del abono para no estorbar a otros casos del suite.
       await raw.payment.deleteMany({ where: { id: abono.id } });
       await raw.treatmentPlan.deleteMany({ where: { id: treatment.id } });
@@ -800,15 +800,62 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
 
     it('CHECK: los demás kinds no admiten expensePaymentId', async () => {
       const p = await outflow();
-      await expect(
-        create(adjustment(p, { kind: 'CORRECTION', amount: 10 })),
-      ).rejects.toThrow(/check constraint/);
-      await expect(
-        create(adjustment(p, { kind: 'VOID', amount: -10 })),
-      ).rejects.toThrow(/check constraint/);
-      await expect(
-        create(adjustment(p, { kind: 'LATE_PAYMENT' })),
-      ).rejects.toThrow(/check constraint/);
+      // Un abono real: VOID y LATE_PAYMENT fallan solo por expensePaymentId.
+      const patient = await raw.patient.create({
+        data: { tenantId: a.tenantId, firstName: 'Ana', lastName: 'Kinds' },
+      });
+      const treatment = await raw.treatmentPlan.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId: patient.id,
+          status: 'ACCEPTED',
+          currency: 'COP',
+        },
+      });
+      const abono = await raw.payment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          treatmentPlanId: treatment.id,
+          patientId: patient.id,
+          amount: 5_000,
+          currency: 'COP',
+          paidAt: new Date(),
+          method: 'CASH',
+          createdById: userId,
+        },
+      });
+      try {
+        // Control: sin expensePaymentId el mismo VOID es válido.
+        await expect(
+          create(
+            adjustment(p, {
+              kind: 'VOID',
+              paymentId: abono.id,
+              expensePaymentId: null,
+              amount: -10,
+            }),
+          ),
+        ).resolves.toBeDefined();
+        await expect(
+          create(adjustment(p, { kind: 'CORRECTION', amount: 10 })),
+        ).rejects.toThrow(/cash_session_adjustments_kind_check/);
+        await expect(
+          create(
+            adjustment(p, { kind: 'VOID', paymentId: abono.id, amount: -10 }),
+          ),
+        ).rejects.toThrow(/cash_session_adjustments_kind_check/);
+        await expect(
+          create(adjustment(p, { kind: 'LATE_PAYMENT', paymentId: abono.id })),
+        ).rejects.toThrow(/cash_session_adjustments_kind_check/);
+      } finally {
+        await raw.cashSessionAdjustment.deleteMany({
+          where: { paymentId: abono.id },
+        });
+        await raw.payment.deleteMany({ where: { id: abono.id } });
+        await raw.treatmentPlan.deleteMany({ where: { id: treatment.id } });
+        await raw.patient.deleteMany({ where: { id: patient.id } });
+      }
       // CORRECTION sin salida sigue valiendo como en DX-027.
       await expect(
         create(
@@ -831,22 +878,40 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
 
     it('el trigger exige que la salida sea de la clínica y de la sede del ajuste', async () => {
       const p = await outflow();
-      // Otra sede de la misma clínica.
+      // SQL crudo: Prisma pierde el mensaje de un foreign_key_violation, y así
+      // se distingue el trigger de la FK compuesta.
+      const insert = (
+        tenantId: string,
+        locationId: string,
+        expensePaymentId: string,
+        originalSessionId: string,
+      ) =>
+        asA(
+          (tx) => tx.$executeRaw`
+            INSERT INTO "cash_session_adjustments"
+              ("id", "tenantId", "locationId", "kind", "expensePaymentId",
+               "originalSessionId", "currency", "method", "amount", "reason",
+               "createdById")
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${locationId}::uuid,
+              'OUTFLOW_VOID', ${expensePaymentId}::uuid,
+              ${originalSessionId}::uuid, 'COP', 'CASH', 10000,
+              'Salida registrada por error', ${userId}::uuid)`,
+        );
+      // Otra sede de la misma clínica: la FK compuesta lo aceptaría.
       await expect(
-        create(
-          adjustment(p, {
-            locationId: a.otherLocationId,
-            originalSessionId: otherLocationSession,
-          }),
-        ),
-      ).rejects.toMatchObject(FK_VIOLATION);
+        insert(a.tenantId, a.otherLocationId, p.id, otherLocationSession),
+      ).rejects.toThrow(
+        /pago de gasto del ajuste no es de esta clínica y sede/,
+      );
       // Una salida de otra clínica no existe para A bajo RLS.
       const foreignExpense = await expense(b);
       const foreign = await raw.expensePayment.create({
         data: paymentData(b, foreignExpense.id),
       });
-      await expect(create(adjustment(foreign))).rejects.toMatchObject(
-        FK_VIOLATION,
+      await expect(
+        insert(a.tenantId, a.locationId, foreign.id, closedSession),
+      ).rejects.toThrow(
+        /pago de gasto del ajuste no es de esta clínica y sede/,
       );
     });
 
