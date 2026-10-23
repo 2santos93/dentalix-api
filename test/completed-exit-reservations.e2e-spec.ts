@@ -10,6 +10,7 @@ import {
   seedMember,
   loginAs,
 } from './support/e2e-fixtures';
+import { PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE } from '../src/modules/appointments/domain/plan-item-reservation';
 
 /**
  * DX-273 (revisión DX-271, I1 e I2):
@@ -781,6 +782,130 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       expect(active).toHaveLength(1);
       const winner = results[0].status === 200 ? first.id : second.id;
       expect((await links(winner))[0].active).toBe(true);
+    });
+
+    describe('DX-288 «Traer a esta cita» atómico', () => {
+      const pastBase = Date.now() - 5 * DAY;
+      let pastSlot = 0;
+      /**
+       * `n` citas del paciente con él en la clínica (ARRIVED), cada una con el
+       * vínculo del ítem sin reserva, y una futura que lo reserva. Se marcan
+       * por la BD, hace 5 días y en huecos de 40 min (las EXCLUDE de solape),
+       * para no depender de la hora del día como `todayAppointment`.
+       */
+      const inClinicWithHolder = async (n: number) => {
+        const {
+          planId,
+          ids: [itemId],
+        } = await acceptedItems(1);
+        await accept(planId);
+        const inClinic: string[] = [];
+        for (let i = 0; i < n; i++) {
+          const appointment = await rawAppointment(
+            new Date(pastBase + pastSlot++ * 40 * MIN),
+          );
+          await rawLink(appointment.id, itemId);
+          inClinic.push(appointment.id);
+        }
+        const future = await rawAppointment(inDays(15));
+        await rawLink(future.id, itemId);
+        await raw.appointment.updateMany({
+          where: { id: { in: inClinic } },
+          data: {
+            status: 'ARRIVED',
+            arrivedAt: new Date(),
+            preArrivalStatus: 'SCHEDULED',
+          },
+        });
+        return { itemId, inClinic, futureId: future.id };
+      };
+      const claim = (appointmentId: string, itemId: string) =>
+        call(
+          'post',
+          `/appointments/${appointmentId}/plan-items/${itemId}/claim`,
+          undefined,
+          reception,
+        );
+      const activeLinks = (itemId: string) =>
+        raw.appointmentPlanItem.findMany({
+          where: { planItemId: itemId, active: true, deletedAt: null },
+          select: { appointmentId: true },
+        });
+      const moveEvents = (itemId: string) =>
+        raw.auditEvent.findMany({
+          where: {
+            tenantId: a.tenantId,
+            action: 'UPDATE',
+            metadata: { path: ['params', 'planItemId'], equals: itemId },
+          },
+          select: { resourceId: true, metadata: true },
+        });
+
+      it('10 «Traer a esta cita» a la vez desde 10 citas en la clínica: una 200, nueve 409 en español, ninguna 500; una sola reserva y un solo traslado auditado', async () => {
+        const { itemId, inClinic, futureId } = await inClinicWithHolder(10);
+        const results = await Promise.all(
+          inClinic.map((id) => claim(id, itemId)),
+        );
+        const statuses = results.map((r) => r.status);
+        expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+        expect(statuses.filter((s) => s === 409)).toHaveLength(9);
+        for (const r of results.filter((x) => x.status === 409))
+          expect((r.body as { message: string }).message).toMatch(
+            /^(Este tratamiento|La cita cambió)/,
+          );
+        const winner = inClinic[statuses.indexOf(200)];
+        expect(await activeLinks(itemId)).toEqual([{ appointmentId: winner }]);
+        // La titular anterior pierde la suya (vínculo retirado).
+        const [futureLink] = await links(futureId);
+        expect(futureLink.active).toBe(false);
+        expect(futureLink.deletedAt).toBeInstanceOf(Date);
+        // Un solo traslado: un evento en la destino y otro en la de origen.
+        const audit = await moveEvents(itemId);
+        expect(audit.map((e) => e.resourceId).sort()).toEqual(
+          [winner, futureId].sort(),
+        );
+        for (const e of audit)
+          expect(e.metadata).toMatchObject({
+            params: { fromAppointmentId: futureId, toAppointmentId: winner },
+          });
+      });
+
+      it('la reserva ya traída a una cita en la clínica no se la lleva otra cita en la clínica después (409, sin traslado)', async () => {
+        const {
+          itemId,
+          inClinic: [first, second],
+          futureId,
+        } = await inClinicWithHolder(2);
+        await claim(first, itemId).expect(200);
+        const res = await claim(second, itemId).expect(409);
+        expect((res.body as { message: string }).message).toBe(
+          PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
+        );
+        expect(await activeLinks(itemId)).toEqual([{ appointmentId: first }]);
+        expect((await links(second))[0]).toMatchObject({
+          active: false,
+          deletedAt: null,
+        });
+        expect(
+          (await moveEvents(itemId)).map((e) => e.resourceId).sort(),
+        ).toEqual([first, futureId].sort());
+      });
+
+      it('doble clic: 10 «Traer a esta cita» a la vez desde la MISMA cita, todas 200 (idempotente) y un solo traslado', async () => {
+        const {
+          itemId,
+          inClinic: [only],
+          futureId,
+        } = await inClinicWithHolder(1);
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () => claim(only, itemId)),
+        );
+        expect(results.map((r) => r.status)).toEqual(Array(10).fill(200));
+        expect(await activeLinks(itemId)).toEqual([{ appointmentId: only }]);
+        expect(
+          (await moveEvents(itemId)).map((e) => e.resourceId).sort(),
+        ).toEqual([only, futureId].sort());
+      });
     });
 
     it('«Traer a esta cita»: 409 si la cita no está en la clínica, 404 si el tratamiento no es de la cita o la cita es de otra clínica', async () => {
