@@ -298,6 +298,26 @@ describe('dedupeRows', () => {
       [3, 'ERROR', 'Número de documento'],
     ]);
   });
+
+  it('existente con supresión parcial (Ley 1581): el aviso de la fila lo dice (revisión I2)', () => {
+    const r = dedupeRows(
+      [
+        { rowNumber: 2, data: data('CC', '111') },
+        { rowNumber: 3, data: data('CC', '222') },
+      ],
+      [
+        { id: 'p1', docType: 'CC', docKey: '111', partiallySuppressed: true },
+        { id: 'p2', docType: 'CC', docKey: '222', partiallySuppressed: false },
+      ],
+      undefined,
+    );
+    expect(r.existing.map((x) => x.patientId)).toEqual(['p1', 'p2']);
+    const [suppressed, normal] = r.issues;
+    expect(suppressed).toMatchObject({ row: 2, kind: 'DUPLICATE_EXISTING' });
+    expect(suppressed.message).toMatch(/supresión de sus datos.*Ley 1581/);
+    expect(suppressed.message).toMatch(/no se rellenarán/);
+    expect(normal.message).not.toMatch(/supresión/);
+  });
 });
 
 describe('«Actualizar solo campos vacíos»', () => {
@@ -327,6 +347,28 @@ describe('«Actualizar solo campos vacíos»', () => {
       sex: 'F',
       phone: '+573101234567',
     });
+  });
+
+  it('paciente con supresión parcial: nunca rellena los campos suprimidos (Ley 1581, revisión I2)', () => {
+    const suppressed: FillablePatient = {
+      ...patient,
+      phone: null,
+      email: null,
+      notes: null,
+      partiallySuppressedAt: new Date('2026-10-01T00:00:00Z'),
+    };
+    const filled = fillEmpty(suppressed, {
+      ...data('CC', '1'),
+      birthDate: '1990-01-01',
+      phone: '+573101234567',
+      email: 'otro@x.com',
+      address: 'Calle 1',
+      notes: 'nueva',
+      emergencyContactName: 'Luis',
+      emergencyContactPhone: '+573109999999',
+      occupation: 'Docente',
+    });
+    expect(filled).toEqual({ birthDate: '1990-01-01', occupation: 'Docente' });
   });
 
   it('al deshacer solo revierte lo que sigue con el valor del lote', () => {

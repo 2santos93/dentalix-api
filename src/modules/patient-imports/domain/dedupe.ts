@@ -12,7 +12,14 @@ export interface ExistingPatientDoc {
   id: string;
   docType: DocType;
   docKey: string;
+  /** Pidió la supresión parcial de sus datos (Ley 1581): no se rellenan. */
+  partiallySuppressed?: boolean;
 }
+
+const EXISTING_MESSAGE =
+  'Ya existe un paciente con este documento en la clínica: no se crea otro (se salta o se rellenan sus campos vacíos, según elijas al confirmar).';
+const SUPPRESSED_MESSAGE =
+  'Ya existe un paciente con este documento en la clínica y pidió la supresión de sus datos (Ley 1581): no se crea otro y no se rellenarán su teléfono, correo, dirección, notas ni contacto de emergencia.';
 
 export interface DedupeResult {
   /** Filas nuevas: se crearán. */
@@ -90,8 +97,9 @@ export function dedupeRows(
         row: row.rowNumber,
         column,
         kind: 'DUPLICATE_EXISTING',
-        message:
-          'Ya existe un paciente con este documento en la clínica: no se crea otro (se salta o se rellenan sus campos vacíos, según elijas al confirmar).',
+        message: match.partiallySuppressed
+          ? SUPPRESSED_MESSAGE
+          : EXISTING_MESSAGE,
         value: label,
       });
     } else {

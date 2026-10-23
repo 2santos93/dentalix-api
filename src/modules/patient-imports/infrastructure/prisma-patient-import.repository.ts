@@ -89,6 +89,18 @@ export class UndoBlockedError extends Error {
   }
 }
 
+/**
+ * El lote dejó de estar RUNNING mientras su trabajo seguía vivo (lo pasó a
+ * FAILED `reapStuck` y quizá ya se deshizo): el bloque no escribe nada y el
+ * trabajo termina sin reintentar.
+ */
+export class BatchNotRunningError extends Error {
+  constructor(readonly status: PatientImportStatus | null) {
+    super(`batch not running (${status ?? 'missing'})`);
+    this.name = 'BatchNotRunningError';
+  }
+}
+
 export class BatchStateError extends Error {
   constructor(readonly status: PatientImportStatus) {
     super(`batch in ${status}`);
@@ -223,7 +235,8 @@ export class PrismaPatientImportRepository {
       (tx) =>
         tx.$queryRaw<ExistingPatientDoc[]>`
         SELECT "id", "docType",
-               regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey"
+               regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey",
+               ("partially_suppressed_at" IS NOT NULL) AS "partiallySuppressed"
           FROM "patients"
          WHERE "tenantId" = ${tenantId}::uuid
            AND "deletedAt" IS NULL
@@ -526,7 +539,12 @@ export class PrismaPatientImportRepository {
         CHUNK_TX,
       );
     } catch (chunkError) {
-      if (isTransientError(chunkError)) throw chunkError;
+      if (
+        isTransientError(chunkError) ||
+        chunkError instanceof BatchNotRunningError
+      ) {
+        throw chunkError;
+      }
       const total: ChunkResult = { ...EMPTY_RESULT };
       for (const row of pending) {
         let one: ChunkResult;
@@ -536,7 +554,12 @@ export class PrismaPatientImportRepository {
             CHUNK_TX,
           );
         } catch (rowError) {
-          if (isTransientError(rowError)) throw rowError;
+          if (
+            isTransientError(rowError) ||
+            rowError instanceof BatchNotRunningError
+          ) {
+            throw rowError;
+          }
           one = await this.failRow(batch.id, row.id);
         }
         total.processed += one.processed;
@@ -549,9 +572,25 @@ export class PrismaPatientImportRepository {
     }
   }
 
+  /**
+   * Al empezar CADA transacción que escribe del bloque: el lote sigue
+   * RUNNING, bajo `FOR SHARE` hasta el COMMIT. El deshacer toma el lote
+   * `FOR UPDATE`, así que los dos se serializan: un bloque en vuelo espera a
+   * que el deshacer confirme y entonces ve UNDONE, o el deshacer espera al
+   * bloque y ve sus pacientes (revisión 2026-10-23, I4).
+   */
+  private async assertRunning(tx: Tx, batchId: string): Promise<void> {
+    const rows = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
+      SELECT "status" FROM "patient_import_batches"
+       WHERE "id" = ${batchId}::uuid FOR SHARE`;
+    const status = rows[0]?.status ?? null;
+    if (status !== 'RUNNING') throw new BatchNotRunningError(status);
+  }
+
   /** La fila no se pudo importar por un error suyo: FAILED y se sigue. */
   private async failRow(batchId: string, rowId: string): Promise<ChunkResult> {
     return this.prisma.runWithTenant(async (tx) => {
+      await this.assertRunning(tx, batchId);
       const n = await tx.patientImportRow.updateMany({
         where: { id: rowId, outcome: 'PENDING' },
         data: {
@@ -573,6 +612,7 @@ export class PrismaPatientImportRepository {
     channel: ContactChannel,
   ): Promise<ChunkResult> {
     const tenantId = this.tenantId();
+    await this.assertRunning(tx, batch.id);
     const items = rows
       .filter((r) => r.data !== null)
       .map((r) => ({ ...r, data: r.data as unknown as ImportPatientData }));
@@ -592,6 +632,7 @@ export class PrismaPatientImportRepository {
         >`
           SELECT "id", "docType", "birthDate", "sex", "phone", "email", "address",
                  "occupation", "emergencyContactName", "emergencyContactPhone", "notes",
+                 "partially_suppressed_at" AS "partiallySuppressedAt",
                  regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey"
             FROM "patients"
            WHERE "tenantId" = ${tenantId}::uuid AND "deletedAt" IS NULL AND "docNumber" IS NOT NULL

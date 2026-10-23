@@ -1,4 +1,5 @@
 import type { Sex } from '@prisma/client';
+import { PARTIAL_SUPPRESSION_FIELDS } from '../../patients/domain/ports/patient-repository.port';
 import {
   FILLABLE_FIELDS,
   type FillableField,
@@ -16,7 +17,11 @@ export interface FillablePatient {
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
   notes: string | null;
+  /** Supresión parcial (Ley 1581, DX-039): sus campos no se vuelven a rellenar. */
+  partiallySuppressedAt?: Date | null;
 }
+
+const SUPPRESSED = new Set<string>(PARTIAL_SUPPRESSION_FIELDS);
 
 /** Lo rellenado: campo → valor en texto (la fecha, AAAA-MM-DD). */
 export type FilledValues = Partial<Record<FillableField, string>>;
@@ -39,7 +44,10 @@ function current(
 /**
  * Qué campos VACÍOS del paciente existente rellena la fila. Nunca pisa un
  * dato: un campo con algo escrito (o un sexo distinto de «sin especificar»)
- * se queda como está aunque el fichero traiga otro valor.
+ * se queda como está aunque el fichero traiga otro valor. Si el paciente
+ * pidió la supresión parcial de sus datos (Ley 1581), los campos suprimidos
+ * (teléfono, correo, dirección, notas, contacto de emergencia) NO se
+ * rellenan aunque estén vacíos: es justo lo que la supresión impide.
  */
 export function fillEmpty(
   patient: FillablePatient,
@@ -49,6 +57,7 @@ export function fillEmpty(
   for (const field of FILLABLE_FIELDS) {
     const incoming = data[field];
     if (incoming === undefined) continue;
+    if (patient.partiallySuppressedAt && SUPPRESSED.has(field)) continue;
     if (current(patient, field) === null) filled[field] = incoming;
   }
   return filled;

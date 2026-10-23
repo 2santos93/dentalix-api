@@ -3,7 +3,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
-import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
+import {
+  BatchNotRunningError,
+  PrismaPatientImportRepository,
+} from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
 
 // DX-107, capa DB de la importación de pacientes: RLS FORCE de los lotes y sus
@@ -692,5 +695,125 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
         })
       ).issues,
     ).toEqual([]);
+  });
+
+  it('«actualizar vacíos» no rellena los datos suprimidos de un paciente (Ley 1581) y el dry-run lo avisa (revisión I2)', async () => {
+    const suppressed = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'Suprimido',
+        lastName: 'Parcial',
+        docNumber: '8181',
+        partiallySuppressedAt: new Date(),
+      },
+    });
+    const docs = await inTenant(a, () => repo.existingDocs(['8181']));
+    expect(docs).toEqual([
+      expect.objectContaining({ id: suppressed.id, partiallySuppressed: true }),
+    ]);
+    const batch = await prepared(
+      a,
+      [
+        person('8181', {
+          phone: '+573109999999',
+          email: 'viejo@x.com',
+          address: 'Calle vieja',
+          notes: 'nota vieja',
+          emergencyContactName: 'Luis',
+          emergencyContactPhone: '+573108888888',
+          birthDate: '1980-05-05',
+        }),
+      ],
+      'FILL_EMPTY',
+    );
+    await runAll(a, batch!.id);
+    const after = await raw.patient.findUniqueOrThrow({
+      where: { id: suppressed.id },
+    });
+    expect(after).toMatchObject({
+      phone: null,
+      email: null,
+      address: null,
+      notes: null,
+      emergencyContactName: null,
+      emergencyContactPhone: null,
+    });
+    expect(after.birthDate?.toISOString().slice(0, 10)).toBe('1980-05-05');
+    const row = await raw.patientImportRow.findFirstOrThrow({
+      where: { batchId: batch!.id },
+    });
+    expect(JSON.stringify(row.filledValues)).not.toMatch(
+      /viejo@x\.com|3109999999|Calle vieja|nota vieja|Luis|3108888888/,
+    );
+  });
+
+  it('un bloque no escribe nada si el lote ya no está RUNNING (atascado → deshecho) (revisión I4)', async () => {
+    const batch = await prepared(a, [
+      person('9101'),
+      person('9102'),
+      person('9103'),
+    ]);
+    const running = await inTenant(a, () => repo.findBatch(batch!.id));
+    // Primer bloque: 1 creado. Luego el worker «pierde» el arriendo.
+    expect(
+      (await inTenant(a, () => repo.processChunk(running!, 1, 'EMAIL')))
+        .created,
+    ).toBe(1);
+    expect(await inTenant(a, () => repo.reapStuck())).toBeGreaterThanOrEqual(1);
+    expect(await inTenant(a, () => repo.undo(batch!.id, a.userId))).toEqual({
+      undoneCreated: 1,
+      undoneFilled: 0,
+    });
+    // El worker original sigue vivo y procesa otro bloque: aborta sin escribir.
+    await expect(
+      inTenant(a, () => repo.processChunk(running!, 2, 'EMAIL')),
+    ).rejects.toBeInstanceOf(BatchNotRunningError);
+    expect(
+      await raw.patient.count({
+        where: { importBatchId: batch!.id, deletedAt: null },
+      }),
+    ).toBe(0);
+    expect(
+      await raw.patientImportBatch.findUniqueOrThrow({
+        where: { id: batch!.id },
+      }),
+    ).toMatchObject({ status: 'UNDONE', createdCount: 1, processedRows: 1 });
+  });
+
+  it('carrera: un bloque en vuelo espera al deshacer (mismo candado) y no crea pacientes vivos en un lote UNDONE (revisión I4)', async () => {
+    const batch = await prepared(a, [person('9201'), person('9202')]);
+    const running = await inTenant(a, () => repo.findBatch(batch!.id));
+    let chunk: Promise<unknown> | undefined;
+    // Hace de «deshacer»: toma el lote FOR UPDATE (como `undo`), deja que
+    // el bloque arranque y lo pasa a UNDONE antes de confirmar.
+    await raw.$transaction(
+      async (t) => {
+        await t.$queryRaw`
+          SELECT "status" FROM "patient_import_batches"
+           WHERE "id" = ${batch!.id}::uuid FOR UPDATE`;
+        chunk = inTenant(a, () =>
+          repo.processChunk(running!, 2, 'EMAIL'),
+        ).catch((e: unknown) => e);
+        await new Promise((r) => setTimeout(r, 500));
+        await t.patientImportBatch.update({
+          where: { id: batch!.id },
+          data: {
+            status: 'UNDONE',
+            undoneAt: new Date(),
+            undoneById: a.userId,
+          },
+        });
+      },
+      { timeout: 10_000 },
+    );
+    expect(await chunk).toBeInstanceOf(BatchNotRunningError);
+    expect(
+      await raw.patient.count({ where: { importBatchId: batch!.id } }),
+    ).toBe(0);
+    expect(
+      await raw.patientImportBatch.findUniqueOrThrow({
+        where: { id: batch!.id },
+      }),
+    ).toMatchObject({ status: 'UNDONE', createdCount: 0, processedRows: 0 });
   });
 });

@@ -1,7 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { JobRegistry } from '../../jobs/application/job-registry';
 import type { JobContext } from '../../jobs/domain/job';
-import { PrismaPatientImportRepository } from '../infrastructure/prisma-patient-import.repository';
+import {
+  BatchNotRunningError,
+  PrismaPatientImportRepository,
+} from '../infrastructure/prisma-patient-import.repository';
 import {
   ISSUES_RETENTION_DAYS,
   PROCESS_IMPORT_JOB,
@@ -117,6 +120,16 @@ export class PatientImportJobs implements OnModuleInit {
       await this.repo.finish(batchId, 'COMPLETED');
       this.logger.log({ event: 'patient_imports.completed', batchId });
     } catch (err) {
+      if (err instanceof BatchNotRunningError) {
+        // El lote ya no es de este trabajo (FAILED por `reapStuck`, deshecho):
+        // no se escribe nada más y no se reintenta.
+        this.logger.warn({
+          event: 'patient_imports.not_running',
+          batchId,
+          status: err.status,
+        });
+        return;
+      }
       if (
         ctx.attempt >= ctx.maxAttempts &&
         !(err instanceof ImportAbortedError)
