@@ -274,6 +274,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/documents/:id/url/download': EVERY_ROLE,
   'POST /patients/:patientId/documents/:id/void': EVERY_ROLE,
 
+  // --- Importación de pacientes (DX-107) ------------------------------------
+  // loop/informes/DX-107.md: solo gestión (escribe miles de fichas y el
+  // informe lleva datos de pacientes).
+  'GET /patient-imports/template': ADMIN_ONLY,
+  'POST /patient-imports/inspect': ADMIN_ONLY,
+  'POST /patient-imports': ADMIN_ONLY,
+  'GET /patient-imports': ADMIN_ONLY,
+  'GET /patient-imports/:id': ADMIN_ONLY,
+  'GET /patient-imports/:id/errors.csv': ADMIN_ONLY,
+  'POST /patient-imports/:id/confirm': ADMIN_ONLY,
+  'POST /patient-imports/:id/undo': ADMIN_ONLY,
+
   // --- Catálogo dental -----------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,
   // escritura solo ADMIN).

@@ -35,4 +35,9 @@ export interface AuditOptions {
    * la query y el nº de filas de la cabecera `X-Result-Count` de la respuesta.
    */
   search?: true;
+  /**
+   * DX-107: lote de importación de pacientes. La metadata guarda el SHA-256
+   * del fichero, el modo y los totales de la respuesta (solo números).
+   */
+  importBatch?: true;
 }

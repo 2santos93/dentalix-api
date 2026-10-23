@@ -111,6 +111,21 @@ export class AuditScheduleChangeDto {
   after!: AuditScheduleEntryDto[];
 }
 
+export class AuditImportBatchDto {
+  @ApiProperty({ description: 'SHA-256 (hex) del archivo importado' })
+  fileSha256!: string;
+  @ApiPropertyOptional({ enum: ['SKIP', 'FILL_EMPTY'] })
+  mode?: 'SKIP' | 'FILL_EMPTY';
+  @ApiPropertyOptional() rows?: number;
+  @ApiPropertyOptional() valid?: number;
+  @ApiPropertyOptional() duplicates?: number;
+  @ApiPropertyOptional() errors?: number;
+  @ApiPropertyOptional() created?: number;
+  @ApiPropertyOptional() updated?: number;
+  @ApiPropertyOptional() undoneCreated?: number;
+  @ApiPropertyOptional() undoneFilled?: number;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -170,6 +185,13 @@ export class AuditMetadataDto {
       'DX-233: horario de un profesional antes y después (semanal o una excepción por fecha): sedes, días, fechas y minutos.',
   })
   scheduleChange?: AuditScheduleChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditImportBatchDto,
+    description:
+      'DX-107: lote de importación de pacientes — hash del archivo, modo de duplicados y totales (solo números).',
+  })
+  importBatch?: AuditImportBatchDto;
 }
 
 export class AuditEventDto {

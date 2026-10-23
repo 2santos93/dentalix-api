@@ -5,6 +5,14 @@ import { guardHardDeletes } from './no-hard-delete';
 
 export interface RunWithTenantOptions {
   isolationLevel?: Prisma.TransactionIsolationLevel;
+  /**
+   * Tope de la transacción interactiva en ms (Prisma: 5000 por defecto). Solo
+   * para escrituras por lotes acotadas (DX-107: dry-run de 10.000 filas y
+   * deshacer un lote), nunca para esperar a un usuario.
+   */
+  timeout?: number;
+  /** Espera máxima por una conexión del pool, en ms (Prisma: 2000). */
+  maxWait?: number;
 }
 
 @Injectable()

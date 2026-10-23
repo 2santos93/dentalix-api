@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, RetentionExtension } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -18,6 +22,7 @@ import {
   retentionUntil,
 } from '../../domain/retention/clinical-record-retention';
 import { Patient } from '../../domain/entities/patient.entity';
+import { livePatientWithDoc, lockPatientDocs } from '../patient-doc-lock';
 import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import {
   recordConsentsInTx,
@@ -57,6 +62,28 @@ async function lockRetentionState(
     FOR UPDATE`;
   if (rows.length === 0) throw new NotFoundException(PATIENT_NOT_FOUND);
   return rows[0];
+}
+
+export const DOC_TAKEN_MESSAGE =
+  'Ya existe un paciente con ese número de documento.';
+
+/**
+ * DX-107: el nº de documento no puede estar ya en otro paciente vivo de la
+ * clínica aunque se escriba distinto («1.111.111» = «1111111»). Toma el
+ * candado del documento (el mismo de la importación) y busca por la clave
+ * normalizada; el índice único solo compara el texto tal cual.
+ */
+async function assertDocFree(
+  tx: TxClient,
+  tenantId: string,
+  docNumber: string | null | undefined,
+  exceptId?: string,
+): Promise<void> {
+  if (!docNumber) return;
+  await lockPatientDocs(tx, tenantId, [docNumber]);
+  if (await livePatientWithDoc(tx, tenantId, docNumber, exceptId)) {
+    throw new ConflictException(DOC_TAKEN_MESSAGE);
+  }
 }
 
 function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
@@ -99,6 +126,7 @@ function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
       until instanceof Date ? until.toISOString().slice(0, 10) : null,
     underRetention: isUnderRetention(until, now),
     partiallySuppressedAt: patient.partiallySuppressedAt,
+    importBatchId: patient.importBatchId,
     contactChannel: patient.contactChannel,
     whatsappOptInAt: patient.whatsappOptInAt,
     whatsappOptInSource: patient.whatsappOptInSource,
@@ -139,6 +167,7 @@ export class PrismaPatientRepository implements PatientRepository {
     const patient = await this.prisma.runWithTenant(async (tx) => {
       // DX-128: el paciente nace con el canal por defecto de su clínica
       // (`tenants` no tiene RLS: se lee por el id del contexto).
+      await assertDocFree(tx, tenantId, input.docNumber);
       const clinic = await tx.tenant.findUniqueOrThrow({
         where: { id: tenantId },
         select: { defaultContactChannel: true },
@@ -336,6 +365,9 @@ export class PrismaPatientRepository implements PatientRepository {
       });
       if (!existing) {
         throw new NotFoundException('Patient not found');
+      }
+      if (typeof patch.docNumber === 'string') {
+        await assertDocFree(tx, this.requireTenantId(), patch.docNumber, id);
       }
 
       const patient = await tx.patient.update({

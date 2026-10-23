@@ -43,6 +43,11 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // Editar la plantilla los sustituye en la misma transacción y el cambio
   // queda en audit_events.
   'postOpInstructionTemplateLink',
+  // DX-107: filas preparadas de un dry-run de importación que CADUCÓ (nadie
+  // lo confirmó o se subió otro fichero). Son datos del fichero que ya no
+  // hacen falta, nunca crearon ni tocaron un paciente (outcome PENDING, sin
+  // patientId) y nada las referencia; el lote queda EXPIRED como rastro.
+  'patientImportRow',
   // DX-105: el precio de un procedimiento en una lista es configuración, sin
   // datos de pacientes y sin nada que lo referencie (el ítem del plan guarda
   // su propia foto del precio al crearse). «Quitar el precio» borra la fila

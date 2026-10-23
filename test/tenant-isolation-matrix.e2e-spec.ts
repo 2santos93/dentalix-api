@@ -1596,6 +1596,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /implants/:id/void': 'implants.e2e-spec.ts',
     // DX-151: B → 404 en lista, detalle, URL, subida y anulación del documento
     // de A, sin cambios en sus filas.
+    // DX-107: lote de importación de otra clínica → 404.
+    'GET /patient-imports/:id': 'patient-imports.e2e-spec.ts',
+    'GET /patient-imports/:id/errors.csv': 'patient-imports.e2e-spec.ts',
+    'POST /patient-imports/:id/confirm': 'patient-imports.e2e-spec.ts',
+    'POST /patient-imports/:id/undo': 'patient-imports.e2e-spec.ts',
     'POST /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
     'POST /patients/:patientId/documents/upload-url':
       'patient-documents-direct-disk.e2e-spec.ts',

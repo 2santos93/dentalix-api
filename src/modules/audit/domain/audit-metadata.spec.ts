@@ -284,3 +284,45 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     });
   });
 });
+
+describe('sanitizeAuditMetadata — lote de importación (DX-107)', () => {
+  const sha = 'a'.repeat(64);
+
+  it('deja el hash, el modo y los contadores enteros ≥ 0', () => {
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: {
+          fileSha256: sha,
+          mode: 'FILL_EMPTY',
+          rows: 10,
+          valid: 7,
+          duplicates: 2,
+          errors: 1,
+          created: 0,
+          updated: -1,
+          undoneCreated: 1.5,
+          fileName: 'pacientes-juan.xlsx',
+        },
+      }),
+    ).toEqual({
+      importBatch: {
+        fileSha256: sha,
+        mode: 'FILL_EMPTY',
+        rows: 10,
+        valid: 7,
+        duplicates: 2,
+        errors: 1,
+        created: 0,
+      },
+    });
+  });
+
+  it('sin un hash válido no guarda nada del lote', () => {
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: { fileSha256: 'Ana Pérez', rows: 3 },
+      }),
+    ).toEqual({});
+    expect(sanitizeAuditMetadata({ importBatch: 'x' })).toEqual({});
+  });
+});

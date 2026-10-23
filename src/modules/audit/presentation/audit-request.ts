@@ -87,6 +87,31 @@ function patientOf(
     : { kind: 'patient', id };
 }
 
+/** DX-107: hash, modo y totales del lote de importación de la respuesta. */
+function importBatchOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    fileSha256?: unknown;
+    duplicateMode?: unknown;
+    totals?: Record<string, unknown>;
+    progress?: Record<string, unknown>;
+    undoneCreated?: unknown;
+    undoneFilled?: unknown;
+  };
+  return {
+    fileSha256: b.fileSha256,
+    mode: b.duplicateMode,
+    rows: b.totals?.totalRows,
+    valid: b.totals?.validRows,
+    duplicates: b.totals?.duplicateRows,
+    errors: b.totals?.errorRows,
+    created: b.progress?.createdCount,
+    updated: b.progress?.updatedCount,
+    undoneCreated: b.undoneCreated,
+    undoneFilled: b.undoneFilled,
+  };
+}
+
 /** Nombres (nunca valores) de los campos de primer nivel del cuerpo. */
 function bodyFields(body: unknown): string[] {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
@@ -133,6 +158,9 @@ export function buildAuditDraft(
               rows: resultCount,
             },
           }
+        : {}),
+      ...(options.importBatch
+        ? { importBatch: importBatchOf(responseBody) }
         : {}),
     }),
   };

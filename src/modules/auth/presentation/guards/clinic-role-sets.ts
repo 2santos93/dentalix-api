@@ -303,3 +303,8 @@ export const PROVIDER_SCHEDULE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Vigencia de la anamnesis de la clínica (DX-247) — LEERLA: los cuatro roles
 // de agenda (APPOINTMENT_ROLES). Cambiarla: solo gestión.
 export const ANAMNESIS_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Importación de pacientes desde CSV/XLSX (DX-107) — todas las rutas
+// (plantilla, validar, confirmar, ver, informe, historial, deshacer): solo
+// gestión. Escribe miles de fichas de golpe y el informe lleva datos de
+// pacientes.
+export const PATIENT_IMPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

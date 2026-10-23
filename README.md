@@ -1795,6 +1795,124 @@ migraciones `20261020200000_dx151_enums`,
 - **Demo**: `seed:demo` no crea documentos (no hay ficheros de ejemplo que
   guardar en el almacén).
 
+## Importación de pacientes desde CSV/XLSX (DX-107)
+
+Un ADMIN trae su base de pacientes de Excel o de otro software sin teclearla.
+Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
+**todas solo ADMIN** (403 en español al resto):
+
+| Ruta | Qué hace |
+|------|----------|
+| `GET /template` | Plantilla CSV (UTF-8 con BOM) con las columnas admitidas y dos filas de ejemplo ficticias |
+| `POST /inspect` | Paso 1: lee el fichero (multipart `file`) y devuelve cabeceras, mapeo sugerido y 5 filas. No escribe nada |
+| `POST /` | Paso 2, **dry-run**: `file` + `mapping` (JSON `{campo: cabecera}`; sin él, el sugerido) + `defaultDocType`. Valida, deduplica y guarda el lote `VALIDATED` con totales y errores por fila. **No crea ni toca pacientes** |
+| `POST /:id/confirm` | Paso 3: `{ duplicateMode: SKIP \| FILL_EMPTY }` → lote `QUEUED` y trabajo `patient-imports.process` encolado en la misma transacción |
+| `GET /:id` | Estado, progreso (`progress.percent`) y los 200 primeros errores/duplicados |
+| `GET /:id/errors.csv` | Informe completo: fila, columna, tipo, motivo y valor |
+| `POST /:id/undo` | Deshacer el lote |
+| `GET /` | Historial (sin los dry-run sin confirmar) |
+
+- **Ficheros**: CSV o .xlsx de hasta **5 MB** (413) y **10.000 filas** con
+  datos (400); como mucho 50.000 filas físicas (vacías incluidas) y 100
+  columnas. El formato lo decide el contenido y debe cuadrar con la
+  extensión; un .xls antiguo o un Excel con contraseña se rechazan con el
+  arreglo. CSV en UTF-8 (con o sin BOM), Windows-1252/Latin-1 o UTF-16 LE con
+  BOM; separador `;`, `,` o tabulador (el que más aparece en las primeras
+  líneas, o la pista `sep=`). La cabecera es la primera fila con al menos dos
+  celdas escritas (un título encima se salta); los números de fila son los de
+  la hoja. El .xlsx lo lee un lector propio sin dependencias
+  (`domain/xlsx-reader.ts`): escáner LINEAL con cursor (nunca regex sobre la
+  hoja; una etiqueta sin cerrar es un 400 al momento), primera hoja, cadenas
+  compartidas/en línea, prefijos de espacio de nombres, números sin notación
+  científica y fechas por su estilo (serie fuera de rango = número, no 500);
+  sin DTD/entidades externas (XXE) y con un tope de **32 MB descomprimidos
+  entre todas las partes**, aunque la cabecera del ZIP mienta (zip bomb). No
+  se guardan filas vacías ni celdas más allá de la columna 100, y la lectura
+  y la validación ceden el hilo cada 500 filas (zlib asíncrono): un fichero
+  grande no para la API. Cualquier fallo inesperado del lector es un 400
+  genérico en español. **El fichero no se guarda**: solo su nombre, tamaño,
+  SHA-256, el mapeo y lo que necesita el informe.
+- **Validación por fila** (motivo en español, columna tal como se llama en el
+  fichero): nombres y apellidos obligatorios; tipo de documento por alias (CC,
+  «cédula», TI, CE, PASAPORTE, RC→OTRO…) o el de por defecto; nº de documento
+  normalizado por tipo (puntos fuera en CC/TI; notación científica de Excel
+  detectada); fecha DD/MM/AAAA, AAAA-MM-DD o serie de Excel, no futura ni
+  anterior a 1900; sexo por alias; email; teléfonos en E.164 con el indicativo
+  del país de la **sede del lote** (la de `X-Location-Id` o la de escritura;
+  regla de `toWhatsAppNumber`, DX-005) y un fijo local corto tal cual.
+- **Deduplicación** por (tipo, nº de documento), con la clave sin puntos ni
+  guiones: dentro del fichero gana la primera fila; contra los pacientes vivos
+  de la clínica, el existente se **salta** o se le **rellenan solo los campos
+  vacíos** (nunca nombre ni documento; nunca pisa un dato). El mismo número con
+  OTRO tipo es un error (la BD ya impone un paciente vivo por nº de documento,
+  `patients_tenant_doc_key`, pero compara el texto tal cual). Por eso el alta
+  y la edición manual de un paciente y cada bloque de la importación toman un
+  candado de transacción por (clínica, documento normalizado)
+  (`pg_advisory_xact_lock(hashtextextended('patient-doc:<clínica>:<clave>'))`,
+  `patients/infrastructure/patient-doc-lock.ts`) y buscan por la clave
+  normalizada: «1.111.111» y «1111111» nunca dan dos pacientes, y el alta
+  manual de un documento ya existente escrito distinto da 409.
+- **Trabajo por bloques** (DX-085): 250 filas por transacción corta; la
+  clínica sigue operando (solo se bloquean las filas del bloque, nunca la tabla
+  `patients`). Idempotente (retoma desde las filas `PENDING`); al agotar los 5
+  intentos el lote queda `FAILED` con lo hecho. Una fila con un error suyo
+  (no pasajero) queda `FAILED` y el resto sigue; un fallo pasajero (BD,
+  conexión, interbloqueo) sube y lo reintenta la cola. Una importación en cola
+  o en curso por clínica (índice único parcial; 409). Un lote cuyo trabajo
+  murió (intentos agotados, arriendo vencido o purgado) pasa a `FAILED` al
+  consultar o confirmar en la clínica y en la tarea
+  `patient-imports.reap-stuck.hourly`: nunca deja la clínica bloqueada.
+- **Retención (datos del fichero)**: un dry-run caduca a las 24 h o al subir
+  otro (`EXPIRED`): se BORRAN sus filas preparadas y se vacían sus errores.
+  Los errores por fila de los lotes terminados o deshechos se vacían a los
+  **90 días** (`issuesPurgedAt`), en la tarea diaria
+  `patient-imports.expire-validated.daily`; desde entonces `errors.csv` da
+  **410**. `filledValues` (lo rellenado) se conserva mientras se pueda
+  deshacer.
+- **Ley 1581 / RGPD (DX-037)**: los importados nacen **sin** autorización de
+  datos registrada (`data_processing_consents` vacía, `dataConsentAccepted`
+  false) y la ficha la marca «Pendiente». La importación no inventa
+  consentimientos. `patients.import_batch_id` dice qué lote creó a cada uno.
+- **Deshacer**: retira en blando solo los pacientes que creó el lote y revierte
+  los campos que rellenó si siguen con el valor del lote. Se niega (409) si
+  alguno de los creados aparece en CUALQUIER tabla con FK a `patients` (leída
+  de `pg_constraint`: citas, lista de espera, planes, pagos, historia,
+  odontograma, dentición, periodoncia, recetas, documentos, consentimientos,
+  implantes, coberturas, convenios (DX-105), responsables, cobranza,
+  indicaciones…; las visitas del plan de DX-256 cuelgan de citas y planes), salvo las
+  filas del lote y `patient_ledgers`. Una tabla nueva queda cubierta sola; el
+  int-spec la enumera para que se revise.
+- **Cartera (DX-155)**: el INSERT de pacientes no dispara el refresco de
+  `patient_ledgers` (solo su UPDATE de `deletedAt`); el deshacer retira por
+  sentencias de 1.000 pacientes, cada una refrescando su resumen, con
+  `app.current_tenant` fijado (RLS FORCE intacta).
+- **Auditoría**: `PATIENT_IMPORT_BATCH` con `CREATE` (dry-run), `UPDATE`
+  (`IMPORT_CONFIRMED`), `DELETE` (`IMPORT_UNDONE`) y `EXPORT` (errors.csv);
+  `metadata.importBatch` lleva el SHA-256, el modo y los totales (solo
+  números). `GET /:id` no se audita: la pantalla lo consulta cada pocos
+  segundos mientras importa. Logs solo con ids y contadores.
+- **Inyección CSV**: en `errors.csv` y la plantilla, una celda que empieza por
+  `= + - @` (también tras espacios), tabulador o CR se antepone con `'`.
+- **Tablas**: `patient_import_batches` y `patient_import_rows`, RLS FORCE y FK
+  compuestas por tenant (sede, lote, paciente). Rendimiento: el dry-run de
+  10.000 filas tarda unos segundos (e2e: < 60 s).
+- **Migraciones sin bloqueo largo de `patients`**: `…130100` solo añade
+  `import_batch_id` y la FK `NOT VALID` (no lee filas); el índice parcial va
+  `CONCURRENTLY` en `…130300` y el `VALIDATE` en `…130400`, con `ANALYZE` de
+  la columna antes del `NO FORCE`: con esa estadística la comprobación usa el
+  índice parcial (vacío) y no recorre la tabla (~1 ms con 1 M de pacientes,
+  frente a ~160 ms de recorrido con ACCESS EXCLUSIVE). Lo vigila
+  `test/migrations/dx107-patients-lock.spec.ts`.
+- **Lector de ficheros acotado**: XLSX con ≤ 16.384 celdas por fila, ≤ 64.000
+  estilos, ≤ 1 M de cadenas compartidas y 4 M de pasos del escáner por
+  fichero (400 en español), cediendo el hilo cada 8.192 pasos; CSV
+  Windows-1252 decodificado en nativo.
+- **Supresión parcial (Ley 1581)**: «Actualizar solo campos vacíos» nunca
+  rellena los campos suprimidos de un paciente con `partially_suppressed_at`
+  (el dry-run lo avisa en la fila).
+- **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
+  con separador `;`, errores, un repetido y uno de la clínica demo).
+
 ## Dominios personalizados (SEC-009)
 
 Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio
