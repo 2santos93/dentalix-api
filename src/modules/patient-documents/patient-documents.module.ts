@@ -5,15 +5,22 @@ import { StorageModule } from '../../shared/storage/storage.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
 import {
+  CompletePatientDocumentUploadUseCase,
+  CreatePatientDocumentUploadUseCase,
   GetPatientDocumentUrlUseCase,
   GetPatientDocumentUseCase,
   ListPatientDocumentsUseCase,
   PATIENT_DOCUMENT_CLOCK,
+  PATIENT_DOCUMENT_UPLOAD_TTL,
   PATIENT_DOCUMENT_URL_TTL,
+  PatientDocumentWriter,
   UploadPatientDocumentUseCase,
   VoidPatientDocumentUseCase,
 } from './application/use-cases/patient-documents.use-cases';
-import { PATIENT_DOCUMENT_URL_TTL_SECONDS } from './domain/document-rules';
+import {
+  PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS,
+  PATIENT_DOCUMENT_URL_TTL_SECONDS,
+} from './domain/document-rules';
 import { PATIENT_DOCUMENT_REPOSITORY } from './domain/ports/patient-document-repository.port';
 import { PrismaPatientDocumentRepository } from './infrastructure/repositories/prisma-patient-document.repository';
 import { PatientDocumentsController } from './presentation/patient-documents.controller';
@@ -23,12 +30,16 @@ import { PatientDocumentsController } from './presentation/patient-documents.con
  * consentimientos escaneados e informes en la ficha. Contenido comprobado
  * (lista blanca por contenido), almacén privado con URL firmadas de corta
  * vida para ver o descargar, anulación con motivo y auditoría de cada acceso.
+ * DX-259: la web sube directamente al almacén (`upload-url` + `complete`).
  */
 @Module({
   imports: [JwtModule.register({}), StorageModule, PatientsModule],
   controllers: [PatientDocumentsController],
   providers: [
+    PatientDocumentWriter,
     UploadPatientDocumentUseCase,
+    CreatePatientDocumentUploadUseCase,
+    CompletePatientDocumentUploadUseCase,
     ListPatientDocumentsUseCase,
     GetPatientDocumentUseCase,
     GetPatientDocumentUrlUseCase,
@@ -39,6 +50,10 @@ import { PatientDocumentsController } from './presentation/patient-documents.con
     {
       provide: PATIENT_DOCUMENT_URL_TTL,
       useValue: PATIENT_DOCUMENT_URL_TTL_SECONDS,
+    },
+    {
+      provide: PATIENT_DOCUMENT_UPLOAD_TTL,
+      useValue: PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS,
     },
     {
       provide: PATIENT_DOCUMENT_REPOSITORY,

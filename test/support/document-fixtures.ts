@@ -112,6 +112,32 @@ export const docxFixture = (): Buffer =>
   ]);
 
 /**
+ * DOCX de más de `minBytes` (DX-259): una imagen incompresible en
+ * `word/media` empuja el directorio central fuera de los primeros 64 KB, así
+ * que detectarlo exige leer el FINAL del fichero.
+ */
+export function largeDocxFixture(minBytes: number): Buffer {
+  // Bytes pseudoaleatorios deterministas (xorshift): deflate no los encoge.
+  const media = Buffer.alloc(minBytes);
+  let x = 0x9e3779b9;
+  for (let i = 0; i < media.length; i++) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    media[i] = x & 0xff;
+  }
+  return zipFixture([
+    { name: '[Content_Types].xml', content: CONTENT_TYPES_XML },
+    { name: 'word/media/image1.png', content: media },
+    {
+      name: 'word/document.xml',
+      content:
+        '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>',
+    },
+  ]);
+}
+
+/**
  * Preámbulo de 128 bytes + `DICM` + un elemento del grupo 0002. El preámbulo
  * es libre: `preamble` rellena su comienzo (p. ej. `PK\x03\x04`).
  */

@@ -1602,6 +1602,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patient-imports/:id/confirm': 'patient-imports.e2e-spec.ts',
     'POST /patient-imports/:id/undo': 'patient-imports.e2e-spec.ts',
     'POST /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
+    'POST /patients/:patientId/documents/upload-url':
+      'patient-documents-direct-disk.e2e-spec.ts',
+    'POST /patients/:patientId/documents/:id/complete':
+      'patient-documents-direct-disk.e2e-spec.ts',
     'GET /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
     'GET /patients/:patientId/documents/:id': 'patient-documents.e2e-spec.ts',
     'GET /patients/:patientId/documents/:id/url/inline':

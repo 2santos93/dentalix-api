@@ -4,7 +4,10 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { createS3Client } from '../../src/shared/storage/s3-file-storage';
-import type { S3StorageConfig } from '../../src/shared/storage/storage-config';
+import {
+  loadS3Tuning,
+  type S3StorageConfig,
+} from '../../src/shared/storage/storage-config';
 
 /**
  * DX-084: los tests contra un S3 real (MinIO) leen `S3_TEST_ENDPOINT`,
@@ -38,6 +41,7 @@ export function minioTestConfig(): S3StorageConfig | null {
     },
     // MinIO sin KMS rechaza SSE-S3; el cifrado se prueba en el unitario.
     serverSideEncryption: undefined,
+    tuning: loadS3Tuning(() => undefined),
   };
 }
 

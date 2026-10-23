@@ -4,22 +4,49 @@ import {
   ForbiddenException,
   Get,
   Header,
+  HttpCode,
   Inject,
   NotFoundException,
   Param,
+  Post,
   Query,
+  Req,
   Res,
   StreamableFile,
+  UseFilters,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { RateLimit } from '../security/rate-limit.decorator';
 import { contentTypeOf, isServableContentType } from './content-type';
 import { DiskFileStorage } from './disk-file-storage';
+import {
+  DIRECT_UPLOAD_FORBIDDEN_MESSAGE,
+  DiskDirectUploadInterceptor,
+  DiskDriverOnlyGuard,
+  type DirectUploadRequest,
+} from './disk-direct-upload';
+import { MultipartErrorsFilter } from '../../modules/patient-documents/presentation/multipart-errors.filter';
+import { avatarCacheControl } from './public-file-cache';
+import { UploadSlotGuard, UploadSlotInterceptor } from './upload-slots';
 import { isFileKey } from './file-key';
 import { FILE_STORAGE, contentDispositionHeader } from './file-storage.port';
 import type { FileStoragePort, SignedUrlOptions } from './file-storage.port';
 
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+
+export const DIRECT_UPLOAD_MISSING_FILE_MESSAGE = 'Falta el archivo.';
+export const DIRECT_UPLOAD_PROBLEMS: Record<
+  'empty' | 'too_large' | 'checksum_mismatch',
+  string
+> = {
+  empty: 'El archivo está vacío.',
+  too_large: 'El archivo supera el máximo de 20 MB.',
+  checksum_mismatch:
+    'El archivo no coincide con su huella SHA-256. Vuelve a subirlo.',
+};
 
 /**
  * Opciones de la URL firmada tal como llegan en la query. Una `disposition`
@@ -59,24 +86,81 @@ export class FilesController {
   // excepción porque la web (otro origen, y dominios de marca blanca) los
   // incrusta con <img>.
   @Header('Cross-Origin-Resource-Policy', 'cross-origin')
+  // DX-259 (OPS-039): ruta anónima que llega al bucket; con la caché del
+  // navegador una clínica casi no la pide, así que su límite por IP es más
+  // estricto que el global (RATE_LIMIT_PUBLIC_FILES_*).
+  @RateLimit('public-files')
   async getAvatar(
     @Param('name') name: string,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<StreamableFile> {
+  ): Promise<StreamableFile | undefined> {
     const key = `avatars/${name}`;
     // isFileKey además rechaza `..` dentro del nombre, que el almacén no
     // acepta como clave (sería un 500 en vez de un 400).
     if (!SAFE_NAME.test(name) || !isFileKey(key)) {
       throw new BadRequestException('Invalid file name');
     }
-    const file = await this.storage.read(key);
+    // Revisión I-2: mientras no haya fichero, no-store. Un 404 o un 503 con
+    // la caché de un año (immutable) dejaría el avatar roto para siempre en
+    // el navegador o en una CDN, sin forma de invalidarlo (la URL no cambia).
+    res.set('Cache-Control', 'no-store');
+    // Revalidación (If-None-Match): basta un HeadObject; el objeto solo se
+    // descarga si cambió. `req.fresh` (Express) compara If-None-Match con la
+    // ETag puesta y, sin cuerpo, el `send()` de Express responde 304.
+    if (req.headers['if-none-match']) {
+      const info = await this.storage.stat(key);
+      if (!info) throw new NotFoundException('File not found');
+      if (info.etag) res.set('ETag', info.etag);
+      if (info.etag && req.fresh) {
+        res.set('Cache-Control', avatarCacheControl(name));
+        return undefined;
+      }
+    }
+    const file = await this.storage.openRead(key);
     if (!file) {
       throw new NotFoundException('File not found');
     }
+    res.set('Cache-Control', avatarCacheControl(name));
+    if (file.etag) res.set('ETag', file.etag);
     // El tipo sale de la extensión (la fija el caso de uso), no de lo
     // guardado: nunca se sirve como HTML algo subido como avatar.
     res.set('Content-Type', contentTypeOf(key));
-    return new StreamableFile(file.bytes);
+    if (file.size !== null) res.set('Content-Length', String(file.size));
+    return new StreamableFile(file.stream);
+  }
+
+  /**
+   * DX-259: la «subida directa» del adaptador de DISCO (solo desarrollo y
+   * tests): recibe el mismo formulario que el POST prefirmado de S3 (los
+   * campos firmados por `createDirectUpload` y el fichero al final, en
+   * `file`). Orden: con S3, 404 antes de nada (`DiskDriverOnlyGuard`); plaza
+   * del semáforo con plazos (`UploadSlotGuard`); firma comprobada antes de
+   * aceptar el fichero (`DiskDirectUploadInterceptor`, 403 sin escribirlo);
+   * y se guarda bajo su clave si el tamaño y el SHA-256 cuadran. Errores de
+   * multer en español (`MultipartErrorsFilter`).
+   */
+  @Post('uploads')
+  @HttpCode(204)
+  @ApiExcludeEndpoint()
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(DiskDriverOnlyGuard, UploadSlotGuard)
+  @UseInterceptors(UploadSlotInterceptor, DiskDirectUploadInterceptor)
+  @UseFilters(MultipartErrorsFilter)
+  async directUpload(@Req() req: DirectUploadRequest): Promise<void> {
+    const upload = req.directUpload;
+    const file = req.file;
+    if (!(this.storage instanceof DiskFileStorage)) {
+      throw new NotFoundException();
+    }
+    if (!upload) throw new ForbiddenException(DIRECT_UPLOAD_FORBIDDEN_MESSAGE);
+    if (!file) {
+      throw new BadRequestException(DIRECT_UPLOAD_MISSING_FILE_MESSAGE);
+    }
+    const outcome = await this.storage.acceptDirectUpload(upload, file.path);
+    if (outcome !== 'ok') {
+      throw new BadRequestException(DIRECT_UPLOAD_PROBLEMS[outcome]);
+    }
   }
 
   /**
@@ -119,7 +203,7 @@ export class FilesController {
     ) {
       throw new ForbiddenException('Invalid or expired signature');
     }
-    const file = await this.storage.read(key);
+    const file = await this.storage.openRead(key);
     if (!file) {
       throw new NotFoundException('File not found');
     }
@@ -131,6 +215,6 @@ export class FilesController {
     // toda la API; aquí se sustituyen (la web está en otro origen).
     res.removeHeader('X-Frame-Options');
     res.set('Content-Security-Policy', 'frame-ancestors *');
-    return new StreamableFile(file.bytes);
+    return new StreamableFile(file.stream);
   }
 }

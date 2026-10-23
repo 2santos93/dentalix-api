@@ -24,6 +24,12 @@ export interface AuditedRequest {
   body?: unknown;
   user?: JwtPayload;
   tenantHost?: { host?: string; tenantId: string | null };
+  /**
+   * DX-259: el handler lo pone cuando la respuesta repite una escritura ya
+   * auditada (p. ej. un `complete` idempotente que devuelve el documento ya
+   * creado): no se registra otro evento.
+   */
+  skipAudit?: boolean;
 }
 
 /** Contexto de la petición capturado al entrar al handler. */

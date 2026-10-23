@@ -14,6 +14,15 @@ import {
   FILE_STORAGE,
   type FileStoragePort,
 } from '../../../../shared/storage/file-storage.port';
+import {
+  hashLocalFile,
+  readLocalRange,
+} from '../../../../shared/storage/local-file';
+import { StorageObjectChangedError } from '../../../../shared/storage/storage-errors';
+import {
+  UPLOAD_STORAGE_BUDGET_MS,
+  withStorageBudget,
+} from '../../../../shared/storage/storage-budget';
 import { currentRequestId } from '../../../../shared/observability/request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
@@ -22,19 +31,23 @@ import {
   type PatientRepository,
 } from '../../../patients/domain/ports/patient-repository.port';
 import {
+  type ByteRangeSource,
   declaredTypeMatches,
+  type DetectedType,
   FILE_TOO_LARGE_MESSAGE,
   isInlineViewable,
   MAX_PATIENT_DOCUMENT_BYTES,
-  sniffDocument,
+  sniffDocumentFrom,
   TYPE_MISMATCH_MESSAGE,
   UNSUPPORTED_TYPE_MESSAGE,
 } from '../../domain/document-content';
 import {
   normalizeOriginalName,
   PatientDocumentRuleError,
-  sha256Hex,
+  pendingStorageKeyFor,
+  sha256HexToBase64,
   storageKeyFor,
+  validateSha256Hex,
   validateCategory,
   validateClinicalDate,
   validateNotes,
@@ -46,6 +59,7 @@ import type {
   PatientDocumentCategory,
 } from '../../domain/entities/patient-document.entity';
 import {
+  type CreatePatientDocumentInput,
   DuplicateActivePatientDocumentError,
   PATIENT_DOCUMENT_REPOSITORY,
   type PatientDocumentFilters,
@@ -60,9 +74,14 @@ export const PATIENT_DOCUMENT_CLOCK = Symbol('PATIENT_DOCUMENT_CLOCK');
  * `overrideProvider` para probar la caducidad.
  */
 export const PATIENT_DOCUMENT_URL_TTL = Symbol('PATIENT_DOCUMENT_URL_TTL');
+/** Vida del POST prefirmado (DX-259); los tests la acortan igual. */
+export const PATIENT_DOCUMENT_UPLOAD_TTL = Symbol(
+  'PATIENT_DOCUMENT_UPLOAD_TTL',
+);
 
 export const MISSING_FILE_MESSAGE = 'Falta el archivo.';
 export const EMPTY_FILE_MESSAGE = 'El archivo está vacío.';
+export const INVALID_SIZE_MESSAGE = 'El tamaño del archivo no es válido.';
 export const DUPLICATE_DOCUMENT_MESSAGE =
   'Este archivo ya está en la ficha del paciente.';
 export const DOCUMENT_NOT_FOUND_MESSAGE = 'Documento no encontrado';
@@ -71,9 +90,12 @@ export const VOID_FORBIDDEN_MESSAGE =
   'Solo quien subió el documento o un administrador puede anularlo.';
 export const DOCUMENT_ALREADY_VOIDED_MESSAGE = 'El documento ya está anulado.';
 
-/** Lo que importa del fichero de multer (sin acoplar el caso de uso a él). */
+/**
+ * Lo que importa del fichero de multer (sin acoplar el caso de uso a él).
+ * DX-259: multer lo deja en un temporal en disco (`path`), no en memoria.
+ */
 export interface UploadedDocumentFile {
-  buffer: Buffer;
+  path: string;
   originalname: string;
   mimetype: string;
   size: number;
@@ -120,6 +142,23 @@ export interface PatientDocumentUrl {
   url: string;
   expiresAt: string;
   disposition: 'inline' | 'attachment';
+}
+
+/**
+ * La fila de un documento recién guardado: `created` es false si otra
+ * petición ya la había creado (la repetición no se vuelve a auditar).
+ */
+export interface InsertedDocument {
+  view: PatientDocumentView;
+  created: boolean;
+}
+
+/** Campos del formulario ya validados. */
+interface ValidatedDocumentFields {
+  category: PatientDocumentCategory;
+  toothNumbers: string[];
+  notes: string | null;
+  clinicalDate: string | null;
 }
 
 /** Las reglas puras fallan con su mensaje en español: 400 tal cual. */
@@ -187,12 +226,12 @@ async function requireDocument(
   return doc;
 }
 
-function parseTeethCsv(csv: string | undefined): string[] {
-  const parts = (csv ?? '')
+/** Los dientes del multipart (`"11,21"`), sin validar todavía. */
+function splitTeethCsv(csv: string | undefined): string[] {
+  return (csv ?? '')
     .split(',')
     .map((t) => t.trim())
     .filter((t) => t !== '');
-  return rule(() => validateToothNumbers(parts));
 }
 
 /** Códigos de Prisma de conexión perdida o inalcanzable (no de la consulta). */
@@ -211,8 +250,12 @@ function isConnectionLostError(error: unknown): boolean {
   );
 }
 
+/**
+ * Lo común a las dos subidas (multipart y directa, DX-259): validar el
+ * formulario, decidir el tipo por contenido, duplicados, sede y la fila.
+ */
 @Injectable()
-export class UploadPatientDocumentUseCase {
+export class PatientDocumentWriter {
   private readonly logger = new Logger('PatientDocuments');
 
   constructor(
@@ -224,32 +267,28 @@ export class UploadPatientDocumentUseCase {
     @Inject(PATIENT_DOCUMENT_CLOCK) private readonly now: PatientDocumentClock,
   ) {}
 
-  /**
-   * Sube un documento a la ficha. El CONTENIDO decide el tipo (lista blanca);
-   * lo que dice el cliente solo puede coincidir o no. Orden: reglas del
-   * formulario → paciente de la clínica → contenido → duplicado vigente →
-   * objeto en el almacén → fila. Autor (token), sede (contexto) y hora de la
-   * subida (BD) nunca salen del cuerpo.
-   */
-  async execute(
-    patientId: string,
-    fields: UploadPatientDocumentFields,
-    file: UploadedDocumentFile | undefined,
-    uploadedById: string,
-  ): Promise<PatientDocumentView> {
-    if (!file) throw new BadRequestException(MISSING_FILE_MESSAGE);
-    const bytes = file.buffer;
-    // Multer ya corta en 20 MB; esto cubre a cualquier otro llamador.
-    if (bytes.length > MAX_PATIENT_DOCUMENT_BYTES) {
-      throw new PayloadTooLargeException(FILE_TOO_LARGE_MESSAGE);
-    }
-    if (bytes.length === 0) throw new BadRequestException(EMPTY_FILE_MESSAGE);
+  tenantId(): string {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return tenantId;
+  }
 
+  /**
+   * Reglas del formulario → paciente de la clínica → fecha clínica (con el
+   * «hoy» de la sede, que solo se consulta si llega fecha). Lanza 400/404.
+   */
+  async validateFields(
+    patientId: string,
+    fields: Pick<
+      UploadPatientDocumentFields,
+      'category' | 'clinicalDate' | 'notes'
+    >,
+    teeth: readonly string[] | undefined,
+  ): Promise<ValidatedDocumentFields> {
     const category = rule(() => validateCategory(fields.category));
-    const toothNumbers = parseTeethCsv(fields.toothNumbers);
+    const toothNumbers = rule(() => validateToothNumbers(teeth));
     const notes = rule(() => validateNotes(fields.notes));
     await assertPatientInClinic(this.patients, patientId);
-    // El «hoy» de la sede solo se consulta si llega fecha clínica.
     let clinicalDate: string | null = null;
     if ((fields.clinicalDate ?? '').trim() !== '') {
       const today = await this.repo.clinicToday(this.now());
@@ -257,49 +296,43 @@ export class UploadPatientDocumentUseCase {
         validateClinicalDate(fields.clinicalDate, today),
       );
     }
+    return { category, toothNumbers, notes, clinicalDate };
+  }
 
-    const detected = sniffDocument(bytes);
+  /** Tipo por contenido que además cuadra con lo declarado, o 400. */
+  async detectType(
+    source: ByteRangeSource,
+    declared: { mimeType?: string; originalName?: string },
+  ): Promise<DetectedType> {
+    const detected = await sniffDocumentFrom(source);
     if (!detected) throw new BadRequestException(UNSUPPORTED_TYPE_MESSAGE);
-    if (
-      !declaredTypeMatches(
-        { mimeType: file.mimetype, originalName: file.originalname },
-        detected,
-      )
-    ) {
+    if (!declaredTypeMatches(declared, detected)) {
       throw new BadRequestException(TYPE_MISMATCH_MESSAGE);
     }
+    return detected;
+  }
 
-    const sha256 = sha256Hex(bytes);
+  async assertNotDuplicate(patientId: string, sha256: string): Promise<void> {
     if (await this.repo.findActiveBySha256(patientId, sha256)) {
       throw new ConflictException(DUPLICATE_DOCUMENT_MESSAGE);
     }
+  }
 
-    const tenantId = this.tenantContext.getTenantId();
-    if (!tenantId) throw new Error('No tenant in context');
-    // La sede se resuelve ANTES de guardar el objeto: si falla (sede no
-    // permitida, BD caída), el bucket no se toca.
-    const { locationId } = await this.repo.resolveWriteLocation();
-    const id = randomUUID();
-    const storageKey = storageKeyFor(tenantId, id, detected);
-    await this.storage.save(storageKey, bytes, detected);
+  resolveWriteLocation(): Promise<{ locationId: string }> {
+    return this.repo.resolveWriteLocation();
+  }
 
+  /**
+   * Crea la fila de un objeto YA guardado en `storageKey`. Si la fila no
+   * llega a existir, el objeto se borra (salvo conexión perdida: el INSERT
+   * pudo confirmarse). Si otra petición ya creó la fila de ESTE id (dos
+   * `complete` a la vez), se devuelve esa y solo se borra el objeto propio
+   * cuando no es el de esa fila.
+   */
+  async insert(input: CreatePatientDocumentInput): Promise<InsertedDocument> {
     let created: PatientDocument;
     try {
-      created = await this.repo.create({
-        id,
-        patientId,
-        locationId,
-        category,
-        originalName: normalizeOriginalName(file.originalname),
-        mimeType: detected,
-        sizeBytes: bytes.length,
-        sha256,
-        storageKey,
-        clinicalDate,
-        toothNumbers,
-        notes,
-        uploadedById,
-      });
+      created = await this.repo.create(input);
     } catch (error) {
       if (isConnectionLostError(error)) {
         // El INSERT pudo confirmarse antes de caer la conexión: borrar el
@@ -310,23 +343,36 @@ export class UploadPatientDocumentUseCase {
         );
         throw error;
       }
-      await this.discardObject(storageKey);
+      const winner = await this.repo.findById(input.patientId, input.id);
+      if (winner?.storageKey !== input.storageKey) {
+        await this.discardObject(input.storageKey);
+      }
+      if (winner) return { view: await this.view(winner), created: false };
       if (error instanceof DuplicateActivePatientDocumentError) {
         throw new ConflictException(DUPLICATE_DOCUMENT_MESSAGE);
       }
       throw error;
     }
-    const [view] = await toViews(this.repo, [created]);
+    return { view: await this.view(created), created: true };
+  }
+
+  async view(doc: PatientDocument): Promise<PatientDocumentView> {
+    const [view] = await toViews(this.repo, [doc]);
     return view;
   }
 
+  findById(patientId: string, id: string): Promise<PatientDocument | null> {
+    return this.repo.findById(patientId, id);
+  }
+
   /**
-   * La fila no llegó a existir: el objeto recién guardado quedaría huérfano
-   * (y con datos clínicos) en el bucket. Se intenta borrar; si también falla,
-   * manda el error del INSERT (el objeto, sin fila, no es alcanzable por la
-   * API: su clave solo la conoce la BD).
+   * Borra un objeto que no tiene (ni tendrá) fila: el recién guardado de una
+   * subida fallida o el pendiente que no pasó `complete`. Si también falla,
+   * manda el error original (el objeto, sin fila, no es alcanzable por la
+   * API: su clave solo la conoce la BD, y el pendiente lo borra el ciclo de
+   * vida del bucket).
    */
-  private async discardObject(storageKey: string): Promise<void> {
+  async discardObject(storageKey: string): Promise<void> {
     try {
       // Excepción justificada al borrado blando: borra el OBJETO del bucket
       // de una subida cuya fila no se creó, no una fila de la BD.
@@ -340,6 +386,406 @@ export class UploadPatientDocumentUseCase {
         `No se pudo borrar el objeto de una subida fallida (requestId=${currentRequestId() ?? '-'}, error=${error instanceof Error ? error.name : 'NonError'})`,
       );
     }
+  }
+}
+
+@Injectable()
+export class UploadPatientDocumentUseCase {
+  constructor(
+    private readonly writer: PatientDocumentWriter,
+    @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
+  ) {}
+
+  /**
+   * Sube un documento a la ficha por la API (multipart). DX-259: el fichero
+   * llega a un temporal en disco (multer), no a memoria; se lee por rangos
+   * para el tipo, se calcula su huella en streaming y se sube al almacén en
+   * streaming. La web usa la subida directa (`upload-url` + `complete`).
+   *
+   * El CONTENIDO decide el tipo (lista blanca); lo que dice el cliente solo
+   * puede coincidir o no. Orden: reglas del formulario → paciente de la
+   * clínica → contenido → duplicado vigente → objeto en el almacén → fila.
+   * Autor (token), sede (contexto) y hora de la subida (BD) nunca salen del
+   * cuerpo.
+   */
+  /** Revisión M-1: con un presupuesto de almacén que cabe en el proxy. */
+  execute(
+    patientId: string,
+    fields: UploadPatientDocumentFields,
+    file: UploadedDocumentFile | undefined,
+    uploadedById: string,
+  ): Promise<PatientDocumentView> {
+    return withStorageBudget(UPLOAD_STORAGE_BUDGET_MS, () =>
+      this.upload(patientId, fields, file, uploadedById),
+    );
+  }
+
+  private async upload(
+    patientId: string,
+    fields: UploadPatientDocumentFields,
+    file: UploadedDocumentFile | undefined,
+    uploadedById: string,
+  ): Promise<PatientDocumentView> {
+    if (!file) throw new BadRequestException(MISSING_FILE_MESSAGE);
+    // Multer ya corta en 20 MB; esto cubre a cualquier otro llamador.
+    if (file.size > MAX_PATIENT_DOCUMENT_BYTES) {
+      throw new PayloadTooLargeException(FILE_TOO_LARGE_MESSAGE);
+    }
+    if (file.size === 0) throw new BadRequestException(EMPTY_FILE_MESSAGE);
+
+    const valid = await this.writer.validateFields(
+      patientId,
+      fields,
+      splitTeethCsv(fields.toothNumbers),
+    );
+    const detected = await this.writer.detectType(
+      {
+        size: file.size,
+        read: (start, end) => readLocalRange(file.path, start, end),
+      },
+      { mimeType: file.mimetype, originalName: file.originalname },
+    );
+    const sha256 = (await hashLocalFile(file.path)).sha256.toString('hex');
+    await this.writer.assertNotDuplicate(patientId, sha256);
+
+    // La sede se resuelve ANTES de guardar el objeto: si falla (sede no
+    // permitida, BD caída), el bucket no se toca.
+    const { locationId } = await this.writer.resolveWriteLocation();
+    const id = randomUUID();
+    const storageKey = storageKeyFor(this.writer.tenantId(), id, detected);
+    await this.storage.saveFile(storageKey, file.path, detected);
+    const { view } = await this.writer.insert({
+      id,
+      patientId,
+      locationId,
+      ...valid,
+      originalName: normalizeOriginalName(file.originalname),
+      mimeType: detected,
+      sizeBytes: file.size,
+      sha256,
+      storageKey,
+      uploadedById,
+    });
+    return view;
+  }
+}
+
+/** Lo que declara el navegador al pedir la subida directa (DX-259). */
+export interface PatientDocumentUploadRequest {
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  /** SHA-256 del contenido en hex. */
+  sha256?: string;
+}
+
+/** La autorización de subida directa que recibe el navegador. */
+export interface PatientDocumentUploadTicket {
+  documentId: string;
+  method: 'POST';
+  url: string;
+  fields: Record<string, string>;
+  expiresAt: string;
+  maxBytes: number;
+}
+
+/** Metadatos `x-amz-meta-*` que fija la API en el objeto pendiente. */
+const META = {
+  uploadedBy: 'uploaded-by',
+  patientId: 'patient-id',
+  size: 'declared-size',
+  sha256: 'sha256',
+} as const;
+
+export const UPLOAD_NOT_FOUND_MESSAGE =
+  'No encontramos el archivo subido o la subida caducó. Vuelve a subirlo.';
+export const SIZE_MISMATCH_MESSAGE =
+  'El tamaño del archivo subido no coincide con el declarado. Vuelve a subirlo.';
+export const CHECKSUM_MISMATCH_MESSAGE =
+  'El archivo subido no coincide con su huella SHA-256. Vuelve a subirlo.';
+/**
+ * QA D3: código del 400 de `complete` cuando el CONTENIDO no vale (vacío, más
+ * de 20 MB, tipo no admitido o que no coincide con el declarado). Volver a
+ * subir el mismo fichero daría lo mismo: la web no ofrece «Reintentar».
+ */
+export const DOCUMENT_CONTENT_REJECTED_CODE = 'DOCUMENT_CONTENT_REJECTED';
+
+function contentRejected(message: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: DOCUMENT_CONTENT_REJECTED_CODE,
+    message,
+  });
+}
+
+export const UPLOAD_CHANGED_MESSAGE =
+  'El archivo cambió mientras se comprobaba. Vuelve a subirlo.';
+
+@Injectable()
+export class CreatePatientDocumentUploadUseCase {
+  constructor(
+    private readonly writer: PatientDocumentWriter,
+    @Inject(PATIENT_REPOSITORY) private readonly patients: PatientRepository,
+    @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
+    @Inject(PATIENT_DOCUMENT_UPLOAD_TTL)
+    private readonly ttlSeconds: number,
+  ) {}
+
+  /**
+   * DX-259 (OPS-038): autoriza al navegador a subir UN fichero directamente
+   * al almacén, sin pasar por el proxy de la web ni por la memoria de la API.
+   * La clave la fija la API (`pending/<tenant>/<id>`), el tamaño va de 1 B a
+   * 20 MB, el SHA-256 declarado es obligatorio (el almacén rechaza otro
+   * contenido) y el autor y el paciente quedan en metadatos firmados. Nada
+   * llega a la ficha hasta `complete`. Antes de autorizar: tamaño, huella,
+   * paciente de la clínica, duplicado vigente (409) y sede de escritura.
+   */
+  async execute(
+    patientId: string,
+    request: PatientDocumentUploadRequest,
+    uploadedById: string,
+  ): Promise<PatientDocumentUploadTicket> {
+    const size = request.sizeBytes;
+    if (typeof size !== 'number' || !Number.isInteger(size) || size < 0) {
+      throw new BadRequestException(INVALID_SIZE_MESSAGE);
+    }
+    if (size > MAX_PATIENT_DOCUMENT_BYTES) {
+      throw new PayloadTooLargeException(FILE_TOO_LARGE_MESSAGE);
+    }
+    if (size === 0) throw new BadRequestException(EMPTY_FILE_MESSAGE);
+    const sha256 = rule(() => validateSha256Hex(request.sha256));
+    await assertPatientInClinic(this.patients, patientId);
+    await this.writer.assertNotDuplicate(patientId, sha256);
+    await this.writer.resolveWriteLocation();
+
+    const documentId = randomUUID();
+    const target = await this.storage.createDirectUpload(
+      pendingStorageKeyFor(this.writer.tenantId(), documentId),
+      {
+        maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+        sha256Base64: sha256HexToBase64(sha256),
+        metadata: {
+          [META.uploadedBy]: uploadedById,
+          [META.patientId]: patientId,
+          [META.size]: String(size),
+          [META.sha256]: sha256,
+        },
+        ttlSeconds: this.ttlSeconds,
+      },
+    );
+    return {
+      documentId,
+      method: target.method,
+      url: target.url,
+      fields: target.fields,
+      expiresAt: target.expiresAt.toISOString(),
+      maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+    };
+  }
+}
+
+/**
+ * Cuerpo de `complete`: los campos del formulario (como en el multipart, pero
+ * los dientes en una lista) y el nombre y el tipo que declara el navegador.
+ */
+export interface CompletePatientDocumentFields {
+  category?: string;
+  /** `YYYY-MM-DD`. */
+  clinicalDate?: string;
+  toothNumbers?: string[];
+  notes?: string;
+  fileName?: string;
+  mimeType?: string;
+}
+
+@Injectable()
+export class CompletePatientDocumentUploadUseCase {
+  constructor(
+    private readonly writer: PatientDocumentWriter,
+    @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
+  ) {}
+
+  /**
+   * DX-259: el navegador ya dejó el fichero en `pending/<tenant>/<id>`.
+   * Orden: reglas del formulario (400 sin tocar el objeto: se puede corregir
+   * y repetir) → paciente → objeto pendiente de ESTE usuario y paciente (404
+   * si no) → tamaño, SHA-256 (`HeadObject`) y tipo por contenido (los
+   * primeros 64 KB con `Range`) → duplicado → sede → se mueve a su clave
+   * definitiva → fila. Si el contenido no vale (tipo, tamaño o huella), el
+   * objeto se borra y la respuesta es 400 en español; un duplicado, 409.
+   * Repetir `complete` de un documento ya creado (el mismo usuario) lo
+   * devuelve con `created: false` (no se vuelve a auditar); otro usuario, 404.
+   */
+  execute(
+    patientId: string,
+    documentId: string,
+    fields: CompletePatientDocumentFields,
+    uploadedById: string,
+  ): Promise<InsertedDocument> {
+    // Revisión M-1: todas sus operaciones (HeadObject, Range, CopyObject)
+    // comparten un presupuesto que cabe en los 30 s del proxy de la web.
+    return withStorageBudget(UPLOAD_STORAGE_BUDGET_MS, () =>
+      this.complete(patientId, documentId, fields, uploadedById),
+    );
+  }
+
+  private async complete(
+    patientId: string,
+    documentId: string,
+    fields: CompletePatientDocumentFields,
+    uploadedById: string,
+  ): Promise<InsertedDocument> {
+    const valid = await this.writer.validateFields(
+      patientId,
+      fields,
+      fields.toothNumbers,
+    );
+    const existing = await this.alreadyCompleted(
+      patientId,
+      documentId,
+      uploadedById,
+    );
+    if (existing) return existing;
+
+    const pendingKey = pendingStorageKeyFor(this.writer.tenantId(), documentId);
+    /**
+     * Revisión I-3: dos `complete` del mismo documento a la vez (doble clic o
+     * reintento tras el `proxyTimeout`). El pendiente solo se borra DESPUÉS de
+     * crear la fila, así que si este ya no lo ve (o ve la huella como
+     * duplicada) es porque el otro ganó: se devuelve su fila (`created:
+     * false`), nunca «vuelve a subirlo» ni «ya está en la ficha».
+     */
+    const winnerOr = async (
+      lost: () => Promise<never>,
+    ): Promise<InsertedDocument> =>
+      (await this.alreadyCompleted(patientId, documentId, uploadedById)) ??
+      lost();
+
+    const info = await this.storage.stat(pendingKey);
+    if (
+      !info ||
+      info.metadata[META.uploadedBy] !== uploadedById ||
+      info.metadata[META.patientId] !== patientId
+    ) {
+      // De otro usuario, de otro paciente, caducado o nunca subido: no se
+      // toca (ni se dice cuál de las cosas es).
+      return winnerOr(() =>
+        Promise.reject(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE)),
+      );
+    }
+
+    const reject = async (
+      error: BadRequestException | ConflictException,
+    ): Promise<never> => {
+      await this.writer.discardObject(pendingKey);
+      throw error;
+    };
+
+    if (info.size === 0) return reject(contentRejected(EMPTY_FILE_MESSAGE));
+    if (info.size > MAX_PATIENT_DOCUMENT_BYTES) {
+      return reject(contentRejected(FILE_TOO_LARGE_MESSAGE));
+    }
+    if (String(info.size) !== info.metadata[META.size]) {
+      return reject(new BadRequestException(SIZE_MISMATCH_MESSAGE));
+    }
+    const declaredSha = info.metadata[META.sha256] ?? '';
+    if (
+      !/^[0-9a-f]{64}$/.test(declaredSha) ||
+      info.sha256Base64 !== sha256HexToBase64(declaredSha)
+    ) {
+      return reject(new BadRequestException(CHECKSUM_MISMATCH_MESSAGE));
+    }
+
+    let detected: DetectedType;
+    try {
+      detected = await this.writer.detectType(
+        {
+          size: info.size,
+          read: (start, end) =>
+            this.storage.readRange(pendingKey, start, end, info.etag),
+        },
+        { mimeType: fields.mimeType, originalName: fields.fileName },
+      );
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        return reject(contentRejected(error.message));
+      }
+      if (error instanceof StorageObjectChangedError) {
+        return winnerOr(() =>
+          reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE)),
+        );
+      }
+      throw error;
+    }
+    try {
+      await this.writer.assertNotDuplicate(patientId, declaredSha);
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        return winnerOr(() => reject(error));
+      }
+      throw error;
+    }
+
+    const { locationId } = await this.writer.resolveWriteLocation();
+    const storageKey = storageKeyFor(
+      this.writer.tenantId(),
+      documentId,
+      detected,
+      declaredSha,
+    );
+    try {
+      await this.storage.copyVersion(
+        pendingKey,
+        storageKey,
+        detected,
+        info.etag,
+      );
+    } catch (error) {
+      if (error instanceof StorageObjectChangedError) {
+        // El otro `complete` ya creó la fila y borró el pendiente: esa fila,
+        // sin volver a auditar.
+        return winnerOr(() =>
+          reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE)),
+        );
+      }
+      throw error;
+    }
+    // Si el otro `complete` insertó antes, `insert` devuelve su fila.
+    const inserted = await this.writer.insert({
+      id: documentId,
+      patientId,
+      locationId,
+      ...valid,
+      originalName: normalizeOriginalName(fields.fileName ?? ''),
+      mimeType: detected,
+      sizeBytes: info.size,
+      sha256: declaredSha,
+      storageKey,
+      uploadedById,
+    });
+    // Revisión M-2: el pendiente, ya con fila, se borra sin esperar ni fallar
+    // (`discardObject` solo avisa); si no se puede, lo borra el ciclo de vida
+    // del bucket (24 h en `patient-documents/pending/`).
+    void this.writer.discardObject(pendingKey);
+    return inserted;
+  }
+
+  /**
+   * El documento ya creado por ESTE usuario (repetir `complete` lo devuelve,
+   * `created: false`); de otro usuario, 404 como si no existiera la subida.
+   */
+  private async alreadyCompleted(
+    patientId: string,
+    documentId: string,
+    uploadedById: string,
+  ): Promise<InsertedDocument | null> {
+    const existing = await this.writer.findById(patientId, documentId);
+    if (!existing) return null;
+    if (existing.uploadedById !== uploadedById) {
+      throw new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE);
+    }
+    return { view: await this.writer.view(existing), created: false };
   }
 }
 

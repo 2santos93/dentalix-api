@@ -14,6 +14,7 @@ import {
   validateNotes,
   validateVoidReason,
   CONTROL_CHARS_MESSAGE,
+  PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS,
 } from './document-rules';
 
 /** El error es del dominio Y el mensaje es exactamente ese (no un prefijo). */
@@ -305,5 +306,11 @@ describe('sha256Hex / storageKeyFor / TTL', () => {
 
   it('las URL firmadas viven 5 minutos', () => {
     expect(PATIENT_DOCUMENT_URL_TTL_SECONDS).toBe(300);
+  });
+});
+
+describe('PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS (DX-259)', () => {
+  it('el POST prefirmado vale 15 minutos (subidas lentas desde el móvil)', () => {
+    expect(PATIENT_DOCUMENT_UPLOAD_TTL_SECONDS).toBe(900);
   });
 });

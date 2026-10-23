@@ -1,4 +1,16 @@
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { DiskFileStorage } from './disk-file-storage';
+import { StorageObjectChangedError } from './storage-errors';
+import { StorageOpLogger } from './storage-op-log';
+
+/** Sin líneas `storage.op` en la salida de jest. */
+const SILENT = new StorageOpLogger({
+  log: () => undefined,
+  warn: () => undefined,
+});
 
 const CFG = {
   driver: 'disk' as const,
@@ -113,5 +125,150 @@ describe('DiskFileStorage · URL firmada (DX-084)', () => {
     await expect(
       new DiskFileStorage(CFG).getSignedUrl('clinical/x.pdf', 0),
     ).rejects.toThrow('TTL');
+  });
+});
+
+describe('DiskFileStorage · subida directa (DX-259)', () => {
+  let root: string;
+  let storage: DiskFileStorage;
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('base64');
+  const temp = (bytes: Buffer) => {
+    const file = path.join(root, `tmp-${Math.random().toString(16).slice(2)}`);
+    writeFileSync(file, bytes);
+    return file;
+  };
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'disk-direct-'));
+    storage = new DiskFileStorage({ ...CFG, root }, SILENT);
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const policy = (bytes: Buffer) => ({
+    maxBytes: 1024,
+    sha256Base64: sha(bytes),
+    metadata: { 'uploaded-by': 'u1' },
+    ttlSeconds: 60,
+  });
+
+  it('el formulario va a /files/uploads, firmado; tocar un campo lo invalida', async () => {
+    const bytes = Buffer.from('%PDF-1.7');
+    const target = await storage.createDirectUpload(
+      'patient-documents/pending/t/d',
+      policy(bytes),
+    );
+    expect(target.url).toBe('http://localhost:3000/api/v1/files/uploads');
+    expect(storage.verifyDirectUpload(target.fields)).toEqual({
+      key: 'patient-documents/pending/t/d',
+      maxBytes: 1024,
+      sha256Base64: sha(bytes),
+      metadata: { 'uploaded-by': 'u1' },
+    });
+    for (const [name, value] of [
+      ['key', 'patient-documents/pending/t/otro'],
+      ['max', '999999'],
+      ['meta', '{"uploaded-by":"u2"}'],
+      ['sha256', sha(Buffer.from('otro'))],
+    ]) {
+      expect(
+        storage.verifyDirectUpload({ ...target.fields, [name]: value }),
+      ).toBeNull();
+    }
+    expect(
+      new DiskFileStorage({ ...CFG, root }).verifyDirectUpload(target.fields),
+    ).toBeNull();
+  });
+
+  it('caduca a los ttl segundos', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-21T12:00:00Z') });
+    const target = await storage.createDirectUpload(
+      'patient-documents/pending/t/d',
+      policy(Buffer.from('x')),
+    );
+    jest.setSystemTime(new Date('2026-10-21T12:01:01Z'));
+    expect(storage.verifyDirectUpload(target.fields)).toBeNull();
+    jest.useRealTimers();
+  });
+
+  it('acepta el contenido con su huella y tamaño; guarda checksum y metadatos (stat), y se lee por rangos', async () => {
+    const bytes = Buffer.from('%PDF-1.7 contenido');
+    const target = await storage.createDirectUpload(
+      'patient-documents/pending/t/d',
+      policy(bytes),
+    );
+    const upload = storage.verifyDirectUpload(target.fields)!;
+    await expect(storage.acceptDirectUpload(upload, temp(bytes))).resolves.toBe(
+      'ok',
+    );
+    const info = await storage.stat('patient-documents/pending/t/d');
+    expect(info).toMatchObject({
+      size: bytes.length,
+      sha256Base64: sha(bytes),
+      metadata: { 'uploaded-by': 'u1' },
+    });
+    await expect(
+      storage.readRange('patient-documents/pending/t/d', 0, 4, info!.etag),
+    ).resolves.toEqual(Buffer.from('%PDF'));
+    await expect(
+      storage.readRange('patient-documents/pending/t/d', 0, 4, '"otra"'),
+    ).rejects.toBeInstanceOf(StorageObjectChangedError);
+  });
+
+  it('rechaza (sin guardar) un contenido vacío, demasiado grande o con otra huella', async () => {
+    const bytes = Buffer.from('%PDF-1.7');
+    const upload = storage.verifyDirectUpload(
+      (
+        await storage.createDirectUpload(
+          'patient-documents/pending/t/d',
+          policy(bytes),
+        )
+      ).fields,
+    )!;
+    await expect(
+      storage.acceptDirectUpload(upload, temp(Buffer.alloc(0))),
+    ).resolves.toBe('empty');
+    await expect(
+      storage.acceptDirectUpload(upload, temp(Buffer.alloc(2048, 1))),
+    ).resolves.toBe('too_large');
+    await expect(
+      storage.acceptDirectUpload(upload, temp(Buffer.from('otro'))),
+    ).resolves.toBe('checksum_mismatch');
+    await expect(
+      storage.stat('patient-documents/pending/t/d'),
+    ).resolves.toBeNull();
+  });
+
+  it('copyVersion copia la versión comprobada a su clave y CONSERVA el pendiente (lo borra el caso de uso tras crear la fila, revisión M-2); otra versión no se copia', async () => {
+    const bytes = Buffer.from('%PDF-1.7');
+    const upload = storage.verifyDirectUpload(
+      (
+        await storage.createDirectUpload(
+          'patient-documents/pending/t/d',
+          policy(bytes),
+        )
+      ).fields,
+    )!;
+    await storage.acceptDirectUpload(upload, temp(bytes));
+    await expect(
+      storage.copyVersion(
+        'patient-documents/pending/t/d',
+        'patient-documents/t/d.pdf',
+        'application/pdf',
+        '"otra"',
+      ),
+    ).rejects.toBeInstanceOf(StorageObjectChangedError);
+    const { etag } = (await storage.stat('patient-documents/pending/t/d'))!;
+    await storage.copyVersion(
+      'patient-documents/pending/t/d',
+      'patient-documents/t/d.pdf',
+      'application/pdf',
+      etag,
+    );
+    await expect(
+      storage.stat('patient-documents/pending/t/d'),
+    ).resolves.toMatchObject({ etag, size: bytes.length });
+    expect((await storage.read('patient-documents/t/d.pdf'))?.bytes).toEqual(
+      bytes,
+    );
   });
 });

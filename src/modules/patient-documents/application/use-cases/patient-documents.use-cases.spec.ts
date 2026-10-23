@@ -1,4 +1,11 @@
 import {
+  UPLOAD_STORAGE_BUDGET_MS,
+  remainingStorageBudgetMs,
+} from '../../../../shared/storage/storage-budget';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import {
   BadRequestException,
   ConflictException,
   Logger,
@@ -14,6 +21,7 @@ import {
   dicomFixture,
   docxFixture,
   heicFixture,
+  largeDocxFixture,
   pdfFixture,
   pngFixture,
   pngRenamedAsPdf,
@@ -42,6 +50,14 @@ import {
   GetPatientDocumentUseCase,
   ListPatientDocumentsUseCase,
   MISSING_FILE_MESSAGE,
+  CHECKSUM_MISMATCH_MESSAGE,
+  CompletePatientDocumentUploadUseCase,
+  CreatePatientDocumentUploadUseCase,
+  PatientDocumentWriter,
+  SIZE_MISMATCH_MESSAGE,
+  UPLOAD_CHANGED_MESSAGE,
+  UPLOAD_NOT_FOUND_MESSAGE,
+  DOCUMENT_CONTENT_REJECTED_CODE,
   UploadPatientDocumentUseCase,
   VOID_FORBIDDEN_MESSAGE,
   VoidPatientDocumentUseCase,
@@ -56,22 +72,33 @@ const AUTHOR = 'dr-autor';
 const OTHER_DENTIST = 'dr-otro';
 const ADMIN = 'admin-1';
 
+let tempDir: string;
+let tempSeq = 0;
+beforeAll(() => {
+  tempDir = mkdtempSync(path.join(tmpdir(), 'patient-documents-spec-'));
+});
+afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
+
+/** El temporal en disco que deja multer (DX-259: nada en memoria). */
 const file = (
   bytes: Buffer,
   originalname = 'informe.pdf',
   mimetype = 'application/pdf',
-): UploadedDocumentFile => ({
-  buffer: bytes,
-  originalname,
-  mimetype,
-  size: bytes.length,
-});
+): UploadedDocumentFile => {
+  tempSeq += 1;
+  const filePath = path.join(tempDir, `upload-${tempSeq}`);
+  writeFileSync(filePath, bytes);
+  return { path: filePath, originalname, mimetype, size: bytes.length };
+};
 
 describe('Documentos del paciente (DX-151, casos de uso)', () => {
   let repo: InMemoryPatientDocumentRepository;
   let storage: InMemoryFileStorage;
   let ctx: TenantContextService;
+  let writer: PatientDocumentWriter;
   let upload: UploadPatientDocumentUseCase;
+  let createUpload: CreatePatientDocumentUploadUseCase;
+  let complete: CompletePatientDocumentUploadUseCase;
   let list: ListPatientDocumentsUseCase;
   let get: GetPatientDocumentUseCase;
   let url: GetPatientDocumentUrlUseCase;
@@ -100,13 +127,15 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       findById: (id: string) =>
         Promise.resolve(id === PATIENT || id === OTHER_PATIENT ? { id } : null),
     } as unknown as PatientRepository;
-    upload = new UploadPatientDocumentUseCase(
-      repo,
+    writer = new PatientDocumentWriter(repo, patients, storage, ctx, clock);
+    upload = new UploadPatientDocumentUseCase(writer, storage);
+    createUpload = new CreatePatientDocumentUploadUseCase(
+      writer,
       patients,
       storage,
-      ctx,
-      clock,
+      300,
     );
+    complete = new CompletePatientDocumentUploadUseCase(writer, storage);
     list = new ListPatientDocumentsUseCase(repo, patients);
     get = new GetPatientDocumentUseCase(repo, patients);
     url = new GetPatientDocumentUrlUseCase(repo, patients, storage, clock, 300);
@@ -433,6 +462,468 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       expect(line).not.toContain(TENANT_ID);
       expect(line).not.toContain('bucket caído');
       warn.mockRestore();
+    });
+  });
+
+  describe('subida directa al almacén (DX-259)', () => {
+    const sha = (bytes: Buffer) => sha256Hex(bytes);
+    const pendingKey = (id: string) =>
+      `patient-documents/pending/${TENANT_ID}/${id}`;
+
+    const ask = (
+      bytes: Buffer,
+      overrides: Partial<{
+        sizeBytes: number;
+        sha256: string;
+        patientId: string;
+      }> = {},
+      by = AUTHOR,
+    ) =>
+      inTenant(() =>
+        createUpload.execute(
+          overrides.patientId ?? PATIENT,
+          {
+            fileName: 'informe.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: overrides.sizeBytes ?? bytes.length,
+            sha256: overrides.sha256 ?? sha(bytes),
+          },
+          by,
+        ),
+      );
+
+    const finish = (
+      documentId: string,
+      fields: Record<string, unknown> = {},
+      by = AUTHOR,
+      patientId = PATIENT,
+    ) =>
+      inTenant(() =>
+        complete
+          .execute(
+            patientId,
+            documentId,
+            {
+              category: 'REPORT',
+              fileName: 'informe.pdf',
+              mimeType: 'application/pdf',
+              ...fields,
+            },
+            by,
+          )
+          .then((r) => r.view),
+      );
+
+    /** upload-url + lo que haría el navegador con el POST prefirmado. */
+    const uploaded = async (bytes: Buffer): Promise<string> => {
+      const ticket = await ask(bytes);
+      storage.simulateDirectUpload(pendingKey(ticket.documentId), bytes);
+      return ticket.documentId;
+    };
+
+    it('upload-url: clave pending fijada por la API, 1 B–20 MB, SHA-256 y autor/paciente en metadatos; nada en la ficha', async () => {
+      const bytes = pdfFixture();
+      const ticket = await ask(bytes);
+      expect(ticket.documentId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(ticket).toMatchObject({
+        method: 'POST',
+        url: 'memory://bucket',
+        maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+      });
+      const policy = storage.directUploads.get(pendingKey(ticket.documentId));
+      expect(policy).toEqual({
+        maxBytes: MAX_PATIENT_DOCUMENT_BYTES,
+        sha256Base64: Buffer.from(sha(bytes), 'hex').toString('base64'),
+        metadata: {
+          'uploaded-by': AUTHOR,
+          'patient-id': PATIENT,
+          'declared-size': String(bytes.length),
+          sha256: sha(bytes),
+        },
+        ttlSeconds: 300,
+      });
+      expect(repo.rows.size).toBe(0);
+      expect(storage.files.size).toBe(0);
+    });
+
+    it.each([
+      [{ sizeBytes: 0 }, new BadRequestException('El archivo está vacío.')],
+      [
+        { sizeBytes: MAX_PATIENT_DOCUMENT_BYTES + 1 },
+        new PayloadTooLargeException(FILE_TOO_LARGE_MESSAGE),
+      ],
+      [
+        { sizeBytes: 1.5 },
+        new BadRequestException('El tamaño del archivo no es válido.'),
+      ],
+      [
+        { sha256: 'abc' },
+        new BadRequestException('La huella SHA-256 del archivo no es válida.'),
+      ],
+    ])('upload-url %j → %p sin autorizar nada', async (overrides, error) => {
+      await expect(ask(pdfFixture(), overrides)).rejects.toThrow(error);
+      expect(storage.directUploads.size).toBe(0);
+    });
+
+    it('upload-url: paciente ajeno → 404, duplicado vigente → 409, sede no permitida → su error; sin autorizar', async () => {
+      await expect(ask(pdfFixture(), { patientId: 'ajeno' })).rejects.toThrow(
+        NotFoundException,
+      );
+      await uploadPdf();
+      await expect(ask(pdfFixture())).rejects.toThrow(
+        new ConflictException(DUPLICATE_DOCUMENT_MESSAGE),
+      );
+      const denied = new ForbiddenException('Sede no permitida');
+      repo.failResolveLocation = denied;
+      await expect(ask(pngFixture())).rejects.toBe(denied);
+      expect(storage.directUploads.size).toBe(0);
+    });
+
+    it('complete: 19 MB leyendo solo los primeros 64 KB; se mueve a su clave definitiva y se crea la fila', async () => {
+      const bytes = Buffer.concat([
+        pdfFixture(),
+        Buffer.alloc(19 * 1024 * 1024 - pdfFixture().length, 0x20),
+      ]);
+      const id = await uploaded(bytes);
+      const doc = await finish(id, {
+        toothNumbers: ['11', '21'],
+        clinicalDate: '2026-10-01',
+        notes: ' Control ',
+      });
+      expect(doc).toMatchObject({
+        id,
+        patientId: PATIENT,
+        locationId: LOCATION_ID,
+        category: 'REPORT',
+        originalName: 'informe.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: bytes.length,
+        sha256: sha(bytes),
+        toothNumbers: ['11', '21'],
+        clinicalDate: '2026-10-01',
+        notes: 'Control',
+        uploadedById: AUTHOR,
+      });
+      expect(storage.ranges).toEqual([[pendingKey(id), 0, 64 * 1024]]);
+      const finalKey = `patient-documents/${TENANT_ID}/${id}-${sha(bytes).slice(0, 16)}.pdf`;
+      expect(repo.rows.get(id)?.storageKey).toBe(finalKey);
+      expect([...storage.files.keys()]).toEqual([finalKey]);
+      expect(storage.files.get(finalKey)?.contentType).toBe('application/pdf');
+    });
+
+    it('complete: un DOCX grande se reconoce leyendo por rango el final (EOCD), no el fichero entero', async () => {
+      const bytes = largeDocxFixture(300 * 1024);
+      const ticket = await inTenant(() =>
+        createUpload.execute(
+          PATIENT,
+          { sizeBytes: bytes.length, sha256: sha(bytes) },
+          AUTHOR,
+        ),
+      );
+      storage.simulateDirectUpload(pendingKey(ticket.documentId), bytes);
+      const doc = await finish(ticket.documentId, {
+        fileName: 'informe.docx',
+        mimeType: '',
+      });
+      expect(doc.mimeType).toBe(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+      const read = storage.ranges.reduce((n, [, a, b]) => n + (b - a), 0);
+      expect(read).toBeLessThan(bytes.length / 2);
+    });
+
+    it.each([
+      [
+        'SVG',
+        svgFake(),
+        'dibujo.svg',
+        'image/svg+xml',
+        UNSUPPORTED_TYPE_MESSAGE,
+      ],
+      [
+        'PNG como .pdf',
+        pngFixture(),
+        'informe.pdf',
+        'application/pdf',
+        TYPE_MISMATCH_MESSAGE,
+      ],
+    ])(
+      'complete: %s → 400 en español, el objeto se borra y no hay fila',
+      async (_label, bytes, fileName, mimeType, message) => {
+        const id = await uploaded(bytes);
+        const err = await finish(id, { fileName, mimeType }).catch(
+          (e: unknown) => e,
+        );
+        expect(err).toEqual(new BadRequestException(message));
+        // QA D3: un código estable para que la web no ofrezca «Reintentar»
+        // (el mismo contenido daría el mismo 400).
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          statusCode: 400,
+          code: DOCUMENT_CONTENT_REJECTED_CODE,
+          message,
+        });
+        expect(storage.deleted).toEqual([pendingKey(id)]);
+        expect(storage.files.size).toBe(0);
+        expect(repo.rows.size).toBe(0);
+      },
+    );
+
+    it('complete: tamaño distinto del declarado → 400, se borra y no hay fila', async () => {
+      const declared = pdfFixture();
+      const ticket = await ask(declared);
+      storage.simulateDirectUpload(
+        pendingKey(ticket.documentId),
+        Buffer.concat([declared, Buffer.from('más')]),
+      );
+      const err = await finish(ticket.documentId).catch((e: unknown) => e);
+      expect(err).toEqual(new BadRequestException(SIZE_MISMATCH_MESSAGE));
+      // Volver a subir el fichero sí puede salir bien: sin código definitivo.
+      expect((err as BadRequestException).getResponse()).not.toHaveProperty(
+        'code',
+      );
+      expect(storage.files.size).toBe(0);
+      expect(repo.rows.size).toBe(0);
+    });
+
+    it.each([
+      ['sin checksum del almacén', null],
+      ['con otro checksum', Buffer.alloc(32, 7).toString('base64')],
+    ])(
+      'complete: objeto %s → 400, se borra y no hay fila',
+      async (_label, sha256Base64) => {
+        const bytes = pdfFixture();
+        const ticket = await ask(bytes);
+        storage.simulateDirectUpload(pendingKey(ticket.documentId), bytes, {
+          sha256Base64,
+        });
+        await expect(finish(ticket.documentId)).rejects.toThrow(
+          new BadRequestException(CHECKSUM_MISMATCH_MESSAGE),
+        );
+        expect(storage.files.size).toBe(0);
+        expect(repo.rows.size).toBe(0);
+      },
+    );
+
+    it('complete: sin objeto, de otro usuario o de otro paciente → 404 y el objeto ajeno no se toca', async () => {
+      await expect(
+        finish('9b0f6a52-6f0e-4d51-8a39-2c1f3c6b8d10'),
+      ).rejects.toThrow(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE));
+      const id = await uploaded(pdfFixture());
+      await expect(finish(id, {}, OTHER_DENTIST)).rejects.toThrow(
+        new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE),
+      );
+      await expect(finish(id, {}, AUTHOR, OTHER_PATIENT)).rejects.toThrow(
+        new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE),
+      );
+      expect(storage.deleted).toEqual([]);
+      expect(storage.files.has(pendingKey(id))).toBe(true);
+    });
+
+    it('complete: un error del formulario es 400 y conserva el objeto para corregir y reintentar', async () => {
+      const id = await uploaded(pdfFixture());
+      await expect(finish(id, { category: 'SELFIE' })).rejects.toThrow(
+        new BadRequestException('La categoría no es válida.'),
+      );
+      expect(storage.deleted).toEqual([]);
+      await expect(finish(id)).resolves.toMatchObject({ id });
+    });
+
+    it('complete: el mismo contenido ya vigente → 409 y se borra el pendiente', async () => {
+      const id = await uploaded(pdfFixture());
+      await uploadPdf();
+      await expect(finish(id)).rejects.toThrow(
+        new ConflictException(DUPLICATE_DOCUMENT_MESSAGE),
+      );
+      expect(storage.files.has(pendingKey(id))).toBe(false);
+    });
+
+    it('complete: si el objeto cambia entre la comprobación y la copia → 400 y no hay fila', async () => {
+      const bytes = pdfFixture();
+      const id = await uploaded(bytes);
+      const copyVersion = jest
+        .spyOn(storage, 'copyVersion')
+        .mockImplementationOnce(() => {
+          storage.simulateDirectUpload(pendingKey(id), bytes);
+          return InMemoryFileStorage.prototype.copyVersion.call(
+            storage,
+            pendingKey(id),
+            'patient-documents/x/y.pdf',
+            'application/pdf',
+            '"stale"',
+          );
+        });
+      await expect(finish(id)).rejects.toThrow(
+        new BadRequestException(UPLOAD_CHANGED_MESSAGE),
+      );
+      expect(copyVersion).toHaveBeenCalled();
+      expect(repo.rows.size).toBe(0);
+    });
+
+    it('complete repetido por el mismo usuario devuelve el documento (created: false) sin tocar el almacén; otro usuario, 404', async () => {
+      const id = await uploaded(pdfFixture());
+      const first = await inTenant(() =>
+        complete.execute(
+          PATIENT,
+          id,
+          { category: 'REPORT', fileName: 'informe.pdf' },
+          AUTHOR,
+        ),
+      );
+      expect(first.created).toBe(true);
+      const saved = [...storage.saved];
+      const again = await inTenant(() =>
+        complete.execute(PATIENT, id, { category: 'REPORT' }, AUTHOR),
+      );
+      expect(again).toEqual({ view: first.view, created: false });
+      expect(storage.saved).toEqual(saved);
+      await expect(finish(id, {}, OTHER_DENTIST)).rejects.toThrow(
+        new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE),
+      );
+      expect(repo.rows.size).toBe(1);
+    });
+
+    it('dos complete a la vez: el que pierde la copia devuelve la fila del que ganó (created: false), no un 400', async () => {
+      const bytes = pdfFixture();
+      const id = await uploaded(bytes);
+      const original = storage.copyVersion.bind(storage);
+      jest
+        .spyOn(storage, 'copyVersion')
+        .mockImplementationOnce(async (from, to, type, etag) => {
+          // El otro `complete` gana: mueve el pendiente y crea la fila.
+          await inTenant(() =>
+            complete.execute(
+              PATIENT,
+              id,
+              { category: 'REPORT', fileName: 'informe.pdf' },
+              AUTHOR,
+            ),
+          );
+          return original(from, to, type, etag);
+        });
+      const loser = await inTenant(() =>
+        complete.execute(
+          PATIENT,
+          id,
+          { category: 'REPORT', fileName: 'informe.pdf' },
+          AUTHOR,
+        ),
+      );
+      expect(loser.created).toBe(false);
+      expect(loser.view.id).toBe(id);
+      expect(repo.rows.size).toBe(1);
+    });
+    /** Una promesa que se resuelve desde fuera (orquestar carreras). */
+    const gate = () => {
+      let open!: () => void;
+      const opened = new Promise<void>((r) => (open = r));
+      return { open, opened };
+    };
+    const body = { category: 'REPORT', fileName: 'informe.pdf' };
+
+    it('dos complete a la vez con el INSERT del primero retrasado: el segundo nunca da 400 «El archivo cambió…» (revisión I-3)', async () => {
+      const id = await uploaded(pdfFixture());
+      const firstReachedInsert = gate();
+      const releaseFirstInsert = gate();
+      const create = repo.create.bind(repo);
+      jest.spyOn(repo, 'create').mockImplementationOnce(async (input) => {
+        // El primero ya copió el objeto; su fila tarda en llegar.
+        firstReachedInsert.open();
+        await releaseFirstInsert.opened;
+        return create(input);
+      });
+      const first = inTenant(() => complete.execute(PATIENT, id, body, AUTHOR));
+      await firstReachedInsert.opened;
+      // El segundo corre entero mientras tanto.
+      const second = await inTenant(() =>
+        complete.execute(PATIENT, id, body, AUTHOR),
+      );
+      releaseFirstInsert.open();
+      const firstResult = await first;
+      expect(second.view.id).toBe(id);
+      expect(firstResult.view.id).toBe(id);
+      expect([firstResult.created, second.created].sort()).toEqual([
+        false,
+        true,
+      ]);
+      expect(repo.rows.size).toBe(1);
+    });
+
+    it('el segundo complete que ve la fila del primero (pendiente aún sin borrar) devuelve esa fila, no un 409 «ya está en la ficha» (revisión I-3)', async () => {
+      const id = await uploaded(pdfFixture());
+      const readRange = storage.readRange.bind(storage);
+      const del = storage.delete.bind(storage);
+      let raced = false;
+      jest
+        .spyOn(storage, 'readRange')
+        .mockImplementation(async (key, start, end, etag) => {
+          if (!raced) {
+            raced = true;
+            // El primero termina (fila creada) y su borrado del pendiente
+            // todavía no ha llegado al almacén.
+            const spy = jest
+              .spyOn(storage, 'delete')
+              .mockImplementation(() => Promise.resolve());
+            await inTenant(() => complete.execute(PATIENT, id, body, AUTHOR));
+            spy.mockImplementation(del);
+          }
+          return readRange(key, start, end, etag);
+        });
+      const second = await inTenant(() =>
+        complete.execute(PATIENT, id, body, AUTHOR),
+      );
+      expect(second).toMatchObject({ created: false, view: { id } });
+      expect(repo.rows.size).toBe(1);
+    });
+
+    it('complete y la subida multipart corren con un presupuesto de almacén que cabe en los 30 s del proxy (revisión M-1)', async () => {
+      const seen: (number | null)[] = [];
+      const stat = storage.stat.bind(storage);
+      jest.spyOn(storage, 'stat').mockImplementation((key) => {
+        seen.push(remainingStorageBudgetMs());
+        return stat(key);
+      });
+      const saveFile = storage.saveFile.bind(storage);
+      jest.spyOn(storage, 'saveFile').mockImplementation((...args) => {
+        seen.push(remainingStorageBudgetMs());
+        return saveFile(...args);
+      });
+      const id = await uploaded(pdfFixture());
+      await inTenant(() => complete.execute(PATIENT, id, body, AUTHOR));
+      await inTenant(() =>
+        upload.execute(
+          PATIENT,
+          { category: 'PHOTO' },
+          file(pngFixture(), 'foto.png', 'image/png'),
+          AUTHOR,
+        ),
+      );
+      expect(seen.length).toBeGreaterThanOrEqual(2);
+      for (const ms of seen) {
+        expect(ms).not.toBeNull();
+        expect(ms!).toBeGreaterThan(0);
+        expect(ms!).toBeLessThanOrEqual(UPLOAD_STORAGE_BUDGET_MS);
+      }
+      expect(UPLOAD_STORAGE_BUDGET_MS).toBeLessThan(30_000);
+    });
+
+    it('el pendiente se borra DESPUÉS de crear la fila y su fallo no tumba el complete (revisión M-2)', async () => {
+      const id = await uploaded(pdfFixture());
+      const order: string[] = [];
+      const create = repo.create.bind(repo);
+      jest.spyOn(repo, 'create').mockImplementationOnce(async (input) => {
+        order.push('insert');
+        return create(input);
+      });
+      jest.spyOn(storage, 'delete').mockImplementation((key) => {
+        order.push(`delete ${key === pendingKey(id) ? 'pending' : key}`);
+        return Promise.reject(new Error('almacén caído'));
+      });
+      const done = await inTenant(() =>
+        complete.execute(PATIENT, id, body, AUTHOR),
+      );
+      expect(done.created).toBe(true);
+      await new Promise((r) => setImmediate(r));
+      expect(order).toEqual(['insert', 'delete pending']);
     });
   });
 
