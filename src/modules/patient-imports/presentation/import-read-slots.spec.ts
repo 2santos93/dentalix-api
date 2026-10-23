@@ -1,9 +1,10 @@
-import { EventEmitter } from 'node:events';
 import {
   ServiceUnavailableException,
   UnauthorizedException,
+  type CallHandler,
   type ExecutionContext,
 } from '@nestjs/common';
+import { Subject, lastValueFrom, of, throwError } from 'rxjs';
 import {
   DEFAULT_UPLOAD_TIMEOUTS,
   UploadSlots,
@@ -11,105 +12,109 @@ import {
 import {
   IMPORT_READ_BUSY_MESSAGE,
   IMPORT_READ_CLINIC_BUSY_MESSAGE,
-  ImportReadSlotGuard,
+  IMPORT_READ_UNAUTHENTICATED_MESSAGE,
+  ImportReadSlotInterceptor,
 } from './import-read-slots';
 
-/** Respuestas del test: al final se cierran para desarmar los plazos del guard. */
-const responses: EventEmitter[] = [];
-
-class FakeResponse extends EventEmitter {
-  constructor() {
-    super();
-    responses.push(this);
-  }
+class FakeResponse {
   readonly headers = new Map<string, string>();
-  headersSent = false;
-  statusCode = 200;
   setHeader(name: string, value: string): void {
     this.headers.set(name, value);
   }
-  end(): void {
-    this.headersSent = true;
-  }
 }
 
-class FakeRequest extends EventEmitter {
-  complete = false;
-  constructor(readonly user?: { tenantId?: string }) {
-    super();
-  }
-  setTimeout(): void {}
-  destroy(): void {}
-}
-
-function contextFor(req: object, res: FakeResponse): ExecutionContext {
+function contextFor(
+  tenantId: string | undefined,
+  res = new FakeResponse(),
+): ExecutionContext {
+  const req = tenantId ? { user: { tenantId } } : {};
   return {
     switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
   } as unknown as ExecutionContext;
 }
 
-function busyOf(guard: ImportReadSlotGuard, tenantId: string) {
-  const res = new FakeResponse();
-  let error: unknown;
-  try {
-    guard.canActivate(contextFor(new FakeRequest({ tenantId }), res));
-  } catch (e) {
-    error = e;
-  }
-  return { error, retryAfter: res.headers.get('Retry-After') };
-}
-
-describe('ImportReadSlotGuard (SEC-046)', () => {
-  afterEach(() => {
-    responses.splice(0).forEach((res) => res.emit('close'));
-  });
-
+describe('ImportReadSlotInterceptor (SEC-046)', () => {
   const build = () => {
     const slots = new UploadSlots(2, DEFAULT_UPLOAD_TIMEOUTS, 1);
-    return { slots, guard: new ImportReadSlotGuard(slots) };
+    return { slots, interceptor: new ImportReadSlotInterceptor(slots) };
   };
 
-  it('una lectura por clínica: la segunda de la MISMA clínica da 503 en español con Retry-After', () => {
-    const { slots, guard } = build();
-    expect(
-      guard.canActivate(
-        contextFor(new FakeRequest({ tenantId: 'a' }), new FakeResponse()),
+  /** Un handler que no termina hasta que el test lo diga. */
+  const pending = () => {
+    const subject = new Subject<string>();
+    const handler: CallHandler = { handle: () => subject.asObservable() };
+    return { subject, handler };
+  };
+
+  it('toma la plaza de la clínica mientras corre el handler y la devuelve al terminar', async () => {
+    const { slots, interceptor } = build();
+    const { subject, handler } = pending();
+    const done = lastValueFrom(interceptor.intercept(contextFor('a'), handler));
+    expect(slots.activeFor('a')).toBe(1);
+    subject.next('ok');
+    subject.complete();
+    await expect(done).resolves.toBe('ok');
+    expect(slots.active).toBe(0);
+  });
+
+  it('el handler que falla también la devuelve', async () => {
+    const { slots, interceptor } = build();
+    await expect(
+      lastValueFrom(
+        interceptor.intercept(contextFor('a'), {
+          handle: () => throwError(() => new Error('x')),
+        }),
       ),
-    ).toBe(true);
-    const { error, retryAfter } = busyOf(guard, 'a');
+    ).rejects.toThrow('x');
+    expect(slots.active).toBe(0);
+  });
+
+  it('una lectura por clínica: la segunda de la MISMA clínica da 503 en español con Retry-After, sin llamar al handler', () => {
+    const { slots, interceptor } = build();
+    const { handler } = pending();
+    void lastValueFrom(interceptor.intercept(contextFor('a'), handler)).catch(
+      () => undefined,
+    );
+    const res = new FakeResponse();
+    const handle = jest.fn(() => of('no'));
+    let error: unknown;
+    try {
+      interceptor.intercept(contextFor('a', res), { handle });
+    } catch (e) {
+      error = e;
+    }
     expect(error).toBeInstanceOf(ServiceUnavailableException);
     expect((error as Error).message).toBe(IMPORT_READ_CLINIC_BUSY_MESSAGE);
-    expect(retryAfter).toBe('5');
+    expect(res.headers.get('Retry-After')).toBe('5');
+    expect(handle).not.toHaveBeenCalled();
     expect(slots.active).toBe(1);
   });
 
   it('dos por réplica: con dos clínicas leyendo, una tercera da 503 con su mensaje', () => {
-    const { slots, guard } = build();
+    const { slots, interceptor } = build();
     for (const tenantId of ['a', 'b']) {
-      guard.canActivate(
-        contextFor(new FakeRequest({ tenantId }), new FakeResponse()),
-      );
+      void lastValueFrom(
+        interceptor.intercept(contextFor(tenantId), pending().handler),
+      ).catch(() => undefined);
     }
-    const { error, retryAfter } = busyOf(guard, 'c');
-    expect((error as Error).message).toBe(IMPORT_READ_BUSY_MESSAGE);
-    expect(retryAfter).toBe('5');
+    const res = new FakeResponse();
+    expect(() =>
+      interceptor.intercept(contextFor('c', res), pending().handler),
+    ).toThrow(IMPORT_READ_BUSY_MESSAGE);
+    expect(res.headers.get('Retry-After')).toBe('5');
     expect(slots.active).toBe(2);
   });
 
-  it('sin usuario autenticado no toma plaza (va después de JwtAuthGuard)', () => {
-    const { slots, guard } = build();
-    expect(() =>
-      guard.canActivate(contextFor(new FakeRequest(), new FakeResponse())),
-    ).toThrow(UnauthorizedException);
+  it('sin usuario autenticado: 401 en español y sin plaza', () => {
+    const { slots, interceptor } = build();
+    let error: unknown;
+    try {
+      interceptor.intercept(contextFor(undefined), pending().handler);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect((error as Error).message).toBe(IMPORT_READ_UNAUTHENTICATED_MESSAGE);
     expect(slots.active).toBe(0);
-  });
-
-  it('al cerrarse la respuesta la plaza de la clínica vuelve', () => {
-    const { slots, guard } = build();
-    const res = new FakeResponse();
-    guard.canActivate(contextFor(new FakeRequest({ tenantId: 'a' }), res));
-    res.emit('close');
-    expect(slots.active).toBe(0);
-    expect(slots.activeFor('a')).toBe(0);
   });
 });

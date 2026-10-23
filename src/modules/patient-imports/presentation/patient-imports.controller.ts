@@ -50,7 +50,11 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
-import { UploadSlotInterceptor } from '../../../shared/storage/upload-slots';
+import {
+  UPLOAD_BUSY_MESSAGE,
+  UploadSlotGuard,
+  UploadSlotInterceptor,
+} from '../../../shared/storage/upload-slots';
 import {
   FILE_TOO_LARGE_MESSAGE,
   IMPORT_FIELD_KEYS,
@@ -82,7 +86,7 @@ import { ImportMultipartErrorsFilter } from './import-multipart-errors.filter';
 import {
   IMPORT_READ_BUSY_MESSAGE,
   IMPORT_READ_CLINIC_BUSY_MESSAGE,
-  ImportReadSlotGuard,
+  ImportReadSlotInterceptor,
 } from './import-read-slots';
 
 interface AuthenticatedRequest {
@@ -100,9 +104,11 @@ const LOCATION_HEADER = {
 };
 
 const FILE_INTERCEPTOR = FileInterceptor('file', {
-  // SEC-046: a un temporal en disco (lo borra UploadSlotInterceptor al
-  // terminar el handler, también con error o si el cliente aborta), no a un
-  // Buffer: el fichero se lee en memoria solo con la plaza ya tomada.
+  // SEC-046: el cuerpo se recibe con el semáforo y los plazos de las subidas
+  // (UploadSlotGuard, DX-259) a un temporal en disco (lo borra
+  // UploadSlotInterceptor al terminar, también con error o si el cliente
+  // aborta), no a un Buffer. La plaza de LECTURA (ImportReadSlotInterceptor)
+  // se toma después, con el fichero ya en disco.
   dest: UPLOAD_TEMP_DIR,
   defParamCharset: 'utf8',
   limits: {
@@ -121,7 +127,7 @@ const FILE_BODY = {
 } as const;
 
 const READ_BUSY_RESPONSE = {
-  description: `${IMPORT_READ_CLINIC_BUSY_MESSAGE} / ${IMPORT_READ_BUSY_MESSAGE} (con Retry-After). SEC-046: como mucho 2 lecturas a la vez por réplica y 1 por clínica (configurable).`,
+  description: `${UPLOAD_BUSY_MESSAGE} (semáforo de subidas, antes de recibir el cuerpo) / ${IMPORT_READ_CLINIC_BUSY_MESSAGE} / ${IMPORT_READ_BUSY_MESSAGE} (con el fichero ya recibido). Siempre con Retry-After. SEC-046: como mucho 2 lecturas a la vez por réplica y 1 por clínica (configurable).`,
 };
 
 /**
@@ -249,8 +255,12 @@ export class PatientImportsController {
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
   @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
   @RateLimit('patient-import')
-  @UseGuards(ImportReadSlotGuard)
-  @UseInterceptors(UploadSlotInterceptor, FILE_INTERCEPTOR)
+  @UseGuards(UploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
   async inspect(
     @UploadedFile() file: Express.Multer.File | undefined,
   ): Promise<InspectResult> {
@@ -296,8 +306,12 @@ export class PatientImportsController {
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
   @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
   @RateLimit('patient-import')
-  @UseGuards(ImportReadSlotGuard)
-  @UseInterceptors(UploadSlotInterceptor, FILE_INTERCEPTOR)
+  @UseGuards(UploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
   async create(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() dto: CreatePatientImportDto,
@@ -405,8 +419,12 @@ export class PatientImportsController {
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
   @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
   @RateLimit('patient-import')
-  @UseGuards(ImportReadSlotGuard)
-  @UseInterceptors(UploadSlotInterceptor, FILE_INTERCEPTOR)
+  @UseGuards(UploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
   async balances(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File | undefined,

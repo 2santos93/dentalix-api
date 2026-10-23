@@ -4,17 +4,15 @@ import { JwtModule } from '@nestjs/jwt';
 import { JobsModule } from '../jobs/jobs.module';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { StorageModule } from '../../shared/storage/storage.module';
+import { loadImportReadConcurrency } from '../../shared/storage/storage-config';
 import {
-  loadImportReadConcurrency,
-  loadUploadTimeouts,
-} from '../../shared/storage/storage-config';
-import {
-  UploadSlotInterceptor,
+  DEFAULT_UPLOAD_TIMEOUTS,
   UploadSlots,
 } from '../../shared/storage/upload-slots';
 import {
   IMPORT_READ_SLOTS,
-  ImportReadSlotGuard,
+  ImportReadSlotInterceptor,
 } from './presentation/import-read-slots';
 import { PatientImportsController } from './presentation/patient-imports.controller';
 import { PatientImportsService } from './application/patient-imports.use-cases';
@@ -29,7 +27,7 @@ import { PrismaPatientImportRepository } from './infrastructure/prisma-patient-i
  */
 @Module({
   // JwtModule.register({}): JwtAuthGuard -> TokenService -> JwtService.
-  imports: [JwtModule.register({}), JobsModule],
+  imports: [JwtModule.register({}), JobsModule, StorageModule],
   controllers: [PatientImportsController],
   providers: [
     PatientImportsService,
@@ -39,17 +37,18 @@ import { PrismaPatientImportRepository } from './infrastructure/prisma-patient-i
     TenantContextInterceptor,
     {
       // SEC-046: lecturas de ficheros de importación a la vez (réplica y
-      // clínica), con los plazos de recepción del cuerpo de DX-259.
+      // clínica). Se toman con el cuerpo ya recibido: los plazos de
+      // recepción son los del semáforo de subidas (StorageModule, DX-259).
       provide: IMPORT_READ_SLOTS,
       inject: [ConfigService],
       useFactory: (config: ConfigService): UploadSlots => {
-        const get = (key: string) => config.get<string>(key);
-        const { perReplica, perClinic } = loadImportReadConcurrency(get);
-        return new UploadSlots(perReplica, loadUploadTimeouts(get), perClinic);
+        const { perReplica, perClinic } = loadImportReadConcurrency((key) =>
+          config.get<string>(key),
+        );
+        return new UploadSlots(perReplica, DEFAULT_UPLOAD_TIMEOUTS, perClinic);
       },
     },
-    ImportReadSlotGuard,
-    UploadSlotInterceptor,
+    ImportReadSlotInterceptor,
   ],
 })
 export class PatientImportsModule {}
