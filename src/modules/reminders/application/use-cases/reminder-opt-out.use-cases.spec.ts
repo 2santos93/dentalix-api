@@ -244,6 +244,37 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
     }
   });
 
+  it('persiste todos los avisos del tope antes de responder; si falla no oculta el error', async () => {
+    for (let i = 0; i < 4; i++)
+      repo.addPatient(`shared-${i}`, { phone: '+573101234567' });
+    const recordMatchWarnings = jest
+      .fn()
+      .mockRejectedValue(new Error('warning storage unavailable'));
+    Object.assign(repo, { recordMatchWarnings });
+    const warning = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    try {
+      await expect(
+        useCase.execute({
+          tenantId: TENANT,
+          fromPhone: '573101234567',
+          text: 'BAJA',
+        }),
+      ).rejects.toThrow('warning storage unavailable');
+      expect(recordMatchWarnings).toHaveBeenCalledWith(
+        [ANA, LUIS, 'shared-0', 'shared-1', 'shared-2', 'shared-3'],
+        6,
+        5,
+      );
+      expect(
+        [...repo.patients.values()].every((p) => p.optedOutAt === null),
+      ).toBe(true);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it('el máximo es configurable y cuenta todas las coincidencias antes de escribir', async () => {
     const limited = new OptOutByMessageUseCase(
       fakeTenantContext(undefined) as never,

@@ -92,6 +92,25 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
     return Promise.resolve(true);
   }
 
+  readonly warnings: {
+    patientId: string;
+    matchCount: number;
+    maxMatches: number;
+  }[] = [];
+  recordMatchWarnings(
+    patientIds: string[],
+    matchCount: number,
+    maxMatches: number,
+  ): Promise<void> {
+    this.warnings.push(
+      ...patientIds.map((patientId) => ({ patientId, matchCount, maxMatches })),
+    );
+    return Promise.resolve();
+  }
+  maintenanceTenantIds(): Promise<string[]> {
+    return Promise.resolve([]);
+  }
+
   purgeLinks(before: Date): Promise<number> {
     let count = 0;
     for (const [hash, link] of this.links) {

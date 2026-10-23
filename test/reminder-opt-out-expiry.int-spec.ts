@@ -1,3 +1,9 @@
+import { Logger } from '@nestjs/common';
+import { JobRegistry } from '../src/modules/jobs/application/job-registry';
+import {
+  ReminderOptOutMaintenance,
+  PURGE_OPT_OUT_LINKS_JOB,
+} from '../src/modules/reminders/application/reminder-opt-out-maintenance';
 import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
@@ -89,6 +95,9 @@ beforeAll(async () => {
   ).id;
 });
 afterAll(async () => {
+  await owner.reminderOptOutMatchWarning.deleteMany({
+    where: { tenantId: { in: [tenant, other] } },
+  });
   await owner.reminderOptOutLink.deleteMany({
     where: { tenantId: { in: [tenant, other] } },
   });
@@ -103,6 +112,9 @@ afterAll(async () => {
   await owner.$disconnect();
 });
 beforeEach(async () => {
+  await owner.reminderOptOutMatchWarning.deleteMany({
+    where: { tenantId: { in: [tenant, other] } },
+  });
   await owner.reminderOptOutLink.deleteMany({
     where: { tenantId: { in: [tenant, other] } },
   });
@@ -354,4 +366,126 @@ test('emisión que bloqueó primero queda invalidada al terminar reactivación c
       repo.optOut(patient, { source: 'LINK', at: NOW, linkId: old.id }),
     ),
   ).toBeNull();
+});
+
+test('I2 job real purga enlaces viejos también de clínica retirada, conserva recientes', async () => {
+  const stale = await link(patient, tenant, {
+    expiresAt: new Date(NOW.getTime() - 91 * DAY),
+  });
+  const recent = await link(patient, tenant, {
+    expiresAt: new Date(NOW.getTime() - DAY),
+  });
+  await owner.tenant.update({
+    where: { id: tenant },
+    data: { deletedAt: NOW },
+  });
+  const registry = new JobRegistry();
+  const log = jest
+    .spyOn(Logger.prototype, 'log')
+    .mockImplementation(() => undefined);
+  try {
+    new ReminderOptOutMaintenance(registry, repo, context, {
+      now: () => NOW,
+    }).onModuleInit();
+    await registry.get(PURGE_OPT_OUT_LINKS_JOB)!.handle({}, {} as never);
+    expect(
+      await owner.reminderOptOutLink.findUnique({ where: { id: stale.id } }),
+    ).toBeNull();
+    expect(
+      await owner.reminderOptOutLink.findUnique({ where: { id: recent.id } }),
+    ).not.toBeNull();
+    expect(log).toHaveBeenCalledWith({
+      event: 'reminders.opt_out_links_purged',
+      tenantId: tenant,
+      purged: 1,
+    });
+  } finally {
+    log.mockRestore();
+    await owner.tenant.update({
+      where: { id: tenant },
+      data: { deletedAt: null },
+    });
+  }
+});
+
+test('I1 avisos persistentes batch con FORCE RLS y consulta20recientes sinPII', async () => {
+  const [{ relforcerowsecurity }] = await owner.$queryRaw<
+    { relforcerowsecurity: boolean }[]
+  >`SELECT relforcerowsecurity FROM pg_class WHERE oid='reminder_opt_out_match_warnings'::regclass`;
+  expect(relforcerowsecurity).toBe(true);
+  await inTenant(() => repo.recordMatchWarnings([patient], 6, 5));
+  await context.run(other, () =>
+    repo.recordMatchWarnings([otherPatient], 8, 5),
+  );
+  const notice = (await inTenant(() => comms.optOutWarnings(patient)))![0];
+  expect(Object.keys(notice).sort()).toEqual([
+    'createdAt',
+    'id',
+    'matchCount',
+    'maxMatches',
+  ]);
+  expect(notice).toMatchObject({ matchCount: 6, maxMatches: 5 });
+  expect(await inTenant(() => comms.optOutWarnings(otherPatient))).toBeNull();
+  expect(
+    await context.run(other, () => comms.optOutWarnings(patient)),
+  ).toBeNull();
+  expect(
+    await inTenant(() =>
+      prisma.runWithTenant((tx) => tx.reminderOptOutMatchWarning.count()),
+    ),
+  ).toBe(1);
+  await owner.reminderOptOutMatchWarning.createMany({
+    data: Array.from({ length: 23 }, (_, index) => ({
+      tenantId: tenant,
+      patientId: patient,
+      matchCount: 6,
+      maxMatches: 5,
+      createdAt: new Date(notice.createdAt.getTime() + (index + 1) * 1000),
+    })),
+  });
+  const recent = await inTenant(() => comms.optOutWarnings(patient));
+  expect(recent).toHaveLength(20);
+  expect(recent![0].createdAt).toEqual(
+    new Date(notice.createdAt.getTime() + 23000),
+  );
+});
+
+test('I1 fallo en batch revierte TODOS los avisos y nunca cambia la preferencia', async () => {
+  // >500 fuerza dos createMany en la mismaTX; segunda FK ajena falla.
+  const ids = Array.from({ length: 500 }, () => patient).concat(otherPatient);
+  await expect(
+    inTenant(() => repo.recordMatchWarnings(ids, 501, 5)),
+  ).rejects.toThrow();
+  expect(await owner.reminderOptOutMatchWarning.count()).toBe(0);
+  expect(
+    (await owner.patient.findUniqueOrThrow({ where: { id: patient } }))
+      .reminderOptOutAt,
+  ).toBeNull();
+});
+
+test('I1 avisos append-only: app no puede actualizar, borrar ni truncar', async () => {
+  await inTenant(() => repo.recordMatchWarnings([patient], 6, 5));
+  await expect(
+    inTenant(() =>
+      prisma.runWithTenant(
+        (tx) =>
+          tx.$executeRaw`UPDATE reminder_opt_out_match_warnings SET "matchCount"=7`,
+      ),
+    ),
+  ).rejects.toThrow();
+  await expect(
+    inTenant(() =>
+      prisma.runWithTenant(
+        (tx) => tx.$executeRaw`DELETE FROM reminder_opt_out_match_warnings`,
+      ),
+    ),
+  ).rejects.toThrow();
+  await expect(
+    inTenant(() =>
+      prisma.runWithTenant(
+        (tx) => tx.$executeRaw`TRUNCATE reminder_opt_out_match_warnings`,
+      ),
+    ),
+  ).rejects.toThrow();
+  expect(await owner.reminderOptOutMatchWarning.count()).toBe(1);
 });

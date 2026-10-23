@@ -54,6 +54,7 @@ model Tenant {
   appointmentReminders      AppointmentReminder[]
   paymentReceipts           PaymentReceipt[]
   paymentReceiptCounters    PaymentReceiptCounter[]
+  reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks       ReminderOptOutLink[]
   clinicalNoteTemplates     ClinicalNoteTemplate[]
   // DX-150: cobranza (notas y compromisos de pago).
@@ -449,6 +450,7 @@ model Patient {
   collectionNotes        CollectionNote[]
   paymentPromises        PaymentPromise[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
+  reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks    ReminderOptOutLink[]
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
   responsibleParties     PatientResponsibleParty[]   @relation("PatientResponsibleParties")
@@ -3990,4 +3992,19 @@ model AppointmentPlanItem {
   @@id([tenantId, appointmentId, planItemId])
   @@index([tenantId, planItemId, appointmentId])
   @@map("appointment_plan_items")
+}
+
+/// DX-214: solicitud de baja que excedió el tope, consultable por recepción.
+/// Inalterable y bajo FORCE RLS; solo IDs y contadores, sin móvil ni nombre.
+model ReminderOptOutMatchWarning {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  patientId String @db.Uuid
+  createdAt DateTime @default(now())
+  matchCount Int
+  maxMatches Int
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "opt_out_match_warnings_tenant_patient_recent_idx")
+  @@map("reminder_opt_out_match_warnings")
 }

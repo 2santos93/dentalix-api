@@ -46,6 +46,14 @@ export interface ReminderOptOutRepository {
     patientId: string,
     input: { source: ReminderOptOutSource; at: Date; linkId?: string },
   ): Promise<boolean | null>;
+  /** Avisos de todos los pacientes en UNA transacción, sin datos de contacto. */
+  recordMatchWarnings(
+    patientIds: string[],
+    matchCount: number,
+    maxMatches: number,
+  ): Promise<void>;
+  /** Todas las clínicas, incluidas retiradas: solo mantenimiento. */
+  maintenanceTenantIds(): Promise<string[]>;
   /** Borra solo expirados/usados anteriores al corte, bajo tenant/RLS. */
   purgeLinks(before: Date): Promise<number>;
   /** Pacientes vivos cuyo teléfono acaba en esos 8 dígitos (prefiltro indexado). */

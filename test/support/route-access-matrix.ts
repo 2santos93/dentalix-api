@@ -146,6 +146,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-128: bloque «Comunicaciones». Lo ven todos (el profesional en solo
   // lectura); el canal lo cambian recepción y ADMIN.
   'GET /patients/:id/communication': EVERY_ROLE,
+  'GET /patients/:id/communication/opt-out-warnings': roles(
+    'ADMIN',
+    'RECEPTION',
+  ),
   'PATCH /patients/:id/communication': roles('ADMIN', 'RECEPTION'),
   // DX-203: bloque «Responsable y familia» (dato demográfico y de cobro, no
   // clínico): como «Editar» de la ficha, los 4 roles (loop/informes/DX-203).

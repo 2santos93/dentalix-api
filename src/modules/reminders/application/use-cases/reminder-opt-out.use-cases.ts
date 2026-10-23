@@ -223,6 +223,11 @@ export class OptOutByMessageUseCase {
       );
       const limit = this.maxMatches;
       if (matches.length > limit) {
+        await this.repo.recordMatchWarnings(
+          matches.map((match) => match.patientId),
+          matches.length,
+          limit,
+        );
         this.logger.warn({
           event: 'reminders.opt_out_match_limit',
           tenantId: reply.tenantId,

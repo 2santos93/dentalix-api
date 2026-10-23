@@ -20,8 +20,10 @@ it('purga diaria DX085 por tenant con corte90d y logs solo técnicos', async () 
   try {
     new ReminderOptOutMaintenance(
       registry,
-      { tenantIds: () => Promise.resolve(['clinic-a', 'clinic-b']) } as never,
-      { purgeLinks } as never,
+      {
+        purgeLinks,
+        maintenanceTenantIds: () => Promise.resolve(['clinic-a', 'clinic-b']),
+      } as never,
       context,
       { now: () => now },
     ).onModuleInit();

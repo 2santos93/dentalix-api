@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   PATIENT_NOT_FOUND_MESSAGE,
   type PatientCommunicationPatch,
+  type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -85,6 +86,29 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
         select: SELECT,
       });
       return row ? this.toState(tx, row) : null;
+    });
+  }
+
+  optOutWarnings(
+    patientId: string,
+  ): Promise<PatientOptOutMatchWarningView[] | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const patient = await tx.patient.findFirst({
+        where: { id: patientId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!patient) return null;
+      return tx.reminderOptOutMatchWarning.findMany({
+        where: { patientId },
+        take: 20,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          matchCount: true,
+          maxMatches: true,
+        },
+      });
     });
   }
 

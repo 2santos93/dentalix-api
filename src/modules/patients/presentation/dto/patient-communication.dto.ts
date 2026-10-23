@@ -218,3 +218,11 @@ export class UpdatePatientCommunicationDto {
   })
   reminderOptOut?: boolean;
 }
+
+/** DX-214: metadatos mínimos del aviso, sin datos de contacto. */
+export class PatientOptOutMatchWarningDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ type: String, format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({ minimum: 2 }) matchCount!: number;
+  @ApiProperty({ minimum: 1 }) maxMatches!: number;
+}

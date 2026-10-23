@@ -49,9 +49,20 @@ export const PATIENT_COMMUNICATION_REPOSITORY = Symbol(
 );
 
 // Sin tenantId: sale del contexto de la petición y todo va bajo RLS.
+export interface PatientOptOutMatchWarningView {
+  id: string;
+  createdAt: Date;
+  matchCount: number;
+  maxMatches: number;
+}
+
 export interface PatientCommunicationRepository {
   /** null si el paciente no existe (o no es de esta clínica, o se retiró). */
   find(patientId: string): Promise<PatientCommunicationState | null>;
+  /** null: paciente ajeno/retirado; últimos20 avisos de comunicaciones. */
+  optOutWarnings(
+    patientId: string,
+  ): Promise<PatientOptOutMatchWarningView[] | null>;
   /**
    * País (ClinicCountry) con el que se valida el móvil: el de la sede activa
    * de la petición (X-Location-Id) o, en la vista consolidada, el de la sede

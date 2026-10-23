@@ -25,6 +25,7 @@ import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
   type PatientCommunicationPatch,
+  type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -266,5 +267,18 @@ export class UpdatePatientCommunicationUseCase {
       },
     });
     return toView(saved, country, clinicDefault, now);
+  }
+}
+
+@Injectable()
+export class GetPatientOptOutWarningsUseCase {
+  constructor(
+    @Inject(PATIENT_COMMUNICATION_REPOSITORY)
+    private readonly repo: PatientCommunicationRepository,
+  ) {}
+  async execute(patientId: string): Promise<PatientOptOutMatchWarningView[]> {
+    const warnings = await this.repo.optOutWarnings(patientId);
+    if (!warnings) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    return warnings;
   }
 }

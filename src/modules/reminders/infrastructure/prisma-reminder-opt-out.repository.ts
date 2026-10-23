@@ -138,6 +138,33 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
     });
   }
 
+  async recordMatchWarnings(
+    patientIds: string[],
+    matchCount: number,
+    maxMatches: number,
+  ): Promise<void> {
+    const tenantId = this.requireTenantId();
+    await this.prisma.runWithTenant(async (tx) => {
+      // Lotes acotados, una única TX: un fallo no deja avisos parciales.
+      for (let offset = 0; offset < patientIds.length; offset += 500) {
+        await tx.reminderOptOutMatchWarning.createMany({
+          data: patientIds.slice(offset, offset + 500).map((patientId) => ({
+            tenantId,
+            patientId,
+            matchCount,
+            maxMatches,
+          })),
+        });
+      }
+    });
+  }
+
+  async maintenanceTenantIds(): Promise<string[]> {
+    // tenants no tiene RLS. Retirar una clínica no cambia su retención.
+    const rows = await this.prisma.tenant.findMany({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
   purgeLinks(before: Date): Promise<number> {
     return this.prisma.runWithTenant(async (tx) => {
       // Housekeeping TTL: SQL bajo FORCE RLS, sin acceso global a enlaces.

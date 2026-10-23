@@ -45,6 +45,10 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
     return Promise.resolve(state ? { ...state } : null);
   }
 
+  optOutWarnings(patientId: string) {
+    return Promise.resolve(this.patients.has(patientId) ? [] : null);
+  }
+
   locationCountry(): Promise<string | null> {
     return Promise.resolve(this.country);
   }

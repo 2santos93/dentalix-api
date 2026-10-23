@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
 import { ReminderClock } from '../src/modules/reminders/application/reminder-clock';
 import {
@@ -78,6 +79,8 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
   let clinic: Clinic;
   let other: Clinic;
   let reception: string;
+  let dentist: string;
+  let assistant: string;
   const mailer = new CapturingMailer();
 
   const api = () => request(app.getHttpServer());
@@ -148,6 +151,12 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
     other = await registerClinic(app, 'dx128-baja-otra');
     const member = await seedMember(raw, clinic, ClinicRole.RECEPTION);
     reception = await loginAs(app, clinic.host, member.email);
+    for (const role of [ClinicRole.DENTIST, ClinicRole.ASSISTANT]) {
+      const staff = await seedMember(raw, clinic, role);
+      const token = await loginAs(app, clinic.host, staff.email);
+      if (role === ClinicRole.DENTIST) dentist = token;
+      else assistant = token;
+    }
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
       .send({ timezone: 'America/Bogota', ranges: [] })
       .expect(200);
@@ -481,6 +490,71 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
           where: { id: { in: six }, reminderOptOutAt: { not: null } },
         }),
       ).toBe(0);
+      const durableWarnings = await raw.reminderOptOutMatchWarning.findMany({
+        where: { tenantId: clinic.tenantId, patientId: { in: six } },
+        select: { patientId: true },
+      });
+      expect(durableWarnings.map((w) => w.patientId).sort()).toEqual(
+        [...six].sort(),
+      );
+      const notices = await as(
+        api().get(`/api/v1/patients/${six[0]}/communication/opt-out-warnings`),
+        reception,
+      ).expect(200);
+      const noticeBody = notices.body as {
+        id: string;
+        createdAt: string;
+        matchCount: number;
+        maxMatches: number;
+      }[];
+      expect(noticeBody).toHaveLength(1);
+      expect(noticeBody[0].matchCount).toBe(6);
+      expect(noticeBody[0].maxMatches).toBe(5);
+      expect(typeof noticeBody[0].createdAt).toBe('string');
+      const warningPath = `/api/v1/patients/${six[0]}/communication/opt-out-warnings`;
+      await as(api().get(warningPath), clinic.adminToken).expect(200);
+      const eventsBeforeDenials = await raw.auditEvent.count({
+        where: {
+          tenantId: clinic.tenantId,
+          patientId: six[0],
+          action: 'VIEW',
+          metadata: { path: ['reason'], equals: 'REMINDER_OPT_OUT_WARNINGS' },
+        },
+      });
+      expect(eventsBeforeDenials).toBe(2);
+      for (const staffToken of [dentist, assistant])
+        await as(api().get(warningPath), staffToken).expect(403);
+      await as(api().get(warningPath), other.adminToken, other.host).expect(
+        404,
+      );
+      expect(
+        await raw.auditEvent.count({
+          where: {
+            tenantId: clinic.tenantId,
+            patientId: six[0],
+            action: 'VIEW',
+            metadata: { path: ['reason'], equals: 'REMINDER_OPT_OUT_WARNINGS' },
+          },
+        }),
+      ).toBe(eventsBeforeDenials);
+      await raw.reminderOptOutMatchWarning.createMany({
+        data: Array.from({ length: 22 }, (_, i) => ({
+          id: randomUUID(),
+          tenantId: clinic.tenantId,
+          patientId: six[0],
+          matchCount: 6,
+          maxMatches: 5,
+          createdAt: new Date(Date.now() + i * 1000),
+        })),
+      });
+      const recent = await as(api().get(warningPath), reception).expect(200);
+      expect(recent.body).toHaveLength(20);
+      expect(Object.keys((recent.body as object[])[0]).sort()).toEqual([
+        'createdAt',
+        'id',
+        'matchCount',
+        'maxMatches',
+      ]);
       const two = await Promise.all([
         createPatient('214210', { phone: '+573152228888' }),
         createPatient('214211', { phone: '+573152228888' }),
