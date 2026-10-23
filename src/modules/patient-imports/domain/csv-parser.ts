@@ -50,22 +50,27 @@ export function decodeCsv(bytes: Buffer): DecodedCsv {
 
 /**
  * 0x80–0x9F de Windows-1252 (€, comillas tipográficas, guiones…); el resto
- * coincide con Latin-1. A mano porque el TextDecoder de Node sin ICU completo
- * trata «windows-1252» como Latin-1 y deja ahí caracteres de control.
+ * coincide con Latin-1. El TextDecoder de Node sin ICU completo trata
+ * «windows-1252» como Latin-1 y deja ahí caracteres de control, así que se
+ * decodifica en NATIVO como `latin1` (lineal, sin concatenar carácter a
+ * carácter: revisión 2026-10-23, I1) y solo se corrige ese tramo.
  */
 const CP1252_HIGH =
   '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f' +
   '\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
 
+const CP1252_HIGH_RANGE = /[\x80-\x9f]/g;
+
 export function decodeWindows1252(bytes: Uint8Array): string {
-  let out = '';
-  for (const byte of bytes) {
-    out +=
-      byte >= 0x80 && byte <= 0x9f
-        ? CP1252_HIGH[byte - 0x80]
-        : String.fromCharCode(byte);
-  }
-  return out;
+  const latin1 = Buffer.from(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  ).toString('latin1');
+  return latin1.replace(
+    CP1252_HIGH_RANGE,
+    (ch) => CP1252_HIGH[ch.charCodeAt(0) - 0x80],
+  );
 }
 
 const DELIMITER_SAMPLE_LINES = 20;

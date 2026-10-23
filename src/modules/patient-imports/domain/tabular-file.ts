@@ -137,13 +137,16 @@ export const yieldToEventLoop = (): Promise<void> =>
 /** Cada cuántos registros se cede el hilo al leer o validar. */
 export const YIELD_EVERY = 500;
 
-/** Lee los registros de un lector cediendo el hilo cada `YIELD_EVERY`. */
+/**
+ * Lee los registros de un lector cediendo el hilo cada `YIELD_EVERY`. El
+ * lector de XLSX es asíncrono y cede además DENTRO de cada registro.
+ */
 export async function buildTable(
-  records: Iterable<RawRecord>,
+  records: Iterable<RawRecord> | AsyncIterable<RawRecord>,
 ): Promise<ParsedTable> {
   const builder = new TableBuilder();
   let n = 0;
-  for (const record of records) {
+  for await (const record of records) {
     builder.add(record);
     n += 1;
     if (n % YIELD_EVERY === 0) await yieldToEventLoop();

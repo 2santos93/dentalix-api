@@ -1,5 +1,6 @@
 import {
   decodeCsv,
+  decodeWindows1252,
   detectDelimiter,
   parseCsv,
   parseCsvRecords,
@@ -53,10 +54,14 @@ function rawBook(
 const inline = (ref: string, text: string) =>
   `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
 
+async function collect(bytes: Buffer): Promise<RawRecord[]> {
+  const out: RawRecord[] = [];
+  for await (const record of await readXlsx(bytes)) out.push(record);
+  return out;
+}
+
 async function records(bytes: Buffer): Promise<RawRecord[]> {
-  return [...(await readXlsx(bytes))].filter((r) =>
-    r.cells.some((c) => c !== ''),
-  );
+  return (await collect(bytes)).filter((r) => r.cells.some((c) => c !== ''));
 }
 
 describe('CSV (DX-107)', () => {
@@ -251,9 +256,7 @@ describe('XLSX', () => {
   it('una etiqueta sin cerrar es un error del fichero, en tiempo lineal', async () => {
     const started = Date.now();
     const book = rawBook('<sheetData>' + '<row>'.repeat(1_000_000), [], true);
-    await expect(readXlsx(book).then((r) => [...r])).rejects.toThrow(
-      ImportFileError,
-    );
+    await expect(collect(book)).rejects.toThrow(ImportFileError);
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
@@ -269,11 +272,9 @@ describe('XLSX', () => {
 
   it('una celda en la columna XFD no reserva 16.384 celdas: se anota como desbordada', async () => {
     const one = '<row><c r="XFD1" t="inlineStr"><is><t>1</t></is></c></row>';
-    const all = [
-      ...(await readXlsx(
-        rawBook(`<sheetData>${one.repeat(1000)}</sheetData>`),
-      )),
-    ];
+    const all = await collect(
+      rawBook(`<sheetData>${one.repeat(1000)}</sheetData>`),
+    );
     expect(all[0]).toEqual({ rowNumber: 1, cells: [], overflow: true });
   });
 
@@ -427,5 +428,173 @@ describe('readImportFile', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+/**
+ * Mide un trabajo asíncrono: tiempo total y el MAYOR hueco del event loop
+ * (un `setInterval` de 5 ms que deja de latir mientras el hilo está ocupado).
+ */
+async function watchLoop<T>(
+  work: () => Promise<T>,
+): Promise<{ outcome: T | Error; maxGap: number; ms: number }> {
+  let maxGap = 0;
+  let last = Date.now();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    maxGap = Math.max(maxGap, now - last);
+    last = now;
+  }, 5);
+  const started = Date.now();
+  let outcome: T | Error;
+  try {
+    outcome = await work();
+  } catch (err) {
+    outcome = err as Error;
+  } finally {
+    clearInterval(timer);
+  }
+  maxGap = Math.max(maxGap, Date.now() - last);
+  return { outcome, maxGap, ms: Date.now() - started };
+}
+
+/*
+ * Umbral de bloqueo en la prueba: holgado frente a los ~150 ms del probe de
+ * la revisión porque jest corre en paralelo en una máquina compartida; el
+ * fallo que se busca es de SEGUNDOS (1,5–5,3 s antes del arreglo).
+ */
+const MAX_BLOCK_MS = 300;
+
+describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', () => {
+  jest.setTimeout(60_000);
+
+  const HEAD =
+    `<row r="1">${inline('A1', 'nombres')}${inline('B1', 'apellidos')}</row>` +
+    `<row r="2">${inline('A2', 'Ana')}${inline('B2', 'Ríos')}</row>`;
+  const sheetWith = (rows: string) =>
+    `<worksheet><sheetData>${HEAD}${rows}</sheetData></worksheet>`;
+  const part = (name: string, xml: string) => ({
+    name,
+    data: Buffer.from(xml),
+  });
+
+  async function expectRejectedFast(book: Buffer, message: RegExp) {
+    expect(book.length).toBeLessThan(200 * 1024);
+    const { outcome, maxGap } = await watchLoop(() =>
+      readImportFile(book, 'x.xlsx'),
+    );
+    expect(outcome).toBeInstanceOf(ImportFileError);
+    expect((outcome as Error).message).toMatch(message);
+    expect(maxGap).toBeLessThan(MAX_BLOCK_MS);
+  }
+
+  it('sharedStrings con 5,5 M de <si/>: 400 sin bloquear el hilo', async () => {
+    await expectRejectedFast(
+      rawBook(sheetWith(''), [
+        part('xl/sharedStrings.xml', `<sst>${'<si/>'.repeat(5_500_000)}</sst>`),
+      ]),
+      /cadenas de texto/,
+    );
+  });
+
+  it('styles.xml con 5,5 M de <xf/>: 400 (más de 64.000 estilos) sin bloquear', async () => {
+    await expectRejectedFast(
+      rawBook(sheetWith(''), [
+        part(
+          'xl/styles.xml',
+          `<styleSheet><cellXfs>${'<xf/>'.repeat(5_500_000)}</cellXfs></styleSheet>`,
+        ),
+      ]),
+      /64\.000 estilos/,
+    );
+  });
+
+  it('una fila con 2,5 M de <c r="CW3"/>: 400 (más de 16.384 celdas) sin bloquear', async () => {
+    await expectRejectedFast(
+      rawBook(
+        sheetWith(`<row r="3">${'<c r="CW3"/>'.repeat(2_500_000)}</row>`),
+      ),
+      /16\.384 celdas/,
+    );
+  });
+
+  it('una fila con 6 M de <c/> sin referencia: 400 sin bloquear', async () => {
+    await expectRejectedFast(
+      rawBook(sheetWith(`<row r="3">${'<c/>'.repeat(6_000_000)}</row>`)),
+      /16\.384 celdas/,
+    );
+  });
+
+  it('muchas filas anchas que respetan el tope por fila: presupuesto global, sin bloquear', async () => {
+    const row = `<row>${'<c/>'.repeat(16_000)}</row>`;
+    await expectRejectedFast(
+      rawBook(sheetWith(row.repeat(400))),
+      /demasiado complej/,
+    );
+  });
+
+  it('etiquetas que se parecen (<cx/>) también cuentan y ceden el hilo', async () => {
+    await expectRejectedFast(
+      rawBook(sheetWith(`<row r="3">${'<cx/>'.repeat(6_000_000)}</row>`)),
+      /demasiado complej/,
+    );
+  });
+
+  it('una cadena con 1 M de tramos <t/>: 400 sin bloquear', async () => {
+    await expectRejectedFast(
+      rawBook(sheetWith(''), [
+        part(
+          'xl/sharedStrings.xml',
+          `<sst><si>${'<t/>'.repeat(1_000_000)}</si></sst>`,
+        ),
+      ]),
+      /demasiado complej/,
+    );
+  });
+
+  it('un libro normal de 10.000 pacientes se sigue leyendo entero sin bloquear', async () => {
+    const rows: string[][] = [
+      ['nombres', 'apellidos', 'documento', 'telefono'],
+    ];
+    for (let i = 0; i < 10_000; i += 1) {
+      rows.push([
+        `Nombre ${i}`,
+        `Apellido ${i}`,
+        String(1_000_000 + i),
+        '3001234567',
+      ]);
+    }
+    const { outcome, maxGap } = await watchLoop(() =>
+      readImportFile(buildXlsx(rows), 'x.xlsx'),
+    );
+    expect(outcome).not.toBeInstanceOf(Error);
+    expect(
+      (outcome as Awaited<ReturnType<typeof readImportFile>>).table.rows,
+    ).toHaveLength(10_000);
+    expect(maxGap).toBeLessThan(MAX_BLOCK_MS);
+  });
+});
+
+describe('CSV Windows-1252 (revisión 2026-10-23, I1)', () => {
+  it('decodifica el tramo 0x80–0x9F y el resto como Latin-1', () => {
+    const bytes = Buffer.from([
+      0x80, 0x82, 0x93, 0x94, 0x96, 0x97, 0x99, 0x9f, 0x81, 0xe9, 0xf1, 0x41,
+    ]);
+    expect(decodeWindows1252(bytes)).toBe('€‚“”–—™Ÿ\u0081éñA');
+  });
+
+  it('un CSV de 5 MB en Windows-1252 se decodifica en < 150 ms sin bloquear', () => {
+    const head = Buffer.from('nombres;apellidos\nJosé;Peña\n', 'latin1');
+    const body = Buffer.alloc(5 * 1024 * 1024 - head.length, 0xe9);
+    for (let i = 0; i < body.length; i += 97) body[i] = 0x80; // €
+    const bytes = Buffer.concat([head, body]);
+    const started = Date.now();
+    const decoded = decodeCsv(bytes);
+    expect(Date.now() - started).toBeLessThan(150);
+    expect(decoded.encoding).toBe('windows-1252');
+    expect(decoded.text.startsWith('nombres;apellidos\nJosé;Peña\n€')).toBe(
+      true,
+    );
+    expect(decoded.text).toHaveLength(bytes.length);
   });
 });
