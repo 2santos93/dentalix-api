@@ -1125,6 +1125,21 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   El informe y su CSV muestran precio de catálogo, rebaja de precio, descuento
   del ítem y el total (bruto = precio de referencia); el índice parcial pasa a
   `treatment_plan_items_tenant_effective_discount_at_idx`.
+- **Rebaja de convenio en el informe (SEC-047)**. El informe y su CSV
+  incluyen también los ítems resueltos por convenio con rebaja (`basePrice` >
+  `catalogPrice`), aunque no tengan descuento propio, con `agreementName`,
+  `basePrice`, `agreementReduction` (max(0, `basePrice` − `catalogPrice`)) y
+  su %, quién asignó el convenio (`agreementAssignedById`/`Name`: el autor de
+  la asignación de ese convenio al paciente más reciente no posterior al alta
+  del ítem) y quién creó el ítem (`createdById`/`Name`, columna nueva de
+  `treatment_plan_items`, NULL en los ítems anteriores). La rebaja de convenio
+  va APARTE: no suma en `discount` ni en el bruto; los totales traen
+  `agreementReduction`. Con `professionalId`, una fila entra si esa persona
+  dio el descuento o, si tiene rebaja de convenio, si creó el ítem o asignó el
+  convenio. Migraciones `20261023210000_sec047_plan_item_created_by` y
+  `20261023210100_sec047_plan_item_agreement_reduction_idx` (parcial
+  `treatment_plan_items_tenant_agreement_reduction_at_idx`, CONCURRENTLY).
+  e2e: `test/discounts-agreement.e2e-spec.ts`.
 - **Estado del plan en la transacción (BE-036)**: alta, edición y bloque
   bloquean la fila del plan (FOR SHARE; el ítem, FOR UPDATE), la releen y solo
   entonces validan si está aceptado, firmado o cerrado. Una aceptación sin
@@ -1941,7 +1956,21 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   como descuento discrecional; la rebaja del convenio no.
 - **Roles**: leer convenios, los 4 roles; listas de precios, ADMIN y rol
   clínico; crear, editar y retirar ambos, ADMIN. Asignar convenio al paciente,
-  los 4 roles. `price-quote`, roles clínicos.
+  los 4 roles, con la elegibilidad de SEC-047 (abajo). `price-quote`, roles
+  clínicos.
+- **Elegibilidad al asignar (SEC-047)**: como la rebaja de convenio no cuenta
+  como descuento discrecional, asignar un convenio no puede saltarse el tope
+  por rol de DX-204. Un convenio de un **pagador externo** (tipo MUTUA_ES,
+  PREPAGADA_CO, EPS_CO o EMPRESA) exige `coverageId` con una cobertura del
+  paciente, de ese pagador, sin retirar y **vigente hoy** (día civil de la
+  sede), para cualquier rol, ADMIN incluido: si no, 400 en español. Un
+  convenio **interno** (pagador de tipo OTRO: cortesía, empleados, socios)
+  solo lo asigna ADMIN (403 en español para el resto, antes de mirar la
+  cobertura); para él la cobertura es opcional y, si viene, se valida igual.
+  `GET /agreements` y la asignación devuelven `payer.type` para que la web
+  sepa qué pedir. Los pagadores creados por el relleno de `insurerEps` son
+  OTRO hasta que el ADMIN los reclasifica. Matriz en
+  `test/patient-agreements-eligibility.e2e-spec.ts`.
 - **Auditoría**: recursos `AGREEMENT` y `PRICE_LIST`; la asignación se audita
   como `PATIENT` con `reason` `AGREEMENT_ASSIGNED|AGREEMENT_REMOVED`. La
   metadata lleva nombres de campos, nunca importes ni datos del paciente.
