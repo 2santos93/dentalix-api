@@ -128,6 +128,8 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             agreementId: item.agreementId,
             agreementName: item.agreementName,
             pricingLocationId: item.pricingLocationId,
+            // SEC-047: el autor del alta viaja con la foto del precio.
+            createdById: item.createdById,
             price: item.price,
             discount: item.discount,
             // DX-204: la alternativa copia el descuento tal como se dio.

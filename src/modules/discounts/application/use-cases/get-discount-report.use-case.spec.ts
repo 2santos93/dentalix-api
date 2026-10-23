@@ -37,6 +37,14 @@ const row = (over: Partial<DiscountReportRow> = {}): DiscountReportRow => ({
   discountOn: '2026-10-02',
   locationId: 'l1',
   locationName: 'Sede principal',
+  priceSource: 'CATALOG',
+  agreementName: null,
+  basePrice: null,
+  agreementReduction: 0,
+  agreementAssignedById: null,
+  agreementAssignedByName: null,
+  createdById: 'u1',
+  createdByName: 'Dra. Ruiz',
   ...over,
 });
 
@@ -45,8 +53,14 @@ class FakeRepo implements DiscountReportRepository {
   lastPage: { offset: number; limit: number } | undefined;
   locations = new Set(['l1']);
   totalsResult: DiscountReportTotal[] = [
-    { currency: 'COP', items: 2, gross: 1000000, discount: 75000 },
-    { currency: 'EUR', items: 1, gross: 3, discount: 1 },
+    {
+      currency: 'COP',
+      items: 2,
+      gross: 1000000,
+      discount: 75000,
+      agreementReduction: 0,
+    },
+    { currency: 'EUR', items: 1, gross: 3, discount: 1, agreementReduction: 0 },
   ];
   findLocation(id: string) {
     return Promise.resolve(
@@ -94,6 +108,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
         items: 2,
         gross: 1000000,
         discount: 75000,
+        agreementReduction: 0,
         percentOfGross: 7.5,
       },
       {
@@ -101,6 +116,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
         items: 1,
         gross: 3,
         discount: 1,
+        agreementReduction: 0,
         percentOfGross: 33.33,
       },
     ]);
@@ -167,5 +183,59 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     });
     expect(rows).toHaveLength(3);
     expect(repo.lastPage).toBeUndefined();
+  });
+
+  it('SEC-047: la rebaja de convenio va aparte, con su % sobre el precio de catálogo', async () => {
+    const repo = new FakeRepo();
+    repo.totalsResult = [
+      {
+        currency: 'COP',
+        items: 1,
+        gross: 1500000,
+        discount: 0,
+        agreementReduction: 500000,
+      },
+    ];
+    repo.rows = () =>
+      Promise.resolve([
+        row({
+          itemId: 'conv',
+          priceSource: 'AGREEMENT_PERCENT',
+          agreementName: 'Empleados 25 %',
+          basePrice: 2000000,
+          catalogPrice: 1500000,
+          price: 1500000,
+          agreementReduction: 500000,
+          itemDiscount: 0,
+          discount: 0,
+          discountById: null,
+          discountByName: null,
+          agreementAssignedById: 'u2',
+          agreementAssignedByName: 'Recepción',
+        }),
+      ]);
+    const report = await new GetDiscountReportUseCase(repo).execute({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+    expect(report.totals[0]).toMatchObject({
+      agreementReduction: 500000,
+      percentOfGross: 0,
+    });
+    expect(report.items[0]).toMatchObject({
+      percent: 0,
+      agreementReduction: 500000,
+      agreementPercent: 25,
+      agreementAssignedByName: 'Recepción',
+      createdByName: 'Dra. Ruiz',
+    });
+  });
+
+  it('SEC-047: sin rebaja de convenio, agreementPercent es 0', async () => {
+    const report = await new GetDiscountReportUseCase(new FakeRepo()).execute({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+    expect(report.items.every((i) => i.agreementPercent === 0)).toBe(true);
   });
 });

@@ -10,7 +10,9 @@ import { currencyDecimals } from '../domain/discount-policy';
  * de implantes (DX-191): UTF-8 con BOM, CRLF, texto entre comillas y celdas
  * que empiezan (tras blancos) por = + - @ (o tabulador/CR) prefijadas con «'»
  * para que la hoja no las ejecute como fórmula (inyección CSV). La nota del
- * motivo es texto libre.
+ * motivo es texto libre. SEC-047: al final, el convenio, el precio sin
+ * convenio, la rebaja por convenio (aparte del descuento total), quién asignó
+ * el convenio y quién creó el ítem.
  */
 export const DISCOUNT_REPORT_CSV_HEADER = [
   'Fecha',
@@ -30,6 +32,11 @@ export const DISCOUNT_REPORT_CSV_HEADER = [
   'Nota del motivo',
   'Dado por',
   'Sede',
+  'Convenio',
+  'Precio sin convenio',
+  'Rebaja por convenio',
+  'Convenio asignado por',
+  'Ítem creado por',
 ] as const;
 
 // Mismas etiquetas que la web.
@@ -95,6 +102,13 @@ export function toDiscountReportCsv(
         text(row.reasonNote),
         text(row.discountByName),
         text(row.locationName),
+        text(row.agreementName),
+        row.agreementName === null || row.basePrice === null
+          ? ''
+          : money(row.basePrice, row.currency),
+        money(row.agreementReduction, row.currency),
+        text(row.agreementAssignedByName),
+        text(row.createdByName),
       ].join(','),
     );
   }

@@ -31,6 +31,8 @@ export interface DiscountReportTotalView {
   items: number;
   gross: number;
   discount: number;
+  /** SEC-047: suma de las rebajas de convenio (aparte del descuento). */
+  agreementReduction: number;
   /** Descuento sobre el bruto de esos mismos ítems, en % con 2 decimales. */
   percentOfGross: number;
 }
@@ -41,6 +43,8 @@ export interface DiscountReportRowView extends DiscountReportRow {
    * catálogo si el precio se rebajó; si no, el precio). SEC-041.
    */
   percent: number;
+  /** SEC-047: % de la rebaja de convenio sobre el precio de catálogo. */
+  agreementPercent: number;
 }
 
 export interface DiscountReport {
@@ -136,5 +140,9 @@ function withPercent(row: DiscountReportRow): DiscountReportRowView {
   return {
     ...row,
     percent: discountPercent(row.price + row.priceReduction, row.discount),
+    agreementPercent:
+      row.basePrice === null
+        ? 0
+        : discountPercent(row.basePrice, row.agreementReduction),
   };
 }
