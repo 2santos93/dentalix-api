@@ -2005,6 +2005,17 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
 - **Un saldo por paciente y moneda y lote**: las filas repetidas se suman (aviso
   `MERGED` en el dry-run), con la fecha más antigua y el primer concepto.
   Las monedas nunca se mezclan ni se convierten.
+- **La misma hoja dos veces no duplica la deuda** (QA D1): si el paciente ya
+  tiene un saldo migrado VIVO en esa moneda de otro lote, cada fila suya es
+  un error del dry-run que dice cuál («Este paciente ya tiene un saldo
+  migrado vivo de 80.000,00 COP (lote «x.csv» del dd/mm/aaaa, corte
+  dd/mm/aaaa): no se crea otro…») y no se importa. Solo con el campo
+  `addToExisting=true` del multipart (casilla «Añadir aunque ya tenga saldo
+  migrado» en la web, guardada en el lote como `balanceAddToExisting`) se
+  crea otro, con el aviso `EXISTING_BALANCE`. El trabajo lo vuelve a
+  comprobar al importar (un lote confirmado y aún en cola cuando se valida
+  el siguiente): sin la casilla, esa fila queda SKIPPED y se cuenta en
+  `progress.existing`. Un saldo retirado no cuenta.
 - **Al confirmar**, el trabajo `patient-imports.process` importa primero los
   pacientes y después los saldos en bloques de 500 (transacción corta, un
   `INSERT … ON CONFLICT DO NOTHING` por bloque: idempotente). Sin fecha en el
@@ -2017,8 +2028,10 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   (`voidedAt`/`voidedById`, trigger `opening_balances_guard`); la app no la
   borra.
 - **Estado de cuenta (DX-011)**: `openingBalances[]` (fecha de corte, «aprox.»,
-  concepto) y `summary[].openingBalance`; `balance = budgeted +
-  openingBalance − paid`. También en el familiar (DX-203).
+  concepto, abonado y pendiente), `summary[].openingBalance` (el cargo
+  original) y `summary[].openingPending` (lo que queda tras sus abonos: lo que
+  «incluye» el saldo, QA D5); `balance = budgeted + openingBalance − paid`.
+  También en el familiar (DX-203).
 - **Cartera (DX-145/DX-155)**: `patient_ledgers_compute` añade `openings` al
   resumen; un saldo migrado vivo hace deudor al paciente (aunque no tenga
   planes) y envejece desde su fecha de corte (aproximado si lo es). Si no hay
@@ -2032,7 +2045,8 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   `treatmentPlanId` (CHECK `payments_target_check`: exactamente uno; FK
   compuesta `(tenantId, openingBalanceId, patientId)` → mismo paciente y
   clínica). Lleva su recibo de caja consecutivo por sede (DX-136, la foto
-  dice «Saldo migrado · concepto · corte» y el pendiente tras el abono),
+  dice «Saldo migrado · concepto · corte» y el pendiente tras el abono; el
+  correo, «Concepto» y «Saldo pendiente tras este abono», revisión N1),
   entra en la caja por turno y su arqueo (DX-027), admite Idempotency-Key
   (DX-109), cuenta para los compromisos de pago (DX-150) y se anula con
   `DELETE /payments/:id` como cualquier abono. En la moneda del saldo y sin
@@ -2058,7 +2072,9 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   contra 20.000 pacientes en menos de 2 s (int).
 - **Topes**: la suma de las filas de un paciente y moneda no puede pasar de
   `DECIMAL(14,2)` (error de la fila); una celda XLSX con ruido de coma
-  flotante (`178500.00000000003`) se redondea a 2 decimales. Un documento con
+  flotante (`178500.00000000003`, `300000000.00000006`) se redondea a 2
+  decimales con una tolerancia relativa de 16 ULP del valor (revisión N2;
+  un tercer decimal real, ≥ 0,001, sigue siendo error hasta el tope). Un documento con
   varios pacientes vivos al importar no se adivina: se cuenta aparte
   (`progress.ambiguous`).
 - **Auditoría**: `PATIENT_IMPORT_BATCH` `UPDATE` con `reason`
