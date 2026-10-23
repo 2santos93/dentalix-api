@@ -362,11 +362,38 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
           expect(JSON.stringify(res.body)).toMatch(/EXPIRED/);
         });
 
+      // Solo los eventos de ESTA cita: la clínica es compartida por el fichero
+      // y desde DX-256 cada POST/PATCH deja además su traza HTTP genérica
+      // (CREATE al agendar, UPDATE con changedFields al mover). El movimiento
+      // se audita una sola vez con el antes y el después.
       const events = await raw.auditEvent.findMany({
-        where: { tenantId: clinic.tenantId, resourceType: 'APPOINTMENT' },
+        where: {
+          tenantId: clinic.tenantId,
+          resourceType: 'APPOINTMENT',
+          resourceId: appt.id,
+        },
+        orderBy: { occurredAt: 'asc' },
       });
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({
+      expect(events.map((e) => e.action).sort()).toEqual([
+        'CREATE',
+        'UPDATE',
+        'UPDATE',
+      ]);
+      const trace = events.filter(
+        (e) =>
+          e.action === 'UPDATE' &&
+          (e.metadata as { reason?: string }).reason === undefined,
+      );
+      expect(trace).toHaveLength(1);
+      expect(trace[0].metadata).toMatchObject({
+        changedFields: ['end', 'providerId', 'start'],
+      });
+      const moves = events.filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason === 'APPOINTMENT_MOVED',
+      );
+      expect(moves).toHaveLength(1);
+      expect(moves[0]).toMatchObject({
         action: 'UPDATE',
         resourceId: appt.id,
         actorUserId: reception.userId,

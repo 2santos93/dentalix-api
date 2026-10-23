@@ -286,9 +286,23 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     );
 
     const rejected = await book(dentist.userId, WED, '10:00').expect(409);
-    expect((rejected.body as { message: string }).message).toMatch(
-      /^La agenda del profesional está bloqueada \(Vacaciones\) del \d\d\/\d\d al \d\d\/\d\d\. Elige otro horario\.$/,
-    );
+    // Del martes al viernes (último día elegido), en día/mes de la sede. El día
+    // sale con uno o dos dígitos según el ICU de es-CO («3/11» o «03/11»): se
+    // compara el número, no el relleno, para que no dependa de la fecha.
+    const message = (rejected.body as { message: string }).message;
+    const range =
+      /^La agenda del profesional está bloqueada \(Vacaciones\) del (\d{1,2})\/(\d\d) al (\d{1,2})\/(\d\d)\. Elige otro horario\.$/.exec(
+        message,
+      );
+    expect(range).not.toBeNull();
+    const dayMonth = (day: string) => [
+      Number(day.slice(8, 10)),
+      Number(day.slice(5, 7)),
+    ];
+    expect(range!.slice(1).map(Number)).toEqual([
+      ...dayMonth(TUE),
+      ...dayMonth(addDays(TUE, 3)),
+    ]);
 
     const monday = await book(dentist.userId, MON, '10:00').expect(201);
     await as(
