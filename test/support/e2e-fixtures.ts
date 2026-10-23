@@ -13,6 +13,16 @@ import { registerVerified } from '../support/register-verified';
 // tenant-isolation-matrix).
 
 export const SEEDED_PASSWORD = 'S3cret!!';
+
+/**
+ * DX-279: cancelar una cita desde la agenda exige origen y motivo. Los specs
+ * que solo necesitan una cita cancelada lo mandan con esto (se ignora en
+ * cualquier otro cambio de estado).
+ */
+export const STAFF_CANCELLATION = {
+  cancelledByKind: 'STAFF_FOR_PATIENT',
+  cancelReasonCode: 'ILLNESS',
+} as const;
 const passwordService = new PasswordService();
 
 /** App de Nest configurada como main.ts (prefijo, pipes y filtro global). */

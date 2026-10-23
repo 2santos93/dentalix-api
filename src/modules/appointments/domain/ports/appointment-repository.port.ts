@@ -1,5 +1,10 @@
-import { AppointmentStatus } from '@prisma/client';
+import {
+  AppointmentStatus,
+  CancellationByKind,
+  CancellationReasonCode,
+} from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { CurrentPolicyRef } from '../../../cancellation-policies/domain/cancellation-policy';
 import {
   Appointment,
   CompletedExit,
@@ -98,6 +103,25 @@ export interface UpdateAppointmentRepoInput {
    * recupera una cita en la clínica cuando esta deja de tenerla.
    */
   audit?: AuditRequestContext;
+  /**
+   * DX-279: la cita pasa a CANCELLED. Con la fila bloqueada, el repositorio
+   * calcula los minutos de aviso y si es tardía contra la política VIGENTE de
+   * la sede de la cita, y lo guarda todo en la misma sentencia que el estado.
+   */
+  cancel?: CancellationWrite;
+  /** DX-279: la cita sale de CANCELLED: se borran los datos de cancelación. */
+  clearCancellation?: true;
+  /** DX-279: hora en que se marca NO_SHOW; null al salir de NO_SHOW. */
+  noShowMarkedAt?: Date | null;
+}
+
+/** DX-279: lo que el caso de uso decide de una cancelación. */
+export interface CancellationWrite {
+  byKind: CancellationByKind;
+  reasonCode: CancellationReasonCode | null;
+  reasonText: string | null;
+  /** Reloj del servidor (UTC). */
+  at: Date;
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */
@@ -246,4 +270,12 @@ export interface AppointmentRepository {
     planItemId: string,
     audit: AuditRequestContext,
   ): Promise<PlanItemClaim>;
+
+  /**
+   * DX-279: política de cancelación VIGENTE de una sede (la versión de mayor
+   * número), o `null` si la sede no tiene. La usa la vista previa del aviso.
+   */
+  currentCancellationPolicy(
+    locationId: string,
+  ): Promise<CurrentPolicyRef | null>;
 }

@@ -493,3 +493,49 @@ describe('sanitizeAuditMetadata — atribución del ítem realizado (DX-050)', (
     expect(sanitizeAuditMetadata({ attribution: 'x' })).toEqual({});
   });
 });
+
+describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
+  it('conserva origen, código del motivo, minutos de aviso y si fue tardía', () => {
+    const cancellation = {
+      byKind: 'STAFF_FOR_PATIENT',
+      reasonCode: 'ILLNESS',
+      noticeMinutes: 300,
+      lateCancellation: true,
+    };
+    expect(sanitizeAuditMetadata({ cancellation })).toEqual({ cancellation });
+    expect(
+      sanitizeAuditMetadata({
+        cancellation: {
+          ...cancellation,
+          byKind: 'PATIENT_LINK',
+          reasonCode: null,
+        },
+      }),
+    ).toEqual({
+      cancellation: {
+        ...cancellation,
+        byKind: 'PATIENT_LINK',
+        reasonCode: null,
+      },
+    });
+  });
+
+  it('descarta la cancelación entera con texto libre, códigos ajenos o números raros', () => {
+    const base = {
+      byKind: 'CLINIC',
+      reasonCode: 'CLINIC_RESCHEDULE',
+      noticeMinutes: 60,
+      lateCancellation: false,
+    };
+    for (const cancellation of [
+      { ...base, reasonText: 'Tiene gripe' },
+      { ...base, byKind: 'OTRO' },
+      { ...base, reasonCode: 'Gripe' },
+      { ...base, noticeMinutes: -1 },
+      { ...base, noticeMinutes: 1.5 },
+      { ...base, lateCancellation: 'sí' },
+    ]) {
+      expect(sanitizeAuditMetadata({ cancellation })).toEqual({});
+    }
+  });
+});

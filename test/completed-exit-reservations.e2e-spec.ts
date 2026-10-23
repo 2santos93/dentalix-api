@@ -9,6 +9,7 @@ import {
   resetDatabase,
   seedMember,
   loginAs,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
 
@@ -341,7 +342,11 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       const res = await call(
         'patch',
         `/appointments/${surgery.id}`,
-        { status: 'CANCELLED', statusReason: '  La cirugía no se hizo  ' },
+        {
+          status: 'CANCELLED',
+          statusReason: '  La cirugía no se hizo  ',
+          ...STAFF_CANCELLATION,
+        },
         dentist,
       ).expect(200);
       const body = res.body as {
@@ -409,6 +414,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       const res = await call('patch', `/appointments/${newer.id}`, {
         status: 'CANCELLED',
         statusReason: 'Duplicada por error',
+        ...STAFF_CANCELLATION,
       }).expect(200);
       const expected = plusDays(civil(older.end), 90);
       expect(
@@ -594,7 +600,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       await call(
         'patch',
         `/appointments/${future.id}`,
-        { status: 'CANCELLED' },
+        { status: 'CANCELLED', ...STAFF_CANCELLATION },
         reception,
       ).expect(200);
       // En la misma transacción: la más temprana en la clínica lo reserva.

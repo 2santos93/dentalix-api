@@ -319,6 +319,11 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     enabled: true,
     leadHours: [48, 2],
   }).expect(200);
+  // DX-279: política de cancelación de la sede nueva de A.
+  await create(app, a, `/locations/${location.id}/cancellation-policy`, {
+    noticeHours: 24,
+    patientText: 'Avísanos con 24 horas.',
+  });
   const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
   // DX-089: la dentista de A queda restringida a TODAS las sedes activas de A
   // (deja filas en membership_locations sin cambiar a qué puede acceder).
@@ -658,6 +663,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-203: responsables de pago y avisos.
       'patient_responsible_parties',
       'location_reminder_settings',
+      // DX-279: versiones de la política de cancelación.
+      'cancellation_policy_versions',
       // DX-027: caja por turno.
       'cash_sessions',
       'cash_session_floats',
@@ -792,6 +799,32 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'GET /appointments/:id/reminders',
       verb: 'get',
       path: () => `/appointments/${a.appointmentId}/reminders`,
+      status: 404,
+    },
+    // --- política de cancelación y asistencia (DX-279) ---
+    {
+      name: 'GET /locations/:id/cancellation-policy',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/cancellation-policy`,
+      status: 404,
+    },
+    {
+      name: 'POST /locations/:id/cancellation-policy',
+      verb: 'post',
+      path: () => `/locations/${a.locationId}/cancellation-policy`,
+      body: () => ({ noticeHours: 1, patientText: 'Hackeada' }),
+      status: 404,
+    },
+    {
+      name: 'GET /appointments/:id/cancellation-preview',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/cancellation-preview`,
+      status: 404,
+    },
+    {
+      name: 'GET /patients/:id/attendance-summary',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/attendance-summary`,
       status: 404,
     },
     // --- reminders (DX-026) ---

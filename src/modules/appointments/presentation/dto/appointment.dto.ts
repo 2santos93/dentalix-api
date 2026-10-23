@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
-import { AppointmentStatus } from '@prisma/client';
+import {
+  AppointmentStatus,
+  CancellationByKind,
+  CancellationReasonCode,
+} from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
@@ -121,6 +125,73 @@ export class AppointmentDto {
     description: 'DX-200: cuándo quedó listo para cobrar.',
   })
   readyForCheckoutAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-279: cuándo se canceló (reloj del servidor). Solo en CANCELLED; null en las canceladas antiguas.',
+  })
+  cancelledAt!: Date | null;
+
+  @ApiProperty({
+    enum: CancellationByKind,
+    enumName: 'CancellationByKind',
+    nullable: true,
+    description:
+      'DX-279: quién canceló — PATIENT_LINK (enlace del paciente), STAFF_FOR_PATIENT (el personal por el paciente) o CLINIC (la clínica; nunca tardía).',
+  })
+  cancelledByKind!: CancellationByKind | null;
+
+  @ApiProperty({
+    enum: CancellationReasonCode,
+    enumName: 'CancellationReasonCode',
+    nullable: true,
+    description: 'DX-279: motivo del catálogo cerrado.',
+  })
+  cancelReasonCode!: CancellationReasonCode | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-279: detalle opcional del motivo (≤ 500). No sale en GET /appointments (como las notas).',
+  })
+  cancelReasonText!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-279: minutos de aviso entre la cancelación y el inicio (0 si ya había empezado).',
+  })
+  noticeMinutes!: number | null;
+
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description:
+      'DX-279: con menos aviso que el que pedía la política vigente de la sede.',
+  })
+  lateCancellation!: boolean | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW).',
+  })
+  noShowMarkedAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-279: versión de la política comunicada al paciente (la rellena DX-291; hoy null).',
+  })
+  policyVersionId!: string | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
@@ -291,9 +362,26 @@ export class AppointmentWriteDto extends AppointmentDto {
  * resume la cobertura principal del paciente, sin número de afiliado.
  * `medicalAlerts` (DX-247): solo banderas de la anamnesis, nunca su contenido.
  */
+/** DX-279: inasistencias y cancelaciones tardías del paciente (12 meses). */
+export class PatientIncidentCountsDto {
+  @ApiProperty({ example: 2 })
+  noShows!: number;
+
+  @ApiProperty({ example: 1 })
+  lateCancellations!: number;
+}
+
 export class AppointmentListItemDto extends OmitType(AppointmentDto, [
   'notes',
+  'cancelReasonText',
 ] as const) {
+  @ApiProperty({
+    type: PatientIncidentCountsDto,
+    description:
+      'DX-279: inasistencias y cancelaciones tardías del paciente en los últimos 12 meses, en las sedes permitidas al usuario (DX-089), calculadas para todo el lote en una consulta (sin N+1). Las de la clínica no cuentan.',
+  })
+  attendance!: PatientIncidentCountsDto;
+
   @ApiProperty({ type: OverdueBalanceDto })
   balance!: OverdueBalanceDto;
 
@@ -306,4 +394,81 @@ export class AppointmentListItemDto extends OmitType(AppointmentDto, [
       'DX-247: banderas médicas del paciente (alerta, premedicación, anamnesis al día / caducada / ausente). Sin alérgenos, condiciones, medicamentos ni notas.',
   })
   medicalAlerts!: MedicalAlertFlagsDto;
+}
+
+/** DX-279: vista previa del aviso si se cancelara ahora. */
+export class CancellationPolicyRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 3 })
+  version!: number;
+
+  @ApiProperty({ example: 24 })
+  noticeHours!: number;
+}
+
+export class CancellationPreviewDto {
+  @ApiProperty({ format: 'uuid' })
+  appointmentId!: string;
+
+  @ApiProperty({
+    example: 300,
+    description: 'Minutos que faltan para el inicio (0 si ya empezó), en UTC.',
+  })
+  noticeMinutes!: number;
+
+  @ApiProperty({
+    description:
+      'Si el paciente cancelara ahora, sería tardía (menos aviso que la política). Una cancelación de la clínica nunca lo es.',
+  })
+  lateCancellation!: boolean;
+
+  @ApiProperty({
+    type: CancellationPolicyRefDto,
+    nullable: true,
+    description: 'Política vigente de la sede de la cita; null = sin política.',
+  })
+  policy!: CancellationPolicyRefDto | null;
+}
+
+/** DX-279: una sede en el resumen de asistencia del paciente. */
+export class LocationAttendanceDto extends PatientIncidentCountsDto {
+  @ApiProperty({ format: 'uuid' })
+  locationId!: string;
+
+  @ApiProperty({ example: 'Sede principal' })
+  locationName!: string;
+
+  @ApiProperty({
+    example: 6,
+    description: 'Citas de la ventana que ya empezaron (cualquier estado).',
+  })
+  appointments!: number;
+}
+
+export class AttendanceTotalsDto extends PatientIncidentCountsDto {
+  @ApiProperty({ example: 6 })
+  appointments!: number;
+}
+
+export class PatientAttendanceSummaryDto {
+  @ApiProperty({ format: 'uuid' })
+  patientId!: string;
+
+  @ApiProperty({ format: 'date-time', description: 'Hace 12 meses (UTC).' })
+  since!: Date;
+
+  @ApiProperty({ format: 'date-time', description: 'Instante del cálculo.' })
+  until!: Date;
+
+  @ApiProperty({ type: AttendanceTotalsDto })
+  totals!: AttendanceTotalsDto;
+
+  @ApiProperty({
+    type: [LocationAttendanceDto],
+    description:
+      'Solo las sedes con citas en la ventana y permitidas al usuario (DX-089), por nombre.',
+  })
+  byLocation!: LocationAttendanceDto[];
 }

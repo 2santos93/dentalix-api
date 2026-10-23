@@ -1,4 +1,8 @@
-import { AppointmentStatus } from '@prisma/client';
+import {
+  AppointmentStatus,
+  CancellationByKind,
+  CancellationReasonCode,
+} from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
 
 /**
@@ -58,6 +62,22 @@ export interface Appointment {
   arrivedAt: Date | null;
   seatedAt: Date | null;
   readyForCheckoutAt: Date | null;
+  /**
+   * DX-279: cancelación (solo en CANCELLED; null en las canceladas antiguas):
+   * hora del servidor, quién (enlace del paciente, el personal por el
+   * paciente o la clínica), motivo del catálogo y texto opcional, minutos de
+   * aviso y si fue tardía según la política vigente de su sede.
+   */
+  cancelledAt: Date | null;
+  cancelledByKind: CancellationByKind | null;
+  cancelReasonCode: CancellationReasonCode | null;
+  cancelReasonText: string | null;
+  noticeMinutes: number | null;
+  lateCancellation: boolean | null;
+  /** DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW). */
+  noShowMarkedAt: Date | null;
+  /** DX-279: versión de la política comunicada al paciente (DX-291; hoy null). */
+  policyVersionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -33,7 +33,10 @@ import {
   AppointmentDto,
   AppointmentListItemDto,
   AppointmentWriteDto,
+  CancellationPreviewDto,
 } from './dto/appointment.dto';
+import { PatientAttendanceFlags } from '../application/attendance/patient-attendance';
+import { NO_INCIDENTS, type PatientIncidentCounts } from '../domain/attendance';
 import { PatientBalanceFlags } from '../../collections/application/patient-balance-flags';
 import {
   NO_COVERAGE,
@@ -60,7 +63,10 @@ import {
 import { CreateAppointmentUseCase } from '../application/use-cases/create-appointment.use-case';
 import { ListAppointmentsUseCase } from '../application/use-cases/list-appointments.use-case';
 import { GetAppointmentUseCase } from '../application/use-cases/get-appointment.use-case';
-import { UpdateAppointmentUseCase } from '../application/use-cases/update-appointment.use-case';
+import {
+  UpdateAppointmentUseCase,
+  type CancellationPreview,
+} from '../application/use-cases/update-appointment.use-case';
 import {
   Appointment,
   AppointmentWriteResult,
@@ -124,6 +130,8 @@ export class AppointmentsController {
     private readonly medicalAlertFlags: PatientMedicalAlertFlags,
     private readonly audit: RecordAuditEventUseCase,
     private readonly listInClinic: ListInClinicUseCase,
+    // DX-279: insignia «inasistencias · cancelaciones tardías» de las tarjetas.
+    private readonly attendanceFlags: PatientAttendanceFlags,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -237,7 +245,7 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: [AppointmentListItemDto],
     description:
-      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica ni las notas de la cita (disponibles en GET /appointments/:id).',
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica ni las notas de la cita (disponibles en GET /appointments/:id). Con `attendance` (DX-279): inasistencias y cancelaciones tardías del paciente en 12 meses, por lote; sin el detalle libre del motivo de cancelación (`cancelReasonText`, en GET /appointments/:id).',
   })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
@@ -246,10 +254,11 @@ export class AppointmentsController {
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    (Omit<Appointment, 'notes'> & {
+    (Omit<Appointment, 'notes' | 'cancelReasonText'> & {
       balance: OverdueBalance;
       coverage: CoverageSummary;
       medicalAlerts: MedicalAlertFlags;
+      attendance: PatientIncidentCounts;
     })[]
   > {
     const appointments = await this.listAppointments.execute({
@@ -267,15 +276,19 @@ export class AppointmentsController {
     const coverage = await this.coverageFlags.forPatients(patientIds);
     // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
     const medical = await this.medicalAlertFlags.forAppointments(appointments);
-    return appointments.map(({ notes: _notes, ...a }) => ({
-      ...a,
-      balance: flags.get(a.patientId) ?? {
-        hasOverdue: false,
-        overdueDays: null,
-      },
-      coverage: coverage.get(a.patientId) ?? NO_COVERAGE,
-      medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
-    }));
+    const attendance = await this.attendanceFlags.forPatients(patientIds);
+    return appointments.map(
+      ({ notes: _notes, cancelReasonText: _text, ...a }) => ({
+        ...a,
+        balance: flags.get(a.patientId) ?? {
+          hasOverdue: false,
+          overdueDays: null,
+        },
+        coverage: coverage.get(a.patientId) ?? NO_COVERAGE,
+        medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
+        attendance: attendance.get(a.patientId) ?? NO_INCIDENTS,
+      }),
+    );
   }
 
   // Antes de `:id`: si no, «openings» se tomaría por el id de una cita.
@@ -347,6 +360,23 @@ export class AppointmentsController {
     };
   }
 
+  @Get(':id/cancellation-preview')
+  @ApiOkResponse({
+    type: CancellationPreviewDto,
+    description:
+      'DX-279: antes de confirmar la cancelación en la agenda, los minutos de aviso si se cancelara AHORA (reloj del servidor, UTC) y si sería tardía para el paciente según la política vigente de la sede de la cita. Mismo cálculo que el PATCH a CANCELLED; la de la clínica nunca es tardía.',
+  })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiForbiddenResponse({
+    description: 'La cita es de una sede no permitida al usuario (DX-089)',
+  })
+  @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
+  cancellationPreview(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CancellationPreview> {
+    return this.updateAppointment.cancellationPreview(id);
+  }
+
   @Get(':id')
   @ApiOkResponse({ type: AppointmentDto })
   get(@Param('id') id: string): Promise<Appointment> {
@@ -367,7 +397,7 @@ export class AppointmentsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos o al pasado, o salida de COMPLETED sin `statusReason` válido (DX-273)',
+      'Datos inválidos o al pasado, salida de COMPLETED sin `statusReason` válido (DX-273), o cancelar sin `cancelledByKind` o sin `cancelReasonCode` (DX-279), con el mensaje en español',
   })
   @ApiForbiddenResponse({
     description:
@@ -401,6 +431,11 @@ export class AppointmentsController {
         wantsEarlier: dto.wantsEarlier,
         planItemIds: dto.planItemIds,
         statusReason: dto.statusReason,
+        cancellation: {
+          byKind: dto.cancelledByKind,
+          reasonCode: dto.cancelReasonCode,
+          reasonText: dto.cancelReasonText,
+        },
       },
       ctx,
     );
