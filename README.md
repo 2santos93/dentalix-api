@@ -669,6 +669,84 @@ hasta 1 h (SEC-028).
   meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
   tienen anamnesis (p. ej. Daniela Montoya).
 
+## Anamnesis previa a la cita por enlace (DX-099)
+
+El paciente responde su anamnesis desde el móvil antes de la cita y un
+profesional la revisa; la historia clínica no cambia hasta que se acepta.
+Módulo `medical-history-submissions`; migraciones
+`20261023160000_dx099_enums` y
+`20261023160100_dx099_medical_history_submissions`.
+
+- **Tabla `medical_history_submissions`**: paciente, cita opcional, sede de
+  la bandeja (la de la cita o la de escritura de la sesión), `tokenHash`
+  (SHA-256 del token de 32 bytes; el token solo viaja en la URL y en la
+  respuesta que lo crea), `expiresAt`, `revokedAt`, `status`
+  (`PENDING_PATIENT`, `SUBMITTED`, `ACCEPTED`, `REJECTED`, `EXPIRED`),
+  `questionnaireVersion`, `answers` (JSONB, ≤ 64 KB), revisor, fecha, motivo
+  del rechazo y `resultingVersionId`. RLS FORCE, FK compuestas por tenant
+  (paciente, cita del MISMO paciente, sede y versión resultante del MISMO
+  paciente), CHECK de coherencia por estado y sin borrado duro (DELETE y
+  TRUNCATE solo superusuario). El trigger `medical_history_submissions_guard`
+  impide reescribir las respuestas y tocar un envío revisado o caducado. Un
+  enlace sin usar cuya fecha pasó se ve `EXPIRED` sin barrido.
+- **Origen de la versión**: `medical_history_versions.source` (`STAFF` por
+  defecto, `PATIENT_FORM` al aceptar el formulario; autor = quien revisa). Va
+  en `MedicalHistoryDto.source`.
+- **Cuestionario** (`domain/anamnesis-questionnaire.ts`, versión
+  `2026-10-v1`): fijo y versionado en código; mismos bloques y `codigo` que la
+  HC del personal (alergias, enfermedades, medicación y anticoagulantes,
+  hábitos, embarazo y cirugías), preguntas Sí/No/No sé con seguimiento. Al
+  aceptar, «Sí» = lo declarado, «No» = nada, «No sé» = lo que ya había; lo
+  que el formulario no pregunta (antecedentes odontológicos, signos vitales,
+  notas) se conserva. Toda alergia declarada entra como alerta; «Sí» a
+  anticoagulantes añade el medicamento y enciende la bandera aunque no diga
+  cuál (`deriveSafetyFlags` reconoce ahora `anticoagul`/`antiagregant`).
+- **Personal**:
+  - `POST /patients/:patientId/medical-history/requests` (los 4 roles;
+    `appointmentId` opcional): un solo uso, caduca a los 7 días o al inicio de
+    la cita (lo que llegue antes) y anula el enlace anterior que aún esperaba.
+    Devuelve la URL una única vez y `whatsapp` (`phone` + `text` para
+    `wa.me`: saludo, clínica y enlace; nada clínico) o el motivo de no tenerlo
+    (sin móvil con indicativo, baja de envíos de DX-128). Cita de otro
+    paciente 400, empezada o no agendada 422, de otra sede 403. Sin
+    autorización SENSITIVE_HEALTH vigente y sin política publicada, 409.
+  - `GET /patients/:patientId/medical-history/requests` (los 4 roles): los
+    últimos 10 envíos con su estado, sin respuestas.
+  - `GET /medical-history/submissions?status=SUBMITTED` (bandeja,
+    ADMIN/DENTIST/ASSISTANT): en las sedes del alcance de la sesión (SEC-045);
+    las más antiguas primero. `GET …/summary` → `{ submitted }` (contador del
+    menú).
+  - `GET /medical-history/submissions/:id` (ídem): respuestas, versión
+    vigente, propuesta, banderas resultantes y **diferencias** (`ADDED`,
+    `REMOVED`, `CHANGED`; los «Sí» primero; sin versión previa, todo nuevo).
+  - `POST …/:id/accept` y `POST …/:id/reject` (`reason` 3–500): solo ADMIN y
+    DENTIST; el resto 403 «Solo un odontólogo o un administrador puede aceptar
+    o rechazar la anamnesis.». Aceptar crea **exactamente una** versión en la
+    misma transacción que el cambio de estado (fila bloqueada `FOR UPDATE` y
+    candado por paciente de DX-247); con `medicalHistory` guarda los ajustes
+    del profesional en vez de la propuesta. Ya revisada o aún sin enviar, 409.
+  - `POST …/:id/revoke` (los 4 roles): anula un enlace sin usar.
+- **Público** (sin sesión, tenant por host, `@RateLimit('anamnesis',
+  'anamnesis-token')`: por IP y por token, un balde por ruta):
+  `GET /public/medical-history/:token` devuelve solo el cuestionario, la marca
+  de la clínica y el nombre de pila (nunca apellidos, documento ni datos de
+  salud anteriores) y, si falta SENSITIVE_HEALTH, el texto versionado de la
+  política (DX-037). `POST` guarda las respuestas una vez (transición
+  condicional); exige la casilla de veracidad (400) y, si hacía falta, la
+  autorización (422; se guarda con canal `PATIENT_LINK`, sin usuario). Token
+  malformado, desconocido o de otra clínica 404; caducado, anulado o ya usado
+  410 «Este enlace ya no es válido, contacte con su clínica.».
+- **Auditoría** (`MEDICAL_HISTORY_SUBMISSION`): crear el enlace
+  (`ANAMNESIS_LINK_CREATED`), ver la revisión, aceptar (`ANAMNESIS_ACCEPTED`),
+  rechazar (`ANAMNESIS_REJECTED`) y anular (`ANAMNESIS_LINK_REVOKED`), con el
+  paciente; el envío del paciente (`ANAMNESIS_SUBMITTED`, origen `LINK`) y su
+  autorización (`DATA_CONSENT`, `ANAMNESIS_LINK`) sin actor, en la misma
+  transacción (`audit_events_actor_check` admite solo esas dos). Nunca la URL,
+  el token, las respuestas ni el motivo.
+- **Seed demo**: Natalia Vargas envió su cuestionario (alergia a la
+  penicilina, asma, anticonceptivo, alcohol los fines de semana) y queda en
+  «Anamnesis por revisar» de la sede principal.
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`

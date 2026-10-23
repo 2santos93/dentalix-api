@@ -78,6 +78,8 @@ model Tenant {
   postOpTemplates           PostOpInstructionTemplate[]
   postOpTemplateLinks       PostOpInstructionTemplateLink[]
   postOpDeliveries          PostOpInstructionDelivery[]
+  // DX-099: anamnesis enviadas por enlace al paciente.
+  medicalHistorySubmissions MedicalHistorySubmission[]
   // DX-151: documentos de los pacientes.
   patientDocuments          PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -153,6 +155,9 @@ model User {
   platformAuditEvents        PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
   postOpDeliveries           PostOpInstructionDelivery[]
+  // DX-099: enlaces de anamnesis creados y envíos revisados.
+  medicalHistorySubmissionsCreated  MedicalHistorySubmission[] @relation("MedicalHistorySubmissionCreatedBy")
+  medicalHistorySubmissionsReviewed MedicalHistorySubmission[] @relation("MedicalHistorySubmissionReviewedBy")
   // DX-273: salidas de citas de COMPLETED (con motivo).
   appointmentStatusReversals AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
 
@@ -243,6 +248,8 @@ model Location {
   membershipLocations       MembershipLocation[]
   // DX-222: indicaciones postoperatorias entregadas en la sede.
   postOpDeliveries          PostOpInstructionDelivery[]
+  // DX-099: anamnesis por revisar de la sede.
+  medicalHistorySubmissions MedicalHistorySubmission[]
   // DX-105: listas y convenios de la sede.
   priceLists                PriceList[]
   agreements                Agreement[]
@@ -477,6 +484,8 @@ model Patient {
   agreements             PatientAgreement[]
   // DX-222: indicaciones postoperatorias que se le entregaron.
   postOpDeliveries       PostOpInstructionDelivery[]
+  // DX-099: anamnesis enviadas por enlace.
+  medicalHistorySubmissions MedicalHistorySubmission[]
   country                Country?                    @relation(fields: [countryCode], references: [code])
   city                   City?                       @relation(fields: [cityId], references: [id])
 
@@ -524,6 +533,9 @@ model MedicalHistoryVersion {
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
   hasCriticalAlert Boolean   @default(false)
+  // DX-099: tecleada por el personal o aceptada desde el formulario del
+  // paciente (autor = quien la revisó).
+  source           MedicalHistorySource @default(STAFF)
   createdById      String?   @db.Uuid
   createdAt        DateTime  @default(now())
   deletedAt        DateTime?
@@ -534,6 +546,8 @@ model MedicalHistoryVersion {
   patient Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id])
   // DX-247: confirmaciones «Sin cambios hoy» sobre esta versión.
   reviews MedicalHistoryReview[]
+  // DX-099: el envío del paciente que la originó (si vino del formulario).
+  submissions MedicalHistorySubmission[]
 
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
   // DX-247: destino de la FK compuesta de medical_history_reviews (misma
@@ -567,6 +581,63 @@ model MedicalHistoryReview {
   @@index([tenantId, patientId, reviewedAt(sort: Desc)], map: "medical_history_reviews_tenant_patient_idx")
   @@index([tenantId, medicalHistoryVersionId], map: "medical_history_reviews_tenant_version_idx")
   @@map("medical_history_reviews")
+}
+
+/// DX-099: origen de una versión de la anamnesis.
+enum MedicalHistorySource {
+  STAFF
+  PATIENT_FORM
+}
+
+/// DX-099: estado de un envío de la anamnesis por enlace.
+enum MedicalHistorySubmissionStatus {
+  PENDING_PATIENT
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+/// DX-099: anamnesis previa a la cita por enlace seguro. Del token solo se
+/// guarda el hash; las respuestas (dato clínico, RLS) no cambian una vez
+/// enviadas y la HC no cambia hasta que un ADMIN o DENTIST las acepta, en una
+/// transacción que crea exactamente una versión (`resultingVersionId`). Sin
+/// borrado duro (trigger) y ciclo de vida en la BD
+/// (medical_history_submissions_guard, CHECK de estado).
+model MedicalHistorySubmission {
+  id                   String                         @id @default(uuid()) @db.Uuid
+  tenantId             String                         @db.Uuid
+  patientId            String                         @db.Uuid
+  appointmentId        String?                        @db.Uuid
+  /// Sede de la bandeja: la de la cita o la de quien creó el enlace.
+  locationId           String                         @db.Uuid
+  tokenHash            String                         @unique
+  expiresAt            DateTime
+  revokedAt            DateTime?
+  status               MedicalHistorySubmissionStatus @default(PENDING_PATIENT)
+  questionnaireVersion String
+  answers              Json?
+  submittedAt          DateTime?
+  reviewedById         String?                        @db.Uuid
+  reviewedAt           DateTime?
+  rejectReason         String?
+  resultingVersionId   String?                        @db.Uuid
+  createdById          String                         @db.Uuid
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient          Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "medical_history_submissions_patient_fkey")
+  appointment      Appointment?           @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_submissions_appointment_fkey")
+  location         Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "medical_history_submissions_location_fkey")
+  resultingVersion MedicalHistoryVersion? @relation(fields: [tenantId, patientId, resultingVersionId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_submissions_version_fkey")
+  createdBy        User                   @relation("MedicalHistorySubmissionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "medical_history_submissions_created_by_fkey")
+  reviewedBy       User?                  @relation("MedicalHistorySubmissionReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict, map: "medical_history_submissions_reviewed_by_fkey")
+
+  @@index([tenantId, status, locationId, submittedAt], map: "medical_history_submissions_inbox_idx")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "medical_history_submissions_patient_idx")
+  @@index([createdById], map: "medical_history_submissions_created_by_idx")
+  @@map("medical_history_submissions")
 }
 
 model ClinicalEntry {
@@ -959,6 +1030,8 @@ model Appointment {
   clinicalEntries  ClinicalEntry[]
   // DX-222: indicaciones postoperatorias entregadas por esta cita.
   postOpDeliveries PostOpInstructionDelivery[]
+  // DX-099: anamnesis enviadas para esta cita.
+  medicalHistorySubmissions MedicalHistorySubmission[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -1252,6 +1325,8 @@ enum DataConsentScope {
 enum DataConsentChannel {
   IN_PERSON
   LEGACY
+  // DX-099: la da el propio paciente en el formulario de anamnesis por enlace.
+  PATIENT_LINK
 }
 
 // DX-037: versión publicada de la política de tratamiento de datos de UNA
@@ -2504,6 +2579,9 @@ enum AuditResourceType {
   POSTOP_DELIVERY
   // DX-151: documentos del paciente (subir, ver, descargar, anular).
   PATIENT_DOCUMENT
+  // DX-099: anamnesis por enlace (crear el enlace, envío del paciente, ver,
+  // aceptar, rechazar y anular).
+  MEDICAL_HISTORY_SUBMISSION
   // DX-105: convenios y listas de precios (altas, cambios, retiros, asignaciones).
   AGREEMENT
   PRICE_LIST

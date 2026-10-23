@@ -30,6 +30,8 @@ const LOW_LIMITS: RateLimitConfig = {
   'public-files': { limit: 2, ttlMs: 60_000 },
   'direct-upload': { limit: 2, ttlMs: 60_000 },
   'patient-import': { limit: 2, ttlMs: 60_000 },
+  anamnesis: { limit: 4, ttlMs: 60_000 },
+  'anamnesis-token': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -182,6 +184,27 @@ describe('Rate limiting (e2e)', () => {
         expect((await respond(`guess-${i}`)).status).not.toBe(429);
       }
       expectTooMany(await respond('guess-next'));
+    });
+
+    it('public/medical-history/:token (DX-099): 429 por token y por IP (balde por ruta)', async () => {
+      const view = (token: string) =>
+        request(app.getHttpServer()).get(
+          `/api/v1/public/medical-history/${token}`,
+        );
+      const tokenA = 'A'.repeat(43);
+      // Por token: el mismo enlace admite 2 y el tercero es 429…
+      for (let i = 0; i < LOW_LIMITS['anamnesis-token'].limit; i++) {
+        expect((await view(tokenA)).status).not.toBe(429);
+      }
+      expectTooMany(await view(tokenA));
+      // …pero otro token (misma IP) sigue pasando hasta el tope por IP (4).
+      expect((await view('B'.repeat(43))).status).not.toBe(429);
+      expectTooMany(await view('C'.repeat(43)));
+      // El POST tiene su propio balde.
+      const submit = await request(app.getHttpServer())
+        .post(`/api/v1/public/medical-history/${tokenA}`)
+        .send({});
+      expect(submit.status).not.toBe(429);
     });
 
     it('recuperar la contraseña (DX-010): 429 por IP en pedir, comprobar y restablecer (balde por ruta)', async () => {

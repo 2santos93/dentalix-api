@@ -1681,6 +1681,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
     'GET /patients/:patientId/clinical-entries/rda-readiness':
       'rda-codes.e2e-spec.ts',
+    // DX-099: B → 404 sobre el paciente, el envío y el token de A, sin tocar
+    // el envío ni la HC de A.
+    'POST /patients/:patientId/medical-history/requests':
+      'medical-history-submissions.e2e-spec.ts',
+    'GET /patients/:patientId/medical-history/requests':
+      'medical-history-submissions.e2e-spec.ts',
+    'GET /medical-history/submissions/:id':
+      'medical-history-submissions.e2e-spec.ts',
+    'POST /medical-history/submissions/:id/accept':
+      'medical-history-submissions.e2e-spec.ts',
+    'POST /medical-history/submissions/:id/reject':
+      'medical-history-submissions.e2e-spec.ts',
+    'POST /medical-history/submissions/:id/revoke':
+      'medical-history-submissions.e2e-spec.ts',
   };
 
   it('cubre toda ruta de clínica con :param (aquí o en el spec citado)', () => {

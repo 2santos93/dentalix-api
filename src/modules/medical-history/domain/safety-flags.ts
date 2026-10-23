@@ -15,6 +15,10 @@ const ANESTHETIC_KW = [
 const PENICILLIN_KW = ['penicilin', 'amoxicilin', 'ampicilin', 'betalactam'];
 const LATEX_KW = ['latex'];
 const ANTICOAGULANT_KW = [
+  // DX-099: el paciente que contesta «Sí» sin saber el principio activo
+  // («Anticoagulante (sin especificar)») también enciende la bandera.
+  'anticoagul',
+  'antiagregant',
   'warfarin',
   'rivaroxab',
   'apixab',

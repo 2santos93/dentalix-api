@@ -46,6 +46,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
 import { PostOpInstructionsModule } from './modules/post-op-instructions/post-op-instructions.module';
+import { MedicalHistorySubmissionsModule } from './modules/medical-history-submissions/medical-history-submissions.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { ImplantsModule } from './modules/implants/implants.module';
@@ -118,6 +119,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     DashboardModule,
     ConsentsModule,
     PostOpInstructionsModule,
+    // DX-099: anamnesis previa a la cita por enlace seguro.
+    MedicalHistorySubmissionsModule,
     PeriodontalModule,
     PrescriptionsModule,
     ImplantsModule,

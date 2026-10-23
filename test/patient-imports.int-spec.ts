@@ -465,6 +465,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'collection_notes.patientId',
       'data_processing_consents.patientId',
       'medical_history_reviews.patientId',
+      // DX-099: una anamnesis enviada por enlace también bloquea el deshacer.
+      'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
       'patient_agreements.patientId',
       'patient_consents.patientId',

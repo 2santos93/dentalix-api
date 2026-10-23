@@ -62,6 +62,14 @@ export class MedicalHistoryDto {
   @ApiProperty()
   hasCriticalAlert!: boolean;
 
+  @ApiProperty({
+    enum: ['STAFF', 'PATIENT_FORM'],
+    enumName: 'MedicalHistorySource',
+    description:
+      'DX-099: STAFF = la tecleó el personal; PATIENT_FORM = la aceptó un profesional (el autor) desde el formulario que llenó el paciente por enlace.',
+  })
+  source!: 'STAFF' | 'PATIENT_FORM';
+
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
 

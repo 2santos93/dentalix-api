@@ -19,6 +19,8 @@ for (const policy of [
   'PUBLIC_FILES',
   'DIRECT_UPLOAD',
   'PATIENT_IMPORT',
+  'ANAMNESIS',
+  'ANAMNESIS_TOKEN',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

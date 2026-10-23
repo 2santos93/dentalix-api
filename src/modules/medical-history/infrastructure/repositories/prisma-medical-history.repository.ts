@@ -8,6 +8,7 @@ import {
 } from '../../domain/ports/medical-history-repository.port';
 import {
   MedicalHistory,
+  MedicalHistorySource,
   Allergy,
   Condition,
   Medication,
@@ -35,7 +36,9 @@ const EMPTY_FLAGS: SafetyFlags = {
   alergiaLatex: false,
 };
 
-function mapToEntity(row: PrismaMedicalHistoryVersion): MedicalHistory {
+export function mapMedicalHistoryVersion(
+  row: PrismaMedicalHistoryVersion,
+): MedicalHistory {
   return {
     id: row.id,
     tenantId: row.tenantId,
@@ -52,9 +55,75 @@ function mapToEntity(row: PrismaMedicalHistoryVersion): MedicalHistory {
     notes: row.notes,
     safetyFlags: (row.safetyFlags as SafetyFlags | null) ?? EMPTY_FLAGS,
     hasCriticalAlert: row.hasCriticalAlert,
+    source: row.source,
     createdById: row.createdById,
     createdAt: row.createdAt,
   };
+}
+
+/** Última versión viva del paciente, dentro de la transacción del llamador. */
+export function latestMedicalHistoryVersionInTx(
+  tx: Prisma.TransactionClient,
+  patientId: string,
+): Promise<PrismaMedicalHistoryVersion | null> {
+  return tx.medicalHistoryVersion.findFirst({
+    where: { patientId, deletedAt: null },
+    orderBy: { version: 'desc' },
+  });
+}
+
+/**
+ * Inserta una versión NUEVA de la anamnesis dentro de la transacción del
+ * llamador (ya con el tenant fijado). Append-only: NEVER update/delete an
+ * existing row. El número de versión se calcula bajo el candado por paciente
+ * (DX-247: el mismo que «Sin cambios hoy», que así nunca confirma una versión
+ * a punto de ser reemplazada); el índice único (tenantId, patientId, version)
+ * es la última red ante un doble INSERT concurrente. Las banderas se derivan
+ * aquí (`deriveSafetyFlags`), nunca se toman del cliente. Lo usan el guardado
+ * del personal y, DX-099, la aceptación del formulario del paciente, que lo
+ * hace en la MISMA transacción que el cambio de estado del envío.
+ */
+export async function insertMedicalHistoryVersionInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    patientId: string;
+    data: MedicalHistoryVersionData;
+    createdById: string | null;
+    source: MedicalHistorySource;
+  },
+): Promise<PrismaMedicalHistoryVersion> {
+  const { tenantId, patientId, data } = input;
+  const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
+  await lockPatientAnamnesis(tx, tenantId, patientId);
+  const latest = await tx.medicalHistoryVersion.findFirst({
+    where: { patientId, deletedAt: null },
+    orderBy: { version: 'desc' },
+    select: { version: true },
+  });
+  const version = (latest?.version ?? 0) + 1;
+
+  return tx.medicalHistoryVersion.create({
+    data: {
+      tenantId,
+      patientId,
+      version,
+      allergies: (data.allergies ?? []) as unknown as Prisma.InputJsonValue,
+      conditions: (data.conditions ?? []) as unknown as Prisma.InputJsonValue,
+      medications: (data.medications ?? []) as unknown as Prisma.InputJsonValue,
+      habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      dentalHistory: (data.dentalHistory ??
+        Prisma.JsonNull) as Prisma.InputJsonValue,
+      surgeries: (data.surgeries ?? []) as unknown as Prisma.InputJsonValue,
+      vitalSigns: (data.vitalSigns ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      familyHistory: data.familyHistory,
+      notes: data.notes,
+      safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
+      hasCriticalAlert,
+      source: input.source,
+      createdById: input.createdById,
+    },
+  });
 }
 
 @Injectable()
@@ -82,13 +151,10 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
   }
 
   async getLatest(patientId: string): Promise<MedicalHistory | null> {
-    const row = await this.prisma.runWithTenant(async (tx) => {
-      return tx.medicalHistoryVersion.findFirst({
-        where: { patientId, deletedAt: null },
-        orderBy: { version: 'desc' },
-      });
-    });
-    return row ? mapToEntity(row) : null;
+    const row = await this.prisma.runWithTenant((tx) =>
+      latestMedicalHistoryVersionInTx(tx, patientId),
+    );
+    return row ? mapMedicalHistoryVersion(row) : null;
   }
 
   async createVersion(
@@ -97,49 +163,15 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
     createdById?: string,
   ): Promise<MedicalHistory> {
     const tenantId = this.requireTenantId();
-    const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
-
-    const row = await this.prisma.runWithTenant(async (tx) => {
-      // Append-only: NEVER update/delete an existing row. `findFirst` +
-      // `create` run inside the same `runWithTenant` transaction, so the
-      // version number is computed from a consistent snapshot; the previous
-      // row is left completely untouched by this write (the partial unique
-      // index (tenantId, patientId, version) WHERE deletedAt IS NULL is the
-      // last-resort guard against a concurrent double-insert of the same
-      // version). DX-247: bajo el mismo candado por paciente que «Sin cambios
-      // hoy», que así nunca confirma una versión a punto de ser reemplazada.
-      await lockPatientAnamnesis(tx, tenantId, patientId);
-      const latest = await tx.medicalHistoryVersion.findFirst({
-        where: { patientId, deletedAt: null },
-        orderBy: { version: 'desc' },
-        select: { version: true },
-      });
-      const version = (latest?.version ?? 0) + 1;
-
-      return tx.medicalHistoryVersion.create({
-        data: {
-          tenantId,
-          patientId,
-          version,
-          allergies: (data.allergies ?? []) as unknown as Prisma.InputJsonValue,
-          conditions: (data.conditions ??
-            []) as unknown as Prisma.InputJsonValue,
-          medications: (data.medications ??
-            []) as unknown as Prisma.InputJsonValue,
-          habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-          dentalHistory: (data.dentalHistory ??
-            Prisma.JsonNull) as Prisma.InputJsonValue,
-          surgeries: (data.surgeries ?? []) as unknown as Prisma.InputJsonValue,
-          vitalSigns: (data.vitalSigns ??
-            Prisma.JsonNull) as Prisma.InputJsonValue,
-          familyHistory: data.familyHistory,
-          notes: data.notes,
-          safetyFlags: safetyFlags as unknown as Prisma.InputJsonValue,
-          hasCriticalAlert,
-          createdById,
-        },
-      });
-    });
-    return mapToEntity(row);
+    const row = await this.prisma.runWithTenant((tx) =>
+      insertMedicalHistoryVersionInTx(tx, {
+        tenantId,
+        patientId,
+        data,
+        createdById: createdById ?? null,
+        source: 'STAFF',
+      }),
+    );
+    return mapMedicalHistoryVersion(row);
   }
 }

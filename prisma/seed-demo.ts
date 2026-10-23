@@ -139,6 +139,8 @@ import {
   UpdatePostOpTemplateUseCase,
 } from '../src/modules/post-op-instructions/application/use-cases/post-op-templates.use-cases';
 import { DeliverPostOpInstructionsUseCase } from '../src/modules/post-op-instructions/application/use-cases/post-op-deliveries.use-cases';
+import { CreateAnamnesisRequestUseCase } from '../src/modules/medical-history-submissions/application/use-cases/anamnesis-requests.use-cases';
+import { SubmitPublicAnamnesisUseCase } from '../src/modules/medical-history-submissions/application/use-cases/public-anamnesis.use-cases';
 import {
   CreatePayerUseCase,
   ListPayersUseCase,
@@ -149,6 +151,7 @@ import {
 } from '../src/modules/patient-coverages/application/use-cases/patient-coverages.use-cases';
 import { UpdatePatientCommunicationUseCase } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
 import {
+  DEMO_ANAMNESIS_SUBMISSION,
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
   DEMO_CLINICAL_ADDENDA,
@@ -629,6 +632,10 @@ class DemoSeeder {
         typeByReason,
         attended,
       ),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createAnamnesisSubmission(tenantId, patientIds, receptionId),
     );
 
     await this.createScheduleBlocksAndWaitlist(
@@ -1424,6 +1431,47 @@ class DemoSeeder {
       },
       // Impreso: sin enlace, no hace falta host.
       { protocol: 'http', host: null },
+    );
+  }
+
+  /**
+   * DX-099: recepción envía el enlace de anamnesis a una paciente y ella lo
+   * responde, por los mismos casos de uso que la API (enlace con su hash,
+   * autorización vigente, envío auditado sin respuestas). Queda SUBMITTED en
+   * la sede principal: el doctor la ve en «Anamnesis por revisar» al entrar.
+   * El evento de crear el enlace es el que escribe el `@Audit` de la ruta.
+   */
+  private async createAnamnesisSubmission(
+    tenantId: string,
+    patientIds: string[],
+    receptionId: string,
+  ): Promise<void> {
+    const patientId = patientIds[DEMO_ANAMNESIS_SUBMISSION.patientIndex];
+    const created = await this.use(CreateAnamnesisRequestUseCase).execute(
+      patientId,
+      {},
+      receptionId,
+      { protocol: 'http', host: 'demo.localhost:3001' },
+    );
+    await this.use(RecordAuditEventUseCase).record({
+      tenantId,
+      locationId: null,
+      actor: { kind: 'user', userId: receptionId, role: ClinicRole.RECEPTION },
+      action: 'CREATE',
+      resourceType: 'MEDICAL_HISTORY_SUBMISSION',
+      resourceId: created.id,
+      patient: { kind: 'patient', id: patientId },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+      metadata: { reason: 'ANAMNESIS_LINK_CREATED' },
+    });
+    const token = created.url.split('/').at(-1);
+    if (!token) throw new Error('Demo DX-099: el enlace no trae token.');
+    await this.use(SubmitPublicAnamnesisUseCase).execute(
+      token,
+      { answers: DEMO_ANAMNESIS_SUBMISSION.answers, declarationAccepted: true },
+      { ipAddress: null, userAgent: null, requestId: null },
     );
   }
 
