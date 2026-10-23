@@ -14,7 +14,7 @@ import { resolveLocationTimeZones } from '../src/shared/locations/location-time-
  * de la cita no falla si el ítem ya está reservado en otra cita viva (lo deja
  * allí), pero el alta explícita del vínculo, reactivar y reagendar siguen
  * chocando con `appointment_plan_items_active_key`. Y la BD no deja retirar el
- * vínculo de una cita COMPLETED (ERRCODE propio DX271).
+ * vínculo de una cita COMPLETED (ERRCODE propio Q0271).
  */
 const owner = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -243,7 +243,7 @@ describe('DX-271 triggers de reserva de ítems', () => {
     await setStatus(future, 'CANCELLED');
   });
 
-  it('la BD no deja retirar el vínculo de una cita COMPLETED (DX271); de una agendada, sí', async () => {
+  it('la BD no deja retirar el vínculo de una cita COMPLETED (Q0271); de una agendada, sí', async () => {
     const other = await newItem();
     const done = await appointment(new Date(Date.now() - 3 * DAY));
     await link(done, other);
@@ -264,14 +264,14 @@ describe('DX-271 triggers de reserva de ítems', () => {
           data: { deletedAt: new Date() },
         }),
       );
-    await expect(retire(done)).rejects.toThrow(/DX271/);
+    await expect(retire(done)).rejects.toThrow(/Q0271/);
     // También como owner de las migraciones (sin RLS que lo esconda).
     await expect(
       owner.appointmentPlanItem.updateMany({
         where: { appointmentId: done },
         data: { deletedAt: new Date() },
       }),
-    ).rejects.toThrow(/DX271/);
+    ).rejects.toThrow(/Q0271/);
     expect(
       await owner.appointmentPlanItem.count({
         where: { appointmentId: done, deletedAt: null },

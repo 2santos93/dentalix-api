@@ -1,14 +1,15 @@
 -- DX-271 (auditoría BE-038, BE-039).
 --
--- 1) Un paso del día de la cita (llegó, en sillón, listo, completada,
---    confirmada…) que reactiva su vínculo NO falla si el ítem ya está
+-- 1) Un paso del día de la cita hacia un estado que reserva (llegó, en
+--    sillón, listo, confirmada…) que reactiva su vínculo NO falla si el ítem ya está
 --    reservado en otra cita viva: la reserva se queda donde está y este
 --    vínculo sigue inactivo. Reactivar (desde cancelada, no-show, completada o
 --    retirada) y reagendar (cambia `start`) siguen chocando con
 --    `appointment_plan_items_active_key`, igual que el alta explícita.
 -- 2) La BD no deja retirar (`deletedAt`) el vínculo de una cita COMPLETED:
 --    es lo que se hizo en esa visita y fija el mínimo de la siguiente.
---    ERRCODE propio 'DX271', que el filtro de errores traduce a 409.
+--    ERRCODE propio 'Q0271' (clase de implementación, I–Z: las A–H las
+--    reserva el estándar SQL), que el filtro de errores traduce a 409.
 --
 -- Sin SECURITY DEFINER (como el resto de dx256): las funciones corren con el
 -- rol que escribe, bajo su RLS. No cambia ninguna política ni el FORCE.
@@ -23,9 +24,12 @@ DECLARE
 BEGIN
  IF NEW.start IS DISTINCT FROM OLD.start
     OR NEW."deletedAt" IS DISTINCT FROM OLD."deletedAt"
-    OR OLD.status IN ('CANCELLED','NO_SHOW','COMPLETED') THEN
+    OR OLD.status IN ('CANCELLED','NO_SHOW','COMPLETED')
+    OR NEW.status NOT IN ('SCHEDULED','CONFIRMED','ARRIVED','IN_CHAIR','READY_FOR_CHECKOUT') THEN
   -- Reagendar o reactivar: estricto. Si otra cita viva tiene el ítem, el
-  -- índice único lo rechaza (409 en la API).
+  -- índice único lo rechaza (409 en la API). Hacia un estado que no reserva
+  -- (cancelar, no-show, completar) nada se activa y no puede chocar: un solo
+  -- UPDATE, sin subtransacciones.
   UPDATE public.appointment_plan_items SET active=false
    WHERE "tenantId"=NEW."tenantId" AND "appointmentId"=NEW.id;
  ELSE
@@ -58,7 +62,7 @@ BEGIN
     WHERE a.id=OLD."appointmentId" AND a."tenantId"=OLD."tenantId"
       AND a.status='COMPLETED') THEN
   RAISE EXCEPTION 'Esta cita ya pasó: sus tratamientos no se cambian.'
-   USING ERRCODE='DX271';
+   USING ERRCODE='Q0271';
  END IF;
  RETURN NEW;
 END $$;
