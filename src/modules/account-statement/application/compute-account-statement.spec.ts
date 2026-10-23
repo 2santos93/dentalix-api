@@ -1,4 +1,5 @@
 import {
+  StatementOpeningBalanceRow,
   StatementPaymentPlanRow,
   StatementPaymentRow,
   StatementPlanRow,
@@ -92,6 +93,7 @@ describe('computeAccountStatement', () => {
       plans: [],
       movements: [],
       installments: [],
+      openingBalances: [],
     });
   });
 
@@ -115,6 +117,7 @@ describe('computeAccountStatement', () => {
       {
         currency: 'COP',
         budgeted: 1500.5,
+        openingBalance: 0,
         paid: 300.3,
         balance: 1200.2,
         overdueCount: 0,
@@ -476,5 +479,84 @@ describe('computeAccountStatement', () => {
       { today: TODAY },
     );
     expect(out.movements.map((m) => m.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  describe('saldo migrado (DX-262)', () => {
+    function opening(
+      id: string,
+      amount: number,
+      overrides: Partial<StatementOpeningBalanceRow> = {},
+    ): StatementOpeningBalanceRow {
+      return {
+        id,
+        currency: 'COP',
+        amount,
+        asOfDate: '2025-12-15',
+        asOfDateApproximate: false,
+        concept: 'Saldo migrado',
+        importBatchId: 'batch-1',
+        ...overrides,
+      };
+    }
+
+    it('suma al saldo de su moneda sin tocar lo presupuestado ni lo abonado', () => {
+      const out = computeAccountStatement(
+        snapshot({
+          plans: [plan('tp-1', { billable: 1000 })],
+          payments: [payment('tp-1', 300)],
+          openingBalances: [opening('ob-1', 250.5)],
+        }),
+        { today: TODAY },
+      );
+      expect(out.summary).toEqual([
+        {
+          currency: 'COP',
+          budgeted: 1000,
+          openingBalance: 250.5,
+          paid: 300,
+          balance: 950.5,
+          overdueCount: 0,
+          overdueAmount: 0,
+          nextInstallment: null,
+        },
+      ]);
+      expect(out.openingBalances).toEqual([
+        {
+          id: 'ob-1',
+          currency: 'COP',
+          amount: 250.5,
+          asOfDate: '2025-12-15',
+          asOfDateApproximate: false,
+          concept: 'Saldo migrado',
+          importBatchId: 'batch-1',
+        },
+      ]);
+    });
+
+    it('un paciente que solo tiene saldo migrado: una moneda por saldo, sin mezclar', () => {
+      const out = computeAccountStatement(
+        snapshot({
+          openingBalances: [
+            opening('ob-usd', 40, {
+              currency: 'USD',
+              asOfDateApproximate: true,
+            }),
+            opening('ob-cop', 150000),
+          ],
+        }),
+        { today: TODAY },
+      );
+      expect(
+        out.summary.map((s) => [s.currency, s.openingBalance, s.balance]),
+      ).toEqual([
+        ['COP', 150000, 150000],
+        ['USD', 40, 40],
+      ]);
+      // Del más antiguo al más reciente y, a igual fecha, por moneda.
+      expect(out.openingBalances.map((o) => o.id)).toEqual([
+        'ob-cop',
+        'ob-usd',
+      ]);
+    });
   });
 });

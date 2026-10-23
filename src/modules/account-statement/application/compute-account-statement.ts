@@ -56,6 +56,9 @@ export interface ComputeAccountStatementOptions {
  *   mismo reparto voraz y los mismos estados que GetPaymentPlanUseCase
  *   (deriveStatuses): lo abonado al plan en la moneda del plan de pagos cubre
  *   primero la cuota inicial y luego las cuotas en orden.
+ * - Saldo migrado (DX-262) = deuda traída del programa anterior, por moneda:
+ *   va aparte de lo presupuestado (`openingBalance`) y suma al saldo:
+ *   `balance = budgeted + openingBalance − paid`.
  * - Próxima cuota = la de vencimiento más cercano que todavía no venció ni está
  *   pagada (las vencidas ya se cuentan aparte).
  */
@@ -80,6 +83,7 @@ function isActive(payment: BalancePaymentRow): boolean {
 
 interface CurrencyAccumulator {
   budgetedCents: number;
+  openingCents: number;
   paidCents: number;
   overdueCount: number;
   overdueCents: number;
@@ -90,6 +94,7 @@ interface CurrencyAccumulator {
 function emptyAccumulator(): CurrencyAccumulator {
   return {
     budgetedCents: 0,
+    openingCents: 0,
     paidCents: 0,
     overdueCount: 0,
     overdueCents: 0,
@@ -197,6 +202,19 @@ export function computeBalances(
     };
   });
 
+  // --- Saldo migrado (DX-262) -----------------------------------------------
+  // Deuda traída del programa anterior: suma entera al saldo de su moneda
+  // (ningún abono se le imputa todavía, DX-051).
+  const openingBalances = [...(snapshot.openingBalances ?? [])].sort(
+    (a, b) =>
+      a.asOfDate.localeCompare(b.asOfDate) ||
+      a.currency.localeCompare(b.currency) ||
+      a.id.localeCompare(b.id),
+  );
+  for (const o of openingBalances) {
+    acc(o.currency).openingCents += toCents(o.amount);
+  }
+
   // --- Abonado por moneda ---------------------------------------------------
   for (const p of snapshot.payments) {
     if (isActive(p)) {
@@ -268,27 +286,31 @@ export function computeBalances(
   const summary: StatementCurrencySummary[] = [...currencies.entries()]
     .filter(
       ([, a]) =>
-        a.budgetedCents !== 0 || a.paidCents !== 0 || a.hasInstallments,
+        a.budgetedCents !== 0 ||
+        a.openingCents !== 0 ||
+        a.paidCents !== 0 ||
+        a.hasInstallments,
     )
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([currency, a]) => ({
       currency,
       budgeted: fromCents(a.budgetedCents),
+      openingBalance: fromCents(a.openingCents),
       paid: fromCents(a.paidCents),
-      balance: fromCents(a.budgetedCents - a.paidCents),
+      balance: fromCents(a.budgetedCents + a.openingCents - a.paidCents),
       overdueCount: a.overdueCount,
       overdueAmount: fromCents(a.overdueCents),
       nextInstallment: a.next,
     }));
 
-  return { summary, plans, installments };
+  return { summary, plans, installments, openingBalances };
 }
 
 export function computeAccountStatement(
   snapshot: StatementSnapshot,
   options: ComputeAccountStatementOptions,
 ): ComputedAccountStatement {
-  const { summary, plans, installments } = computeBalances(
+  const { summary, plans, installments, openingBalances } = computeBalances(
     snapshot,
     options.today,
   );
@@ -324,5 +346,5 @@ export function computeAccountStatement(
         b.paidAt.getTime() - a.paidAt.getTime() || b.id.localeCompare(a.id),
     );
 
-  return { summary, plans, movements, installments };
+  return { summary, plans, movements, installments, openingBalances };
 }

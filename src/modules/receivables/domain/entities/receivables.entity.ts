@@ -1,4 +1,5 @@
 import type {
+  BalanceOpeningRow,
   StatementPaymentPlanRow,
   StatementPlanRow,
 } from '../../../account-statement/domain/entities/account-statement.entity';
@@ -47,6 +48,11 @@ export interface PatientLedger {
   paid: PaidSum[];
   /** Planes de pago vivos (no cancelados) de planes vivos. */
   paymentPlans: StatementPaymentPlanRow[];
+  /**
+   * Saldos migrados vivos (DX-262): envejecen desde su fecha de corte
+   * (aproximada si el archivo no la traía).
+   */
+  openings?: BalanceOpeningRow[];
 }
 
 /** Datos de contacto y último abono de un paciente de la página. */

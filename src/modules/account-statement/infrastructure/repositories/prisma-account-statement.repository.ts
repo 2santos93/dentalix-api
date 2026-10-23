@@ -36,7 +36,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
    * Número FIJO de consultas, sin importar cuántos planes, abonos o cuotas
    * tenga el paciente (sin N+1): paciente, planes, suma de ítems por plan
    * (`groupBy`), abonos con su sede (Prisma resuelve la relación con un `IN`
-   * para todas las filas) y planes de pago con sus cuotas (ídem), más el nombre
+   * para todas las filas), planes de pago con sus cuotas (ídem) y saldos
+   * migrados vivos (DX-262), más el nombre
    * de la clínica, y el nombre de quienes anularon abonos (una consulta más,
    * solo si hay anulaciones con autor).
    *
@@ -76,7 +77,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           deletedAt: null,
         };
 
-        const [tenant, plans, itemSums, payments, paymentPlans] =
+        const [tenant, plans, itemSums, payments, paymentPlans, openings] =
           await Promise.all([
             // `tenants` no tiene RLS (tabla global): se acota por el tenant del
             // contexto, igual que PrismaTenantBrandingRepository.
@@ -143,6 +144,20 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                   orderBy: { sequence: 'asc' },
                 },
               },
+            }),
+            // DX-262: saldos migrados vivos (los de un lote deshecho, fuera).
+            tx.openingBalance.findMany({
+              where: { patientId, voidedAt: null },
+              select: {
+                id: true,
+                currency: true,
+                amount: true,
+                asOfDate: true,
+                asOfDateApproximate: true,
+                concept: true,
+                importBatchId: true,
+              },
+              orderBy: [{ asOfDate: 'asc' }, { id: 'asc' }],
             }),
           ]);
 
@@ -223,6 +238,11 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 dueDate: i.dueDate,
                 amount: i.amount.toNumber(),
               })),
+            })),
+            openingBalances: openings.map((o) => ({
+              ...o,
+              amount: o.amount.toNumber(),
+              asOfDate: o.asOfDate.toISOString().slice(0, 10),
             })),
           },
         };
