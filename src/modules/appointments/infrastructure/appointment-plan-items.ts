@@ -7,7 +7,7 @@ import {
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import type { PlanItemReservedElsewhere } from '../domain/entities/appointment.entity';
-import { PATIENT_FLOW_MESSAGES } from '../domain/patient-flow';
+import { isInClinic, PATIENT_FLOW_MESSAGES } from '../domain/patient-flow';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import {
@@ -17,6 +17,7 @@ import {
 import {
   planItemsClosedMessage,
   planItemsEditable,
+  PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
   PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
   PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
   PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
@@ -333,6 +334,13 @@ export interface ClaimPlanItemInput {
  * «Traer» cruzados) y todo se revalida con ellas bloqueadas. Un
  * `audit_event` APPOINTMENT_PLAN_ITEMS en cada cita, en la misma transacción.
  * Si ya lo reserva, no cambia nada. Devuelve la cita de la que vino (o null).
+ *
+ * DX-288: atómico entre citas distintas. Después de las citas se bloquea la
+ * fila del ítem (FOR NO KEY UPDATE: no estorba a las FK que la miran), así
+ * que dos «Traer» del mismo tratamiento se ponen en fila aunque no
+ * compartan ninguna cita. Y no se trae desde una cita con el paciente en la
+ * clínica: la que llega después de la primera (a la vez o no) recibe 409 en
+ * vez de quitársela.
  */
 export async function claimPlanItemInTx(
   tx: Prisma.TransactionClient,
@@ -348,7 +356,10 @@ export async function claimPlanItemInTx(
         appointmentId: { not: appointmentId },
         appointment: liveReservingAppointment(new Date()),
       },
-      select: { appointmentId: true },
+      select: {
+        appointmentId: true,
+        appointment: { select: { status: true } },
+      },
     });
   const seen = await holderOf();
   const ids = [appointmentId, ...(seen ? [seen.appointmentId] : [])].sort();
@@ -379,14 +390,24 @@ export async function claimPlanItemInTx(
   if (schedulable === 0)
     throw new ConflictException(PLAN_ITEM_NOT_SCHEDULABLE_MESSAGE);
 
+  await tx.$queryRaw`
+    SELECT 1 FROM treatment_plan_items
+     WHERE id=${planItemId}::uuid AND "tenantId"=${tenantId}::uuid
+       FOR NO KEY UPDATE`;
   const holder = await holderOf();
   if ((holder?.appointmentId ?? null) !== (seen?.appointmentId ?? null))
-    throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+    throw new ConflictException(
+      holder && isInClinic(holder.appointment.status)
+        ? PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE
+        : PATIENT_FLOW_MESSAGES.stale,
+    );
   const from = holder
     ? locked.find((a) => a.id === holder.appointmentId)!
     : null;
   if (from && !isLocationAllowed(input.allowedLocations, from.locationId))
     throw new ForbiddenException(PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE);
+  if (from && isInClinic(from.status))
+    throw new ConflictException(PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE);
 
   if (from)
     await tx.appointmentPlanItem.update({
