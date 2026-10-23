@@ -318,6 +318,39 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     ).toBeNull();
   });
 
+  it('reabrir una cita COMPLETED a otra fecha y quitarle sus ítems en el mismo PATCH: la BD lo impide (409) y nada cambia', async () => {
+    const {
+      planId,
+      ids: [itemId],
+    } = await acceptedItems(1);
+    await accept(planId);
+    const done = await rawAppointment(new Date(Date.now() - 4 * DAY));
+    await rawLink(done.id, itemId);
+    await raw.appointment.update({
+      where: { id: done.id },
+      data: { status: 'COMPLETED' },
+    });
+    const linksBefore = await links(done.id);
+    // La cita «después» queda abierta (agendada y futura): el caso de uso lo
+    // admite, pero retirar el vínculo mientras sigue COMPLETED lo frena el
+    // trigger `dx271_completed_link_guard` (ERRCODE DX271 → 409).
+    const start = new Date(Date.now() + 50 * DAY);
+    const res = await call('patch', `/appointments/${done.id}`, {
+      status: 'SCHEDULED',
+      start: start.toISOString(),
+      end: new Date(start.getTime() + 30 * MIN).toISOString(),
+      planItemIds: [],
+    }).expect(409);
+    expect((res.body as { message: string }).message).toBe(CLOSED);
+    const after = await raw.appointment.findUniqueOrThrow({
+      where: { id: done.id },
+    });
+    expect(after.status).toBe('COMPLETED');
+    expect(after.start.getTime()).toBe(done.start.getTime());
+    expect(await links(done.id)).toEqual(linksBefore);
+    expect(await planItemEvents(done.id)).toBe(0);
+  });
+
   it('planItemIds sobre una cita CANCELLED, NO_SHOW o pasada sin llegar: 409; en una futura, 200', async () => {
     const {
       planId,
