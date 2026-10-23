@@ -106,11 +106,16 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             }),
             // Anulados INCLUIDOS (sin filtro de deletedAt): el estado de cuenta
             // los lista marcados; el cálculo no los suma.
+            // DX-262: también los abonos contra un saldo migrado (sin plan).
             tx.payment.findMany({
-              where: { patientId, plan: livePlan },
+              where: {
+                patientId,
+                OR: [{ plan: livePlan }, { openingBalanceId: { not: null } }],
+              },
               select: {
                 id: true,
                 treatmentPlanId: true,
+                openingBalanceId: true,
                 amount: true,
                 currency: true,
                 paidAt: true,
@@ -209,6 +214,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             payments: payments.map((p) => ({
               id: p.id,
               treatmentPlanId: p.treatmentPlanId,
+              openingBalanceId: p.openingBalanceId,
               amount: p.amount.toNumber(),
               currency: p.currency,
               paidAt: p.paidAt,
@@ -336,6 +342,9 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           { currency: string; amount: number }[]
         >();
         for (const row of paidSums) {
+          // El filtro `plan: billablePlan` ya deja fuera los abonos a un saldo
+          // migrado (DX-262), que no tienen plan.
+          if (!row.treatmentPlanId) continue;
           const list = paidByPlan.get(row.treatmentPlanId) ?? [];
           list.push({
             currency: row.currency,

@@ -529,6 +529,8 @@ describe('computeAccountStatement', () => {
           asOfDateApproximate: false,
           concept: 'Saldo migrado',
           importBatchId: 'batch-1',
+          paid: 0,
+          pending: 250.5,
         },
       ]);
     });
@@ -557,6 +559,48 @@ describe('computeAccountStatement', () => {
         'ob-cop',
         'ob-usd',
       ]);
+    });
+
+    it('los abonos contra el saldo migrado lo reducen: abonado y pendiente por saldo (revisión C1)', () => {
+      const out = computeAccountStatement(
+        snapshot({
+          plans: [plan('tp-1', { billable: 1000 })],
+          payments: [
+            payment('tp-1', 300),
+            {
+              ...payment('tp-1', 50000),
+              treatmentPlanId: null,
+              openingBalanceId: 'ob-1',
+            },
+            {
+              ...payment('tp-1', 1000),
+              treatmentPlanId: null,
+              openingBalanceId: 'ob-1',
+              voidedAt: new Date('2026-02-02T00:00:00.000Z'),
+            },
+          ],
+          openingBalances: [opening('ob-1', 150000)],
+        }),
+        { today: TODAY },
+      );
+      expect(out.openingBalances[0]).toMatchObject({
+        id: 'ob-1',
+        amount: 150000,
+        paid: 50000,
+        pending: 100000,
+      });
+      expect(out.summary[0]).toMatchObject({
+        budgeted: 1000,
+        openingBalance: 150000,
+        paid: 50300,
+        balance: 100700,
+      });
+      // El abono al saldo migrado no cubre el plan ni sus cuotas.
+      expect(out.plans[0]).toMatchObject({ paid: 300, balance: 700 });
+      expect(out.movements.find((m) => m.amount === 50000)).toMatchObject({
+        treatmentPlanId: null,
+        openingBalanceId: 'ob-1',
+      });
     });
   });
 });

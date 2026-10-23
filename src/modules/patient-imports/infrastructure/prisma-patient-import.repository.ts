@@ -21,6 +21,7 @@ import {
 import type { FillableField, ImportPatientData } from '../domain/import-fields';
 import {
   DEFAULT_BALANCE_CONCEPT,
+  totalsByCurrency,
   type CurrencyTotal,
   type DocLookup,
   type PreparedBalance,
@@ -158,7 +159,10 @@ export interface NewBalanceSheet {
 export interface BalanceChunkResult {
   processed: number;
   created: number;
+  /** Su paciente no existía al importar. */
   skipped: number;
+  /** Su documento era de varios pacientes vivos (no se adivina). */
+  ambiguous: number;
 }
 
 /** Saldos migrados vivos de un lote, por moneda (lo importado de verdad). */
@@ -168,8 +172,11 @@ export interface ImportedBalanceTotal {
   cents: number;
 }
 
-/** Una columna que apunta a `opening_balances.id` (imputación futura, DX-051). */
-export type OpeningBalanceReference = PatientReference;
+/** Una columna que apunta a `opening_balances.id` (abonos, DX-262). */
+export interface OpeningBalanceReference extends PatientReference {
+  /** Columnas de retirada de esa tabla: la fila solo bloquea si están NULL. */
+  live: string[];
+}
 
 /** Una columna que apunta a `patients.id` (de `pg_constraint`). */
 export interface PatientReference {
@@ -408,7 +415,7 @@ export class PrismaPatientImportRepository {
    */
   async purgeIssues(tenantId: string, before: Date): Promise<number> {
     return this.prisma.runWithTenant(tenantId, async (tx) => {
-      const r = await tx.patientImportBatch.updateMany({
+      const purged = await tx.patientImportBatch.updateManyAndReturn({
         where: {
           issuesPurgedAt: null,
           OR: [
@@ -420,8 +427,18 @@ export class PrismaPatientImportRepository {
           ],
         },
         data: { issues: [], balanceIssues: [], issuesPurgedAt: new Date() },
+        select: { id: true },
       });
-      return r.count;
+      // DX-262 (revisión M3): los saldos preparados llevan el documento del
+      // paciente y el importe del fichero; lo importado ya está en
+      // opening_balances y el lote guarda hash y totales. Misma caducidad.
+      if (purged.length > 0) {
+        // eslint-disable-next-line no-restricted-syntax -- datos del fichero caducados (allowlist en no-hard-delete.ts)
+        await tx.patientImportBalanceRow.deleteMany({
+          where: { batchId: { in: purged.map((b) => b.id) } },
+        });
+      }
+      return purged.length;
     });
   }
 
@@ -528,24 +545,36 @@ export class PrismaPatientImportRepository {
     const out = new Map<string, 'FOUND' | 'AMBIGUOUS'>();
     if (keys.length === 0) return out;
     const tenantId = this.tenantId();
-    const rows = await this.prisma.runWithTenant(
-      (tx) => tx.$queryRaw<
-        { docKey: string; patients: number; inFile: boolean }[]
-      >`
-        SELECT k."docKey",
-               (SELECT count(*)::int FROM "patients" p
-                 WHERE p."tenantId" = ${tenantId}::uuid AND p."deletedAt" IS NULL
-                   AND p."docNumber" IS NOT NULL
-                   AND regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = k."docKey") AS "patients",
-               EXISTS (SELECT 1 FROM "patient_import_rows" r
-                        WHERE r."tenantId" = ${tenantId}::uuid AND r."batchId" = ${batchId}::uuid
-                          AND r."outcome" = 'PENDING' AND r."data" IS NOT NULL
-                          AND regexp_replace(upper(r."data"->>'docNumber'), '[^0-9A-Z]', '', 'g') = k."docKey") AS "inFile"
-          FROM unnest(${keys}::text[]) AS k("docKey")`,
+    // Por conjuntos (revisión I1): una pasada por patients y otra por las
+    // filas del lote con `= ANY(keys)`, agrupadas por clave, como
+    // `existingDocs`. Nunca una subconsulta por clave. Transacción larga:
+    // una clínica grande y una hoja de 10.000 filas.
+    const [patients, inFile] = await this.prisma.runWithTenant(
+      (tx) =>
+        Promise.all([
+          tx.$queryRaw<{ docKey: string; n: number }[]>`
+            SELECT regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey",
+                   count(*)::int AS "n"
+              FROM "patients"
+             WHERE "tenantId" = ${tenantId}::uuid
+               AND "deletedAt" IS NULL
+               AND "docNumber" IS NOT NULL
+               AND regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])
+             GROUP BY 1`,
+          tx.$queryRaw<{ docKey: string }[]>`
+            SELECT DISTINCT regexp_replace(upper("data"->>'docNumber'), '[^0-9A-Z]', '', 'g') AS "docKey"
+              FROM "patient_import_rows"
+             WHERE "tenantId" = ${tenantId}::uuid
+               AND "batchId" = ${batchId}::uuid
+               AND "outcome" = 'PENDING'
+               AND "data" IS NOT NULL
+               AND regexp_replace(upper("data"->>'docNumber'), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])`,
+        ]),
+      LONG_TX,
     );
-    for (const r of rows) {
-      if (r.patients > 1) out.set(r.docKey, 'AMBIGUOUS');
-      else if (r.patients === 1 || r.inFile) out.set(r.docKey, 'FOUND');
+    for (const r of inFile) out.set(r.docKey, 'FOUND');
+    for (const r of patients) {
+      out.set(r.docKey, r.n > 1 ? 'AMBIGUOUS' : 'FOUND');
     }
     return out;
   }
@@ -687,19 +716,28 @@ export class PrismaPatientImportRepository {
          ORDER BY "rowNumber", "currency"
          LIMIT ${chunk}
          FOR UPDATE SKIP LOCKED`;
-      if (pending.length === 0) return { processed: 0, created: 0, skipped: 0 };
+      if (pending.length === 0) {
+        return { processed: 0, created: 0, skipped: 0, ambiguous: 0 };
+      }
       const keys = [...new Set(pending.map((r) => r.docKey))];
-      // Solo una clave con UN paciente vivo: si hay varios, no se adivina.
-      const patients = await tx.$queryRaw<{ id: string; docKey: string }[]>`
-        SELECT min(p."id"::text)::uuid AS "id", k."docKey"
+      // Solo una clave con UN paciente vivo: si hay varios, no se adivina
+      // (ambiguo, se cuenta aparte: revisión M7).
+      const patients = await tx.$queryRaw<
+        { id: string; docKey: string; n: number }[]
+      >`
+        SELECT min(p."id"::text)::uuid AS "id", k."docKey", count(*)::int AS "n"
           FROM "patients" p
           JOIN unnest(${keys}::text[]) AS k("docKey")
             ON regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = k."docKey"
          WHERE p."tenantId" = ${tenantId}::uuid AND p."deletedAt" IS NULL
            AND p."docNumber" IS NOT NULL
-         GROUP BY k."docKey"
-        HAVING count(*) = 1`;
-      const patientOf = new Map(patients.map((p) => [p.docKey, p.id]));
+         GROUP BY k."docKey"`;
+      const patientOf = new Map(
+        patients.filter((p) => p.n === 1).map((p) => [p.docKey, p.id]),
+      );
+      const ambiguousKeys = new Set(
+        patients.filter((p) => p.n > 1).map((p) => p.docKey),
+      );
       const createdById = batch.confirmedById as string;
       const toCreate = pending.filter((r) => patientOf.has(r.docKey));
       if (toCreate.length > 0) {
@@ -722,22 +760,28 @@ export class PrismaPatientImportRepository {
       }
       const ids = pending.map((r) => r.id);
       const outcomes = pending.map((r) =>
-        patientOf.has(r.docKey) ? 'CREATED' : 'SKIPPED',
+        patientOf.has(r.docKey)
+          ? 'CREATED'
+          : ambiguousKeys.has(r.docKey)
+            ? 'FAILED'
+            : 'SKIPPED',
       );
       const patientIds = pending.map((r) => patientOf.get(r.docKey) ?? null);
       await tx.$executeRaw`
         UPDATE "patient_import_balance_rows" r
            SET "outcome" = v.outcome::"PatientImportRowOutcome",
                "patientId" = v.patient_id,
-               "processedAt" = now()
+               "processedAt" = timezone('UTC', now())
           FROM (SELECT unnest(${ids}::uuid[]) AS id,
                        unnest(${outcomes}::text[]) AS outcome,
                        unnest(${patientIds}::uuid[]) AS patient_id) v
          WHERE r."id" = v.id`;
+      const ambiguous = outcomes.filter((o) => o === 'FAILED').length;
       const result = {
         processed: pending.length,
         created: toCreate.length,
-        skipped: pending.length - toCreate.length,
+        skipped: pending.length - toCreate.length - ambiguous,
+        ambiguous,
       };
       await tx.patientImportBatch.update({
         where: { id: batch.id },
@@ -745,6 +789,7 @@ export class PrismaPatientImportRepository {
           balanceProcessedRows: { increment: result.processed },
           balanceCreatedCount: { increment: result.created },
           balanceSkippedCount: { increment: result.skipped },
+          balanceAmbiguousCount: { increment: result.ambiguous },
         },
       });
       return result;
@@ -1246,13 +1291,18 @@ export class PrismaPatientImportRepository {
 
   /**
    * Columnas que apuntan a `opening_balances.id` (DX-262), del catálogo, una
-   * vez por proceso. Hoy ninguna: los abonos van siempre a un plan y la
-   * imputación al saldo migrado es DX-051. La tabla que la haga bloqueará
-   * el deshacer de los saldos con abonos imputados sin tocar este código.
+   * vez por proceso: hoy `payments.openingBalanceId` (abonos contra el saldo
+   * migrado). Una tabla nueva que se le cuelgue bloqueará el deshacer sin
+   * tocar este código. `live`: las columnas de retirada que tiene esa tabla
+   * (`deletedAt`, `voidedAt`): una fila anulada no bloquea (revisión M4).
    */
   openingBalanceReferences(): Promise<OpeningBalanceReference[]> {
     this.balanceReferences ??= this.prisma.$queryRaw<OpeningBalanceReference[]>`
-      SELECT cl.relname AS "table", a.attname AS "column"
+      SELECT cl.relname AS "table", a.attname AS "column",
+             ARRAY(SELECT la.attname::text FROM pg_attribute la
+                    WHERE la.attrelid = cl.oid AND NOT la.attisdropped
+                      AND la.attname IN ('deletedAt', 'voidedAt')
+                    ORDER BY 1) AS "live"
         FROM pg_constraint c
         JOIN pg_class cl ON cl.oid = c.conrelid
         JOIN pg_namespace n ON n.oid = cl.relnamespace AND n.nspname = 'public'
@@ -1264,6 +1314,103 @@ export class PrismaPatientImportRepository {
          AND fa.attname = 'id'
        ORDER BY 1, 2`;
     return this.balanceReferences;
+  }
+
+  /**
+   * Los saldos migrados vivos del lote, bloqueados FOR UPDATE (un abono que
+   * llega a la vez espera y después ve el saldo retirado: 404). Se niega
+   * (`UndoBlockedError` con `balances`) si alguno tiene abonos VIVOS.
+   */
+  private async lockUndoableBalances(
+    tx: Tx,
+    batchId: string,
+    references: OpeningBalanceReference[],
+  ): Promise<{ id: string; currency: string; cents: number }[]> {
+    const tenantId = this.tenantId();
+    const balances = await tx.$queryRaw<
+      { id: string; currency: string; cents: number }[]
+    >`
+      SELECT "id", "currency", ("amount" * 100)::bigint::float8 AS "cents"
+        FROM "opening_balances"
+       WHERE "tenantId" = ${tenantId}::uuid AND "importBatchId" = ${batchId}::uuid
+         AND "voidedAt" IS NULL
+       ORDER BY "id"
+       FOR UPDATE`;
+    const ids = balances.map((b) => b.id);
+    if (ids.length > 0 && references.length > 0) {
+      const checks = references.map((ref) => {
+        const live = ref.live.map(
+          (col) => Prisma.sql`AND ${Prisma.raw(quoteIdent(col))} IS NULL`,
+        );
+        return Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
+                            FROM ${Prisma.raw(quoteIdent(ref.table))}
+                           WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${ids}::uuid[])
+                           ${Prisma.join(live, ' ', '', '')}`;
+      });
+      const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
+        SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
+      if (n > 0) throw new UndoBlockedError(0, n);
+    }
+    return balances;
+  }
+
+  /**
+   * Retira (en blando, hora UTC de la BD) esos saldos del lote, antes que
+   * los pacientes (el refresco de cartera de cada sentencia ya los ve fuera),
+   * por sentencias de 1.000, y suma lo retirado al lote (cuántos y cuánto por
+   * moneda: la auditoría dice lo que se hizo, revisión M5).
+   */
+  private async retireBalances(
+    tx: Tx,
+    batchId: string,
+    undoneById: string,
+    balances: { id: string; currency: string; cents: number }[],
+  ): Promise<void> {
+    if (balances.length === 0) return;
+    const tenantId = this.tenantId();
+    const ids = balances.map((b) => b.id);
+    for (let i = 0; i < ids.length; i += UNDO_CHUNK) {
+      await tx.$executeRaw`
+        UPDATE "opening_balances"
+           SET "voidedAt" = timezone('UTC', now()), "voidedById" = ${undoneById}::uuid
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "id" = ANY(${ids.slice(i, i + UNDO_CHUNK)}::uuid[])`;
+    }
+    const before = await tx.patientImportBatch.findUniqueOrThrow({
+      where: { id: batchId },
+      select: { balanceUndoneCount: true, balanceUndoneTotals: true },
+    });
+    await tx.patientImportBatch.update({
+      where: { id: batchId },
+      data: {
+        balanceUndoneCount: (before.balanceUndoneCount ?? 0) + balances.length,
+        balanceUndoneTotals: totalsByCurrency([
+          ...((before.balanceUndoneTotals ?? []) as unknown as CurrencyTotal[]),
+          ...balances.map((b) => ({ currency: b.currency, cents: b.cents })),
+        ]) as unknown as Prisma.InputJsonArray,
+      },
+    });
+  }
+
+  /**
+   * Deshacer SOLO los saldos migrados del lote (DX-262, revisión C1), aunque
+   * sus pacientes ya tengan citas o historia: el lote sigue importado. Se
+   * niega si algún saldo tiene abonos vivos.
+   */
+  async undoBalances(
+    id: string,
+    undoneById: string,
+  ): Promise<{ undoneBalances: number }> {
+    const references = await this.openingBalanceReferences();
+    return this.prisma.runWithTenant(async (tx) => {
+      const status = await this.lockStatus(tx, id);
+      if (status === null) throw new BatchStateError('EXPIRED');
+      if (status !== 'COMPLETED' && status !== 'FAILED')
+        throw new BatchStateError(status);
+      const balances = await this.lockUndoableBalances(tx, id, references);
+      await this.retireBalances(tx, id, undoneById, balances);
+      return { undoneBalances: balances.length };
+    }, LONG_TX);
   }
 
   /**
@@ -1285,6 +1432,13 @@ export class PrismaPatientImportRepository {
       const { status } = locked[0];
       if (status !== 'COMPLETED' && status !== 'FAILED')
         throw new BatchStateError(status);
+
+      // DX-262: primero los saldos (un abono vivo lo niega con su motivo).
+      const balances = await this.lockUndoableBalances(
+        tx,
+        id,
+        balanceReferences,
+      );
 
       const created = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "patients"
@@ -1312,38 +1466,11 @@ export class PrismaPatientImportRepository {
         if (n > 0) throw new UndoBlockedError(n);
       }
 
-      // DX-262: los saldos migrados del lote, bloqueados; con un abono
-      // imputado (cualquier FK a opening_balances) el deshacer se niega.
-      const balances = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "opening_balances"
-         WHERE "tenantId" = ${tenantId}::uuid AND "importBatchId" = ${id}::uuid
-           AND "voidedAt" IS NULL
-         ORDER BY "id"
-         FOR UPDATE`;
-      const balanceIds = balances.map((r) => r.id);
-      if (balanceIds.length > 0 && balanceReferences.length > 0) {
-        const checks = balanceReferences.map(
-          (ref) =>
-            Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
-                         FROM ${Prisma.raw(quoteIdent(ref.table))}
-                        WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${balanceIds}::uuid[])`,
-        );
-        const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
-          SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
-        if (n > 0) throw new UndoBlockedError(0, n);
-      }
-      // Se retiran ANTES que los pacientes (el refresco de la cartera de cada
-      // sentencia ya los ve fuera), por sentencias de 1.000.
-      for (let i = 0; i < balanceIds.length; i += UNDO_CHUNK) {
-        await tx.$executeRaw`
-          UPDATE "opening_balances"
-             SET "voidedAt" = now(), "voidedById" = ${undoneById}::uuid
-           WHERE "tenantId" = ${tenantId}::uuid
-             AND "id" = ANY(${balanceIds.slice(i, i + UNDO_CHUNK)}::uuid[])`;
-      }
+      await this.retireBalances(tx, id, undoneById, balances);
       for (let i = 0; i < ids.length; i += UNDO_CHUNK) {
         await tx.$executeRaw`
-          UPDATE "patients" SET "deletedAt" = now(), "updatedAt" = now()
+          UPDATE "patients"
+             SET "deletedAt" = timezone('UTC', now()), "updatedAt" = timezone('UTC', now())
            WHERE "tenantId" = ${tenantId}::uuid AND "id" = ANY(${ids.slice(i, i + UNDO_CHUNK)}::uuid[])`;
       }
 
@@ -1390,13 +1517,12 @@ export class PrismaPatientImportRepository {
           undoneById,
           undoneCreated: ids.length,
           undoneFilled,
-          balanceUndoneCount: balanceIds.length,
         },
       });
       return {
         undoneCreated: ids.length,
         undoneFilled,
-        undoneBalances: balanceIds.length,
+        undoneBalances: balances.length,
       };
     }, LONG_TX);
   }

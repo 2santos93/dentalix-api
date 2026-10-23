@@ -418,6 +418,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // planes cobrables: loop/informes/DX-067.md.
   'GET /payments': BILLING,
   'POST /treatment-plans/:id/payments': BILLING,
+  // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
+  'POST /opening-balances/:id/payments': BILLING,
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,

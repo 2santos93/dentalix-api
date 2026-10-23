@@ -1709,7 +1709,10 @@ model Payment {
   id                     String         @id @default(uuid()) @db.Uuid
   tenantId               String         @db.Uuid
   locationId             String         @db.Uuid
-  treatmentPlanId        String         @db.Uuid
+  // DX-262: un abono va a un plan O a un saldo migrado (CHECK
+  // payments_target_check: exactamente uno de los dos).
+  treatmentPlanId        String?        @db.Uuid
+  openingBalanceId       String?        @db.Uuid
   patientId              String         @db.Uuid
   amount                 Decimal        @db.Decimal(14, 2)
   currency               String
@@ -1741,8 +1744,10 @@ model Payment {
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
   // transitividad el paciente también es del tenant (treatment_plans ya tiene
   // su FK compuesta a patients), sin una tercera FK.
-  plan     TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
-  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  plan           TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
+  // DX-262: abono contra el saldo migrado del MISMO paciente y tenant.
+  openingBalance OpeningBalance? @relation(fields: [tenantId, openingBalanceId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payments_opening_balance_fkey")
+  location       Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
@@ -1762,6 +1767,9 @@ model Payment {
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
+  // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
+  //   payments_tenant_opening_balance_idx ("tenantId", "openingBalanceId")
+  //     WHERE "openingBalanceId" IS NOT NULL
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
@@ -3945,29 +3953,33 @@ model PatientImportBatch {
   // DX-262: hoja de saldos («Saldo migrado») del lote, opcional. Se sube con
   // el lote VALIDATED (dry-run propio) y se importa al confirmar, después de
   // los pacientes. El fichero tampoco se guarda: nombre, hash y totales.
-  balanceFileName      String?
-  balanceFileSha256    String?                  @db.Char(64)
-  balanceFileFormat    PatientImportFileFormat?
-  balanceFileSizeBytes Int?
-  balanceTotalRows     Int                      @default(0)
+  balanceFileName       String?
+  balanceFileSha256     String?                  @db.Char(64)
+  balanceFileFormat     PatientImportFileFormat?
+  balanceFileSizeBytes  Int?
+  balanceTotalRows      Int                      @default(0)
   /// Filas con error (importe, moneda, fecha, documento inexistente…).
-  balanceErrorRows     Int                      @default(0)
+  balanceErrorRows      Int                      @default(0)
   /// Filas sumadas a otra del mismo paciente y moneda.
-  balanceMergedRows    Int                      @default(0)
+  balanceMergedRows     Int                      @default(0)
   /// Saldos a crear (uno por paciente y moneda).
-  balancePreparedRows  Int                      @default(0)
-  balanceProcessedRows Int                      @default(0)
-  balanceCreatedCount  Int                      @default(0)
+  balancePreparedRows   Int                      @default(0)
+  balanceProcessedRows  Int                      @default(0)
+  balanceCreatedCount   Int                      @default(0)
   /// Saldos no creados al importar (su paciente no llegó a existir).
-  balanceSkippedCount  Int                      @default(0)
+  balanceSkippedCount   Int                      @default(0)
   /// [{ currency, rows, cents }]: todas las filas con importe y moneda legibles.
-  balanceFileTotals    Json                     @default("[]")
+  balanceFileTotals     Json                     @default("[]")
   /// [{ currency, rows, cents }]: lo que se importa.
-  balanceValidTotals   Json                     @default("[]")
+  balanceValidTotals    Json                     @default("[]")
   /// Errores y avisos por fila de la hoja (mismo formato que `issues`).
-  balanceIssues        Json                     @default("[]")
+  balanceIssues         Json                     @default("[]")
   /// Saldos migrados que retiró el deshacer.
-  balanceUndoneCount   Int?
+  balanceUndoneCount    Int?
+  /// [{ currency, rows, cents }] de los saldos que retiró de verdad el deshacer.
+  balanceUndoneTotals   Json                     @default("[]")
+  /// Saldos no creados porque su documento era de varios pacientes vivos.
+  balanceAmbiguousCount Int                      @default(0)
 
   tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   location        Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
@@ -4075,8 +4087,11 @@ model OpeningBalance {
   patient     Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_patient_fkey")
   batch       PatientImportBatch @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_batch_fkey")
   currencyRef Currency           @relation(fields: [currency], references: [code], onDelete: Restrict, map: "opening_balances_currency_fkey")
+  /// Abonos registrados contra este saldo (vivos: `deletedAt` NULL).
+  payments    Payment[]
 
   @@unique([tenantId, id], map: "opening_balances_tenant_id_key")
+  @@unique([tenantId, id, patientId], map: "opening_balances_tenant_id_patient_key")
   @@unique([tenantId, importBatchId, patientId, currency], map: "opening_balances_tenant_batch_patient_currency_key")
   @@index([tenantId, patientId], map: "opening_balances_tenant_patient_idx")
   @@index([tenantId, locationId], map: "opening_balances_tenant_location_idx")

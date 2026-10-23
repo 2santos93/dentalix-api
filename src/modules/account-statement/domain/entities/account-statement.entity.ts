@@ -31,7 +31,10 @@ export interface StatementPlanRow {
 
 export interface StatementPaymentRow {
   id: string;
-  treatmentPlanId: string;
+  /** Plan del abono; `null` si es contra un saldo migrado (DX-262). */
+  treatmentPlanId: string | null;
+  /** Saldo migrado del abono (DX-262); `null`/ausente si es a un plan. */
+  openingBalanceId?: string | null;
   amount: number;
   currency: string;
   paidAt: Date;
@@ -78,7 +81,7 @@ export interface StatementPaymentPlanRow {
  */
 export type BalancePaymentRow = Pick<
   StatementPaymentRow,
-  'treatmentPlanId' | 'amount' | 'currency' | 'voidedAt'
+  'treatmentPlanId' | 'openingBalanceId' | 'amount' | 'currency' | 'voidedAt'
 >;
 
 /**
@@ -176,7 +179,10 @@ export interface StatementMovement {
   currency: string;
   method: PaymentMethod | null;
   location: { id: string; name: string };
-  treatmentPlanId: string;
+  /** `null` si el abono es contra un saldo migrado (DX-262). */
+  treatmentPlanId: string | null;
+  /** Saldo migrado del abono (DX-262), o `null`. */
+  openingBalanceId: string | null;
   /** Quién registró el abono (`null` en abonos antiguos sin autor). */
   createdById: string | null;
   /**
@@ -206,7 +212,12 @@ export interface StatementInstallment {
 }
 
 /** Línea «Saldo migrado» del estado de cuenta (DX-262). */
-export type StatementOpeningBalanceLine = BalanceOpeningRow;
+export type StatementOpeningBalanceLine = BalanceOpeningRow & {
+  /** Abonos vivos contra este saldo, en su moneda. */
+  paid: number;
+  /** `amount − paid`: lo que falta por cobrar. */
+  pending: number;
+};
 
 export interface ComputedBalances {
   summary: StatementCurrencySummary[];

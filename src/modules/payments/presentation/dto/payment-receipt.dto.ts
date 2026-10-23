@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DocType, PaymentMethod } from '@prisma/client';
 
 // Respuesta de GET /payments/:id/receipt y POST /payments/:id/receipt/print
@@ -88,6 +88,17 @@ export class ReceiptPlanDto {
   createdAt!: string;
 }
 
+export class ReceiptOpeningBalanceDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Saldo migrado' })
+  concept!: string;
+
+  @ApiProperty({ example: '2026-03-15', description: 'Fecha de corte' })
+  asOfDate!: string;
+}
+
 export class ReceiptPlanBalanceDto {
   @ApiProperty({ example: 'COP' })
   currency!: string;
@@ -132,8 +143,20 @@ export class ReceiptSnapshotDto {
   @ApiProperty({ type: ReceiptPaymentDto })
   payment!: ReceiptPaymentDto;
 
-  @ApiProperty({ type: ReceiptPlanDto })
-  plan!: ReceiptPlanDto;
+  @ApiProperty({
+    type: ReceiptPlanDto,
+    nullable: true,
+    description: 'null si el abono es contra un saldo migrado (DX-262)',
+  })
+  plan!: ReceiptPlanDto | null;
+
+  @ApiPropertyOptional({
+    type: ReceiptOpeningBalanceDto,
+    nullable: true,
+    description:
+      'DX-262: saldo migrado del abono (concepto y fecha de corte); ausente o null si es a un plan',
+  })
+  openingBalance?: ReceiptOpeningBalanceDto | null;
 
   @ApiProperty({
     type: ReceiptPlanBalanceDto,

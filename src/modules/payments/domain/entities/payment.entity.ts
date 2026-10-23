@@ -12,7 +12,10 @@ import { PaymentMethod } from '@prisma/client';
 export interface Payment {
   id: string;
   tenantId: string;
-  treatmentPlanId: string;
+  /** Plan del abono; `null` si es contra un saldo migrado (DX-262). */
+  treatmentPlanId: string | null;
+  /** Saldo migrado del abono (DX-262); `null` si es a un plan. */
+  openingBalanceId: string | null;
   patientId: string;
   amount: number;
   currency: string;

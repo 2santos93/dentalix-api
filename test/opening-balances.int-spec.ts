@@ -7,6 +7,7 @@ import {
   UndoBlockedError,
 } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
+import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import type { PreparedBalance } from '../src/modules/patient-imports/domain/opening-balance-sheet';
 
 // DX-262, capa DB del saldo migrado: RLS FORCE de opening_balances y de los
@@ -26,6 +27,7 @@ const SUBDOMAINS = [
   'opening-int-b',
   'opening-flow-a',
   'opening-flow-b',
+  'opening-flow-big',
 ];
 
 interface Seeded {
@@ -43,6 +45,11 @@ async function purge(): Promise<void> {
   const ids = tenants.map((t) => t.id);
   if (ids.length > 0) {
     const where = { tenantId: { in: ids } };
+    // Como superusuario: los triggers de recibos y caja dejan borrar.
+    await raw.paymentReceipt.deleteMany({ where });
+    await raw.paymentReceiptCounter.deleteMany({ where });
+    await raw.payment.deleteMany({ where });
+    await raw.appointment.deleteMany({ where });
     await raw.openingBalance.deleteMany({ where });
     await raw.patientImportBalanceRow.deleteMany({ where });
     await raw.payment.deleteMany({ where });
@@ -147,13 +154,13 @@ async function ledgerOf(s: Seeded): Promise<LedgerRow | undefined> {
 beforeAll(async () => {
   await prisma.onModuleInit();
   await purge();
-});
+}, 180_000);
 
 afterAll(async () => {
   await purge();
   await prisma.onModuleDestroy();
   await raw.$disconnect();
-});
+}, 180_000);
 
 describe('opening_balances: RLS, FK, CHECKs, inmutable y resumen de cartera (DX-262, int)', () => {
   let a: Seeded;
@@ -307,7 +314,7 @@ describe('opening_balances: RLS, FK, CHECKs, inmutable y resumen de cartera (DX-
       ledger: expect.objectContaining({
         plans: [],
         paymentPlans: [],
-        openings: [[created.id, 'COP', 150000.5, '2026-03-15', true]],
+        openings: [[created.id, 'COP', 150000.5, '2026-03-15', true, 0]],
       }) as LedgerRow['ledger'],
     });
 
@@ -329,6 +336,7 @@ describe('opening_balances: RLS, FK, CHECKs, inmutable y resumen de cartera (DX-
 // Repositorio: hoja de saldos del lote, importación por bloques y deshacer.
 // ---------------------------------------------------------------------------
 const repo = new PrismaPatientImportRepository(prisma, tenantContext);
+const payments = new PrismaPaymentRepository(prisma, tenantContext);
 
 interface Clinic {
   tenantId: string;
@@ -686,42 +694,293 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     });
   });
 
-  it('deshacer se niega con un abono imputado al saldo migrado (cualquier FK a opening_balances, del catálogo)', async () => {
-    const batch = await validated([person('1313')]);
+  function payOpening(
+    openingBalanceId: string,
+    patientId: string,
+    amount: number,
+    currency = 'COP',
+  ) {
+    return tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.create({
+        treatmentPlanId: null,
+        openingBalanceId,
+        patientId,
+        amount,
+        currency,
+        paidAt: new Date('2026-10-20T15:00:00.000Z'),
+        method: 'TRANSFER',
+        createdById: a.userId,
+        receiptPlanBalance: null,
+      }),
+    );
+  }
+
+  async function importedOpening(doc: string, cents: number) {
+    const batch = await validated([person(doc)]);
     await inA(() =>
-      repo.saveBalances(batch.id, sheet([balance(2, '1313', 900)])),
+      repo.saveBalances(batch.id, sheet([balance(2, doc, cents)])),
     );
     await confirmAndRun(batch.id);
     const ob = await raw.openingBalance.findFirstOrThrow({
       where: { importBatchId: batch.id },
     });
-    // Hoy ningún abono se imputa a un saldo migrado (DX-051). Una tabla que
-    // lo haga (con FK a opening_balances) bloquea el deshacer sin tocar su
-    // código: se simula con una tabla de prueba.
-    await raw.$executeRawUnsafe(`
-      CREATE TABLE "dx262_test_imputations" (
-        "tenantId" UUID NOT NULL,
-        "openingBalanceId" UUID NOT NULL,
-        FOREIGN KEY ("tenantId", "openingBalanceId")
-          REFERENCES "opening_balances"("tenantId", "id"))`);
-    try {
-      await raw.$executeRawUnsafe(
-        `INSERT INTO "dx262_test_imputations" VALUES ($1::uuid, $2::uuid)`,
-        a.tenantId,
-        ob.id,
-      );
-      const fresh = new PrismaPatientImportRepository(prisma, tenantContext);
-      const err = await tenantContext
-        .run(a.tenantId, () => fresh.undo(batch.id, a.userId))
-        .catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(UndoBlockedError);
-      expect(err).toMatchObject({ patients: 0, balances: 1 });
-      expect(
-        (await raw.openingBalance.findUniqueOrThrow({ where: { id: ob.id } }))
-          .voidedAt,
-      ).toBeNull();
-    } finally {
-      await raw.$executeRawUnsafe(`DROP TABLE "dx262_test_imputations"`);
+    return { batch, ob };
+  }
+
+  const ledgerOfPatient = (patientId: string) =>
+    raw.patientLedger.findUniqueOrThrow({
+      where: { tenantId_patientId: { tenantId: a.tenantId, patientId } },
+    });
+
+  it('abono contra el saldo migrado: recibo consecutivo, la cartera ve lo pendiente y no admite pasarse (revisión C1)', async () => {
+    const { ob } = await importedOpening('1313', 90_000);
+    const first = await payOpening(ob.id, ob.patientId, 400);
+    expect(first).toMatchObject({
+      treatmentPlanId: null,
+      openingBalanceId: ob.id,
+      receiptNumber: expect.stringMatching(/^[A-Z0-9]+-\d{6}$/) as string,
+    });
+    const receipt = await raw.paymentReceipt.findFirstOrThrow({
+      where: { paymentId: first.id },
+    });
+    expect(receipt.snapshot).toMatchObject({
+      plan: null,
+      openingBalance: { id: ob.id, concept: 'Saldo migrado' },
+      planBalance: { currency: 'COP', billable: 900, paid: 400, balance: 500 },
+    });
+    let ledger = await ledgerOfPatient(ob.patientId);
+    expect(ledger.owing).toBe(true);
+    expect((ledger.ledger as { openings: unknown[][] }).openings[0][5]).toBe(
+      400,
+    );
+
+    // Quedan 500; tras 300 quedan 200: dos cobros a la vez de 150, solo
+    // uno entra (el saldo se bloquea en la transacción del abono).
+    await payOpening(ob.id, ob.patientId, 300);
+    const race = await Promise.allSettled([
+      payOpening(ob.id, ob.patientId, 150),
+      payOpening(ob.id, ob.patientId, 150),
+    ]);
+    expect(race.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = race.find((r) => r.status === 'rejected');
+    expect(String(rejected?.reason)).toMatch(
+      /supera lo pendiente del saldo migrado/,
+    );
+    await payOpening(ob.id, ob.patientId, 50);
+    ledger = await ledgerOfPatient(ob.patientId);
+    expect(ledger.owing).toBe(false);
+    await expect(payOpening(ob.id, ob.patientId, 1)).rejects.toThrow(
+      'Este saldo migrado ya está pagado: no admite más abonos.',
+    );
+    await expect(payOpening(ob.id, ob.patientId, 1, 'USD')).rejects.toThrow(
+      'El abono al saldo migrado tiene que ir en su moneda (COP).',
+    );
+  });
+
+  it('BD: un abono va a un plan O a un saldo migrado, y el saldo es del mismo paciente', async () => {
+    const { ob } = await importedOpening('1414', 1_000);
+    const other = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'O',
+        lastName: 'Tro',
+        docNumber: '1415',
+      },
+    });
+    const base = {
+      tenantId: a.tenantId,
+      locationId: a.locationId,
+      amount: new Prisma.Decimal(1),
+      currency: 'COP',
+      paidAt: new Date(),
+    };
+    await expect(
+      prisma.runWithTenant(a.tenantId, (tx) =>
+        tx.payment.create({
+          data: { ...base, patientId: ob.patientId, treatmentPlanId: null },
+        }),
+      ),
+    ).rejects.toThrow(/payments_target_check/);
+    await expect(
+      prisma.runWithTenant(a.tenantId, (tx) =>
+        tx.payment.create({
+          data: { ...base, patientId: other.id, openingBalanceId: ob.id },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'P2003' });
+  });
+
+  it('deshacer se niega con abonos VIVOS al saldo migrado; uno anulado no cuenta (revisión C1, M4)', async () => {
+    const { batch, ob } = await importedOpening('1515', 90_000);
+    const paid = await payOpening(ob.id, ob.patientId, 100);
+    const err = await inA(() => repo.undo(batch.id, a.userId)).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UndoBlockedError);
+    expect(err).toMatchObject({ balances: 1 });
+    await expect(
+      inA(() => repo.undoBalances(batch.id, a.userId)),
+    ).rejects.toMatchObject({ balances: 1 });
+    expect(
+      (await raw.openingBalance.findUniqueOrThrow({ where: { id: ob.id } }))
+        .voidedAt,
+    ).toBeNull();
+
+    await tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.softDelete(paid.id, {
+        voidedById: a.userId,
+        voidedByRole: 'ADMIN',
+        voidedAt: new Date(),
+        reason: 'Cobro duplicado',
+        request: null,
+      }),
+    );
+    await expect(inA(() => repo.undo(batch.id, a.userId))).resolves.toEqual({
+      undoneCreated: 1,
+      undoneFilled: 0,
+      undoneBalances: 1,
+    });
+    // M8: la hora de la retirada es UTC (la de la BD), como el resto.
+    const voided = await raw.openingBalance.findUniqueOrThrow({
+      where: { id: ob.id },
+    });
+    expect(Math.abs(voided.voidedAt!.getTime() - Date.now())).toBeLessThan(
+      60_000,
+    );
+  });
+
+  it('deshacer SOLO los saldos aunque los pacientes del lote ya tengan actividad; con sus totales retirados', async () => {
+    const { batch, ob } = await importedOpening('1616', 12_345);
+    const start = new Date(Date.now() + 86_400_000);
+    await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: ob.patientId,
+        providerId: a.userId,
+        locationId: a.locationId,
+        start,
+        end: new Date(start.getTime() + 1_800_000),
+      },
+    });
+    await expect(
+      inA(() => repo.undo(batch.id, a.userId)),
+    ).rejects.toMatchObject({ patients: 1 });
+    await expect(
+      inA(() => repo.undoBalances(batch.id, a.userId)),
+    ).resolves.toEqual({ undoneBalances: 1 });
+    expect(await inA(() => repo.findBatch(batch.id))).toMatchObject({
+      status: 'COMPLETED',
+      balanceUndoneCount: 1,
+      balanceUndoneTotals: [{ currency: 'COP', rows: 1, cents: 12_345 }],
+    });
+    expect(
+      (await raw.patient.findUniqueOrThrow({ where: { id: ob.patientId } }))
+        .deletedAt,
+    ).toBeNull();
+    // Ya no queda nada que retirar.
+    await expect(
+      inA(() => repo.undoBalances(batch.id, a.userId)),
+    ).resolves.toEqual({ undoneBalances: 0 });
+  });
+
+  it('un documento con varios pacientes vivos al importar se cuenta aparte (ambiguo), no como «sin paciente» (M7)', async () => {
+    await raw.patient.createMany({
+      data: [
+        {
+          tenantId: a.tenantId,
+          firstName: 'A',
+          lastName: '1',
+          docNumber: '17.171',
+        },
+        {
+          tenantId: a.tenantId,
+          firstName: 'A',
+          lastName: '2',
+          docNumber: '17171',
+        },
+      ],
+    });
+    const batch = await validated([person('1818')]);
+    await inA(() =>
+      repo.saveBalances(
+        batch.id,
+        sheet([balance(2, '17171', 100), balance(3, '1818', 100)]),
+      ),
+    );
+    await confirmAndRun(batch.id);
+    expect(await inA(() => repo.findBatch(batch.id))).toMatchObject({
+      balanceCreatedCount: 1,
+      balanceSkippedCount: 0,
+      balanceAmbiguousCount: 1,
+      balanceProcessedRows: 2,
+    });
+  });
+
+  it('retención (M3): a los 90 días de terminar se borran los saldos preparados del lote (documento e importe)', async () => {
+    const { batch } = await importedOpening('1919', 100);
+    expect(
+      await raw.patientImportBalanceRow.count({ where: { batchId: batch.id } }),
+    ).toBe(1);
+    await raw.patientImportBatch.update({
+      where: { id: batch.id },
+      data: { finishedAt: new Date(Date.now() - 91 * 86_400_000) },
+    });
+    await repo.purgeIssues(a.tenantId, new Date(Date.now() - 90 * 86_400_000));
+    expect(
+      await raw.patientImportBalanceRow.count({ where: { batchId: batch.id } }),
+    ).toBe(0);
+    // Lo importado sigue: solo se van los datos del fichero.
+    expect(
+      await raw.openingBalance.count({ where: { importBatchId: batch.id } }),
+    ).toBe(1);
+  });
+
+  it('knownDocs por conjuntos (I1): 5.000 claves contra 20.000 pacientes en menos de 2 s', async () => {
+    const big = await clinic('opening-flow-big');
+    const docs = Array.from(
+      { length: 20_000 },
+      (_, i) => `55${String(i).padStart(7, '0')}`,
+    );
+    for (let i = 0; i < docs.length; i += 5_000) {
+      await raw.patient.createMany({
+        data: docs.slice(i, i + 5_000).map((d) => ({
+          tenantId: big.tenantId,
+          firstName: 'P',
+          lastName: d,
+          docNumber: d,
+        })),
+      });
     }
+    const batch = await tenantContext.run(big.tenantId, () =>
+      repo.createBatch({
+        createdById: big.userId,
+        locationId: big.locationId,
+        fileName: 'p.csv',
+        fileSha256: sha('big'),
+        fileFormat: 'CSV',
+        fileSizeBytes: 100,
+        columnMapping: { columns: {} },
+        totalRows: 1,
+        validRows: 1,
+        duplicateRows: 0,
+        errorRows: 0,
+        issues: [],
+        rows: [{ rowNumber: 2, data: person('9999999') }],
+      }),
+    );
+    const keys = [
+      ...docs.filter((_, i) => i % 4 === 0).slice(0, 4_998),
+      '9999999',
+      '1',
+    ];
+    const t0 = Date.now();
+    const found = await tenantContext.run(big.tenantId, () =>
+      repo.knownDocs(batch.id, keys),
+    );
+    const ms = Date.now() - t0;
+    expect(found.size).toBe(4_999);
+    expect(found.get('9999999')).toBe('FOUND');
+    expect(found.has('1')).toBe(false);
+    expect(ms).toBeLessThan(2_000);
   });
 });

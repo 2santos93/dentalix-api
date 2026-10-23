@@ -28,11 +28,14 @@ export interface CashPayment {
   notes: string | null;
   location: { id: string; name: string };
   patient: { id: string; fullName: string };
+  /** `null` si el abono es contra un saldo migrado (DX-262). */
   treatmentPlan: {
     id: string;
     status: TreatmentPlanStatus;
     createdAt: Date;
-  };
+  } | null;
+  /** Saldo migrado del abono (DX-262), o `null` si es a un plan. */
+  openingBalance: { id: string; concept: string } | null;
 }
 
 /**

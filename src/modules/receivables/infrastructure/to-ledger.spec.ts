@@ -9,8 +9,8 @@ describe('toLedger (DX-155, DX-262)', () => {
         plans: [],
         paymentPlans: [],
         openings: [
-          ['ob-1', 'COP', 150000.5, '2026-03-15', false],
-          ['ob-2', 'USD', 40, '2026-10-23', true],
+          ['ob-1', 'COP', 150000.5, '2026-03-15', false, 50000],
+          ['ob-2', 'USD', 40, '2026-10-23', true, 0],
         ],
       }),
     });
@@ -28,6 +28,15 @@ describe('toLedger (DX-155, DX-262)', () => {
         amount: 40,
         asOfDate: '2026-10-23',
         asOfDateApproximate: true,
+      },
+    ]);
+    // Lo abonado a cada saldo entra como abono suyo (revisión C1).
+    expect(withOpenings.paid).toEqual([
+      {
+        treatmentPlanId: null,
+        openingBalanceId: 'ob-1',
+        currency: 'COP',
+        amount: 50000,
       },
     ]);
     const legacy = toLedger({

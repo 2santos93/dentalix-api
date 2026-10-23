@@ -131,10 +131,10 @@ export function computePatientAging(
     }
   }
 
-  // Saldo migrado (DX-262): exigible desde su fecha de corte; aproximado si
-  // es la de la importación. Nada se le imputa todavía (DX-051).
+  // Saldo migrado (DX-262): lo que queda pendiente tras sus abonos, exigible
+  // desde su fecha de corte; aproximado si es la de la importación.
   for (const o of balances.openingBalances) {
-    const cents = toCents(o.amount);
+    const cents = toCents(o.pending);
     if (cents <= 0) continue;
     acc(o.currency).lines.push({
       cents,

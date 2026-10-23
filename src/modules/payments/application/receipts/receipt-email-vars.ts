@@ -35,6 +35,23 @@ function money(amount: number, currency: string): string {
   }).format(amount);
 }
 
+/** «Plan del …» o, en un abono contra el saldo migrado (DX-262), su concepto. */
+function targetLabel(
+  plan: PaymentReceiptView['snapshot']['plan'],
+  opening: PaymentReceiptView['snapshot']['openingBalance'] | null,
+  timeZone: string,
+): string {
+  if (!plan) {
+    return opening
+      ? `Saldo migrado · ${opening.concept} · corte ${civilLabel(opening.asOfDate)}`
+      : 'Saldo migrado';
+  }
+  const planDay = civilLabel(civilDateIn(new Date(plan.createdAt), timeZone));
+  return plan.optionLabel
+    ? `Plan del ${planDay} · ${plan.optionLabel}`
+    : `Plan del ${planDay}`;
+}
+
 /**
  * Variables del email del recibo (DX-136), sacadas SOLO de la foto del
  * recibo: el email dice lo mismo que la pantalla y el papel. El documento va
@@ -49,7 +66,6 @@ export function receiptEmailVars(
 ): PaymentReceiptEmailVars {
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;
-  const planDay = civilDateIn(new Date(plan.createdAt), timeZone);
   return {
     patientName: patient.fullName,
     reference: receipt.reference,
@@ -67,9 +83,7 @@ export function receiptEmailVars(
     methodLabel: payment.method
       ? METHOD_LABELS[payment.method]
       : 'Sin especificar',
-    planLabel: plan.optionLabel
-      ? `Plan del ${civilLabel(planDay)} · ${plan.optionLabel}`
-      : `Plan del ${civilLabel(planDay)}`,
+    planLabel: targetLabel(plan, snapshot.openingBalance ?? null, timeZone),
     balanceLabel: planBalance
       ? money(planBalance.balance, planBalance.currency)
       : null,

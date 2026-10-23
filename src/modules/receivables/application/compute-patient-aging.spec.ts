@@ -402,5 +402,51 @@ describe('computePatientAging', () => {
       expect(aging.ageApproximate).toBe(false);
       expect(aging.currencies[0].buckets.days0to30).toBe(80);
     });
+
+    it('envejece solo lo pendiente; pagado entero, no es deuda (revisión C1)', () => {
+      const aging = computePatientAging(
+        ledger({
+          openings: [
+            {
+              id: 'ob-1',
+              currency: 'COP',
+              amount: 500,
+              asOfDate: '2026-07-01',
+              asOfDateApproximate: false,
+            },
+            {
+              id: 'ob-2',
+              currency: 'USD',
+              amount: 30,
+              asOfDate: '2026-07-01',
+              asOfDateApproximate: false,
+            },
+          ],
+          paid: [
+            {
+              treatmentPlanId: null,
+              openingBalanceId: 'ob-1',
+              currency: 'COP',
+              amount: 200,
+            },
+            {
+              treatmentPlanId: null,
+              openingBalanceId: 'ob-2',
+              currency: 'USD',
+              amount: 30,
+            },
+          ],
+        }),
+        { now: NOW, timeZone: BOGOTA },
+      );
+      expect(aging.currencies).toHaveLength(1);
+      expect(aging.currencies[0]).toMatchObject({
+        currency: 'COP',
+        balance: 300,
+        debt: 300,
+        credit: 0,
+      });
+      expect(aging.currencies[0].buckets.over90).toBe(300);
+    });
   });
 });

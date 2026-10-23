@@ -63,6 +63,8 @@ type OpeningTuple = [
   amount: number,
   asOfDate: string,
   approximate: boolean,
+  /** Abonado vivo en su moneda (revisión C1); ausente antes de ella. */
+  paid?: number,
 ];
 
 /** El `ledger` de una fila de `patient_ledgers`. */
@@ -124,6 +126,16 @@ export function toLedger({
       }),
     ),
   };
+  for (const [id, currency, , , , paid] of ledger.openings ?? []) {
+    if (paid) {
+      out.paid.push({
+        treatmentPlanId: null,
+        openingBalanceId: id,
+        currency,
+        amount: paid,
+      });
+    }
+  }
   for (const [
     id,
     status,

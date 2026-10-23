@@ -132,6 +132,15 @@ export class AccountStatementOpeningBalanceDto {
 
   @ApiProperty({ format: 'uuid', description: 'Lote de importación' })
   importBatchId!: string;
+
+  @ApiProperty({
+    example: 50000,
+    description: 'Abonos vivos contra este saldo, en su moneda',
+  })
+  paid!: number;
+
+  @ApiProperty({ example: 100000, description: 'amount − paid: lo pendiente' })
+  pending!: number;
 }
 
 export class AccountStatementOtherCurrencyDto {
@@ -238,8 +247,21 @@ export class AccountStatementMovementDto {
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;
 
-  @ApiProperty({ format: 'uuid' })
-  treatmentPlanId!: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'null si el abono es contra un saldo migrado (DX-262)',
+  })
+  treatmentPlanId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Saldo migrado del abono (DX-262), o null',
+  })
+  openingBalanceId!: string | null;
 
   @ApiProperty({
     type: String,

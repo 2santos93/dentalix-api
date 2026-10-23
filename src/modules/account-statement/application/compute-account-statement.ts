@@ -58,7 +58,9 @@ export interface ComputeAccountStatementOptions {
  *   primero la cuota inicial y luego las cuotas en orden.
  * - Saldo migrado (DX-262) = deuda traída del programa anterior, por moneda:
  *   va aparte de lo presupuestado (`openingBalance`) y suma al saldo:
- *   `balance = budgeted + openingBalance − paid`.
+ *   `balance = budgeted + openingBalance − paid`. Un abono va a un plan O a
+ *   un saldo migrado: el de un saldo cuenta en `paid` de su moneda y en el
+ *   abonado/pendiente de ese saldo, nunca en un plan ni en sus cuotas.
  * - Próxima cuota = la de vencimiento más cercano que todavía no venció ni está
  *   pagada (las vencidas ya se cuentan aparte).
  */
@@ -132,7 +134,7 @@ function paidByPlanAndCurrency(
 ): Map<string, Map<string, number>> {
   const out = new Map<string, Map<string, number>>();
   for (const p of payments) {
-    if (!isActive(p)) continue;
+    if (!isActive(p) || p.treatmentPlanId === null) continue;
     const byCurrency = out.get(p.treatmentPlanId) ?? new Map<string, number>();
     byCurrency.set(
       p.currency,
@@ -211,9 +213,22 @@ export function computeBalances(
       a.currency.localeCompare(b.currency) ||
       a.id.localeCompare(b.id),
   );
-  for (const o of openingBalances) {
-    acc(o.currency).openingCents += toCents(o.amount);
+  // Abonos vivos contra cada saldo migrado, en su moneda (revisión C1).
+  const paidByOpening = new Map<string, number>();
+  for (const p of snapshot.payments) {
+    if (!isActive(p) || !p.openingBalanceId) continue;
+    const key = `${p.openingBalanceId}\u0000${p.currency}`;
+    paidByOpening.set(key, (paidByOpening.get(key) ?? 0) + toCents(p.amount));
   }
+  const openingLines = openingBalances.map((o) => {
+    acc(o.currency).openingCents += toCents(o.amount);
+    const paidCents = paidByOpening.get(`${o.id}\u0000${o.currency}`) ?? 0;
+    return {
+      ...o,
+      paid: fromCents(paidCents),
+      pending: fromCents(Math.max(0, toCents(o.amount) - paidCents)),
+    };
+  });
 
   // --- Abonado por moneda ---------------------------------------------------
   for (const p of snapshot.payments) {
@@ -303,7 +318,7 @@ export function computeBalances(
       nextInstallment: a.next,
     }));
 
-  return { summary, plans, installments, openingBalances };
+  return { summary, plans, installments, openingBalances: openingLines };
 }
 
 export function computeAccountStatement(
@@ -331,6 +346,7 @@ export function computeAccountStatement(
       method: p.method,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
+      openingBalanceId: p.openingBalanceId ?? null,
       createdById: p.createdById,
       canVoid:
         p.voidedAt === null &&

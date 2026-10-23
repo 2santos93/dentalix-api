@@ -520,6 +520,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'IMPORT_UNDONE',
     importBatch: true,
   },
+  // DX-262: abono contra el saldo migrado (con su recibo de caja).
+  'POST /opening-balances/:id/payments': {
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: RES,
+    patient: { lookup: 'openingBalance', param: 'id' },
+    reason: 'RECEIPT_ISSUED',
+  },
   // DX-262: hoja de saldos del lote (dry-run, quitarla y su informe).
   'POST /patient-imports/:id/balances': {
     action: 'UPDATE',
