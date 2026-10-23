@@ -416,6 +416,32 @@ export class PatientImportsController {
     action: 'UPDATE',
     resource: 'PATIENT_IMPORT_BATCH',
     resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_UNDONE',
+    importBatch: true,
+  })
+  @Post(':id/balances/undo')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Retirar solo los saldos migrados del lote (DX-262)',
+    description:
+      'Retira en blando los «Saldo migrado» vivos del lote aunque sus pacientes ya tengan citas u otra actividad (el lote sigue importado). Se niega (409) si alguno tiene abonos vivos: hay que anularlos antes.',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({
+    description: 'El lote no está terminado o algún saldo tiene abonos',
+  })
+  undoBalances(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<BatchDetail> {
+    return this.imports.undoBalances(id, req.user.sub);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
     reason: 'IMPORT_CONFIRMED',
     importBatch: true,
   })

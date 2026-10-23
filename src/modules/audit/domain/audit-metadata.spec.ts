@@ -347,6 +347,7 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
             { currency: 'EUR', rows: 1, amount: 10.555 },
             { currency: 'USD', rows: 1, amount: 40 },
           ],
+          balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
         },
       }),
     ).toEqual({
@@ -360,6 +361,7 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
           { currency: 'COP', rows: 9, amount: 1500000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
         ],
+        balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
       },
     });
   });

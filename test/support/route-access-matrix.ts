@@ -288,6 +288,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-262: hoja de saldos («Saldo migrado») del lote; solo gestión.
   'GET /patient-imports/balances-template': ADMIN_ONLY,
   'POST /patient-imports/:id/balances': ADMIN_ONLY,
+  'POST /patient-imports/:id/balances/undo': ADMIN_ONLY,
   'DELETE /patient-imports/:id/balances': ADMIN_ONLY,
   'GET /patient-imports/:id/balances/errors.csv': ADMIN_ONLY,
 

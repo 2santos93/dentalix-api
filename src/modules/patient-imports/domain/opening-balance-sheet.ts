@@ -214,6 +214,21 @@ export function parseAmountCents(
   let frac = '';
   if (format === 'XLSX' && /^\d+(\.\d+)?$/.test(text)) {
     [intPart, frac = ''] = text.split('.');
+    // Una celda calculada con fórmula llega con ruido de coma flotante
+    // («178500.00000000003»): si la diferencia con 2 decimales es solo eso
+    // (≤ 1e-9), se redondea (revisión M6). Un tercer decimal real sigue
+    // siendo error.
+    if (frac.length > 2) {
+      const value = Number(text);
+      const cents = Math.round(value * 100);
+      if (
+        Math.abs(value - cents / 100) <= 1e-9 &&
+        Number.isSafeInteger(cents)
+      ) {
+        intPart = String(Math.trunc(cents / 100));
+        frac = String(cents % 100).padStart(2, '0');
+      }
+    }
   } else {
     const lastDot = text.lastIndexOf('.');
     const lastComma = text.lastIndexOf(',');
@@ -484,6 +499,18 @@ export function aggregateBalances(
         asOfDate: c.asOfDate,
         concept: c.concept,
         sourceRows: 1,
+      });
+      continue;
+    }
+    if (prev.cents + c.cents > MAX_CENTS) {
+      // La suma no cabe en DECIMAL(14,2) (revisión M2): la fila es un error.
+      errorRows += 1;
+      issues.push({
+        row: c.rowNumber,
+        column: docColumn,
+        kind: 'ERROR',
+        message: `Con esta fila, el saldo de este paciente en ${c.currency} pasaría de 999.999.999.999,99: revisa los importes.`,
+        value: clip(c.docNumber),
       });
       continue;
     }

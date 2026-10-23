@@ -49,6 +49,19 @@ describe('importe del saldo migrado (DX-262)', () => {
     });
   });
 
+  it('XLSX con fórmula: el ruido de coma flotante se redondea a 2 decimales (revisión M6)', () => {
+    expect(parseAmountCents('178500.00000000003', 'XLSX')).toEqual({
+      cents: 17_850_000,
+    });
+    expect(parseAmountCents('0.30000000000000004', 'XLSX')).toEqual({
+      cents: 30,
+    });
+    // Un tercer decimal de verdad sigue siendo error.
+    expect(parseAmountCents('10.555', 'XLSX')).toEqual({
+      error: 'El importe tiene más de 2 decimales.',
+    });
+  });
+
   it('rechaza importes no positivos, con letras, con 3 decimales o enormes', () => {
     expect(errorOf(parseAmountCents('0', 'CSV'))).toBe(
       'El importe debe ser mayor que 0.',
@@ -236,6 +249,34 @@ describe('agregado por paciente y moneda (DX-262)', () => {
     expect(result.validTotals).toEqual([
       { currency: 'COP', rows: 3, cents: 35_050 },
       { currency: 'USD', rows: 1, cents: 700 },
+    ]);
+  });
+
+  it('la suma de un paciente y moneda no puede pasar de DECIMAL(14,2): error de la fila (revisión M2)', () => {
+    const big = 99_999_999_999_999; // 999.999.999.999,99
+    const result = aggregateBalances(
+      [
+        c(2, '111', big - 100, 'COP'),
+        c(3, '111', 200, 'COP'),
+        c(4, '111', 50, 'USD'),
+      ],
+      new Map([['111', 'FOUND']]),
+      'numero_documento',
+    );
+    expect(result.prepared.map((p) => [p.currency, p.cents])).toEqual([
+      ['COP', big - 100],
+      ['USD', 50],
+    ]);
+    expect(result.errorRows).toBe(1);
+    expect(result.issues).toEqual([
+      {
+        row: 3,
+        column: 'numero_documento',
+        kind: 'ERROR',
+        message:
+          'Con esta fila, el saldo de este paciente en COP pasaría de 999.999.999.999,99: revisa los importes.',
+        value: '111',
+      },
     ]);
   });
 

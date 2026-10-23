@@ -536,6 +536,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'IMPORT_BALANCES_VALIDATED',
     importBatch: true,
   },
+  'POST /patient-imports/:id/balances/undo': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_UNDONE',
+    importBatch: true,
+  },
   'DELETE /patient-imports/:id/balances': {
     action: 'UPDATE',
     resource: 'PATIENT_IMPORT_BATCH',

@@ -104,6 +104,7 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
       validTotals?: unknown;
       progress?: Record<string, unknown>;
       undoneCount?: unknown;
+      undoneTotals?: unknown;
     } | null;
   };
   const sheet = b.balances ?? undefined;
@@ -125,6 +126,8 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     balancesCreated: sheet?.progress?.created,
     balancesUndone: sheet?.undoneCount,
     balanceTotals: sheet?.validTotals,
+    // Revisión M5: lo que retiró de verdad el deshacer.
+    balanceUndoneTotals: sheet?.undoneTotals,
   };
 }
 

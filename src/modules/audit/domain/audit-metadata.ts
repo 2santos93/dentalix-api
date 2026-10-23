@@ -76,6 +76,8 @@ export interface AuditImportBatch {
   balancesCreated?: number;
   balancesUndone?: number;
   balanceTotals?: AuditCurrencyTotal[];
+  /** Lo que retiró de verdad el deshacer, por moneda (revisión M5). */
+  balanceUndoneTotals?: AuditCurrencyTotal[];
 }
 
 /** Total por moneda de la hoja de saldos (DX-262): código, filas e importe. */
@@ -268,6 +270,8 @@ function importBatch(value: unknown): AuditImportBatch | null {
   }
   const totals = currencyTotals(value.balanceTotals);
   if (totals.length > 0) out.balanceTotals = totals;
+  const undone = currencyTotals(value.balanceUndoneTotals);
+  if (undone.length > 0) out.balanceUndoneTotals = undone;
   return out;
 }
 

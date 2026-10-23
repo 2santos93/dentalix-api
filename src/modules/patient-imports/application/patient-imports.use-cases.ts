@@ -85,15 +85,21 @@ export const BALANCE_REPORT_GONE_MESSAGE =
   'Este lote no tiene hoja de saldos o su informe ya no está disponible.';
 
 /** Mensaje del deshacer bloqueado (pacientes con actividad o saldos con abonos). */
-export function undoBlockedMessage(err: UndoBlockedError): string {
+export function undoBlockedMessage(
+  err: UndoBlockedError,
+  withBalances = false,
+): string {
   if (err.balances > 0) {
     return err.balances === 1
-      ? 'No se puede deshacer: 1 saldo migrado de este lote ya tiene abonos imputados. Anula esos abonos antes de deshacer.'
-      : `No se puede deshacer: ${err.balances} saldos migrados de este lote ya tienen abonos imputados. Anula esos abonos antes de deshacer.`;
+      ? 'No se puede deshacer: 1 saldo migrado de este lote ya tiene abonos. Anula esos abonos antes de deshacer.'
+      : `No se puede deshacer: ${err.balances} saldos migrados de este lote ya tienen abonos. Anula esos abonos antes de deshacer.`;
   }
+  const hint = withBalances
+    ? ' Si solo quieres quitar sus saldos migrados, usa «Retirar saldos migrados».'
+    : '';
   return err.patients === 1
-    ? 'No se puede deshacer: 1 paciente de este lote ya tiene citas, historia clínica, planes, pagos, saldos de otra importación u otros datos registrados. Corrígelo desde su ficha.'
-    : `No se puede deshacer: ${err.patients} pacientes de este lote ya tienen citas, historia clínica, planes, pagos, saldos de otra importación u otros datos registrados. Corrígelos desde su ficha.`;
+    ? `No se puede deshacer: 1 paciente de este lote ya tiene citas, historia clínica, planes, pagos, saldos de otra importación u otros datos registrados. Corrígelo desde su ficha.${hint}`
+    : `No se puede deshacer: ${err.patients} pacientes de este lote ya tienen citas, historia clínica, planes, pagos, saldos de otra importación u otros datos registrados. Corrígelos desde su ficha.${hint}`;
 }
 
 const STATE_MESSAGES: Partial<Record<PatientImportStatus, string>> = {
@@ -164,8 +170,19 @@ export interface BalancesView {
   validTotals: BalanceCurrencyTotal[];
   /** Saldos migrados vivos del lote, por moneda (lo importado de verdad). */
   imported: { currency: string; count: number; amount: number }[];
-  progress: { processed: number; created: number; skipped: number };
+  progress: {
+    processed: number;
+    created: number;
+    /** No creados: su paciente no existía al importar. */
+    skipped: number;
+    /** No creados: su documento era de varios pacientes vivos. */
+    ambiguous: number;
+  };
   undoneCount: number | null;
+  /** Lo que retiró de verdad el deshacer, por moneda. */
+  undoneTotals: BalanceCurrencyTotal[];
+  /** Hay saldos vivos y el lote está terminado: se pueden retirar solos. */
+  canUndo: boolean;
 }
 
 export interface BatchView {
@@ -679,6 +696,29 @@ export class PatientImportsService {
     }
   }
 
+  /**
+   * Retira SOLO los saldos migrados del lote (DX-262, revisión C1), aunque
+   * sus pacientes ya tengan actividad. 409 si alguno tiene abonos vivos.
+   */
+  async undoBalances(id: string, actorId: string): Promise<BatchDetail> {
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    try {
+      await this.repo.undoBalances(id, actorId);
+    } catch (err) {
+      if (err instanceof UndoBlockedError) {
+        throw new ConflictException(undoBlockedMessage(err));
+      }
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(
+          STATE_MESSAGES[err.status] ?? EXPIRED_MESSAGE,
+        );
+      }
+      throw err;
+    }
+    return this.get(id);
+  }
+
   async undo(id: string, actorId: string): Promise<BatchDetail> {
     const current = await this.repo.findBatch(id);
     if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
@@ -686,7 +726,9 @@ export class PatientImportsService {
       await this.repo.undo(id, actorId);
     } catch (err) {
       if (err instanceof UndoBlockedError) {
-        throw new ConflictException(undoBlockedMessage(err));
+        throw new ConflictException(
+          undoBlockedMessage(err, current.balanceCreatedCount > 0),
+        );
       }
       if (err instanceof BatchStateError) {
         throw new ConflictException(
@@ -760,8 +802,13 @@ export class PatientImportsService {
         processed: batch.balanceProcessedRows,
         created: batch.balanceCreatedCount,
         skipped: batch.balanceSkippedCount,
+        ambiguous: batch.balanceAmbiguousCount,
       },
       undoneCount: batch.balanceUndoneCount,
+      undoneTotals: toAmounts(batch.balanceUndoneTotals),
+      canUndo:
+        (batch.status === 'COMPLETED' || batch.status === 'FAILED') &&
+        (imported.get(batch.id) ?? []).length > 0,
     };
   }
 

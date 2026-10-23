@@ -144,6 +144,11 @@ export class AuditImportBatchDto {
       'DX-262: total por moneda de los saldos migrados del lote (agregado, sin convertir)',
   })
   balanceTotals?: AuditCurrencyTotalDto[];
+  @ApiPropertyOptional({
+    type: [AuditCurrencyTotalDto],
+    description: 'DX-262: lo que retiró de verdad el deshacer, por moneda',
+  })
+  balanceUndoneTotals?: AuditCurrencyTotalDto[];
 }
 
 export class AuditMetadataDto {

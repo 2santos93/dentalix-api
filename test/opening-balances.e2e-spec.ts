@@ -39,8 +39,14 @@ interface BalancesView {
   fileTotals: CurrencyTotal[];
   validTotals: CurrencyTotal[];
   imported: { currency: string; count: number; amount: number }[];
-  progress: { processed: number; created: number; skipped: number };
+  progress: {
+    processed: number;
+    created: number;
+    skipped: number;
+    ambiguous: number;
+  };
   undoneCount: number | null;
+  undoneTotals: CurrencyTotal[];
 }
 
 interface Batch {
@@ -126,12 +132,15 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         balance: number;
       }[];
       openingBalances: {
+        id: string;
         currency: string;
         amount: number;
         asOfDate: string;
         asOfDateApproximate: boolean;
         concept: string;
         importBatchId: string;
+        paid: number;
+        pending: number;
       }[];
     };
   const aging = async () =>
@@ -350,6 +359,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       processed: 3,
       created: 3,
       skipped: 0,
+      ambiguous: 0,
     });
     expect(done.balances?.imported).toEqual([
       { currency: 'COP', count: 2, amount: 201000.5 },
@@ -372,6 +382,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         asOfDateApproximate: false,
         concept: 'Ortodoncia 2025',
         importBatchId: batch.id,
+        paid: 0,
+        pending: 200000.5,
       },
     ]);
     expect(st.summary).toEqual([
@@ -460,18 +472,213 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     );
   });
 
-  it('deshacer el lote retira los saldos migrados: fuera del estado de cuenta y de la cartera', async () => {
+  it('abono contra el saldo migrado (revisión C1): recibo de caja, estado de cuenta y cartera con lo pendiente', async () => {
+    const ana = await patientByDoc('111111');
+    const ob = (await statementOf(ana.id)).openingBalances[0];
+    // Recepción cobra (roles de abono), con Idempotency-Key.
+    const key = '0f5e7a52-8a1c-4a9e-9d61-3b1f0e6c2a10';
+    const body = {
+      amount: 50000.5,
+      currency: 'COP',
+      paidAt: bogotaDay(),
+      method: 'TRANSFER',
+    };
+    const res = await as(
+      api().post(`/api/v1/opening-balances/${ob.id}/payments`),
+      reception,
+    )
+      .set('Idempotency-Key', key)
+      .set('X-Location-Id', mainLocationId)
+      .send(body)
+      .expect(201);
+    const paid = res.body as {
+      id: string;
+      treatmentPlanId: string | null;
+      openingBalanceId: string;
+      receiptNumber: string;
+    };
+    expect(paid).toMatchObject({
+      treatmentPlanId: null,
+      openingBalanceId: ob.id,
+      receiptNumber: expect.stringMatching(/-\d{6}$/) as string,
+    });
+    // La misma petición: el mismo abono.
+    const replay = await as(
+      api().post(`/api/v1/opening-balances/${ob.id}/payments`),
+      reception,
+    )
+      .set('Idempotency-Key', key)
+      .set('X-Location-Id', mainLocationId)
+      .send(body)
+      .expect(201);
+    expect((replay.body as { id: string }).id).toBe(paid.id);
+
+    const receipt = await as(
+      api().get(`/api/v1/payments/${paid.id}/receipt`),
+      a.adminToken,
+    ).expect(200);
+    expect(receipt.body).toMatchObject({
+      snapshot: {
+        plan: null,
+        openingBalance: { id: ob.id, concept: 'Ortodoncia 2025' },
+        planBalance: { balance: 150000 },
+      },
+    });
+
+    const st = await statementOf(ana.id);
+    expect(st.openingBalances[0]).toMatchObject({
+      amount: 200000.5,
+      paid: 50000.5,
+      pending: 150000,
+    });
+    expect(st.summary[0]).toMatchObject({ paid: 50000.5, balance: 150000 });
+    const row = (await aging()).items.find((r) => r.patient.id === ana.id);
+    expect(row?.currencies[0]).toMatchObject({
+      balance: 150000,
+      buckets: expect.objectContaining({ days61to90: 150000 }) as Record<
+        string,
+        number
+      >,
+    });
+
+    // Sin pasarse de lo pendiente, en su moneda y solo de esta clínica.
+    const over = await as(
+      api().post(`/api/v1/opening-balances/${ob.id}/payments`),
+      a.adminToken,
+    )
+      .send({ ...body, amount: 150000.01 })
+      .expect(400);
+    expect((over.body as { message: string }).message).toMatch(
+      /^El abono supera lo pendiente del saldo migrado: quedan 150\.000,00\sCOP\.$/,
+    );
+    await as(
+      api().post(`/api/v1/opening-balances/${ob.id}/payments`),
+      a.adminToken,
+    )
+      .send({ ...body, currency: 'USD' })
+      .expect(400);
+    await as(
+      api().post(`/api/v1/opening-balances/${ob.id}/payments`),
+      b.adminToken,
+      b,
+    )
+      .send(body)
+      .expect(404);
+  });
+
+  it('deshacer el lote se niega con abonos vivos al saldo migrado; anulado el abono, retira los saldos', async () => {
+    const res409 = await as(
+      api().post(`/api/v1/patient-imports/${batch.id}/undo`),
+      a.adminToken,
+    ).expect(409);
+    expect((res409.body as { message: string }).message).toBe(
+      'No se puede deshacer: 1 saldo migrado de este lote ya tiene abonos. Anula esos abonos antes de deshacer.',
+    );
+    const ana = await patientByDoc('111111');
+    const live = await raw.payment.findFirstOrThrow({
+      where: { patientId: ana.id, deletedAt: null },
+    });
+    await as(api().delete(`/api/v1/payments/${live.id}`), a.adminToken)
+      .send({ reason: 'Prueba del deshacer' })
+      .expect(200);
+
     const res = await as(
       api().post(`/api/v1/patient-imports/${batch.id}/undo`),
       a.adminToken,
     ).expect(200);
     const undone = res.body as Batch;
     expect(undone.status).toBe('UNDONE');
-    expect(undone.balances).toMatchObject({ undoneCount: 3, imported: [] });
+    expect(undone.balances).toMatchObject({
+      undoneCount: 3,
+      imported: [],
+      undoneTotals: [
+        { currency: 'COP', rows: 2, amount: 201000.5 },
+        { currency: 'USD', rows: 1, amount: 40 },
+      ],
+    });
     const st = await statementOf(existingId);
     expect(st.openingBalances).toEqual([]);
     expect(st.summary).toEqual([]);
     expect((await aging()).items).toEqual([]);
+    // Auditoría: lo retirado de verdad.
+    const event = await raw.auditEvent.findFirst({
+      where: {
+        tenantId: a.tenantId,
+        resourceId: batch.id,
+        action: 'DELETE',
+      },
+    });
+    expect(event?.metadata).toMatchObject({
+      importBatch: {
+        balancesUndone: 3,
+        balanceUndoneTotals: [
+          { currency: 'COP', rows: 2, amount: 201000.5 },
+          { currency: 'USD', rows: 1, amount: 40 },
+        ],
+      },
+    });
+  });
+
+  it('retirar SOLO los saldos del lote aunque sus pacientes ya tengan citas', async () => {
+    const res = await attach(
+      '',
+      csv(PATIENTS_HEADER, ['CC;444444;Iris;Citada']),
+      'p3.csv',
+    ).expect(201);
+    const third = res.body as Batch;
+    await attach(
+      `/${third.id}/balances`,
+      csv(BALANCES_HEADER, ['444444;70.000;COP;;']),
+      'saldos3.csv',
+    ).expect(201);
+    await as(
+      api().post(`/api/v1/patient-imports/${third.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    const iris = await patientByDoc('444444');
+    const start = new Date(Date.now() + 2 * 86_400_000);
+    await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: iris.id,
+        providerId: (
+          await raw.user.findFirstOrThrow({
+            where: { memberships: { some: { tenantId: a.tenantId } } },
+          })
+        ).id,
+        locationId: mainLocationId,
+        start,
+        end: new Date(start.getTime() + 1_800_000),
+      },
+    });
+    await as(
+      api().post(`/api/v1/patient-imports/${third.id}/undo`),
+      a.adminToken,
+    ).expect(409);
+    // Recepción no puede.
+    await as(
+      api().post(`/api/v1/patient-imports/${third.id}/balances/undo`),
+      reception,
+    ).expect(403);
+    const out = await as(
+      api().post(`/api/v1/patient-imports/${third.id}/balances/undo`),
+      a.adminToken,
+    ).expect(200);
+    expect((out.body as Batch).status).toBe('COMPLETED');
+    expect((out.body as Batch).balances).toMatchObject({
+      undoneCount: 1,
+      imported: [],
+    });
+    expect((await statementOf(iris.id)).openingBalances).toEqual([]);
+    // Otra clínica no lo ve.
+    await as(
+      api().post(`/api/v1/patient-imports/${third.id}/balances/undo`),
+      b.adminToken,
+      b,
+    ).expect(404);
   });
 
   it('quitar la hoja de saldos de un dry-run; en un lote ya importado, 409', async () => {

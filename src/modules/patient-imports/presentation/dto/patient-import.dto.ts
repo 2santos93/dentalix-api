@@ -236,6 +236,11 @@ export class BalanceProgressDto {
     description: 'No creados: su paciente no existía al importar',
   })
   skipped!: number;
+  @ApiProperty({
+    description:
+      'No creados: su documento era de varios pacientes vivos (ambiguo)',
+  })
+  ambiguous!: number;
 }
 
 /** Hoja de saldos «Saldo migrado» del lote (DX-262). */
@@ -285,6 +290,16 @@ export class PatientImportBalancesDto {
     description: 'Saldos que retiró el deshacer',
   })
   undoneCount!: number | null;
+  @ApiProperty({
+    type: [BalanceCurrencyTotalDto],
+    description: 'Lo que retiró de verdad el deshacer, por moneda',
+  })
+  undoneTotals!: BalanceCurrencyTotalDto[];
+  @ApiProperty({
+    description:
+      'Lote terminado con saldos vivos: se pueden retirar solos (POST :id/balances/undo)',
+  })
+  canUndo!: boolean;
 }
 
 export class PatientImportBatchDto {
