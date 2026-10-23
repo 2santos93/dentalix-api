@@ -10,6 +10,8 @@ import { ACCEPTED_PLAN_DISCOUNT_LOCKED_MESSAGE } from '../src/modules/treatment-
 import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import type { DentalCatalogRepository } from '../src/modules/dental-catalog/domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/entities/dental-catalog-item.entity';
+import type { PricingSource } from '../src/modules/treatment-plans/domain/ports/pricing-source.port';
+import { catalogPricing } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/catalog-pricing-source';
 
 // BE-036 (SEC-041): el estado del plan se comprueba DENTRO de la transacción
 // que escribe el ítem, después de bloquear la fila del plan. Antes se leía
@@ -31,17 +33,28 @@ const now = () => new Date();
 let catalogEntity: DentalCatalogItem;
 const catalog = {
   findById: () => Promise.resolve(catalogEntity),
+  findByIds: () => Promise.resolve([catalogEntity]),
 } as unknown as DentalCatalogRepository;
+// DX-105: sin convenio ni lista; la sede de la foto es la sembrada (FK).
+const pricing: PricingSource = {
+  contextFor: (patientId, catalogItemId, currency) =>
+    catalogPricing(catalog, { locationId: s.locationId }).contextFor(
+      patientId,
+      catalogItemId,
+      currency,
+    ),
+};
 
-const add = new AddTreatmentPlanItemUseCase(plans, catalog, policy, now);
+const add = new AddTreatmentPlanItemUseCase(plans, pricing, policy, now);
 const update = new UpdateTreatmentPlanItemUseCase(plans, catalog, policy, now);
-const bulk = new ApplyBulkDiscountUseCase(plans, policy, now);
+const bulk = new ApplyBulkDiscountUseCase(plans, policy, now, catalog);
 
 interface Seeded {
   tenantId: string;
   userId: string;
   patientId: string;
   catalogItemId: string;
+  locationId: string;
 }
 let s: Seeded;
 
@@ -56,7 +69,7 @@ async function seed(): Promise<Seeded> {
       fullName: 'Dra Carrera',
     },
   });
-  await raw.location.create({
+  const location = await raw.location.create({
     data: { tenantId: tenant.id, name: 'Sede principal' },
   });
   const patient = await raw.patient.create({
@@ -78,6 +91,7 @@ async function seed(): Promise<Seeded> {
     userId: user.id,
     patientId: patient.id,
     catalogItemId: item.id,
+    locationId: location.id,
   };
 }
 

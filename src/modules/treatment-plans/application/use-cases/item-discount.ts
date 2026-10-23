@@ -24,6 +24,7 @@ import {
   type PricedItem,
 } from '../../../discounts/domain/effective-discount';
 import type { TreatmentPlanWithItems } from '../../domain/entities/treatment-plan.entity';
+import { NO_DISCOUNT_ALLOWED_MESSAGE } from '../../domain/pricing/resolve-item-price';
 import type { DiscountStamp } from '../../domain/ports/treatment-plan-repository.port';
 
 /** 0 ≤ descuento ≤ precio (DX-012). La base lo repite con un CHECK. */
@@ -35,6 +36,20 @@ export function assertDiscountWithinPrice(
     throw new BadRequestException(
       'El descuento no puede ser mayor que el precio del ítem.',
     );
+  }
+}
+
+/**
+ * DX-105: una prestación con `allowDiscount=false` no admite descuento
+ * discrecional: ni `discount > 0` ni un precio por debajo de la referencia
+ * (`catalogPrice`). 400 con el mensaje en español.
+ */
+export function assertDiscountAllowed(
+  allowDiscount: boolean,
+  item: PricedItem,
+): void {
+  if (!allowDiscount && effectiveDiscount(item).total > 0) {
+    throw new BadRequestException(NO_DISCOUNT_ALLOWED_MESSAGE);
   }
 }
 

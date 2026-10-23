@@ -33,6 +33,10 @@ import {
   PatientCoverageFlags,
   type CoverageSummary,
 } from '../../patient-coverages/application/patient-coverage-flags';
+import {
+  PatientAgreementFlags,
+  type AgreementSummary,
+} from '../../patient-agreements/application/patient-agreement-flags';
 import type { OverdueBalance } from '../../collections/domain/overdue-balance';
 import { ListPatientsResponseDto } from './dto/list-patients-response.dto';
 import { CreatePatientUseCase } from '../application/use-cases/create-patient.use-case';
@@ -100,6 +104,7 @@ export class PatientsController {
     private readonly balanceFlags: PatientBalanceFlags,
     // DX-153: resumen de cobertura de la ficha y del listado.
     private readonly coverageFlags: PatientCoverageFlags,
+    private readonly agreementFlags: PatientAgreementFlags,
   ) {}
 
   @Audit({
@@ -203,19 +208,26 @@ export class PatientsController {
   @ApiOkResponse({
     type: PatientDetailDto,
     description:
-      'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION. Y con `coverage` (DX-153): resumen de la cobertura principal.',
+      'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal. Y con `agreement` (DX-105): resumen del convenio vigente.',
   })
   async get(
     @Param('id') id: string,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Patient & { balance: OverdueBalance; coverage: CoverageSummary }> {
+  ): Promise<
+    Patient & {
+      balance: OverdueBalance;
+      coverage: CoverageSummary;
+      agreement: AgreementSummary;
+    }
+  > {
     const patient = await this.getPatient.execute(id);
     const balance = await this.balanceFlags.forPatient(
       patient.id,
       req.user.role,
     );
     const coverage = await this.coverageFlags.forPatient(patient.id);
-    return { ...patient, balance, coverage };
+    const agreement = await this.agreementFlags.forPatient(patient.id);
+    return { ...patient, balance, coverage, agreement };
   }
 
   @Audit({

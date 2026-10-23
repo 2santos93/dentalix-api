@@ -725,6 +725,70 @@ export const DEMO_PAYERS = [
   type: 'EPS_CO' | 'PREPAGADA_CO';
 }[];
 
+/** DX-105: pagador extra de la demo, para el convenio de lista de precios. */
+export const DEMO_ALFA_PAYER = {
+  name: 'Empresa Alfa',
+  type: 'EMPRESA',
+} as const;
+
+/**
+ * DX-105: listas de precios (COP). «Tarifa Sede Norte» es la lista activa de la
+ * Sede Norte (5 precios); «Convenio Alfa» es de toda la clínica y solo la usa
+ * el convenio «Empresa Alfa lista» (3 precios). Los códigos son los de
+ * `DEMO_PRICES`, y todos los precios quedan por debajo del de catálogo.
+ */
+export const DEMO_PRICE_LISTS = [
+  {
+    key: 'norte',
+    name: 'Tarifa Sede Norte',
+    locationKey: 'norte',
+    prices: {
+      'IMG-CONSULTA': 75000,
+      'PREV-PROFILAXIS': 110000,
+      'OP-RESINA-1': 140000,
+      'ENDO-UNI': 420000,
+      'URG-CONSULTA': 85000,
+    },
+  },
+  {
+    key: 'alfa',
+    name: 'Convenio Alfa',
+    locationKey: null,
+    prices: {
+      'PREV-PROFILAXIS': 90000,
+      'OP-RESINA-1': 120000,
+      'IMG-RX-PERIAPICAL': 28000,
+    },
+  },
+] as const;
+
+/** DX-105: los dos convenios de la demo. */
+export const DEMO_AGREEMENTS = [
+  {
+    key: 'sura',
+    name: 'Sura EPS −15 %',
+    payerName: 'Sura EPS',
+    kind: 'PERCENT_DISCOUNT',
+    percent: 15,
+    priceListKey: null,
+  },
+  {
+    key: 'alfa',
+    name: 'Empresa Alfa lista',
+    payerName: 'Empresa Alfa',
+    kind: 'PRICE_LIST',
+    percent: null,
+    priceListKey: 'alfa',
+  },
+] as const;
+
+/** DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su cobertura— y uno con Alfa). */
+export const DEMO_PATIENT_AGREEMENTS = [
+  { patientIndex: 0, agreementKey: 'sura' },
+  { patientIndex: 4, agreementKey: 'sura' },
+  { patientIndex: 2, agreementKey: 'alfa' },
+] as const;
+
 export interface DemoCoverage {
   patientIndex: number;
   payerKey: (typeof DEMO_PAYERS)[number]['key'];

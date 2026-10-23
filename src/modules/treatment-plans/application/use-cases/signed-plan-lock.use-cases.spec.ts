@@ -12,6 +12,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
+import { catalogPricing } from './__fixtures__/catalog-pricing-source';
 import { AddTreatmentPlanItemUseCase } from './add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from './update-treatment-plan-item.use-case';
 import { RemoveTreatmentPlanItemUseCase } from './remove-treatment-plan-item.use-case';
@@ -34,6 +35,7 @@ const CATALOG_ITEM: DentalCatalogItem = {
   color: '#FFFFFF',
   defaultPrice: 200,
   cupsCode: null,
+  allowDiscount: true,
   active: true,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -41,11 +43,14 @@ const CATALOG_ITEM: DentalCatalogItem = {
 
 function catalog(): DentalCatalogRepository {
   const findById = (id: string) =>
-    Promise.resolve(id === CATALOG_ITEM.id ? CATALOG_ITEM : null);
+    Promise.resolve(
+      id === CATALOG_ITEM.id ? CATALOG_ITEM : { ...CATALOG_ITEM, id },
+    );
   const unused = () => Promise.reject(new Error('no usado en este spec'));
   return {
     create: unused,
     list: unused,
+    findByIds: () => Promise.resolve([]),
     listDirectory: unused,
     findById,
     update: unused,
@@ -83,7 +88,7 @@ function setup(acceptance: typeof SIGNED | null, status?: TreatmentPlanStatus) {
     item,
     add: new AddTreatmentPlanItemUseCase(
       repo,
-      catalog(),
+      catalogPricing(catalog()),
       testDiscountPolicy(),
       FIXED_CLOCK,
     ),

@@ -63,6 +63,11 @@ model Tenant {
   // DX-153: pagadores de la clínica y coberturas de sus pacientes.
   payers                    Payer[]
   patientCoverages          PatientCoverage[]
+  // DX-105: listas de precios, convenios y su asignación a pacientes.
+  priceLists                PriceList[]
+  priceListItems            PriceListItem[]
+  agreements                Agreement[]
+  patientAgreements         PatientAgreement[]
   paymentPromises           PaymentPromise[]
   platformAccesses          PlatformAccessAudit[]
   // DX-204: topes de descuento por rol (una fila; sin ella, los de por defecto).
@@ -196,6 +201,7 @@ model Location {
   updatedAt            DateTime      @updatedAt
   deletedAt            DateTime?
 
+  clinicalEntries           ClinicalEntry[]
   appointments              Appointment[]
   payments                  Payment[]
   inventoryItems            InventoryItem[]
@@ -218,7 +224,9 @@ model Location {
   collectionNotes           CollectionNote[]
   paymentPromises           PaymentPromise[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
-  planItemDiscounts         TreatmentPlanItem[]
+  planItemDiscounts         TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
+  // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
+  planItemPricings          TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
   // DX-027: cajas por turno de la sede y sus ajustes.
   cashSessions              CashSession[]
   cashAdjustments           CashSessionAdjustment[]
@@ -226,6 +234,9 @@ model Location {
   membershipLocations       MembershipLocation[]
   // DX-222: indicaciones postoperatorias entregadas en la sede.
   postOpDeliveries          PostOpInstructionDelivery[]
+  // DX-105: listas y convenios de la sede.
+  priceLists                PriceList[]
+  agreements                Agreement[]
   // DX-233: horario de los profesionales en la sede y sus excepciones.
   providerSchedules         ProviderSchedule[]
   providerScheduleOverrides ProviderScheduleOverride[]
@@ -444,6 +455,8 @@ model Patient {
   responsibleFor         PatientResponsibleParty[]   @relation("ResponsiblePatient")
   // DX-153: sus coberturas (pagador, plan, afiliado, vigencia).
   coverages              PatientCoverage[]
+  // DX-105: asignaciones de convenio (una viva; las retiradas son el historial).
+  agreements             PatientAgreement[]
   // DX-222: indicaciones postoperatorias que se le entregaron.
   postOpDeliveries       PostOpInstructionDelivery[]
   country                Country?                    @relation(fields: [countryCode], references: [code])
@@ -550,6 +563,8 @@ model ClinicalEntry {
   // las anteriores) y la plantilla con la que se redactó. El texto compuesto
   // vive en `notes`: cambiar o desactivar la plantilla no toca la evolución.
   appointmentId String?   @db.Uuid
+  // DX-232: sede de la atención; null solo para registros legacy.
+  locationId    String?   @db.Uuid
   templateId    String?   @db.Uuid
   createdAt     DateTime  @default(now())
   deletedAt     DateTime?
@@ -566,6 +581,7 @@ model ClinicalEntry {
   // clínica Y del MISMO paciente. RESTRICT en las dos acciones: la evolución
   // es inalterable (DX-038) y nada puede reescribirla en cascada.
   appointment Appointment?             @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
+  location    Location?                @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
   template    ClinicalNoteTemplate?    @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
 
   // DX-038: INALTERABLE en la BD (trigger: ni UPDATE ni DELETE para el rol de
@@ -678,6 +694,8 @@ model ClinicalEntryDiagnosis {
   patientId       String                @db.Uuid
   clinicalEntryId String                @db.Uuid
   icd10Code       String
+  // DX-236: snapshot autoritativo del trigger BEFORE INSERT, nunca del cliente.
+  labelEs         String                @default(dbgenerated())
   kind            ClinicalDiagnosisKind
   // Diente FDI opcional (mismo patrón que el odontograma).
   toothFdi        String?
@@ -717,25 +735,32 @@ enum CatalogKind {
 }
 
 model DentalCatalogItem {
-  id           String      @id @default(uuid()) @db.Uuid
-  tenantId     String      @db.Uuid
-  code         String
-  category     String?
-  kind         CatalogKind
-  labelEs      String
-  labelEn      String?
-  labelPt      String?
-  color        String
-  defaultPrice Decimal?    @db.Decimal(12, 2)
+  id            String      @id @default(uuid()) @db.Uuid
+  tenantId      String      @db.Uuid
+  code          String
+  category      String?
+  kind          CatalogKind
+  labelEs       String
+  labelEn       String?
+  labelPt       String?
+  color         String
+  defaultPrice  Decimal?    @db.Decimal(12, 2)
   // DX-212: código CUPS del procedimiento (6 caracteres alfanuméricos, CHECK
   // dental_catalog_items_cups_code_format). Lo piden el RDA y el RIPS.
-  cupsCode     String?
-  active       Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  deletedAt    DateTime?
+  cupsCode      String?
+  // DX-105: false = el procedimiento no recibe convenio ni descuento porcentual.
+  allowDiscount Boolean     @default(true)
+  active        Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  // DX-105: precios de este procedimiento en las listas.
+  priceListItems PriceListItem[]
 
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
+  // DX-105: destino de la FK compuesta de `price_list_items`.
+  @@unique([tenantId, id], map: "dental_catalog_items_tenant_id_key")
   @@index([tenantId])
   @@map("dental_catalog_items")
 }
@@ -900,6 +925,7 @@ model Appointment {
   updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
 
+  planItems        AppointmentPlanItem[]
   confirmations    AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
   waitlistOffers   WaitlistOffer[]
@@ -1300,18 +1326,21 @@ enum TreatmentPlanItemStatus {
 }
 
 model TreatmentPlan {
-  id          String              @id @default(uuid()) @db.Uuid
-  tenantId    String              @db.Uuid
-  patientId   String              @db.Uuid
-  status      TreatmentPlanStatus @default(DRAFT)
+  visitIntervals     Json                @default("{}")
+  acceptedAt         DateTime?
+  acceptedLocationId String?             @db.Uuid
+  id                 String              @id @default(uuid()) @db.Uuid
+  tenantId           String              @db.Uuid
+  patientId          String              @db.Uuid
+  status             TreatmentPlanStatus @default(DRAFT)
   // Moneda del plan: monto a pagar/saldo se calculan en esta moneda; un abono
   // en otra moneda se convierte por su fecha (ver Payment/ConvertAmountUseCase).
-  currency    String              @default("USD")
-  notes       String?
-  createdById String?             @db.Uuid
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  deletedAt   DateTime?
+  currency           String              @default("USD")
+  notes              String?
+  createdById        String?             @db.Uuid
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
 
   // Alternativas A/B (DX-040). `optionGroupId` es el id del plan que abrió el
   // grupo (ese plan apunta a sí mismo); null = plan suelto. `optionLabel`
@@ -1363,26 +1392,41 @@ model TreatmentPlan {
 }
 
 model TreatmentPlanItem {
-  id            String                  @id @default(uuid()) @db.Uuid
-  tenantId      String                  @db.Uuid
-  planId        String                  @db.Uuid
-  toothNumber   String
-  surfaces      ToothSurface[]
-  catalogItemId String                  @db.Uuid
-  // SEC-041: precio de catálogo al dar de alta el ítem (NULL = ítem libre: el
-  // catálogo no tenía precio). Un precio por debajo cuenta como descuento
-  // (rebaja = catalogPrice − price) y se firma como él. CHECK
+  visit             Int                     @default(1)
+  visitLabel        String?                 @db.VarChar(60)
+  patientId         String                  @default(dbgenerated()) @db.Uuid
+  appointmentLinks  AppointmentPlanItem[]
+  id                String                  @id @default(uuid()) @db.Uuid
+  tenantId          String                  @db.Uuid
+  planId            String                  @db.Uuid
+  toothNumber       String
+  surfaces          ToothSurface[]
+  catalogItemId     String                  @db.Uuid
+  // Precio de REFERENCIA del ítem al darlo de alta (NULL = ítem libre: sin
+  // precio de catálogo). DX-105 (ruling R1) lo resuelve en orden convenio →
+  // lista de precios → catálogo; `basePrice` guarda siempre el de catálogo. Un
+  // precio por debajo cuenta como descuento (rebaja = catalogPrice − price) y se
+  // firma como él, así que `effectiveDiscount`, el informe de descuentos y su
+  // índice parcial miden solo lo que baja del precio pactado. CHECK
   // treatment_plan_items_catalog_price_nonneg (>= 0).
-  catalogPrice  Decimal?                @db.Decimal(12, 2)
-  price         Decimal                 @db.Decimal(12, 2)
+  catalogPrice      Decimal?                @db.Decimal(12, 2)
+  // DX-105: foto del precio al dar de alta el ítem. NULL = «sin convenio»
+  // (ítems anteriores, sin backfill). CHECK treatment_plan_items_base_price_nonneg.
+  basePrice         Decimal?                @db.Decimal(12, 2)
+  priceSource       PriceSource?
+  agreementId       String?                 @db.Uuid
+  agreementName     String?
+  // Sede con la que se resolvió el precio.
+  pricingLocationId String?                 @db.Uuid
+  price             Decimal                 @db.Decimal(12, 2)
   // Descuento del ítem en la moneda del plan (DX-012). CHECK 0 <= discount <= price
   // (treatment_plan_items_discount_nonneg / _subtotal_nonneg).
-  discount      Decimal                 @default(0) @db.Decimal(12, 2)
-  status        TreatmentPlanItemStatus @default(PROPOSED)
-  notes         String?
-  createdAt     DateTime                @default(now())
-  updatedAt     DateTime                @updatedAt
-  deletedAt     DateTime?
+  discount          Decimal                 @default(0) @db.Decimal(12, 2)
+  status            TreatmentPlanItemStatus @default(PROPOSED)
+  notes             String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  deletedAt         DateTime?
 
   // DX-204: quién dio el descuento vigente, cuándo (hora del servidor), en qué
   // sede (la del request o la principal) y por qué. NULL en los ítems sin
@@ -1398,9 +1442,16 @@ model TreatmentPlanItem {
   plan             TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
   discountBy       User?         @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
   // FK COMPUESTA (SEC-004): la sede del descuento es de la MISMA clínica.
-  discountLocation Location?     @relation(fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
+  discountLocation Location?     @relation("TreatmentPlanItemDiscountLocation", fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
+  // FK COMPUESTA (SEC-004, DX-105): el convenio aplicado es de la MISMA clínica.
+  agreement        Agreement?    @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
+  // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
+  pricingLocation  Location?     @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
 
+  @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
   @@index([tenantId, planId])
+  @@index([tenantId, agreementId], map: "treatment_plan_items_tenant_agreement_idx")
+  @@index([tenantId, pricingLocationId], map: "treatment_plan_items_tenant_pricing_location_idx")
   @@index([tenantId, discountLocationId])
   @@index([discountById])
   // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:
@@ -1559,6 +1610,8 @@ model Currency {
   cashFloats       CashSessionFloat[]
   cashClosingLines CashSessionClosingLine[]
   cashAdjustments  CashSessionAdjustment[]
+  // DX-105: listas de precios en esa moneda.
+  priceLists       PriceList[]
 
   @@map("currencies")
 }
@@ -2402,6 +2455,9 @@ enum AuditResourceType {
   POSTOP_DELIVERY
   // DX-151: documentos del paciente (subir, ver, descargar, anular).
   PATIENT_DOCUMENT
+  // DX-105: convenios y listas de precios (altas, cambios, retiros, asignaciones).
+  AGREEMENT
+  PRICE_LIST
   // DX-233: horario semanal de un profesional, sus excepciones por fecha y el
   // modo estricto de la clínica.
   PROVIDER_SCHEDULE
@@ -2776,6 +2832,7 @@ enum AppointmentReminderStatus {
   SENDING
   SENT
   SKIPPED
+  FAILED
 }
 
 enum AppointmentReminderSkipReason {
@@ -2806,6 +2863,8 @@ model AppointmentReminder {
   appointmentStart  DateTime
   status            AppointmentReminderStatus      @default(SENDING)
   skipReason        AppointmentReminderSkipReason?
+  /// Solo describeJobError: tipo/código, nunca mensaje ni datos del paciente.
+  failureReason     String?                        @db.VarChar(200)
   outboundMessageId String?                        @db.Uuid
   sentAt            DateTime?
   createdAt         DateTime                       @default(now())
@@ -3283,8 +3342,10 @@ model Payer {
   updatedAt   DateTime       @updatedAt
   deletedAt   DateTime?
 
-  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  coverages PatientCoverage[]
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  coverages  PatientCoverage[]
+  // DX-105: convenios con este pagador.
+  agreements Agreement[]
 
   // Destino de la FK compuesta de `patient_coverages`.
   @@unique([tenantId, id], map: "payers_tenant_id_key")
@@ -3327,12 +3388,174 @@ model PatientCoverage {
   updatedAt              DateTime  @updatedAt
   deletedAt              DateTime?
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_patient_fkey")
-  payer   Payer   @relation(fields: [tenantId, payerId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_payer_fkey")
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient    Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_patient_fkey")
+  payer      Payer              @relation(fields: [tenantId, payerId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_payer_fkey")
+  // DX-105: asignaciones de convenio que vinculan esta cobertura.
+  agreements PatientAgreement[]
 
+  // Destino de la FK compuesta de `patient_agreements` (DX-105).
+  @@unique([tenantId, id], map: "patient_coverages_tenant_id_key")
   @@index([tenantId, patientId, createdAt], map: "patient_coverages_tenant_patient_idx")
   @@map("patient_coverages")
+}
+
+// ---------------------------------------------------------------------------
+// Convenios y listas de precios (DX-105)
+// ---------------------------------------------------------------------------
+
+enum AgreementKind {
+  PERCENT_DISCOUNT
+  PRICE_LIST
+}
+
+/// De dónde salió el precio sellado en un ítem de plan.
+enum PriceSource {
+  CATALOG
+  PRICE_LIST
+  AGREEMENT_PERCENT
+  AGREEMENT_PRICE_LIST
+}
+
+/// DX-105: lista de precios de la clínica (toda la clínica o una sede). Se
+/// retira en blando (`deletedAt`). RLS FORCE y FK COMPUESTAS por tenant.
+/// PARCIALES (no declarables en Prisma, no generan drift):
+///   price_lists_tenant_name_key            UNIQUE ("tenantId", "name") WHERE "deletedAt" IS NULL
+///   price_lists_tenant_location_active_key UNIQUE ("tenantId", "locationId")
+///     WHERE "active" AND "deletedAt" IS NULL AND "locationId" IS NOT NULL
+///     (a lo sumo una lista activa por sede)
+/// CHECK price_lists_name_length_check (2..120) y price_lists_currency_format.
+model PriceList {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  name        String
+  currency    String
+  /// NULL = toda la clínica.
+  locationId  String?   @db.Uuid
+  active      Boolean   @default(true)
+  /// Punteros suaves a User, como `Payer.createdById`.
+  createdById String?   @db.Uuid
+  updatedById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  currencyRef Currency        @relation(fields: [currency], references: [code], map: "price_lists_currency_fkey")
+  location    Location?       @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "price_lists_location_fkey")
+  items       PriceListItem[]
+  agreements  Agreement[]
+
+  // Destino de las FK compuestas de `price_list_items` y `agreements`.
+  @@unique([tenantId, id], map: "price_lists_tenant_id_key")
+  // PARCIAL: en la BD es UNIQUE ("tenantId", "name") WHERE "deletedAt" IS NULL.
+  // Prisma no expresa el WHERE: NO aceptar un diff de `migrate dev` que lo
+  // recree sin el WHERE.
+  @@unique([tenantId, name], map: "price_lists_tenant_name_key")
+  @@index([tenantId, locationId], map: "price_lists_tenant_location_idx")
+  @@map("price_lists")
+}
+
+/// DX-105: precio de un procedimiento en una lista. Sin borrado blando: quitar
+/// el precio = borrar la fila. CHECK price_list_items_price_nonneg (>= 0).
+model PriceListItem {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  priceListId   String   @db.Uuid
+  catalogItemId String   @db.Uuid
+  price         Decimal  @db.Decimal(12, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  priceList   PriceList         @relation(fields: [tenantId, priceListId], references: [tenantId, id], onDelete: Restrict, map: "price_list_items_price_list_fkey")
+  catalogItem DentalCatalogItem @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Restrict, map: "price_list_items_catalog_item_fkey")
+
+  @@unique([tenantId, priceListId, catalogItemId], map: "price_list_items_tenant_list_item_key")
+  @@index([tenantId, catalogItemId], map: "price_list_items_tenant_catalog_item_idx")
+  @@map("price_list_items")
+}
+
+/// DX-105: convenio con un pagador. `PERCENT_DISCOUNT` usa `percent` (global) y
+/// opcionalmente `percentByCategory` (`{ "<categoría>": <0–100> }`, la categoría
+/// se compara normalizada con `DentalCatalogItem.category`); `PRICE_LIST` usa
+/// `priceListId`. Se retira en blando (`deletedAt`). RLS FORCE y FK COMPUESTAS.
+/// PARCIAL (no declarable en Prisma):
+///   agreements_tenant_name_key UNIQUE ("tenantId", "name") WHERE "deletedAt" IS NULL
+/// CHECK agreements_kind_check, agreements_percent_check (0..100),
+/// agreements_percent_by_category_check (jsonb_typeof = 'object'),
+/// agreements_valid_range_check, agreements_name_length_check (2..120).
+model Agreement {
+  id                String        @id @default(uuid()) @db.Uuid
+  tenantId          String        @db.Uuid
+  name              String
+  payerId           String        @db.Uuid
+  kind              AgreementKind
+  percent           Decimal?      @db.Decimal(5, 2)
+  percentByCategory Json?
+  priceListId       String?       @db.Uuid
+  /// NULL = toda la clínica.
+  locationId        String?       @db.Uuid
+  validFrom         DateTime?     @db.Date
+  validTo           DateTime?     @db.Date
+  active            Boolean       @default(true)
+  /// Punteros suaves a User, como `Payer.createdById`.
+  createdById       String?       @db.Uuid
+  updatedById       String?       @db.Uuid
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payer       Payer               @relation(fields: [tenantId, payerId], references: [tenantId, id], onDelete: Restrict, map: "agreements_payer_fkey")
+  priceList   PriceList?          @relation(fields: [tenantId, priceListId], references: [tenantId, id], onDelete: Restrict, map: "agreements_price_list_fkey")
+  location    Location?           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "agreements_location_fkey")
+  assignments PatientAgreement[]
+  planItems   TreatmentPlanItem[]
+
+  // Destino de las FK compuestas de `patient_agreements` y `treatment_plan_items`.
+  @@unique([tenantId, id], map: "agreements_tenant_id_key")
+  // PARCIAL: en la BD es UNIQUE ("tenantId", "name") WHERE "deletedAt" IS NULL.
+  // NO aceptar un diff de `migrate dev` que lo recree sin el WHERE.
+  @@unique([tenantId, name], map: "agreements_tenant_name_key")
+  @@index([tenantId, payerId], map: "agreements_tenant_payer_idx")
+  @@index([tenantId, priceListId], map: "agreements_tenant_price_list_idx")
+  @@index([tenantId, locationId], map: "agreements_tenant_location_idx")
+  @@map("agreements")
+}
+
+/// DX-105: convenio asignado a un paciente. `coverageId` vincula el nº de
+/// afiliado sin duplicarlo (ruling R2). Se retira en blando; las filas retiradas
+/// son el historial. RLS FORCE y FK COMPUESTAS.
+/// PARCIAL (no declarable en Prisma, no genera drift):
+///   patient_agreements_one_live_key UNIQUE ("tenantId", "patientId") WHERE "deletedAt" IS NULL
+///   (una asignación viva por paciente)
+/// CHECK patient_agreements_valid_range_check y patient_agreements_notes_length_check (<= 500).
+model PatientAgreement {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  patientId   String    @db.Uuid
+  agreementId String    @db.Uuid
+  coverageId  String?   @db.Uuid
+  validFrom   DateTime? @db.Date
+  validTo     DateTime? @db.Date
+  notes       String?
+  /// Punteros suaves a User, como `Payer.createdById`.
+  createdById String?   @db.Uuid
+  updatedById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient   Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_agreements_patient_fkey")
+  agreement Agreement        @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "patient_agreements_agreement_fkey")
+  coverage  PatientCoverage? @relation(fields: [tenantId, coverageId], references: [tenantId, id], onDelete: Restrict, map: "patient_agreements_coverage_fkey")
+
+  @@index([tenantId, patientId, createdAt], map: "patient_agreements_tenant_patient_idx")
+  @@index([tenantId, agreementId], map: "patient_agreements_tenant_agreement_idx")
+  @@index([tenantId, coverageId], map: "patient_agreements_tenant_coverage_idx")
+  @@map("patient_agreements")
 }
 
 // ---------------------------------------------------------------------------
@@ -3747,4 +3970,21 @@ model PatientImportRow {
   @@unique([tenantId, batchId, rowNumber], map: "patient_import_rows_tenant_batch_row_key")
   @@index([tenantId, patientId], map: "patient_import_rows_tenant_patient_idx")
   @@map("patient_import_rows")
+}
+
+// DX-256: historial de ítems agendados; active se mantiene con triggers.
+model AppointmentPlanItem {
+  deletedAt     DateTime?
+  tenantId      String            @db.Uuid
+  patientId     String            @db.Uuid
+  appointmentId String            @db.Uuid
+  planItemId    String            @db.Uuid
+  active        Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  appointment   Appointment       @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Cascade)
+  planItem      TreatmentPlanItem @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict)
+
+  @@id([tenantId, appointmentId, planItemId])
+  @@index([tenantId, planItemId, appointmentId])
+  @@map("appointment_plan_items")
 }

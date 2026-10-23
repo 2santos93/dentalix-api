@@ -11,6 +11,7 @@ export interface CreateDentalCatalogItemRepoInput {
   color: string;
   defaultPrice?: number;
   cupsCode?: string | null;
+  allowDiscount?: boolean;
   active?: boolean;
 }
 
@@ -25,6 +26,7 @@ export interface UpdateDentalCatalogItemRepoInput {
   defaultPrice?: number | null;
   /** DX-212: ya normalizado y validado por el caso de uso; null lo quita. */
   cupsCode?: string | null;
+  allowDiscount?: boolean;
   active?: boolean;
 }
 
@@ -70,6 +72,10 @@ export interface DentalCatalogRepository {
     params: ListCatalogDirectoryParams,
   ): Promise<CatalogDirectoryPage>;
   findById(id: string): Promise<DentalCatalogItem | null>;
+  /** Los ítems vivos de la clínica entre `ids` (DX-105). Bajo RLS: los ids de
+   * otra clínica, inexistentes o retirados simplemente no aparecen, así que
+   * quien llama compara tamaños para detectar ajenos sin leer nada de ellos. */
+  findByIds(ids: string[]): Promise<DentalCatalogItem[]>;
   update(
     id: string,
     patch: UpdateDentalCatalogItemRepoInput,

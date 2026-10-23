@@ -12,6 +12,10 @@ import {
   roleDiscountCapMessage,
 } from '../../../discounts/domain/discount-policy';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
+import {
+  DENTAL_CATALOG_REPOSITORY,
+  type DentalCatalogRepository,
+} from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import { assertItemsEditable } from './signed-plan-lock';
 import {
   assertPlanDiscountable,
@@ -27,6 +31,13 @@ export interface ApplyBulkDiscountInput {
   discountReasonNote?: string;
 }
 
+/** Lo que devuelve la acción: los ítems descontados y cuántos se saltaron. */
+export interface ApplyBulkDiscountResult {
+  items: TreatmentPlanItem[];
+  /** DX-105: ítems cuyo procedimiento no admite descuentos; no se tocan. */
+  skippedNoDiscount: number;
+}
+
 /**
  * Acción «Descuento %» sobre varios ítems de un plan (DX-204). A cada ítem se
  * le pone el `percent` % de SU precio, redondeado a la unidad de la moneda del
@@ -34,6 +45,8 @@ export interface ApplyBulkDiscountInput {
  * (un % por encima: 403 y nada cambia) y otra vez ítem a ítem: si el redondeo
  * lo llevara por encima, baja a la unidad que lo respeta. Por encima del
  * umbral, el motivo es obligatorio (422). Todo o nada, en una transacción.
+ * DX-105: los ítems cuyo procedimiento no admite descuentos se saltan (no
+ * cambian) y la respuesta dice cuántos.
  */
 @Injectable()
 export class ApplyBulkDiscountUseCase {
@@ -43,13 +56,15 @@ export class ApplyBulkDiscountUseCase {
     private readonly discountPolicy: GetDiscountPolicyUseCase,
     @Inject(TREATMENT_PLAN_CLOCK)
     private readonly now: PlanClock,
+    @Inject(DENTAL_CATALOG_REPOSITORY)
+    private readonly catalog: DentalCatalogRepository,
   ) {}
 
   async execute(
     planId: string,
     input: ApplyBulkDiscountInput,
     actor: DiscountActor,
-  ): Promise<TreatmentPlanItem[]> {
+  ): Promise<ApplyBulkDiscountResult> {
     const policy = await this.discountPolicy.execute();
     const cap = policy.maxPercentByRole[actor.role] ?? 0;
     if (input.percent > cap) {
@@ -60,15 +75,24 @@ export class ApplyBulkDiscountUseCase {
     const reasonChanged =
       input.discountReason !== undefined ||
       input.discountReasonNote !== undefined;
+    const noDiscount = await this.noDiscountCatalogItems(planId, input.itemIds);
+    let skippedNoDiscount = 0;
     // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
     // la transacción, junto a los ítems.
-    return this.repo.applyBulkDiscount(
+    const updated = await this.repo.applyBulkDiscount(
       planId,
       input.itemIds,
       ({ plan, items }) => {
         assertItemsEditable(plan);
         assertPlanDiscountable(plan);
-        return items.map((item): BulkItemDiscount => {
+        // Al 0 % no se salta ningún ítem: limpia descuentos antiguos y solo
+        // puede bajar el descuento efectivo.
+        const discountable =
+          input.percent > 0
+            ? items.filter((item) => !noDiscount.has(item.catalogItemId))
+            : items;
+        skippedNoDiscount = items.length - discountable.length;
+        return discountable.map((item): BulkItemDiscount => {
           const discount = discountForPercent(
             item.price,
             input.percent,
@@ -99,5 +123,33 @@ export class ApplyBulkDiscountUseCase {
         });
       },
     );
+    return { items: updated, skippedNoDiscount };
+  }
+
+  /**
+   * Procedimientos (de los ítems pedidos) que no admiten descuentos. Se leen
+   * antes de la transacción: el procedimiento de un ítem no cambia. Un ítem
+   * que aún no existía en esta lectura no tiene entrada, y se salta (lado
+   * seguro: nunca se descuenta lo que no se ha comprobado).
+   */
+  private async noDiscountCatalogItems(
+    planId: string,
+    itemIds: string[],
+  ): Promise<{ has(catalogItemId: string): boolean }> {
+    const plan = await this.repo.findPlanById(planId);
+    const wanted = new Set(itemIds);
+    const catalogIds = [
+      ...new Set(
+        (plan?.items ?? [])
+          .filter((item) => wanted.has(item.id))
+          .map((item) => item.catalogItemId),
+      ),
+    ];
+    const catalogItems =
+      catalogIds.length > 0 ? await this.catalog.findByIds(catalogIds) : [];
+    const allowed = new Set(
+      catalogItems.filter((c) => c.allowDiscount).map((c) => c.id),
+    );
+    return { has: (catalogItemId) => !allowed.has(catalogItemId) };
   }
 }

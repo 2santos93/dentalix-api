@@ -17,6 +17,11 @@ import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  computeAcceptanceHash,
+  computeQuoteHash,
+  parseQuoteContent,
+} from '../src/modules/treatment-plans/domain/plan-quote';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
@@ -64,8 +69,18 @@ interface QuoteBody {
     unitPrice: number;
     discount: number;
     subtotal: number;
+    listPrice: number | null;
+    agreementName: string | null;
   }[];
-  totals: { currency: string; gross: number; discount: number; net: number }[];
+  version: 1 | 2;
+  agreement: { name: string; payerName: string } | null;
+  totals: {
+    currency: string;
+    gross: number;
+    discount: number;
+    net: number;
+    agreementSaving: number;
+  }[];
   contentHash: string;
   acceptance: null | {
     signerName: string;
@@ -78,6 +93,7 @@ interface QuoteBody {
 }
 
 async function cleanup(): Promise<void> {
+  // TRUNCATE ... CASCADE: no depende del orden de las FK (convenios incluidos).
   await resetDatabase(raw);
 }
 
@@ -111,6 +127,8 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         withAuth(request(server()).post(`/api/v1${path}`)).send(body),
       patch: (path: string, body: object) =>
         withAuth(request(server()).patch(`/api/v1${path}`)).send(body),
+      put: (path: string, body: object) =>
+        withAuth(request(server()).put(`/api/v1${path}`)).send(body),
       delete: (path: string) =>
         withAuth(request(server()).delete(`/api/v1${path}`)),
     };
@@ -321,7 +339,13 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         }),
       ]);
       expect(quote.totals).toEqual([
-        { currency: 'USD', gross: 1200, discount: 150.5, net: 1049.5 },
+        {
+          currency: 'USD',
+          gross: 1200,
+          discount: 150.5,
+          net: 1049.5,
+          agreementSaving: 0,
+        },
       ]);
       expect(quote.contentHash).toMatch(/^[0-9a-f]{64}$/);
       expect(quote.acceptance).toBeNull();
@@ -375,7 +399,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       const quote = res.body as QuoteBody;
       expect(quote.items).toEqual([]);
       expect(quote.totals).toEqual([
-        { currency: 'USD', gross: 0, discount: 0, net: 0 },
+        { currency: 'USD', gross: 0, discount: 0, net: 0, agreementSaving: 0 },
       ]);
       expect(quote.professionalName).toBe('Dr. Owner');
     });
@@ -655,6 +679,187 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         statement.body as { plans: { id: string; budgeted: number }[] }
       ).plans;
       expect(plans.find((p) => p.id === planA)?.budgeted).toBe(1049.5);
+    });
+  });
+  describe('presupuesto v2 con convenio (DX-105)', () => {
+    let agreementPatient: string;
+    let agreementPlan: string;
+    let agreementShownHash: string;
+
+    beforeAll(async () => {
+      const payer = await as(clinicA)
+        .post('/payers', { name: 'Sura EPS', type: 'EPS_CO', country: 'CO' })
+        .expect(201);
+      const agreement = await as(clinicA)
+        .post('/agreements', {
+          name: 'Sura EPS −15 %',
+          payerId: (payer.body as { id: string }).id,
+          kind: 'PERCENT_DISCOUNT',
+          percent: 15,
+        })
+        .expect(201);
+      agreementPatient = await createPatient(clinicA, 'Dora', 'PRES-A-3');
+      await as(clinicA)
+        .put(`/patients/${agreementPatient}/agreement`, {
+          agreementId: (agreement.body as { id: string }).id,
+        })
+        .expect(200);
+      agreementPlan = await createPlan(clinicA, agreementPatient, dentistA);
+      await addItem(clinicA, agreementPlan, {
+        toothNumber: '26',
+        catalogItemId: catalogA,
+      });
+    });
+
+    it('muestra el convenio, el precio de lista y el ahorro', async () => {
+      const res = await as(clinicA)
+        .get(quotePath(agreementPatient, agreementPlan))
+        .expect(200);
+      const quote = res.body as QuoteBody;
+      expect(quote.version).toBe(2);
+      expect(quote.agreement).toEqual({
+        name: 'Sura EPS −15 %',
+        payerName: 'Sura EPS',
+      });
+      expect(quote.items).toEqual([
+        expect.objectContaining({
+          unitPrice: 850,
+          discount: 0,
+          subtotal: 850,
+          listPrice: 1000,
+          agreementName: 'Sura EPS −15 %',
+        }),
+      ]);
+      expect(quote.totals).toEqual([
+        {
+          currency: 'USD',
+          gross: 850,
+          discount: 0,
+          net: 850,
+          agreementSaving: 150,
+        },
+      ]);
+      agreementShownHash = quote.contentHash;
+    });
+
+    it('un plan sin convenio sale con agreement null y ahorro 0', async () => {
+      const res = await as(clinicA).get(quotePath(patientA, planA)).expect(200);
+      const quote = res.body as QuoteBody;
+      expect(quote.version).toBe(2);
+      expect(quote.agreement).toBeNull();
+      expect(quote.totals[0].agreementSaving).toBe(0);
+      expect(quote.items.map((i) => i.listPrice)).toEqual([1000, 1000]);
+    });
+
+    it('la aceptación firmada v2 guarda la foto con convenio y sigue íntegra', async () => {
+      const res = await as(clinicA, dentistA)
+        .post(acceptPath(agreementPatient, agreementPlan), {
+          signerName: 'Dora Presupuesto',
+          signature: SIGNATURE,
+          contentHash: agreementShownHash,
+        })
+        .expect(201);
+      const quote = res.body as QuoteBody;
+      expect(quote.contentHash).toBe(agreementShownHash);
+      expect(quote.agreement?.name).toBe('Sura EPS −15 %');
+      expect(quote.acceptance?.integrityOk).toBe(true);
+
+      const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+        where: { planId: agreementPlan },
+      });
+      expect(row.content).toMatchObject({
+        version: 2,
+        agreement: { name: 'Sura EPS −15 %', payerName: 'Sura EPS' },
+        totals: [expect.objectContaining({ agreementSaving: 150 })],
+      });
+
+      // Cambiar el convenio después no toca la foto firmada.
+      await as(clinicA)
+        .patch(
+          `/agreements/${(await raw.agreement.findFirstOrThrow({ where: { tenantId: clinicA.tenantId } })).id}`,
+          {
+            percent: 40,
+          },
+        )
+        .expect(200);
+      const again = await as(clinicA)
+        .get(quotePath(agreementPatient, agreementPlan))
+        .expect(200);
+      expect((again.body as QuoteBody).contentHash).toBe(agreementShownHash);
+      expect((again.body as QuoteBody).acceptance?.integrityOk).toBe(true);
+    });
+
+    it('una aceptación v1 sembrada por fuera sigue íntegra y sin convenio', async () => {
+      const patient = await createPatient(clinicA, 'Elena', 'PRES-A-4');
+      const plan = await createPlan(clinicA, patient, dentistA);
+      const location = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId, name: { not: 'Sede Norte' } },
+        select: { id: true, name: true, address: true },
+      });
+      const dentist = await raw.user.findFirstOrThrow({
+        where: { email: `dentist@${clinicA.subdomain}.com` },
+        select: { id: true },
+      });
+      const v1 = {
+        version: 1,
+        planId: plan,
+        patientId: patient,
+        currency: 'USD',
+        clinicName: 'Clinica presupuesto-a',
+        location,
+        patient: { name: 'Elena Presupuesto', document: 'CC PRES-A-4' },
+        professionalName: 'Dra. Laura Gómez',
+        issuedOn: '2026-10-01',
+        validUntil: '2026-10-31',
+        validityDays: 30,
+        items: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            toothNumber: '36',
+            surfaces: [],
+            procedure: 'Corona de zirconio',
+            quantity: 1,
+            unitPrice: 1000,
+            discount: 0,
+            subtotal: 1000,
+          },
+        ],
+        totals: [{ currency: 'USD', gross: 1000, discount: 0, net: 1000 }],
+      };
+      const contentHash = computeQuoteHash(parseQuoteContent(v1));
+      const acceptedAt = new Date('2026-10-02T15:00:00.000Z');
+      await raw.treatmentPlanAcceptance.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          planId: plan,
+          patientId: patient,
+          locationId: location.id,
+          signerName: 'Elena Presupuesto',
+          signature: PNG,
+          content: v1,
+          contentHash,
+          acceptanceHash: computeAcceptanceHash({
+            contentHash,
+            signerName: 'Elena Presupuesto',
+            signature: PNG,
+            acceptedAt,
+          }),
+          acceptedAt,
+          acceptedById: dentist.id,
+        },
+      });
+
+      const res = await as(clinicA).get(quotePath(patient, plan)).expect(200);
+      const quote = res.body as QuoteBody;
+      expect(quote.version).toBe(1);
+      expect(quote.agreement).toBeNull();
+      expect(quote.contentHash).toBe(contentHash);
+      expect(quote.items[0]).toMatchObject({
+        listPrice: null,
+        agreementName: null,
+      });
+      expect(quote.totals[0].agreementSaving).toBe(0);
+      expect(quote.acceptance?.integrityOk).toBe(true);
     });
   });
 });

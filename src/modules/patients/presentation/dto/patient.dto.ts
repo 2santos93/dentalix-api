@@ -1,3 +1,4 @@
+import { AgreementSummaryDto } from '../../../patient-agreements/presentation/dto/agreement-summary.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { ApiProperty } from '@nestjs/swagger';
@@ -237,6 +238,7 @@ export class PatientDto {
  * GET /patients/:id (DX-150): la ficha con la marca «Saldo vencido» de su
  * cabecera. El importe (`balance.amounts`) solo llega a ADMIN y RECEPTION.
  * `coverage` (DX-153) resume la cobertura principal, sin número de afiliado.
+ * `agreement` (DX-105) resume el convenio vigente; solo en la ficha, no en listados.
  */
 export class PatientDetailDto extends PatientDto {
   @ApiProperty({ type: OverdueBalanceDto })
@@ -244,6 +246,9 @@ export class PatientDetailDto extends PatientDto {
 
   @ApiProperty({ type: CoverageSummaryDto })
   coverage!: CoverageSummaryDto;
+
+  @ApiProperty({ type: AgreementSummaryDto })
+  agreement!: AgreementSummaryDto;
 }
 
 /** Un paciente de GET /patients: la ficha base más el resumen de cobertura (DX-153). */

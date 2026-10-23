@@ -29,6 +29,7 @@ function mapToEntity(item: PrismaDentalCatalogItem): DentalCatalogItem {
     color: item.color,
     defaultPrice: item.defaultPrice ? item.defaultPrice.toNumber() : null,
     cupsCode: item.cupsCode,
+    allowDiscount: item.allowDiscount,
     active: item.active,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -76,6 +77,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
           color: input.color,
           defaultPrice: input.defaultPrice,
           cupsCode: input.cupsCode,
+          allowDiscount: input.allowDiscount,
           active: input.active,
         },
       });
@@ -90,6 +92,16 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
       });
     });
     return item ? mapToEntity(item) : null;
+  }
+
+  async findByIds(ids: string[]): Promise<DentalCatalogItem[]> {
+    if (ids.length === 0) return [];
+    const items = await this.prisma.runWithTenant(async (tx) => {
+      return tx.dentalCatalogItem.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+      });
+    });
+    return items.map(mapToEntity);
   }
 
   async list(

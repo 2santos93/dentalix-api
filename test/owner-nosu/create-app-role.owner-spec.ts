@@ -116,6 +116,38 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
     expect(canLogin('primera-134')).toBe(true);
   });
 
+  it('DX-236: repetir el script conserva SELECT sin reabrir escritura de referencia', async () => {
+    expect(
+      asOwner([
+        '-c',
+        'CREATE TABLE icd10_codes (code text); CREATE TABLE currencies (code text); CREATE TABLE countries (code text); CREATE TABLE cities (id int);',
+      ]).status,
+    ).toBe(0);
+    const r = asOwner(['-f', copy]);
+    expect(r.status).toBe(0);
+    const target = new PrismaClient({
+      datasources: { db: { url: adminUrlFor(env, db) } },
+    });
+    try {
+      const rows = await target.$queryRaw<
+        { table: string; read: boolean; write: boolean }[]
+      >`
+        SELECT c.relname AS table, has_table_privilege(${appRole}, c.oid, 'SELECT') AS read,
+               has_table_privilege(${appRole}, c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE') AS write
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`;
+      expect(rows).toEqual(
+        ['cities', 'countries', 'currencies', 'icd10_codes'].map((table) => ({
+          table,
+          read: true,
+          write: false,
+        })),
+      );
+    } finally {
+      await target.$disconnect();
+    }
+  });
+
   it('repetido sin app_password: termina bien y no cambia la contraseña', () => {
     const r = asOwner(['-f', copy]);
     expect(r.out).not.toContain('CREATE ROLE');

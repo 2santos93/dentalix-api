@@ -171,6 +171,14 @@ interface View {
   options: string[] | null;
 }
 
+// DX-236: lista cerrada de referencia global de solo lectura para la API.
+const READ_ONLY_REFERENCE_TABLES = [
+  'icd10_codes',
+  'currencies',
+  'countries',
+  'cities',
+];
+
 describe('Catálogo de RLS (DX-068)', () => {
   let clinic: TenantTable[];
   let rls: TableRls[];
@@ -201,6 +209,15 @@ describe('Catálogo de RLS (DX-068)', () => {
 
   afterAll(async () => {
     await raw.$disconnect();
+  });
+
+  it('DX-236: la app solo lee las cuatro referencias globales', async () => {
+    for (const table of READ_ONLY_REFERENCE_TABLES) {
+      const [row] = await raw.$queryRaw<{ select: boolean; write: boolean }[]>`
+        SELECT has_table_privilege('dentalix_app', ${`public.${table}`}, 'SELECT') AS select,
+               has_table_privilege('dentalix_app', ${`public.${table}`}, 'INSERT,UPDATE,DELETE,TRUNCATE') AS write`;
+      expect({ table, ...row }).toEqual({ table, select: true, write: false });
+    }
   });
 
   it('encuentra las tablas de clínica (la consulta no está vacía)', () => {

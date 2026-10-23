@@ -21,6 +21,8 @@ export interface IssueConfirmationInput {
   createdById?: string;
   /** true = no limpiar `callbackRequestedAt` (enlace del recordatorio automático). */
   keepCallbackRequest: boolean;
+  /** false = el automático conserva los enlaces ya enviados. Default: true. */
+  revokePrevious?: boolean;
   now: Date;
 }
 
@@ -58,8 +60,8 @@ export interface AppointmentConfirmationRepository {
   ): Promise<ConfirmationAppointment | null>;
 
   /**
-   * En una transacción: revoca los enlaces pendientes de la cita (solo vale el
-   * último), crea el nuevo y marca `appointments.confirmationSentAt`.
+   * En una transacción: conserva o revoca los enlaces pendientes según
+   * revokePrevious, crea el nuevo y marca `appointments.confirmationSentAt`.
    */
   issue(input: IssueConfirmationInput): Promise<void>;
 

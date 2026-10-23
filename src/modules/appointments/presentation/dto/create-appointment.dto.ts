@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsOptional,
@@ -13,6 +16,19 @@ import {
 // schema default (SCHEDULED); `createdById` is sourced from the authenticated
 // user in the controller (req.user.sub), never from the client body.
 export class CreateAppointmentDto {
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    description:
+      'Ítems aceptados del mismo paciente para esta cita (DX-256). [] desvincula al editar.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  planItemIds?: string[];
+
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
   patientId!: string;

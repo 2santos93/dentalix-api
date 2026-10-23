@@ -3,7 +3,8 @@ import { CreateConfirmationLinkUseCase } from '../../appointment-confirmations/a
 import { OutboundMessages } from '../../notifications/outbound/application/outbound-messages.service';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import type { JobPayload } from '../../jobs/domain/job';
+import { describeJobError } from '../../jobs/domain/backoff';
+import type { JobContext, JobPayload } from '../../jobs/domain/job';
 import {
   REMINDER_REPOSITORY,
   type ReminderRepository,
@@ -71,8 +72,34 @@ export class SendAppointmentReminder {
     private readonly optOutLinks: ReminderOptOutLinks,
   ) {}
 
-  async handle(payload: JobPayload): Promise<void> {
-    const { appointmentId, leadHours, start } = parsePayload(payload);
+  async handle(payload: JobPayload, context?: JobContext): Promise<void> {
+    const parsed = parsePayload(payload);
+    try {
+      await this.send(parsed);
+    } catch (error) {
+      if (
+        context &&
+        context.attempt >= context.maxAttempts &&
+        !context.signal.aborted
+      ) {
+        await this.repo.markFailed(
+          parsed.appointmentId,
+          parsed.leadHours,
+          parsed.start,
+          describeJobError(error),
+          this.clock.now(),
+        );
+      }
+      // El worker persiste el fallo del job con la misma descripción segura.
+      throw error;
+    }
+  }
+
+  private async send({
+    appointmentId,
+    leadHours,
+    start,
+  }: ParsedPayload): Promise<void> {
     const ctx = await this.repo.loadSendContext(appointmentId);
     if (!ctx) {
       this.logger.warn({
@@ -153,18 +180,18 @@ export class SendAppointmentReminder {
     const outboundId =
       claim.outboundMessageId ??
       (
-        await this.outbound.record({
-          channel: 'EMAIL',
-          template: TEMPLATE,
-          recipient: to,
-          recipientKind:
-            recipient.kind === 'RESPONSIBLE' ? 'RESPONSIBLE' : 'PATIENT',
-          appointmentId,
-        })
+        await this.outbound.record(
+          {
+            channel: 'EMAIL',
+            template: TEMPLATE,
+            recipient: to,
+            recipientKind:
+              recipient.kind === 'RESPONSIBLE' ? 'RESPONSIBLE' : 'PATIENT',
+            appointmentId,
+          },
+          (id, tx) => this.repo.attachOutbound(claim.id, id, tx),
+        )
       ).id;
-    if (!claim.outboundMessageId) {
-      await this.repo.attachOutbound(claim.id, outboundId);
-    }
     // DX-128: la de un menor saluda a su responsable (o contacto principal)
     // y nombra al paciente.
     await this.email.enqueue({

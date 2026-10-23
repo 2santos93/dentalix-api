@@ -28,6 +28,7 @@ interface CatalogItemBody {
   labelEs: string;
   kind: 'DIAGNOSIS' | 'PROCEDURE';
   active: boolean;
+  allowDiscount: boolean;
 }
 interface DirectoryBody {
   items: CatalogItemBody[];
@@ -36,6 +37,9 @@ interface DirectoryBody {
   pageSize: number;
 }
 
+// `resetDatabase` vacía todas las tablas de clínica: borrar a mano en orden de
+// FK falla en cuanto otro spec (role-matrix, aislamiento...) dejó abonos, listas
+// de precios u otras filas colgando de los planes.
 async function cleanup(): Promise<void> {
   await resetDatabase(raw);
 }
@@ -229,5 +233,65 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
     // del que dependen el odontograma y el plan de tratamiento.
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body as CatalogItemBody[]).toHaveLength(26);
+  });
+
+  it('allowDiscount (DX-105): nace en true, el PATCH lo apaga y el directorio y el listado lo devuelven', async () => {
+    const created = await auth(
+      request(app.getHttpServer()).post('/api/v1/catalog/items'),
+    )
+      .send({
+        code: 'P-NODESC',
+        kind: 'PROCEDURE',
+        labelEs: 'Prestación sin descuento',
+        color: '#0E7490',
+      })
+      .expect(201);
+    const item = created.body as CatalogItemBody;
+    expect(item.allowDiscount).toBe(true);
+
+    const patched = await auth(
+      request(app.getHttpServer()).patch(`/api/v1/catalog/items/${item.id}`),
+    )
+      .send({ allowDiscount: false })
+      .expect(200);
+    expect((patched.body as CatalogItemBody).allowDiscount).toBe(false);
+
+    const directory = await auth(
+      request(app.getHttpServer()).get(
+        '/api/v1/catalog/items/directory?query=P-NODESC',
+      ),
+    ).expect(200);
+    expect((directory.body as DirectoryBody).items[0].allowDiscount).toBe(
+      false,
+    );
+
+    const list = await auth(
+      request(app.getHttpServer()).get('/api/v1/catalog/items'),
+    ).expect(200);
+    expect(
+      (list.body as CatalogItemBody[]).find((i) => i.id === item.id)
+        ?.allowDiscount,
+    ).toBe(false);
+
+    await auth(
+      request(app.getHttpServer()).patch(`/api/v1/catalog/items/${item.id}`),
+    )
+      .send({ allowDiscount: 'no' })
+      .expect(400);
+  });
+
+  it('allowDiscount: false en el alta se respeta', async () => {
+    const created = await auth(
+      request(app.getHttpServer()).post('/api/v1/catalog/items'),
+    )
+      .send({
+        code: 'P-NODESC2',
+        kind: 'PROCEDURE',
+        labelEs: 'Otra sin descuento',
+        color: '#0E7490',
+        allowDiscount: false,
+      })
+      .expect(201);
+    expect((created.body as CatalogItemBody).allowDiscount).toBe(false);
   });
 });

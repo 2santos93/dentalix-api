@@ -148,6 +148,10 @@ interface SeedA {
   prescriptionTemplateId: string;
   appointmentTypeId: string;
   payerId: string;
+  /** DX-105: una lista de precios de A con un precio cargado. */
+  priceListId: string;
+  /** DX-105: un convenio de A por lista de precios. */
+  agreementId: string;
   scheduleBlockId: string;
   waitlistEntryId: string;
   noteTemplateId: string;
@@ -155,6 +159,8 @@ interface SeedA {
   /** DX-203: un responsable (contacto) del paciente de A. */
   responsiblePartyId: string;
   coverageId: string;
+  /** DX-105: la asignación del convenio al paciente de A (creada por la API). */
+  patientAgreementId: string;
   /** Caja por turno cerrada de A (DX-027). */
   cashSessionId: string;
   /** DX-222: plantilla de indicaciones de A (con vínculo) y una entrega. */
@@ -358,6 +364,23 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     type: 'EMPRESA',
   });
 
+  // DX-105: una lista de precios de A con un precio (para `price_list_items`).
+  const priceList = await create(app, a, '/price-lists', {
+    name: 'Lista de A',
+    currency: 'COP',
+  });
+  await api(app, a, 'put', `/price-lists/${priceList.id}/items`, {
+    items: [{ catalogItemId, price: 90000 }],
+  }).expect(200);
+
+  // DX-105: un convenio de A (pagador + lista de precios).
+  const agreement = await create(app, a, '/agreements', {
+    name: 'Convenio de A',
+    payerId: payer.id,
+    kind: 'PRICE_LIST',
+    priceListId: priceList.id,
+  });
+
   // DX-122: un bloqueo de la sede y un pendiente (alta manual) de A.
   const scheduleBlock = await create(app, a, '/schedule-blocks', {
     locationId: location.id,
@@ -422,6 +445,14 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     payerId: payer.id,
     memberNumber: 'AFI-A-0001',
   });
+
+  // DX-105: el convenio de A asignado al paciente de A, con su cobertura.
+  const patientAgreement = (
+    await api(app, a, 'put', `/patients/${patientId}/agreement`, {
+      agreementId: agreement.id,
+      coverageId: coverage.id,
+    }).expect(200)
+  ).body as IdBody;
 
   // DX-222: una plantilla de indicaciones vinculada al tipo de cita y una
   // entrega impresa en la cita de A, ambas por la API.
@@ -491,12 +522,15 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
     payerId: payer.id,
+    priceListId: priceList.id,
+    agreementId: agreement.id,
     scheduleBlockId: scheduleBlock.id,
     waitlistEntryId: waitlistEntry.id,
     noteTemplateId: noteTemplate.id,
     waitlistOfferId: waitlistOffer.id,
     responsiblePartyId: responsibleParty.id,
     coverageId: coverage.id,
+    patientAgreementId: patientAgreement.id,
     cashSessionId: cashSession.id,
     postOpTemplateId: postOpTemplate.id,
     postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
@@ -578,6 +612,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-153: pagadores.
       'payers',
       'patient_coverages',
+      // DX-105: listas de precios y sus precios.
+      'price_lists',
+      'price_list_items',
+      // DX-105: convenios.
+      'agreements',
+      'patient_agreements',
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
@@ -980,6 +1020,47 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/payers/${a.payerId}`,
       status: 404,
     },
+    // --- listas de precios (DX-105) ---
+    {
+      name: 'PATCH /price-lists/:id',
+      verb: 'patch',
+      path: () => `/price-lists/${a.priceListId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /price-lists/:id',
+      verb: 'delete',
+      path: () => `/price-lists/${a.priceListId}`,
+      status: 404,
+    },
+    {
+      name: 'GET /price-lists/:id/items',
+      verb: 'get',
+      path: () => `/price-lists/${a.priceListId}/items`,
+      status: 404,
+    },
+    {
+      name: 'PUT /price-lists/:id/items',
+      verb: 'put',
+      path: () => `/price-lists/${a.priceListId}/items`,
+      body: () => ({ items: [{ catalogItemId: b.catalogItemId, price: 1 }] }),
+      status: 404,
+    },
+    // --- convenios (DX-105) ---
+    {
+      name: 'PATCH /agreements/:id',
+      verb: 'patch',
+      path: () => `/agreements/${a.agreementId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /agreements/:id',
+      verb: 'delete',
+      path: () => `/agreements/${a.agreementId}`,
+      status: 404,
+    },
     // --- responsables de pago y avisos (DX-203) ---
     {
       name: 'GET /patients/:patientId/responsible-parties',
@@ -1034,6 +1115,34 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /patients/:patientId/coverages/:coverageId',
       verb: 'delete',
       path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
+      status: 404,
+    },
+    // --- convenio del paciente (DX-105) ---
+    {
+      name: 'GET /patients/:patientId/agreement',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/agreement?includeHistory=true`,
+      status: 404,
+    },
+    {
+      name: 'PUT /patients/:patientId/agreement',
+      verb: 'put',
+      path: () => `/patients/${a.patientId}/agreement`,
+      body: () => ({ agreementId: a.agreementId }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /patients/:patientId/agreement',
+      verb: 'delete',
+      path: () => `/patients/${a.patientId}/agreement`,
+      status: 404,
+    },
+    // --- precio resuelto de un ítem nuevo (DX-105) ---
+    {
+      name: 'GET /patients/:patientId/price-quote',
+      verb: 'get',
+      path: () =>
+        `/patients/${a.patientId}/price-quote?catalogItemId=${b.catalogItemId}&currency=USD`,
       status: 404,
     },
     // --- caja por turno (DX-027) ---
@@ -1435,6 +1544,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
    */
   const COVERED_ELSEWHERE: Record<string, string> = {
+    // DX-256: «guarda dos visitas; recepción no organiza y clínica ajena no
+    // encuentra el plan» prueba GET/PATCH B → 404 y snapshot de plan, ítems,
+    // intervalos, aceptación y hash del presupuesto de A sin cambios.
+    'GET /treatment-plans/:id/visits': 'plan-visits.e2e-spec.ts',
+    'PATCH /treatment-plans/:id/visits': 'plan-visits.e2e-spec.ts',
     'POST /patients/:patientId/treatment-plans':
       'patient-tenant-fk.e2e-spec.ts',
     'PUT /patients/:patientId/medical-history': 'patient-tenant-fk.e2e-spec.ts',
@@ -1504,6 +1618,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
     // DX-212: B → 404 sobre la evolución de A.
     'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
+    'GET /patients/:patientId/clinical-entries/rda-readiness':
+      'rda-codes.e2e-spec.ts',
   };
 
   it('cubre toda ruta de clínica con :param (aquí o en el spec citado)', () => {

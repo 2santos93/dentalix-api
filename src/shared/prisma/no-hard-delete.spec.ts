@@ -31,6 +31,7 @@ function fakeTx() {
     clinicalNoteTemplatePrompt: model('clinicalNoteTemplatePrompt'),
     membershipLocation: model('membershipLocation'),
     postOpInstructionTemplateLink: model('postOpInstructionTemplateLink'),
+    priceListItem: model('priceListItem'),
     $executeRaw: jest.fn(() => {
       calls.push('$executeRaw');
       return Promise.resolve(1);
@@ -119,5 +120,13 @@ describe('guardHardDeletes', () => {
 
     await guarded.postOpInstructionTemplateLink.deleteMany();
     expect(calls).toEqual(['postOpInstructionTemplateLink.deleteMany']);
+  });
+
+  it('deja borrar el precio de un procedimiento en una lista (allowlist, DX-105)', async () => {
+    const { tx, calls } = fakeTx();
+    const guarded = guard(tx);
+
+    await guarded.priceListItem.deleteMany();
+    expect(calls).toEqual(['priceListItem.deleteMany']);
   });
 });

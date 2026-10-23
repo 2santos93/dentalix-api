@@ -24,7 +24,7 @@ export class RemindersJobs implements OnModuleInit {
     this.registry.register({
       name: SEND_REMINDER_JOB,
       maxAttempts: 5,
-      handle: (payload) => this.send.handle(payload),
+      handle: (payload, context) => this.send.handle(payload, context),
     });
     this.registry.register({
       name: PLAN_REMINDERS_JOB,

@@ -286,6 +286,21 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
         const early = opts.before ? await pay(d) : null;
         const id = await promiseFor(d, addCivilDays(today(), 5), 'KEPT');
         const paymentId = early ?? (await pay(d, opts.amount, opts.currency));
+        if (early) {
+          // Timestamp(3) can round two separate inserts to the same millisecond.
+          // This fixture needs a strictly older payment, not an inclusive tie.
+          const promise = await raw.paymentPromise.findUniqueOrThrow({
+            where: { id },
+            select: { createdAt: true },
+          });
+          const payment = await raw.payment.update({
+            where: { id: early },
+            data: { createdAt: new Date(promise.createdAt.getTime() - 1000) },
+          });
+          expect(payment.createdAt.getTime()).toBeLessThan(
+            promise.createdAt.getTime(),
+          );
+        }
         await expect(
           asApp(async (tx) => {
             await tx.payment.update({

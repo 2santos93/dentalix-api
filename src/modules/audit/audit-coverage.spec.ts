@@ -1,3 +1,5 @@
+import { PlanVisitsController } from '../treatment-plans/presentation/plan-visits.controller';
+import { AppointmentsController } from '../appointments/presentation/appointments.controller';
 import { RequestMethod, Type } from '@nestjs/common';
 import {
   INTERCEPTORS_METADATA,
@@ -9,12 +11,15 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
+import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
+import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
+import { AgreementsController } from '../agreements/presentation/agreements.controller';
 import { LocationsController } from '../locations/presentation/locations.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
 import { PerioExamsController } from '../periodontal/presentation/perio-exams.controller';
@@ -26,6 +31,7 @@ import {
 } from '../prescriptions/presentation/prescriptions.controller';
 import { TreatmentPlansController } from '../treatment-plans/presentation/treatment-plans.controller';
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
+import { PriceQuoteController } from '../treatment-plans/presentation/price-quote.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
@@ -59,14 +65,46 @@ import {
  * `@Audit` que desaparece, cambia de acción o de recurso, o una ruta nueva
  * auditada sin entrada, ponen `npm test` en rojo.
  *
- * Fuera a propósito: `GET /patients` (búsqueda, no es la ficha de nadie) y
- * `GET /audit-events` (leer el propio registro).
+ * Fuera a propósito: `GET /patients` (búsqueda, no es la ficha de nadie),
+ * `GET /audit-events` (leer el propio registro) y `GET
+ * /patients/:patientId/price-quote` (DX-105: calcula un precio, sin datos
+ * clínicos ni escritura).
  */
 const P = { param: 'patientId' } as const;
 const RES = { response: 'id' } as const;
 const plan = (param = 'id') => ({ lookup: 'treatmentPlan', param }) as const;
 
 const EXPECTED: Record<string, AuditOptions> = {
+  'GET /treatment-plans/unscheduled': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+  },
+  'GET /treatment-plans/:id/visits': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+  },
+  'PATCH /treatment-plans/:id/visits': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+    reason: 'PLAN_VISITS',
+  },
+  'POST /appointments': {
+    action: 'CREATE',
+    resource: 'APPOINTMENT',
+    resourceId: RES,
+    patient: { response: 'patientId' },
+  },
+  'PATCH /appointments/:id': {
+    action: 'UPDATE',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+  },
+
   'POST /auth/login': { action: 'LOGIN', resource: 'SESSION' },
 
   'POST /patients': {
@@ -132,6 +170,21 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: P,
     patient: P,
     reason: 'COVERAGE_REMOVED',
+  },
+  // DX-105: convenio del paciente; solo el motivo, sin el cuerpo.
+  'PUT /patients/:patientId/agreement': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'AGREEMENT_ASSIGNED',
+  },
+  'DELETE /patients/:patientId/agreement': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'AGREEMENT_REMOVED',
   },
   // DX-039: archivar y retención legal de la HC.
   'DELETE /patients/:id': {
@@ -205,6 +258,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: { lookup: 'clinicalEntry', param: 'id' },
     reason: 'RDA_READINESS',
   },
+  'GET /patients/:patientId/clinical-entries/rda-readiness': {
+    action: 'VIEW',
+    resource: 'CLINICAL_ENTRY',
+    patient: P,
+    reason: 'RDA_READINESS',
+  },
   'POST /catalog/items': {
     action: 'CREATE',
     resource: 'DENTAL_CATALOG_ITEM',
@@ -213,6 +272,44 @@ const EXPECTED: Record<string, AuditOptions> = {
   'PATCH /catalog/items/:id': {
     action: 'UPDATE',
     resource: 'DENTAL_CATALOG_ITEM',
+    resourceId: { param: 'id' },
+  },
+  // DX-105: listas de precios; el PUT de precios cuenta como UPDATE de la lista.
+  'POST /price-lists': {
+    action: 'CREATE',
+    resource: 'PRICE_LIST',
+    resourceId: RES,
+  },
+  'PATCH /price-lists/:id': {
+    action: 'UPDATE',
+    resource: 'PRICE_LIST',
+    resourceId: { param: 'id' },
+  },
+  'DELETE /price-lists/:id': {
+    action: 'DELETE',
+    resource: 'PRICE_LIST',
+    resourceId: { param: 'id' },
+  },
+  'PUT /price-lists/:id/items': {
+    action: 'UPDATE',
+    resource: 'PRICE_LIST',
+    resourceId: { param: 'id' },
+    reason: 'PRICES_REPLACED',
+  },
+  // DX-105: convenios.
+  'POST /agreements': {
+    action: 'CREATE',
+    resource: 'AGREEMENT',
+    resourceId: RES,
+  },
+  'PATCH /agreements/:id': {
+    action: 'UPDATE',
+    resource: 'AGREEMENT',
+    resourceId: { param: 'id' },
+  },
+  'DELETE /agreements/:id': {
+    action: 'DELETE',
+    resource: 'AGREEMENT',
     resourceId: { param: 'id' },
   },
   'PATCH /locations/:id': {
@@ -846,10 +943,13 @@ const CONTROLLERS: Type[] = [
   PatientsController,
   PatientResponsiblePartiesController,
   PatientCoveragesController,
+  PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
   ClinicalEntryRdaController,
   DentalCatalogController,
+  PriceListsController,
+  AgreementsController,
   LocationsController,
   OdontogramController,
   PerioExamsController,
@@ -861,9 +961,12 @@ const CONTROLLERS: Type[] = [
   ImplantsController,
   PatientDocumentsController,
   PatientImportsController,
+  PlanVisitsController,
+  AppointmentsController,
   PlanFollowUpController,
   TreatmentPlansController,
   PlanQuoteController,
+  PriceQuoteController,
   PaymentsController,
   PaymentReceiptsController,
   PaymentPlansController,

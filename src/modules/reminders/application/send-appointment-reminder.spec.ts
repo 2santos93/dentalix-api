@@ -1,3 +1,5 @@
+import type { AttachOutboundMessage } from '../../notifications/outbound/application/outbound-messages.service';
+import type { Prisma } from '@prisma/client';
 import type { ReminderSendContext } from '../domain/ports/reminder-repository.port';
 import { FakeReminderRepository } from './__fixtures__/fake-reminder.repository';
 import { SendAppointmentReminder } from './send-appointment-reminder';
@@ -68,7 +70,12 @@ describe('SendAppointmentReminder (DX-026)', () => {
       }),
     };
     outbound = {
-      record: jest.fn().mockResolvedValue({ id: 'out-1' }),
+      record: jest.fn(
+        async (_input: unknown, attach?: AttachOutboundMessage) => {
+          await attach?.('out-1', {} as Prisma.TransactionClient);
+          return { id: 'out-1' };
+        },
+      ),
       settle: jest.fn().mockResolvedValue(true),
     };
     email = {
@@ -105,13 +112,16 @@ describe('SendAppointmentReminder (DX-026)', () => {
       appointmentId: APPT,
       automatic: true,
     });
-    expect(outbound.record).toHaveBeenCalledWith({
-      channel: 'EMAIL',
-      template: 'appointment-reminder',
-      recipient: 'ana@example.com',
-      recipientKind: 'PATIENT',
-      appointmentId: APPT,
-    });
+    expect(outbound.record).toHaveBeenCalledWith(
+      {
+        channel: 'EMAIL',
+        template: 'appointment-reminder',
+        recipient: 'ana@example.com',
+        recipientKind: 'PATIENT',
+        appointmentId: APPT,
+      },
+      expect.any(Function),
+    );
     expect(email.enqueue).toHaveBeenCalledWith({
       tenantId: TENANT,
       to: 'ana@example.com',
@@ -173,6 +183,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
         recipient: 'maria@example.com',
         recipientKind: 'RESPONSIBLE',
       }),
+      expect.any(Function),
     );
     const [input] = email.enqueue.mock.calls[0] as [
       {
@@ -255,6 +266,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(input.vars.guardianName).toBe('María');
     expect(outbound.record).toHaveBeenCalledWith(
       expect.objectContaining({ recipientKind: 'PATIENT' }),
+      expect.any(Function),
     );
   });
 
@@ -294,6 +306,76 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(email.enqueue).not.toHaveBeenCalled();
     expect(outbound.settle).toHaveBeenCalledWith('out-0', { status: 'QUEUED' });
     expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
+  });
+
+  it.each([1, 5])(
+    'DX-160: intento %i fallido conserva SENDING hasta agotar los cinco',
+    async (attempt) => {
+      repo.contexts.set(APPT, context());
+      const error = Object.assign(new Error('private ana@example.com'), {
+        code: 'ECONNRESET',
+      });
+      email.enqueue.mockRejectedValueOnce(error);
+      await expect(
+        handler.handle(payload, {
+          jobId: 'job-1',
+          attempt,
+          maxAttempts: 5,
+          tenantId: TENANT,
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toBe(error);
+      expect(repo.reminders[0]).toMatchObject(
+        attempt === 5
+          ? {
+              status: 'FAILED',
+              failureReason: 'Error ECONNRESET',
+              outboundMessageId: 'out-1',
+            }
+          : { status: 'SENDING' },
+      );
+    },
+  );
+
+  it('DX-160 fix I2: último fallo anterior al claim registra FAILED sin destinatario', async () => {
+    repo.contexts.set(APPT, context());
+    const error = Object.assign(new Error('private ana@example.com'), {
+      code: 'ECONNRESET',
+    });
+    jest.spyOn(repo, 'loadSendContext').mockRejectedValueOnce(error);
+    await expect(
+      handler.handle(payload, {
+        jobId: 'job-1',
+        attempt: 5,
+        maxAttempts: 5,
+        tenantId: TENANT,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBe(error);
+    expect(repo.reminders).toEqual([
+      expect.objectContaining({
+        status: 'FAILED',
+        failureReason: 'Error ECONNRESET',
+        outboundMessageId: null,
+      }),
+    ]);
+    expect(outbound.record).not.toHaveBeenCalled();
+  });
+
+  it('DX-160: fallo al cerrar después del outbox se recupera SENT en el último intento', async () => {
+    repo.contexts.set(APPT, context());
+    outbound.settle.mockRejectedValueOnce(new Error('transient'));
+    await expect(
+      handler.handle(payload, {
+        jobId: 'job-1',
+        attempt: 5,
+        maxAttempts: 5,
+        tenantId: TENANT,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('transient');
+    expect(repo.reminders[0]).toMatchObject({ status: 'SENT', sentAt: NOW });
+    expect(email.enqueue).toHaveBeenCalledTimes(1);
   });
 
   it.each([

@@ -1,3 +1,5 @@
+import { PlanVisitsService } from './application/plan-visits.service';
+import { PlanVisitsController } from './presentation/plan-visits.controller';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TreatmentPlansController } from './presentation/treatment-plans.controller';
@@ -34,6 +36,13 @@ import { PatientsModule } from '../patients/patients.module';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { ApplyBulkDiscountUseCase } from './application/use-cases/apply-bulk-discount.use-case';
+import { PriceListsModule } from '../price-lists/price-lists.module';
+import { AgreementsModule } from '../agreements/agreements.module';
+import { PatientAgreementsModule } from '../patient-agreements/patient-agreements.module';
+import { PRICING_SOURCE } from './domain/ports/pricing-source.port';
+import { PrismaPricingSource } from './infrastructure/pricing/prisma-pricing-source';
+import { GetPriceQuoteUseCase } from './application/use-cases/get-price-quote.use-case';
+import { PriceQuoteController } from './presentation/price-quote.controller';
 
 @Module({
   // JwtModule.register({}) mirrors AppointmentsModule/OdontogramModule:
@@ -49,20 +58,29 @@ import { ApplyBulkDiscountUseCase } from './application/use-cases/apply-bulk-dis
   // paciente de la ruta sea de esta clínica antes de insertar (SEC-004).
   // DiscountsModule exporta la política de descuentos (DX-204), que los casos
   // de uso de los ítems aplican en el servidor.
+  // DX-105: listas de precios, convenios y asignaciones exportan sus
+  // repositorios para la resolución del precio de un ítem nuevo (PricingSource).
   imports: [
     JwtModule.register({}),
     DentalCatalogModule,
     PatientsModule,
     DiscountsModule,
+    PriceListsModule,
+    AgreementsModule,
+    PatientAgreementsModule,
   ],
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
   controllers: [
+    PlanVisitsController,
     PlanFollowUpController,
     TreatmentPlansController,
     PlanQuoteController,
+    // Precio resuelto de un ítem nuevo (DX-105).
+    PriceQuoteController,
   ],
   providers: [
+    PlanVisitsService,
     CreateTreatmentPlanUseCase,
     ListTreatmentPlansUseCase,
     GetTreatmentPlanUseCase,
@@ -72,6 +90,9 @@ import { ApplyBulkDiscountUseCase } from './application/use-cases/apply-bulk-dis
     RemoveTreatmentPlanItemUseCase,
     // Acción «Descuento %» sobre varios ítems (DX-204).
     ApplyBulkDiscountUseCase,
+    // Resolución del precio por convenio o lista (DX-105).
+    { provide: PRICING_SOURCE, useClass: PrismaPricingSource },
+    GetPriceQuoteUseCase,
     // Alternativas, presentación, rechazo y seguimiento (DX-040).
     PresentTreatmentPlanUseCase,
     RejectTreatmentPlanUseCase,

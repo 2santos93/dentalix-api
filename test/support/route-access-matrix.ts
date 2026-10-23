@@ -179,6 +179,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   // DX-212: datos del RDA de una atención (como la historia: sin recepción).
   'GET /clinical-entries/:id/rda-readiness': CLINICAL,
+  'GET /patients/:patientId/clinical-entries/rda-readiness': CLINICAL,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,
@@ -315,6 +316,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,
   // que llama al paciente desde la lista de seguimiento (ADMIN y recepción).
   'GET /treatment-plans/pending-follow-up': BILLING,
+  'GET /treatment-plans/unscheduled': EVERY_ROLE,
+  'GET /treatment-plans/:id/visits': EVERY_ROLE,
+  'PATCH /treatment-plans/:id/visits': PLAN_DECIDERS,
   'POST /treatment-plans/:id/present': PLAN_DECIDERS,
   'POST /treatment-plans/:id/reject': PLAN_REJECTERS,
   'POST /treatment-plans/:id/alternatives': CLINICAL,
@@ -339,6 +343,24 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /payers': roles('ADMIN', 'RECEPTION'),
   'PATCH /payers/:id': ADMIN_ONLY,
   'DELETE /payers/:id': ADMIN_ONLY,
+  // DX-105: listas de precios (leerlas: quien arma el plan; escribirlas: ADMIN).
+  'GET /price-lists': CLINICAL,
+  'POST /price-lists': ADMIN_ONLY,
+  'PATCH /price-lists/:id': ADMIN_ONLY,
+  'DELETE /price-lists/:id': ADMIN_ONLY,
+  'GET /price-lists/:id/items': CLINICAL,
+  'PUT /price-lists/:id/items': ADMIN_ONLY,
+  // DX-105: convenios (leerlos: los 4 roles; escribirlos: ADMIN).
+  'GET /agreements': EVERY_ROLE,
+  'POST /agreements': ADMIN_ONLY,
+  'PATCH /agreements/:id': ADMIN_ONLY,
+  'DELETE /agreements/:id': ADMIN_ONLY,
+  // DX-105: convenio del paciente (PATIENT_ROLES).
+  'GET /patients/:patientId/agreement': EVERY_ROLE,
+  'PUT /patients/:patientId/agreement': EVERY_ROLE,
+  'DELETE /patients/:patientId/agreement': EVERY_ROLE,
+  // DX-105: precio resuelto de un ítem nuevo (CLINICAL_ROLES, R15).
+  'GET /patients/:patientId/price-quote': CLINICAL,
   // DX-153: coberturas del paciente (PATIENT_ROLES).
   'GET /patients/:patientId/coverages': EVERY_ROLE,
   'POST /patients/:patientId/coverages': EVERY_ROLE,
