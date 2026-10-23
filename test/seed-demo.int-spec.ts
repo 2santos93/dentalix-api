@@ -36,6 +36,8 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-273: salidas de COMPLETED (hijas de appointments).
+  'appointment_status_reversals',
   'appointment_plan_items',
   // DX-233: horario de los profesionales (hijas de locations, en orden de FK).
   'provider_schedule_override_ranges',
