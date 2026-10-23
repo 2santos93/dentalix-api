@@ -20,6 +20,7 @@ import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repos
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { maskEmail } from '../../../../shared/privacy/mask-email';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
   PostOpDelivery,
   PostOpDeliveryChannel,
@@ -202,12 +203,19 @@ function whatsAppPhone(ctx: PostOpAppointmentContext): string | null {
   return toWhatsAppNumber(ctx.patient.phone, ctx.location.country);
 }
 
+/**
+ * La cita viva de la clínica y en una sede permitida al miembro. SEC-045
+ * (DX-089): una cita de otra sede es 403, como `GET /appointments/:id`, antes
+ * de leer sus canales o registrar, enviar o enlazar nada.
+ */
 async function loadAppointment(
   repo: PostOpDeliveryRepository,
+  tenantContext: TenantContextService,
   appointmentId: string,
 ): Promise<PostOpAppointmentContext> {
   const ctx = await repo.loadAppointmentContext(appointmentId);
   if (!ctx) throw new NotFoundException(POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE);
+  tenantContext.assertLocationAllowed(ctx.appointment.locationId);
   return ctx;
 }
 
@@ -219,6 +227,7 @@ export class GetPostOpSuggestionsUseCase {
     @Inject(POST_OP_TEMPLATE_REPOSITORY)
     private readonly templates: PostOpTemplateRepository,
     @Inject(POSTOP_CLOCK) private readonly now: PostOpClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -227,7 +236,11 @@ export class GetPostOpSuggestionsUseCase {
    * WhatsApp (y por qué no) y lo ya entregado en la cita.
    */
   async execute(appointmentId: string): Promise<PostOpSuggestions> {
-    const ctx = await loadAppointment(this.deliveries, appointmentId);
+    const ctx = await loadAppointment(
+      this.deliveries,
+      this.tenantContext,
+      appointmentId,
+    );
     const { appointment, location } = ctx;
     const [templates, performed, delivered] = await Promise.all([
       this.templates.list({ active: true }),
@@ -312,6 +325,7 @@ export class DeliverPostOpInstructionsUseCase {
     @Inject(POSTOP_EMAIL_SENDER) private readonly email: PostOpEmailSender,
     private readonly audit: RecordAuditEventUseCase,
     @Inject(POSTOP_CLOCK) private readonly now: PostOpClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -329,7 +343,11 @@ export class DeliverPostOpInstructionsUseCase {
     /** `host` null: el de la petición no es seguro para armar un enlace. */
     link: { protocol: string; host: string | null },
   ): Promise<PostOpDeliveryCreated> {
-    const ctx = await loadAppointment(this.deliveries, appointmentId);
+    const ctx = await loadAppointment(
+      this.deliveries,
+      this.tenantContext,
+      appointmentId,
+    );
     const template = await this.templates.findById(input.templateId);
     if (!template) {
       throw new NotFoundException(POSTOP_TEMPLATE_NOT_FOUND_MESSAGE);

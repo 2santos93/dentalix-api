@@ -45,6 +45,7 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       patientPhone: '+57 310 555 0101',
       patientCountryCode: 'CO',
       providerName: 'Dra. Pérez',
+      locationId: 'loc-principal',
       locationName: 'Sede Principal',
       locationAddress: 'Calle 1 # 2-3',
       ...overrides,

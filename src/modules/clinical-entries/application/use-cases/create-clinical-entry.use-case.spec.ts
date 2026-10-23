@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 import { CreateClinicalEntryRepoInput } from '../../domain/ports/clinical-entry-repository.port';
 import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
@@ -11,6 +12,7 @@ function useCase(repo: InMemoryClinicalEntryRepository) {
     repo,
     patientsInClinic('p1'),
     new InMemoryClinicalNoteTemplateRepository(),
+    new TenantContextService(),
   );
 }
 
