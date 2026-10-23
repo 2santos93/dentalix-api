@@ -490,8 +490,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: { lookup: 'patientImplant', param: 'id' },
   },
 
-  // DX-151: documentos del paciente. Ver la URL en línea es VIEW y descargar
-  // es EXPORT; la metadata solo lleva el código, nunca el nombre del fichero.
   // DX-107: lotes de importación de pacientes. `GET /patient-imports/:id`
   // fuera a propósito: la pantalla lo consulta cada pocos segundos mientras
   // importa (su informe, errors.csv, sí se audita).
@@ -522,6 +520,9 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'IMPORT_UNDONE',
     importBatch: true,
   },
+
+  // DX-151: documentos del paciente. Ver la URL en línea es VIEW y descargar
+  // es EXPORT; la metadata solo lleva el código, nunca el nombre del fichero.
   'POST /patients/:patientId/documents': {
     action: 'CREATE',
     resource: 'PATIENT_DOCUMENT',
