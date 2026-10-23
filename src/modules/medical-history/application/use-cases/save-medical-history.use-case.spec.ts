@@ -50,6 +50,7 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
       notes: data.notes ?? null,
       safetyFlags,
       hasCriticalAlert,
+      source: 'STAFF',
       createdById: createdById ?? null,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     };

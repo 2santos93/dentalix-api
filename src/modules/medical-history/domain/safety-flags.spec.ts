@@ -50,6 +50,20 @@ describe('deriveSafetyFlags', () => {
     expect(safetyFlags.bifosfonatos).toBe(true);
   });
 
+  it('DX-099: «anticoagulante» o «antiagregante» sin el principio activo también encienden la bandera', () => {
+    for (const nombre of [
+      'Anticoagulante (sin especificar)',
+      'Anticoagulante: Xarelto',
+      'antiagregante plaquetario',
+    ]) {
+      const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags({
+        medications: [{ nombre, esAlerta: false }],
+      });
+      expect(safetyFlags.anticoagulantes).toBe(true);
+      expect(hasCriticalAlert).toBe(true);
+    }
+  });
+
   it('deriva diabetes y profilaxis desde condiciones con estado SI', () => {
     const { safetyFlags } = deriveSafetyFlags({
       conditions: [
