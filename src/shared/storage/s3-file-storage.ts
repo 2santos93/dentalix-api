@@ -38,6 +38,7 @@ import {
   StorageUnavailableError,
 } from './storage-errors';
 import { StorageOp, StorageOpLogger, StorageOutcome } from './storage-op-log';
+import { remainingStorageBudgetMs } from './storage-budget';
 
 /**
  * Cliente S3 para AWS, Cloudflare R2 o MinIO (DX-084). Sin credenciales en el
@@ -54,15 +55,27 @@ import { StorageOp, StorageOpLogger, StorageOutcome } from './storage-op-log';
  * sockets por réplica son `S3_MAX_SOCKETS` y hay `S3_MAX_ATTEMPTS`
  * tentativas. El plazo de la operación ENTERA (todas sus tentativas) lo pone
  * `S3FileStorage` con un `AbortSignal`.
+ *
+ * Revisión M-1: cada tentativa tiene `S3_REQUEST_TIMEOUT_MS / S3_MAX_ATTEMPTS`
+ * (mínimo 250 ms): si la primera se cuelga, todavía caben los reintentos en el
+ * plazo total; con el plazo entero por tentativa, el `AbortSignal` vencía a la
+ * vez y los reintentos solo servían para los fallos rápidos.
  */
+/** Plazo mínimo de una tentativa (revisión M-1). */
+const MIN_ATTEMPT_TIMEOUT_MS = 250;
+
 export function s3RequestHandlerOptions(
   tuning: S3ClientTuning,
 ): NodeHttpHandlerOptions {
   const agent = { keepAlive: true, maxSockets: tuning.maxSockets };
+  const perAttemptMs = Math.max(
+    MIN_ATTEMPT_TIMEOUT_MS,
+    Math.floor(tuning.requestTimeoutMs / Math.max(1, tuning.maxAttempts)),
+  );
   return {
     connectionTimeout: tuning.connectTimeoutMs,
-    requestTimeout: tuning.requestTimeoutMs,
-    socketTimeout: tuning.requestTimeoutMs,
+    requestTimeout: perAttemptMs,
+    socketTimeout: perAttemptMs,
     throwOnRequestTimeout: true,
     httpAgent: agent,
     httpsAgent: agent,
@@ -175,10 +188,16 @@ export class S3FileStorage implements FileStoragePort {
     options: { deadlineMs?: number; bytes?: (result: T) => number } = {},
   ): Promise<T> {
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      options.deadlineMs ?? this.cfg.tuning.requestTimeoutMs,
-    );
+    // Revisión M-1: dentro de un presupuesto (`withStorageBudget`), como mucho
+    // lo que le queda; agotado, ni se intenta.
+    const remaining = remainingStorageBudgetMs();
+    const ownDeadline = options.deadlineMs ?? this.cfg.tuning.requestTimeoutMs;
+    const deadlineMs =
+      remaining === null ? ownDeadline : Math.min(ownDeadline, remaining);
+    if (deadlineMs <= 0) {
+      throw new StorageUnavailableError(new Error('storage budget exhausted'));
+    }
+    const timer = setTimeout(() => controller.abort(), deadlineMs);
     try {
       return await this.ops.time(
         's3',
@@ -380,7 +399,7 @@ export class S3FileStorage implements FileStoragePort {
     }
   }
 
-  async promote(
+  async copyVersion(
     from: string,
     to: string,
     contentType: string,
@@ -411,9 +430,6 @@ export class S3FileStorage implements FileStoragePort {
       }
       throw err;
     }
-    // Borra el OBJETO pendiente ya copiado, no una fila de la BD.
-    // eslint-disable-next-line no-restricted-syntax
-    await this.delete(from);
   }
 
   async createDirectUpload(

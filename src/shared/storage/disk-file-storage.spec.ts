@@ -238,7 +238,7 @@ describe('DiskFileStorage · subida directa (DX-259)', () => {
     ).resolves.toBeNull();
   });
 
-  it('promote mueve la versión comprobada a su clave y borra el pendiente; otra versión no se mueve', async () => {
+  it('copyVersion copia la versión comprobada a su clave y CONSERVA el pendiente (lo borra el caso de uso tras crear la fila, revisión M-2); otra versión no se copia', async () => {
     const bytes = Buffer.from('%PDF-1.7');
     const upload = storage.verifyDirectUpload(
       (
@@ -250,7 +250,7 @@ describe('DiskFileStorage · subida directa (DX-259)', () => {
     )!;
     await storage.acceptDirectUpload(upload, temp(bytes));
     await expect(
-      storage.promote(
+      storage.copyVersion(
         'patient-documents/pending/t/d',
         'patient-documents/t/d.pdf',
         'application/pdf',
@@ -258,7 +258,7 @@ describe('DiskFileStorage · subida directa (DX-259)', () => {
       ),
     ).rejects.toBeInstanceOf(StorageObjectChangedError);
     const { etag } = (await storage.stat('patient-documents/pending/t/d'))!;
-    await storage.promote(
+    await storage.copyVersion(
       'patient-documents/pending/t/d',
       'patient-documents/t/d.pdf',
       'application/pdf',
@@ -266,7 +266,7 @@ describe('DiskFileStorage · subida directa (DX-259)', () => {
     );
     await expect(
       storage.stat('patient-documents/pending/t/d'),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ etag, size: bytes.length });
     expect((await storage.read('patient-documents/t/d.pdf'))?.bytes).toEqual(
       bytes,
     );

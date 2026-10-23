@@ -141,7 +141,7 @@ export class InMemoryFileStorage implements FileStoragePort {
     return Promise.resolve(Buffer.from(file.bytes.subarray(start, end)));
   }
 
-  promote(
+  copyVersion(
     from: string,
     to: string,
     contentType: string,
@@ -155,9 +155,7 @@ export class InMemoryFileStorage implements FileStoragePort {
     this.put(to, file.bytes, contentType, {
       sha256Base64: file.sha256Base64,
     });
-    // El objeto pendiente ya copiado, en memoria; no una fila.
-    // eslint-disable-next-line no-restricted-syntax
-    return this.delete(from);
+    return Promise.resolve();
   }
 
   createDirectUpload(

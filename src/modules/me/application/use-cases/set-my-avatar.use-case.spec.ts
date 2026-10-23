@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { BadRequestException } from '@nestjs/common';
 import { SetMyAvatarUseCase } from './set-my-avatar.use-case';
+import {
+  UPLOAD_STORAGE_BUDGET_MS,
+  remainingStorageBudgetMs,
+} from '../../../../shared/storage/storage-budget';
 import { UserProfileRepository } from '../../domain/ports/user-profile-repository.port';
 import { InMemoryFileStorage } from '../../../../shared/storage/__fixtures__/in-memory-file-storage';
 
@@ -67,6 +71,27 @@ const run = (
   });
 
 describe('SetMyAvatarUseCase', () => {
+  it('guardar y borrar el anterior comparten un presupuesto de almacén que cabe en los 30 s del proxy (revisión M-1)', async () => {
+    const deps = makeDeps('avatars/u1-0000000000000000.png');
+    const seen: (number | null)[] = [];
+    const saveFile = deps.storage.saveFile.bind(deps.storage);
+    jest.spyOn(deps.storage, 'saveFile').mockImplementation((...args) => {
+      seen.push(remainingStorageBudgetMs());
+      return saveFile(...args);
+    });
+    const del = deps.storage.delete.bind(deps.storage);
+    jest.spyOn(deps.storage, 'delete').mockImplementation((key) => {
+      seen.push(remainingStorageBudgetMs());
+      return del(key);
+    });
+    await run(deps, PNG, 'image/png');
+    expect(seen).toHaveLength(2);
+    for (const ms of seen) {
+      expect(ms).not.toBeNull();
+      expect(ms!).toBeLessThanOrEqual(UPLOAD_STORAGE_BUDGET_MS);
+    }
+  });
+
   it('guarda avatars/<userId>-<versión>.png desde el temporal, con caché immutable, y responde su URL (DX-084, DX-259)', async () => {
     const deps = makeDeps(null);
     const res = await run(deps, PNG, 'image/png');

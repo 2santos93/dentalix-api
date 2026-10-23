@@ -122,11 +122,13 @@ export interface FileStoragePort {
   ): Promise<Buffer>;
 
   /**
-   * Mueve la versión `etag` de `from` a `to` con el tipo `contentType` (copia
-   * en el propio almacén y borra `from`). Si `from` ya no es esa versión,
-   * `StorageObjectChangedError` y nada cambia.
+   * Copia la versión `etag` de `from` a `to` con el tipo `contentType` (en el
+   * propio almacén). `from` se CONSERVA: quien llama lo borra cuando ya creó
+   * la fila (revisión M-2: si el borrado vence, la copia no queda huérfana, y
+   * otro `complete` simultáneo que ya no ve `from` encuentra la fila). Si
+   * `from` ya no es esa versión, `StorageObjectChangedError` y nada cambia.
    */
-  promote(
+  copyVersion(
     from: string,
     to: string,
     contentType: string,

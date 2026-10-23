@@ -14,6 +14,7 @@ import {
   createS3Client,
   s3RequestHandlerOptions,
 } from './s3-file-storage';
+import { withStorageBudget } from './storage-budget';
 import { StorageOpLogger } from './storage-op-log';
 import {
   STORAGE_UNAVAILABLE_MESSAGE,
@@ -248,9 +249,11 @@ describe('S3FileStorage (DX-084, cliente simulado)', () => {
           maxAttempts: 2,
         }),
       ).toEqual({
+        // Revisión M-1: cada tentativa tiene su parte del plazo total
+        // (7000 / 2), para que el reintento quepa en él.
         connectionTimeout: 1500,
-        requestTimeout: 7000,
-        socketTimeout: 7000,
+        requestTimeout: 3500,
+        socketTimeout: 3500,
         throwOnRequestTimeout: true,
         httpAgent: { keepAlive: true, maxSockets: 12 },
         httpsAgent: { keepAlive: true, maxSockets: 12 },
@@ -371,10 +374,10 @@ describe('S3FileStorage (DX-084, cliente simulado)', () => {
       ).rejects.toBeInstanceOf(StorageObjectChangedError);
     });
 
-    it('promote: CopyObject condicionado a la ETag, con el tipo detectado, y borra el pendiente', async () => {
+    it('copyVersion: CopyObject condicionado a la ETag, con el tipo detectado; NO borra el pendiente (revisión M-2)', async () => {
       const send = mockSend().mockResolvedValue({});
       const { storage } = makeStorage(send);
-      await storage.promote(
+      await storage.copyVersion(
         'patient-documents/pending/t/d',
         'patient-documents/t/d-0123456789abcdef.pdf',
         'application/pdf',
@@ -390,10 +393,47 @@ describe('S3FileStorage (DX-084, cliente simulado)', () => {
         ChecksumAlgorithm: 'SHA256',
         ServerSideEncryption: 'AES256',
       });
-      expect((send.mock.calls[1][0] as DeleteObjectCommand).input).toEqual({
-        Bucket: 'dentalix-files',
-        Key: 'patient-documents/pending/t/d',
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it('revisión M-1: la tentativa nunca baja de 250 ms ni pasa de la conexión', () => {
+      expect(
+        s3RequestHandlerOptions({
+          connectTimeoutMs: 3000,
+          requestTimeoutMs: 600,
+          maxSockets: 1,
+          maxAttempts: 10,
+        }),
+      ).toMatchObject({ requestTimeout: 250, socketTimeout: 250 });
+    });
+
+    it('revisión M-1: dentro de withStorageBudget el plazo de cada operación es como mucho lo que queda del presupuesto', async () => {
+      const send = jest.fn(
+        (_cmd: unknown, opts?: { abortSignal?: AbortSignal }) =>
+          new Promise<unknown>((_resolve, reject) => {
+            opts?.abortSignal?.addEventListener('abort', () =>
+              reject(
+                Object.assign(new Error('aborted'), { name: 'AbortError' }),
+              ),
+            );
+          }),
+      );
+      const { storage } = makeStorage(send as unknown as Send, {
+        tuning: { ...CONFIG.tuning, requestTimeoutMs: 60_000 },
       });
+      const started = Date.now();
+      const err = await withStorageBudget(80, () =>
+        storage.stat('patient-documents/pending/t/d'),
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StorageUnavailableError);
+      expect(Date.now() - started).toBeLessThan(1000);
+      // Agotado el presupuesto, la siguiente ni se intenta.
+      const sent = send.mock.calls.length;
+      const again = await withStorageBudget(0, () =>
+        storage.stat('patient-documents/pending/t/d'),
+      ).catch((e: unknown) => e);
+      expect(again).toBeInstanceOf(StorageUnavailableError);
+      expect(send.mock.calls.length).toBe(sent);
     });
 
     it('cada operación lleva un AbortSignal que vence a S3_REQUEST_TIMEOUT_MS: timeout → 503 en español', async () => {

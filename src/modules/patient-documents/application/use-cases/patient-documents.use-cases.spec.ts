@@ -1,3 +1,7 @@
+import {
+  UPLOAD_STORAGE_BUDGET_MS,
+  remainingStorageBudgetMs,
+} from '../../../../shared/storage/storage-budget';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -724,11 +728,11 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
     it('complete: si el objeto cambia entre la comprobación y la copia → 400 y no hay fila', async () => {
       const bytes = pdfFixture();
       const id = await uploaded(bytes);
-      const promote = jest
-        .spyOn(storage, 'promote')
+      const copyVersion = jest
+        .spyOn(storage, 'copyVersion')
         .mockImplementationOnce(() => {
           storage.simulateDirectUpload(pendingKey(id), bytes);
-          return InMemoryFileStorage.prototype.promote.call(
+          return InMemoryFileStorage.prototype.copyVersion.call(
             storage,
             pendingKey(id),
             'patient-documents/x/y.pdf',
@@ -739,7 +743,7 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       await expect(finish(id)).rejects.toThrow(
         new BadRequestException(UPLOAD_CHANGED_MESSAGE),
       );
-      expect(promote).toHaveBeenCalled();
+      expect(copyVersion).toHaveBeenCalled();
       expect(repo.rows.size).toBe(0);
     });
 
@@ -769,9 +773,9 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
     it('dos complete a la vez: el que pierde la copia devuelve la fila del que ganó (created: false), no un 400', async () => {
       const bytes = pdfFixture();
       const id = await uploaded(bytes);
-      const original = storage.promote.bind(storage);
+      const original = storage.copyVersion.bind(storage);
       jest
-        .spyOn(storage, 'promote')
+        .spyOn(storage, 'copyVersion')
         .mockImplementationOnce(async (from, to, type, etag) => {
           // El otro `complete` gana: mueve el pendiente y crea la fila.
           await inTenant(() =>
@@ -795,6 +799,119 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       expect(loser.created).toBe(false);
       expect(loser.view.id).toBe(id);
       expect(repo.rows.size).toBe(1);
+    });
+    /** Una promesa que se resuelve desde fuera (orquestar carreras). */
+    const gate = () => {
+      let open!: () => void;
+      const opened = new Promise<void>((r) => (open = r));
+      return { open, opened };
+    };
+    const body = { category: 'REPORT', fileName: 'informe.pdf' };
+
+    it('dos complete a la vez con el INSERT del primero retrasado: el segundo nunca da 400 «El archivo cambió…» (revisión I-3)', async () => {
+      const id = await uploaded(pdfFixture());
+      const firstReachedInsert = gate();
+      const releaseFirstInsert = gate();
+      const create = repo.create.bind(repo);
+      jest.spyOn(repo, 'create').mockImplementationOnce(async (input) => {
+        // El primero ya copió el objeto; su fila tarda en llegar.
+        firstReachedInsert.open();
+        await releaseFirstInsert.opened;
+        return create(input);
+      });
+      const first = inTenant(() => complete.execute(PATIENT, id, body, AUTHOR));
+      await firstReachedInsert.opened;
+      // El segundo corre entero mientras tanto.
+      const second = await inTenant(() =>
+        complete.execute(PATIENT, id, body, AUTHOR),
+      );
+      releaseFirstInsert.open();
+      const firstResult = await first;
+      expect(second.view.id).toBe(id);
+      expect(firstResult.view.id).toBe(id);
+      expect([firstResult.created, second.created].sort()).toEqual([
+        false,
+        true,
+      ]);
+      expect(repo.rows.size).toBe(1);
+    });
+
+    it('el segundo complete que ve la fila del primero (pendiente aún sin borrar) devuelve esa fila, no un 409 «ya está en la ficha» (revisión I-3)', async () => {
+      const id = await uploaded(pdfFixture());
+      const readRange = storage.readRange.bind(storage);
+      const del = storage.delete.bind(storage);
+      let raced = false;
+      jest
+        .spyOn(storage, 'readRange')
+        .mockImplementation(async (key, start, end, etag) => {
+          if (!raced) {
+            raced = true;
+            // El primero termina (fila creada) y su borrado del pendiente
+            // todavía no ha llegado al almacén.
+            const spy = jest
+              .spyOn(storage, 'delete')
+              .mockImplementation(() => Promise.resolve());
+            await inTenant(() => complete.execute(PATIENT, id, body, AUTHOR));
+            spy.mockImplementation(del);
+          }
+          return readRange(key, start, end, etag);
+        });
+      const second = await inTenant(() =>
+        complete.execute(PATIENT, id, body, AUTHOR),
+      );
+      expect(second).toMatchObject({ created: false, view: { id } });
+      expect(repo.rows.size).toBe(1);
+    });
+
+    it('complete y la subida multipart corren con un presupuesto de almacén que cabe en los 30 s del proxy (revisión M-1)', async () => {
+      const seen: (number | null)[] = [];
+      const stat = storage.stat.bind(storage);
+      jest.spyOn(storage, 'stat').mockImplementation((key) => {
+        seen.push(remainingStorageBudgetMs());
+        return stat(key);
+      });
+      const saveFile = storage.saveFile.bind(storage);
+      jest.spyOn(storage, 'saveFile').mockImplementation((...args) => {
+        seen.push(remainingStorageBudgetMs());
+        return saveFile(...args);
+      });
+      const id = await uploaded(pdfFixture());
+      await inTenant(() => complete.execute(PATIENT, id, body, AUTHOR));
+      await inTenant(() =>
+        upload.execute(
+          PATIENT,
+          { category: 'PHOTO' },
+          file(pngFixture(), 'foto.png', 'image/png'),
+          AUTHOR,
+        ),
+      );
+      expect(seen.length).toBeGreaterThanOrEqual(2);
+      for (const ms of seen) {
+        expect(ms).not.toBeNull();
+        expect(ms!).toBeGreaterThan(0);
+        expect(ms!).toBeLessThanOrEqual(UPLOAD_STORAGE_BUDGET_MS);
+      }
+      expect(UPLOAD_STORAGE_BUDGET_MS).toBeLessThan(30_000);
+    });
+
+    it('el pendiente se borra DESPUÉS de crear la fila y su fallo no tumba el complete (revisión M-2)', async () => {
+      const id = await uploaded(pdfFixture());
+      const order: string[] = [];
+      const create = repo.create.bind(repo);
+      jest.spyOn(repo, 'create').mockImplementationOnce(async (input) => {
+        order.push('insert');
+        return create(input);
+      });
+      jest.spyOn(storage, 'delete').mockImplementation((key) => {
+        order.push(`delete ${key === pendingKey(id) ? 'pending' : key}`);
+        return Promise.reject(new Error('almacén caído'));
+      });
+      const done = await inTenant(() =>
+        complete.execute(PATIENT, id, body, AUTHOR),
+      );
+      expect(done.created).toBe(true);
+      await new Promise((r) => setImmediate(r));
+      expect(order).toEqual(['insert', 'delete pending']);
     });
   });
 

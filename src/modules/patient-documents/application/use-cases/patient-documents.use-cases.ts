@@ -19,6 +19,10 @@ import {
   readLocalRange,
 } from '../../../../shared/storage/local-file';
 import { StorageObjectChangedError } from '../../../../shared/storage/storage-errors';
+import {
+  UPLOAD_STORAGE_BUDGET_MS,
+  withStorageBudget,
+} from '../../../../shared/storage/storage-budget';
 import { currentRequestId } from '../../../../shared/observability/request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
@@ -404,7 +408,19 @@ export class UploadPatientDocumentUseCase {
    * Autor (token), sede (contexto) y hora de la subida (BD) nunca salen del
    * cuerpo.
    */
-  async execute(
+  /** Revisión M-1: con un presupuesto de almacén que cabe en el proxy. */
+  execute(
+    patientId: string,
+    fields: UploadPatientDocumentFields,
+    file: UploadedDocumentFile | undefined,
+    uploadedById: string,
+  ): Promise<PatientDocumentView> {
+    return withStorageBudget(UPLOAD_STORAGE_BUDGET_MS, () =>
+      this.upload(patientId, fields, file, uploadedById),
+    );
+  }
+
+  private async upload(
     patientId: string,
     fields: UploadPatientDocumentFields,
     file: UploadedDocumentFile | undefined,
@@ -585,7 +601,20 @@ export class CompletePatientDocumentUploadUseCase {
    * Repetir `complete` de un documento ya creado (el mismo usuario) lo
    * devuelve con `created: false` (no se vuelve a auditar); otro usuario, 404.
    */
-  async execute(
+  execute(
+    patientId: string,
+    documentId: string,
+    fields: CompletePatientDocumentFields,
+    uploadedById: string,
+  ): Promise<InsertedDocument> {
+    // Revisión M-1: todas sus operaciones (HeadObject, Range, CopyObject)
+    // comparten un presupuesto que cabe en los 30 s del proxy de la web.
+    return withStorageBudget(UPLOAD_STORAGE_BUDGET_MS, () =>
+      this.complete(patientId, documentId, fields, uploadedById),
+    );
+  }
+
+  private async complete(
     patientId: string,
     documentId: string,
     fields: CompletePatientDocumentFields,
@@ -604,6 +633,19 @@ export class CompletePatientDocumentUploadUseCase {
     if (existing) return existing;
 
     const pendingKey = pendingStorageKeyFor(this.writer.tenantId(), documentId);
+    /**
+     * Revisión I-3: dos `complete` del mismo documento a la vez (doble clic o
+     * reintento tras el `proxyTimeout`). El pendiente solo se borra DESPUÉS de
+     * crear la fila, así que si este ya no lo ve (o ve la huella como
+     * duplicada) es porque el otro ganó: se devuelve su fila (`created:
+     * false`), nunca «vuelve a subirlo» ni «ya está en la ficha».
+     */
+    const winnerOr = async (
+      lost: () => Promise<never>,
+    ): Promise<InsertedDocument> =>
+      (await this.alreadyCompleted(patientId, documentId, uploadedById)) ??
+      lost();
+
     const info = await this.storage.stat(pendingKey);
     if (
       !info ||
@@ -612,7 +654,9 @@ export class CompletePatientDocumentUploadUseCase {
     ) {
       // De otro usuario, de otro paciente, caducado o nunca subido: no se
       // toca (ni se dice cuál de las cosas es).
-      throw new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE);
+      return winnerOr(() =>
+        Promise.reject(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE)),
+      );
     }
 
     const reject = async (
@@ -651,14 +695,18 @@ export class CompletePatientDocumentUploadUseCase {
     } catch (error) {
       if (error instanceof BadRequestException) return reject(error);
       if (error instanceof StorageObjectChangedError) {
-        return reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE));
+        return winnerOr(() =>
+          reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE)),
+        );
       }
       throw error;
     }
     try {
       await this.writer.assertNotDuplicate(patientId, declaredSha);
     } catch (error) {
-      if (error instanceof ConflictException) return reject(error);
+      if (error instanceof ConflictException) {
+        return winnerOr(() => reject(error));
+      }
       throw error;
     }
 
@@ -670,22 +718,24 @@ export class CompletePatientDocumentUploadUseCase {
       declaredSha,
     );
     try {
-      await this.storage.promote(pendingKey, storageKey, detected, info.etag);
+      await this.storage.copyVersion(
+        pendingKey,
+        storageKey,
+        detected,
+        info.etag,
+      );
     } catch (error) {
       if (error instanceof StorageObjectChangedError) {
-        // Dos `complete` a la vez: el otro ya movió el pendiente y creó la
-        // fila. Se devuelve esa, sin volver a auditar.
-        const winner = await this.alreadyCompleted(
-          patientId,
-          documentId,
-          uploadedById,
+        // El otro `complete` ya creó la fila y borró el pendiente: esa fila,
+        // sin volver a auditar.
+        return winnerOr(() =>
+          reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE)),
         );
-        if (winner) return winner;
-        return reject(new BadRequestException(UPLOAD_CHANGED_MESSAGE));
       }
       throw error;
     }
-    return this.writer.insert({
+    // Si el otro `complete` insertó antes, `insert` devuelve su fila.
+    const inserted = await this.writer.insert({
       id: documentId,
       patientId,
       locationId,
@@ -697,6 +747,11 @@ export class CompletePatientDocumentUploadUseCase {
       storageKey,
       uploadedById,
     });
+    // Revisión M-2: el pendiente, ya con fila, se borra sin esperar ni fallar
+    // (`discardObject` solo avisa); si no se puede, lo borra el ciclo de vida
+    // del bucket (24 h en `patient-documents/pending/`).
+    void this.writer.discardObject(pendingKey);
+    return inserted;
   }
 
   /**

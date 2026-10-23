@@ -32,7 +32,7 @@ async function post(
 // DX-259: el POST prefirmado contra un S3 real (MinIO): la política fija la
 // clave, el tamaño, el SHA-256 y los metadatos, y el almacén la hace cumplir;
 // `stat` da el checksum que calculó, `readRange` lee solo un trozo (el sniff)
-// y `promote` mueve la versión comprobada. Sin S3_TEST_ENDPOINT se salta de
+// y `copyVersion` mueve la versión comprobada. Sin S3_TEST_ENDPOINT se salta de
 // forma visible (test/support/minio.ts); en la CI es obligatorio.
 describeWithMinio('POST prefirmado contra MinIO (int)', (cfg) => {
   const run = `dx259-${process.pid}-${Date.now()}`;
@@ -58,7 +58,7 @@ describeWithMinio('POST prefirmado contra MinIO (int)', (cfg) => {
     ttlSeconds: extra.ttlSeconds ?? 60,
   });
 
-  it('sube; HeadObject da tamaño, SHA-256 y metadatos; Range lee solo los primeros bytes; promote mueve y borra', async () => {
+  it('sube; HeadObject da tamaño, SHA-256 y metadatos; Range lee solo los primeros bytes; copyVersion copia y conserva el pendiente', async () => {
     const bytes = Buffer.concat([
       Buffer.from('%PDF-1.7\n'),
       Buffer.alloc(2 * 1024 * 1024, 0x20),
@@ -78,8 +78,10 @@ describeWithMinio('POST prefirmado contra MinIO (int)', (cfg) => {
     expect(head.subarray(0, 8).toString()).toBe('%PDF-1.7');
 
     const finalKey = `patient-documents/${run}/doc.pdf`;
-    await storage.promote(key, finalKey, 'application/pdf', info!.etag);
-    expect(await storage.stat(key)).toBeNull();
+    await storage.copyVersion(key, finalKey, 'application/pdf', info!.etag);
+    // Revisión M-2: el pendiente lo borra el caso de uso tras crear la fila.
+    expect((await storage.stat(key))?.etag).toBe(info!.etag);
+    await storage.delete(key);
     const moved = await storage.stat(finalKey);
     expect(moved?.size).toBe(bytes.length);
     expect(moved?.sha256Base64).toBe(sha256(bytes));
@@ -137,7 +139,7 @@ describeWithMinio('POST prefirmado contra MinIO (int)', (cfg) => {
     expect((await post(target, bytes)).status).toBe(403);
   }, 15_000);
 
-  it('si el objeto cambia tras el HeadObject, Range y promote lo detectan (IfMatch)', async () => {
+  it('si el objeto cambia tras el HeadObject, Range y copyVersion lo detectan (IfMatch)', async () => {
     const first = Buffer.from('%PDF-uno');
     const key = pending('cambia');
     await post(await storage.createDirectUpload(key, policyFor(first)), first);
@@ -151,7 +153,7 @@ describeWithMinio('POST prefirmado contra MinIO (int)', (cfg) => {
       storage.readRange(key, 0, 4, info!.etag),
     ).rejects.toBeInstanceOf(StorageObjectChangedError);
     await expect(
-      storage.promote(
+      storage.copyVersion(
         key,
         `patient-documents/${run}/x.pdf`,
         'application/pdf',

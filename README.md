@@ -2102,12 +2102,27 @@ avatares hacían un `GetObject` por petición (OPS-038, OPS-039).
    huella), **se borra del bucket y responde 400 en español**. Si vale, se
    copia (`CopyObject` con `CopySourceIfMatch`) a
    `patient-documents/<tenantId>/<documentId>-<16 hex del sha256>.<ext>` con
-   el tipo detectado, se borra el pendiente y se crea la fila. Repetir
+   el tipo detectado (el pendiente se **conserva**), se crea la fila y solo
+   entonces se borra el pendiente, sin esperar a que el bucket conteste: si
+   ese borrado falla, lo limpia la regla de 24 h (y la copia nunca queda sin
+   fila). Repetir
    `complete` de un documento ya creado por el mismo usuario lo devuelve
    (idempotente) **sin** volver a auditar CREATE; otro usuario recibe 404. Si
-   dos `complete` del mismo documento se cruzan, el que pierde la copia
-   devuelve la fila del que ganó. Hasta `complete` el objeto no es alcanzable
-   por la API.
+   dos `complete` del mismo documento se cruzan (doble clic, reintento tras el
+   `proxyTimeout`), el que pierde devuelve la fila del que ganó (`created:
+   false`), nunca «vuelve a subirlo» ni «ya está en la ficha»: como el
+   pendiente solo desaparece cuando la fila ya existe, no verlo (o ver su
+   huella como duplicada) significa que el otro ganó. Hasta `complete` el
+   objeto no es alcanzable por la API.
+4. **El POST prefirmado sirve para varios envíos** mientras no caduca (15
+   min), también después de `complete`: S3 no tiene POST de un solo uso. No es
+   un problema de seguridad (misma clave y misma huella firmadas, y `complete`
+   devuelve la fila ya creada), pero un re-envío deja un pendiente huérfano
+   hasta la regla de 24 h; el tope es `RATE_LIMIT_DIRECT_UPLOAD_*`.
+5. **Verificar en AWS S3 real (staging) antes de desplegar** que el bucket
+   aplica el campo `x-amz-checksum-sha256` del POST (solo está probado contra
+   MinIO). Si el proveedor lo ignorase, `complete` falla cerrado (sin
+   `ChecksumSHA256` → 400): seguro, pero rompería todas las subidas.
 
 **Con `STORAGE_DRIVER=disk`** (desarrollo y tests) el flujo es el mismo:
 `upload-url` responde un formulario equivalente hacia la propia API,
@@ -2122,7 +2137,7 @@ español (`MultipartErrorsFilter`).
 
 **El multipart de siempre** (`POST /patients/:patientId/documents`) sigue,
 para integraciones: multer escribe en un **temporal en disco**
-(`os.tmpdir()/dentalix-uploads`, se borra al cerrar la respuesta), el tipo se
+(`os.tmpdir()/dentalix-uploads`, se borra al terminar el handler), el tipo se
 lee por rangos, la huella se calcula en streaming y la subida a S3 es en
 streaming (`@aws-sdk/lib-storage` `Upload`). Igual el avatar (`POST
 /me/avatar`) y `/files/uploads`.
@@ -2130,26 +2145,33 @@ streaming (`@aws-sdk/lib-storage` `Upload`). Igual el avatar (`POST
 **Semáforo de subidas por réplica**: `UPLOAD_MAX_CONCURRENCY` (default 4,
 1..256) peticiones que reciben un fichero a la vez (multipart, avatar,
 `/files/uploads`). Sin plaza: **503** «Hay demasiadas subidas en curso…» con
-`Retry-After: 5`, antes de leer el cuerpo. Cada subida tiene un plazo de
-inactividad `UPLOAD_IDLE_TIMEOUT_MS` (default 15000) y uno total
-`UPLOAD_MAX_DURATION_MS` (default 120000): al vencer, **408** «La subida tardó
-demasiado…», se corta la conexión y la plaza queda libre (si no, unos pocos
-clientes a 10 B/s retendrían todas las plazas hasta los 300 s del
-`requestTimeout` de Node). Con el default, un multipart de 20 MB por la API
+`Retry-After: 5`, antes de leer el cuerpo. **Mientras se recibe el cuerpo**
+hay un plazo de inactividad `UPLOAD_IDLE_TIMEOUT_MS` (default 15000) y uno
+total `UPLOAD_MAX_DURATION_MS` (default 120000): al vencer, **408** «La subida
+tardó demasiado…», se corta la conexión y la plaza queda libre (si no, unos
+pocos clientes a 10 B/s retendrían todas las plazas hasta los 300 s del
+`requestTimeout` de Node). Con el cuerpo ya recibido los plazos se desarman
+(el procesamiento lo acotan los plazos del almacén) y la plaza y el temporal
+se devuelven cuando **termina el handler** (`UploadSlotInterceptor`, que va
+el primero en `@UseInterceptors`), no al cerrarse la respuesta. Con el default, un multipart de 20 MB por la API
 necesita ≥ 1,4 Mbit/s; la web no usa esa ruta (sube directo al bucket).
 
 **Cliente S3** (`createS3Client`): `NodeHttpHandler` con `connectionTimeout`
 `S3_CONNECT_TIMEOUT_MS` (default 3000), `requestTimeout` y `socketTimeout`
-`S3_REQUEST_TIMEOUT_MS` (default 10000; `throwOnRequestTimeout`: corta, no
-solo avisa), agentes con `maxSockets` `S3_MAX_SOCKETS` (default 50) y
+por tentativa de `S3_REQUEST_TIMEOUT_MS / S3_MAX_ATTEMPTS` (mínimo 250 ms,
+para que los reintentos quepan en el plazo total; `throwOnRequestTimeout`:
+corta, no solo avisa), agentes con `maxSockets` `S3_MAX_SOCKETS` (default 50) y
 `maxAttempts` `S3_MAX_ATTEMPTS` (default 3). Además cada operación lleva un
 `AbortSignal` con un plazo TOTAL de `S3_REQUEST_TIMEOUT_MS` (reintentos
 incluidos; una subida en partes, uno por parte de 5 MB): al vencer se destruye
 el socket y la API responde **503** «El almacén de archivos no responde.
 Inténtalo de nuevo en unos minutos.» con `Retry-After: 5`
 (`StorageUnavailableError`; también conexión rechazada/cortada y 5xx tras los
-reintentos). 10 s y no los 30 s de la auditoría: `complete` hace hasta cuatro
-operaciones y tiene que caber en los 30 s del proxy de Next. Un valor fuera de
+reintentos). 10 s y no los 30 s de la auditoría. Además `complete`, el
+multipart y el avatar comparten un **presupuesto** de 25 s para todas sus
+operaciones (`withStorageBudget`, `UPLOAD_STORAGE_BUDGET_MS`): cada una vence
+a lo que quede si es menos que su plazo, así la petición entera cabe en los
+30 s del proxy de Next y el navegador ve el 503 en español, no un 500. Un valor fuera de
 rango impide arrancar.
 
 **Log `storage.op`**: una línea por operación (`driver`, `op`: put, get,

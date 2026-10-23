@@ -215,7 +215,7 @@ export class DiskFileStorage implements FileStoragePort {
     );
   }
 
-  async promote(
+  async copyVersion(
     from: string,
     to: string,
     _contentType: string,
@@ -226,8 +226,10 @@ export class DiskFileStorage implements FileStoragePort {
     await this.time('copy', async () => {
       await this.assertVersion(source, etag);
       await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.rename(source, target);
-      await fs.rm(this.metaPathOf(from), { force: true });
+      // Copia a un temporal y renombra: `to` nunca se ve a medias.
+      const partial = `${target}.${process.pid}.${Date.now()}.partial`;
+      await fs.copyFile(source, partial);
+      await fs.rename(partial, target);
     });
   }
 

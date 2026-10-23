@@ -183,7 +183,8 @@ describeWithMinio(
       );
       expect(grewMb).toBeLessThan(5);
 
-      // El pendiente ya no está; la fila apunta a la clave definitiva.
+      // La fila apunta a la clave definitiva; el pendiente se borra tras
+      // crearla, sin que la respuesta lo espere (revisión M-2).
       const row = await raw.patientDocument.findUniqueOrThrow({
         where: { id: ticket.documentId },
       });
@@ -191,7 +192,11 @@ describeWithMinio(
         `patient-documents/${clinic.tenantId}/${ticket.documentId}-${sha.hex.slice(0, 16)}.pdf`,
       );
       const storage = app.get<S3FileStorage>(FILE_STORAGE);
-      expect(await storage.stat(pendingKey(ticket.documentId))).toBeNull();
+      const deadline = Date.now() + 5000;
+      while (await storage.stat(pendingKey(ticket.documentId))) {
+        if (Date.now() > deadline) throw new Error('el pendiente sigue ahí');
+        await new Promise((r) => setTimeout(r, 50));
+      }
 
       // Se ve: la URL en línea sirve el PDF entero desde el bucket.
       const inline = await api(

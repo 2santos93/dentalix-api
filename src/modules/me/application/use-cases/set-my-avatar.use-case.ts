@@ -10,6 +10,10 @@ import {
 } from '../../../../shared/storage/local-file';
 import { avatarKeyOf } from '../avatar-url.util';
 import { sniffAvatarImage } from '../avatar-image';
+import {
+  UPLOAD_STORAGE_BUDGET_MS,
+  withStorageBudget,
+} from '../../../../shared/storage/storage-budget';
 
 const EXT_BY_MIME: Record<string, string> = {
   'image/png': 'png',
@@ -35,7 +39,12 @@ export class SetMyAvatarUseCase {
     @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
   ) {}
 
-  async execute(input: SetMyAvatarInput): Promise<{ avatarUrl: string }> {
+  /** Revisión M-1: guardar y borrar el anterior caben en el proxy de la web. */
+  execute(input: SetMyAvatarInput): Promise<{ avatarUrl: string }> {
+    return withStorageBudget(UPLOAD_STORAGE_BUDGET_MS, () => this.set(input));
+  }
+
+  private async set(input: SetMyAvatarInput): Promise<{ avatarUrl: string }> {
     const ext = EXT_BY_MIME[input.contentType];
     if (!ext) {
       throw new BadRequestException('Unsupported image type');
