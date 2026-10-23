@@ -18,6 +18,10 @@ import {
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
 import type { DemoLocationKey } from './calendar';
+import {
+  ANAMNESIS_CONDITIONS,
+  type AnamnesisAnswers,
+} from '../../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 
 // Datos FICTICIOS de la clínica demo. Nombres y documentos inventados; los
 // correos usan example.com (RFC 2606) y los teléfonos son de formato
@@ -2435,3 +2439,47 @@ export const DEMO_POSTOP = {
   ],
   delivered: 'POI-EXO',
 } as const;
+
+/**
+ * DX-099: un cuestionario de anamnesis enviado por enlace y pendiente de
+ * revisión, para que el doctor lo vea en «Anamnesis por revisar» al entrar.
+ * Natalia (índice 2, anamnesis «sana») declara ahora alergia a la penicilina,
+ * asma y un anticonceptivo oral: la revisión los marca como añadidos y
+ * cambiados frente a su versión vigente.
+ */
+export const DEMO_ANAMNESIS_SUBMISSION: {
+  patientIndex: number;
+  answers: AnamnesisAnswers;
+} = {
+  patientIndex: 2,
+  answers: {
+    allergies: {
+      answer: 'SI',
+      items: [
+        {
+          alergeno: 'Penicilina',
+          tipo: 'MEDICAMENTO',
+          severidad: 'MODERADA',
+          reaccion: 'Ronchas y picor',
+        },
+      ],
+    },
+    conditions: ANAMNESIS_CONDITIONS.map((c) => ({
+      codigo: c.codigo,
+      answer: c.codigo === 'ASMA' ? ('SI' as const) : ('NO' as const),
+      ...(c.codigo === 'ASMA' ? { nota: 'Inhalador si hace ejercicio' } : {}),
+    })),
+    medications: {
+      answer: 'SI',
+      items: [{ nombre: 'Anticonceptivo oral', frecuencia: 'Diario' }],
+    },
+    anticoagulants: { answer: 'NO' },
+    habits: {
+      tabaquismo: { answer: 'NO' },
+      alcohol: { answer: 'SI', frecuencia: 'Fines de semana' },
+      bruxismo: { answer: 'NO_SE' },
+    },
+    pregnancy: { answer: 'NO' },
+    surgeries: { answer: 'NO' },
+  },
+};

@@ -99,6 +99,9 @@ const TENANT_TABLES = [
   'clinical_entries',
   'clinical_note_template_prompts',
   'clinical_note_templates',
+  // DX-099: anamnesis por enlace (hijas de versions, appointments, patients y
+  // locations).
+  'medical_history_submissions',
   // DX-247: confirmaciones «Sin cambios hoy» (hijas de medical_history_versions).
   'medical_history_reviews',
   'medical_history_versions',
@@ -519,6 +522,44 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         },
       }),
     ).resolves.toBe(1);
+  });
+
+  it('deja una anamnesis por enlace enviada y pendiente de revisión en la sede principal (DX-099)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const submissions = await raw.medicalHistorySubmission.findMany({
+      where: { tenantId },
+      include: { patient: true, location: true },
+    });
+    expect(submissions).toHaveLength(1);
+    const [submission] = submissions;
+    expect(submission).toMatchObject({
+      status: 'SUBMITTED',
+      resultingVersionId: null,
+      reviewedById: null,
+    });
+    expect(submission.patient.firstName).toBe('Natalia');
+    expect(submission.location.name).toBe('Sede principal');
+    expect(submission.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    // La HC de la paciente no cambia hasta que el doctor la acepte.
+    const versions = await raw.medicalHistoryVersion.findMany({
+      where: { tenantId, patientId: submission.patientId },
+    });
+    expect(versions.map((v) => v.source)).toEqual(['STAFF']);
+    // Crear el enlace (recepción) y el envío (la paciente, sin actor).
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId,
+        resourceType: 'MEDICAL_HISTORY_SUBMISSION',
+        resourceId: submission.id,
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+    expect(
+      events.map((e) => [e.action, (e.metadata as { reason?: string }).reason]),
+    ).toEqual([
+      ['CREATE', 'ANAMNESIS_LINK_CREATED'],
+      ['UPDATE', 'ANAMNESIS_SUBMITTED'],
+    ]);
   });
 
   it('deja un bloqueo de vacaciones, uno de almuerzo y 3 pendientes abiertos (DX-122)', async () => {
