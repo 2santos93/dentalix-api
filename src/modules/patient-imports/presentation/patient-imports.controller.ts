@@ -33,9 +33,11 @@ import {
   ApiOperation,
   ApiPayloadTooLargeResponse,
   ApiProduces,
+  ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { readFile } from 'node:fs/promises';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
@@ -46,6 +48,9 @@ import { PATIENT_IMPORT_ROLES } from '../../auth/presentation/guards/clinic-role
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
+import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
+import { UploadSlotInterceptor } from '../../../shared/storage/upload-slots';
 import {
   FILE_TOO_LARGE_MESSAGE,
   IMPORT_FIELD_KEYS,
@@ -62,6 +67,7 @@ import {
   REPORT_GONE_MESSAGE,
   type BatchDetail,
   type InspectResult,
+  type UploadedFile as ImportUpload,
 } from '../application/patient-imports.use-cases';
 import {
   ConfirmPatientImportDto,
@@ -73,6 +79,11 @@ import {
   PatientImportListDto,
 } from './dto/patient-import.dto';
 import { ImportMultipartErrorsFilter } from './import-multipart-errors.filter';
+import {
+  IMPORT_READ_BUSY_MESSAGE,
+  IMPORT_READ_CLINIC_BUSY_MESSAGE,
+  ImportReadSlotGuard,
+} from './import-read-slots';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
@@ -89,6 +100,10 @@ const LOCATION_HEADER = {
 };
 
 const FILE_INTERCEPTOR = FileInterceptor('file', {
+  // SEC-046: a un temporal en disco (lo borra UploadSlotInterceptor al
+  // terminar el handler, también con error o si el cliente aborta), no a un
+  // Buffer: el fichero se lee en memoria solo con la plaza ya tomada.
+  dest: UPLOAD_TEMP_DIR,
   defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_IMPORT_BYTES,
@@ -104,6 +119,25 @@ const FILE_BODY = {
   description:
     'CSV (UTF-8, Latin-1 o UTF-16; separador «,» «;» o tabulador) o .xlsx; hasta 5 MB y 10.000 filas',
 } as const;
+
+const READ_BUSY_RESPONSE = {
+  description: `${IMPORT_READ_CLINIC_BUSY_MESSAGE} / ${IMPORT_READ_BUSY_MESSAGE} (con Retry-After). SEC-046: como mucho 2 lecturas a la vez por réplica y 1 por clínica (configurable).`,
+};
+
+/**
+ * SEC-046: el fichero que multer dejó en el temporal, ya en memoria para el
+ * lector. Se llama dentro del handler, con la plaza de lectura tomada.
+ */
+async function loadUpload(
+  file: Express.Multer.File | undefined,
+): Promise<ImportUpload | undefined> {
+  if (!file?.path) return undefined;
+  return {
+    originalname: file.originalname,
+    size: file.size,
+    buffer: await readFile(file.path),
+  };
+}
 
 const INVALID_MAPPING_MESSAGE =
   'El mapeo de columnas no es válido: debe ser un JSON { campo: cabecera }.';
@@ -138,8 +172,9 @@ export function parseMappingField(
 
 /**
  * Importación de pacientes desde CSV/XLSX (DX-107). Solo ADMIN. El fichero
- * no se guarda: se lee en memoria, se guarda su hash y lo necesario para el
- * informe. `GET /:id` no se audita a propósito: la pantalla lo consulta cada
+ * no se guarda: multer lo deja en un temporal en disco que se borra al
+ * terminar, se lee con una plaza de lectura (SEC-046) y se guarda su hash y
+ * lo necesario para el informe. `GET /:id` no se audita a propósito: la pantalla lo consulta cada
  * pocos segundos mientras importa; su informe (`errors.csv`) sí.
  */
 @ApiTags('patient-imports')
@@ -212,11 +247,14 @@ export class PatientImportsController {
       'Archivo vacío, de otro formato, con cabeceras repetidas o con más de 10.000 filas',
   })
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
-  @UseInterceptors(FILE_INTERCEPTOR)
-  inspect(
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportReadSlotGuard)
+  @UseInterceptors(UploadSlotInterceptor, FILE_INTERCEPTOR)
+  async inspect(
     @UploadedFile() file: Express.Multer.File | undefined,
   ): Promise<InspectResult> {
-    return this.imports.inspect(file);
+    return this.imports.inspect(await loadUpload(file));
   }
 
   @Audit({
@@ -256,14 +294,17 @@ export class PatientImportsController {
     description: 'Archivo o mapeo inválidos (mensaje en español)',
   })
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
-  @UseInterceptors(FILE_INTERCEPTOR)
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportReadSlotGuard)
+  @UseInterceptors(UploadSlotInterceptor, FILE_INTERCEPTOR)
   async create(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() dto: CreatePatientImportDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<BatchDetail> {
     return this.imports.dryRun(
-      file,
+      await loadUpload(file),
       {
         columns: parseMappingField(dto.mapping),
         defaultDocType: dto.defaultDocType,
@@ -362,13 +403,20 @@ export class PatientImportsController {
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
   @ApiConflictResponse({ description: BALANCES_NOT_EDITABLE_MESSAGE })
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
-  @UseInterceptors(FILE_INTERCEPTOR)
-  balances(
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportReadSlotGuard)
+  @UseInterceptors(UploadSlotInterceptor, FILE_INTERCEPTOR)
+  async balances(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() dto: UploadBalancesDto,
   ): Promise<BatchDetail> {
-    return this.imports.dryRunBalances(id, file, dto.addToExisting === 'true');
+    return this.imports.dryRunBalances(
+      id,
+      await loadUpload(file),
+      dto.addToExisting === 'true',
+    );
   }
 
   @Audit({

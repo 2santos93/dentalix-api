@@ -37,6 +37,7 @@ import {
   S3_CLIENT_LIMITS,
   S3_SSE_VALUES,
   STORAGE_DRIVERS,
+  IMPORT_READ_CONCURRENCY_LIMITS,
   UPLOAD_MAX_CONCURRENCY_LIMITS,
   UPLOAD_TIMEOUT_LIMITS,
   boundedInt,
@@ -575,6 +576,16 @@ function storageProblems(env: Env, isProd: boolean): string[] {
     if (value != null && boundedInt(value, range) == null) {
       problems.push(
         `${key} debe ser un entero entre ${range[0]} y ${range[1]} (plazo en ms de las subidas que pasan por la API).`,
+      );
+    }
+  }
+  for (const [key, { range }] of Object.entries(
+    IMPORT_READ_CONCURRENCY_LIMITS,
+  )) {
+    const value = str(env, key);
+    if (value != null && boundedInt(value, range) == null) {
+      problems.push(
+        `${key} debe ser un entero entre ${range[0]} y ${range[1]} (lecturas de ficheros de importación a la vez, SEC-046).`,
       );
     }
   }
