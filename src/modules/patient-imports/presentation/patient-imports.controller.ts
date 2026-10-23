@@ -52,7 +52,6 @@ import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
 import {
   UPLOAD_BUSY_MESSAGE,
-  UploadSlotGuard,
   UploadSlotInterceptor,
 } from '../../../shared/storage/upload-slots';
 import {
@@ -87,6 +86,7 @@ import {
   IMPORT_READ_BUSY_MESSAGE,
   IMPORT_READ_CLINIC_BUSY_MESSAGE,
   ImportReadSlotInterceptor,
+  ImportUploadSlotGuard,
 } from './import-read-slots';
 
 interface AuthenticatedRequest {
@@ -104,8 +104,8 @@ const LOCATION_HEADER = {
 };
 
 const FILE_INTERCEPTOR = FileInterceptor('file', {
-  // SEC-046: el cuerpo se recibe con el semáforo y los plazos de las subidas
-  // (UploadSlotGuard, DX-259) a un temporal en disco (lo borra
+  // SEC-046: el cuerpo se recibe con un semáforo propio y los plazos de las
+  // subidas (ImportUploadSlotGuard, DX-259) a un temporal en disco (lo borra
   // UploadSlotInterceptor al terminar, también con error o si el cliente
   // aborta), no a un Buffer. La plaza de LECTURA (ImportReadSlotInterceptor)
   // se toma después, con el fichero ya en disco.
@@ -255,7 +255,7 @@ export class PatientImportsController {
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
   @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
   @RateLimit('patient-import')
-  @UseGuards(UploadSlotGuard)
+  @UseGuards(ImportUploadSlotGuard)
   @UseInterceptors(
     UploadSlotInterceptor,
     FILE_INTERCEPTOR,
@@ -306,7 +306,7 @@ export class PatientImportsController {
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
   @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
   @RateLimit('patient-import')
-  @UseGuards(UploadSlotGuard)
+  @UseGuards(ImportUploadSlotGuard)
   @UseInterceptors(
     UploadSlotInterceptor,
     FILE_INTERCEPTOR,
@@ -419,7 +419,7 @@ export class PatientImportsController {
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
   @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
   @RateLimit('patient-import')
-  @UseGuards(UploadSlotGuard)
+  @UseGuards(ImportUploadSlotGuard)
   @UseInterceptors(
     UploadSlotInterceptor,
     FILE_INTERCEPTOR,

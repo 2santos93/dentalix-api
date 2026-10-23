@@ -10,11 +10,34 @@ import {
 import { Observable, finalize } from 'rxjs';
 import {
   UPLOAD_BUSY_RETRY_AFTER_SECONDS,
+  UploadSlotGuard,
   UploadSlots,
 } from '../../../shared/storage/upload-slots';
 
 /** SEC-046: semáforo de las lecturas de ficheros de importación. */
 export const IMPORT_READ_SLOTS = Symbol('IMPORT_READ_SLOTS');
+
+/**
+ * SEC-046 (revisión rev1): semáforo PROPIO de la recepción del cuerpo en las
+ * rutas de importación, con el mismo tope y los mismos plazos que las subidas
+ * de DX-259 (`UPLOAD_MAX_CONCURRENCY`, `UPLOAD_IDLE_TIMEOUT_MS`,
+ * `UPLOAD_MAX_DURATION_MS`), pero separado de `UPLOAD_SLOTS`: una ráfaga de
+ * importaciones, o quien gotea sus cuerpos, no deja sin plaza el avatar, los
+ * documentos ni `/files/uploads` de las demás clínicas, y al revés.
+ */
+export const IMPORT_UPLOAD_SLOTS = Symbol('IMPORT_UPLOAD_SLOTS');
+
+/**
+ * `UploadSlotGuard` (plazas, 503 sin leer el cuerpo y plazos 408) sobre el
+ * semáforo de recepción de las importaciones. Va con `UploadSlotInterceptor`,
+ * que devuelve la plaza y borra el temporal igual que en las demás subidas.
+ */
+@Injectable()
+export class ImportUploadSlotGuard extends UploadSlotGuard {
+  constructor(@Inject(IMPORT_UPLOAD_SLOTS) slots: UploadSlots) {
+    super(slots);
+  }
+}
 
 export const IMPORT_READ_CLINIC_BUSY_MESSAGE =
   'Ya se está leyendo otro archivo de importación de esta clínica. Vuelve a intentarlo en unos segundos.';
@@ -41,8 +64,8 @@ interface ReadResponse {
  *
  * La plaza se toma DESPUÉS de recibir el cuerpo: va en `@UseInterceptors`
  * detrás del `FileInterceptor` (multer a disco). La recepción del cuerpo la
- * acotan el semáforo y los plazos de las subidas de DX-259
- * (`UploadSlotGuard`/`UploadSlotInterceptor`), así que un cliente que gotea
+ * acotan un semáforo propio con los plazos de las subidas de DX-259
+ * (`ImportUploadSlotGuard`/`UploadSlotInterceptor`), así que un cliente que gotea
  * el cuerpo no retiene ninguna plaza de lectura. Sin plaza, 503 en español
  * con `Retry-After` al momento (sin cola); el temporal lo borra
  * `UploadSlotInterceptor`. Corre después de `JwtAuthGuard` y `RolesGuard`:

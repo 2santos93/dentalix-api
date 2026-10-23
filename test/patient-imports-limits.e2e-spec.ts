@@ -12,6 +12,7 @@ import {
   IMPORT_READ_BUSY_MESSAGE,
   IMPORT_READ_CLINIC_BUSY_MESSAGE,
   IMPORT_READ_SLOTS,
+  IMPORT_UPLOAD_SLOTS,
 } from '../src/modules/patient-imports/presentation/import-read-slots';
 import {
   RATE_LIMIT_CONFIG,
@@ -67,7 +68,10 @@ const tempFiles = (): Set<string> => {
 describe('Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e)', () => {
   let app: INestApplication<App>;
   let readSlots: UploadSlots;
+  /** Recepción del cuerpo de las rutas de importación (semáforo propio). */
   let uploadSlots: UploadSlots;
+  /** Las de avatar, documentos y `/files/uploads` (DX-259). */
+  let sharedUploadSlots: UploadSlots;
   let port: number;
   let a: Clinic;
   let b: Clinic;
@@ -147,7 +151,8 @@ describe('Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e)'
     await app.listen(0, '127.0.0.1');
     port = ((app.getHttpServer() as Server).address() as AddressInfo).port;
     readSlots = app.get<UploadSlots>(IMPORT_READ_SLOTS);
-    uploadSlots = app.get<UploadSlots>(UPLOAD_SLOTS);
+    uploadSlots = app.get<UploadSlots>(IMPORT_UPLOAD_SLOTS);
+    sharedUploadSlots = app.get<UploadSlots>(UPLOAD_SLOTS);
     await resetDatabase(raw);
     a = await registerClinic(app, 'sec046-a');
     b = await registerClinic(app, 'sec046-b');
@@ -164,7 +169,10 @@ describe('Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e)'
     held.splice(0).forEach((release) => release());
     jest.restoreAllMocks();
     await waitFor(
-      () => uploadSlots.active === 0 && readSlots.active === 0,
+      () =>
+        uploadSlots.active === 0 &&
+        sharedUploadSlots.active === 0 &&
+        readSlots.active === 0,
       'plazas libres entre tests',
     );
   });
@@ -194,6 +202,43 @@ describe('Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e)'
     slowA.destroy();
     await waitFor(() => uploadSlots.active === 0, 'plaza de subida devuelta');
     await expectNoNewTempFiles(before);
+  });
+
+  it('revisión rev1: las importaciones no gastan las plazas de subida de avatar y documentos, ni al revés', async () => {
+    const avatar = () =>
+      as(api().post('/api/v1/me/avatar'), b).attach(
+        'file',
+        Buffer.concat([
+          Buffer.from('89504e470d0a1a0a', 'hex'),
+          Buffer.from(`rev1-${Date.now()}`),
+        ]),
+        { filename: 'a.png', contentType: 'image/png' },
+      );
+    const fill = (slots: UploadSlots): (() => void)[] => {
+      const taken: (() => void)[] = [];
+      for (let r = slots.tryAcquire(); r; r = slots.tryAcquire()) taken.push(r);
+      return taken;
+    };
+
+    // Recepción de importaciones llena (p. ej. 4 subidas que gotean): el
+    // avatar de otra clínica sigue subiendo.
+    const imports = fill(uploadSlots);
+    try {
+      expectBusy(await read(a), UPLOAD_BUSY_MESSAGE);
+      expect((await avatar()).status).toBe(200);
+    } finally {
+      imports.forEach((release) => release());
+    }
+
+    // Subidas de avatar y documentos llenas: la importación sigue leyendo.
+    const shared = fill(sharedUploadSlots);
+    try {
+      expectBusy(await avatar(), UPLOAD_BUSY_MESSAGE);
+      expect((await read(a)).status).toBe(200);
+      expect((await read(a, '')).status).toBe(201);
+    } finally {
+      shared.forEach((release) => release());
+    }
   });
 
   it('plaza de lectura ocupada → la segunda lectura de la clínica y la de otra clínica con la réplica llena dan 503 con Retry-After, ya recibido el fichero, y su temporal se borra', async () => {

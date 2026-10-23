@@ -45,7 +45,7 @@
  *                  dry-run y hoja de saldos, SEC-046), por clínica + usuario
  *                  y con UN balde para las tres rutas (no uno por ruta):
  *                  cada lectura puede costar decenas de MB y segundos de CPU.
- *                  El tope de lecturas a la vez es aparte (`ImportReadSlotGuard`).
+ *                  El tope de lecturas a la vez es aparte (`ImportReadSlotInterceptor`).
  */
 export type RateLimitPolicy =
   | 'auth'

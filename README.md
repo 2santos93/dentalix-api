@@ -1901,12 +1901,15 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   dry-run `POST /` y hoja de saldos `POST /:id/balances`) puede ocupar ~30–85
   MB y segundos de CPU, y cualquiera que se registre es ADMIN de su clínica.
   Por eso:
-  - **Recepción del cuerpo, con el semáforo de subidas**: las tres rutas
-    llevan `UploadSlotGuard` + `UploadSlotInterceptor` de DX-259
-    (`UPLOAD_MAX_CONCURRENCY`, plazos `UPLOAD_IDLE_TIMEOUT_MS` y
-    `UPLOAD_MAX_DURATION_MS`, 408 al vencer) y multer escribe el fichero en
-    el temporal de las subidas (`os.tmpdir()/dentalix-uploads`), no en
-    memoria.
+  - **Recepción del cuerpo, con un semáforo de subidas propio**: las tres
+    rutas llevan `ImportUploadSlotGuard` + `UploadSlotInterceptor`: el guard
+    de DX-259 sobre un semáforo SOLO de importaciones, con el mismo tope
+    (`UPLOAD_MAX_CONCURRENCY`) y plazos (`UPLOAD_IDLE_TIMEOUT_MS` y
+    `UPLOAD_MAX_DURATION_MS`, 408 al vencer). Así una ráfaga de
+    importaciones, o quien gotea sus cuerpos, no deja sin plaza el avatar,
+    los documentos ni `/files/uploads` de las demás clínicas (y al revés).
+    Multer escribe el fichero en el temporal de las subidas
+    (`os.tmpdir()/dentalix-uploads`), no en memoria.
   - **Plazas de lectura** (`ImportReadSlotInterceptor`, detrás del
     `FileInterceptor`): se toman **con el fichero ya en disco**, así que un
     cliente que gotea el cuerpo no retiene ninguna. Como mucho
@@ -1927,7 +1930,7 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
     `Retry-After`. Corre antes que las plazas: un 429 no ocupa ninguna; un
     503 sí gasta una unidad del balde (con `Retry-After: 5`, un reintento a
     mano no lo agota).
-  - Prueba de carga (lenta, no corre por defecto ni en CI):
+  - Prueba de carga (lenta: no corre por defecto; en CI, en su propio paso):
     `RUN_SLOW_TESTS=1 npm run test:e2e -- test/patient-imports-load`. 20
     lecturas en paralelo del XLSX de la auditoría: el pico de RSS crece < 300
     MB (medido: +26 MB una clínica, +62 MB veinte clínicas; sin el tope, +916
