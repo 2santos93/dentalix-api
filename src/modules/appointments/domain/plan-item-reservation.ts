@@ -25,6 +25,13 @@ export const PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE =
 /** DX-273 «Traer a esta cita»: la cita destino no está en la clínica. */
 export const PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE =
   'Solo se trae un tratamiento a una cita con el paciente en la clínica (llegó, en sillón o listo para cobrar).';
+/**
+ * DX-288: el tratamiento ya lo reserva otra cita con el paciente en la
+ * clínica. Mientras esa cita siga en curso nadie se lo lleva: con varias
+ * peticiones a la vez, solo la primera lo trae.
+ */
+export const PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE =
+  'Este tratamiento ya lo tiene otra cita con el paciente en la clínica. No se puede traer mientras esa cita siga en curso.';
 /** DX-273: el tratamiento no está (vivo) en la cita destino. */
 export const PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE =
   'Este tratamiento no está en esta cita.';
