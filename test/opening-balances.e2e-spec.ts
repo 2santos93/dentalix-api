@@ -128,6 +128,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         currency: string;
         budgeted: number;
         openingBalance: number;
+        openingPending: number;
         paid: number;
         balance: number;
       }[];
@@ -532,7 +533,12 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       paid: 50000.5,
       pending: 150000,
     });
-    expect(st.summary[0]).toMatchObject({ paid: 50000.5, balance: 150000 });
+    expect(st.summary[0]).toMatchObject({
+      paid: 50000.5,
+      balance: 150000,
+      // «Incluye saldo migrado» dice lo que queda, no el original (QA D5).
+      openingPending: 150000,
+    });
     const row = (await aging()).items.find((r) => r.patient.id === ana.id);
     expect(row?.currencies[0]).toMatchObject({
       balance: 150000,

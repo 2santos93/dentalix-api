@@ -86,6 +86,7 @@ function isActive(payment: BalancePaymentRow): boolean {
 interface CurrencyAccumulator {
   budgetedCents: number;
   openingCents: number;
+  openingPendingCents: number;
   paidCents: number;
   overdueCount: number;
   overdueCents: number;
@@ -97,6 +98,7 @@ function emptyAccumulator(): CurrencyAccumulator {
   return {
     budgetedCents: 0,
     openingCents: 0,
+    openingPendingCents: 0,
     paidCents: 0,
     overdueCount: 0,
     overdueCents: 0,
@@ -205,8 +207,8 @@ export function computeBalances(
   });
 
   // --- Saldo migrado (DX-262) -----------------------------------------------
-  // Deuda traída del programa anterior: suma entera al saldo de su moneda
-  // (ningún abono se le imputa todavía, DX-051).
+  // Deuda traída del programa anterior: suma al saldo de su moneda; sus
+  // abonos (revisión C1) la reducen como cualquier abono.
   const openingBalances = [...(snapshot.openingBalances ?? [])].sort(
     (a, b) =>
       a.asOfDate.localeCompare(b.asOfDate) ||
@@ -223,10 +225,12 @@ export function computeBalances(
   const openingLines = openingBalances.map((o) => {
     acc(o.currency).openingCents += toCents(o.amount);
     const paidCents = paidByOpening.get(`${o.id}\u0000${o.currency}`) ?? 0;
+    const pendingCents = Math.max(0, toCents(o.amount) - paidCents);
+    acc(o.currency).openingPendingCents += pendingCents;
     return {
       ...o,
       paid: fromCents(paidCents),
-      pending: fromCents(Math.max(0, toCents(o.amount) - paidCents)),
+      pending: fromCents(pendingCents),
     };
   });
 
@@ -311,6 +315,7 @@ export function computeBalances(
       currency,
       budgeted: fromCents(a.budgetedCents),
       openingBalance: fromCents(a.openingCents),
+      openingPending: fromCents(a.openingPendingCents),
       paid: fromCents(a.paidCents),
       balance: fromCents(a.budgetedCents + a.openingCents - a.paidCents),
       overdueCount: a.overdueCount,

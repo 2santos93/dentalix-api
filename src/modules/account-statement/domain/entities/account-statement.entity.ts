@@ -146,6 +146,12 @@ export interface StatementCurrencySummary {
   budgeted: number;
   /** Σ saldos migrados vivos de la moneda (DX-262); entra en `balance`. */
   openingBalance: number;
+  /**
+   * Lo que queda de esos saldos tras sus abonos (QA D5): lo que «Incluye
+   * saldo migrado» del saldo. `openingBalance` sigue siendo el cargo
+   * original, para que `balance = budgeted + openingBalance − paid` cuadre.
+   */
+  openingPending: number;
   paid: number;
   balance: number;
   overdueCount: number;
@@ -280,6 +286,8 @@ export interface FamilyCurrencyAmounts {
   budgeted: number;
   /** Saldo migrado (DX-262), ya incluido en `balance`. */
   openingBalance: number;
+  /** Lo que queda pendiente de él (QA D5). */
+  openingPending: number;
   paid: number;
   balance: number;
   overdueAmount: number;

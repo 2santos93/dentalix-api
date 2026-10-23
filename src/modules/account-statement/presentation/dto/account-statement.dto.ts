@@ -83,6 +83,13 @@ export class AccountStatementCurrencySummaryDto {
   openingBalance!: number;
 
   @ApiProperty({
+    example: 100000,
+    description:
+      'DX-262 (QA D5): lo que queda pendiente de esos saldos migrados tras sus abonos; es lo que «incluye» el saldo',
+  })
+  openingPending!: number;
+
+  @ApiProperty({
     example: 1200000,
     description: 'Σ abonos no anulados en esta moneda (sin convertir)',
   })
@@ -403,6 +410,11 @@ export class FamilyCurrencyAmountsDto {
 
   @ApiProperty({ description: 'DX-262: saldo migrado, ya incluido en balance' })
   openingBalance!: number;
+
+  @ApiProperty({
+    description: 'DX-262 (QA D5): lo que queda pendiente del saldo migrado',
+  })
+  openingPending!: number;
 
   @ApiProperty()
   paid!: number;

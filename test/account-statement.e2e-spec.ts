@@ -335,6 +335,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         budgeted: 500000,
         // DX-262: sin saldo migrado.
         openingBalance: 0,
+        openingPending: 0,
         paid: 200000,
         balance: 300000,
         overdueCount: 0,
@@ -346,6 +347,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         // 1000 + 200; el cancelado (500) y el borrador (PROPOSED) no suman.
         budgeted: 1200,
         openingBalance: 0,
+        openingPending: 0,
         // 300 + 50 del cancelado; el anulado (100) no suma.
         paid: 350,
         balance: 850,

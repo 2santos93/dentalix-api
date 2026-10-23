@@ -118,6 +118,7 @@ describe('computeAccountStatement', () => {
         currency: 'COP',
         budgeted: 1500.5,
         openingBalance: 0,
+        openingPending: 0,
         paid: 300.3,
         balance: 1200.2,
         overdueCount: 0,
@@ -513,6 +514,7 @@ describe('computeAccountStatement', () => {
           currency: 'COP',
           budgeted: 1000,
           openingBalance: 250.5,
+          openingPending: 250.5,
           paid: 300,
           balance: 950.5,
           overdueCount: 0,
@@ -592,6 +594,8 @@ describe('computeAccountStatement', () => {
       expect(out.summary[0]).toMatchObject({
         budgeted: 1000,
         openingBalance: 150000,
+        // Lo que queda del migrado, para «Incluye saldo migrado» (QA D5).
+        openingPending: 100000,
         paid: 50300,
         balance: 100700,
       });
