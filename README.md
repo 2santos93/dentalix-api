@@ -891,9 +891,14 @@ Módulo `medical-history-submissions`; migraciones
   DX-288: es atómico. Tras las citas bloquea la fila del ítem (`FOR NO KEY
   UPDATE`, que no estorba a las FK), así que dos «Traer» del mismo
   tratamiento desde citas distintas van en fila. Y no se trae desde una cita
-  con el paciente en la clínica (409 «Este tratamiento ya lo tiene otra cita
-  con el paciente en la clínica…»): con N peticiones a la vez, una 200 y las
-  demás 409, también si alguna llega cuando la primera ya confirmó. Desde la
+  **de hoy** (día civil de la zona de su sede) con el paciente en la clínica:
+  409 «Este tratamiento ya lo tiene otra cita con el paciente en la clínica,
+  la de hoy a las 09:00 (Sede…). No se puede traer…», con la hora y la sede
+  solo si esa sede está permitida al usuario (si no, el mismo texto sin
+  datos, DX-089). Con N peticiones a la vez, una 200 y las demás 409, también
+  si alguna llega cuando la primera ya confirmó. Una cita olvidada en la
+  clínica de un día anterior no lo impide: se trae normalmente. El estado del
+  tratamiento (por hacer) se comprueba con el ítem ya bloqueado. Desde la
   misma cita (doble clic) sigue siendo idempotente: todas 200 y un solo
   traslado auditado.
 
