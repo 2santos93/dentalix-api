@@ -1876,7 +1876,8 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   alguno de los creados aparece en CUALQUIER tabla con FK a `patients` (leída
   de `pg_constraint`: citas, lista de espera, planes, pagos, historia,
   odontograma, dentición, periodoncia, recetas, documentos, consentimientos,
-  implantes, coberturas, responsables, cobranza, indicaciones…), salvo las
+  implantes, coberturas, convenios (DX-105), responsables, cobranza,
+  indicaciones…; las visitas del plan de DX-256 cuelgan de citas y planes), salvo las
   filas del lote y `patient_ledgers`. Una tabla nueva queda cubierta sola; el
   int-spec la enumera para que se revise.
 - **Cartera (DX-155)**: el INSERT de pacientes no dispara el refresco de

@@ -36,6 +36,9 @@ async function purge(): Promise<void> {
     const where = { tenantId: { in: ids } };
     await raw.appointment.deleteMany({ where });
     await raw.patientDentitionEvent.deleteMany({ where });
+    await raw.patientAgreement.deleteMany({ where });
+    await raw.agreement.deleteMany({ where });
+    await raw.payer.deleteMany({ where });
     await raw.job.deleteMany({ where });
     await raw.patientImportRow.deleteMany({ where });
     await raw.patient.updateMany({ where, data: { importBatchId: null } });
@@ -456,6 +459,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'data_processing_consents.patientId',
       'medical_history_reviews.patientId',
       'medical_history_versions.patientId',
+      'patient_agreements.patientId',
       'patient_consents.patientId',
       'patient_coverages.patientId',
       'patient_dentition_events.patientId',
@@ -491,6 +495,40 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     await expect(
       inTenant(a, () => repo.undo(batch!.id, a.userId)),
     ).rejects.toMatchObject({ patients: 1 });
+  });
+
+  it('deshacer se niega si un importado ya tiene un convenio asignado (DX-105)', async () => {
+    const batch = await prepared(a, [person('8882')]);
+    await runAll(a, batch!.id);
+    const created = await raw.patient.findFirstOrThrow({
+      where: { importBatchId: batch!.id },
+    });
+    const payer = await raw.payer.create({
+      data: { tenantId: a.tenantId, name: 'Mutua DX-107', type: 'OTRO' },
+    });
+    const agreement = await raw.agreement.create({
+      data: {
+        tenantId: a.tenantId,
+        name: 'Convenio DX-107',
+        payerId: payer.id,
+        kind: 'PERCENT_DISCOUNT',
+        percent: 10,
+      },
+    });
+    await raw.patientAgreement.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: created.id,
+        agreementId: agreement.id,
+      },
+    });
+    await expect(
+      inTenant(a, () => repo.undo(batch!.id, a.userId)),
+    ).rejects.toMatchObject({ patients: 1 });
+    const still = await raw.patient.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    expect(still.deletedAt).toBeNull();
   });
 
   it('alta manual con el mismo documento escrito distinto: 409, también si la importación ya lo creó', async () => {
