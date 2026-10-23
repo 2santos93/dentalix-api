@@ -72,6 +72,7 @@ import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
 import {
   UPLOAD_BUSY_MESSAGE,
   UploadSlotGuard,
+  UploadSlotInterceptor,
 } from '../../../shared/storage/upload-slots';
 import { STORAGE_UNAVAILABLE_MESSAGE } from '../../../shared/storage/storage-errors';
 
@@ -166,9 +167,11 @@ export class PatientDocumentsController {
   })
   @UseGuards(UploadSlotGuard)
   @UseInterceptors(
+    // Devuelve la plaza y borra el temporal al terminar el handler (I-1).
+    UploadSlotInterceptor,
     FileInterceptor('file', {
-      // DX-259: a un temporal en disco (lo borra UploadSlotGuard al cerrar la
-      // respuesta), no a un Buffer en memoria.
+      // DX-259: a un temporal en disco (lo borra UploadSlotInterceptor al
+      // terminar el handler), no a un Buffer en memoria.
       dest: UPLOAD_TEMP_DIR,
       // Los navegadores mandan el nombre del fichero en UTF-8 crudo; sin
       // esto multer lo lee como latin1 («RemisiÃ³n.pdf»).

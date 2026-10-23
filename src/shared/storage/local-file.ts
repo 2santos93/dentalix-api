@@ -7,7 +7,7 @@ import * as path from 'node:path';
  * DX-259 (OPS-038): las subidas que todavía pasan por la API (avatares, la
  * subida multipart de documentos y la subida directa del disco) las escribe
  * multer en este directorio temporal, no en memoria. El temporal se borra al
- * cerrarse la respuesta (`UploadSlotGuard`).
+ * terminar el handler (`UploadSlotInterceptor`).
  */
 export const UPLOAD_TEMP_DIR = path.join(tmpdir(), 'dentalix-uploads');
 

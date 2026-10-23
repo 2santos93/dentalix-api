@@ -7,8 +7,10 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import {
   UPLOAD_BUSY_MESSAGE,
   UploadSlotGuard,
+  UploadSlotInterceptor,
   UploadSlots,
 } from './upload-slots';
+import { Subject, throwError } from 'rxjs';
 
 class FakeResponse extends EventEmitter {
   readonly headers = new Map<string, string>();
@@ -25,12 +27,13 @@ class FakeResponse extends EventEmitter {
   }
 }
 
-class FakeRequest {
+class FakeRequest extends EventEmitter {
   file?: { path: string };
+  complete = false;
   destroyed = false;
-  idle: { ms: number; cb: () => void } | null = null;
-  setTimeout(ms: number, cb: () => void): void {
-    this.idle = { ms, cb };
+  idle: { ms: number; cb?: () => void } | null = null;
+  setTimeout(ms: number, cb?: () => void): void {
+    this.idle = ms === 0 ? null : { ms, cb };
   }
   destroy(): void {
     this.destroyed = true;
@@ -41,6 +44,15 @@ function contextFor(req: object, res: FakeResponse): ExecutionContext {
   return {
     switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
   } as unknown as ExecutionContext;
+}
+
+/** Sondeo en vez de una espera fija (revisión M-5: con carga, 50 ms no bastan). */
+async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor: timeout');
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 describe('UploadSlots / UploadSlotGuard (DX-259, OPS-038)', () => {
@@ -86,8 +98,7 @@ describe('UploadSlots / UploadSlotGuard (DX-259, OPS-038)', () => {
     expect(slots.active).toBe(1);
     res.emit('close');
     expect(slots.active).toBe(0);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(existsSync(file)).toBe(false);
+    await waitFor(() => !existsSync(file));
   });
 
   it('un cliente lento que pasa del plazo total recibe 408 en español, se corta y la plaza queda libre', () => {
@@ -129,10 +140,63 @@ describe('UploadSlots / UploadSlotGuard (DX-259, OPS-038)', () => {
     const req = new FakeRequest();
     const res = new FakeResponse();
     new UploadSlotGuard(slots).canActivate(contextFor(req, res));
-    req.idle?.cb();
+    req.idle?.cb?.();
     expect(res.statusCode).toBe(408);
     expect(req.destroyed).toBe(true);
     expect(slots.active).toBe(0);
     res.emit('close');
+  });
+
+  it('con el cuerpo ya recibido los plazos se desarman y no cortan nada (revisión I-1)', () => {
+    jest.useFakeTimers();
+    try {
+      const slots = new UploadSlots(1, {
+        idleTimeoutMs: 1000,
+        maxDurationMs: 2000,
+      });
+      const req = new FakeRequest();
+      const res = new FakeResponse();
+      new UploadSlotGuard(slots).canActivate(contextFor(req, res));
+      req.complete = true;
+      req.emit('end');
+      expect(req.idle).toBeNull();
+      jest.advanceTimersByTime(10_000);
+      expect(res.statusCode).toBe(200);
+      expect(req.destroyed).toBe(false);
+      expect(slots.active).toBe(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('si el interceptor tomó la subida, cerrar la respuesta no libera la plaza: la libera el final del handler (revisión I-1)', () => {
+    const slots = new UploadSlots(1);
+    const req = new FakeRequest();
+    const res = new FakeResponse();
+    const ctx = contextFor(req, res);
+    new UploadSlotGuard(slots).canActivate(ctx);
+    const handler = new Subject<string>();
+    const out = new UploadSlotInterceptor().intercept(ctx, {
+      handle: () => handler.asObservable(),
+    });
+    const sub = out.subscribe({ error: () => undefined });
+    res.emit('close');
+    expect(slots.active).toBe(1);
+    handler.next('ok');
+    handler.complete();
+    expect(slots.active).toBe(0);
+    sub.unsubscribe();
+  });
+
+  it('el handler que falla también devuelve la plaza', () => {
+    const slots = new UploadSlots(1);
+    const req = new FakeRequest();
+    const res = new FakeResponse();
+    const ctx = contextFor(req, res);
+    new UploadSlotGuard(slots).canActivate(ctx);
+    new UploadSlotInterceptor()
+      .intercept(ctx, { handle: () => throwError(() => new Error('x')) })
+      .subscribe({ error: () => undefined });
+    expect(slots.active).toBe(0);
   });
 });

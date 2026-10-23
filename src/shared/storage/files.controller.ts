@@ -30,7 +30,7 @@ import {
 } from './disk-direct-upload';
 import { MultipartErrorsFilter } from '../../modules/patient-documents/presentation/multipart-errors.filter';
 import { avatarCacheControl } from './public-file-cache';
-import { UploadSlotGuard } from './upload-slots';
+import { UploadSlotGuard, UploadSlotInterceptor } from './upload-slots';
 import { isFileKey } from './file-key';
 import { FILE_STORAGE, contentDispositionHeader } from './file-storage.port';
 import type { FileStoragePort, SignedUrlOptions } from './file-storage.port';
@@ -138,7 +138,7 @@ export class FilesController {
   @ApiExcludeEndpoint()
   @Header('Cache-Control', 'no-store')
   @UseGuards(DiskDriverOnlyGuard, UploadSlotGuard)
-  @UseInterceptors(DiskDirectUploadInterceptor)
+  @UseInterceptors(UploadSlotInterceptor, DiskDirectUploadInterceptor)
   @UseFilters(MultipartErrorsFilter)
   async directUpload(@Req() req: DirectUploadRequest): Promise<void> {
     const upload = req.directUpload;

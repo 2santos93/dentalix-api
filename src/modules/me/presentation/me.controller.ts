@@ -30,6 +30,7 @@ import { STORAGE_UNAVAILABLE_MESSAGE } from '../../../shared/storage/storage-err
 import {
   UPLOAD_BUSY_MESSAGE,
   UploadSlotGuard,
+  UploadSlotInterceptor,
 } from '../../../shared/storage/upload-slots';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import {
@@ -164,9 +165,11 @@ export class MeController {
     description: `${UPLOAD_BUSY_MESSAGE} / ${STORAGE_UNAVAILABLE_MESSAGE} (con Retry-After)`,
   })
   // DX-259 (OPS-038): semáforo de subidas por réplica y multer a un temporal
-  // en disco (lo borra UploadSlotGuard al cerrar la respuesta), no a memoria.
+  // en disco (lo borra UploadSlotInterceptor al terminar el handler), no a
+  // memoria.
   @UseGuards(UploadSlotGuard)
   @UseInterceptors(
+    UploadSlotInterceptor,
     FileInterceptor('file', {
       dest: UPLOAD_TEMP_DIR,
       limits: { fileSize: MAX_AVATAR_BYTES, files: 1 },

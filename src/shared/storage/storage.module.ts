@@ -20,7 +20,12 @@ import {
   loadUploadTimeouts,
 } from './storage-config';
 import { errorName } from './storage-op-log';
-import { UPLOAD_SLOTS, UploadSlotGuard, UploadSlots } from './upload-slots';
+import {
+  UPLOAD_SLOTS,
+  UploadSlotGuard,
+  UploadSlotInterceptor,
+  UploadSlots,
+} from './upload-slots';
 
 /**
  * Elige el adaptador según `STORAGE_DRIVER` (DX-084): `s3` (S3, R2, MinIO) o
@@ -79,10 +84,11 @@ export class StorageStartupCheck implements OnApplicationBootstrap {
         ),
     },
     UploadSlotGuard,
+    UploadSlotInterceptor,
     DiskDriverOnlyGuard,
     DiskDirectUploadInterceptor,
     StorageStartupCheck,
   ],
-  exports: [FILE_STORAGE, UPLOAD_SLOTS, UploadSlotGuard],
+  exports: [FILE_STORAGE, UPLOAD_SLOTS, UploadSlotGuard, UploadSlotInterceptor],
 })
 export class StorageModule {}
