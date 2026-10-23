@@ -19,7 +19,7 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
   readonly patients = new Map<string, FakePatient>();
   readonly links = new Map<
     string,
-    { id: string; patientId: string; usedAt: Date | null }
+    { id: string; patientId: string; usedAt: Date | null; expiresAt: Date }
   >();
   country: string | null = 'CO';
   branding: OptOutClinicBranding | null = {
@@ -50,14 +50,19 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
       id: `l${++this.seq}`,
       patientId,
       usedAt: null,
+      expiresAt: new Date('2099-01-01'),
     });
     return Promise.resolve();
   }
 
-  findLinkByTokenHash(tokenHash: string): Promise<OptOutLinkLookup | null> {
+  findLinkByTokenHash(
+    tokenHash: string,
+    at: Date,
+  ): Promise<OptOutLinkLookup | null> {
     const link = this.links.get(tokenHash);
     const patient = link ? this.patients.get(link.patientId) : undefined;
-    if (!link || !patient) return Promise.resolve(null);
+    if (!link || !patient || link.usedAt || link.expiresAt <= at)
+      return Promise.resolve(null);
     return Promise.resolve({
       linkId: link.id,
       patientId: patient.id,
@@ -69,7 +74,14 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
   optOut(
     patientId: string,
     input: { source: ReminderOptOutSource; at: Date; linkId?: string },
-  ): Promise<boolean> {
+  ): Promise<boolean | null> {
+    if (input.linkId) {
+      const link = [...this.links.values()].find(
+        (l) => l.id === input.linkId && l.patientId === patientId,
+      );
+      if (!link || link.usedAt || link.expiresAt <= input.at)
+        return Promise.resolve(null);
+    }
     for (const link of this.links.values()) {
       if (link.id === input.linkId && !link.usedAt) link.usedAt = input.at;
     }
@@ -78,6 +90,18 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
     patient.optedOutAt = input.at;
     patient.optOutSource = input.source;
     return Promise.resolve(true);
+  }
+
+  purgeLinks(before: Date): Promise<number> {
+    let count = 0;
+    for (const [hash, link] of this.links) {
+      if (link.expiresAt < before || (link.usedAt && link.usedAt < before)) {
+        // eslint-disable-next-line no-restricted-syntax -- Map efímero del fake, purga TTL sin datos de negocio.
+        this.links.delete(hash);
+        count++;
+      }
+    }
+    return Promise.resolve(count);
   }
 
   findByPhoneTail(tail: string): Promise<MobileCandidate[]> {

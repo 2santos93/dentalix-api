@@ -1,4 +1,6 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { optOutPositiveInteger } from '../opt-out-config';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ReminderOptOutSource } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -73,12 +75,13 @@ async function findLink(
   tenantContext: TenantContextService,
   repo: ReminderOptOutRepository,
   token: string,
+  at: Date,
 ): Promise<{ tenantId: string; link: OptOutLinkLookup }> {
   const tenantId = tenantContext.getTenantId();
   if (!tenantId || !isWellFormedConfirmationToken(token)) {
     throw new NotFoundException(LINK_NOT_FOUND);
   }
-  const link = await repo.findLinkByTokenHash(hashConfirmationToken(token));
+  const link = await repo.findLinkByTokenHash(hashConfirmationToken(token), at);
   if (!link) throw new NotFoundException(LINK_NOT_FOUND);
   return { tenantId, link };
 }
@@ -107,18 +110,24 @@ export class GetPublicOptOutUseCase {
     private readonly tenantContext: TenantContextService,
     @Inject(REMINDER_OPT_OUT_REPOSITORY)
     private readonly repo: ReminderOptOutRepository,
+    private readonly clock: ReminderClock,
   ) {}
 
   async execute(token: string): Promise<PublicOptOutView> {
-    const { link } = await findLink(this.tenantContext, this.repo, token);
+    const { link } = await findLink(
+      this.tenantContext,
+      this.repo,
+      token,
+      this.clock.now(),
+    );
     return toView(link, link.optedOutAt, await this.repo.clinicBranding());
   }
 }
 
 /**
  * PÚBLICO: el paciente confirma la baja desde el enlace del email (DX-128).
- * Idempotente: si ya estaba dado de baja (por este enlace, otro o recepción)
- * responde lo mismo con la fecha vigente, sin escribir ni auditar de nuevo.
+ * Consume el enlace una sola vez. Si la baja ya estaba vigente por otra vía,
+ * conserva su fecha y no audita de nuevo; un enlace usado devuelve404.
  */
 @Injectable()
 export class ConfirmPublicOptOutUseCase {
@@ -138,9 +147,9 @@ export class ConfirmPublicOptOutUseCase {
       this.tenantContext,
       this.repo,
       token,
+      this.clock.now(),
     );
     const clinic = await this.repo.clinicBranding();
-    if (link.optedOutAt) return toView(link, link.optedOutAt, clinic);
 
     const now = this.clock.now();
     const registered = await this.repo.optOut(link.patientId, {
@@ -148,14 +157,8 @@ export class ConfirmPublicOptOutUseCase {
       at: now,
       linkId: link.linkId,
     });
-    if (!registered) {
-      // Otro clic (u otra vía) la registró entre la lectura y la escritura:
-      // se muestra la fecha que quedó.
-      const current = await this.repo.findLinkByTokenHash(
-        hashConfirmationToken(token),
-      );
-      return toView(link, current?.optedOutAt ?? now, clinic);
-    }
+    if (registered === null) throw new NotFoundException(LINK_NOT_FOUND);
+    if (!registered) return toView(link, link.optedOutAt ?? now, clinic);
     await this.audit.record(
       patientOptOutAudit(tenantId, link.patientId, 'LINK', meta),
     );
@@ -190,14 +193,22 @@ export interface InboundReplyResult {
  */
 @Injectable()
 export class OptOutByMessageUseCase {
+  private readonly logger = new Logger('Reminders');
+  private readonly maxMatches: number;
   constructor(
     private readonly tenantContext: TenantContextService,
     @Inject(REMINDER_OPT_OUT_REPOSITORY)
     private readonly repo: ReminderOptOutRepository,
     private readonly audit: RecordAuditEventUseCase,
     private readonly clock: ReminderClock,
-  ) {}
-
+    private readonly config: ConfigService = new ConfigService(),
+  ) {
+    this.maxMatches = optOutPositiveInteger(
+      this.config,
+      'REMINDER_OPT_OUT_MESSAGE_MAX_MATCHES',
+      5,
+    );
+  }
   async execute(reply: InboundReply): Promise<InboundReplyResult> {
     if (!isOptOutMessage(reply.text)) return { isOptOut: false, optedOut: [] };
     const digits = reply.fromPhone.replace(/\D/g, '');
@@ -210,6 +221,16 @@ export class OptOutByMessageUseCase {
       const matches = candidates.filter(
         (c) => normalizeMobile(c.phone, country).e164 === from.e164,
       );
+      const limit = this.maxMatches;
+      if (matches.length > limit) {
+        this.logger.warn({
+          event: 'reminders.opt_out_match_limit',
+          tenantId: reply.tenantId,
+          matches: matches.length,
+          limit,
+        });
+        return { isOptOut: true, optedOut: [] };
+      }
       const now = this.clock.now();
       const optedOut: string[] = [];
       for (const { patientId } of matches) {

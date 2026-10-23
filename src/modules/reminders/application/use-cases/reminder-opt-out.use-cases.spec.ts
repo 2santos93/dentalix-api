@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { hashConfirmationToken } from '../../../appointment-confirmations/application/confirmation-token';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import { FakeReminderOptOutRepository } from '../__fixtures__/fake-reminder-opt-out.repository';
@@ -49,6 +50,7 @@ describe('Baja de recordatorios por enlace (DX-128)', () => {
     new GetPublicOptOutUseCase(
       fakeTenantContext(tenant ?? undefined) as never,
       repo,
+      clock,
     );
   const confirm = (tenant: string | null = TENANT) =>
     new ConfirmPublicOptOutUseCase(
@@ -100,11 +102,37 @@ describe('Baja de recordatorios por enlace (DX-128)', () => {
     });
   });
 
-  it('es idempotente: un segundo clic responde lo mismo y no audita otra vez', async () => {
+  it('un enlace usado devuelve el mismo404 en GET/POST sin otra auditoría', async () => {
     await confirm().execute(TOKEN, META);
-    const again = await confirm().execute(TOKEN, META);
-    expect(again).toMatchObject({ status: 'OPTED_OUT', optedOutAt: NOW });
+    await expect(get().execute(TOKEN)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(confirm().execute(TOKEN, META)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
     expect(audit.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('caduca exactamente a los60d y no cambia el paciente', async () => {
+    Object.assign(repo.links.get(hashConfirmationToken(TOKEN))!, {
+      expiresAt: NOW,
+    });
+    await expect(get().execute(TOKEN)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(confirm().execute(TOKEN, META)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(repo.patients.get(ANA)?.optedOutAt).toBeNull();
+  });
+
+  it('un enlace invalidado después de leerlo rechaza consumo sin inventar éxito', async () => {
+    jest.spyOn(repo, 'optOut').mockResolvedValue(null);
+    await expect(confirm().execute(TOKEN, META)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(repo.patients.get(ANA)?.optedOutAt).toBeNull();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('un paciente ya dado de baja (por otra vía) ve la baja con su fecha', async () => {
@@ -185,6 +213,61 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
         changedFields: ['reminderOptOutAt'],
       },
     });
+  });
+
+  it('seis coincidencias no dan de baja a ninguno y dejan aviso sin PII', async () => {
+    for (let i = 0; i < 4; i++)
+      repo.addPatient(`shared-${i}`, { phone: '+573101234567' });
+    const warning = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    try {
+      expect(
+        await useCase.execute({
+          tenantId: TENANT,
+          fromPhone: '573101234567',
+          text: 'BAJA',
+        }),
+      ).toEqual({ isOptOut: true, optedOut: [] });
+      expect(
+        [...repo.patients.values()].every((p) => p.optedOutAt === null),
+      ).toBe(true);
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledWith({
+        event: 'reminders.opt_out_match_limit',
+        tenantId: TENANT,
+        matches: 6,
+        limit: 5,
+      });
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it('el máximo es configurable y cuenta todas las coincidencias antes de escribir', async () => {
+    const limited = new OptOutByMessageUseCase(
+      fakeTenantContext(undefined) as never,
+      repo,
+      audit as never,
+      { now: () => NOW },
+      new ConfigService({ REMINDER_OPT_OUT_MESSAGE_MAX_MATCHES: '1' }),
+    );
+    const warning = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    try {
+      expect(
+        await limited.execute({
+          tenantId: TENANT,
+          fromPhone: '573101234567',
+          text: 'BAJA',
+        }),
+      ).toEqual({ isOptOut: true, optedOut: [] });
+      expect(repo.patients.get(ANA)?.optedOutAt).toBeNull();
+      expect(repo.patients.get(LUIS)?.optedOutAt).toBeNull();
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it('acepta el número con + y separadores', async () => {

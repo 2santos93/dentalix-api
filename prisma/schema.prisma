@@ -2988,8 +2988,8 @@ enum ReminderOptOutSource {
 }
 
 /// DX-128: enlace de baja de los recordatorios que viaja en cada email. El
-/// token en claro solo va en el email; aquí su SHA-256. No caduca: darse de
-/// baja tiene que funcionar siempre. `usedAt`: la primera vez que se usó.
+/// token en claro solo va en el email; aquí su SHA-256. DX-214: caduca a los
+///60d por defecto; usedAt registra consumo o invalidación al reactivar.
 model ReminderOptOutLink {
   id        String    @id @default(uuid()) @db.Uuid
   tenantId  String    @db.Uuid
@@ -2997,12 +2997,15 @@ model ReminderOptOutLink {
   tokenHash String    @unique
   createdAt DateTime  @default(now())
   usedAt    DateTime?
+  expiresAt DateTime @default(dbgenerated("(now() + '60 days'::interval)"))
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // FK COMPUESTA (SEC-004): el paciente tiene que ser del MISMO tenant.
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Cascade)
 
   @@index([tenantId, patientId])
+  @@index([tenantId, expiresAt])
+  @@index([tenantId, usedAt])
   @@map("reminder_opt_out_links")
 }
 

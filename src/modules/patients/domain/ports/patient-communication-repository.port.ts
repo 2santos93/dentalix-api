@@ -64,5 +64,6 @@ export interface PatientCommunicationRepository {
   update(
     patientId: string,
     patch: PatientCommunicationPatch,
+    invalidateOptOutLinksAt?: Date,
   ): Promise<PatientCommunicationState>;
 }

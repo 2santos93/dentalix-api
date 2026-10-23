@@ -114,6 +114,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
   update(
     patientId: string,
     patch: PatientCommunicationPatch,
+    invalidateOptOutLinksAt?: Date,
   ): Promise<PatientCommunicationState> {
     return this.prisma.runWithTenant(async (tx) => {
       const { count } = await tx.patient.updateMany({
@@ -121,6 +122,13 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
         data: patch,
       });
       if (count === 0) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+      // El UPDATE anterior bloquea paciente antes que enlaces, igual que emisión/consumo.
+      if (invalidateOptOutLinksAt) {
+        await tx.reminderOptOutLink.updateMany({
+          where: { patientId, usedAt: null },
+          data: { usedAt: invalidateOptOutLinksAt },
+        });
+      }
       const row = await tx.patient.findFirstOrThrow({
         where: { id: patientId },
         select: SELECT,

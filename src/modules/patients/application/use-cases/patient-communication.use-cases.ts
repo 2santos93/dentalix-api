@@ -232,17 +232,22 @@ export class UpdatePatientCommunicationUseCase {
       patch.reminderOptOutAt = now;
       patch.reminderOptOutSource = 'STAFF';
       changed.push('reminderOptOutAt');
-    } else if (input.reminderOptOut === false && state.reminderOptOutAt) {
+    } else if (input.reminderOptOut === false) {
       patch.reminderOptOutAt = null;
       patch.reminderOptOutSource = null;
-      changed.push('reminderOptOutAt');
+      if (state.reminderOptOutAt) changed.push('reminderOptOutAt');
     }
 
-    if (changed.length === 0) {
+    if (changed.length === 0 && input.reminderOptOut !== false) {
       return toView(state, country, clinicDefault, now);
     }
 
-    const saved = await this.repo.update(patientId, patch);
+    const saved = await this.repo.update(
+      patientId,
+      patch,
+      input.reminderOptOut === false ? now : undefined,
+    );
+    if (changed.length === 0) return toView(saved, country, clinicDefault, now);
     await this.audit.record({
       tenantId: ctx.tenantId,
       locationId: ctx.locationId,

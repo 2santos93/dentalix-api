@@ -334,9 +334,27 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
     });
 
+    it('reactivar invalida aunque lectura previa dijera activo, sin auditoría ficticia', async () => {
+      repo.add(ANA);
+      const write = jest.spyOn(repo, 'update');
+      await update.execute(ANA, { reminderOptOut: false }, ctx);
+      expect(write).toHaveBeenCalledWith(
+        ANA,
+        { reminderOptOutAt: null, reminderOptOutSource: null },
+        NOW,
+      );
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('reactivar los recordatorios borra la baja (queda auditado)', async () => {
       repo.add(ANA, { reminderOptOutAt: NOW, reminderOptOutSource: 'LINK' });
+      const write = jest.spyOn(repo, 'update');
       const view = await update.execute(ANA, { reminderOptOut: false }, ctx);
+      expect(write).toHaveBeenCalledWith(
+        ANA,
+        { reminderOptOutAt: null, reminderOptOutSource: null },
+        NOW,
+      );
       expect(view.reminderOptOut).toBeNull();
       expect(lastAudit().metadata.changedFields).toEqual(['reminderOptOutAt']);
     });
