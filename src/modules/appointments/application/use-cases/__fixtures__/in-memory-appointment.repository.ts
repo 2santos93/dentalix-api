@@ -1,7 +1,11 @@
 import { ConflictException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../../waitlist/domain/waitlist-rules';
-import { Appointment } from '../../../domain/entities/appointment.entity';
+import {
+  Appointment,
+  PlanItemReservedElsewhere,
+} from '../../../domain/entities/appointment.entity';
+import type { AuditRequestContext } from '../../../../audit/domain/audit-request-context';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
 import {
   PATIENT_FLOW_MESSAGES,
@@ -14,6 +18,7 @@ import {
   CreateAppointmentRepoInput,
   InClinicAppointment,
   ListInClinicParams,
+  PlanItemClaim,
   ListAppointmentsByRangeParams,
   ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
@@ -267,7 +272,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           key !== 'enqueueWaitlist' &&
           key !== 'resolveWaitlist' &&
           key !== 'requireWantsEarlier' &&
-          key !== 'expectStatus',
+          key !== 'expectStatus' &&
+          key !== 'completedExit',
       ),
     );
     Object.assign(row, definedPatch, {
@@ -287,8 +293,18 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
             patch.resolveWaitlist.resolvedById,
           )
         : null;
+    if (patch.completedExit) this.completedExits.push(patch.completedExit);
     return Promise.resolve({
       appointment: this.toEntity(row),
+      ...(patch.completedExit
+        ? {
+            completedExit: {
+              reversalId: `reversal-${this.completedExits.length}`,
+              reason: patch.completedExit.reason,
+              visitMinimums: [],
+            },
+          }
+        : {}),
       waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
       reopenedWaitlistEntryId:
         enqueued && enqueued.reopened ? enqueued.id : null,
@@ -328,5 +344,55 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         providerName: this.providerNames.get(r.providerId) ?? null,
       }));
     return Promise.resolve(items);
+  }
+
+  /** DX-273: lo que el repositorio recibió para sacar citas de COMPLETED. */
+  readonly completedExits: NonNullable<
+    UpdateAppointmentRepoInput['completedExit']
+  >[] = [];
+
+  /** DX-273: tratamientos reservados en otra cita, por cita (test helper). */
+  readonly reservedElsewhere = new Map<string, PlanItemReservedElsewhere[]>();
+
+  /** DX-273: las llamadas a «Traer a esta cita». */
+  readonly claims: {
+    appointmentId: string;
+    planItemId: string;
+    audit: AuditRequestContext;
+  }[] = [];
+
+  findPlanItemsReservedElsewhere(
+    appointmentIds: readonly string[],
+  ): Promise<Map<string, PlanItemReservedElsewhere[]>> {
+    return Promise.resolve(
+      new Map(
+        appointmentIds.flatMap((id) => {
+          const items = this.reservedElsewhere.get(id) ?? [];
+          return items.length ? [[id, items] as const] : [];
+        }),
+      ),
+    );
+  }
+
+  claimPlanItem(
+    appointmentId: string,
+    planItemId: string,
+    audit: AuditRequestContext,
+  ): Promise<PlanItemClaim> {
+    const row = this.rows.find(
+      (r) => r.id === appointmentId && r.deletedAt === null,
+    );
+    if (!row) return Promise.reject(new Error('not found'));
+    this.claims.push({ appointmentId, planItemId, audit });
+    const items = this.reservedElsewhere.get(appointmentId) ?? [];
+    const moved = items.find((i) => i.planItemId === planItemId);
+    this.reservedElsewhere.set(
+      appointmentId,
+      items.filter((i) => i.planItemId !== planItemId),
+    );
+    return Promise.resolve({
+      appointment: this.toEntity(row),
+      fromAppointmentId: moved?.appointmentId ?? null,
+    });
   }
 }

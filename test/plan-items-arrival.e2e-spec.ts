@@ -339,8 +339,10 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     // admite, pero retirar el vínculo mientras sigue COMPLETED lo frena el
     // trigger `dx271_completed_link_guard` (ERRCODE DX271 → 409).
     const start = new Date(Date.now() + 50 * DAY);
+    // DX-273: la salida de COMPLETED lleva motivo (ADMIN/DENTIST).
     const res = await call('patch', `/appointments/${done.id}`, {
       status: 'SCHEDULED',
+      statusReason: 'Reabrir para corregir sus tratamientos',
       start: start.toISOString(),
       end: new Date(start.getTime() + 30 * MIN).toISOString(),
       planItemIds: [],

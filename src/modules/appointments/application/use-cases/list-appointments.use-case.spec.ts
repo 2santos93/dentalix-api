@@ -44,6 +44,9 @@ function makeRepo(
 ): AppointmentRepository {
   return {
     resolveWriteLocationId: () => Promise.resolve('loc1'),
+    findPlanItemsReservedElsewhere: () => Promise.resolve(new Map()),
+    claimPlanItem: () =>
+      Promise.reject(new Error('not implemented in this fake')),
     create: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<Appointment | null> => Promise.resolve(null),

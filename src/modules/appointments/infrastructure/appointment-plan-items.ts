@@ -1,8 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
+import type { PlanItemReservedElsewhere } from '../domain/entities/appointment.entity';
+import { PATIENT_FLOW_MESSAGES } from '../domain/patient-flow';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import {
@@ -12,6 +17,8 @@ import {
 import {
   planItemsClosedMessage,
   planItemsEditable,
+  PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
+  PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
   PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
   reservedElsewhereMessage,
 } from '../domain/plan-item-reservation';
@@ -188,4 +195,232 @@ export async function planItemConflictMessage(
     holder.appointment.start,
     zoneOf(holder.appointment.locationId),
   );
+}
+
+/** Reserva viva (mismo predicado que `dx256_link_reservation`). */
+function liveReservingAppointment(now: Date): Prisma.AppointmentWhereInput {
+  return {
+    deletedAt: null,
+    OR: [
+      { status: { in: [...PRE_ARRIVAL_RESERVING] }, start: { gte: now } },
+      { status: { in: [...IN_CLINIC_RESERVING] } },
+    ],
+  };
+}
+
+/**
+ * DX-273 (revisión DX-271, I2): por cita, sus tratamientos con vínculo vivo
+ * pero sin reserva (`active` false) que reserva OTRA cita viva. Solo citas de
+ * sedes permitidas (DX-089): las demás se omiten sin dejar rastro.
+ */
+export async function findPlanItemsReservedElsewhere(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  appointmentIds: readonly string[],
+  allowedLocations: AllowedLocations,
+): Promise<Map<string, PlanItemReservedElsewhere[]>> {
+  const out = new Map<string, PlanItemReservedElsewhere[]>();
+  if (appointmentIds.length === 0) return out;
+  const own = await tx.appointmentPlanItem.findMany({
+    where: {
+      appointmentId: { in: [...appointmentIds] },
+      deletedAt: null,
+      active: false,
+      appointment: { deletedAt: null },
+    },
+    select: { appointmentId: true, planItemId: true },
+  });
+  if (own.length === 0) return out;
+  const holders = await tx.appointmentPlanItem.findMany({
+    where: {
+      planItemId: { in: [...new Set(own.map((l) => l.planItemId))] },
+      active: true,
+      deletedAt: null,
+      appointment: {
+        ...liveReservingAppointment(new Date()),
+        ...(allowedLocations === 'ALL'
+          ? {}
+          : { locationId: { in: [...allowedLocations] } }),
+      },
+    },
+    select: {
+      planItemId: true,
+      appointmentId: true,
+      appointment: {
+        select: {
+          start: true,
+          locationId: true,
+          location: { select: { name: true } },
+        },
+      },
+      planItem: { select: { toothNumber: true, catalogItemId: true } },
+    },
+  });
+  if (holders.length === 0) return out;
+  const [catalog, zoneOf] = await Promise.all([
+    tx.dentalCatalogItem.findMany({
+      where: {
+        id: { in: [...new Set(holders.map((h) => h.planItem.catalogItemId))] },
+      },
+      select: { id: true, labelEs: true },
+    }),
+    resolveLocationTimeZones(tx, tenantId, [
+      ...new Set(holders.map((h) => h.appointment.locationId)),
+    ]),
+  ]);
+  const labels = new Map(catalog.map((c) => [c.id, c.labelEs]));
+  const byItem = new Map(holders.map((h) => [h.planItemId, h]));
+  for (const link of own) {
+    const holder = byItem.get(link.planItemId);
+    if (!holder || holder.appointmentId === link.appointmentId) continue;
+    const list = out.get(link.appointmentId) ?? [];
+    list.push({
+      planItemId: link.planItemId,
+      name: labels.get(holder.planItem.catalogItemId) ?? 'Tratamiento',
+      toothNumber: holder.planItem.toothNumber,
+      appointmentId: holder.appointmentId,
+      start: holder.appointment.start,
+      locationId: holder.appointment.locationId,
+      locationName: holder.appointment.location.name,
+      timeZone: zoneOf(holder.appointment.locationId),
+    });
+    out.set(link.appointmentId, list);
+  }
+  for (const list of out.values())
+    list.sort(
+      (a, b) =>
+        a.start.getTime() - b.start.getTime() ||
+        a.planItemId.localeCompare(b.planItemId),
+    );
+  return out;
+}
+
+/** La cita que pide el tratamiento y la que lo tiene, bloqueadas. */
+interface LockedClaimAppointment {
+  id: string;
+  status: AppointmentStatus;
+  locationId: string;
+  patientId: string;
+}
+
+export interface ClaimPlanItemInput {
+  tenantId: string;
+  appointmentId: string;
+  planItemId: string;
+  allowedLocations: AllowedLocations;
+  audit: AuditRequestContext;
+}
+
+/**
+ * DX-273 «Traer a esta cita», dentro de `tx`: la cita (con el paciente en la
+ * clínica) pasa a reservar `planItemId`, que ya es suyo (vínculo vivo pero
+ * sin reserva); la cita que lo reservaba retira su vínculo. Las dos filas de
+ * `appointments` se bloquean en orden de id (sin interbloqueos entre dos
+ * «Traer» cruzados) y todo se revalida con ellas bloqueadas. Un
+ * `audit_event` APPOINTMENT_PLAN_ITEMS en cada cita, en la misma transacción.
+ * Si ya lo reserva, no cambia nada. Devuelve la cita de la que vino (o null).
+ */
+export async function claimPlanItemInTx(
+  tx: Prisma.TransactionClient,
+  input: ClaimPlanItemInput,
+): Promise<{ fromAppointmentId: string | null }> {
+  const { tenantId, appointmentId, planItemId } = input;
+  const holderOf = () =>
+    tx.appointmentPlanItem.findFirst({
+      where: {
+        planItemId,
+        active: true,
+        deletedAt: null,
+        appointmentId: { not: appointmentId },
+        appointment: liveReservingAppointment(new Date()),
+      },
+      select: { appointmentId: true },
+    });
+  const seen = await holderOf();
+  const ids = [appointmentId, ...(seen ? [seen.appointmentId] : [])].sort();
+  const locked = await tx.$queryRaw<LockedClaimAppointment[]>`
+    SELECT id, status, "locationId", "patientId" FROM appointments
+     WHERE "tenantId"=${tenantId}::uuid AND "deletedAt" IS NULL
+       AND id = ANY(${ids}::uuid[])
+     ORDER BY id
+       FOR UPDATE`;
+  const target = locked.find((a) => a.id === appointmentId);
+  if (!target) throw new NotFoundException('Cita no encontrada');
+  if (
+    !(IN_CLINIC_RESERVING as readonly AppointmentStatus[]).includes(
+      target.status,
+    )
+  )
+    throw new ConflictException(PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE);
+  const own = await tx.appointmentPlanItem.findFirst({
+    where: { appointmentId, planItemId, deletedAt: null },
+    select: { active: true },
+  });
+  if (!own) throw new NotFoundException(PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE);
+  if (own.active) return { fromAppointmentId: null };
+
+  const holder = await holderOf();
+  if ((holder?.appointmentId ?? null) !== (seen?.appointmentId ?? null))
+    throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+  const from = holder
+    ? locked.find((a) => a.id === holder.appointmentId)!
+    : null;
+  if (from && !isLocationAllowed(input.allowedLocations, from.locationId))
+    throw new ForbiddenException(PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE);
+
+  if (from)
+    await tx.appointmentPlanItem.update({
+      where: {
+        tenantId_appointmentId_planItemId: {
+          tenantId,
+          appointmentId: from.id,
+          planItemId,
+        },
+      },
+      data: { deletedAt: new Date() },
+    });
+  // Reescribir el vínculo hace que `dx256_link_reservation` recalcule
+  // `active` con el estado real de la cita (en la clínica → reserva).
+  const claimed = await tx.appointmentPlanItem.update({
+    where: {
+      tenantId_appointmentId_planItemId: {
+        tenantId,
+        appointmentId,
+        planItemId,
+      },
+    },
+    data: { deletedAt: null },
+    select: { active: true },
+  });
+  if (!claimed.active) throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+
+  const params = {
+    planItemId,
+    ...(from ? { fromAppointmentId: from.id } : {}),
+    toAppointmentId: appointmentId,
+  };
+  for (const appointment of from ? [target, from] : [target]) {
+    await writeAuditEvent(tx, {
+      tenantId,
+      locationId: input.audit.locationId,
+      actor: {
+        kind: 'user',
+        userId: input.audit.actor.userId,
+        role: input.audit.actor.role,
+      },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: input.audit.requestId,
+      ip: input.audit.ip,
+      userAgent: input.audit.userAgent,
+      metadata: {
+        reason: 'APPOINTMENT_PLAN_ITEMS',
+        changedFields: ['planItemIds'],
+        params,
+      },
+    });
+  }
+  return { fromAppointmentId: from?.id ?? null };
 }

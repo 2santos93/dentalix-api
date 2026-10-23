@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, Matches } from 'class-validator';
 import { IN_CLINIC_STATUSES } from '../../domain/patient-flow';
 import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
+import { PlanItemReservedElsewhereDto } from './appointment.dto';
 
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -74,6 +75,13 @@ export class InClinicItemDto {
       'Puntualidad de la llegada: ON_TIME (verde) a la hora o antes; LATE (naranja) hasta 5 min tarde; VERY_LATE (rojo) después.',
   })
   punctuality!: 'ON_TIME' | 'LATE' | 'VERY_LATE';
+
+  @ApiProperty({
+    type: [PlanItemReservedElsewhereDto],
+    description:
+      'DX-273: tratamientos de la cita reservados en OTRA cita viva (solo sedes permitidas al usuario). Vacío si no hay.',
+  })
+  planItemsReservedElsewhere!: PlanItemReservedElsewhereDto[];
 
   @ApiProperty({
     type: MedicalAlertFlagsDto,

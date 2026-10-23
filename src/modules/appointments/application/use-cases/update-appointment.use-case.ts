@@ -17,6 +17,7 @@ import type {
 import {
   Appointment,
   AppointmentWriteResult,
+  PlanItemReservedElsewhere,
 } from '../../domain/entities/appointment.entity';
 import { checkScheduleBlocks } from '../schedule-block-check';
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
@@ -57,9 +58,13 @@ import {
   FRONT_DESK_ROLES,
   PATIENT_FLOW_MESSAGES,
   checkStatusTransition,
+  isCompletedExit,
   isInClinic,
+  normalizeStatusReason,
 } from '../../domain/patient-flow';
 import {
+  PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
+  PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
   planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
@@ -79,7 +84,26 @@ export type UpdateAppointmentInput = Omit<
   | 'readyForCheckoutAt'
   | 'preArrivalStatus'
   | 'expectStatus'
->;
+  | 'completedExit'
+> & {
+  /**
+   * DX-273: motivo para sacar la cita de COMPLETED (obligatorio entonces,
+   * 3–500 caracteres tras recortar). En cualquier otro cambio se ignora.
+   */
+  statusReason?: string | null;
+};
+
+/** DX-273 «Traer a esta cita»: mensajes en español. */
+export const PLAN_ITEM_CLAIM_MESSAGES = {
+  notInClinic: PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
+  notLinked: PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
+} as const;
+
+/** Estados en los que la cita ya no reserva nada: sin aviso (DX-273). */
+const NOT_RESERVING: ReadonlySet<AppointmentStatus> = new Set([
+  AppointmentStatus.CANCELLED,
+  AppointmentStatus.NO_SHOW,
+]);
 
 /** DX-210: el hueco libre al que se adelanta una cita marcada. */
 export interface MoveToOpeningInput {
@@ -174,10 +198,11 @@ export class UpdateAppointmentUseCase {
 
   private async apply(
     id: string,
-    patch: UpdateAppointmentInput,
+    input: UpdateAppointmentInput,
     auditContext: AppointmentAuditContext | undefined,
     fromOpening: boolean,
   ): Promise<AppointmentWriteResult> {
+    const { statusReason, ...patch } = input;
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as the Patient use cases: a missing row and a row
@@ -232,8 +257,17 @@ export class UpdateAppointmentUseCase {
       (isInClinic(existing.status) || isInClinic(nextStatus));
     const flowPatch =
       nextStatus !== null
-        ? await this.checkFlow(existing, nextStatus, auditContext)
+        ? await this.checkFlow(existing, nextStatus, auditContext, statusReason)
         : {};
+    // DX-273: la salida de COMPLETED ya pasó rol y motivo; el repositorio
+    // guarda el motivo, recalcula el mínimo de la visita siguiente y la
+    // audita en la misma transacción.
+    const completedExit =
+      nextStatus !== null &&
+      isCompletedExit(existing.status, nextStatus) &&
+      auditContext
+        ? { reason: normalizeStatusReason(statusReason)!, audit: auditContext }
+        : undefined;
 
     // Reagendar = cambiar la hora O el profesional (DX-121: «Mover a…» y el
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
@@ -376,6 +410,7 @@ export class UpdateAppointmentUseCase {
         : {}),
       ...(isReschedule ? { revokeConfirmations: true } : {}),
       ...(fromOpening ? { requireWantsEarlier: true } : {}),
+      ...(completedExit ? { completedExit } : {}),
       ...(enqueuesWaitlist
         ? {
             enqueueWaitlist: {
@@ -396,12 +431,14 @@ export class UpdateAppointmentUseCase {
     let waitlistEntryId: string | null;
     let reopenedWaitlistEntryId: string | null;
     let resolvedWaitlistEntryId: string | null;
+    let exitResult: AppointmentWriteResult['completedExit'];
     try {
       ({
         appointment: updated,
         waitlistEntryId,
         reopenedWaitlistEntryId,
         resolvedWaitlistEntryId,
+        completedExit: exitResult,
       } = await this.repo.update(id, effectivePatch));
     } catch (error) {
       const scope = overlapExclusionScope(error);
@@ -447,7 +484,51 @@ export class UpdateAppointmentUseCase {
         'APPOINTMENT_REACTIVATED',
       );
     }
-    return { ...updated, ...warnings };
+    return {
+      ...updated,
+      ...warnings,
+      planItemsReservedElsewhere: await this.reservedElsewhere(updated),
+      ...(exitResult ? { completedExit: exitResult } : {}),
+    };
+  }
+
+  /**
+   * DX-273 «Traer a esta cita»: con el paciente en la clínica, la cita pasa
+   * a reservar un tratamiento suyo que reservaba otra cita (que deja de
+   * hacerlo). Transacción y auditoría en las dos citas, en el repositorio.
+   */
+  async claimPlanItem(
+    id: string,
+    planItemId: string,
+    auditContext: AppointmentAuditContext,
+  ): Promise<AppointmentWriteResult> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new NotFoundException('Cita no encontrada');
+    this.tenantContext.assertLocationAllowed(existing.locationId);
+    if (!isInClinic(existing.status)) {
+      throw new ConflictException(PLAN_ITEM_CLAIM_MESSAGES.notInClinic);
+    }
+    const { appointment } = await this.repo.claimPlanItem(
+      id,
+      planItemId,
+      auditContext,
+    );
+    return {
+      ...appointment,
+      ...NO_WARNINGS,
+      planItemsReservedElsewhere: await this.reservedElsewhere(appointment),
+    };
+  }
+
+  /** DX-273: el aviso de la cita, salvo si ya no reserva nada. */
+  private async reservedElsewhere(
+    appointment: Appointment,
+  ): Promise<PlanItemReservedElsewhere[]> {
+    if (NOT_RESERVING.has(appointment.status)) return [];
+    const byAppointment = await this.repo.findPlanItemsReservedElsewhere([
+      appointment.id,
+    ]);
+    return byAppointment.get(appointment.id) ?? [];
   }
 
   /**
@@ -478,7 +559,11 @@ export class UpdateAppointmentUseCase {
       'ARRIVAL_UNDONE',
       auditContext,
     );
-    return { ...updated, ...NO_WARNINGS };
+    return {
+      ...updated,
+      ...NO_WARNINGS,
+      planItemsReservedElsewhere: await this.reservedElsewhere(updated),
+    };
   }
 
   /**
@@ -490,6 +575,7 @@ export class UpdateAppointmentUseCase {
     existing: Appointment,
     to: AppointmentStatus,
     auditContext: AppointmentAuditContext | undefined,
+    statusReason?: string | null,
   ): Promise<Partial<UpdateAppointmentRepoInput>> {
     const from = existing.status;
     const isToday =
@@ -500,11 +586,14 @@ export class UpdateAppointmentUseCase {
       role: auditContext?.actor.role ?? null,
       isToday,
       arrived: existing.arrivedAt !== null,
+      statusReason,
     });
     if (!verdict.ok) {
-      throw verdict.kind === 'FORBIDDEN'
-        ? new ForbiddenException(verdict.message)
-        : new ConflictException(verdict.message);
+      if (verdict.kind === 'FORBIDDEN')
+        throw new ForbiddenException(verdict.message);
+      if (verdict.kind === 'BAD_REQUEST')
+        throw new BadRequestException(verdict.message);
+      throw new ConflictException(verdict.message);
     }
     if (!isInClinic(from) && !isInClinic(to)) {
       // Vuelve a estar pendiente (p. ej. se reactiva una cita que se canceló

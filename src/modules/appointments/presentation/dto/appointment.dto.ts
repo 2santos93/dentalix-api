@@ -1,4 +1,4 @@
-import { ApiProperty, OmitType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { AppointmentStatus } from '@prisma/client';
 import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 import { CoverageSummaryDto } from '../../../patient-coverages/presentation/dto/coverage-summary.dto';
@@ -134,6 +134,93 @@ export class AppointmentDto {
  * impiden la operación, en español (p. ej. «La cita cae en un bloqueo que
  * permite agendar: Almuerzo (13:00–14:00).»). Vacío si no hay ninguno.
  */
+/**
+ * DX-273 (revisión DX-271, I2): un tratamiento de la cita que sigue reservado
+ * en OTRA cita viva (la reserva se quedó allí al marcar «Llegó»).
+ */
+export class PlanItemReservedElsewhereDto {
+  @ApiProperty({ format: 'uuid' })
+  planItemId!: string;
+
+  @ApiProperty({
+    description: 'Nombre del procedimiento (catálogo, en español).',
+    example: 'Implante',
+  })
+  name!: string;
+
+  @ApiProperty({ example: '36' })
+  toothNumber!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'La cita que lo reserva.' })
+  appointmentId!: string;
+
+  @ApiProperty({ format: 'date-time', description: 'Inicio de esa cita.' })
+  start!: Date;
+
+  @ApiProperty({ format: 'uuid' })
+  locationId!: string;
+
+  @ApiProperty({ description: 'Sede de esa cita.', example: 'Sede Norte' })
+  locationName!: string;
+
+  @ApiProperty({
+    description: 'Zona IANA de esa sede: la fecha se muestra en ella.',
+    example: 'America/Bogota',
+  })
+  timeZone!: string;
+}
+
+/** DX-273: el mínimo de una visita del plan antes y después de la salida. */
+export class VisitMinimumChangeDto {
+  @ApiProperty({ format: 'uuid' })
+  planId!: string;
+
+  @ApiProperty({ description: 'Visita siguiente (2 si la cita era de la 1).' })
+  visit!: number;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '2027-01-20',
+    description:
+      'Mínimo (día civil en la zona de la sede del plan) antes de sacar la cita de COMPLETED. null = sin mínimo clínico.',
+  })
+  minimumDayBefore!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: null,
+    description:
+      'Mínimo recalculado: la última cita de la visita anterior que SIGUE completada más el intervalo. null = ninguna sigue completada (o intervalo 0): se puede agendar desde hoy.',
+  })
+  minimumDayAfter!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'La cita completada que fija ahora el mínimo, o null.',
+  })
+  anchorAppointmentIdAfter!: string | null;
+}
+
+/** DX-273: resultado de sacar una cita de COMPLETED. */
+export class CompletedExitDto {
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Fila de `appointment_status_reversals` con el motivo; el `audit_event` COMPLETED_EXIT la enlaza en `params.reversalId`.',
+  })
+  reversalId!: string;
+
+  @ApiProperty({ description: 'El motivo, recortado.' })
+  reason!: string;
+
+  @ApiProperty({ type: [VisitMinimumChangeDto] })
+  visitMinimums!: VisitMinimumChangeDto[];
+}
+
 export class AppointmentWriteDto extends AppointmentDto {
   @ApiProperty({
     type: [String],
@@ -150,6 +237,20 @@ export class AppointmentWriteDto extends AppointmentDto {
       'DX-233: código de cada aviso, en el mismo orden que `warnings`: SCHEDULE_BLOCK (bloqueo que deja agendar, DX-122) o PROVIDER_OFF_SCHEDULE (fuera del horario del profesional en la sede).',
   })
   warningCodes!: AppointmentWarningCode[];
+
+  @ApiProperty({
+    type: [PlanItemReservedElsewhereDto],
+    description:
+      'DX-273: tratamientos de esta cita que siguen reservados en OTRA cita viva (p. ej. al marcar «Llegó», la reserva se quedó en la cita futura). Solo citas de sedes permitidas al usuario (DX-089): las de otras sedes se omiten. Vacío en una cita cancelada o no-show. Para moverla: `POST /appointments/:id/plan-items/:planItemId/claim`.',
+  })
+  planItemsReservedElsewhere!: PlanItemReservedElsewhereDto[];
+
+  @ApiPropertyOptional({
+    type: CompletedExitDto,
+    description:
+      'DX-273: solo al sacar la cita de COMPLETED. El motivo y cómo queda el mínimo de la visita siguiente de cada plan afectado.',
+  })
+  completedExit?: CompletedExitDto;
 }
 
 /**

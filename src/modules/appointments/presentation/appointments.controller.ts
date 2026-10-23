@@ -360,11 +360,18 @@ export class AppointmentsController {
     patient: { response: 'patientId' },
   })
   @Patch(':id')
-  @ApiOkResponse({ type: AppointmentWriteDto })
-  @ApiBadRequestResponse({ description: 'Datos inválidos o al pasado' })
+  @ApiOkResponse({
+    type: AppointmentWriteDto,
+    description:
+      'La cita, los avisos y `planItemsReservedElsewhere` (DX-273: tratamientos de la cita que reserva otra cita, p. ej. tras «Llegó»). Al sacarla de COMPLETED, además `completedExit`.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Datos inválidos o al pasado, o salida de COMPLETED sin `statusReason` válido (DX-273)',
+  })
   @ApiForbiddenResponse({
     description:
-      'Rol sin permiso de agenda, o sin permiso para ese paso del flujo en la clínica (DX-200)',
+      'Rol sin permiso de agenda, sin permiso para ese paso del flujo en la clínica (DX-200), o RECEPTION/ASSISTANT sacando una cita de COMPLETED (DX-273)',
   })
   @ApiNotFoundResponse({
     description: 'Cita o profesional no encontrados en esta clínica',
@@ -393,11 +400,42 @@ export class AppointmentsController {
         notes: dto.notes,
         wantsEarlier: dto.wantsEarlier,
         planItemIds: dto.planItemIds,
+        statusReason: dto.statusReason,
       },
       ctx,
     );
     await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
     return updated;
+  }
+
+  @Post(':id/plan-items/:planItemId/claim')
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    type: AppointmentWriteDto,
+    description:
+      'DX-273 «Traer a esta cita»: con el paciente en la clínica (ARRIVED, IN_CHAIR o READY_FOR_CHECKOUT), la cita pasa a reservar un tratamiento suyo que reservaba otra cita viva; esa otra cita lo deja (su vínculo se retira). Una transacción, con las dos citas bloqueadas, y un `audit_event` APPOINTMENT_PLAN_ITEMS en cada una (`params`: planItemId, fromAppointmentId, toAppointmentId). Si ninguna otra cita lo reserva, solo recupera la reserva; si ya la tiene, no cambia nada.',
+  })
+  @ApiBadRequestResponse({ description: 'Ids que no son UUID' })
+  @ApiForbiddenResponse({
+    description:
+      'Sede de la cita no permitida, o la cita que lo reserva es de una sede no permitida al usuario (DX-089; no se dice cuál)',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'La cita no existe en esta clínica, o el tratamiento no está en ella',
+  })
+  @ApiConflictResponse({
+    description:
+      'La cita no tiene al paciente en la clínica, otra cita lo tomó a la vez (dice cuál), o la cita cambió mientras tanto',
+  })
+  claimPlanItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('planItemId', ParseUUIDPipe) planItemId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<AppointmentWriteResult> {
+    const ctx = this.auditContext(req);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateAppointment.claimPlanItem(id, planItemId, ctx);
   }
 
   @Post(':id/undo-arrival')
