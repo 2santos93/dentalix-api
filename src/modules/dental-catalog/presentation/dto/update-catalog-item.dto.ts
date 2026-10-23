@@ -83,6 +83,13 @@ export class UpdateCatalogItemDto {
   @IsString()
   cupsCode?: string | null;
 
+  @ApiPropertyOptional({
+    description: 'DX-105: false = la prestación no admite descuentos.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowDiscount?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

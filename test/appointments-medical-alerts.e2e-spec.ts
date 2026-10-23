@@ -134,6 +134,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
         start: `${futureDay}T${String(hour).padStart(2, '0')}:00:00.000Z`,
         end: `${futureDay}T${String(hour).padStart(2, '0')}:15:00.000Z`,
         reason: 'Control',
+        notes: 'Nota privada de cita DX264',
       })
       .expect(201);
     appts[key] = (res.body as { id: string }).id;
@@ -281,6 +282,28 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     const json = JSON.stringify(res.body);
     for (const text of CLINICAL_TEXT) expect(json).not.toContain(text);
     for (const key of CLINICAL_KEYS) expect(json).not.toContain(`"${key}"`);
+  });
+
+  it('DX-264: ningún rol recibe notes en el listado y todos conservan las notas del detalle', async () => {
+    const assistant = await loginAs(
+      app,
+      clinic.host,
+      (await seedMember(raw, clinic, ClinicRole.ASSISTANT)).email,
+    );
+    for (const token of [clinic.adminToken, reception, dentist, assistant]) {
+      const listed = await listDay(token, mainId);
+      for (const item of listed.body as ListItem[]) {
+        expect(item).not.toHaveProperty('notes');
+      }
+      expect(JSON.stringify(listed.body)).not.toContain(
+        'Nota privada de cita DX264',
+      );
+      const detail = await as(
+        api().get(`/api/v1/appointments/${appts.premed}`),
+        token,
+      ).expect(200);
+      expect(detail.body).toHaveProperty('notes', 'Nota privada de cita DX264');
+    }
   });
 
   it('premedicación, anamnesis caducada, «Sin anamnesis» y paciente limpio', async () => {

@@ -18,6 +18,7 @@ import {
   buildQuoteContent,
   computeAcceptanceHash,
   computeQuoteHash,
+  parseQuoteContent,
 } from '../../domain/plan-quote';
 
 // PNG real de 1x1 (firma + IHDR).
@@ -43,6 +44,30 @@ function setup() {
 }
 
 describe('GetPlanQuoteUseCase (DX-012)', () => {
+  it('entrega organización separada del contenido sellado (DX-256)', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    const source = quoteSource();
+    Object.assign(source, {
+      visitOrganization: [
+        {
+          itemId: 'item-1',
+          visit: 2,
+          label: 'Corona',
+          minDaysAfterPrevious: 90,
+        },
+        { itemId: 'item-2', visit: 1, label: null, minDaysAfterPrevious: 0 },
+      ],
+    });
+    repo.add(source);
+    const get = new GetPlanQuoteUseCase(repo, () => NOW);
+    const doc = await get.execute('patient-1', 'plan-1');
+    expect(doc).toHaveProperty('visitOrganization', [
+      { itemId: 'item-1', visit: 2, label: 'Corona', minDaysAfterPrevious: 90 },
+      { itemId: 'item-2', visit: 1, label: null, minDaysAfterPrevious: 0 },
+    ]);
+    expect(doc.contentHash).toBe(computeQuoteHash(doc));
+  });
+
   it('compone el presupuesto con la fecha de hoy en la zona de la sede y su hash', async () => {
     const { get } = setup();
     // 23:30 del 15 en Bogotá = 04:30 UTC del 16: el presupuesto es del 15.
@@ -62,7 +87,13 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(doc.professionalName).toBe('Dra. Gómez');
     expect(doc.planStatus).toBe(TreatmentPlanStatus.DRAFT);
     expect(doc.totals).toEqual([
-      { currency: 'COP', gross: 3680000, discount: 350000, net: 3330000 },
+      {
+        currency: 'COP',
+        gross: 3680000,
+        discount: 350000,
+        net: 3330000,
+        agreementSaving: 0,
+      },
     ]);
     expect(doc.contentHash).toBe(
       computeQuoteHash(
@@ -86,6 +117,8 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       ),
     );
     expect(doc.acceptance).toBeNull();
+    expect(doc.version).toBe(2);
+    expect(doc.agreement).toBeNull();
 
     expect((await late.execute('patient-1', 'plan-1')).issuedOn).toBe(
       '2026-10-15',
@@ -161,6 +194,116 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       }),
       integrityOk: true,
     });
+  });
+
+  it('con convenio: muestra convenio, precio de lista y ahorro, y la firma v2 sigue íntegra', async () => {
+    const { repo, get, accept } = setup();
+    const base = quoteSource();
+    repo.add(
+      quoteSource({
+        items: [
+          {
+            ...base.items[0],
+            price: 850,
+            discount: 0,
+            basePrice: 1000,
+            referencePrice: 850,
+            agreementName: 'Sura EPS −15 %',
+            agreementPayerName: 'Sura EPS',
+          },
+        ],
+      }),
+    );
+    const shown = await get.execute('patient-1', 'plan-1');
+    expect(shown.version).toBe(2);
+    expect(shown.agreement).toEqual({
+      name: 'Sura EPS −15 %',
+      payerName: 'Sura EPS',
+    });
+    expect(shown.items[0].listPrice).toBe(1000);
+    expect(shown.totals[0].agreementSaving).toBe(150);
+
+    const signed = await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    expect(signed.version).toBe(2);
+    expect(signed.acceptance?.integrityOk).toBe(true);
+    expect(signed.agreement?.name).toBe('Sura EPS −15 %');
+    expect(
+      (repo.sources.get('plan-1')!.acceptance!.content as { version: number })
+        .version,
+    ).toBe(2);
+  });
+
+  it('una aceptación v1 ya guardada sigue íntegra y se muestra sin convenio', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    const v1 = {
+      version: 1,
+      planId: 'plan-1',
+      patientId: 'patient-1',
+      currency: 'COP',
+      clinicName: 'Clínica Sonrisa',
+      location: { id: 'loc-1', name: 'Sede principal', address: 'Calle 1' },
+      patient: { name: 'Ana Pérez', document: 'CC 123' },
+      professionalName: 'Dra. Gómez',
+      issuedOn: '2026-10-01',
+      validUntil: '2026-10-31',
+      validityDays: 30,
+      items: [
+        {
+          id: 'item-1',
+          toothNumber: '36',
+          surfaces: [],
+          procedure: 'Implante',
+          quantity: 1,
+          unitPrice: 1000,
+          discount: 0,
+          subtotal: 1000,
+        },
+      ],
+      totals: [{ currency: 'COP', gross: 1000, discount: 0, net: 1000 }],
+    };
+    const contentHash = computeQuoteHash(parseQuoteContent(v1));
+    const acceptedAt = new Date('2026-10-02T15:00:00.000Z');
+    repo.add(
+      quoteSource({
+        plan: {
+          id: 'plan-1',
+          patientId: 'patient-1',
+          status: TreatmentPlanStatus.ACCEPTED,
+          currency: 'COP',
+        },
+        acceptance: {
+          content: v1,
+          contentHash,
+          signerName: 'Ana Pérez',
+          signature: PNG,
+          acceptedAt,
+          acceptedByName: 'Dra. Gómez',
+          acceptanceHash: computeAcceptanceHash({
+            contentHash,
+            signerName: 'Ana Pérez',
+            signature: PNG,
+            acceptedAt,
+          }),
+        },
+      }),
+    );
+    const doc = await new GetPlanQuoteUseCase(repo, () => NOW).execute(
+      'patient-1',
+      'plan-1',
+    );
+    expect(doc.version).toBe(1);
+    expect(doc.agreement).toBeNull();
+    expect(doc.contentHash).toBe(contentHash);
+    expect(doc.acceptance?.integrityOk).toBe(true);
   });
 
   it('marca integrityOk=false si la foto o la firma se alteraron por fuera', async () => {

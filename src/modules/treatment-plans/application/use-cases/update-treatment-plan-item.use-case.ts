@@ -22,6 +22,7 @@ import {
   assertPlanOpenForItems,
 } from './signed-plan-lock';
 import {
+  assertDiscountAllowed,
   assertDiscountWithinPrice,
   assertPlanDiscountable,
   decideDiscountChange,
@@ -29,6 +30,7 @@ import {
   type DiscountActor,
 } from './item-discount';
 import { isClosedPlanItemChangeAllowed } from '../../domain/plan-status-machine';
+import { effectiveDiscountRises } from '../../../discounts/domain/effective-discount';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 
@@ -99,6 +101,12 @@ export class UpdateTreatmentPlanItemUseCase {
       patch.status === TreatmentPlanItemStatus.DONE
         ? await this.catalogKind(existing.catalogItemId)
         : undefined;
+    // DX-105: ¿la prestación admite descuentos? Solo importa si el precio o el
+    // descuento pueden cambiar (el ítem de catálogo del ítem no cambia).
+    const allowDiscount =
+      patch.price !== undefined || patch.discount !== undefined
+        ? await this.allowsDiscount(existing.catalogItemId)
+        : true;
     const at = this.now();
 
     // BE-036: el estado del plan y del ítem se comprueban con sus filas
@@ -139,6 +147,11 @@ export class UpdateTreatmentPlanItemUseCase {
         discount: item.discount,
       };
       const after = { ...before, price, discount };
+      // DX-105: sin descuentos, no se da uno nuevo ni se sube el que hubiera
+      // (bajar o quitar uno anterior a la marca sí se puede).
+      if (effectiveDiscountRises(before, after)) {
+        assertDiscountAllowed(allowDiscount, after);
+      }
       const changes = discountFieldChanges(item, patch);
       if (policy && touchesDiscount(before, after, changes)) {
         assertPlanDiscountable(plan);
@@ -177,6 +190,12 @@ export class UpdateTreatmentPlanItemUseCase {
           : undefined;
       return { patch: repoPatch, mirror };
     });
+  }
+
+  /** DX-105: `allowDiscount` del procedimiento (false si no se encuentra: cierra por defecto, como el descuento en bloque). */
+  private async allowsDiscount(catalogItemId: string): Promise<boolean> {
+    const catalogItem = await this.catalog.findById(catalogItemId);
+    return catalogItem?.allowDiscount ?? false;
   }
 
   /**

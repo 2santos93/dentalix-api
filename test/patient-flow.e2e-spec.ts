@@ -246,7 +246,21 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       select: { metadata: true, actorRole: true },
     });
     expect(
-      events.map((e) => ({
+      events.filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason ===
+          'APPOINTMENT_PLAN_ITEMS',
+      ),
+    ).toHaveLength(0);
+    // Una traza HTTP por escritura sigue existiendo, separada del dominio.
+    expect(
+      events.filter((e) => !(e.metadata as { reason?: string }).reason),
+    ).toHaveLength(5);
+    const flowEvents = events.filter(
+      (e) => (e.metadata as { reason?: string }).reason === 'PATIENT_FLOW',
+    );
+    expect(
+      flowEvents.map((e) => ({
         role: e.actorRole,
         status: (e.metadata as { status?: unknown }).status,
       })),
@@ -264,7 +278,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
         },
       ]),
     );
-    expect(events).toHaveLength(4);
+    expect(flowEvents).toHaveLength(4);
   });
 
   it('sin saltos: de agendada a «En sillón» es 409; la llegada de otro día también', async () => {

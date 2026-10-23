@@ -3,6 +3,7 @@ import type {
   OutboundChannel,
   OutboundMessageStatus,
   OutboundRecipientKind,
+  Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { describeJobError } from '../../../jobs/domain/backoff';
@@ -18,6 +19,12 @@ export interface RecordOutboundMessage {
   recipientKind?: OutboundRecipientKind;
   appointmentId?: string;
 }
+
+/** Asociación de negocio confirmada en la misma transacción que el mensaje. */
+export type AttachOutboundMessage = (
+  id: string,
+  tx: Prisma.TransactionClient,
+) => Promise<void>;
 
 export type OutboundOutcome =
   | { status: 'QUEUED' | 'SENT' | 'CANCELLED' }
@@ -38,10 +45,13 @@ export class OutboundMessages {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(input: RecordOutboundMessage): Promise<{ id: string }> {
+  async record(
+    input: RecordOutboundMessage,
+    attach?: AttachOutboundMessage,
+  ): Promise<{ id: string }> {
     const recipientMasked = maskRecipient(input.channel, input.recipient);
-    const { id, tenantId } = await this.prisma.runWithTenant((tx) =>
-      tx.$queryRaw<{ id: string; tenantId: string }[]>`
+    const { id, tenantId } = await this.prisma.runWithTenant(async (tx) => {
+      const [recorded] = await tx.$queryRaw<{ id: string; tenantId: string }[]>`
         INSERT INTO "outbound_messages"
           ("id", "tenantId", "channel", "template", "recipientMasked",
            "recipientKind", "appointmentId", "updatedAt")
@@ -52,8 +62,11 @@ export class OutboundMessages {
            ${input.recipientKind ?? 'PATIENT'}::"OutboundRecipientKind",
            ${input.appointmentId ?? null}::uuid,
            CURRENT_TIMESTAMP)
-        RETURNING "id", "tenantId"`.then((rows) => rows[0]),
-    );
+        RETURNING "id", "tenantId"`;
+      // Fallar la asociación revierte también el INSERT, en cada intento.
+      await attach?.(recorded.id, tx);
+      return recorded;
+    });
     this.logger.log({
       event: 'outbound.recorded',
       outboundId: id,

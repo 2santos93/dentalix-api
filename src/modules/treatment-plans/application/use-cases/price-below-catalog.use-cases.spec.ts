@@ -17,6 +17,7 @@ import {
   testDiscountPolicy,
 } from './__fixtures__/discount-fixtures';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
+import { catalogPricing } from './__fixtures__/catalog-pricing-source';
 import { AddTreatmentPlanItemUseCase } from './add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from './update-treatment-plan-item.use-case';
 import { ApplyBulkDiscountUseCase } from './apply-bulk-discount.use-case';
@@ -34,17 +35,22 @@ const CROWN = {
   id: 'crown',
   kind: CatalogKind.PROCEDURE,
   defaultPrice: 1_000_000,
+  allowDiscount: true,
 } as DentalCatalogItem;
 /** Ítem «libre»: el catálogo no tiene precio. */
 const FREE = {
   id: 'free',
   kind: CatalogKind.PROCEDURE,
   defaultPrice: null,
+  allowDiscount: true,
 } as DentalCatalogItem;
 
 const catalog = {
   findById: (id: string) =>
-    Promise.resolve([CROWN, FREE].find((c) => c.id === id) ?? null),
+    Promise.resolve([CROWN, FREE].find((c) => c.id === id) ?? { ...CROWN, id }),
+  // DX-105: el «Descuento %» mira si cada procedimiento admite descuentos.
+  findByIds: (ids: string[]) =>
+    Promise.resolve(ids.map((id) => ({ ...CROWN, id }))),
 } as unknown as DentalCatalogRepository;
 
 function setup(plan: { status?: TreatmentPlanStatus } = {}) {
@@ -57,14 +63,19 @@ function setup(plan: { status?: TreatmentPlanStatus } = {}) {
   const policy = testDiscountPolicy();
   return {
     repo,
-    add: new AddTreatmentPlanItemUseCase(repo, catalog, policy, FIXED_CLOCK),
+    add: new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogPricing(catalog),
+      policy,
+      FIXED_CLOCK,
+    ),
     update: new UpdateTreatmentPlanItemUseCase(
       repo,
       catalog,
       policy,
       FIXED_CLOCK,
     ),
-    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK),
+    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK, catalog),
   };
 }
 
@@ -375,7 +386,9 @@ describe('Precio por debajo del de catálogo = descuento (SEC-041)', () => {
         discountReason: DiscountReason.LOYALTY,
         discountById: ADMIN_ACTOR.userId,
       });
-      const [item] = await ctx.bulk.execute(
+      const {
+        items: [item],
+      } = await ctx.bulk.execute(
         'plan1',
         { itemIds: ['item1'], percent: 0 },
         ASSISTANT_ACTOR,

@@ -31,6 +31,9 @@ interface Seeded {
   otherLocationId: string;
   patientId: string;
   catalogItemId: string;
+  payerId: string;
+  agreementId: string;
+  otherAgreementId: string;
 }
 
 async function seedClinic(subdomain: string): Promise<Seeded> {
@@ -67,7 +70,27 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
       color: '#123456',
     },
   });
+  // DX-105: dos convenios para probar la foto del precio.
+  const payer = await raw.payer.create({
+    data: { tenantId, name: 'Sanitas', type: 'EPS_CO', country: 'CO' },
+  });
+  const [agreement, otherAgreement] = await Promise.all(
+    ['Convenio 10', 'Convenio 20'].map((name, i) =>
+      raw.agreement.create({
+        data: {
+          tenantId,
+          name,
+          payerId: payer.id,
+          kind: 'PERCENT_DISCOUNT',
+          percent: (i + 1) * 10,
+        },
+      }),
+    ),
+  );
   return {
+    payerId: payer.id,
+    agreementId: agreement.id,
+    otherAgreementId: otherAgreement.id,
     tenantId,
     userId: user.id,
     otherUserId: other.id,
@@ -100,6 +123,12 @@ async function seedDiscountedPlan(
       discountById: s.userId,
       discountAt: new Date('2026-10-01T15:00:00Z'),
       discountLocationId: s.locationId,
+      // DX-105: foto del precio (convenio del 10 % sobre el precio de catálogo).
+      basePrice: 111000,
+      priceSource: 'AGREEMENT_PERCENT',
+      agreementId: s.agreementId,
+      agreementName: 'Convenio 10',
+      pricingLocationId: s.locationId,
       status: itemStatus,
     },
   });
@@ -121,6 +150,8 @@ async function cleanup(seeds: Seeded[]): Promise<void> {
   await raw.treatmentPlanItem.deleteMany({ where });
   await raw.treatmentPlan.deleteMany({ where });
   await raw.discountPolicy.deleteMany({ where });
+  await raw.agreement.deleteMany({ where });
+  await raw.payer.deleteMany({ where });
   await raw.dentalCatalogItem.deleteMany({ where });
   await raw.patient.deleteMany({ where });
   await raw.location.deleteMany({ where });
@@ -172,6 +203,12 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
     ['discountLocationId', { discountLocationId: a.otherLocationId }],
     // SEC-041: la referencia de la rebaja de precio también queda congelada.
     ['catalogPrice', { catalogPrice: 120000 }],
+    // DX-105: la foto del precio (convenio / lista / catálogo) también.
+    ['basePrice', { basePrice: 120000 }],
+    ['priceSource', { priceSource: 'CATALOG' }],
+    ['agreementId', { agreementId: a.otherAgreementId }],
+    ['agreementName', { agreementName: 'Otro nombre' }],
+    ['pricingLocationId', { pricingLocationId: a.otherLocationId }],
   ];
 
   describe('plan aceptado y firmado (DX-012)', () => {
@@ -205,11 +242,46 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
       'discountById',
       'discountAt',
       'discountLocationId',
+      'basePrice',
+      'priceSource',
+      'agreementId',
+      'agreementName',
+      'pricingLocationId',
     ])('no admite cambiar %s', async (column) => {
       const [, data] = discountChanges().find(([c]) => c === column)!;
       await expect(
         asA((tx) =>
           tx.treatmentPlanItem.update({ where: { id: itemId }, data }),
+        ),
+      ).rejects.toThrow(SIGNED);
+    });
+
+    it('la foto del precio sigue como se firmó (DX-105)', async () => {
+      const after = await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: itemId },
+      });
+      expect(after).toMatchObject({
+        basePrice: new Prisma.Decimal(111000),
+        priceSource: 'AGREEMENT_PERCENT',
+        agreementId: a.agreementId,
+        agreementName: 'Convenio 10',
+        pricingLocationId: a.locationId,
+      });
+    });
+
+    it('no admite quitar el convenio (todo a NULL) en un plan firmado (DX-105)', async () => {
+      await expect(
+        asA((tx) =>
+          tx.treatmentPlanItem.update({
+            where: { id: itemId },
+            data: {
+              basePrice: null,
+              priceSource: null,
+              agreementId: null,
+              agreementName: null,
+              pricingLocationId: null,
+            },
+          }),
         ),
       ).rejects.toThrow(SIGNED);
     });
@@ -296,6 +368,29 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
       expect(done.status).toBe('DONE');
     });
 
+    it('un plan abierto sigue admitiendo cambiar la foto del precio (DX-105)', async () => {
+      const { itemId } = await seedDiscountedPlan(
+        a,
+        TreatmentPlanStatus.DRAFT,
+        'PROPOSED',
+      );
+      const updated = await asA((tx) =>
+        tx.treatmentPlanItem.update({
+          where: { id: itemId },
+          data: {
+            priceSource: 'CATALOG',
+            agreementId: null,
+            agreementName: null,
+          },
+        }),
+      );
+      expect(updated).toMatchObject({
+        priceSource: 'CATALOG',
+        agreementId: null,
+        agreementName: null,
+      });
+    });
+
     it('un plan abierto sigue admitiendo cambiar el descuento y su motivo', async () => {
       const { itemId } = await seedDiscountedPlan(
         a,
@@ -331,6 +426,37 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
       ));
     });
 
+    it('el convenio del ítem no puede ser de otra clínica (DX-105)', async () => {
+      const foreign = await raw.agreement.create({
+        data: {
+          tenantId: b.tenantId,
+          name: 'Convenio B',
+          payerId: b.payerId,
+          kind: 'PERCENT_DISCOUNT',
+          percent: 5,
+        },
+      });
+      await expect(
+        asA((tx) =>
+          tx.treatmentPlanItem.update({
+            where: { id: itemId },
+            data: { agreementId: foreign.id },
+          }),
+        ),
+      ).rejects.toMatchObject(FK_VIOLATION);
+    });
+
+    it('la sede del precio no puede ser de otra clínica (DX-105)', async () => {
+      await expect(
+        asA((tx) =>
+          tx.treatmentPlanItem.update({
+            where: { id: itemId },
+            data: { pricingLocationId: b.locationId },
+          }),
+        ),
+      ).rejects.toMatchObject(FK_VIOLATION);
+    });
+
     it('la sede del descuento no puede ser de otra clínica', async () => {
       await expect(
         asA((tx) =>
@@ -351,6 +477,7 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
       ['nota en blanco', { discountReasonNote: '   ' }],
       ['nota de más de 200', { discountReasonNote: 'x'.repeat(201) }],
       ['un precio de catálogo negativo (SEC-041)', { catalogPrice: -1 }],
+      ['un precio base negativo (DX-105)', { basePrice: -1 }],
     ] as const)('CHECK: rechaza %s', async (_label, data) => {
       await expect(
         asA((tx) =>

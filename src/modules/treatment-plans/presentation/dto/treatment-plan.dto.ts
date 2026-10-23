@@ -22,6 +22,15 @@ export class TreatmentPlanAcceptanceSummaryDto {
 // GET /treatment-plans/:id (see GetTreatmentPlanUseCase) — create/list/update
 // return the bare plan, so those two fields are optional here.
 export class TreatmentPlanDto {
+  @ApiPropertyOptional({
+    type: Object,
+    additionalProperties: { type: 'integer' },
+  })
+  visitIntervals!: Record<string, number>;
+  @ApiPropertyOptional({ type: String, nullable: true, format: 'date-time' })
+  acceptedAt!: Date | null;
+  @ApiPropertyOptional({ type: String, nullable: true, format: 'uuid' })
+  acceptedLocationId!: string | null;
   @ApiProperty({ format: 'uuid' })
   id!: string;
 

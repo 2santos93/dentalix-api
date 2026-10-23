@@ -11,6 +11,9 @@ import { TreatmentPlanItem } from './treatment-plan-item.entity';
  * shape, with no items attached.
  */
 export interface TreatmentPlan {
+  visitIntervals?: Record<string, number>;
+  acceptedAt?: Date | null;
+  acceptedLocationId?: string | null;
   id: string;
   tenantId: string;
   patientId: string;

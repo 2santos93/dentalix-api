@@ -1641,13 +1641,65 @@ coberturas por paciente, una principal. Sustituye al texto libre
   `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
   `insurerEps`, que queda DEPRECADO y de solo lectura: la API ya no lo
   escribe y un cliente antiguo que lo mande no da error.
-- **Demo**: `npm run seed:demo` crea 7 pagadores (Sura EPS, Sanitas,
-  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva) y una cobertura
+- **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
+  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una
   pendiente para ver los tres estados. El seed omite una clínica demo ya creada.
 - **Tests**: `payers.e2e-spec.ts`, `patient-coverages.e2e-spec.ts`,
   `appointments-coverage.e2e-spec.ts`, `patient-coverages.int-spec.ts` (RLS,
   FK compuestas, relleno) y los recuentos de `seed-demo.int-spec.ts`.
+
+## Convenios y listas de precios (DX-105)
+
+Precio de lista por sede y convenios por pagador (descuento porcentual o lista
+de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
+`price-lists`, `agreements` y `patient-agreements`; migraciones
+`20261020230000_dx105_enums` a `20261020230500_dx105_plan_item_pricing_location_fk`.
+
+- **Tablas**: `price_lists` (nombre, moneda, sede o toda la clínica, activa),
+  `price_list_items` (lista, prestación del catálogo, precio), `agreements`
+  (nombre, pagador, `kind` PERCENT_DISCOUNT | PRICE_LIST, `percent`,
+  `percentByCategory` en JSONB, lista, sede, vigencia, activo) y
+  `patient_agreements` (una asignación viva por paciente; el historial son las
+  retiradas; puede enlazar una cobertura del mismo pagador). Todas con RLS
+  FORCE y FK compuestas por `tenantId`. Los ítems del plan guardan una foto
+  inmutable: `basePrice`, `catalogPrice`, `priceSource`, `agreementId`,
+  `agreementName` y `pricingLocationId`. Cambiar o quitar el convenio después
+  no re-precia nada. El catálogo trae `allowDiscount`: sin él, el ítem no
+  admite descuento y el descuento masivo lo salta.
+- **Orden de resolución** al añadir un ítem sin `price`: convenio vigente del
+  paciente (porcentaje por categoría, luego general; o su lista de precios),
+  lista activa de la sede de escritura, precio de catálogo. Una lista de otra
+  moneda que la del plan se ignora y se pasa al siguiente paso. «Hoy» es el
+  día civil de la sede. `GET /patients/:id/price-quote` devuelve la misma
+  resolución sin escribir.
+- **Semántica de `catalogPrice` (R1)**: es la referencia resuelta (la del
+  convenio, la lista o el catálogo), no el precio de catálogo; `basePrice`
+  guarda siempre el de catálogo. Un precio por debajo de `catalogPrice` cuenta
+  como descuento discrecional; la rebaja del convenio no.
+- **Roles**: leer convenios, los 4 roles; listas de precios, ADMIN y rol
+  clínico; crear, editar y retirar ambos, ADMIN. Asignar convenio al paciente,
+  los 4 roles. `price-quote`, roles clínicos.
+- **Auditoría**: recursos `AGREEMENT` y `PRICE_LIST`; la asignación se audita
+  como `PATIENT` con `reason` `AGREEMENT_ASSIGNED|AGREEMENT_REMOVED`. La
+  metadata lleva nombres de campos, nunca importes ni datos del paciente.
+- **Presupuesto v2**: `GET …/quote` devuelve `version: 2` con `agreement`
+  (`{name, payerName}` del primer ítem con convenio; con varios, los nombres
+  unidos por « · »), `listPrice` y `agreementName` por línea y
+  `agreementSaving` en los totales (Σ max(0, `basePrice` − `catalogPrice`) de
+  los ítems con convenio). El hash es `dentalix-plan-quote-v2`; el v1 se
+  conserva intacto, `parseQuoteContent` lee ambos y una aceptación firmada
+  compara con el hash de su propia versión, así que las firmadas antes
+  siguen con `integrityOk: true`.
+- **Demo**: `npm run seed:demo` crea las listas «Tarifa Sede Norte» (5
+  precios, sede Norte) y «Convenio Alfa» (3), el pagador «Empresa Alfa», los
+  convenios «Sura EPS −15 %» y «Empresa Alfa lista» y los asigna a tres
+  pacientes. Se crean al final para no cambiar los precios de los planes de la
+  demo.
+- **Tests**: `plan-quote.spec.ts`, `price-lists.e2e-spec.ts`,
+  `agreements.e2e-spec.ts`, `patient-agreements.e2e-spec.ts`,
+  `treatment-plans-pricing.e2e-spec.ts`, `treatment-plan-quote.e2e-spec.ts`,
+  `price-lists-agreements.int-spec.ts` y los recuentos de `seed-demo.int-spec.ts`.
 
 ## Documentos del paciente (DX-151)
 
@@ -2197,6 +2249,25 @@ FORCE y `npm run test:owner-nosu`).
 | `dentalix_patient_search` (DX-043) | NOLOGIN | dueño de `dx_patient_search_*`; `SELECT` de 5 columnas de `patients` y su política | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
 | `dentalix_email_dispatcher` (DX-113) | NOLOGIN | dueño de `email_outbox_claim/_settle/_enqueue_platform` y, desde DX-144, de `email_outbox_enqueue_platform_capped/_platform_allowed/_purge_platform`; `SELECT/INSERT/UPDATE/DELETE` de `email_outbox` con su política permisiva y, para DELETE, una RESTRICTIVA que lo limita a filas de plataforma | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT`, DELETE sin su política restrictiva |
 | `dentalix_membership_lookup` (DX-143) | NOLOGIN | dueño de `dx_user_has_other_active_memberships`; `SELECT` de 3 columnas (`userId`, `tenantId`, `deletedAt`) de `clinic_memberships` y su política de solo `SELECT` | `LOGIN`, `BYPASSRLS`, miembros con `SET`/`INHERIT` |
+
+DX-236: `dentalix_app` solo tiene `SELECT` en las referencias globales
+`icd10_codes`, `currencies`, `countries` y `cities`. La migración revoca
+`INSERT`, `UPDATE`, `DELETE` y `TRUNCATE`; repetir `create-app-role.sql`
+conserva esta restricción. `exchange_rate_snapshots` sigue siendo escribible.
+Si la migración avisa que no puede revocar o quedan permisos heredados, un
+admin debe corregir los grants y ejecutar `npm run db:check-force` antes de
+arrancar la API; `reference_writes` identifica tabla y privilegio efectivos.
+
+Cada diagnóstico guarda `clinical_entry_diagnoses."labelEs"`, copiada por
+un trigger al insertar aunque el cliente mande otro texto. Ficha y DTO leen
+esa copia; la preparación RDA no consulta etiquetas del catálogo. El backfill
+único usa el texto disponible al migrar: no reconstruye etiquetas históricas.
+Se ejecuta en transacción explícita y bajo bloqueo exclusivo, suspende solo
+el trigger de UPDATE y FORCE de esa tabla, y restaura ambos antes del COMMIT;
+un fallo revierte todos los cambios, también con owner sin superusuario.
+La siembra CIE-10 añade códigos nuevos y conserva todas las etiquetas ya
+existentes, incluso las de códigos sin uso. Sus correcciones requieren una
+migración explícita con el owner; nunca reescriben la copia clínica guardada.
 
 Pasos (el `psql` no acepta el `?schema=public` de las URL de Prisma:
 `"${DIRECT_URL%%\?*}"` lo quita):

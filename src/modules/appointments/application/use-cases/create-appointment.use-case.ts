@@ -38,6 +38,7 @@ import { collectWarnings } from '../appointment-warnings';
 // guarded request context (the repository reads it, never this input), and
 // a newly created appointment always starts SCHEDULED (the schema default).
 export interface CreateAppointmentInput {
+  planItemIds?: string[];
   patientId: string;
   providerId: string;
   start: Date;
@@ -269,6 +270,7 @@ export class CreateAppointmentUseCase {
         locationId: input.locationId,
         waitlistEntryId: input.waitlistEntryId,
         wantsEarlier: input.wantsEarlier,
+        planItemIds: input.planItemIds,
       });
       return { ...created, ...warnings };
     } catch (error) {

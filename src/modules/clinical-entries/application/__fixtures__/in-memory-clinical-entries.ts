@@ -71,6 +71,22 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
     return Promise.resolve(new Set(codes.filter((c) => this.icd10.has(c))));
   }
 
+  loadRdaFactsBatch(
+    ids: string[],
+    patientId?: string,
+  ): Promise<Map<string, RdaFacts>> {
+    return Promise.resolve(
+      new Map(
+        ids.flatMap((id) => {
+          const facts = this.rdaFacts.get(id);
+          return facts && (!patientId || facts.patient.id === patientId)
+            ? [[id, facts] as const]
+            : [];
+        }),
+      ),
+    );
+  }
+
   loadRdaFacts(id: string): Promise<RdaFacts | null> {
     return Promise.resolve(this.rdaFacts.get(id) ?? null);
   }

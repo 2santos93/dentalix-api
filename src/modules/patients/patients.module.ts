@@ -40,14 +40,21 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
 import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
+import { PatientAgreementsModule } from '../patient-agreements/patient-agreements.module';
 
 @Module({
   // JwtModule.register({}) mirrors AuthModule: JwtAuthGuard depends on
   // TokenService, which depends on JwtService — must be available here since
   // the guard is applied on this module's controller.
+  // DX-105: PatientAgreementsModule da el resumen `agreement` de la ficha.
   // DX-153: PatientCoveragesModule da el resumen `coverage` de la ficha y el listado.
   // DX-150: CollectionsModule da la marca «Saldo vencido» de la ficha.
-  imports: [JwtModule.register({}), CollectionsModule, PatientCoveragesModule],
+  imports: [
+    JwtModule.register({}),
+    CollectionsModule,
+    PatientCoveragesModule,
+    PatientAgreementsModule,
+  ],
   controllers: [
     PatientsController,
     PatientCommunicationController,

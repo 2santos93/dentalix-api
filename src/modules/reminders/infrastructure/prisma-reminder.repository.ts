@@ -303,17 +303,22 @@ export class PrismaReminderRepository implements ReminderRepository {
   async attachOutbound(
     reminderId: string,
     outboundMessageId: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      tx.appointmentReminder.updateMany({
+    const attach = async (transaction: Prisma.TransactionClient) => {
+      const { count } = await transaction.appointmentReminder.updateMany({
         where: {
           id: reminderId,
           status: AppointmentReminderStatus.SENDING,
           outboundMessageId: null,
         },
         data: { outboundMessageId },
-      }),
-    );
+      });
+      // No sustituir un mensaje ya asociado ni tocar estados finales/otro tenant.
+      if (count !== 1) throw new Error('ReminderOutboundNotAttachable');
+    };
+    if (tx) await attach(tx);
+    else await this.prisma.runWithTenant(attach);
   }
 
   async emailQueuedFor(outboundMessageId: string): Promise<boolean> {
@@ -330,6 +335,62 @@ export class PrismaReminderRepository implements ReminderRepository {
         data: { status: AppointmentReminderStatus.SENT, sentAt },
       }),
     );
+  }
+
+  async markFailed(
+    appointmentId: string,
+    leadHours: number,
+    start: Date,
+    errorCode: string,
+    now: Date,
+  ): Promise<void> {
+    await this.prisma.runWithTenant(async (tx) => {
+      // Un fallo al leer contexto puede ocurrir antes de claim. Solo una cita
+      // visible bajo RLS permite crear este registro; nunca una cita ajena.
+      await tx.$executeRaw`
+        INSERT INTO "appointment_reminders"
+          ("id", "tenantId", "appointmentId", "leadHours", "appointmentStart", "status", "updatedAt")
+        SELECT gen_random_uuid(), "tenantId", "id", ${leadHours}, ${utc(start)}, 'SENDING', CURRENT_TIMESTAMP
+          FROM "appointments" WHERE "id" = ${appointmentId}::uuid AND "deletedAt" IS NULL
+        ON CONFLICT ("tenantId", "appointmentId", "leadHours", "appointmentStart") DO NOTHING`;
+      const [reminder] = await tx.$queryRaw<
+        { id: string; outboundMessageId: string | null }[]
+      >`
+        SELECT "id", "outboundMessageId" FROM "appointment_reminders"
+        WHERE "appointmentId" = ${appointmentId}::uuid AND "leadHours" = ${leadHours}
+          AND "appointmentStart" = ${utc(start)} AND "status" = 'SENDING'
+        FOR UPDATE`;
+      if (!reminder) return;
+      const outboundId = reminder.outboundMessageId;
+      const queued = outboundId
+        ? (await tx.emailOutbox.count({
+            where: { referenceId: outboundId },
+          })) > 0
+        : false;
+      await tx.appointmentReminder.update({
+        where: { id: reminder.id },
+        data: {
+          ...(queued
+            ? { status: 'SENT', sentAt: now }
+            : { status: 'FAILED', failureReason: errorCode }),
+        },
+      });
+      if (outboundId) {
+        await tx.outboundMessage.updateMany({
+          where: {
+            id: outboundId,
+            status: { in: queued ? ['PENDING'] : ['PENDING', 'QUEUED'] },
+          },
+          data: queued
+            ? { status: 'QUEUED' }
+            : {
+                status: 'FAILED',
+                lastError: errorCode,
+                attempts: { increment: 1 },
+              },
+        });
+      }
+    });
   }
 
   findAppointmentReminders(
@@ -358,6 +419,7 @@ export class PrismaReminderRepository implements ReminderRepository {
             appointmentStart: true,
             status: true,
             skipReason: true,
+            failureReason: true,
             sentAt: true,
             outboundMessageId: true,
             outboundMessage: { select: { recipientKind: true } },
@@ -397,6 +459,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           appointmentStart: r.appointmentStart,
           status: r.status,
           skipReason: r.skipReason,
+          failureReason: r.failureReason,
           sentAt: r.sentAt,
           emailDelivery: r.outboundMessageId
             ? (delivery.get(r.outboundMessageId) ?? null)

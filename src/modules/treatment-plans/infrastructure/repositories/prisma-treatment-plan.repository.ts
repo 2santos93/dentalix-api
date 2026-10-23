@@ -43,6 +43,9 @@ type PrismaTreatmentPlanWithItems = Prisma.TreatmentPlanGetPayload<{
 
 export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
   return {
+    visitIntervals: plan.visitIntervals as Record<string, number>,
+    acceptedAt: plan.acceptedAt,
+    acceptedLocationId: plan.acceptedLocationId,
     id: plan.id,
     tenantId: plan.tenantId,
     patientId: plan.patientId,
@@ -67,6 +70,8 @@ export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
 // `PrismaDentalCatalogRepository.mapToEntity` for `defaultPrice`.
 function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
   return {
+    visit: item.visit,
+    visitLabel: item.visitLabel,
     id: item.id,
     tenantId: item.tenantId,
     planId: item.planId,
@@ -74,6 +79,11 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
     surfaces: item.surfaces.map((surface) => surface),
     catalogItemId: item.catalogItemId,
     catalogPrice: item.catalogPrice?.toNumber() ?? null,
+    basePrice: item.basePrice?.toNumber() ?? null,
+    priceSource: item.priceSource,
+    agreementId: item.agreementId,
+    agreementName: item.agreementName,
+    pricingLocationId: item.pricingLocationId,
     price: item.price.toNumber(),
     discount: item.discount.toNumber(),
     discountReason: item.discountReason,
@@ -253,6 +263,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           locked,
           change.acceptedAt,
           change.acceptedById ?? null,
+          await this.tenantContext.writeLocationId(tx),
         );
       }
       if (change.cancellation) {
@@ -286,6 +297,12 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           surfaces: input.surfaces ?? [],
           catalogItemId: input.catalogItemId,
           catalogPrice: input.catalogPrice,
+          // DX-105: foto del precio, resuelta por el caso de uso.
+          basePrice: input.pricing.basePrice,
+          priceSource: input.pricing.priceSource,
+          agreementId: input.pricing.agreementId,
+          agreementName: input.pricing.agreementName,
+          pricingLocationId: input.pricing.pricingLocationId,
           price: input.price,
           discount: input.discount ?? 0,
           notes: input.notes,

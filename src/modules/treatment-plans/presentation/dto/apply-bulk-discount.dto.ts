@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { DiscountReasonFieldsDto } from './discount-reason.dto';
+import { TreatmentPlanItemDto } from './treatment-plan-item.dto';
 
 export const BULK_DISCOUNT_MAX_ITEMS = 100;
 
@@ -44,4 +45,21 @@ export class ApplyBulkDiscountDto extends DiscountReasonFieldsDto {
   @Min(0, { message: 'El porcentaje no puede ser negativo.' })
   @Max(100, { message: 'El porcentaje no puede pasar del 100 %.' })
   percent!: number;
+}
+
+/** Respuesta de «Descuento %» (DX-204; DX-105 añade los saltados). */
+export class ApplyBulkDiscountResultDto {
+  @ApiProperty({
+    type: [TreatmentPlanItemDto],
+    description:
+      'Los ítems descontados: el % de su precio redondeado a la unidad de la moneda del plan (COP sin decimales, EUR a céntimos), nunca por encima del tope del rol ítem a ítem',
+  })
+  items!: TreatmentPlanItemDto[];
+
+  @ApiProperty({
+    description:
+      'DX-105: ítems pedidos cuyo procedimiento no admite descuentos; se saltan y no cambian',
+    example: 0,
+  })
+  skippedNoDiscount!: number;
 }

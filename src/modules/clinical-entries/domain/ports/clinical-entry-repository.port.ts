@@ -76,4 +76,10 @@ export interface ClinicalEntryRepository {
    * autor). `null` si la evolución no es de esta clínica (RLS) o no existe.
    */
   loadRdaFacts(id: string): Promise<RdaFacts | null>;
+
+  /** DX-232: carga en conjunto, restringida al paciente cuando se indica. */
+  loadRdaFactsBatch(
+    ids: string[],
+    patientId?: string,
+  ): Promise<Map<string, RdaFacts>>;
 }

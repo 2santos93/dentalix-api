@@ -172,11 +172,15 @@ export async function acceptPlanInTx(
   plan: LockedPlanRow,
   at: Date,
   byId: string | null,
+  locationId?: string,
 ): Promise<void> {
   await rejectOpenSiblings(tx, plan, at, byId);
   await tx.treatmentPlan.update({
     where: { id: plan.id },
-    data: { status: TreatmentPlanStatus.ACCEPTED },
+    data: {
+      status: TreatmentPlanStatus.ACCEPTED,
+      ...(locationId ? { acceptedLocationId: locationId } : {}),
+    },
   });
   await tx.treatmentPlanItem.updateMany({
     where: {

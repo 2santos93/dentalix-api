@@ -20,6 +20,12 @@ export interface StoredPlanAcceptance {
  * vista consolidada, la principal.
  */
 export interface PlanQuoteSource {
+  visitOrganization?: {
+    itemId: string;
+    visit: number;
+    label: string | null;
+    minDaysAfterPrevious: number;
+  }[];
   plan: {
     id: string;
     patientId: string;

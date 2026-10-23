@@ -103,6 +103,7 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
           tenantId,
           patientId: source.patientId,
           currency: source.currency,
+          visitIntervals: source.visitIntervals ?? {},
           notes: source.notes,
           createdById: decision.createdById,
           optionGroupId: groupId,
@@ -114,11 +115,19 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
           data: source.items.map((item) => ({
             tenantId,
             planId: created.id,
+            visit: item.visit,
+            visitLabel: item.visitLabel,
             toothNumber: item.toothNumber,
             surfaces: item.surfaces,
             catalogItemId: item.catalogItemId,
             // SEC-041: la referencia de la rebaja de precio viaja con el ítem.
             catalogPrice: item.catalogPrice,
+            // DX-105: la foto del precio viaja tal cual; no se re-resuelve.
+            basePrice: item.basePrice,
+            priceSource: item.priceSource,
+            agreementId: item.agreementId,
+            agreementName: item.agreementName,
+            pricingLocationId: item.pricingLocationId,
             price: item.price,
             discount: item.discount,
             // DX-204: la alternativa copia el descuento tal como se dio.

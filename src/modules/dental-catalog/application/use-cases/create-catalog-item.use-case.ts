@@ -49,6 +49,8 @@ export interface CreateCatalogItemInput {
   defaultPrice?: number;
   /** DX-212: código CUPS (6 alfanuméricos); vacío o null = sin código. */
   cupsCode?: string | null;
+  /** DX-105: por defecto true. */
+  allowDiscount?: boolean;
   active?: boolean;
 }
 
@@ -87,6 +89,7 @@ export class CreateCatalogItemUseCase {
       color: input.color,
       defaultPrice: input.defaultPrice,
       cupsCode: cupsCode ?? undefined,
+      allowDiscount: input.allowDiscount,
       active: input.active,
     });
   }
