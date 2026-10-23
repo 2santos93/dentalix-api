@@ -285,6 +285,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patient-imports/:id/errors.csv': ADMIN_ONLY,
   'POST /patient-imports/:id/confirm': ADMIN_ONLY,
   'POST /patient-imports/:id/undo': ADMIN_ONLY,
+  // DX-262: hoja de saldos («Saldo migrado») del lote; solo gestión.
+  'GET /patient-imports/balances-template': ADMIN_ONLY,
+  'POST /patient-imports/:id/balances': ADMIN_ONLY,
+  'DELETE /patient-imports/:id/balances': ADMIN_ONLY,
+  'GET /patient-imports/:id/balances/errors.csv': ADMIN_ONLY,
 
   // --- Catálogo dental -----------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,

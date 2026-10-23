@@ -111,6 +111,12 @@ export class AuditScheduleChangeDto {
   after!: AuditScheduleEntryDto[];
 }
 
+export class AuditCurrencyTotalDto {
+  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Filas del archivo' }) rows!: number;
+  @ApiProperty({ example: 1500000 }) amount!: number;
+}
+
 export class AuditImportBatchDto {
   @ApiProperty({ description: 'SHA-256 (hex) del archivo importado' })
   fileSha256!: string;
@@ -124,6 +130,20 @@ export class AuditImportBatchDto {
   @ApiPropertyOptional() updated?: number;
   @ApiPropertyOptional() undoneCreated?: number;
   @ApiPropertyOptional() undoneFilled?: number;
+  @ApiPropertyOptional({
+    description: 'DX-262: SHA-256 (hex) de la hoja de saldos',
+  })
+  balanceFileSha256?: string;
+  @ApiPropertyOptional() balanceRows?: number;
+  @ApiPropertyOptional() balanceErrors?: number;
+  @ApiPropertyOptional() balancesCreated?: number;
+  @ApiPropertyOptional() balancesUndone?: number;
+  @ApiPropertyOptional({
+    type: [AuditCurrencyTotalDto],
+    description:
+      'DX-262: total por moneda de los saldos migrados del lote (agregado, sin convertir)',
+  })
+  balanceTotals?: AuditCurrencyTotalDto[];
 }
 
 export class AuditMetadataDto {

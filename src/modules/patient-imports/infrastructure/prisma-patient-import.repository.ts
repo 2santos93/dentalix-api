@@ -19,6 +19,12 @@ import {
   type FillablePatient,
 } from '../domain/fill-empty';
 import type { FillableField, ImportPatientData } from '../domain/import-fields';
+import {
+  DEFAULT_BALANCE_CONCEPT,
+  type CurrencyTotal,
+  type DocLookup,
+  type PreparedBalance,
+} from '../domain/opening-balance-sheet';
 import { docKey, type RowIssue } from '../domain/row-validation';
 
 type Tx = Prisma.TransactionClient;
@@ -36,13 +42,20 @@ export const importJobKey = (batchId: string) => `patient-import:${batchId}`;
 
 /**
  * Tablas con FK a `patients` que NO cuentan como «actividad» del paciente al
- * deshacer un lote: las filas del propio lote y el resumen de cartera (lo
- * mantiene la BD). Cualquier otra tabla que apunte a un paciente lo bloquea.
+ * deshacer un lote: las filas del propio lote (pacientes y saldos), el
+ * resumen de cartera (lo mantiene la BD) y los saldos migrados, que se miran
+ * aparte (DX-262): los del propio lote se retiran con él y uno de OTRO lote
+ * bloquea. Cualquier otra tabla que apunte a un paciente lo bloquea.
  */
 export const UNDO_IGNORED_TABLES: ReadonlySet<string> = new Set([
+  'opening_balances',
+  'patient_import_balance_rows',
   'patient_import_rows',
   'patient_ledgers',
 ]);
+
+/** Saldos migrados por sentencia al importar (cada una refresca su cartera). */
+const BALANCE_INSERT_CHUNK = 500;
 
 /** Lo que el dry-run deja preparado: una fila por paciente a crear o a rellenar. */
 export interface PreparedRow {
@@ -82,9 +95,15 @@ const EMPTY_RESULT: ChunkResult = {
   failed: 0,
 };
 
-/** Pacientes del lote con algo registrado después: el deshacer se niega. */
+/**
+ * Pacientes del lote con algo registrado después, o saldos migrados del lote
+ * con un abono imputado (DX-262): el deshacer se niega.
+ */
 export class UndoBlockedError extends Error {
-  constructor(readonly patients: number) {
+  constructor(
+    readonly patients: number,
+    readonly balances = 0,
+  ) {
     super('undo blocked');
   }
 }
@@ -117,7 +136,40 @@ export class BatchLocationError extends Error {
 export interface UndoResult {
   undoneCreated: number;
   undoneFilled: number;
+  /** Saldos migrados del lote retirados (DX-262). */
+  undoneBalances: number;
 }
+
+/** La hoja de saldos validada (dry-run) que se guarda en el lote (DX-262). */
+export interface NewBalanceSheet {
+  fileName: string;
+  fileSha256: string;
+  fileFormat: PatientImportFileFormat;
+  fileSizeBytes: number;
+  totalRows: number;
+  errorRows: number;
+  mergedRows: number;
+  fileTotals: CurrencyTotal[];
+  validTotals: CurrencyTotal[];
+  issues: RowIssue[];
+  prepared: PreparedBalance[];
+}
+
+export interface BalanceChunkResult {
+  processed: number;
+  created: number;
+  skipped: number;
+}
+
+/** Saldos migrados vivos de un lote, por moneda (lo importado de verdad). */
+export interface ImportedBalanceTotal {
+  currency: string;
+  count: number;
+  cents: number;
+}
+
+/** Una columna que apunta a `opening_balances.id` (imputación futura, DX-051). */
+export type OpeningBalanceReference = PatientReference;
 
 /** Una columna que apunta a `patients.id` (de `pg_constraint`). */
 export interface PatientReference {
@@ -133,8 +185,8 @@ export type ConfirmResult =
  * leen el sondeo del avance y el historial. Los errores, con `batchIssues`
  * (los primeros) o `allIssues` (el informe).
  */
-export type BatchRow = Omit<PatientImportBatch, 'issues'>;
-const WITHOUT_ISSUES = { issues: true } as const;
+export type BatchRow = Omit<PatientImportBatch, 'issues' | 'balanceIssues'>;
+const WITHOUT_ISSUES = { issues: true, balanceIssues: true } as const;
 
 /**
  * ¿Es un fallo pasajero (BD caída, conexión cortada, interbloqueo, tiempo de
@@ -210,6 +262,7 @@ const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 @Injectable()
 export class PrismaPatientImportRepository {
   private references: Promise<PatientReference[]> | null = null;
+  private balanceReferences: Promise<OpeningBalanceReference[]> | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -313,7 +366,12 @@ export class PrismaPatientImportRepository {
         ...(where.createdById ? { createdById: where.createdById } : {}),
         ...(where.before ? { createdAt: { lt: where.before } } : {}),
       },
-      data: { status: 'EXPIRED', issues: [], issuesPurgedAt: new Date() },
+      data: {
+        status: 'EXPIRED',
+        issues: [],
+        balanceIssues: [],
+        issuesPurgedAt: new Date(),
+      },
       select: { id: true },
     });
     if (expired.length === 0) return 0;
@@ -323,6 +381,11 @@ export class PrismaPatientImportRepository {
     // eslint-disable-next-line no-restricted-syntax -- filas preparadas de un dry-run caducado
     await tx.patientImportRow.deleteMany({
       where: { batchId: { in: ids }, outcome: 'PENDING', patientId: null },
+    });
+    // DX-262: lo mismo con los saldos preparados de su hoja de saldos.
+    // eslint-disable-next-line no-restricted-syntax -- saldos preparados de un dry-run caducado
+    await tx.patientImportBalanceRow.deleteMany({
+      where: { batchId: { in: ids }, outcome: 'PENDING' },
     });
     return ids.length;
   }
@@ -356,7 +419,7 @@ export class PrismaPatientImportRepository {
             { status: 'UNDONE', undoneAt: { lt: before } },
           ],
         },
-        data: { issues: [], issuesPurgedAt: new Date() },
+        data: { issues: [], balanceIssues: [], issuesPurgedAt: new Date() },
       });
       return r.count;
     });
@@ -410,32 +473,340 @@ export class PrismaPatientImportRepository {
     );
   }
 
-  /** Los primeros `limit` errores del lote y cuántos hay, recortados en SQL. */
+  /**
+   * Los primeros `limit` errores del lote (o de su hoja de saldos, DX-262) y
+   * cuántos hay, recortados en SQL.
+   */
   async batchIssues(
     id: string,
     limit: number,
+    sheet: 'patients' | 'balances' = 'patients',
   ): Promise<{ issues: Prisma.JsonValue[]; total: number }> {
+    const column = Prisma.raw(
+      sheet === 'balances' ? '"balanceIssues"' : '"issues"',
+    );
     const rows = await this.prisma.runWithTenant(
       (tx) => tx.$queryRaw<{ issues: Prisma.JsonValue[]; total: number }[]>`
         SELECT jsonb_path_query_array(
-                 "issues", '$[0 to $last]',
+                 ${column}, '$[0 to $last]',
                  jsonb_build_object('last', ${Math.max(0, limit - 1)}::int)) AS "issues",
-               jsonb_array_length("issues")::int AS "total"
+               jsonb_array_length(${column})::int AS "total"
           FROM "patient_import_batches"
          WHERE "id" = ${id}::uuid`,
     );
     return rows[0] ?? { issues: [], total: 0 };
   }
 
-  /** Todos los errores del lote (el informe descargable). */
-  async allIssues(id: string): Promise<Prisma.JsonValue[] | null> {
+  /** Todos los errores del lote o de su hoja de saldos (el informe). */
+  async allIssues(
+    id: string,
+    sheet: 'patients' | 'balances' = 'patients',
+  ): Promise<Prisma.JsonValue[] | null> {
     const row = await this.prisma.runWithTenant((tx) =>
       tx.patientImportBatch.findFirst({
         where: { id },
-        select: { issues: true },
+        select: { issues: true, balanceIssues: true },
       }),
     );
-    return row ? (row.issues as Prisma.JsonValue[]) : null;
+    if (!row) return null;
+    return (
+      sheet === 'balances' ? row.balanceIssues : row.issues
+    ) as Prisma.JsonValue[];
+  }
+
+  // -------------------------------------------------------------------------
+  // Hoja de saldos (DX-262)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Cómo está cada clave de documento: un paciente vivo de la clínica (o
+   * una fila preparada del archivo de pacientes de ESTE lote, que creará o
+   * encontrará al paciente) = FOUND; varios pacientes vivos con esa clave
+   * (anteriores a DX-107: «1.111» y «1111») = AMBIGUOUS; ninguno, fuera.
+   */
+  async knownDocs(batchId: string, keys: string[]): Promise<DocLookup> {
+    const out = new Map<string, 'FOUND' | 'AMBIGUOUS'>();
+    if (keys.length === 0) return out;
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<
+        { docKey: string; patients: number; inFile: boolean }[]
+      >`
+        SELECT k."docKey",
+               (SELECT count(*)::int FROM "patients" p
+                 WHERE p."tenantId" = ${tenantId}::uuid AND p."deletedAt" IS NULL
+                   AND p."docNumber" IS NOT NULL
+                   AND regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = k."docKey") AS "patients",
+               EXISTS (SELECT 1 FROM "patient_import_rows" r
+                        WHERE r."tenantId" = ${tenantId}::uuid AND r."batchId" = ${batchId}::uuid
+                          AND r."outcome" = 'PENDING' AND r."data" IS NOT NULL
+                          AND regexp_replace(upper(r."data"->>'docNumber'), '[^0-9A-Z]', '', 'g') = k."docKey") AS "inFile"
+          FROM unnest(${keys}::text[]) AS k("docKey")`,
+    );
+    for (const r of rows) {
+      if (r.patients > 1) out.set(r.docKey, 'AMBIGUOUS');
+      else if (r.patients === 1 || r.inFile) out.set(r.docKey, 'FOUND');
+    }
+    return out;
+  }
+
+  /**
+   * Guarda (o reemplaza) la hoja de saldos de un lote VALIDATED: sus totales,
+   * errores y los saldos preparados. `null` si el lote no es de la clínica;
+   * `BatchStateError` si ya no está VALIDATED.
+   */
+  async saveBalances(
+    batchId: string,
+    input: NewBalanceSheet,
+  ): Promise<BatchRow | null> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const status = await this.lockStatus(tx, batchId);
+      if (status === null) return null;
+      if (status !== 'VALIDATED') throw new BatchStateError(status);
+      await this.deletePreparedBalances(tx, batchId);
+      for (let i = 0; i < input.prepared.length; i += INSERT_CHUNK) {
+        await tx.patientImportBalanceRow.createMany({
+          data: input.prepared.slice(i, i + INSERT_CHUNK).map((b) => ({
+            tenantId,
+            batchId,
+            rowNumber: b.rowNumber,
+            docKey: b.docKey,
+            currency: b.currency,
+            amount: new Prisma.Decimal(b.cents).dividedBy(100),
+            asOfDate: b.asOfDate
+              ? new Date(`${b.asOfDate}T00:00:00.000Z`)
+              : null,
+            concept: b.concept,
+            sourceRows: b.sourceRows,
+          })),
+        });
+      }
+      return tx.patientImportBatch.update({
+        where: { id: batchId },
+        omit: WITHOUT_ISSUES,
+        data: {
+          balanceFileName: input.fileName,
+          balanceFileSha256: input.fileSha256,
+          balanceFileFormat: input.fileFormat,
+          balanceFileSizeBytes: input.fileSizeBytes,
+          balanceTotalRows: input.totalRows,
+          balanceErrorRows: input.errorRows,
+          balanceMergedRows: input.mergedRows,
+          balancePreparedRows: input.prepared.length,
+          balanceFileTotals:
+            input.fileTotals as unknown as Prisma.InputJsonArray,
+          balanceValidTotals:
+            input.validTotals as unknown as Prisma.InputJsonArray,
+          balanceIssues: input.issues as unknown as Prisma.InputJsonArray,
+        },
+      });
+    }, LONG_TX);
+  }
+
+  /** Quita la hoja de saldos de un lote VALIDATED (`null` si no es de la clínica). */
+  async clearBalances(batchId: string): Promise<BatchRow | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const status = await this.lockStatus(tx, batchId);
+      if (status === null) return null;
+      if (status !== 'VALIDATED') throw new BatchStateError(status);
+      await this.deletePreparedBalances(tx, batchId);
+      return tx.patientImportBatch.update({
+        where: { id: batchId },
+        omit: WITHOUT_ISSUES,
+        data: {
+          balanceFileName: null,
+          balanceFileSha256: null,
+          balanceFileFormat: null,
+          balanceFileSizeBytes: null,
+          balanceTotalRows: 0,
+          balanceErrorRows: 0,
+          balanceMergedRows: 0,
+          balancePreparedRows: 0,
+          balanceFileTotals: [],
+          balanceValidTotals: [],
+          balanceIssues: [],
+        },
+      });
+    });
+  }
+
+  private async lockStatus(
+    tx: Tx,
+    batchId: string,
+  ): Promise<PatientImportStatus | null> {
+    const rows = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
+      SELECT "status" FROM "patient_import_batches"
+       WHERE "id" = ${batchId}::uuid FOR UPDATE`;
+    return rows[0]?.status ?? null;
+  }
+
+  /** Saldos preparados de un dry-run que se reemplaza o se quita. */
+  private async deletePreparedBalances(tx: Tx, batchId: string): Promise<void> {
+    // Housekeeping (allowlist en no-hard-delete.ts): datos del fichero de un
+    // dry-run sin confirmar; nada los referencia.
+    // eslint-disable-next-line no-restricted-syntax -- saldos preparados de un dry-run reemplazado
+    await tx.patientImportBalanceRow.deleteMany({
+      where: { batchId, outcome: 'PENDING' },
+    });
+  }
+
+  /**
+   * Importa el siguiente bloque de saldos preparados del lote en SU
+   * transacción corta (como los pacientes): busca al paciente vivo por la
+   * clave del documento, crea su «Saldo migrado» (sin fecha en el archivo:
+   * `today`, aproximada) y marca la fila. Idempotente: un saldo ya creado
+   * no se repite (índice único por lote, paciente y moneda) y una fila ya
+   * procesada no vuelve a salir. Un INSERT por bloque: el trigger del
+   * resumen de cartera refresca solo a esos pacientes.
+   */
+  async processBalanceChunk(
+    batch: Pick<PatientImportBatch, 'id' | 'confirmedById' | 'locationId'>,
+    size: number,
+    today: string,
+  ): Promise<BalanceChunkResult> {
+    const tenantId = this.tenantId();
+    const chunk = Math.min(size, BALANCE_INSERT_CHUNK);
+    return this.prisma.runWithTenant(async (tx) => {
+      await this.assertRunning(tx, batch.id);
+      const pending = await tx.$queryRaw<
+        {
+          id: string;
+          docKey: string;
+          currency: string;
+          amount: Prisma.Decimal;
+          asOfDate: Date | null;
+          concept: string | null;
+          sourceRows: number;
+        }[]
+      >`
+        SELECT "id", "docKey", "currency", "amount", "asOfDate", "concept", "sourceRows"
+          FROM "patient_import_balance_rows"
+         WHERE "tenantId" = ${tenantId}::uuid AND "batchId" = ${batch.id}::uuid
+           AND "outcome" = 'PENDING'
+         ORDER BY "rowNumber", "currency"
+         LIMIT ${chunk}
+         FOR UPDATE SKIP LOCKED`;
+      if (pending.length === 0) return { processed: 0, created: 0, skipped: 0 };
+      const keys = [...new Set(pending.map((r) => r.docKey))];
+      // Solo una clave con UN paciente vivo: si hay varios, no se adivina.
+      const patients = await tx.$queryRaw<{ id: string; docKey: string }[]>`
+        SELECT min(p."id"::text)::uuid AS "id", k."docKey"
+          FROM "patients" p
+          JOIN unnest(${keys}::text[]) AS k("docKey")
+            ON regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = k."docKey"
+         WHERE p."tenantId" = ${tenantId}::uuid AND p."deletedAt" IS NULL
+           AND p."docNumber" IS NOT NULL
+         GROUP BY k."docKey"
+        HAVING count(*) = 1`;
+      const patientOf = new Map(patients.map((p) => [p.docKey, p.id]));
+      const createdById = batch.confirmedById as string;
+      const toCreate = pending.filter((r) => patientOf.has(r.docKey));
+      if (toCreate.length > 0) {
+        await tx.openingBalance.createMany({
+          skipDuplicates: true,
+          data: toCreate.map((r) => ({
+            tenantId,
+            locationId: batch.locationId,
+            patientId: patientOf.get(r.docKey) as string,
+            importBatchId: batch.id,
+            currency: r.currency,
+            amount: r.amount,
+            asOfDate: r.asOfDate ?? new Date(`${today}T00:00:00.000Z`),
+            asOfDateApproximate: r.asOfDate === null,
+            concept: r.concept ?? DEFAULT_BALANCE_CONCEPT,
+            sourceRows: r.sourceRows,
+            createdById,
+          })),
+        });
+      }
+      const ids = pending.map((r) => r.id);
+      const outcomes = pending.map((r) =>
+        patientOf.has(r.docKey) ? 'CREATED' : 'SKIPPED',
+      );
+      const patientIds = pending.map((r) => patientOf.get(r.docKey) ?? null);
+      await tx.$executeRaw`
+        UPDATE "patient_import_balance_rows" r
+           SET "outcome" = v.outcome::"PatientImportRowOutcome",
+               "patientId" = v.patient_id,
+               "processedAt" = now()
+          FROM (SELECT unnest(${ids}::uuid[]) AS id,
+                       unnest(${outcomes}::text[]) AS outcome,
+                       unnest(${patientIds}::uuid[]) AS patient_id) v
+         WHERE r."id" = v.id`;
+      const result = {
+        processed: pending.length,
+        created: toCreate.length,
+        skipped: pending.length - toCreate.length,
+      };
+      await tx.patientImportBatch.update({
+        where: { id: batch.id },
+        data: {
+          balanceProcessedRows: { increment: result.processed },
+          balanceCreatedCount: { increment: result.created },
+          balanceSkippedCount: { increment: result.skipped },
+        },
+      });
+      return result;
+    }, CHUNK_TX);
+  }
+
+  /** Saldos migrados VIVOS del lote por moneda: lo que de verdad se importó. */
+  async importedBalanceTotals(
+    batchId: string,
+  ): Promise<ImportedBalanceTotal[]> {
+    return (
+      (await this.importedBalanceTotalsByBatch([batchId])).get(batchId) ?? []
+    );
+  }
+
+  /** Lo mismo para varios lotes (el historial), en UNA consulta. */
+  async importedBalanceTotalsByBatch(
+    batchIds: string[],
+  ): Promise<Map<string, ImportedBalanceTotal[]>> {
+    const out = new Map<string, ImportedBalanceTotal[]>();
+    if (batchIds.length === 0) return out;
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<(ImportedBalanceTotal & { batchId: string })[]>`
+        SELECT "importBatchId" AS "batchId", "currency", count(*)::int AS "count",
+               (sum("amount") * 100)::bigint::float8 AS "cents"
+          FROM "opening_balances"
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "importBatchId" = ANY(${batchIds}::uuid[])
+           AND "voidedAt" IS NULL
+         GROUP BY "importBatchId", "currency"
+         ORDER BY "importBatchId", "currency"`,
+    );
+    for (const { batchId, ...total } of rows) {
+      const list = out.get(batchId) ?? [];
+      list.push(total);
+      out.set(batchId, list);
+    }
+    return out;
+  }
+
+  /**
+   * Monedas admitidas: el catálogo `currencies` (global, sin RLS), el mismo
+   * que valida planes y abonos (DX-042).
+   */
+  async currencyCodes(): Promise<string[]> {
+    const rows = await this.prisma.currency.findMany({
+      select: { code: true },
+      orderBy: { code: 'asc' },
+    });
+    return rows.map((r) => r.code);
+  }
+
+  /** País de la sede del lote (su zona decide el «hoy» de los saldos sin fecha). */
+  async locationCountry(locationId: string): Promise<string> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const location = await tx.location.findFirstOrThrow({
+        where: { id: locationId },
+        select: { country: true },
+      });
+      return location.country;
+    });
   }
 
   async listBatches(
@@ -874,6 +1245,28 @@ export class PrismaPatientImportRepository {
   }
 
   /**
+   * Columnas que apuntan a `opening_balances.id` (DX-262), del catálogo, una
+   * vez por proceso. Hoy ninguna: los abonos van siempre a un plan y la
+   * imputación al saldo migrado es DX-051. La tabla que la haga bloqueará
+   * el deshacer de los saldos con abonos imputados sin tocar este código.
+   */
+  openingBalanceReferences(): Promise<OpeningBalanceReference[]> {
+    this.balanceReferences ??= this.prisma.$queryRaw<OpeningBalanceReference[]>`
+      SELECT cl.relname AS "table", a.attname AS "column"
+        FROM pg_constraint c
+        JOIN pg_class cl ON cl.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = cl.relnamespace AND n.nspname = 'public'
+        CROSS JOIN LATERAL unnest(c.conkey, c.confkey) AS k(con, conf)
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.con
+        JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = k.conf
+       WHERE c.contype = 'f'
+         AND c.confrelid = 'public.opening_balances'::regclass
+         AND fa.attname = 'id'
+       ORDER BY 1, 2`;
+    return this.balanceReferences;
+  }
+
+  /**
    * «Deshacer lote»: retira en blando los pacientes que CREÓ el lote y
    * revierte lo que rellenó en los existentes (solo los campos que siguen con
    * el valor del lote). Se niega si alguno de los creados aparece en
@@ -884,6 +1277,7 @@ export class PrismaPatientImportRepository {
   async undo(id: string, undoneById: string): Promise<UndoResult> {
     const tenantId = this.tenantId();
     const references = await this.patientReferences();
+    const balanceReferences = await this.openingBalanceReferences();
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
         SELECT "status" FROM "patient_import_batches" WHERE "id" = ${id}::uuid FOR UPDATE`;
@@ -899,16 +1293,53 @@ export class PrismaPatientImportRepository {
          ORDER BY "id"
          FOR UPDATE`;
       const ids = created.map((p) => p.id);
-      if (ids.length > 0 && references.length > 0) {
+      if (ids.length > 0) {
         const checks = references.map(
           (ref) =>
             Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
                          FROM ${Prisma.raw(quoteIdent(ref.table))}
                         WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${ids}::uuid[])`,
         );
+        // DX-262: un saldo migrado de OTRO lote también es actividad (los
+        // del propio lote se retiran con él).
+        checks.push(Prisma.sql`SELECT "patientId" AS id FROM "opening_balances"
+                                WHERE "tenantId" = ${tenantId}::uuid
+                                  AND "patientId" = ANY(${ids}::uuid[])
+                                  AND "importBatchId" <> ${id}::uuid
+                                  AND "voidedAt" IS NULL`);
         const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
           SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
         if (n > 0) throw new UndoBlockedError(n);
+      }
+
+      // DX-262: los saldos migrados del lote, bloqueados; con un abono
+      // imputado (cualquier FK a opening_balances) el deshacer se niega.
+      const balances = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "opening_balances"
+         WHERE "tenantId" = ${tenantId}::uuid AND "importBatchId" = ${id}::uuid
+           AND "voidedAt" IS NULL
+         ORDER BY "id"
+         FOR UPDATE`;
+      const balanceIds = balances.map((r) => r.id);
+      if (balanceIds.length > 0 && balanceReferences.length > 0) {
+        const checks = balanceReferences.map(
+          (ref) =>
+            Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
+                         FROM ${Prisma.raw(quoteIdent(ref.table))}
+                        WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${balanceIds}::uuid[])`,
+        );
+        const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
+          SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
+        if (n > 0) throw new UndoBlockedError(0, n);
+      }
+      // Se retiran ANTES que los pacientes (el refresco de la cartera de cada
+      // sentencia ya los ve fuera), por sentencias de 1.000.
+      for (let i = 0; i < balanceIds.length; i += UNDO_CHUNK) {
+        await tx.$executeRaw`
+          UPDATE "opening_balances"
+             SET "voidedAt" = now(), "voidedById" = ${undoneById}::uuid
+           WHERE "tenantId" = ${tenantId}::uuid
+             AND "id" = ANY(${balanceIds.slice(i, i + UNDO_CHUNK)}::uuid[])`;
       }
       for (let i = 0; i < ids.length; i += UNDO_CHUNK) {
         await tx.$executeRaw`
@@ -959,9 +1390,14 @@ export class PrismaPatientImportRepository {
           undoneById,
           undoneCreated: ids.length,
           undoneFilled,
+          balanceUndoneCount: balanceIds.length,
         },
       });
-      return { undoneCreated: ids.length, undoneFilled };
+      return {
+        undoneCreated: ids.length,
+        undoneFilled,
+        undoneBalances: balanceIds.length,
+      };
     }, LONG_TX);
   }
 }

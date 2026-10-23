@@ -1,0 +1,499 @@
+import { INestApplication } from '@nestjs/common';
+import { ClinicRole, PrismaClient } from '@prisma/client';
+import request from 'supertest';
+import { App } from 'supertest/types';
+import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
+import { createE2eApp } from './support/create-e2e-app';
+import {
+  Clinic,
+  loginAs,
+  registerClinic,
+  resetDatabase,
+  seedMember,
+} from './support/e2e-fixtures';
+
+// DX-262 · Saldo inicial «Saldo migrado» con la hoja de saldos del
+// importador, en HTTP real: plantilla, dry-run con totales por moneda y
+// errores por fila en español SIN escribir, confirmación (en segundo plano,
+// después de los pacientes), estado de cuenta con «Saldo migrado» y su fecha
+// de corte, cartera en el tramo de su fecha, la suma importada = la del
+// archivo por moneda, deshacer, solo ADMIN, auditoría y aislamiento.
+const raw = new PrismaClient({
+  datasources: { db: { url: process.env.DIRECT_URL } },
+});
+
+interface CurrencyTotal {
+  currency: string;
+  rows: number;
+  amount: number;
+}
+
+interface BalancesView {
+  fileName: string;
+  fileSha256: string;
+  totalRows: number;
+  validRows: number;
+  errorRows: number;
+  mergedRows: number;
+  preparedCount: number;
+  fileTotals: CurrencyTotal[];
+  validTotals: CurrencyTotal[];
+  imported: { currency: string; count: number; amount: number }[];
+  progress: { processed: number; created: number; skipped: number };
+  undoneCount: number | null;
+}
+
+interface Batch {
+  id: string;
+  status: string;
+  canConfirm: boolean;
+  canUndo: boolean;
+  balances: BalancesView | null;
+  balanceIssues: {
+    row: number;
+    column: string | null;
+    kind: string;
+    message: string;
+  }[];
+  balanceIssuesTotal: number;
+}
+
+const PATIENTS_HEADER = 'tipo_documento;numero_documento;nombres;apellidos';
+const BALANCES_HEADER =
+  'numero_documento;importe;moneda;fecha_antiguedad;concepto';
+
+const csv = (header: string, lines: string[]) =>
+  Buffer.from(`${header}\n${lines.join('\n')}\n`, 'utf8');
+
+/** Día civil en Bogotá (la sede de la demo): el «hoy» de la clínica. */
+function bogotaDay(offsetDays = 0): string {
+  const d = new Date(Date.now() + offsetDays * 86_400_000);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+  }).format(d);
+}
+const ddmmyyyy = (iso: string) => iso.split('-').reverse().join('/');
+
+describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => {
+  let app: INestApplication<App>;
+  let a: Clinic;
+  let b: Clinic;
+  let reception: string;
+  let existingId: string;
+  let mainLocationId: string;
+  let batch: Batch;
+
+  const api = () => request(app.getHttpServer());
+  const as = (req: request.Test, token: string, clinic: Clinic = a) =>
+    req
+      .set('X-Tenant-Host', clinic.host)
+      .set('Authorization', `Bearer ${token}`);
+  const attach = (
+    path: string,
+    bytes: Buffer,
+    filename: string,
+    token = a.adminToken,
+    clinic = a,
+  ) =>
+    as(api().post(`/api/v1/patient-imports${path}`), token, clinic).attach(
+      'file',
+      bytes,
+      { filename, contentType: 'text/csv' },
+    );
+  const getBatch = async (id: string): Promise<Batch> =>
+    (
+      await as(api().get(`/api/v1/patient-imports/${id}`), a.adminToken).expect(
+        200,
+      )
+    ).body as Batch;
+  const drain = () => app.get(JobWorker).drain();
+  const patientByDoc = (docNumber: string) =>
+    raw.patient.findFirstOrThrow({
+      where: { tenantId: a.tenantId, docNumber, deletedAt: null },
+    });
+  const statementOf = async (patientId: string) =>
+    (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/account-statement`),
+        a.adminToken,
+      ).expect(200)
+    ).body as {
+      summary: {
+        currency: string;
+        budgeted: number;
+        openingBalance: number;
+        paid: number;
+        balance: number;
+      }[];
+      openingBalances: {
+        currency: string;
+        amount: number;
+        asOfDate: string;
+        asOfDateApproximate: boolean;
+        concept: string;
+        importBatchId: string;
+      }[];
+    };
+  const aging = async () =>
+    (
+      await as(api().get('/api/v1/receivables/aging'), a.adminToken)
+        .set('X-Location-Id', mainLocationId)
+        .expect(200)
+    ).body as {
+      items: {
+        patient: { id: string };
+        ageApproximate: boolean;
+        currencies: {
+          currency: string;
+          balance: number;
+          ageApproximate: boolean;
+          buckets: Record<string, number>;
+        }[];
+      }[];
+    };
+
+  const OLD_DAY = bogotaDay(-75);
+  const RECENT_DAY = bogotaDay(-10);
+
+  beforeAll(async () => {
+    app = await createE2eApp();
+    await resetDatabase(raw);
+    a = await registerClinic(app, 'dx262-e2e');
+    b = await registerClinic(app, 'dx262-e2e-otra');
+    reception = await loginAs(
+      app,
+      a.host,
+      (await seedMember(raw, a, ClinicRole.RECEPTION)).email,
+    );
+    const locations = await as(
+      api().get('/api/v1/locations'),
+      a.adminToken,
+    ).expect(200);
+    mainLocationId = (locations.body as { id: string }[])[0].id;
+    await as(api().put('/api/v1/locations/schedule'), a.adminToken)
+      .set('X-Location-Id', mainLocationId)
+      .send({
+        timezone: 'America/Bogota',
+        ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+          weekday,
+          startMinute: 0,
+          endMinute: 1440,
+        })),
+      })
+      .expect(200);
+    const existing = await as(api().post('/api/v1/patients'), a.adminToken)
+      .send({
+        docType: 'CC',
+        docNumber: '900900',
+        firstName: 'Ya',
+        lastName: 'Existía',
+        sex: 'UNSPECIFIED',
+      })
+      .expect(201);
+    existingId = (existing.body as { id: string }).id;
+
+    // Lote de pacientes (dry-run): dos nuevos y el que ya existe.
+    const res = await attach(
+      '',
+      csv(PATIENTS_HEADER, [
+        'CC;111111;Ana;Migrada',
+        'CC;222222;Luis;Migrado',
+        'CC;900900;Ya;Existía',
+      ]),
+      'pacientes.csv',
+    )
+      .set('X-Location-Id', mainLocationId)
+      .expect(201);
+    batch = res.body as Batch;
+    expect(batch.balances).toBeNull();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await raw.$disconnect();
+  });
+
+  it('plantilla de la hoja de saldos: CSV con BOM y las columnas', async () => {
+    const res = await as(
+      api().get('/api/v1/patient-imports/balances-template'),
+      a.adminToken,
+    ).expect(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.text.startsWith('﻿"numero_documento","importe","moneda"')).toBe(
+      true,
+    );
+  });
+
+  it('solo ADMIN: recepción recibe 403 en español al subir la hoja de saldos', async () => {
+    const res = await attach(
+      `/${batch.id}/balances`,
+      csv(BALANCES_HEADER, ['111111;100;COP;;']),
+      'saldos.csv',
+      reception,
+    ).expect(403);
+    expect((res.body as { message: string }).message).toBe(
+      'Solo un administrador de la clínica puede importar pacientes.',
+    );
+  });
+
+  it('otra clínica no ve el lote: 404 al subirle saldos', async () => {
+    await attach(
+      `/${batch.id}/balances`,
+      csv(BALANCES_HEADER, ['111111;100;COP;;']),
+      'saldos.csv',
+      b.adminToken,
+      b,
+    ).expect(404);
+  });
+
+  it('dry-run: total por moneda y errores por fila en español, sin escribir nada', async () => {
+    const res = await attach(
+      `/${batch.id}/balances`,
+      csv(BALANCES_HEADER, [
+        `111111;150.000;COP;${ddmmyyyy(OLD_DAY)};Ortodoncia 2025`,
+        '111111;50.000,50;COP;;',
+        '900900;40;USD;;',
+        '999999;100;COP;;',
+        '222222;-5;COP;;',
+        '222222;100;XYZ;;',
+        `222222;1.000;cop;${RECENT_DAY};`,
+      ]),
+      'saldos.csv',
+    ).expect(201);
+    const view = res.body as Batch;
+    expect(view.balances).toMatchObject({
+      fileName: 'saldos.csv',
+      totalRows: 7,
+      validRows: 4,
+      errorRows: 3,
+      mergedRows: 1,
+      preparedCount: 3,
+      fileTotals: [
+        { currency: 'COP', rows: 4, amount: 201100.5 },
+        { currency: 'USD', rows: 1, amount: 40 },
+      ],
+      validTotals: [
+        { currency: 'COP', rows: 3, amount: 201000.5 },
+        { currency: 'USD', rows: 1, amount: 40 },
+      ],
+      imported: [],
+    });
+    expect(
+      view.balanceIssues.map((i) => [i.row, i.column, i.kind, i.message]),
+    ).toEqual([
+      [
+        3,
+        'numero_documento',
+        'MERGED',
+        'Mismo paciente y moneda que la fila 2: se suman en un solo saldo migrado.',
+      ],
+      [
+        5,
+        'numero_documento',
+        'ERROR',
+        'No hay ningún paciente con el documento «999999» en la clínica ni en el archivo de pacientes.',
+      ],
+      [6, 'importe', 'ERROR', 'El importe debe ser mayor que 0.'],
+      [
+        7,
+        'moneda',
+        'ERROR',
+        expect.stringMatching(
+          /^La moneda «XYZ» no está admitida en la clínica\. Admitidas: .*COP.*USD/,
+        ),
+      ],
+    ]);
+    expect(view.balanceIssuesTotal).toBe(4);
+    expect(view.canConfirm).toBe(true);
+    // Sin escribir: ni saldos migrados ni pacientes nuevos.
+    expect(
+      await raw.openingBalance.count({ where: { tenantId: a.tenantId } }),
+    ).toBe(0);
+    expect(
+      await raw.patient.count({
+        where: { tenantId: a.tenantId, deletedAt: null },
+      }),
+    ).toBe(1);
+
+    const report = await as(
+      api().get(`/api/v1/patient-imports/${batch.id}/balances/errors.csv`),
+      a.adminToken,
+    ).expect(200);
+    expect(report.text).toContain('Sumada a otra fila');
+    expect(report.text).toContain('El importe debe ser mayor que 0.');
+  });
+
+  it('una hoja sin la columna de moneda: 400 en español', async () => {
+    const res = await attach(
+      `/${batch.id}/balances`,
+      csv('documento;saldo', ['111111;100']),
+      'malo.csv',
+    ).expect(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /^A la hoja de saldos le falta la columna «Moneda»/,
+    );
+    // La hoja anterior sigue en el lote.
+    expect((await getBatch(batch.id)).balances?.preparedCount).toBe(3);
+  });
+
+  it('confirmar importa pacientes y saldos; la suma importada cuadra con el archivo por moneda', async () => {
+    await as(
+      api().post(`/api/v1/patient-imports/${batch.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    const done = await getBatch(batch.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.balances?.progress).toEqual({
+      processed: 3,
+      created: 3,
+      skipped: 0,
+    });
+    expect(done.balances?.imported).toEqual([
+      { currency: 'COP', count: 2, amount: 201000.5 },
+      { currency: 'USD', count: 1, amount: 40 },
+    ]);
+    expect(done.balances?.imported.map((t) => [t.currency, t.amount])).toEqual(
+      done.balances?.validTotals.map((t) => [t.currency, t.amount]),
+    );
+  });
+
+  it('estado de cuenta: «Saldo migrado» con su fecha de corte (aprox. si es la de importación) y en el saldo', async () => {
+    const ana = await patientByDoc('111111');
+    const st = await statementOf(ana.id);
+    expect(st.openingBalances).toEqual([
+      {
+        id: expect.any(String) as string,
+        currency: 'COP',
+        amount: 200000.5,
+        asOfDate: OLD_DAY,
+        asOfDateApproximate: false,
+        concept: 'Ortodoncia 2025',
+        importBatchId: batch.id,
+      },
+    ]);
+    expect(st.summary).toEqual([
+      expect.objectContaining({
+        currency: 'COP',
+        budgeted: 0,
+        openingBalance: 200000.5,
+        paid: 0,
+        balance: 200000.5,
+      }),
+    ]);
+    const old = await statementOf(existingId);
+    expect(old.openingBalances).toEqual([
+      expect.objectContaining({
+        currency: 'USD',
+        amount: 40,
+        asOfDate: bogotaDay(),
+        asOfDateApproximate: true,
+        concept: 'Saldo migrado',
+      }),
+    ]);
+  });
+
+  it('cartera: cada saldo en el tramo de su fecha, por moneda y en la sede del lote', async () => {
+    const ana = await patientByDoc('111111');
+    const luis = await patientByDoc('222222');
+    const rows = (await aging()).items;
+    const row = (id: string) => rows.find((r) => r.patient.id === id);
+    expect(row(ana.id)?.currencies).toEqual([
+      expect.objectContaining({
+        currency: 'COP',
+        balance: 200000.5,
+        ageApproximate: false,
+        buckets: expect.objectContaining({
+          days61to90: 200000.5,
+        }) as Record<string, number>,
+      }),
+    ]);
+    expect(row(luis.id)?.currencies[0].buckets.days0to30).toBe(1000);
+    expect(row(existingId)?.currencies).toEqual([
+      expect.objectContaining({
+        currency: 'USD',
+        balance: 40,
+        ageApproximate: true,
+        buckets: expect.objectContaining({ days0to30: 40 }) as Record<
+          string,
+          number
+        >,
+      }),
+    ]);
+  });
+
+  it('auditoría del lote con el total por moneda de los saldos', async () => {
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId: a.tenantId,
+        resourceType: 'PATIENT_IMPORT_BATCH',
+        resourceId: batch.id,
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+    const validated = events.find(
+      (e) =>
+        (e.metadata as { reason?: string }).reason ===
+        'IMPORT_BALANCES_VALIDATED',
+    );
+    expect(validated?.action).toBe('UPDATE');
+    expect(validated?.metadata).toMatchObject({
+      importBatch: {
+        balanceRows: 7,
+        balanceErrors: 3,
+        balanceTotals: [
+          { currency: 'COP', rows: 3, amount: 201000.5 },
+          { currency: 'USD', rows: 1, amount: 40 },
+        ],
+      },
+    });
+    const confirmed = events.find(
+      (e) => (e.metadata as { reason?: string }).reason === 'IMPORT_CONFIRMED',
+    );
+    expect(confirmed?.metadata).toMatchObject({
+      importBatch: { balanceTotals: expect.any(Array) as unknown[] },
+    });
+    expect(JSON.stringify(events.map((e) => e.metadata))).not.toContain(
+      '111111',
+    );
+  });
+
+  it('deshacer el lote retira los saldos migrados: fuera del estado de cuenta y de la cartera', async () => {
+    const res = await as(
+      api().post(`/api/v1/patient-imports/${batch.id}/undo`),
+      a.adminToken,
+    ).expect(200);
+    const undone = res.body as Batch;
+    expect(undone.status).toBe('UNDONE');
+    expect(undone.balances).toMatchObject({ undoneCount: 3, imported: [] });
+    const st = await statementOf(existingId);
+    expect(st.openingBalances).toEqual([]);
+    expect(st.summary).toEqual([]);
+    expect((await aging()).items).toEqual([]);
+  });
+
+  it('quitar la hoja de saldos de un dry-run; en un lote ya importado, 409', async () => {
+    const res = await attach(
+      '',
+      csv(PATIENTS_HEADER, ['CC;333333;Eva;Nueva']),
+      'p2.csv',
+    ).expect(201);
+    const second = res.body as Batch;
+    await attach(
+      `/${second.id}/balances`,
+      csv(BALANCES_HEADER, ['333333;10;COP;;']),
+      'saldos.csv',
+    ).expect(201);
+    const cleared = await as(
+      api().delete(`/api/v1/patient-imports/${second.id}/balances`),
+      a.adminToken,
+    ).expect(200);
+    expect((cleared.body as Batch).balances).toBeNull();
+    await as(
+      api().delete(`/api/v1/patient-imports/${batch.id}/balances`),
+      a.adminToken,
+    ).expect(409);
+  });
+});

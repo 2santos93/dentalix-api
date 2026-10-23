@@ -51,6 +51,9 @@ export interface AuditMetadata {
   /**
    * DX-107: lote de importación de pacientes — SHA-256 del fichero, modo de
    * duplicados y totales (solo números). Ni el nombre del fichero ni filas.
+   * DX-262: y su hoja de saldos — hash, contadores y el total por moneda
+   * (importe AGREGADO del lote, pedido por el criterio de auditoría; nunca
+   * el de un paciente ni su documento).
    */
   importBatch?: AuditImportBatch;
 }
@@ -66,6 +69,20 @@ export interface AuditImportBatch {
   updated?: number;
   undoneCreated?: number;
   undoneFilled?: number;
+  /** DX-262: hoja de saldos del lote. */
+  balanceFileSha256?: string;
+  balanceRows?: number;
+  balanceErrors?: number;
+  balancesCreated?: number;
+  balancesUndone?: number;
+  balanceTotals?: AuditCurrencyTotal[];
+}
+
+/** Total por moneda de la hoja de saldos (DX-262): código, filas e importe. */
+export interface AuditCurrencyTotal {
+  currency: string;
+  rows: number;
+  amount: number;
 }
 
 /** Un tramo del horario de un profesional en la auditoría (DX-233). */
@@ -201,7 +218,38 @@ const IMPORT_COUNTS = [
   'updated',
   'undoneCreated',
   'undoneFilled',
+  'balanceRows',
+  'balanceErrors',
+  'balancesCreated',
+  'balancesUndone',
 ] as const;
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+const MAX_CURRENCY_TOTALS = 20;
+
+/** Totales por moneda con código ISO, filas enteras e importe a céntimos. */
+function currencyTotals(value: unknown): AuditCurrencyTotal[] {
+  if (!Array.isArray(value)) return [];
+  const out: AuditCurrencyTotal[] = [];
+  for (const item of value.slice(0, MAX_CURRENCY_TOTALS)) {
+    if (!isRecord(item)) continue;
+    const { currency, rows, amount } = item;
+    if (
+      typeof currency !== 'string' ||
+      !CURRENCY_CODE.test(currency) ||
+      typeof rows !== 'number' ||
+      !Number.isInteger(rows) ||
+      rows < 0 ||
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      Math.round(amount * 100) / 100 !== amount
+    ) {
+      continue;
+    }
+    out.push({ currency, rows, amount });
+  }
+  return out;
+}
 
 /** Hash con formato y contadores enteros ≥ 0 (el resto se descarta); sin hash, nada. */
 function importBatch(value: unknown): AuditImportBatch | null {
@@ -214,6 +262,12 @@ function importBatch(value: unknown): AuditImportBatch | null {
     const n = value[key];
     if (typeof n === 'number' && Number.isInteger(n) && n >= 0) out[key] = n;
   }
+  const { balanceFileSha256 } = value;
+  if (typeof balanceFileSha256 === 'string' && SHA256.test(balanceFileSha256)) {
+    out.balanceFileSha256 = balanceFileSha256;
+  }
+  const totals = currencyTotals(value.balanceTotals);
+  if (totals.length > 0) out.balanceTotals = totals;
   return out;
 }
 

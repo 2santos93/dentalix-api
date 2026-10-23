@@ -21,7 +21,7 @@ export function csvCell(value: string | number | null): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-function csv(lines: (string | number | null)[][]): string {
+export function csv(lines: (string | number | null)[][]): string {
   return BOM + lines.map((l) => l.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -62,6 +62,7 @@ export const ISSUE_KIND_LABELS: Record<IssueKind, string> = {
   ERROR: 'Error',
   DUPLICATE_FILE: 'Repetido en el archivo',
   DUPLICATE_EXISTING: 'Ya existe en la clínica',
+  MERGED: 'Sumada a otra fila',
 };
 
 export const ISSUES_CSV_HEADER = ['Fila', 'Columna', 'Tipo', 'Motivo', 'Valor'];

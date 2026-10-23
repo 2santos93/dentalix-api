@@ -185,10 +185,12 @@ export class ImportIssueDto {
   @ApiProperty({ description: 'Fila del archivo (1 = cabecera)' }) row!: number;
   @ApiProperty({ nullable: true, type: String }) column!: string | null;
   @ApiProperty({
-    enum: ['ERROR', 'DUPLICATE_FILE', 'DUPLICATE_EXISTING'],
+    enum: ['ERROR', 'DUPLICATE_FILE', 'DUPLICATE_EXISTING', 'MERGED'],
     enumName: 'PatientImportIssueKind',
+    description:
+      'MERGED (DX-262): fila de la hoja de saldos sumada a otra del mismo paciente y moneda (aviso, no error)',
   })
-  kind!: 'ERROR' | 'DUPLICATE_FILE' | 'DUPLICATE_EXISTING';
+  kind!: 'ERROR' | 'DUPLICATE_FILE' | 'DUPLICATE_EXISTING' | 'MERGED';
   @ApiProperty({ description: 'Motivo en español' }) message!: string;
   @ApiProperty({ nullable: true, type: String }) value!: string | null;
 }
@@ -213,6 +215,76 @@ export class ImportPreviewRowDto {
   @ApiProperty() rowNumber!: number;
   @ApiProperty({ enum: ['NEW', 'EXISTING'] }) status!: 'NEW' | 'EXISTING';
   @ApiProperty({ type: ImportPatientDataDto }) data!: ImportPatientDataDto;
+}
+
+export class BalanceCurrencyTotalDto {
+  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Filas del archivo' }) rows!: number;
+  @ApiProperty({ example: 1500000.5 }) amount!: number;
+}
+
+export class ImportedBalanceTotalDto {
+  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Saldos migrados vivos' }) count!: number;
+  @ApiProperty({ example: 1500000.5 }) amount!: number;
+}
+
+export class BalanceProgressDto {
+  @ApiProperty() processed!: number;
+  @ApiProperty() created!: number;
+  @ApiProperty({
+    description: 'No creados: su paciente no existía al importar',
+  })
+  skipped!: number;
+}
+
+/** Hoja de saldos «Saldo migrado» del lote (DX-262). */
+export class PatientImportBalancesDto {
+  @ApiProperty() fileName!: string;
+  @ApiProperty({
+    enum: PatientImportFileFormat,
+    enumName: 'PatientImportFileFormat',
+  })
+  fileFormat!: PatientImportFileFormat;
+  @ApiProperty() fileSizeBytes!: number;
+  @ApiProperty({ description: 'SHA-256 (hex) de la hoja de saldos' })
+  fileSha256!: string;
+  @ApiProperty({ description: 'Filas con datos' }) totalRows!: number;
+  @ApiProperty({
+    description: 'Filas que se importan (las sumadas a otra incluidas)',
+  })
+  validRows!: number;
+  @ApiProperty({ description: 'Filas con algún error: no se importan' })
+  errorRows!: number;
+  @ApiProperty({
+    description: 'Filas sumadas a otra del mismo paciente y moneda',
+  })
+  mergedRows!: number;
+  @ApiProperty({ description: 'Saldos a crear: uno por paciente y moneda' })
+  preparedCount!: number;
+  @ApiProperty({
+    type: [BalanceCurrencyTotalDto],
+    description:
+      'Total del archivo por moneda (filas con importe y moneda legibles)',
+  })
+  fileTotals!: BalanceCurrencyTotalDto[];
+  @ApiProperty({
+    type: [BalanceCurrencyTotalDto],
+    description: 'Lo que se importa, por moneda (sin convertir)',
+  })
+  validTotals!: BalanceCurrencyTotalDto[];
+  @ApiProperty({
+    type: [ImportedBalanceTotalDto],
+    description: 'Saldos migrados vivos del lote, por moneda',
+  })
+  imported!: ImportedBalanceTotalDto[];
+  @ApiProperty({ type: BalanceProgressDto }) progress!: BalanceProgressDto;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Saldos que retiró el deshacer',
+  })
+  undoneCount!: number | null;
 }
 
 export class PatientImportBatchDto {
@@ -262,6 +334,12 @@ export class PatientImportBatchDto {
       'El informe de errores (errors.csv) sigue disponible: ni caducado ni purgado a los 90 días',
   })
   reportAvailable!: boolean;
+  @ApiProperty({
+    type: PatientImportBalancesDto,
+    nullable: true,
+    description: 'DX-262: hoja de saldos del lote; null si no trae',
+  })
+  balances!: PatientImportBalancesDto | null;
 }
 
 export class PatientImportBatchDetailDto extends PatientImportBatchDto {
@@ -276,6 +354,13 @@ export class PatientImportBatchDetailDto extends PatientImportBatchDto {
     description: 'Solo en el dry-run: las primeras filas que se importarán',
   })
   preview!: ImportPreviewRowDto[];
+  @ApiProperty({
+    type: [ImportIssueDto],
+    description:
+      'DX-262: errores y avisos de la hoja de saldos (los primeros 200; todos en balances/errors.csv)',
+  })
+  balanceIssues!: ImportIssueDto[];
+  @ApiProperty() balanceIssuesTotal!: number;
 }
 
 export class PatientImportListDto {
