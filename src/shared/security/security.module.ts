@@ -91,6 +91,13 @@ function throttlers(
           request(context).headers.authorization,
         ),
     },
+    {
+      // SEC-046: un balde por clínica + usuario para TODAS las rutas que leen
+      // un fichero de importación (el prefijo es la política, no la ruta).
+      ...strict('patient-import'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
   ];
 }
 
