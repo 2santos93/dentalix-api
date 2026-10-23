@@ -2483,3 +2483,40 @@ export const DEMO_ANAMNESIS_SUBMISSION: {
     surgeries: { answer: 'NO' },
   },
 };
+
+/**
+ * DX-279: política de cancelación de la sede principal (24 h de aviso, cargo
+ * sugerido de 50.000 COP) y una paciente con incidencias para ver la insignia
+ * «2 inasistencias · 1 cancelación tardía (12 meses)» en su ficha y en sus
+ * citas: Daniela Montoya Arango, con dos inasistencias y una cancelación con
+ * 5 h de aviso en citas de la semana pasada en la sede principal (en huecos
+ * libres del calendario). Las cancelaciones del calendario se
+ * registran como avisadas por el paciente 2 días antes (no tardías).
+ */
+export const DEMO_CANCELLATION = {
+  location: 'principal' as DemoLocationKey,
+  policy: {
+    noticeHours: 24,
+    suggestedFee: 50000,
+    currency: 'COP',
+    patientText:
+      'Si no puedes asistir, avísanos con al menos 24 horas de antelación para ofrecer tu hora a otro paciente. Las cancelaciones con menos aviso y las inasistencias pueden tener un cargo.',
+  },
+  calendarNoticeHours: 48,
+  calendarReasons: ['ILLNESS', 'WORK', 'TRANSPORT', 'FORGOT'] as const,
+  incidents: {
+    patientIndex: 4,
+    dentistIndex: 0,
+    /** Huecos que se prueban (hora de pared de Bogotá, en minutos). */
+    firstMinute: 7 * 60,
+    lastMinute: 18 * 60,
+    /** Dentro de la semana pasada del calendario (nada de hace más de 15 días). */
+    lastDaysAgo: 14,
+    noShowDaysAgo: [9, 10] as const,
+    lateCancellation: {
+      daysAgo: 11,
+      hoursBefore: 5,
+      reasonCode: 'WORK' as const,
+    },
+  },
+};

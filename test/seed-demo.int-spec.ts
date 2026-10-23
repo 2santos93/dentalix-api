@@ -110,6 +110,8 @@ const TENANT_TABLES = [
   'waitlist_offers',
   'appointment_waitlist',
   'appointments',
+  // DX-279: versiones de la política de cancelación (las citas las citan).
+  'cancellation_policy_versions',
   'appointment_types',
   'inventory_movements',
   'inventory_items',
@@ -803,6 +805,45 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       Buffer.from(paolaToken.split('.')[1], 'base64url').toString('utf8'),
     ) as { loc?: string[] };
     expect(paolaClaims.loc).toBeUndefined();
+  });
+
+  it('DX-279: política de cancelación en la sede principal y una paciente con inasistencias y una cancelación tardía', async () => {
+    const tenantId = await liveDemoTenantId();
+    const policies = await raw.cancellationPolicyVersion.findMany({
+      where: { tenantId },
+      include: { location: { select: { name: true } } },
+    });
+    expect(policies).toHaveLength(1);
+    expect(policies[0]).toMatchObject({
+      version: 1,
+      noticeHours: 24,
+      currency: 'COP',
+    });
+    const late = await raw.appointment.findMany({
+      where: { tenantId, lateCancellation: true },
+    });
+    expect(late).toHaveLength(1);
+    expect(late[0]).toMatchObject({
+      status: 'CANCELLED',
+      cancelledByKind: 'STAFF_FOR_PATIENT',
+      noticeMinutes: 300,
+      locationId: policies[0].locationId,
+    });
+    const noShows = await raw.appointment.count({
+      where: {
+        tenantId,
+        patientId: late[0].patientId,
+        status: 'NO_SHOW',
+        noShowMarkedAt: { not: null },
+      },
+    });
+    expect(noShows).toBeGreaterThanOrEqual(2);
+    // Las cancelaciones del calendario llevan origen y motivo, y no son tardías.
+    const cancelled = await raw.appointment.findMany({
+      where: { tenantId, status: 'CANCELLED', lateCancellation: false },
+    });
+    expect(cancelled.length).toBeGreaterThan(0);
+    expect(cancelled.every((a) => a.cancelReasonCode !== null)).toBe(true);
   });
 
   it('las citas cubren semana pasada/actual/próxima, varios estados, sedes y dentistas, dentro del horario', async () => {

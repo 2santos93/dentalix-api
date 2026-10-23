@@ -1575,6 +1575,64 @@ de esquemas propios de una librería).
   DELETE de ese rol lo acota a `"tenantId" IS NULL` la política RESTRICTIVA
   `email_outbox_dispatcher_delete_platform`.
 
+## Política de cancelación e inasistencias (DX-279)
+
+Porción 1: la política por sede, quién y cuándo canceló, si fue tardía y el
+resumen de asistencia del paciente. Mostrar la política al paciente (recordatorio
+y enlace con `acknowledgePolicy`), rellenar `policyVersionId` y el cargo o su
+condonación son DX-291.
+
+- **Tabla `cancellation_policy_versions`** (RLS FORCE, FK compuesta a la sede,
+  moneda del catálogo): horas de aviso 0–168, importe sugerido ≥ 0 con su
+  moneda (los dos o ninguno), texto para el paciente ≤ 1000 y
+  `receptionCanCharge` (lo usará DX-291). **Append-only**: la app no tiene
+  UPDATE/DELETE/TRUNCATE y el trigger `cancellation_policy_versions_immutable`
+  los rechaza (DELETE/TRUNCATE solo a un superusuario o sin
+  `app.current_tenant`, para limpiar bases de test). La vigente es la de mayor
+  `version`.
+- **Endpoints** (solo ADMIN, 403 «Solo un administrador puede ver y cambiar la
+  política de cancelación.»): `GET /locations/:id/cancellation-policy` →
+  `{ locationId, current, versions }` y `POST` con `{ noticeHours,
+  suggestedFee?, currency?, patientText?, receptionCanCharge? }`, que crea la
+  versión siguiente (sede bloqueada: dos guardados a la vez no repiten número).
+  400 en español; otra clínica: 404. Queda en `audit_events`
+  (`CREATE`, `CANCELLATION_POLICY`, `CANCELLATION_POLICY_CHANGED`).
+- **Columnas de `appointments`**: `cancelledAt`, `cancelledByKind`
+  (`PATIENT_LINK | STAFF_FOR_PATIENT | CLINIC`), `cancelReasonCode` (ILLNESS,
+  FORGOT, COST, TRANSPORT, WORK, CLINIC_RESCHEDULE, OTHER), `cancelReasonText`
+  (≤ 500), `noticeMinutes`, `lateCancellation`, `noShowMarkedAt` y
+  `policyVersionId` (FK compuesta; NULL hasta DX-291). CHECK
+  `appointments_cancellation_check`: solo una cita CANCELLED lleva datos de
+  cancelación; hora, quién, aviso y tardía van juntos (las canceladas antiguas
+  no tienen ninguno y siguen siendo válidas); el personal siempre da motivo;
+  aviso ≥ 0; la clínica nunca es tardía; `noShowMarkedAt` solo en NO_SHOW.
+- **Cancelar** (`PATCH /appointments/:id` a CANCELLED) exige
+  `cancelledByKind` (`STAFF_FOR_PATIENT` o `CLINIC`) y `cancelReasonCode` (400
+  si faltan); `cancelReasonText` es opcional. El servidor fija la hora y, con la
+  fila bloqueada, calcula en UTC los minutos de aviso (hacia abajo, 0 si la
+  cita ya empezó) y si es tardía (aviso **menor** que las horas de la política
+  vigente de la sede de la cita; exactamente las horas no lo es; sin política o
+  si cancela la clínica, nunca). Un cambio de hora no lo altera: se cuenta el
+  tiempo real. Queda auditado (`APPOINTMENT_CANCELLED` con origen, código del
+  motivo, aviso y tardía; nunca el texto). Marcar NO_SHOW guarda
+  `noShowMarkedAt`; salir de CANCELLED o NO_SHOW borra sus datos. El enlace
+  público (DX-005) que cancela guarda `PATIENT_LINK`, la hora de la respuesta,
+  el aviso y si es tardía (sin motivo ni aceptación todavía). Reagendar o
+  adelantar a un hueco no cancela nunca. `GET
+  /appointments/:id/cancellation-preview` da el aviso si se cancelara ahora.
+- **Resumen**: `GET /patients/:id/attendance-summary` (los cuatro roles):
+  citas ya empezadas, inasistencias y cancelaciones tardías cuyo inicio cae en
+  los últimos 12 meses, por sede y en total, calculado al pedirlo. Un miembro
+  restringido (DX-089) solo cuenta sus sedes (sin mirar la cabecera). `GET
+  /appointments` trae `attendance` por cita con la misma regla, en una sola
+  consulta para todo el lote (índice parcial
+  `appointments_tenant_patient_incidents_idx`), y omite `cancelReasonText`.
+- **Demo**: la sede principal tiene una política de 24 h con cargo sugerido de
+  50.000 COP, y Daniela Montoya Arango tiene dos inasistencias y una
+  cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
+  citas). Las cancelaciones del calendario se registran avisadas por el
+  paciente con 2 días.
+
 ## Recordatorios de cita por email (DX-026)
 
 Módulo `src/modules/reminders`. Reutiliza la cola y el cron con candado
