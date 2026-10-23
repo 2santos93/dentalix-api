@@ -59,6 +59,10 @@ import {
   checkStatusTransition,
   isInClinic,
 } from '../../domain/patient-flow';
+import {
+  planItemsClosedMessage,
+  planItemsEditable,
+} from '../../domain/plan-item-reservation';
 
 /**
  * Lo que el cliente puede cambiar. `revokeConfirmations` y los indicadores de
@@ -183,6 +187,23 @@ export class UpdateAppointmentUseCase {
     }
     // DX-089: una cita de una sede no permitida es 403 (no 404: existe).
     this.tenantContext.assertLocationAllowed(existing.locationId);
+
+    // DX-271 (BE-039): los ítems de una cita cerrada o pasada no se cambian
+    // (fijan el intervalo mínimo de la visita siguiente). El repositorio lo
+    // vuelve a mirar con la fila bloqueada; aquí, antes de cualquier otra regla.
+    if (
+      patch.planItemIds !== undefined &&
+      !planItemsEditable(
+        existing,
+        {
+          status: patch.status ?? existing.status,
+          start: patch.start ?? existing.start,
+        },
+        new Date(),
+      )
+    ) {
+      throw new ConflictException(planItemsClosedMessage(existing, new Date()));
+    }
 
     // DX-210: «Adelantar si hay hueco» lo cambian recepción, el odontólogo y
     // gestión (la asistente ve la agenda pero no la marca).
