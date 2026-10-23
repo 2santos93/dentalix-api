@@ -1913,6 +1913,66 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
 - **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
   con separador `;`, errores, un repetido y uno de la clínica demo).
 
+## Saldo inicial «Saldo migrado» (DX-262)
+
+Porción 2 de DX-107: la clínica que llega de Excel o de otro programa trae las
+deudas de sus pacientes. En el asistente de importación, después de validar
+los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
+(CSV o XLSX, mismos topes: 5 MB y 10.000 filas). Solo ADMIN.
+
+- **Columnas** (por sinónimos, sin tildes; plantilla en
+  `GET /patient-imports/balances-template`): `numero_documento`, `importe`,
+  `moneda`, `fecha_antiguedad` (opcional) y `concepto` (opcional, ≤ 200;
+  por defecto «Saldo migrado»). Sin documento, importe o moneda: 400.
+- **Endpoints**: `POST /patient-imports/:id/balances` (dry-run, lote
+  VALIDATED y vigente; volver a subirla la reemplaza), `DELETE
+  /patient-imports/:id/balances` (quitarla), `GET
+  /patient-imports/:id/balances/errors.csv`. El lote (`GET /:id`) trae
+  `balances` (totales por moneda del archivo y de lo que se importa, lo
+  importado de verdad, avance y deshecho) y `balanceIssues`.
+- **Validación por fila** (en español, con su columna): documento que no es
+  de ningún paciente vivo de la clínica ni del archivo de pacientes del lote
+  (o ambiguo: «1.111» y «1111» anteriores a DX-107), importe no positivo, con
+  más de 2 decimales o ilegible, moneda fuera del catálogo `currencies` (el
+  mismo de planes y abonos), fecha futura o irreconocible. Importe: el último
+  separador es el decimal si hay «.» y «,»; con uno solo seguido de 3 cifras,
+  de miles (`150.000`); en una celda numérica de XLSX, siempre decimal.
+- **Un saldo por paciente y moneda y lote**: las filas repetidas se suman (aviso
+  `MERGED` en el dry-run), con la fecha más antigua y el primer concepto.
+  Las monedas nunca se mezclan ni se convierten.
+- **Al confirmar**, el trabajo `patient-imports.process` importa primero los
+  pacientes y después los saldos en bloques de 500 (transacción corta, un
+  `INSERT … ON CONFLICT DO NOTHING` por bloque: idempotente). Sin fecha en el
+  archivo, la fecha de corte es el día de la importación en la zona de la
+  sede del lote y queda marcada **aproximada**. La sede del saldo es la del
+  lote (la de `X-Location-Id` al subir los pacientes).
+- **Tabla `opening_balances`**: RLS FORCE, FK compuestas por tenant (paciente,
+  sede, lote), moneda del catálogo, `CHECK amount > 0`, concepto 1–200, único
+  `(tenant, lote, paciente, moneda)`. Inmutable salvo la retirada
+  (`voidedAt`/`voidedById`, trigger `opening_balances_guard`); la app no la
+  borra.
+- **Estado de cuenta (DX-011)**: `openingBalances[]` (fecha de corte, «aprox.»,
+  concepto) y `summary[].openingBalance`; `balance = budgeted +
+  openingBalance − paid`. También en el familiar (DX-203).
+- **Cartera (DX-145/DX-155)**: `patient_ledgers_compute` añade `openings` al
+  resumen; un saldo migrado vivo hace deudor al paciente (aunque no tenga
+  planes) y envejece desde su fecha de corte (aproximado si lo es). Si no hay
+  cita atendida, abono ni plan presentado, la sede de la deuda es la del
+  último saldo. Triggers por sentencia en `opening_balances` refrescan el
+  resumen (no hay que pausarlos: cada bloque refresca a sus ≤ 500
+  pacientes).
+- **Abonos y deshacer**: hoy ningún abono se imputa al saldo migrado (los
+  abonos van siempre a un plan; la imputación es DX-051). El deshacer del
+  lote **retira** sus saldos (`voidedAt`), salvo que alguno tenga un abono
+  imputado: cualquier FK a `opening_balances.id` (leída de `pg_constraint`)
+  lo bloquea con 409 «…ya tiene abonos imputados…». Un paciente creado por el
+  lote con un saldo de OTRO lote también lo bloquea.
+- **Auditoría**: `PATIENT_IMPORT_BATCH` `UPDATE` con `reason`
+  `IMPORT_BALANCES_VALIDATED` / `IMPORT_BALANCES_REMOVED`, `EXPORT`
+  `IMPORT_BALANCE_ERRORS`; `metadata.importBatch` lleva el hash de la hoja,
+  sus contadores y `balanceTotals` (total AGREGADO por moneda; nunca el de un
+  paciente ni documentos).
+
 ## Dominios personalizados (SEC-009)
 
 Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio
