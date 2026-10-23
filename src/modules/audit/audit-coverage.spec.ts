@@ -54,6 +54,8 @@ import {
   PatientImplantsController,
 } from '../implants/presentation/implants.controller';
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
+import { ExpenseCategoriesController } from '../expenses/presentation/expense-categories.controller';
+import { ExpensesController } from '../expenses/presentation/expenses.controller';
 import { PatientImportsController } from '../patient-imports/presentation/patient-imports.controller';
 import {
   ProviderScheduleController,
@@ -824,6 +826,62 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'CASH_SESSION_ADJUSTMENT',
   },
 
+  // DX-274: gastos de la sede (sin paciente). Los pagos, las anulaciones y el
+  // soporte van como escrituras sobre el gasto, con su motivo; la metadata
+  // lleva los NOMBRES de los campos, nunca el proveedor ni la descripción.
+  'GET /expenses': { action: 'VIEW', resource: 'EXPENSE' },
+  'POST /expenses': {
+    action: 'CREATE',
+    resource: 'EXPENSE',
+    resourceId: RES,
+  },
+  'GET /expenses/:id': {
+    action: 'VIEW',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+  },
+  'PATCH /expenses/:id': {
+    action: 'UPDATE',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+  },
+  'POST /expenses/:id/void': {
+    action: 'VOID',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+    reason: 'EXPENSE_VOIDED',
+  },
+  'POST /expenses/:id/payments': {
+    action: 'CREATE',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+    reason: 'PAYMENT_ADDED',
+  },
+  'POST /expenses/:id/payments/:paymentId/void': {
+    action: 'VOID',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+    reason: 'PAYMENT_VOIDED',
+  },
+  'POST /expenses/:id/attachment': {
+    action: 'UPDATE',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+    reason: 'EXPENSE_RECEIPT_ATTACHED',
+  },
+  'POST /expense-categories': {
+    action: 'CREATE',
+    resource: 'EXPENSE',
+    resourceId: RES,
+    reason: 'EXPENSE_CATEGORY_ADDED',
+  },
+  'DELETE /expense-categories/:id': {
+    action: 'DELETE',
+    resource: 'EXPENSE',
+    resourceId: { param: 'id' },
+    reason: 'EXPENSE_CATEGORY_REMOVED',
+  },
+
   // DX-122: bloqueos de agenda (sin paciente). Las altas y bajas de
   // «Pendientes por agendar» las audita el caso de uso, con el paciente.
   'POST /schedule-blocks': {
@@ -945,6 +1003,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'DELETE /providers/:providerId/schedule-overrides/:overrideId':
     'provider-schedule.e2e-spec.ts',
   'PUT /schedule/settings': 'provider-schedule.e2e-spec.ts',
+  // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción
+  // depende de la query, que el decorador no lee).
+  'GET /expenses/:id/attachment/url':
+    'expense-receipts.use-cases.spec.ts y expenses.e2e-spec.ts',
 };
 
 const CONTROLLERS: Type[] = [
@@ -985,6 +1047,8 @@ const CONTROLLERS: Type[] = [
   DiscountReportController,
   CollectionsController,
   CashSessionsController,
+  ExpensesController,
+  ExpenseCategoriesController,
   ScheduleBlocksController,
   StaffController,
   ClinicalNoteTemplatesController,

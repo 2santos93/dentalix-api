@@ -308,3 +308,13 @@ export const ANAMNESIS_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // gestión. Escribe miles de fichas de golpe y el informe lleva datos de
 // pacientes.
 export const PATIENT_IMPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Gastos de la sede y salidas de caja menor (DX-274) — la gestión (lista,
+// detalle, alta, edición, anulación, pagos, soporte, resumen y CSV): solo
+// ADMIN. CAPTURA: recepción también pide la autorización de subida del soporte
+// (la usa al registrar una salida de caja), ve las sugerencias de proveedor y
+// lee las categorías para el selector.
+export const EXPENSE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+export const EXPENSE_CAPTURE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];

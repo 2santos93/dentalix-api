@@ -50,6 +50,7 @@ import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { ImplantsModule } from './modules/implants/implants.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
 import { PatientImportsModule } from './modules/patient-imports/patient-imports.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { JobsModule } from './modules/jobs/jobs.module';
@@ -106,6 +107,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     CollectionsModule,
     // DX-027: caja por turno (apertura, cierre con arqueo, reapertura).
     CashSessionsModule,
+    // DX-274: gastos de la sede, sus pagos, categorías y soporte.
+    ExpensesModule,
     DataConsentsModule,
     InventoryModule,
     LocationsModule,

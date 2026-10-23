@@ -51,8 +51,10 @@ services:
       timeout: 5s
       retries: 10
   # Crea los buckets privados (local y test) con versionado, como en producción,
-  # y (DX-259) la regla de ciclo de vida que borra a las 24 h las subidas
-  # directas que no llegaron a `complete` (prefijo patient-documents/pending/).
+  # y (DX-259, DX-274) las reglas de ciclo de vida que borran a las 24 h las
+  # subidas directas que no llegaron a `complete` o al alta del gasto (prefijos
+  # patient-documents/pending/ y expense-receipts/pending/). `mc ilm import`
+  # REEMPLAZA todas las reglas: van las dos en el mismo JSON.
   minio_init:
     # La imagen de MinIO trae `mc` y `sh` (minio/mc tampoco se descarga ya).
     image: cgr.dev/chainguard/minio:latest@sha256:cff197fef764642223ef9f4444c903d51aee9b544a7be8bc007fef6b7b00d136
@@ -66,7 +68,7 @@ services:
         mc alias set local http://minio:9000 dentalix-minio dentalix-minio-local &&
         for b in dentalix-local dentalix-test; do
           mc mb --ignore-existing local/$$b && mc version enable local/$$b && mc anonymous set none local/$$b &&
-          echo '{"Rules":[{"ID":"pending-24h","Status":"Enabled","Filter":{"Prefix":"patient-documents/pending/"},"Expiration":{"Days":1},"NoncurrentVersionExpiration":{"NoncurrentDays":1}}]}' | mc ilm import local/$$b;
+          echo '{"Rules":[{"ID":"pending-24h","Status":"Enabled","Filter":{"Prefix":"patient-documents/pending/"},"Expiration":{"Days":1},"NoncurrentVersionExpiration":{"NoncurrentDays":1}},{"ID":"expense-receipts-pending-24h","Status":"Enabled","Filter":{"Prefix":"expense-receipts/pending/"},"Expiration":{"Days":1},"NoncurrentVersionExpiration":{"NoncurrentDays":1}}]}' | mc ilm import local/$$b;
         done
 volumes:
   dentalix_db:

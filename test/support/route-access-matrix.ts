@@ -454,6 +454,24 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /cash-sessions/:id/reopen': ADMIN_ONLY,
   'POST /cash-sessions/:id/adjustments': ADMIN_ONLY,
 
+  // DX-274: gastos de la sede. La gestión es de ADMIN; recepción solo captura
+  // (autorización de subida del soporte, sugerencias de proveedor y lectura de
+  // las categorías). Las rutas fijas van antes de `:id` en el controlador.
+  'POST /expenses/attachments/upload-url': BILLING,
+  'GET /expenses/suppliers': BILLING,
+  'GET /expenses': ADMIN_ONLY,
+  'POST /expenses': ADMIN_ONLY,
+  'GET /expenses/:id': ADMIN_ONLY,
+  'PATCH /expenses/:id': ADMIN_ONLY,
+  'POST /expenses/:id/void': ADMIN_ONLY,
+  'POST /expenses/:id/payments': ADMIN_ONLY,
+  'POST /expenses/:id/payments/:paymentId/void': ADMIN_ONLY,
+  'POST /expenses/:id/attachment': ADMIN_ONLY,
+  'GET /expenses/:id/attachment/url': ADMIN_ONLY,
+  'GET /expense-categories': BILLING,
+  'POST /expense-categories': ADMIN_ONLY,
+  'DELETE /expense-categories/:id': ADMIN_ONLY,
+
   // --- Inventario ----------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-inventory.md (INVENTORY_ROLES).
   'POST /inventory/items': STOCK,

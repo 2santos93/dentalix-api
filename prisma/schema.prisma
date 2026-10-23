@@ -4045,30 +4045,34 @@ model ExpenseCategory {
 /// vacía; triggers `expenses_guard` (sin DELETE, soporte y anulación una vez)
 /// y `expenses_server_created_at` (hora UTC de la BD).
 model Expense {
-  id               String    @id @default(uuid()) @db.Uuid
-  tenantId         String    @db.Uuid
-  locationId       String    @db.Uuid
+  id                     String    @id @default(uuid()) @db.Uuid
+  tenantId               String    @db.Uuid
+  locationId             String    @db.Uuid
   /// Foto del nombre de la categoría al crear o editar (2 a 60).
-  category         String
-  supplier         String?
-  description      String?
-  amount           Decimal   @db.Decimal(14, 2)
-  currency         String
-  invoiceDate      DateTime  @db.Date
-  dueDate          DateTime? @db.Date
-  attachmentKey    String?
-  attachmentMime   String?
-  attachmentSize   Int?
-  attachmentSha256 String?
-  attachmentName   String?
+  category               String
+  supplier               String?
+  description            String?
+  amount                 Decimal   @db.Decimal(14, 2)
+  currency               String
+  invoiceDate            DateTime  @db.Date
+  dueDate                DateTime? @db.Date
+  attachmentKey          String?
+  attachmentMime         String?
+  attachmentSize         Int?
+  attachmentSha256       String?
+  attachmentName         String?
   /// Puntero suave a User, como `Payment.createdById`.
-  createdById      String    @db.Uuid
+  createdById            String    @db.Uuid
   /// La pone el servidor de BD (trigger), en UTC.
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  voidedAt         DateTime?
-  voidedById       String?   @db.Uuid
-  voidReason       String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  voidedAt               DateTime?
+  voidedById             String?   @db.Uuid
+  voidReason             String?
+  /// Idempotency-Key (UUID) de `POST /expenses` y huella de la petición. Único
+  /// parcial por clínica (solo SQL, ver abajo).
+  idempotencyKey         String?
+  idempotencyFingerprint String?
 
   tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   location    Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "expenses_location_fkey")
@@ -4090,26 +4094,32 @@ model Expense {
 /// Solo SQL: CHECK `cashSessionId IS NULL OR method = 'CASH'`, importe > 0,
 /// anulación completa o vacía, índice parcial
 /// expense_payments_tenant_cash_session_idx (WHERE "cashSessionId" IS NOT NULL)
-/// y triggers `expense_payments_guard` / `expense_payments_server_created_at`.
+/// triggers `expense_payments_guard` / `expense_payments_server_created_at` y el
+/// único parcial expense_payments_tenant_idempotency_key UNIQUE ("tenantId",
+/// "idempotencyKey") WHERE "idempotencyKey" IS NOT NULL.
 model ExpensePayment {
-  id            String        @id @default(uuid()) @db.Uuid
-  tenantId      String        @db.Uuid
-  expenseId     String        @db.Uuid
+  id                     String        @id @default(uuid()) @db.Uuid
+  tenantId               String        @db.Uuid
+  expenseId              String        @db.Uuid
   /// La del gasto (FK compuesta).
-  locationId    String        @db.Uuid
-  amount        Decimal       @db.Decimal(14, 2)
+  locationId             String        @db.Uuid
+  amount                 Decimal       @db.Decimal(14, 2)
   /// La del gasto (FK compuesta).
-  currency      String
-  method        PaymentMethod
-  paidOn        DateTime      @db.Date
-  cashSessionId String?       @db.Uuid
+  currency               String
+  method                 PaymentMethod
+  paidOn                 DateTime      @db.Date
+  cashSessionId          String?       @db.Uuid
   /// Puntero suave a User, como `Payment.createdById`.
-  createdById   String        @db.Uuid
+  createdById            String        @db.Uuid
   /// La pone el servidor de BD (trigger), en UTC.
-  createdAt     DateTime      @default(now())
-  voidedAt      DateTime?
-  voidedById    String?       @db.Uuid
-  voidReason    String?
+  createdAt              DateTime      @default(now())
+  voidedAt               DateTime?
+  voidedById             String?       @db.Uuid
+  voidReason             String?
+  /// Idempotency-Key (UUID) de `POST /expenses/:id/payments` y huella. Único
+  /// parcial por clínica (solo SQL, ver abajo).
+  idempotencyKey         String?
+  idempotencyFingerprint String?
 
   tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   expense         Expense                 @relation(fields: [tenantId, expenseId, locationId, currency], references: [tenantId, id, locationId, currency], onDelete: Restrict, onUpdate: Restrict, map: "expense_payments_expense_fkey")
