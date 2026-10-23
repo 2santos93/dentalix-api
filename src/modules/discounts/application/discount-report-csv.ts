@@ -1,5 +1,10 @@
 import type { DiscountReason, TreatmentPlanStatus } from '@prisma/client';
 import type { DiscountReportRowView } from './use-cases/get-discount-report.use-case';
+import {
+  csvAmount,
+  csvDocument,
+  csvText as text,
+} from '../../../shared/csv/csv-cells';
 import { currencyDecimals } from '../domain/discount-policy';
 
 /*
@@ -51,17 +56,8 @@ const PLAN_STATUS_LABELS: Record<TreatmentPlanStatus, string> = {
   CANCELLED: 'Cancelado',
 };
 
-const FORMULA_START = /^[\s]*[=+\-@]|^[\t\r]/;
-
-function text(value: string | null): string {
-  const raw = (value ?? '').replace(/[\r\n]+/g, ' ');
-  const safe = FORMULA_START.test(raw) ? `'${raw}` : raw;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
-
-/** En la unidad de la moneda: COP sin decimales, EUR a céntimos. */
 function money(value: number, currency: string): string {
-  return value.toFixed(currencyDecimals(currency));
+  return csvAmount(value, currencyDecimals(currency));
 }
 
 function planLabel(row: DiscountReportRowView): string {
@@ -98,5 +94,5 @@ export function toDiscountReportCsv(
       ].join(','),
     );
   }
-  return `\uFEFF${lines.join('\r\n')}\r\n`;
+  return csvDocument(lines);
 }

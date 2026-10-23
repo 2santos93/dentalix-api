@@ -80,6 +80,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
   readonly expenses = new Map<string, StoredExpense>();
   readonly payments: StoredPayment[] = [];
   readonly users = new Map<string, string>();
+  readonly locations = new Map<string, string>();
   /** Día civil que devuelve el «hoy» de cualquier sede. */
   today = '2026-10-23';
   defaultLocationId = LOCATION_ID;
@@ -175,6 +176,10 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
 
   cashRequiresOpenSession(): Promise<boolean> {
     return Promise.resolve(this.cashRequireOpenSession);
+  }
+
+  locationNames(): Promise<Map<string, string>> {
+    return Promise.resolve(new Map(this.locations));
   }
 
   userNames(ids: string[]): Promise<Map<string, string>> {

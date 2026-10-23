@@ -93,6 +93,8 @@ import {
   CloseCashSessionUseCase,
   OpenCashSessionUseCase,
 } from '../src/modules/cash-sessions/application/use-cases/cash-sessions.use-cases';
+import { CreateCashOutflowUseCase } from '../src/modules/expenses/application/use-cases/create-cash-outflow.use-case';
+import { CreateExpenseUseCase } from '../src/modules/expenses/application/use-cases/create-expense.use-case';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
@@ -175,7 +177,9 @@ import {
   DEMO_COVERAGES,
   DEMO_RESPONSIBLES,
   DEMO_PLANS,
+  DEMO_CASH_OUTFLOW,
   DEMO_COLLECTION_NOTES,
+  DEMO_EXPENSES,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
   DEMO_MEDICAL_ALERTS,
@@ -666,6 +670,8 @@ class DemoSeeder {
     await this.createCollections(tenantId, locations, patientIds, receptionId);
 
     await this.createCashSessions(tenantId, locations, receptionId);
+
+    await this.createExpenses(tenantId, locations, ownerId, receptionId);
 
     await this.createInventory(tenantId, locations, userIds[4]);
 
@@ -1929,6 +1935,51 @@ class DemoSeeder {
         actor,
       );
       await charge(15_000, 'CASH');
+    });
+  }
+
+  /**
+   * DX-274: tres gastos de la sede principal (pagado, parcial vencido y
+   * pendiente) por los mismos casos de uso que la API, y una salida de caja
+   * menor de recepción en el turno ABIERTO de la tarde. Va DESPUÉS de las
+   * cajas y no toca la cerrada de la mañana, así que su arqueo sigue
+   * cuadrando; los pagos de los gastos son por transferencia, fuera de caja.
+   */
+  private async createExpenses(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    ownerId: string,
+    receptionId: string,
+  ): Promise<void> {
+    const today = civilDateIn(this.now, DEMO_TIMEZONE);
+    const day = (offset: number) => addCivilDays(today, offset);
+    await this.inTenant(tenantId, locations.principal, async () => {
+      for (const expense of DEMO_EXPENSES) {
+        await this.use(CreateExpenseUseCase).execute(
+          {
+            locationId: locations.principal,
+            category: expense.category,
+            supplier: expense.supplier,
+            description: expense.description,
+            amount: expense.amount,
+            currency: DEMO_CURRENCY,
+            invoiceDate: day(expense.invoice),
+            dueDate: expense.due === null ? null : day(expense.due),
+            payment: expense.payment
+              ? {
+                  amount: expense.payment.amount,
+                  method: expense.payment.method,
+                  paidOn: day(expense.payment.paid),
+                }
+              : undefined,
+          },
+          ownerId,
+        );
+      }
+      await this.use(CreateCashOutflowUseCase).execute(
+        { ...DEMO_CASH_OUTFLOW, currency: DEMO_CURRENCY },
+        receptionId,
+      );
     });
   }
 

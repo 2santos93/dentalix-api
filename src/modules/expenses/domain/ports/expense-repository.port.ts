@@ -194,6 +194,9 @@ export interface ExpenseRepository {
   /** ¿Algún gasto de la clínica usa ya este objeto como soporte? */
   attachmentKeyInUse(key: string): Promise<boolean>;
 
+  /** Nombre de cada sede de la clínica, incluidas las retiradas. */
+  locationNames(): Promise<Map<string, string>>;
+
   /** Nombres de usuarios de la clínica por id. */
   userNames(ids: string[]): Promise<Map<string, string>>;
 }

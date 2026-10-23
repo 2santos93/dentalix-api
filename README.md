@@ -1795,14 +1795,14 @@ migraciones `20261020200000_dx151_enums`,
 - **Demo**: `seed:demo` no crea documentos (no hay ficheros de ejemplo que
   guardar en el almacén).
 
-## Gastos de la sede (DX-274)
+## Gastos de la sede y caja menor (DX-274)
 
 Lo que gasta cada sede: factura o cuenta por pagar con categoría, proveedor,
 importe, fechas y soporte, pagada total o parcialmente. Módulo `expenses`;
 migraciones `20261023120000_dx274_enums`, `…120100_dx274_expenses`,
 `…120200_dx274_cash_adjustment_outflow`, `…120300_dx274_audit_events_idx` y
-`…120400_dx274_expense_idempotency`. Las salidas de caja menor y el resumen
-con CSV llegan con las tareas siguientes de DX-274.
+`…120400_dx274_expense_idempotency`. Incluye las salidas de caja menor
+(el dinero del cajón) y el resumen mensual «ingresos − gastos» con CSV.
 
 - **Tablas**: `expense_categories` (propias de la clínica; las predefinidas
   son constantes de código), `expenses` y `expense_payments`, con RLS FORCE y
@@ -1837,17 +1837,55 @@ con CSV llegan con las tareas siguientes de DX-274.
   [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)).
   `GET /expenses/:id/attachment/url?disposition=inline|attachment` da una URL
   firmada de 300 s, auditada como VIEW (inline) o EXPORT (descarga).
+- **Caja menor** (R1, R5, R6): un pago puede salir del cajón
+  (`payment.fromCashSession` en el alta, `fromCashSession` en `POST
+  /expenses/:id/payments`): método `CASH`, `paidOn` = hoy en la sede y caja
+  abierta de quien paga en la sede del gasto (409 `Abre tu caja en esta sede
+  para pagar desde el cajón.`); la caja se toma con `FOR SHARE`, así que un
+  cierre simultáneo gana o pierde limpio. `POST /cash-sessions/current/outflows`
+  (ADMIN y recepción, `Idempotency-Key`) crea gasto y pago de una vez en la
+  caja abierta de quien llama, con fecha de hoy y la sede de esa caja. El
+  efectivo esperado del arqueo resta las salidas (`fondo + abonos + ajustes −
+  salidas`, puede quedar negativo). Anular una salida con la caja abierta la
+  saca del cálculo («Salidas anuladas»); con la caja ya cerrada sigue restando
+  ahí y la anulación entra como ajuste `OUTFLOW_VOID` positivo en la caja
+  abierta de quien anula (o pendiente de la siguiente de la sede). Con arqueo
+  ciego, nada de esto devuelve el esperado; la lista de salidas del turno sí.
+- **Resumen mensual**: `GET /expenses/summary?from&to&locationId` (ADMIN,
+  rango de hasta 366 días, 400 en español si no): una fila por mes × sede ×
+  moneda con `income`, `categories` (gasto por categoría, mayor primero),
+  `expensesTotal` y `net` (ingresos − gastos; puede ser negativo). Los gastos
+  no anulados cuentan por **fecha de factura** (devengado, estén pagados o no)
+  y los ingresos son los abonos vivos por el **día civil de su sede** (mes y
+  rango en la zona de cada sede, no en UTC). Las monedas no se convierten.
+  Ambas lecturas salen de una misma foto `REPEATABLE READ`. Sin permiso sobre
+  una sede, ni sus gastos ni sus ingresos entran.
+- **CSV** (ADMIN, `@Audit` EXPORT con `reason` `EXPENSE_LIST` o
+  `EXPENSE_SUMMARY`, `Cache-Control: no-store`, UTF-8 con BOM y CRLF, celdas
+  de texto entre comillas, sin saltos de línea y con prefijo `'` si empiezan
+  por `= + - @`, importes con los decimales de su moneda):
+  `GET /expenses.csv` (mismos filtros que la lista, una línea por gasto, hasta
+  10 000: más es 400 «acota el periodo») y `GET /expenses/summary.csv` (por
+  mes, sede y moneda: `Ingresos`, un `Gasto` por categoría, `Total gastos` y
+  `Neto`). Los comparte `src/shared/csv/csv-cells.ts` con cartera y descuentos.
 - **Endpoints**: `GET|POST /expenses`, `GET|PATCH /expenses/:id`,
   `POST /expenses/:id/void`, `POST /expenses/:id/payments`,
   `POST /expenses/:id/payments/:paymentId/void`,
   `GET /expenses/suppliers?query` (hasta 20 proveedores distintos, el de uso
   más reciente primero) y `GET|POST /expense-categories`,
   `DELETE /expense-categories/:id`. Respeta las sedes permitidas del usuario.
-- **Roles**: toda la gestión, ADMIN. ADMIN y recepción: la autorización de
-  subida del soporte, las sugerencias de proveedor y leer las categorías.
+- **Roles**: toda la gestión, el resumen y los CSV, ADMIN. ADMIN y recepción:
+  la autorización de subida del soporte, las sugerencias de proveedor, leer
+  las categorías y la salida de caja menor desde su propia caja.
 - **Auditoría**: recurso `EXPENSE` (CREATE, UPDATE, VOID con `reason`
-  `EXPENSE_VOIDED` o `PAYMENT_VOIDED`, `PAYMENT_ADDED`, VIEW); la metadata
-  solo lleva los nombres de los campos, nunca el proveedor ni la descripción.
+  `EXPENSE_VOIDED` o `PAYMENT_VOIDED`, `PAYMENT_ADDED`, VIEW y EXPORT); la
+  metadata solo lleva los nombres de los campos, nunca el proveedor ni la
+  descripción.
+- **Demo**: `npm run seed:demo` crea tres gastos de la sede principal (uno
+  pagado, uno pagado a medias con el vencimiento pasado y uno pendiente) y una
+  salida de caja menor de recepción en el turno ABIERTO de la tarde; la caja
+  cerrada de la mañana no se toca, así que su arqueo (diferencia de −2.000)
+  sigue igual.
 
 ## Importación de pacientes desde CSV/XLSX (DX-107)
 

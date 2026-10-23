@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PickType,
+} from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -30,6 +35,7 @@ import {
   PAID_ON_INVALID_MESSAGE,
   SUPPLIER_MESSAGE,
 } from '../../domain/expense-rules';
+import { SUMMARY_PERIOD_INVALID_MESSAGE } from '../../application/use-cases/get-expense-summary.use-case';
 
 const CURRENCY_MESSAGE = 'La moneda no es válida.';
 const FROM_CASH_SESSION_MESSAGE = 'fromCashSession debe ser verdadero o falso.';
@@ -360,4 +366,28 @@ export class CreateExpenseCategoryDto {
     message: 'El nombre de la categoría debe tener entre 2 y 60 caracteres.',
   })
   name!: string;
+}
+
+/** El CSV lleva los mismos filtros que la lista y todas las filas. */
+export class ExportExpensesQueryDto extends OmitType(ListExpensesQueryDto, [
+  'page',
+  'pageSize',
+] as const) {}
+
+export class ExpenseSummaryQueryDto {
+  @ApiProperty({ format: 'date', description: 'Primer día (AAAA-MM-DD).' })
+  @IsString({ message: SUMMARY_PERIOD_INVALID_MESSAGE })
+  from!: string;
+
+  @ApiProperty({
+    format: 'date',
+    description: 'Último día (AAAA-MM-DD), como mucho 366 días después.',
+  })
+  @IsString({ message: SUMMARY_PERIOD_INVALID_MESSAGE })
+  to!: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID('all', { message: LOCATION_INVALID_MESSAGE })
+  locationId?: string;
 }

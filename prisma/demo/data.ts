@@ -2400,6 +2400,53 @@ export const DEMO_PAYMENT_PROMISE = {
 };
 
 /**
+ * DX-274: gastos de la sede principal, en COP. Días relativos a hoy (el día de
+ * la sede): `invoice`/`due`/`paid` negativos son pasado. Uno pagado del todo,
+ * uno pagado a medias con el vencimiento ya pasado (sale «Vencido») y uno
+ * pendiente con plazo.
+ */
+export const DEMO_EXPENSES = [
+  {
+    category: 'Arriendo',
+    supplier: 'Inmobiliaria Centro S.A.S.',
+    description: 'Arriendo del local del mes',
+    amount: 1_800_000,
+    invoice: -14,
+    due: null,
+    payment: { amount: 1_800_000, method: 'TRANSFER' as const, paid: -12 },
+  },
+  {
+    category: 'Servicios públicos',
+    supplier: 'Empresas Públicas',
+    description: 'Energía y agua del mes',
+    amount: 420_000,
+    invoice: -20,
+    due: -5,
+    payment: { amount: 150_000, method: 'TRANSFER' as const, paid: -10 },
+  },
+  {
+    category: 'Laboratorio',
+    supplier: 'Laboratorio Dental Sonrisa',
+    description: 'Coronas del mes',
+    amount: 680_000,
+    invoice: -3,
+    due: 12,
+    payment: null,
+  },
+];
+
+/**
+ * DX-274: salida de caja menor del turno de la tarde (el abierto, nunca el
+ * cerrado: su arqueo ya cuadraba). Baja 18.000 el efectivo esperado.
+ */
+export const DEMO_CASH_OUTFLOW = {
+  category: 'Mensajería',
+  supplier: 'Domicilios Rápido',
+  description: 'Envío de impresiones al laboratorio',
+  amount: 18_000,
+};
+
+/**
  * DX-222: indicaciones postoperatorias de la demo. Se cargan las 5 plantillas
  * de ejemplo y se vinculan para que la cita sugiera la correcta: por
  * procedimiento del catálogo (códigos de `default-dental-catalog`) o por tipo

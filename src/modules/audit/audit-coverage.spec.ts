@@ -55,6 +55,7 @@ import {
 } from '../implants/presentation/implants.controller';
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
 import { ExpenseCategoriesController } from '../expenses/presentation/expense-categories.controller';
+import { ExpenseReportsController } from '../expenses/presentation/expense-reports.controller';
 import { ExpensesController } from '../expenses/presentation/expenses.controller';
 import { CashOutflowsController } from '../expenses/presentation/cash-outflows.controller';
 import { PatientImportsController } from '../patient-imports/presentation/patient-imports.controller';
@@ -831,6 +832,21 @@ const EXPECTED: Record<string, AuditOptions> = {
   // soporte van como escrituras sobre el gasto, con su motivo; la metadata
   // lleva los NOMBRES de los campos, nunca el proveedor ni la descripción.
   'GET /expenses': { action: 'VIEW', resource: 'EXPENSE' },
+  'GET /expenses/summary': {
+    action: 'VIEW',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_SUMMARY',
+  },
+  'GET /expenses/summary.csv': {
+    action: 'EXPORT',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_SUMMARY',
+  },
+  'GET /expenses.csv': {
+    action: 'EXPORT',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_LIST',
+  },
   'POST /expenses': {
     action: 'CREATE',
     resource: 'EXPENSE',
@@ -1052,6 +1068,7 @@ const CONTROLLERS: Type[] = [
   DiscountReportController,
   CollectionsController,
   CashSessionsController,
+  ExpenseReportsController,
   ExpensesController,
   ExpenseCategoriesController,
   CashOutflowsController,

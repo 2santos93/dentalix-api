@@ -406,6 +406,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.cash_session_floats).toBe(2);
     expect(firstCounts.cash_session_closings).toBe(1);
     expect(firstCounts.cash_session_closing_lines).toBe(2);
+    // DX-274: tres gastos (uno con pago completo, uno parcial, uno pendiente)
+    // y la salida de caja menor del turno abierto (4.º gasto con su pago).
+    expect(firstCounts.expenses).toBe(4);
+    expect(firstCounts.expense_payments).toBe(3);
     // DX-121: 5 tipos de cita con color.
     expect(firstCounts.appointment_types).toBe(5);
     // DX-122: vacaciones y almuerzo; pendientes del calendario + uno manual.
@@ -831,6 +835,51 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       );
       expect(payment.paidAt.getTime()).toBeLessThanOrEqual(seededBetween.end);
     }
+  });
+
+  it('los gastos demo: pagado, parcial vencido, pendiente y una salida en el turno abierto (DX-274)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const expenses = await raw.expense.findMany({
+      where: { tenantId },
+      include: { payments: true },
+      orderBy: { invoiceDate: 'asc' },
+    });
+    expect(expenses.map((e) => e.category)).toEqual([
+      'Servicios públicos',
+      'Arriendo',
+      'Laboratorio',
+      'Mensajería',
+    ]);
+    const paid = (e: (typeof expenses)[number]) =>
+      e.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const [utilities, rent, lab, courier] = expenses;
+    expect(paid(rent)).toBe(Number(rent.amount));
+    expect(paid(utilities)).toBeGreaterThan(0);
+    expect(paid(utilities)).toBeLessThan(Number(utilities.amount));
+    expect(utilities.dueDate!.getTime()).toBeLessThan(Date.now());
+    expect(paid(lab)).toBe(0);
+    expect(lab.dueDate!.getTime()).toBeGreaterThan(Date.now());
+
+    // La salida de caja está en el turno ABIERTO; los demás pagos, fuera de caja.
+    const open = await raw.cashSession.findFirstOrThrow({
+      where: { tenantId, status: 'OPEN' },
+    });
+    expect(courier.payments).toHaveLength(1);
+    expect(courier.payments[0]).toMatchObject({
+      cashSessionId: open.id,
+      method: 'CASH',
+    });
+    expect(
+      [utilities, rent, lab]
+        .flatMap((e) => e.payments)
+        .map((p) => p.cashSessionId),
+    ).toEqual([null, null]);
+
+    // El arqueo cerrado de la mañana no se tocó: su diferencia sigue siendo la sembrada.
+    const closing = await raw.cashSessionClosingLine.findFirstOrThrow({
+      where: { tenantId, method: 'CASH' },
+    });
+    expect(Number(closing.difference)).toBe(-2000);
   });
 
   it('planes, pagos, plan de pagos e inventario son coherentes', async () => {

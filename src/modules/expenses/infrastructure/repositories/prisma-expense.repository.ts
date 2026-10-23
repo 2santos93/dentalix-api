@@ -162,6 +162,13 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     return tenant?.cashRequireOpenSession ?? false;
   }
 
+  async locationNames(): Promise<Map<string, string>> {
+    const locations = await this.prisma.runWithTenant((tx) =>
+      tx.location.findMany({ select: { id: true, name: true } }),
+    );
+    return new Map(locations.map((l) => [l.id, l.name]));
+  }
+
   async userNames(ids: string[]): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
     const users = await this.prisma.runWithTenant((tx) =>

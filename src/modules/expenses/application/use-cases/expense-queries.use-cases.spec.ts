@@ -12,6 +12,8 @@ import {
 } from '../__fixtures__/in-memory-expenses';
 import { GetExpenseUseCase } from './get-expense.use-case';
 import {
+  EXPORT_MAX_ROWS,
+  EXPORT_TOO_MANY_MESSAGE,
   FILTER_DATE_MESSAGE,
   ListExpensesUseCase,
   MAX_PAGE_SIZE,
@@ -81,6 +83,34 @@ describe('consultas de gastos (DX-274)', () => {
         overdue: true,
         createdByName: 'Dra. Admin',
       });
+    });
+
+    it('exporta todas las filas del filtro con el nombre de las sedes', async () => {
+      kit.repo.locations.set(LOCATION_ID, 'Norte');
+      kit.repo.locations.set(OTHER_LOCATION_ID, 'Sur');
+      const out = await kit.inTenant(() =>
+        list.exportAll({ status: 'OPEN', pageSize: 1 }),
+      );
+      expect(out.items.map((e) => e.supplier)).toEqual([
+        'Pendiente SA',
+        'Parcial SA',
+      ]);
+      expect(out.locationNames.get(OTHER_LOCATION_ID)).toBe('Sur');
+    });
+
+    it('exportar con más de EXPORT_MAX_ROWS filas pide acotar el periodo', async () => {
+      const spy = jest.spyOn(kit.repo, 'list').mockResolvedValue({
+        items: Array.from({ length: EXPORT_MAX_ROWS + 1 }, () =>
+          kit.repo.seed(),
+        ) as never,
+        total: EXPORT_MAX_ROWS + 1,
+        page: 1,
+        pageSize: EXPORT_MAX_ROWS + 1,
+      });
+      await expect(kit.inTenant(() => list.exportAll({}))).rejects.toThrow(
+        EXPORT_TOO_MANY_MESSAGE,
+      );
+      spy.mockRestore();
     });
 
     it('filtra por estado, OPEN (pendiente + parcial) y vencidos', async () => {

@@ -134,3 +134,38 @@ export class ExpenseCategoryDto {
   @ApiProperty({ example: 'Papelería' }) name!: string;
   @ApiProperty() predefined!: boolean;
 }
+
+export class ExpenseSummaryCategoryDto {
+  @ApiProperty({ example: 'Arriendo' }) category!: string;
+  @ApiProperty({ example: 2500000 }) amount!: number;
+}
+
+export class ExpenseSummaryRowDto {
+  @ApiProperty({ example: '2026-10', description: 'Mes AAAA-MM.' })
+  month!: string;
+  @ApiProperty({ format: 'uuid' }) locationId!: string;
+  @ApiProperty() locationName!: string;
+  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({
+    description: 'Abonos vivos del mes civil de la sede, sin anulados.',
+  })
+  income!: number;
+  @ApiProperty({
+    type: [ExpenseSummaryCategoryDto],
+    description: 'Gastos no anulados por fecha de factura; mayor primero.',
+  })
+  categories!: ExpenseSummaryCategoryDto[];
+  @ApiProperty() expensesTotal!: number;
+  @ApiProperty({ description: 'Ingresos − gastos; puede ser negativo.' })
+  net!: number;
+}
+
+export class ExpenseSummaryDto {
+  @ApiProperty({ format: 'date' }) from!: string;
+  @ApiProperty({ format: 'date' }) to!: string;
+  @ApiProperty({
+    type: [ExpenseSummaryRowDto],
+    description: 'Por mes, sede y moneda; las monedas nunca se mezclan.',
+  })
+  rows!: ExpenseSummaryRowDto[];
+}

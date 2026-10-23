@@ -25,6 +25,7 @@ import {
 } from './application/use-cases/expense-categories.use-cases';
 import { GetExpenseReceiptUrlUseCase } from './application/use-cases/get-expense-receipt-url.use-case';
 import { GetExpenseUseCase } from './application/use-cases/get-expense.use-case';
+import { GetExpenseSummaryUseCase } from './application/use-cases/get-expense-summary.use-case';
 import { ListExpensesUseCase } from './application/use-cases/list-expenses.use-case';
 import { SuggestSuppliersUseCase } from './application/use-cases/suggest-suppliers.use-case';
 import { UpdateExpenseUseCase } from './application/use-cases/update-expense.use-case';
@@ -36,10 +37,13 @@ import {
 } from './domain/expense-receipt';
 import { EXPENSE_CATEGORY_REPOSITORY } from './domain/ports/expense-category-repository.port';
 import { EXPENSE_REPOSITORY } from './domain/ports/expense-repository.port';
+import { EXPENSE_SUMMARY_REPOSITORY } from './domain/ports/expense-summary-repository.port';
 import { PrismaExpenseCategoryRepository } from './infrastructure/repositories/prisma-expense-category.repository';
+import { PrismaExpenseSummaryRepository } from './infrastructure/repositories/prisma-expense-summary.repository';
 import { PrismaExpenseRepository } from './infrastructure/repositories/prisma-expense.repository';
 import { CashOutflowsController } from './presentation/cash-outflows.controller';
 import { ExpenseCategoriesController } from './presentation/expense-categories.controller';
+import { ExpenseReportsController } from './presentation/expense-reports.controller';
 import { ExpensesController } from './presentation/expenses.controller';
 
 /**
@@ -54,12 +58,15 @@ import { ExpensesController } from './presentation/expenses.controller';
 @Module({
   imports: [JwtModule.register({}), StorageModule, CashSessionsModule],
   controllers: [
+    // Antes que `ExpensesController`: `expenses/summary` no es un `:id`.
+    ExpenseReportsController,
     ExpensesController,
     ExpenseCategoriesController,
     CashOutflowsController,
   ],
   providers: [
     ListExpensesUseCase,
+    GetExpenseSummaryUseCase,
     GetExpenseUseCase,
     CreateExpenseUseCase,
     UpdateExpenseUseCase,
@@ -86,6 +93,10 @@ import { ExpensesController } from './presentation/expenses.controller';
     },
     { provide: CURRENCY_WHITELIST, useClass: PrismaCurrencyWhitelist },
     { provide: EXPENSE_REPOSITORY, useClass: PrismaExpenseRepository },
+    {
+      provide: EXPENSE_SUMMARY_REPOSITORY,
+      useClass: PrismaExpenseSummaryRepository,
+    },
     {
       provide: EXPENSE_CATEGORY_REPOSITORY,
       useClass: PrismaExpenseCategoryRepository,
