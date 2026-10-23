@@ -1,6 +1,7 @@
 import { ArgumentsHost, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
+  BY_SQLSTATE,
   PrismaExceptionFilter,
   conflictMessageForTarget,
 } from './prisma-exception.filter';
@@ -248,6 +249,35 @@ describe('PrismaExceptionFilter', () => {
       message: 'El registro está cerrado o firmado y ya no admite ese cambio.',
     });
     jest.restoreAllMocks();
+  });
+
+  it('turns the closed-visit link guard (Q0271, DX-271) into a 409 in Spanish', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        'Q0271',
+        'Esta cita ya pasó: sus tratamientos no se cambian.',
+        SECRET_DETAIL,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(409);
+    expect(bodyOf(json)).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'Esta cita ya pasó: sus tratamientos no se cambian.',
+    });
+    jest.restoreAllMocks();
+  });
+
+  it('own SQLSTATEs live in an implementation class (I–Z or 5–9), never A–H', () => {
+    const own = Object.keys(BY_SQLSTATE).filter((code) => !/^\d{2}/.test(code));
+    expect(own).toContain('Q0271');
+    for (const code of own) expect(code).toMatch(/^[5-9I-Z]/);
   });
 
   const CONCURRENCY_BODY = {

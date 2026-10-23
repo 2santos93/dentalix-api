@@ -164,6 +164,14 @@ const RESTRICT_VIOLATION: ErrorBody = {
   error: 'Conflict',
   message: 'El registro está cerrado o firmado y ya no admite ese cambio.',
 };
+// DX-271: `dx271_completed_link_guard` rechazó retirar un ítem de una cita
+// completada (ERRCODE propio Q0271). Los casos de uso responden 409 antes con
+// el mismo texto (`PLAN_ITEMS_CLOSED_MESSAGE`); esto es la red.
+const CLOSED_VISIT_ITEMS: ErrorBody = {
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  message: 'Esta cita ya pasó: sus tratamientos no se cambian.',
+};
 // Dos transacciones se cruzaron (deadlock o fallo de serialización): Postgres
 // abortó esta. Reintentar la operación la resuelve (DX-012).
 const CONCURRENCY_CONFLICT: ErrorBody = {
@@ -179,13 +187,16 @@ const INTERNAL_ERROR: ErrorBody = {
 };
 
 /** SQLSTATE de Postgres → respuesta, para los que tienen una genérica. */
-const BY_SQLSTATE: Record<string, ErrorBody> = {
+// SQLSTATE propios del repo: clase de implementación (primer carácter I–Z o
+// 5–9). Las clases que empiezan por 0–4 o A–H las reserva el estándar SQL.
+export const BY_SQLSTATE: Record<string, ErrorBody> = {
   '23514': CHECK_VIOLATION, // check_violation
   '22003': NUMERIC_OVERFLOW, // numeric_value_out_of_range
   '23503': FK_VIOLATION, // foreign_key_violation
   '23001': RESTRICT_VIOLATION, // restrict_violation (triggers de inmutabilidad)
   '40P01': CONCURRENCY_CONFLICT, // deadlock_detected
   '40001': CONCURRENCY_CONFLICT, // serialization_failure
+  Q0271: CLOSED_VISIT_ITEMS, // propio (DX-271): vínculo de una cita completada
 };
 
 /**
