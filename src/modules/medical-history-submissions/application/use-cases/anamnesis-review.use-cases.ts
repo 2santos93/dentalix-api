@@ -41,6 +41,8 @@ export const ANAMNESIS_NOT_SUBMITTED_MESSAGE =
   'El paciente aún no ha enviado esta anamnesis.';
 export const ANAMNESIS_REJECT_REASON_MESSAGE =
   'Escribe el motivo (al menos 3 caracteres).';
+export const ANAMNESIS_INBOX_FORBIDDEN_MESSAGE =
+  'Las anamnesis que envían los pacientes son dato clínico: solo las ven odontólogos, asistentes y administradores.';
 export const ANAMNESIS_REVIEW_FORBIDDEN_MESSAGE =
   'Solo un odontólogo o un administrador puede aceptar o rechazar la anamnesis.';
 

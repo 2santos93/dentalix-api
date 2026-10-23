@@ -17,7 +17,10 @@ import {
   ANAMNESIS_CONSENT_REQUIRED_MESSAGE,
   ANAMNESIS_DECLARATION_REQUIRED_MESSAGE,
 } from '../src/modules/medical-history-submissions/application/use-cases/public-anamnesis.use-cases';
-import { ANAMNESIS_REVIEW_FORBIDDEN_MESSAGE } from '../src/modules/medical-history-submissions/application/use-cases/anamnesis-review.use-cases';
+import {
+  ANAMNESIS_INBOX_FORBIDDEN_MESSAGE,
+  ANAMNESIS_REVIEW_FORBIDDEN_MESSAGE,
+} from '../src/modules/medical-history-submissions/application/use-cases/anamnesis-review.use-cases';
 import { MISSING_ALLERGIES_MESSAGE } from '../src/modules/medical-history-submissions/domain/answers-to-version';
 import { allNoAnswers } from '../src/modules/medical-history-submissions/domain/__fixtures__/anamnesis-answers';
 import type { AnamnesisAnswers } from '../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
@@ -428,9 +431,12 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         .get('/medical-history/submissions/summary')
         .expect(200);
       expect(summary.body).toEqual({ submitted: 1 });
-      await as(clinicA, receptionToken)
+      const forbidden = await as(clinicA, receptionToken)
         .get('/medical-history/submissions')
         .expect(403);
+      expect((forbidden.body as { message: string }).message).toBe(
+        ANAMNESIS_INBOX_FORBIDDEN_MESSAGE,
+      );
       const ficha = await as(clinicA, receptionToken)
         .get(`/patients/${patientId}/medical-history/requests`)
         .expect(200);

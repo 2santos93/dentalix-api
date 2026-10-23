@@ -37,6 +37,7 @@ import {
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { RevokeAnamnesisRequestUseCase } from '../application/use-cases/anamnesis-requests.use-cases';
 import {
+  ANAMNESIS_INBOX_FORBIDDEN_MESSAGE,
   ANAMNESIS_REVIEW_FORBIDDEN_MESSAGE,
   AcceptAnamnesisUseCase,
   CountAnamnesisInboxUseCase,
@@ -69,6 +70,7 @@ const SUBMISSION = { lookup: 'medicalHistorySubmission', param: 'id' } as const;
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UseInterceptors(TenantContextInterceptor)
 @Roles(...CLINICAL_ROLES)
+@RolesDeniedMessage(ANAMNESIS_INBOX_FORBIDDEN_MESSAGE)
 @Controller('medical-history/submissions')
 export class MedicalHistorySubmissionsController {
   constructor(
