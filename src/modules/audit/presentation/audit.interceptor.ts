@@ -80,6 +80,7 @@ export class AuditInterceptor implements NestInterceptor {
     if (options.action === 'LOGIN') return this.login(req, scope, next);
     return next.handle().pipe(
       concatMap(async (body: unknown) => {
+        if (req.skipAudit) return body;
         const draft = buildAuditDraft(
           options,
           req,

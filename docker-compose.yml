@@ -33,6 +33,14 @@ services:
       MINIO_ROOT_PASSWORD: dentalix-minio-local
       # Alias `local` del `mc` de la imagen para el healthcheck.
       MC_HOST_local: http://dentalix-minio:dentalix-minio-local@localhost:9000
+      # DX-259: la web sube los documentos directamente al bucket (POST
+      # prefirmado por XHR desde http://<clínica>.localhost:3001), así que el
+      # navegador necesita CORS. MinIO no tiene CORS por bucket (PutBucketCors
+      # da NotImplemented): es de todo el servidor. En local, cualquier origen
+      # (el bucket sigue privado: sin la política firmada no se sube nada). En
+      # producción, CORS del bucket solo con los orígenes de la web (README,
+      # «Subida directa al bucket»).
+      MINIO_API_CORS_ALLOW_ORIGIN: '*'
     ports: ['9000:9000', '9001:9001']
     volumes:
       - 'dentalix_minio:/data'
@@ -42,7 +50,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  # Crea los buckets privados (local y test) con versionado, como en producción.
+  # Crea los buckets privados (local y test) con versionado, como en producción,
+  # y (DX-259) la regla de ciclo de vida que borra a las 24 h las subidas
+  # directas que no llegaron a `complete` (prefijo patient-documents/pending/).
   minio_init:
     # La imagen de MinIO trae `mc` y `sh` (minio/mc tampoco se descarga ya).
     image: cgr.dev/chainguard/minio:latest@sha256:cff197fef764642223ef9f4444c903d51aee9b544a7be8bc007fef6b7b00d136
@@ -55,7 +65,8 @@ services:
       - |
         mc alias set local http://minio:9000 dentalix-minio dentalix-minio-local &&
         for b in dentalix-local dentalix-test; do
-          mc mb --ignore-existing local/$$b && mc version enable local/$$b && mc anonymous set none local/$$b;
+          mc mb --ignore-existing local/$$b && mc version enable local/$$b && mc anonymous set none local/$$b &&
+          echo '{"Rules":[{"ID":"pending-24h","Status":"Enabled","Filter":{"Prefix":"patient-documents/pending/"},"Expiration":{"Days":1},"NoncurrentVersionExpiration":{"NoncurrentDays":1}}]}' | mc ilm import local/$$b;
         done
 volumes:
   dentalix_db:

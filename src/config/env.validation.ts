@@ -28,11 +28,18 @@
  * poder usarlo, 0–10080; por defecto 1440).
  * DX-084: `STORAGE_DRIVER` (disk | s3; el disco no se admite en producción)
  * y los ajustes `S3_*` del bucket de ficheros.
+ * DX-259: `S3_CONNECT_TIMEOUT_MS`, `S3_REQUEST_TIMEOUT_MS`, `S3_MAX_SOCKETS`,
+ * `S3_MAX_ATTEMPTS` (cliente S3) y `UPLOAD_MAX_CONCURRENCY` (subidas que pasan
+ * por la API a la vez en cada réplica).
  */
 
 import {
+  S3_CLIENT_LIMITS,
   S3_SSE_VALUES,
   STORAGE_DRIVERS,
+  UPLOAD_MAX_CONCURRENCY_LIMITS,
+  UPLOAD_TIMEOUT_LIMITS,
+  boundedInt,
   storageDriverOf,
 } from '../shared/storage/storage-config';
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
@@ -553,6 +560,32 @@ const S3_BUCKET_PATTERN = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
 /** DX-084: almacén de ficheros (disco solo fuera de producción, o bucket S3). */
 function storageProblems(env: Env, isProd: boolean): string[] {
   const problems: string[] = [];
+  const concurrency = str(env, 'UPLOAD_MAX_CONCURRENCY');
+  if (
+    concurrency != null &&
+    boundedInt(concurrency, UPLOAD_MAX_CONCURRENCY_LIMITS.range) == null
+  ) {
+    const [min, max] = UPLOAD_MAX_CONCURRENCY_LIMITS.range;
+    problems.push(
+      `UPLOAD_MAX_CONCURRENCY debe ser un entero entre ${min} y ${max} (subidas que pasan por la API a la vez en cada réplica).`,
+    );
+  }
+  for (const [key, { range }] of Object.entries(UPLOAD_TIMEOUT_LIMITS)) {
+    const value = str(env, key);
+    if (value != null && boundedInt(value, range) == null) {
+      problems.push(
+        `${key} debe ser un entero entre ${range[0]} y ${range[1]} (plazo en ms de las subidas que pasan por la API).`,
+      );
+    }
+  }
+  for (const [key, { range }] of Object.entries(S3_CLIENT_LIMITS)) {
+    const value = str(env, key);
+    if (value != null && boundedInt(value, range) == null) {
+      problems.push(
+        `${key} debe ser un entero entre ${range[0]} y ${range[1]} (cliente S3, README «Ficheros en un bucket S3»).`,
+      );
+    }
+  }
   const driver = storageDriverOf(str(env, 'STORAGE_DRIVER')) ?? 'disk';
   if (!(STORAGE_DRIVERS as readonly string[]).includes(driver)) {
     problems.push(

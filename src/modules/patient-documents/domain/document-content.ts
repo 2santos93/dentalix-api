@@ -75,48 +75,136 @@ const CENTRAL_SIGNATURE = 0x02014b50;
 const EOCD_MIN = 22;
 const MAX_ZIP_COMMENT = 0xffff;
 
+/** Bytes del final de un ZIP donde puede estar el registro de fin (EOCD). */
+export const ZIP_TAIL_BYTES = EOCD_MIN + MAX_ZIP_COMMENT;
+
 /**
- * ¿El directorio central del ZIP tiene una entrada con ese nombre? Busca el
- * registro de fin (EOCD) desde el final (puede llevar un comentario de hasta
- * 64 KB) y recorre las entradas con todos los límites comprobados: un ZIP
- * roto o malicioso da false, nunca una excepción. Solo cuentan los NOMBRES de
- * entrada; un fichero que solo menciona `word/document.xml` no es un DOCX.
- * ZIP64 no se admite (un DOCX de ≤ 20 MB no lo necesita).
+ * Directorio central más grande que se acepta leer por rango (DX-259). El de
+ * un DOCX ocupa unos pocos KB; uno enorme no es un DOCX razonable.
  */
-function zipHasEntry(bytes: Buffer, wanted: string): boolean {
-  if (bytes.length < EOCD_MIN) return false;
-  const lowest = Math.max(0, bytes.length - EOCD_MIN - MAX_ZIP_COMMENT);
-  let eocd = -1;
-  for (let i = bytes.length - EOCD_MIN; i >= lowest; i--) {
-    if (bytes.readUInt32LE(i) === EOCD_SIGNATURE) {
-      eocd = i;
-      break;
-    }
+export const MAX_ZIP_CENTRAL_DIRECTORY_BYTES = 1024 * 1024;
+
+interface ZipDirectory {
+  /** Offset ABSOLUTO del directorio central en el fichero. */
+  start: number;
+  size: number;
+  entries: number;
+}
+
+/**
+ * Busca el registro de fin (EOCD) en `tail`, los últimos bytes del fichero
+ * (`tailOffset` es dónde empiezan); puede llevar un comentario de hasta
+ * 64 KB. null si no hay o el directorio que anuncia no cabe antes del EOCD.
+ */
+function findZipDirectory(
+  tail: Buffer,
+  tailOffset: number,
+): ZipDirectory | null {
+  if (tail.length < EOCD_MIN) return null;
+  const lowest = Math.max(0, tail.length - EOCD_MIN - MAX_ZIP_COMMENT);
+  for (let i = tail.length - EOCD_MIN; i >= lowest; i--) {
+    if (tail.readUInt32LE(i) !== EOCD_SIGNATURE) continue;
+    const entries = tail.readUInt16LE(i + 10);
+    const size = tail.readUInt32LE(i + 12);
+    const start = tail.readUInt32LE(i + 16);
+    if (start + size > tailOffset + i) return null;
+    return { start, size, entries };
   }
-  if (eocd < 0) return false;
+  return null;
+}
 
-  const entries = bytes.readUInt16LE(eocd + 10);
-  const size = bytes.readUInt32LE(eocd + 12);
-  const start = bytes.readUInt32LE(eocd + 16);
-  if (start + size > eocd) return false;
-
+/**
+ * ¿El directorio central (`central`, ya recortado a su tamaño) tiene una
+ * entrada con ese nombre? Todos los límites comprobados: un ZIP roto o
+ * malicioso da false, nunca una excepción.
+ */
+function centralHasEntry(
+  central: Buffer,
+  entries: number,
+  wanted: string,
+): boolean {
   const name = Buffer.from(wanted, 'utf8');
-  let p = start;
+  let p = 0;
   for (let n = 0; n < entries; n++) {
-    if (p + 46 > eocd || bytes.readUInt32LE(p) !== CENTRAL_SIGNATURE) {
+    if (
+      p + 46 > central.length ||
+      central.readUInt32LE(p) !== CENTRAL_SIGNATURE
+    ) {
       return false;
     }
-    const nameLength = bytes.readUInt16LE(p + 28);
-    const extraLength = bytes.readUInt16LE(p + 30);
-    const commentLength = bytes.readUInt16LE(p + 32);
+    const nameLength = central.readUInt16LE(p + 28);
+    const extraLength = central.readUInt16LE(p + 30);
+    const commentLength = central.readUInt16LE(p + 32);
     const nameStart = p + 46;
-    if (nameStart + nameLength > eocd) return false;
-    if (bytes.subarray(nameStart, nameStart + nameLength).equals(name)) {
+    if (nameStart + nameLength > central.length) return false;
+    if (central.subarray(nameStart, nameStart + nameLength).equals(name)) {
       return true;
     }
     p = nameStart + nameLength + extraLength + commentLength;
   }
   return false;
+}
+
+/**
+ * ¿El directorio central del ZIP tiene una entrada con ese nombre? Solo
+ * cuentan los NOMBRES de entrada; un fichero que solo menciona
+ * `word/document.xml` no es un DOCX. ZIP64 no se admite (un DOCX de ≤ 20 MB
+ * no lo necesita).
+ */
+function zipHasEntry(bytes: Buffer, wanted: string): boolean {
+  const dir = findZipDirectory(bytes, 0);
+  if (!dir) return false;
+  return centralHasEntry(
+    bytes.subarray(dir.start, dir.start + dir.size),
+    dir.entries,
+    wanted,
+  );
+}
+
+/**
+ * Lectura por rangos de un fichero que no está en memoria (DX-259: el objeto
+ * subido directamente al bucket se lee con `Range`). `read(start, end)` da
+ * los bytes `[start, end)`.
+ */
+export interface ByteRangeSource {
+  size: number;
+  read(start: number, end: number): Promise<Buffer>;
+}
+
+/** Bytes del principio que bastan para todas las firmas salvo la del DOCX. */
+export const SNIFF_HEAD_BYTES = 64 * 1024;
+
+/**
+ * `sniffDocument` sin tener el fichero entero (DX-259): lee los primeros
+ * 64 KB y, solo si empieza como un ZIP, el final (EOCD) y el directorio
+ * central. El resultado es el mismo que con el fichero completo.
+ */
+export async function sniffDocumentFrom(
+  source: ByteRangeSource,
+): Promise<DetectedType | null> {
+  const head = await source.read(0, Math.min(source.size, SNIFF_HEAD_BYTES));
+  // Lo que no empieza como un ZIP se decide con la cabecera (las firmas
+  // están en los primeros 132 bytes). Un ZIP se decide por su final.
+  if (source.size <= SNIFF_HEAD_BYTES || !startsWith(head, ZIP_LOCAL_MAGIC)) {
+    return sniffDocument(head);
+  }
+  const tailStart = Math.max(0, source.size - ZIP_TAIL_BYTES);
+  const tail = await source.read(tailStart, source.size);
+  const dir = findZipDirectory(tail, tailStart);
+  if (dir && dir.size <= MAX_ZIP_CENTRAL_DIRECTORY_BYTES) {
+    const central =
+      dir.start >= tailStart
+        ? tail.subarray(dir.start - tailStart, dir.start - tailStart + dir.size)
+        : await source.read(dir.start, dir.start + dir.size);
+    if (centralHasEntry(central, dir.entries, 'word/document.xml')) {
+      return DOCX_TYPE;
+    }
+  }
+  // Un ZIP que no es DOCX puede ser el preámbulo libre de un DICOM.
+  return head.length >= DICOM_PREAMBLE + 4 &&
+    head.toString('latin1', DICOM_PREAMBLE, DICOM_PREAMBLE + 4) === 'DICM'
+    ? 'application/dicom'
+    : null;
 }
 
 const EXTENSIONS: Record<DetectedType, string> = {

@@ -11,6 +11,10 @@ import { AppLogger } from './app-logger';
 import { currentRequestId } from './request-context';
 import { stackWithoutMessage } from './safe-stack';
 import {
+  STORAGE_RETRY_AFTER_SECONDS,
+  StorageUnavailableError,
+} from '../storage/storage-errors';
+import {
   ObservedRequest,
   routeTemplate,
 } from './request-observability.middleware';
@@ -18,6 +22,7 @@ import {
 interface FilterResponse {
   headersSent: boolean;
   end(): unknown;
+  setHeader(name: string, value: string): unknown;
   status(code: number): { json(body: unknown): unknown };
 }
 
@@ -46,7 +51,8 @@ function isHttpishError(value: unknown): value is HttpishError {
  *
  * - 4xx: misma respuesta que el filtro por defecto de Nest; no es un error
  *   del servidor y no se registra como tal.
- * - 5xx lanzado a propósito (HttpException, p. ej. el 503 de la readiness):
+ * - 5xx lanzado a propósito (HttpException, p. ej. el 503 de la readiness o
+ *   el de un almacén de ficheros que no responde, DX-259, con `Retry-After`):
  *   UNA línea `warn` sin stack (es un estado previsto, no un fallo del
  *   código), con el tipo de su `cause` si la trae.
  * - Error no controlado: 500 genérico y una línea `error` con el request id,
@@ -94,6 +100,10 @@ export class AppExceptionFilter implements ExceptionFilter {
       // cierra para que el cliente no quede esperando.
       res.end();
       return;
+    }
+    if (exception instanceof StorageUnavailableError) {
+      // DX-259: el almacén no respondió; el cliente puede reintentar.
+      res.setHeader('Retry-After', String(STORAGE_RETRY_AFTER_SECONDS));
     }
     res.status(status).json(body);
   }
