@@ -66,6 +66,7 @@ describe('receiptEmailVars (DX-136)', () => {
       paidOnLabel: '17/10/2026',
       methodLabel: 'Efectivo',
       planLabel: 'Plan del 01/09/2026 · Opción A: implante',
+      toOpeningBalance: false,
       cashierName: 'Recepción Demo',
       voided: null,
       legalNotice: 'Este documento no es factura',
@@ -120,6 +121,7 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(vars.fiscalLine).toBe('Clínica Demo S.A.S. · NIT/NIF 900123456-7');
     expect(vars.methodLabel).toBe('Sin especificar');
     expect(vars.planLabel).toBe('Plan del 01/09/2026');
+    expect(vars.toOpeningBalance).toBe(false);
   });
 
   it('DX-262: un abono contra el saldo migrado dice su concepto y su fecha de corte', () => {
@@ -139,5 +141,6 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(vars.planLabel).toBe(
       'Saldo migrado · Ortodoncia (programa anterior) · corte 15/03/2026',
     );
+    expect(vars.toOpeningBalance).toBe(true);
   });
 });

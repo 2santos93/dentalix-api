@@ -162,7 +162,7 @@ export class ReceiptSnapshotDto {
     type: ReceiptPlanBalanceDto,
     nullable: true,
     description:
-      'Saldo del plan tras el abono (moneda del plan); null si no se pudo calcular.',
+      'Saldo tras el abono: el del plan (en su moneda) o, si el abono va a un saldo migrado (DX-262), lo que queda pendiente de ese saldo; null si no se pudo calcular.',
   })
   planBalance!: ReceiptPlanBalanceDto | null;
 

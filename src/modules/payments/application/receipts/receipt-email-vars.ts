@@ -75,6 +75,7 @@ export function receiptEmailVars(
       ? METHOD_LABELS[payment.method]
       : 'Sin especificar',
     planLabel: targetLabel(plan, snapshot.openingBalance ?? null, timeZone),
+    toOpeningBalance: Boolean(snapshot.openingBalance),
     balanceLabel: planBalance
       ? money(planBalance.balance, planBalance.currency)
       : null,
