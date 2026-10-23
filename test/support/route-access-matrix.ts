@@ -107,6 +107,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-222: indicaciones postoperatorias desde el enlace del email/WhatsApp.
   'GET /public/post-op-instructions/:token': PUBLIC_TENANT,
   'POST /public/post-op-instructions/:token/opened': PUBLIC_TENANT,
+  // DX-099: cuestionario de anamnesis por enlace (el paciente, sin sesión).
+  'GET /public/medical-history/:token': PUBLIC_TENANT,
+  'POST /public/medical-history/:token': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -172,6 +175,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/medical-alerts': EVERY_ROLE,
   'GET /medical-history/settings': EVERY_ROLE,
   'PUT /medical-history/settings': ADMIN_ONLY,
+  // DX-099 (loop/informes/DX-099.md): el enlace lo crea, lo ve en la ficha y
+  // lo anula cualquiera (recepción lo manda); la bandeja y las respuestas son
+  // clínicas; aceptar (crea una versión de la HC) y rechazar, solo el
+  // odontólogo y gestión.
+  'POST /patients/:patientId/medical-history/requests': EVERY_ROLE,
+  'GET /patients/:patientId/medical-history/requests': EVERY_ROLE,
+  'GET /medical-history/submissions': CLINICAL,
+  'GET /medical-history/submissions/summary': CLINICAL,
+  'GET /medical-history/submissions/:id': CLINICAL,
+  'POST /medical-history/submissions/:id/accept': roles('ADMIN', 'DENTIST'),
+  'POST /medical-history/submissions/:id/reject': roles('ADMIN', 'DENTIST'),
+  'POST /medical-history/submissions/:id/revoke': EVERY_ROLE,
   'POST /patients/:patientId/clinical-entries': CLINICAL,
   'GET /patients/:patientId/clinical-entries': CLINICAL,
   // DX-038: adendas; PATCH/PUT/DELETE solo responden 405 (HC inalterable).

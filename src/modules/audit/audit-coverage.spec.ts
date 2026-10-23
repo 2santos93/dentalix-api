@@ -15,6 +15,8 @@ import { PatientAgreementsController } from '../patient-agreements/presentation/
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
+import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
+import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
@@ -225,6 +227,43 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
     reason: 'NO_CHANGES_CONFIRMED',
+  },
+  // DX-099: anamnesis por enlace. Nunca la URL, el token, las respuestas ni
+  // el motivo del rechazo: solo el id del envío y el código. El envío del
+  // paciente se audita en su transacción (sin actor, origen LINK).
+  'POST /patients/:patientId/medical-history/requests': {
+    action: 'CREATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: RES,
+    patient: P,
+    reason: 'ANAMNESIS_LINK_CREATED',
+  },
+  'GET /medical-history/submissions/:id': {
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+  },
+  'POST /medical-history/submissions/:id/accept': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+    reason: 'ANAMNESIS_ACCEPTED',
+  },
+  'POST /medical-history/submissions/:id/reject': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+    reason: 'ANAMNESIS_REJECTED',
+  },
+  'POST /medical-history/submissions/:id/revoke': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+    reason: 'ANAMNESIS_LINK_REVOKED',
   },
 
   'POST /patients/:patientId/clinical-entries': {
@@ -986,6 +1025,8 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
+  PatientAnamnesisRequestsController,
+  MedicalHistorySubmissionsController,
   PatientResponsiblePartiesController,
   PatientCoveragesController,
   PatientAgreementsController,
