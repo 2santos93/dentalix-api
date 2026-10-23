@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { AgreementKind } from '@prisma/client';
+import { AgreementKind, PayerType } from '@prisma/client';
 import {
   IsBoolean,
   IsEnum,
@@ -50,6 +50,14 @@ export class AgreementPayerDto {
 
   @ApiProperty({ example: 'Sanitas' })
   name!: string;
+
+  @ApiProperty({
+    enum: PayerType,
+    enumName: 'PayerType',
+    description:
+      'SEC-047: con un pagador externo, asignar el convenio exige una cobertura viva del paciente con él; OTRO (cortesía, empleados…) solo lo asigna ADMIN.',
+  })
+  type!: PayerType;
 }
 
 export class AgreementPriceListDto {

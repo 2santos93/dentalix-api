@@ -23,7 +23,7 @@ import {
 } from '../../domain/agreement-rules';
 
 const INCLUDE = {
-  payer: { select: { id: true, name: true } },
+  payer: { select: { id: true, name: true, type: true } },
   priceList: { select: { id: true, name: true, currency: true } },
   // Solo las asignaciones vivas: el historial retirado no cuenta.
   _count: { select: { assignments: { where: { deletedAt: null } } } },
@@ -53,7 +53,7 @@ function mapToEntity(row: PrismaAgreement): Agreement {
   return {
     id: row.id,
     name: row.name,
-    payer: { id: row.payer.id, name: row.payer.name },
+    payer: { id: row.payer.id, name: row.payer.name, type: row.payer.type },
     kind: row.kind,
     percent: row.percent ? row.percent.toNumber() : null,
     percentByCategory: row.percentByCategory as unknown as Record<

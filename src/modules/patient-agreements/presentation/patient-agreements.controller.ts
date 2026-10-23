@@ -16,6 +16,7 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -64,7 +65,9 @@ const audit = (reason: string) =>
 /**
  * Convenio del paciente (DX-105): uno vigente, con historial. Datos
  * administrativos y de cobro, no clínicos: los 4 roles (PATIENT_ROLES, como
- * «Editar» de la ficha).
+ * «Editar» de la ficha). SEC-047: asignar depende además del convenio (ver
+ * `AssignPatientAgreementUseCase`): uno de pagador externo exige una cobertura
+ * viva del paciente con él; uno interno, ser ADMIN.
  */
 @ApiTags('patients')
 @ApiBearerAuth()
@@ -99,12 +102,16 @@ export class PatientAgreementsController {
     summary:
       'Asignar un convenio al paciente, sustituyendo el vigente (DX-105)',
     description:
-      'La asignación anterior queda en el historial. Un convenio desactivado se acepta y la asignación sale con estado INACTIVE.',
+      'La asignación anterior queda en el historial. Un convenio desactivado se acepta y la asignación sale con estado INACTIVE. SEC-047: un convenio de pagador externo exige `coverageId` con una cobertura vigente del paciente con ese pagador (cualquier rol); uno de pagador OTRO (cortesía, empleados…) solo lo asigna ADMIN, con la cobertura opcional.',
   })
   @ApiOkResponse({ type: PatientAgreementDto })
   @ApiBadRequestResponse({
     description:
-      'Validación, convenio inexistente o retirado, vigencia inválida, o cobertura que no es del paciente ni del pagador del convenio',
+      'Validación, convenio inexistente o retirado, vigencia inválida, convenio de pagador sin cobertura, o cobertura que no es del paciente, ni del pagador del convenio, o no está vigente',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Convenio sin pagador externo (pagador OTRO) asignado por un rol distinto de ADMIN',
   })
   @ApiNotFoundResponse({ description: 'Paciente no encontrado' })
   @ApiUnprocessableEntityResponse({
@@ -115,7 +122,10 @@ export class PatientAgreementsController {
     @Body() dto: AssignPatientAgreementDto,
     @Req() req: { user: TenantJwtPayload },
   ): Promise<PatientAgreementView> {
-    return this.assignAgreement.execute(patientId, dto, req.user.sub);
+    return this.assignAgreement.execute(patientId, dto, {
+      userId: req.user.sub,
+      role: req.user.role,
+    });
   }
 
   @Audit(audit('AGREEMENT_REMOVED'))

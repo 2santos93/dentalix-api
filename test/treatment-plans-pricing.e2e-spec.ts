@@ -112,8 +112,22 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   const createAgreement = (name: string, extra: object) =>
     create('/agreements', { name, payerId: payer, ...extra });
 
+  /**
+   * SEC-047: un convenio de pagador exige una cobertura viva del paciente con
+   * ese pagador; se reutiliza la que ya tenga o se le añade.
+   */
   async function assign(patientId: string, body: object): Promise<void> {
-    await as().put(`/patients/${patientId}/agreement`, body).expect(200);
+    const listed = await as()
+      .get(`/patients/${patientId}/coverages`)
+      .expect(200);
+    const coverageId =
+      (listed.body as { id: string; payer: { id: string } }[]).find(
+        (c) => c.payer.id === payer,
+      )?.id ??
+      (await create(`/patients/${patientId}/coverages`, { payerId: payer }));
+    await as()
+      .put(`/patients/${patientId}/agreement`, { coverageId, ...body })
+      .expect(200);
   }
 
   async function newPlan(patientId: string, currency = 'COP'): Promise<string> {

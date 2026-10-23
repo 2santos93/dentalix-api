@@ -699,9 +699,16 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         })
         .expect(201);
       agreementPatient = await createPatient(clinicA, 'Dora', 'PRES-A-3');
+      // SEC-047: el convenio de un pagador exige su cobertura viva.
+      const coverage = await as(clinicA)
+        .post(`/patients/${agreementPatient}/coverages`, {
+          payerId: (payer.body as { id: string }).id,
+        })
+        .expect(201);
       await as(clinicA)
         .put(`/patients/${agreementPatient}/agreement`, {
           agreementId: (agreement.body as { id: string }).id,
+          coverageId: (coverage.body as { id: string }).id,
         })
         .expect(200);
       agreementPlan = await createPlan(clinicA, agreementPatient, dentistA);

@@ -32,7 +32,7 @@ const INCLUDE = {
       active: true,
       validFrom: true,
       validTo: true,
-      payer: { select: { id: true, name: true } },
+      payer: { select: { id: true, name: true, type: true } },
     },
   },
 } as const satisfies Prisma.PatientAgreementInclude;
