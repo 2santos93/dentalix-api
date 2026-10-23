@@ -1543,3 +1543,75 @@ describe('UpdateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
     ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
   });
 });
+
+describe('UpdateAppointmentUseCase · ítems del plan de una cita cerrada (DX-271)', () => {
+  const useCase = (
+    existing: Appointment,
+    calls: UpdateAppointmentRepoInput[],
+  ) =>
+    new UpdateAppointmentUseCase(
+      makeRepo({
+        findById: () => Promise.resolve(existing),
+        update: (_id, patch) => {
+          calls.push(patch);
+          return Promise.resolve({ ...existing, ...patch } as Appointment);
+        },
+      }),
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+      makeBlocks(),
+      makeLocations(),
+      new TenantContextService(),
+      inMemoryAvailability(),
+    );
+  const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+  it.each([
+    fakeAppointment({ status: AppointmentStatus.COMPLETED }),
+    fakeAppointment({ status: AppointmentStatus.NO_SHOW }),
+    fakeAppointment({ status: AppointmentStatus.CANCELLED, start: past }),
+    fakeAppointment({ start: past, end: new Date(past.getTime() + 1800000) }),
+  ])(
+    'planItemIds en una cita cerrada o pasada → 409 sin escribir ($status)',
+    async (existing) => {
+      const calls: UpdateAppointmentRepoInput[] = [];
+      await expect(
+        useCase(existing, calls).execute(existing.id, {
+          planItemIds: [],
+          notes: 'x',
+        }),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Esta cita ya pasó: sus tratamientos no se cambian.',
+        ),
+      );
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it('reactivar una cita cancelada futura y cambiar sus ítems a la vez sí se puede', async () => {
+    const existing = fakeAppointment({ status: AppointmentStatus.CANCELLED });
+    const calls: UpdateAppointmentRepoInput[] = [];
+    await useCase(existing, calls).execute(existing.id, {
+      status: AppointmentStatus.SCHEDULED,
+      planItemIds: [],
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('una cita futura o en la clínica admite planItemIds', async () => {
+    for (const existing of [
+      fakeAppointment(),
+      fakeAppointment({
+        status: AppointmentStatus.IN_CHAIR,
+        start: past,
+        end: new Date(past.getTime() + 1800000),
+      }),
+    ]) {
+      const calls: UpdateAppointmentRepoInput[] = [];
+      await useCase(existing, calls).execute(existing.id, { planItemIds: [] });
+      expect(calls).toHaveLength(1);
+    }
+  });
+});

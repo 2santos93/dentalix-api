@@ -457,9 +457,16 @@ describe('DX-256 carreras de edición de vínculos', () => {
     });
     const transaction = run(() =>
       prisma.runWithTenant(async (tx) => {
-        await replaceAppointmentPlanItems(tx, tenantId, patientId, cancelled, [
-          itemId,
-        ]);
+        // DX-271: la cita está cancelada; solo admite ítems en el PATCH que la
+        // reactiva (uno de los dos estados abierto, aquí el del otro lado).
+        await replaceAppointmentPlanItems(
+          tx,
+          tenantId,
+          patientId,
+          cancelled,
+          [itemId],
+          { status: 'SCHEDULED', start: new Date(Date.now() + 20 * 86400000) },
+        );
         entered();
         await resume;
       }),
@@ -575,9 +582,15 @@ describe('DX-256 carreras de edición de vínculos', () => {
       where: { id: cancelled },
       data: { status: 'CANCELLED' },
     });
-    await run(() =>
-      appointmentRepo.update(cancelled, { planItemIds: [itemId] }),
-    );
+    // DX-271: a una cita cancelada no se le cambian los ítems por sí solos;
+    // el vínculo retirado de X vuelve aquí directo en la BD.
+    await expect(
+      run(() => appointmentRepo.update(cancelled, { planItemIds: [itemId] })),
+    ).rejects.toThrow('Esta cita ya pasó');
+    await owner.appointmentPlanItem.updateMany({
+      where: { appointmentId: cancelled, planItemId: itemId },
+      data: { deletedAt: null },
+    });
     await run(() =>
       appointmentRepo.update(cancelled, {
         status: 'SCHEDULED',

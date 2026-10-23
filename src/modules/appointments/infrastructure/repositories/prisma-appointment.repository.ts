@@ -1,7 +1,13 @@
 import {
+  isPlanItemConflict,
+  lockAppointmentForPlanItems,
+  planItemConflictMessage,
   replaceAppointmentPlanItems,
-  translatePlanItemConflict,
 } from '../appointment-plan-items';
+import {
+  PLAN_ITEMS_CLOSED_MESSAGE,
+  planItemsEditable,
+} from '../../domain/plan-item-reservation';
 import {
   ConflictException,
   Injectable,
@@ -187,7 +193,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           include: INCLUDE_PATIENT_NAME,
         });
       })
-      .catch(translatePlanItemConflict);
+      .catch((error: unknown) =>
+        this.rethrowPlanItemConflict(error, input.planItemIds ?? []),
+      );
     return mapToEntity(appointment);
   }
 
@@ -315,12 +323,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     return this.prisma
       .runWithTenant(async (tx) => {
         // Incluso PATCH solo planItemIds debe bloquear: Prisma puede omitir un UPDATE vacío.
-        await tx.$queryRaw`SELECT id FROM appointments WHERE id=${id}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
-
-        const existing = await tx.appointment.findFirst({
-          where: { id, deletedAt: null },
-          select: { id: true },
-        });
+        const existing = await lockAppointmentForPlanItems(
+          tx,
+          this.requireTenantId(),
+          id,
+        );
         if (!existing) {
           throw new NotFoundException('Appointment not found');
         }
@@ -334,6 +341,22 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           expectStatus,
           ...data
         } = patch;
+        // DX-271 (BE-039): con la fila bloqueada, los ítems de una cita que
+        // sigue cerrada (antes y después de este PATCH) no se tocan; nada de
+        // la petición se escribe.
+        if (
+          planItemIds !== undefined &&
+          !planItemsEditable(
+            existing,
+            {
+              status: data.status ?? existing.status,
+              start: data.start ?? existing.start,
+            },
+            new Date(),
+          )
+        ) {
+          throw new ConflictException(PLAN_ITEMS_CLOSED_MESSAGE);
+        }
         // Retirar excluidos ANTES de reactivar/reagendar: el trigger no debe
         // intentar reservar los vínculos antiguos que esta misma petición quita.
         if (planItemIds !== undefined) {
@@ -394,6 +417,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             appointment.patientId,
             id,
             planItemIds,
+            existing,
           );
         }
         if (revokeConfirmations) {
@@ -432,7 +456,38 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           resolvedWaitlistEntryId,
         };
       })
-      .catch(translatePlanItemConflict);
+      .catch((error: unknown) =>
+        // DX-271: un cambio de estado del día ya no choca (el trigger deja la
+        // reserva en la otra cita); esto es el alta o edición explícita de
+        // `planItemIds`, reagendar o reactivar.
+        this.rethrowPlanItemConflict(error, patch.planItemIds, id),
+      );
+  }
+
+  /**
+   * El ítem ya está reservado en otra cita viva: 409 que dice en cuál (fecha
+   * en la zona de su sede). Cualquier otro error sigue su camino. Sin
+   * `planItemIds` explícitos, los ítems vivos de la cita.
+   */
+  private async rethrowPlanItemConflict(
+    error: unknown,
+    planItemIds: string[] | undefined,
+    appointmentId?: string,
+  ): Promise<never> {
+    if (!isPlanItemConflict(error)) throw error;
+    const tenantId = this.requireTenantId();
+    const message = await this.prisma.runWithTenant(async (tx) => {
+      const ids =
+        planItemIds ??
+        (
+          await tx.appointmentPlanItem.findMany({
+            where: { appointmentId, deletedAt: null },
+            select: { planItemId: true },
+          })
+        ).map((l) => l.planItemId);
+      return planItemConflictMessage(tx, tenantId, ids, appointmentId);
+    });
+    throw new ConflictException(message);
   }
 
   async undoArrival(id: string): Promise<Appointment | null> {

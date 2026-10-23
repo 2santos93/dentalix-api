@@ -164,6 +164,14 @@ const RESTRICT_VIOLATION: ErrorBody = {
   error: 'Conflict',
   message: 'El registro está cerrado o firmado y ya no admite ese cambio.',
 };
+// DX-271: `dx271_completed_link_guard` rechazó retirar un ítem de una cita
+// completada (ERRCODE propio DX271). Los casos de uso responden 409 antes con
+// el mismo texto (`PLAN_ITEMS_CLOSED_MESSAGE`); esto es la red.
+const CLOSED_VISIT_ITEMS: ErrorBody = {
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  message: 'Esta cita ya pasó: sus tratamientos no se cambian.',
+};
 // Dos transacciones se cruzaron (deadlock o fallo de serialización): Postgres
 // abortó esta. Reintentar la operación la resuelve (DX-012).
 const CONCURRENCY_CONFLICT: ErrorBody = {
@@ -186,6 +194,7 @@ const BY_SQLSTATE: Record<string, ErrorBody> = {
   '23001': RESTRICT_VIOLATION, // restrict_violation (triggers de inmutabilidad)
   '40P01': CONCURRENCY_CONFLICT, // deadlock_detected
   '40001': CONCURRENCY_CONFLICT, // serialization_failure
+  DX271: CLOSED_VISIT_ITEMS, // propio: vínculo de una cita completada
 };
 
 /**

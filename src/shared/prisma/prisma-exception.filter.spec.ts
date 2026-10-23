@@ -250,6 +250,29 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  it('turns the closed-visit link guard (DX271, DX-271) into a 409 in Spanish', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        'DX271',
+        'Esta cita ya pasó: sus tratamientos no se cambian.',
+        SECRET_DETAIL,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(409);
+    expect(bodyOf(json)).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'Esta cita ya pasó: sus tratamientos no se cambian.',
+    });
+    jest.restoreAllMocks();
+  });
+
   const CONCURRENCY_BODY = {
     statusCode: 409,
     error: 'Conflict',
