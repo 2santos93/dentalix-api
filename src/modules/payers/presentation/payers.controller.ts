@@ -134,7 +134,7 @@ export class PayersController {
   @ApiNotFoundResponse({ description: 'Pagador no encontrado en esta clínica' })
   @ApiConflictResponse({
     description:
-      'Tiene coberturas asociadas; se desactiva en lugar de retirarlo',
+      'Tiene coberturas o convenios asociados; se desactiva en lugar de retirarlo',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   async remove(

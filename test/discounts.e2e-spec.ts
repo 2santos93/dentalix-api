@@ -342,7 +342,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         })
         .set('X-Request-Id', requestId)
         .expect(200);
-      const byId = new Map((res.body as Item[]).map((i) => [i.id, i]));
+      // DX-105: la respuesta es `{ items, skippedNoDiscount }`.
+      const body = res.body as { items: Item[]; skippedNoDiscount: number };
+      expect(body.skippedNoDiscount).toBe(0);
+      const byId = new Map(body.items.map((i) => [i.id, i]));
       // 8500; 12345,7 → 12346 y 100,5 → 101 superarían el 10 % del DENTIST:
       // bajan a 12345 y 100.
       expect(items.map((i) => byId.get(i.id)!.discount)).toEqual([
@@ -374,7 +377,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           percent: 7.5,
         })
         .expect(200);
-      const byId = new Map((res.body as Item[]).map((i) => [i.id, i]));
+      // DX-105: la respuesta es `{ items, skippedNoDiscount }`.
+      const body = res.body as { items: Item[]; skippedNoDiscount: number };
+      expect(body.skippedNoDiscount).toBe(0);
+      const byId = new Map(body.items.map((i) => [i.id, i]));
       expect(items.map((i) => byId.get(i.id)!.discount)).toEqual([
         6.42, 9.26, 0.07,
       ]);
@@ -931,7 +937,8 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           percent: 5,
         })
         .expect(200);
-      expect((ok.body as Item[])[0]).toMatchObject({
+      // DX-105: la respuesta es `{ items, skippedNoDiscount }`.
+      expect((ok.body as { items: Item[] }).items[0]).toMatchObject({
         discount: 47500,
         discountById: dentistId,
       });

@@ -1,3 +1,4 @@
+import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   Body,
   Controller,
@@ -132,6 +133,38 @@ export class AppointmentsController {
     return auditRequestContext(req, this.tenantContext);
   }
 
+  /** La escritura explícita de vínculos es distinta de la traza HTTP genérica. */
+  private async auditPlanItems(
+    appointment: AppointmentWriteResult,
+    planItemIds: string[] | undefined,
+    action: 'CREATE' | 'UPDATE',
+    ctx: AppointmentAuditContext | undefined,
+  ): Promise<void> {
+    if (planItemIds === undefined || !ctx) return;
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action,
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'APPOINTMENT_PLAN_ITEMS',
+        changedFields: ['planItemIds'],
+      },
+    });
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'APPOINTMENT',
+    resourceId: { response: 'id' },
+    patient: { response: 'patientId' },
+  })
   @Post()
   @ApiCreatedResponse({
     type: AppointmentWriteDto,
@@ -174,6 +207,7 @@ export class AppointmentsController {
       createdById: req.user.sub,
       appointmentTypeId: dto.appointmentTypeId,
       wantsEarlier: dto.wantsEarlier,
+      planItemIds: dto.planItemIds,
     });
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.
     if (created.wantsEarlier && ctx) {
@@ -195,6 +229,7 @@ export class AppointmentsController {
         metadata: { reason: 'WANTS_EARLIER_ON' },
       });
     }
+    await this.auditPlanItems(created, dto.planItemIds, 'CREATE', ctx);
     return created;
   }
 
@@ -202,7 +237,7 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: [AppointmentListItemDto],
     description:
-      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica.',
+      'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica ni las notas de la cita (disponibles en GET /appointments/:id).',
   })
   @ApiBadRequestResponse({
     description: 'Más de 12 profesionales o alguno ajeno a la clínica',
@@ -211,7 +246,7 @@ export class AppointmentsController {
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    (Appointment & {
+    (Omit<Appointment, 'notes'> & {
       balance: OverdueBalance;
       coverage: CoverageSummary;
       medicalAlerts: MedicalAlertFlags;
@@ -232,7 +267,7 @@ export class AppointmentsController {
     const coverage = await this.coverageFlags.forPatients(patientIds);
     // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
     const medical = await this.medicalAlertFlags.forAppointments(appointments);
-    return appointments.map((a) => ({
+    return appointments.map(({ notes: _notes, ...a }) => ({
       ...a,
       balance: flags.get(a.patientId) ?? {
         hasOverdue: false,
@@ -318,6 +353,12 @@ export class AppointmentsController {
     return this.getAppointment.execute(id);
   }
 
+  @Audit({
+    action: 'UPDATE',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+  })
   @Patch(':id')
   @ApiOkResponse({ type: AppointmentWriteDto })
   @ApiBadRequestResponse({ description: 'Datos inválidos o al pasado' })
@@ -335,12 +376,13 @@ export class AppointmentsController {
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
   })
-  update(
+  async update(
     @Param('id') id: string,
     @Body() dto: UpdateAppointmentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
-    return this.updateAppointment.execute(
+    const ctx = this.auditContext(req);
+    const updated = await this.updateAppointment.execute(
       id,
       {
         start: dto.start !== undefined ? new Date(dto.start) : undefined,
@@ -350,9 +392,12 @@ export class AppointmentsController {
         reason: dto.reason,
         notes: dto.notes,
         wantsEarlier: dto.wantsEarlier,
+        planItemIds: dto.planItemIds,
       },
-      this.auditContext(req),
+      ctx,
     );
+    await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
+    return updated;
   }
 
   @Post(':id/undo-arrival')

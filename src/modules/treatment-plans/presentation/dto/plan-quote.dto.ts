@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ToothSurface, TreatmentPlanStatus } from '@prisma/client';
 import { IsString, Matches, MaxLength } from 'class-validator';
 
@@ -83,6 +83,22 @@ export class PlanQuoteItemDto {
 
   @ApiProperty({ description: 'unitPrice × quantity − discount' })
   subtotal!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Precio de catálogo del procedimiento al añadirlo (v2). Null en ítems anteriores a DX-105 y en presupuestos v1.',
+  })
+  listPrice!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Convenio con que se fijó el precio del ítem (v2). Null si no hubo convenio.',
+  })
+  agreementName!: string | null;
 }
 
 export class PlanQuoteTotalDto {
@@ -97,6 +113,23 @@ export class PlanQuoteTotalDto {
 
   @ApiProperty({ description: 'gross − discount' })
   net!: number;
+
+  @ApiProperty({
+    description:
+      'Ahorro por convenio (v2): Σ max(0, precio de lista − precio de referencia) de los ítems con convenio, en la moneda del plan. 0 en v1.',
+  })
+  agreementSaving!: number;
+}
+
+export class PlanQuoteAgreementDto {
+  @ApiProperty({
+    description:
+      'Nombre del convenio; si el plan mezcla varios, los nombres separados por « · ».',
+  })
+  name!: string;
+
+  @ApiProperty({ description: 'Pagador del primer convenio' })
+  payerName!: string;
 }
 
 export class PlanQuoteAcceptanceDto {
@@ -130,9 +163,25 @@ export class PlanQuoteAcceptanceDto {
  * Presupuesto imprimible del plan (DX-012). Sin aceptación, es el plan VIVO
  * emitido hoy; aceptado, es la foto firmada (no cambia aunque cambie el plan).
  */
+export class PlanQuoteVisitDto {
+  @ApiProperty({ format: 'uuid' }) itemId!: string;
+  @ApiProperty() visit!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty() minDaysAfterPrevious!: number;
+}
 export class PlanQuoteDocumentDto {
-  @ApiProperty({ enum: [1] })
-  version!: 1;
+  @ApiPropertyOptional({
+    type: [PlanQuoteVisitDto],
+    description: 'Organización clínica actual; separada del contenido firmado.',
+  })
+  visitOrganization?: PlanQuoteVisitDto[];
+
+  @ApiProperty({
+    enum: [1, 2],
+    description:
+      '2 = con convenio y ahorro (DX-105); 1 = foto firmada antes de DX-105 (sin convenio).',
+  })
+  version!: 1 | 2;
 
   @ApiProperty({ format: 'uuid' })
   planId!: string;
@@ -164,6 +213,13 @@ export class PlanQuoteDocumentDto {
     description: 'Profesional que creó el plan',
   })
   professionalName!: string | null;
+
+  @ApiProperty({
+    type: PlanQuoteAgreementDto,
+    nullable: true,
+    description: 'Convenio de los ítems; null si ninguno lo tiene',
+  })
+  agreement!: PlanQuoteAgreementDto | null;
 
   @ApiProperty({
     example: '2026-10-16',

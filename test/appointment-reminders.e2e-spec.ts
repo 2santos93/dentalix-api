@@ -1,3 +1,7 @@
+import { ReminderClock } from '../src/modules/reminders/application/reminder-clock';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
+import { JobQueue } from '../src/modules/jobs/application/job-queue.service';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -50,6 +54,7 @@ interface RemindersBody {
     state: string;
     sentAt: string | null;
     skipReason: string | null;
+    failureReason: string | null;
     emailDelivery: string | null;
     sentToResponsible: boolean;
     current: boolean;
@@ -321,6 +326,16 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
         new Date(start.getTime() - 2 * HOUR).toISOString(),
       );
 
+      const manualLink = await as(
+        api().post(`/api/v1/appointments/${withEmail}/confirmation-link`),
+        tokens[ClinicRole.RECEPTION],
+      ).expect(201);
+      const manualToken = (
+        manualLink.body as { token?: string; url: string }
+      ).url
+        .split('/')
+        .pop();
+
       await runReminders();
       // Repetirlo no manda otro.
       await runReminders();
@@ -383,6 +398,93 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       });
       expect(row.outboundMessageId).not.toBeNull();
       expect(JSON.stringify(row)).not.toContain('carolina');
+      // DX-160: WhatsApp anterior al recordatorio sigue confirmando por HTTP.
+      await api()
+        .post(`/api/v1/public/appointment-confirmations/${manualToken}`)
+        .set('X-Tenant-Host', clinic.host)
+        .send({ action: 'confirm' })
+        .expect(200);
+      const closed = await raw.appointmentConfirmation.findMany({
+        where: { appointmentId: withEmail },
+      });
+      expect(closed).toHaveLength(2);
+      expect(
+        closed.every(
+          (link) => link.respondedAt !== null && link.response === 'CONFIRM',
+        ),
+      ).toBe(true);
+      await api()
+        .post(`/api/v1/public/appointment-confirmations/${token}`)
+        .set('X-Tenant-Host', clinic.host)
+        .send({ action: 'cancel' })
+        .expect(409);
+    });
+
+    it('DX-160: API y Swagger distinguen FAILED con motivo seguro', async () => {
+      const id = await book(
+        await createPatient('failed@example.com', '26160'),
+        new Date(Date.now() + 8 * HOUR),
+      );
+      const appt = await raw.appointment.findUniqueOrThrow({ where: { id } });
+      const enqueue = jest
+        .spyOn(app.get(EmailOutbox), 'enqueue')
+        .mockRejectedValue(
+          Object.assign(new Error('failed@example.com private'), {
+            code: 'ECONNRESET',
+          }),
+        );
+      try {
+        await app.get(JobQueue).enqueue(
+          SEND_REMINDER_JOB,
+          {
+            appointmentId: id,
+            leadHours: 2,
+            start: appt.start.toISOString(),
+          },
+          { tenantId: clinic.tenantId, maxAttempts: 1 },
+        );
+        // El reloj del handler necesita la ventana de envío para este job.
+        const reminderClock = app.get(ReminderClock);
+        const now = jest
+          .spyOn(reminderClock, 'now')
+          .mockReturnValue(new Date(appt.start.getTime() - 2 * HOUR));
+        try {
+          await app.get(JobWorker).drain();
+        } finally {
+          now.mockRestore();
+        }
+      } finally {
+        enqueue.mockRestore();
+      }
+      expect(
+        (await reminders(id)).items.find((item) => item.leadHours === 2),
+      ).toMatchObject({
+        state: 'FAILED',
+        failureReason: 'Error ECONNRESET',
+        sentAt: null,
+      });
+      expect(
+        await raw.outboundMessage.findFirstOrThrow({
+          where: { appointmentId: id },
+        }),
+      ).toMatchObject({ status: 'FAILED', lastError: 'Error ECONNRESET' });
+      const swagger = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      expect(
+        swagger.components?.schemas?.AppointmentReminderState,
+      ).toMatchObject({
+        enum: expect.arrayContaining([
+          'PENDING',
+          'SENT',
+          'SKIPPED',
+          'FAILED',
+        ]) as string[],
+      });
+      expect(
+        swagger.components?.schemas?.AppointmentReminderItemDto,
+      ).toMatchObject({ properties: { failureReason: { nullable: true } } });
     });
 
     it('DX-203: un menor sin email con responsable que recibe avisos recibe el recordatorio en el email del responsable, y la cita lo dice', async () => {

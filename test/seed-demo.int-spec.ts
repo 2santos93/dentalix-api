@@ -36,6 +36,7 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  'appointment_plan_items',
   // DX-233: horario de los profesionales (hijas de locations, en orden de FK).
   'provider_schedule_override_ranges',
   'provider_schedule_overrides',
@@ -48,9 +49,11 @@ const TENANT_TABLES = [
   'post_op_instruction_templates',
   // DX-203: responsables (hijos de patients).
   'patient_responsible_parties',
-  // DX-153: coberturas (hijas de patients y payers) y pagadores.
+  // DX-105: asignaciones de convenio (hijas de patients, convenios y coberturas).
+  'patient_agreements',
+  // DX-153: coberturas (hijas de patients y payers). Los pagadores van más abajo
+  // (los convenios los referencian).
   'patient_coverages',
-  'payers',
   'patient_implants',
   // DX-151: documentos (hijos de patients y locations).
   'patient_documents',
@@ -78,6 +81,13 @@ const TENANT_TABLES = [
   'cash_sessions',
   'treatment_plan_acceptances',
   'treatment_plan_items',
+  // DX-105: tras treatment_plan_items (agreementId, RESTRICT): precios de lista,
+  // convenios (hijos de payers y listas), listas (hijas de locations) y, al fin,
+  // los pagadores (DX-153).
+  'price_list_items',
+  'agreements',
+  'price_lists',
+  'payers',
   'treatment_plans',
   'tooth_records',
   'patient_dentition_events',
@@ -335,9 +345,16 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patients).toBe(25);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
-    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora.
-    expect(firstCounts.payers).toBe(7);
+    // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
+    // DX-105 añade «Empresa Alfa» (8).
+    expect(firstCounts.payers).toBe(8);
     expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
+    // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
+    // convenios (Sura −15 % y Empresa Alfa lista) y tres pacientes asignados.
+    expect(firstCounts.price_lists).toBe(2);
+    expect(firstCounts.price_list_items).toBe(8);
+    expect(firstCounts.agreements).toBe(2);
+    expect(firstCounts.patient_agreements).toBe(3);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
     // DX-247: una anamnesis antigua confirmada «Sin cambios hoy».
     expect(firstCounts.medical_history_reviews).toBe(1);

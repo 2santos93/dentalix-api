@@ -272,9 +272,25 @@ describe('Pagadores (e2e, DX-153)', () => {
       tokens.ADMIN,
     ).expect(409);
     expect((res.body as { message: string }).message).toBe(
-      'Este pagador tiene coberturas asociadas; desactívalo en lugar de retirarlo.',
+      'Este pagador tiene coberturas o convenios asociados; desactívalo en lugar de retirarlo.',
     );
     expect(await names()).toContain('Con cobertura');
+  });
+
+  it('retirar con un convenio vivo da 409 y el pagador sigue (DX-105)', async () => {
+    const payer = await createPayer({ name: 'Con convenio', type: 'OTRO' });
+    await as(api().post('/api/v1/agreements'), tokens.ADMIN)
+      .send({
+        name: 'Convenio del pagador',
+        payerId: payer.id,
+        kind: 'PERCENT_DISCOUNT',
+        percent: 10,
+      })
+      .expect(201);
+    await as(api().delete(`/api/v1/payers/${payer.id}`), tokens.ADMIN).expect(
+      409,
+    );
+    expect(await names()).toContain('Con convenio');
   });
 
   it('la clínica B no ve ni edita los pagadores de A, y el mismo nombre no choca', async () => {

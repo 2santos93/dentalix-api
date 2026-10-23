@@ -14,6 +14,7 @@ export interface ReminderRecord {
   status: AppointmentReminderStatus;
   skipReason: AppointmentReminderSkipReason | null;
   sentAt: Date | null;
+  failureReason?: string | null;
   emailDelivery: ReminderEmailDelivery | null;
   /** DX-203: el registro de envíos dice que fue al responsable del paciente. */
   sentToResponsible?: boolean;
@@ -28,7 +29,7 @@ export interface ReminderRecord {
  * - MISSED: su hora pasó sin enviarse (la cita se agendó después).
  */
 export type ReminderState =
-  'SENT' | 'SKIPPED' | 'SENDING' | 'PENDING' | 'MISSED';
+  'SENT' | 'SKIPPED' | 'SENDING' | 'PENDING' | 'MISSED' | 'FAILED';
 
 export interface ReminderTimelineItem {
   leadHours: number;
@@ -36,6 +37,7 @@ export interface ReminderTimelineItem {
   dueAt: Date;
   state: ReminderState;
   sentAt: Date | null;
+  failureReason: string | null;
   skipReason: AppointmentReminderSkipReason | null;
   emailDelivery: ReminderEmailDelivery | null;
   /** DX-203: «Recordatorio enviado al responsable». */
@@ -72,6 +74,7 @@ function fromRecord(
     state: record.status,
     sentAt: record.sentAt,
     skipReason: record.skipReason,
+    failureReason: record.failureReason ?? null,
     emailDelivery: record.emailDelivery,
     sentToResponsible: record.sentToResponsible ?? false,
     current,
@@ -113,6 +116,7 @@ export function buildReminderTimeline(
         state: missed ? 'MISSED' : 'PENDING',
         sentAt: null,
         skipReason: null,
+        failureReason: null,
         emailDelivery: null,
         sentToResponsible: false,
         current: true,

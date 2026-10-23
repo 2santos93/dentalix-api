@@ -32,7 +32,10 @@ import { AddTreatmentPlanItemDto } from './dto/add-treatment-plan-item.dto';
 import { UpdateTreatmentPlanItemDto } from './dto/update-treatment-plan-item.dto';
 import { RejectTreatmentPlanDto } from './dto/reject-treatment-plan.dto';
 import { CreatePlanAlternativeDto } from './dto/create-plan-alternative.dto';
-import { ApplyBulkDiscountDto } from './dto/apply-bulk-discount.dto';
+import {
+  ApplyBulkDiscountDto,
+  ApplyBulkDiscountResultDto,
+} from './dto/apply-bulk-discount.dto';
 import { TreatmentPlanDto } from './dto/treatment-plan.dto';
 import { TreatmentPlanItemDto } from './dto/treatment-plan-item.dto';
 import { CreateTreatmentPlanUseCase } from '../application/use-cases/create-treatment-plan.use-case';
@@ -45,7 +48,10 @@ import { RemoveTreatmentPlanItemUseCase } from '../application/use-cases/remove-
 import { PresentTreatmentPlanUseCase } from '../application/use-cases/present-treatment-plan.use-case';
 import { RejectTreatmentPlanUseCase } from '../application/use-cases/reject-treatment-plan.use-case';
 import { CreatePlanAlternativeUseCase } from '../application/use-cases/create-plan-alternative.use-case';
-import { ApplyBulkDiscountUseCase } from '../application/use-cases/apply-bulk-discount.use-case';
+import {
+  ApplyBulkDiscountUseCase,
+  type ApplyBulkDiscountResult,
+} from '../application/use-cases/apply-bulk-discount.use-case';
 import {
   TreatmentPlan,
   TreatmentPlanDetail,
@@ -360,9 +366,9 @@ export class TreatmentPlansController {
     description: 'Sede donde se da el descuento; sin ella, la principal',
   })
   @ApiOkResponse({
-    type: [TreatmentPlanItemDto],
+    type: ApplyBulkDiscountResultDto,
     description:
-      'Los ítems con su descuento nuevo: el % de su precio redondeado a la unidad de la moneda del plan (COP sin decimales, EUR a céntimos), nunca por encima del tope del rol ítem a ítem',
+      'Los ítems con su descuento nuevo y cuántos se saltaron por no admitir descuentos (DX-105)',
   })
   @ApiNotFoundResponse({
     description: 'Plan, o algún ítem, inexistente o de otro plan: nada cambia',
@@ -374,7 +380,7 @@ export class TreatmentPlansController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ApplyBulkDiscountDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlanItem[]> {
+  ): Promise<ApplyBulkDiscountResult> {
     return this.applyBulkDiscount.execute(
       id,
       {

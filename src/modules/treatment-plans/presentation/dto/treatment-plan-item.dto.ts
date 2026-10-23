@@ -1,6 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   DiscountReason,
+  PriceSource,
   ToothSurface,
   TreatmentPlanItemStatus,
 } from '@prisma/client';
@@ -12,6 +13,10 @@ import {
 // class exists purely for `@ApiProperty` documentation, not for input
 // validation.
 export class TreatmentPlanItemDto {
+  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  visit!: number;
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: 60 })
+  visitLabel!: string | null;
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
@@ -34,9 +39,49 @@ export class TreatmentPlanItemDto {
     type: Number,
     nullable: true,
     description:
-      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre). Un precio por debajo cuenta como descuento: tope del rol, motivo e informe de descuentos.',
+      'Precio de REFERENCIA al dar de alta el ítem (null = ítem libre). DX-105: el resuelto (convenio → lista de precios de la sede → catálogo). Un precio por debajo cuenta como descuento (SEC-041): tope del rol, motivo e informe de descuentos.',
   })
   catalogPrice!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-105: precio de catálogo (`defaultPrice`) en el alta. Null en ítems anteriores a DX-105 o sin precio de catálogo.',
+  })
+  basePrice!: number | null;
+
+  @ApiProperty({
+    enum: PriceSource,
+    nullable: true,
+    description:
+      'DX-105: de dónde salió `catalogPrice` (convenio por %, lista del convenio, lista de la sede o catálogo). Null en ítems anteriores a DX-105.',
+  })
+  priceSource!: PriceSource | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-105: convenio con el que se resolvió el precio',
+  })
+  agreementId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-105: nombre del convenio en el alta (foto: no cambia si se renombra)',
+  })
+  agreementName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-105: sede con la que se resolvió el precio',
+  })
+  pricingLocationId!: string | null;
 
   @ApiProperty()
   price!: number;

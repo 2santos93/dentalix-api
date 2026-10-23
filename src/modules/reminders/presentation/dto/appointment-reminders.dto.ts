@@ -1,7 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AppointmentReminderSkipReason } from '@prisma/client';
 
-const STATES = ['SENT', 'SKIPPED', 'SENDING', 'PENDING', 'MISSED'] as const;
+const STATES = [
+  'SENT',
+  'SKIPPED',
+  'SENDING',
+  'PENDING',
+  'MISSED',
+  'FAILED',
+] as const;
 const DELIVERIES = ['PENDING', 'SENT', 'FAILED'] as const;
 
 export class AppointmentReminderItemDto {
@@ -24,7 +31,7 @@ export class AppointmentReminderItemDto {
     enum: STATES,
     enumName: 'AppointmentReminderState',
     description:
-      'SENT: dejado en el outbox de email (sentAt). SKIPPED: omitido (skipReason). SENDING: entregándose. PENDING: saldrá en dueAt. MISSED: su hora pasó sin enviarse (la cita se agendó después).',
+      'SENT: dejado en el outbox de email (sentAt). SKIPPED: omitido (skipReason). FAILED: agotó los intentos (failureReason). SENDING: entregándose. PENDING: saldrá en dueAt. MISSED: su hora pasó sin enviarse (la cita se agendó después).',
   })
   state!: (typeof STATES)[number];
 
@@ -39,6 +46,14 @@ export class AppointmentReminderItemDto {
       'NO_EMAIL sin email · OPTED_OUT el paciente se dio de baja · CHANNEL_NONE / CHANNEL_WHATSAPP su canal no es el email (DX-128) · CANCELLED/COMPLETED/NO_SHOW estado de la cita · IN_CLINIC el paciente ya llegó (DX-200) · RESCHEDULED a otra hora · DELETED retirada · DISABLED la sede los desactivó · TOO_LATE fuera de plazo (la cita ya había empezado o su hora pasó hace más de 1 h)',
   })
   skipReason!: AppointmentReminderSkipReason | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Motivo técnico del fallo definitivo: solo tipo y código de describeJobError, sin datos del paciente.',
+  })
+  failureReason!: string | null;
 
   @ApiProperty({
     enum: DELIVERIES,

@@ -1,5 +1,6 @@
 import {
   DiscountReason,
+  PriceSource,
   ToothSurface,
   TreatmentPlanItemStatus,
 } from '@prisma/client';
@@ -13,6 +14,8 @@ import {
  * `defaultPrice`).
  */
 export interface TreatmentPlanItem {
+  visit?: number;
+  visitLabel?: string | null;
   id: string;
   tenantId: string;
   planId: string;
@@ -20,10 +23,22 @@ export interface TreatmentPlanItem {
   surfaces: ToothSurface[];
   catalogItemId: string;
   /**
-   * SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre: el
-   * catálogo no tenía precio). Un precio por debajo cuenta como descuento.
+   * SEC-041: precio de REFERENCIA al dar de alta el ítem (null = ítem libre:
+   * sin precio). DX-105 (ruling R1): el resuelto (convenio → lista de la sede →
+   * catálogo). Un precio por debajo cuenta como descuento discrecional.
    */
   catalogPrice: number | null;
+  /**
+   * DX-105: foto del precio al dar de alta el ítem, inmutable (nada re-precia):
+   * el precio de catálogo de entonces, de dónde salió la referencia, el
+   * convenio (id y nombre) y la sede con la que se resolvió. Todo null en los
+   * ítems anteriores a DX-105 («sin convenio»).
+   */
+  basePrice: number | null;
+  priceSource: PriceSource | null;
+  agreementId: string | null;
+  agreementName: string | null;
+  pricingLocationId: string | null;
   price: number;
   /** Descuento del ítem en la moneda del plan (DX-012); 0 ≤ discount ≤ price. */
   discount: number;

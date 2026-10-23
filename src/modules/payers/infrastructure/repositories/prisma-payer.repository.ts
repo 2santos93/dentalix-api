@@ -152,7 +152,7 @@ export class PrismaPayerRepository implements PayerRepository {
 
   /**
    * Candado de fila sobre el pagador (`FOR UPDATE`) antes de contar: el alta o
-   * cambio de cobertura lo relee con `FOR SHARE` dentro de su transacción, así
+   * cambio de cobertura (o el de un convenio) lo relee con `FOR SHARE` dentro de su transacción, así
    * que uno de los dos espera al otro y ve su resultado.
    */
   retire(id: string, updatedById?: string): Promise<RetirePayerResult> {
@@ -162,10 +162,13 @@ export class PrismaPayerRepository implements PayerRepository {
         WHERE id = ${id}::uuid AND "deletedAt" IS NULL
         FOR UPDATE`;
       if (locked.length === 0) return 'NOT_FOUND';
-      const inUse = await tx.patientCoverage.count({
-        where: { payerId: id, deletedAt: null },
-      });
-      if (inUse > 0) return 'IN_USE';
+      // Coberturas de pacientes y convenios vivos de la clínica (DX-105): con
+      // cualquiera de los dos se desactiva en lugar de retirar.
+      const [coverages, agreements] = await Promise.all([
+        tx.patientCoverage.count({ where: { payerId: id, deletedAt: null } }),
+        tx.agreement.count({ where: { payerId: id, deletedAt: null } }),
+      ]);
+      if (coverages > 0 || agreements > 0) return 'IN_USE';
       await tx.payer.update({
         where: { id },
         data: { active: false, deletedAt: new Date(), updatedById },

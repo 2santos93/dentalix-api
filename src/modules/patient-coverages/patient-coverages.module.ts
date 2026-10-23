@@ -38,7 +38,8 @@ import { PrismaPatientCoverageRepository } from './infrastructure/repositories/p
       useClass: PrismaPatientCoverageRepository,
     },
   ],
-  // Resumen por lote para la ficha, el listado de pacientes y la agenda.
-  exports: [PatientCoverageFlags],
+  // Resumen por lote para la ficha, el listado de pacientes y la agenda; el
+  // repositorio, para que la asignación del convenio compruebe la cobertura (DX-105).
+  exports: [PatientCoverageFlags, PATIENT_COVERAGE_REPOSITORY],
 })
 export class PatientCoveragesModule {}
