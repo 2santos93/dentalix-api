@@ -14,7 +14,14 @@ import {
   ImportReadSlotGuard,
 } from './import-read-slots';
 
+/** Respuestas del test: al final se cierran para desarmar los plazos del guard. */
+const responses: EventEmitter[] = [];
+
 class FakeResponse extends EventEmitter {
+  constructor() {
+    super();
+    responses.push(this);
+  }
   readonly headers = new Map<string, string>();
   headersSent = false;
   statusCode = 200;
@@ -53,6 +60,10 @@ function busyOf(guard: ImportReadSlotGuard, tenantId: string) {
 }
 
 describe('ImportReadSlotGuard (SEC-046)', () => {
+  afterEach(() => {
+    responses.splice(0).forEach((res) => res.emit('close'));
+  });
+
   const build = () => {
     const slots = new UploadSlots(2, DEFAULT_UPLOAD_TIMEOUTS, 1);
     return { slots, guard: new ImportReadSlotGuard(slots) };
