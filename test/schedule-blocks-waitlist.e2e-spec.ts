@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, PrismaClient, ScheduleBlockKind } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -10,6 +10,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { DAY_MONTH, dayMonthNumbers } from './support/sede-day-month';
+import { blockConflictMessage } from '../src/modules/schedule-blocks/domain/schedule-block-rules';
 
 // DX-122 en HTTP real: bloqueos de agenda (roles, vacaciones que impiden crear
 // y mover, almuerzo que deja agendar con aviso, confirmación sobre citas
@@ -37,6 +39,15 @@ function addDays(day: string, n: number): string {
 /** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
   return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+}
+
+/** `[díaIni, mesIni, díaFin, mesFin]` del 409 de unas vacaciones de días completos. */
+function vacationRange(message: string): number[] {
+  const range = new RegExp(
+    `^La agenda del profesional está bloqueada \\(Vacaciones\\) del ${DAY_MONTH} al ${DAY_MONTH}\\. Elige otro horario\\.$`,
+  ).exec(message);
+  expect(range).not.toBeNull();
+  return range!.slice(1).map(Number);
 }
 
 const TUE = nextTuesday();
@@ -286,9 +297,12 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     );
 
     const rejected = await book(dentist.userId, WED, '10:00').expect(409);
-    expect((rejected.body as { message: string }).message).toMatch(
-      /^La agenda del profesional está bloqueada \(Vacaciones\) del \d\d\/\d\d al \d\d\/\d\d\. Elige otro horario\.$/,
-    );
+    // Del martes al viernes (último día elegido), en día/mes de la sede. El
+    // ICU de es-CO quita el cero del día y del mes («5/1», «3/11»): se comparan
+    // números, no el relleno, para que no dependa de la fecha (DAY_MONTH).
+    expect(
+      vacationRange((rejected.body as { message: string }).message),
+    ).toEqual([...dayMonthNumbers(TUE), ...dayMonthNumbers(addDays(TUE, 3))]);
 
     const monday = await book(dentist.userId, MON, '10:00').expect(201);
     await as(
@@ -694,5 +708,38 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
         .send({ allowsBooking: false, confirmAffected: true })
         .expect(200);
     });
+  });
+});
+
+// DX-252: el mismo análisis con el formateador real de la API en meses y días
+// de una cifra (del martes 5 al viernes 8 de enero) y de dos (octubre/noviembre),
+// sin esperar a que el calendario llegue a esas fechas.
+describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252)', () => {
+  const vacationFrom = (from: string, toExclusive: string) =>
+    blockConflictMessage(
+      {
+        id: 'b',
+        tenantId: 't',
+        locationId: null,
+        providerId: 'doc',
+        start: new Date(local(from, '00:00')),
+        end: new Date(local(toExclusive, '00:00')),
+        kind: ScheduleBlockKind.VACATION,
+        allowsBooking: false,
+        note: 'Vacaciones',
+        createdById: 'u',
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      },
+      'America/Bogota',
+    );
+
+  it.each([
+    ['2027-01-05', '2027-01-09', [5, 1, 8, 1]],
+    ['2026-12-29', '2027-01-02', [29, 12, 1, 1]],
+    ['2026-11-03', '2026-11-07', [3, 11, 6, 11]],
+    ['2026-10-20', '2026-10-24', [20, 10, 23, 10]],
+  ])('del %s al día anterior a %s', (from, toExclusive, expected) => {
+    expect(vacationRange(vacationFrom(from, toExclusive))).toEqual(expected);
   });
 });

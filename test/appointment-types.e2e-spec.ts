@@ -339,6 +339,8 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       ).expect(201);
       const token = (link.body as { url: string }).url.split('/confirmar/')[1];
 
+      // Desde aquí, en TODA la clínica, solo puede auditarse el movimiento.
+      const t0 = new Date();
       const moved = await as(
         api().patch(`/api/v1/appointments/${appt.id}`),
         reception.token,
@@ -362,11 +364,52 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
           expect(JSON.stringify(res.body)).toMatch(/EXPIRED/);
         });
 
+      // Desde DX-256 cada POST/PATCH deja además su traza HTTP genérica
+      // (UPDATE con changedFields) junto al APPOINTMENT_MOVED con el antes y el
+      // después. Tras t0, en toda la clínica, solo esos dos y de esta cita:
+      // nada atribuido a otra cita ni duplicado.
       const events = await raw.auditEvent.findMany({
-        where: { tenantId: clinic.tenantId, resourceType: 'APPOINTMENT' },
+        where: {
+          tenantId: clinic.tenantId,
+          resourceType: 'APPOINTMENT',
+          occurredAt: { gte: t0 },
+        },
+        orderBy: { occurredAt: 'asc' },
       });
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({
+      expect(events.map((e) => [e.action, e.resourceId]).sort()).toEqual([
+        ['UPDATE', appt.id],
+        ['UPDATE', appt.id],
+      ]);
+      // Y el alta de la cita, una sola vez.
+      expect(
+        await raw.auditEvent.count({
+          where: {
+            tenantId: clinic.tenantId,
+            resourceType: 'APPOINTMENT',
+            resourceId: appt.id,
+            action: 'CREATE',
+          },
+        }),
+      ).toBe(1);
+      const trace = events.filter(
+        (e) =>
+          e.action === 'UPDATE' &&
+          (e.metadata as { reason?: string }).reason === undefined,
+      );
+      expect(trace).toHaveLength(1);
+      expect(trace[0]).toMatchObject({
+        actorUserId: reception.userId,
+        actorRole: 'RECEPTION',
+      });
+      expect(trace[0].metadata).toMatchObject({
+        changedFields: ['end', 'providerId', 'start'],
+      });
+      const moves = events.filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason === 'APPOINTMENT_MOVED',
+      );
+      expect(moves).toHaveLength(1);
+      expect(moves[0]).toMatchObject({
         action: 'UPDATE',
         resourceId: appt.id,
         actorUserId: reception.userId,
