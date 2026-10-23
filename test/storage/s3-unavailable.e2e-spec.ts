@@ -73,6 +73,8 @@ describe('Almacén sin responder (DX-259, e2e)', () => {
       ),
     );
     expectUnavailable(res, elapsed);
+    // Revisión I-2: el 503 de un avatar versionado no se cachea (nunca immutable).
+    expect(res.headers['cache-control']).toBe('no-store');
     await waitUntil(() => hung.openSockets() === 0, 1000);
   });
 

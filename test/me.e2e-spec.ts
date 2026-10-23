@@ -187,9 +187,28 @@ describe('Me (e2e)', () => {
       .expect(200);
     const nextUrl = (next.body as { avatarUrl: string }).avatarUrl;
     expect(nextUrl).not.toBe(avatarUrl);
-    await request(app.getHttpServer())
+    const gone = await request(app.getHttpServer())
       .get(`/api/v1/files/avatars/${name}`)
       .expect(404);
+    // Revisión I-2: el 404 de un avatar versionado no se cachea un año.
+    expect(gone.headers['cache-control']).toBe('no-store');
+    const goneRevalidated = await request(app.getHttpServer())
+      .get(`/api/v1/files/avatars/${name}`)
+      .set('If-None-Match', String(served.headers['etag']))
+      .expect(404);
+    expect(goneRevalidated.headers['cache-control']).toBe('no-store');
+    // Y el 304 de uno vigente mantiene su caché immutable.
+    const nextName = nextUrl.split('/files/avatars/')[1];
+    const fresh = await request(app.getHttpServer())
+      .get(`/api/v1/files/avatars/${nextName}`)
+      .expect(200);
+    const notModified = await request(app.getHttpServer())
+      .get(`/api/v1/files/avatars/${nextName}`)
+      .set('If-None-Match', String(fresh.headers['etag']))
+      .expect(304);
+    expect(notModified.headers['cache-control']).toBe(
+      'public, max-age=31536000, immutable',
+    );
   });
 
   it('DX-084: an existing avatar saved as an absolute URL of another domain is still served', async () => {

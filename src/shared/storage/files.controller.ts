@@ -101,7 +101,10 @@ export class FilesController {
     if (!SAFE_NAME.test(name) || !isFileKey(key)) {
       throw new BadRequestException('Invalid file name');
     }
-    res.set('Cache-Control', avatarCacheControl(name));
+    // Revisión I-2: mientras no haya fichero, no-store. Un 404 o un 503 con
+    // la caché de un año (immutable) dejaría el avatar roto para siempre en
+    // el navegador o en una CDN, sin forma de invalidarlo (la URL no cambia).
+    res.set('Cache-Control', 'no-store');
     // Revalidación (If-None-Match): basta un HeadObject; el objeto solo se
     // descarga si cambió. `req.fresh` (Express) compara If-None-Match con la
     // ETag puesta y, sin cuerpo, el `send()` de Express responde 304.
@@ -109,12 +112,16 @@ export class FilesController {
       const info = await this.storage.stat(key);
       if (!info) throw new NotFoundException('File not found');
       if (info.etag) res.set('ETag', info.etag);
-      if (info.etag && req.fresh) return undefined;
+      if (info.etag && req.fresh) {
+        res.set('Cache-Control', avatarCacheControl(name));
+        return undefined;
+      }
     }
     const file = await this.storage.openRead(key);
     if (!file) {
       throw new NotFoundException('File not found');
     }
+    res.set('Cache-Control', avatarCacheControl(name));
     if (file.etag) res.set('ETag', file.etag);
     // El tipo sale de la extensión (la fija el caso de uso), no de lo
     // guardado: nunca se sirve como HTML algo subido como avatar.
