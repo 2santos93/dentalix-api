@@ -1,5 +1,6 @@
 import { AppointmentStatus } from '@prisma/client';
 import { isInClinic } from './patient-flow';
+import { civilDateIn } from '../../../shared/time/civil-day';
 
 /**
  * DX-271 (BE-039): los ítems del plan de una cita cerrada o pasada no se
@@ -26,12 +27,47 @@ export const PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE =
 export const PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE =
   'Solo se trae un tratamiento a una cita con el paciente en la clínica (llegó, en sillón o listo para cobrar).';
 /**
- * DX-288: el tratamiento ya lo reserva otra cita con el paciente en la
- * clínica. Mientras esa cita siga en curso nadie se lo lleva: con varias
- * peticiones a la vez, solo la primera lo trae.
+ * DX-288: el tratamiento ya lo reserva otra cita de hoy con el paciente en
+ * la clínica. Mientras esa cita siga en curso nadie se lo lleva: con varias
+ * peticiones a la vez, solo la primera lo trae. Texto general, sin datos de
+ * la cita (su sede no está permitida al usuario, DX-089).
  */
 export const PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE =
   'Este tratamiento ya lo tiene otra cita con el paciente en la clínica. No se puede traer mientras esa cita siga en curso.';
+
+/**
+ * DX-288 (revisión M1): ¿la cita que reserva el tratamiento impide
+ * traerlo? Solo si tiene al paciente en la clínica y es del mismo día civil
+ * que `now` en la zona de SU sede (DX-097). Una cita olvidada en la clínica
+ * de un día anterior no lo impide: se trae normalmente.
+ */
+export function heldInClinicToday(
+  holder: { status: AppointmentStatus; start: Date },
+  timeZone: string,
+  now: Date,
+): boolean {
+  return (
+    isInClinic(holder.status) &&
+    civilDateIn(holder.start, timeZone) === civilDateIn(now, timeZone)
+  );
+}
+
+/**
+ * El 409 de una titular en la clínica: con su hora (en la zona de su sede)
+ * y su sede si el usuario la tiene permitida; sin ella (`null`), el general.
+ */
+export function heldInClinicMessage(
+  holder: { start: Date; timeZone: string; locationName: string } | null,
+): string {
+  if (!holder) return PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE;
+  const time = new Intl.DateTimeFormat('es-CO', {
+    timeZone: holder.timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(holder.start);
+  return `Este tratamiento ya lo tiene otra cita con el paciente en la clínica, la de hoy a las ${time} (${holder.locationName}). No se puede traer mientras esa cita siga en curso.`;
+}
 /** DX-273: el tratamiento no está (vivo) en la cita destino. */
 export const PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE =
   'Este tratamiento no está en esta cita.';

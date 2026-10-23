@@ -1,9 +1,9 @@
 import { ConflictException } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
-import { PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE } from '../src/modules/appointments/domain/plan-item-reservation';
+import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
 import { resetDatabase } from './support/e2e-fixtures';
 
 /**
@@ -22,16 +22,14 @@ const context = new TenantContextService();
 const prisma = new PrismaService(context);
 const repo = new PrismaAppointmentRepository(prisma, context);
 const MIN = 60000;
+const ZONE = 'America/Bogota';
 const DAY = 86400000;
 
 describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () => {
   let tenantId: string,
-    patientId: string,
     locationId: string,
     providerId: string,
-    catalogItemId: string,
-    planId: string;
-  let slot = 0;
+    catalogItemId: string;
 
   const audit = () => ({
     tenantId,
@@ -41,34 +39,58 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     ip: null,
     userAgent: null,
   });
-  const claim = (appointmentId: string, itemId: string) =>
-    context.run(tenantId, () =>
-      repo.claimPlanItem(appointmentId, itemId, audit()),
+  const claim = (
+    appointmentId: string,
+    itemId: string,
+    allowedLocationIds?: readonly string[],
+  ) =>
+    context.run(
+      tenantId,
+      undefined,
+      () => repo.claimPlanItem(appointmentId, itemId, audit()),
+      allowedLocationIds,
     );
-  const appointment = async (start: Date) =>
-    (
-      await owner.appointment.create({
+  /**
+   * Cada escenario con su paciente, su profesional y su ítem (las EXCLUDE de
+   * solape son por paciente y por profesional): sus citas de hoy caben justo
+   * antes de «ahora». La regla es del mismo día civil de la sede (revisión
+   * M1), así que las citas en la clínica son de hoy y ya empezaron (el
+   * vínculo nace sin reserva).
+   */
+  let scenarios = 0;
+  const scenario = async () => {
+    const n = scenarios++;
+    const patient = (
+      await owner.patient.create({
+        data: { tenantId, firstName: 'Rosa', lastName: `Carrera ${n}` },
+      })
+    ).id;
+    const provider = (
+      await owner.user.create({
         data: {
-          tenantId,
-          patientId,
-          providerId,
-          locationId,
-          start,
-          end: new Date(start.getTime() + 30 * MIN),
-          status: AppointmentStatus.SCHEDULED,
+          email: `dx288-int-${n}@example.com`,
+          passwordHash: 'x',
+          fullName: `Doctora ${n}`,
         },
       })
     ).id;
-  /**
-   * `n` citas con el paciente en la clínica, con el vínculo del ítem sin
-   * reserva, y una futura que lo reserva (lo que deja «Llegó», DX-271).
-   */
-  const inClinicWithHolder = async (n: number) => {
+    const plan = (
+      await owner.treatmentPlan.create({
+        data: {
+          tenantId,
+          patientId: patient,
+          status: 'ACCEPTED',
+          currency: 'COP',
+          acceptedAt: new Date(),
+          acceptedLocationId: locationId,
+        },
+      })
+    ).id;
     const itemId = (
       await owner.treatmentPlanItem.create({
         data: {
           tenantId,
-          planId,
+          planId: plan,
           catalogItemId,
           toothNumber: '46',
           price: 100,
@@ -76,36 +98,56 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
         },
       })
     ).id;
-    const inClinic: string[] = [];
-    for (let i = 0; i < n; i++) {
-      // Pasadas (vínculo sin reserva) y cada una en su hueco (EXCLUDE).
-      const id = await appointment(
-        new Date(Date.now() - 3 * DAY + slot++ * 40 * MIN),
-      );
+    let minutesAgo = 0;
+    const base = Date.now() - 30_000;
+    const book = async (start: Date, minutes = 1, location = locationId) => {
+      const id = (
+        await owner.appointment.create({
+          data: {
+            tenantId,
+            patientId: patient,
+            providerId: provider,
+            locationId: location,
+            start,
+            end: new Date(start.getTime() + minutes * MIN),
+          },
+        })
+      ).id;
       await owner.appointmentPlanItem.create({
-        data: { tenantId, patientId, appointmentId: id, planItemId: itemId },
+        data: {
+          tenantId,
+          patientId: patient,
+          appointmentId: id,
+          planItemId: itemId,
+        },
       });
-      inClinic.push(id);
-    }
-    const futureId = await appointment(
-      new Date(Date.now() + 7 * DAY + slot++ * 40 * MIN),
-    );
-    await owner.appointmentPlanItem.create({
-      data: {
-        tenantId,
-        patientId,
-        appointmentId: futureId,
-        planItemId: itemId,
-      },
-    });
-    await owner.appointment.updateMany({
-      where: { id: { in: inClinic } },
+      return id;
+    };
+    /** Cita de hoy, de 1 min, que ya empezó (sin reserva). */
+    const startedToday = (location = locationId) =>
+      book(new Date(base - ++minutesAgo * MIN), 1, location);
+    const future = () => book(new Date(Date.now() + 7 * DAY), 30);
+    return { itemId, startedToday, future };
+  };
+  const markArrived = (ids: string[]) =>
+    owner.appointment.updateMany({
+      where: { id: { in: ids } },
       data: {
         status: 'ARRIVED',
         arrivedAt: new Date(),
         preArrivalStatus: 'SCHEDULED',
       },
     });
+  /**
+   * `n` citas de hoy con el paciente en la clínica, con el vínculo del ítem
+   * sin reserva, y una futura que lo reserva (lo que deja «Llegó», DX-271).
+   */
+  const inClinicWithHolder = async (n: number) => {
+    const { itemId, startedToday, future } = await scenario();
+    const inClinic: string[] = [];
+    for (let i = 0; i < n; i++) inClinic.push(await startedToday());
+    const futureId = await future();
+    await markArrived(inClinic);
     return { itemId, inClinic, futureId };
   };
   const activeHolders = async (itemId: string) =>
@@ -181,11 +223,6 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     locationId = (
       await owner.location.create({ data: { tenantId, name: 'Principal' } })
     ).id;
-    patientId = (
-      await owner.patient.create({
-        data: { tenantId, firstName: 'Rosa', lastName: 'Carrera' },
-      })
-    ).id;
     providerId = (
       await owner.user.create({
         data: {
@@ -206,18 +243,6 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
         },
       })
     ).id;
-    planId = (
-      await owner.treatmentPlan.create({
-        data: {
-          tenantId,
-          patientId,
-          status: 'ACCEPTED',
-          currency: 'COP',
-          acceptedAt: new Date(),
-          acceptedLocationId: locationId,
-        },
-      })
-    ).id;
   });
   afterAll(async () => {
     await prisma.onModuleDestroy();
@@ -235,8 +260,12 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     });
     const late = await claim(second, itemId).catch((e: unknown) => e);
     expect(late).toBeInstanceOf(ConflictException);
+    // Revisión M1: dice la hora y la sede de la cita que lo tiene.
+    const { start } = await owner.appointment.findUniqueOrThrow({
+      where: { id: first },
+    });
     expect((late as ConflictException).message).toBe(
-      PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
+      heldInClinicMessage({ start, timeZone: ZONE, locationName: 'Principal' }),
     );
     expect(await activeHolders(itemId)).toEqual([first]);
     expect((await moveEvents(itemId)).map((e) => e.resourceId).sort()).toEqual(
@@ -301,5 +330,63 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     expect((await moveEvents(itemId)).map((e) => e.resourceId).sort()).toEqual(
       [only, futureId].sort(),
     );
+  });
+
+  it('sin titular (la futura se canceló): diez a la vez desde diez citas en la clínica, el bloqueo del ítem las pone en fila: una lo trae y nueve 409', async () => {
+    const { itemId, inClinic, futureId } = await inClinicWithHolder(10);
+    await owner.appointment.update({
+      where: { id: futureId },
+      data: { status: 'CANCELLED' },
+    });
+    expect(await activeHolders(itemId)).toEqual([]);
+    const outcomes = await settle(inClinic.map((id) => claim(id, itemId)));
+    expect(outcomes.filter((o) => o === 'ok')).toHaveLength(1);
+    const winner = inClinic[outcomes.indexOf('ok')];
+    const { start } = await owner.appointment.findUniqueOrThrow({
+      where: { id: winner },
+    });
+    for (const o of outcomes.filter((x) => x !== 'ok')) {
+      expect(o).toBeInstanceOf(ConflictException);
+      expect((o as ConflictException).message).toBe(
+        heldInClinicMessage({
+          start,
+          timeZone: ZONE,
+          locationName: 'Principal',
+        }),
+      );
+    }
+    expect(await activeHolders(itemId)).toEqual([winner]);
+  });
+
+  it('la que gana es de una sede no permitida a quien llega después: 409 general, sin su hora ni su sede (DX-089, revisión B2)', async () => {
+    const norte = (
+      await owner.location.create({ data: { tenantId, name: 'Sede Norte' } })
+    ).id;
+    const { itemId, startedToday, future } = await scenario();
+    const mine = await startedToday();
+    const theirs = await startedToday(norte);
+    // Una futura lo reserva mientras «llegan» y después se cancela por la
+    // BD: nadie lo reserva y las dos lo tienen sin reserva.
+    const futureId = await future();
+    await markArrived([mine, theirs]);
+    await owner.appointment.update({
+      where: { id: futureId },
+      data: { status: 'CANCELLED' },
+    });
+    expect(await activeHolders(itemId)).toEqual([]);
+    // La mía lee «sin titular» y espera su propia cita; la de Norte lo trae.
+    const lock = await holdLock(mine);
+    const late = claim(mine, itemId, [locationId]).catch((e: unknown) => e);
+    await waitForLockWaiters(1);
+    await claim(theirs, itemId);
+    lock.release();
+    await lock.done;
+    const outcome = await late;
+    expect(outcome).toBeInstanceOf(ConflictException);
+    expect((outcome as ConflictException).message).toBe(
+      heldInClinicMessage(null),
+    );
+    expect((outcome as ConflictException).message).not.toContain('Norte');
+    expect(await activeHolders(itemId)).toEqual([theirs]);
   });
 });
