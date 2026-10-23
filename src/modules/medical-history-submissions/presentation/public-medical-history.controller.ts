@@ -31,6 +31,7 @@ import {
   PublicAnamnesisDto,
   PublicAnamnesisSubmittedDto,
 } from './dto/public-anamnesis.dto';
+import { NoStoreHeadersInterceptor } from './no-store-headers.interceptor';
 
 interface PublicRequest {
   ip?: string;
@@ -44,9 +45,9 @@ const NOT_FOUND = 'Token malformado, desconocido o de otra clínica.';
 // invisible un token de otra clínica (→ 404). Límite por IP (enumeración) y
 // por token (reintentos sobre un mismo enlace), un balde por ruta. Sin
 // @Audit: el envío se audita en el repositorio, en su transacción, sin las
-// respuestas.
+// respuestas. `no-store` y `no-referrer` en toda respuesta, también de error.
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 @RateLimit('anamnesis', 'anamnesis-token')
 @Controller('public/medical-history')
 export class PublicMedicalHistoryController {

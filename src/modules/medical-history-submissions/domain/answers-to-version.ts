@@ -28,6 +28,17 @@ export const BLANK_ALLERGY_MESSAGE = 'Escriba el nombre de cada alergia.';
 export const BLANK_MEDICATION_MESSAGE =
   'Escriba el nombre de cada medicamento.';
 export const BLANK_SURGERY_MESSAGE = 'Describa cada cirugía u hospitalización.';
+export const ANSWERS_TOO_LARGE_MESSAGE =
+  'Sus respuestas son demasiado largas: acorte los textos e inténtelo de nuevo.';
+
+/**
+ * Tope del envío entero en bytes UTF-8 (JSON). Cada texto tiene su límite en
+ * caracteres (DTO), pero con todas las listas llenas de caracteres multibyte
+ * el total pasaría el CHECK de 64 KB de `medical_history_submissions.answers`
+ * (que mide el JSONB como texto, con algún espacio más). Con 48 KB queda
+ * margen y sobra para cualquier respuesta real.
+ */
+export const ANSWERS_MAX_BYTES = 48 * 1024;
 
 const ALERT_CONDITION_CODES: ReadonlySet<string> = new Set(
   ANAMNESIS_CONDITIONS.filter((c) => c.alert).map((c) => c.codigo),
@@ -49,7 +60,7 @@ function clean(value: string | undefined): string | undefined {
  * Reglas que cruzan campos (la forma la valida el DTO): un «Sí» con lista
  * exige al menos un elemento con nombre, y las condiciones son exactamente
  * las del cuestionario, cada una una vez. Mensajes en español para el
- * paciente; lista vacía = válido.
+ * paciente; lista vacía = válido. Y el tope del envío entero en bytes.
  */
 export function answersValidationErrors(answers: AnamnesisAnswers): string[] {
   const errors: string[] = [];
@@ -82,6 +93,9 @@ export function answersValidationErrors(answers: AnamnesisAnswers): string[] {
     codes.some((code) => !ANAMNESIS_CONDITION_CODES.has(code))
   ) {
     errors.push(INCOMPLETE_CONDITIONS_MESSAGE);
+  }
+  if (Buffer.byteLength(JSON.stringify(answers), 'utf8') > ANSWERS_MAX_BYTES) {
+    errors.push(ANSWERS_TOO_LARGE_MESSAGE);
   }
   return errors;
 }

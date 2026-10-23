@@ -22,7 +22,10 @@ import {
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
-import type { JwtPayload } from '../../../shared/crypto/token.service';
+import {
+  type JwtPayload,
+  isTenantPayload,
+} from '../../../shared/crypto/token.service';
 import {
   resolvePublicWebProtocol,
   safeLinkHost,
@@ -30,7 +33,10 @@ import {
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { Audit } from '../../audit/presentation/audit.decorator';
-import { ANAMNESIS_REQUEST_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  ANAMNESIS_REQUEST_ROLES,
+  CLINICAL_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -110,11 +116,16 @@ export class PatientAnamnesisRequestsController {
   @Get()
   @ApiOperation({
     summary: 'Anamnesis enviadas al paciente (estado, sin respuestas)',
+    description:
+      'El motivo de un rechazo (texto libre clínico) solo llega a los roles clínicos; a recepción, `rejectReason` = null.',
   })
   @ApiOkResponse({ type: [AnamnesisSubmissionSummaryDto] })
   list(
     @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Req() req: AuthenticatedRequest,
   ): Promise<AnamnesisSubmissionSummaryDto[]> {
-    return this.listRequests.execute(patientId);
+    const clinical =
+      isTenantPayload(req.user) && CLINICAL_ROLES.includes(req.user.role);
+    return this.listRequests.execute(patientId, { clinical });
   }
 }

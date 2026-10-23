@@ -21,7 +21,10 @@ import {
   ANAMNESIS_INBOX_FORBIDDEN_MESSAGE,
   ANAMNESIS_REVIEW_FORBIDDEN_MESSAGE,
 } from '../src/modules/medical-history-submissions/application/use-cases/anamnesis-review.use-cases';
-import { MISSING_ALLERGIES_MESSAGE } from '../src/modules/medical-history-submissions/domain/answers-to-version';
+import {
+  ANSWERS_TOO_LARGE_MESSAGE,
+  MISSING_ALLERGIES_MESSAGE,
+} from '../src/modules/medical-history-submissions/domain/answers-to-version';
 import { allNoAnswers } from '../src/modules/medical-history-submissions/domain/__fixtures__/anamnesis-answers';
 import type { AnamnesisAnswers } from '../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 
@@ -323,6 +326,19 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       }
     });
 
+    it('las respuestas públicas no se guardan en cachés (no-store), también las de error', async () => {
+      const ok = await publicGet(clinicA.host, link.token).expect(200);
+      expect(ok.headers['cache-control']).toBe('no-store');
+      expect(ok.headers['referrer-policy']).toBe('no-referrer');
+      const unknown = await publicGet(clinicA.host, 'A'.repeat(43)).expect(404);
+      expect(unknown.headers['cache-control']).toBe('no-store');
+      const invalid = await publicPost(clinicA.host, link.token, {
+        answers: allNoAnswers(),
+        declarationAccepted: false,
+      }).expect(400);
+      expect(invalid.headers['cache-control']).toBe('no-store');
+    });
+
     it('el token de A en el host de B → 404', async () => {
       await publicGet(clinicB.host, link.token).expect(404);
       await publicPost(clinicB.host, link.token, validBody()).expect(404);
@@ -352,6 +368,35 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       ).expect(400);
       expect((bad.body as { message: string[] }).message).toEqual([
         MISSING_ALLERGIES_MESSAGE,
+      ]);
+      // Cada texto en su límite pero todo multibyte: 400 en español, no el
+      // 500 del CHECK de tamaño de la BD.
+      const long = '€'.repeat(200);
+      const huge = allNoAnswers();
+      huge.allergies = {
+        answer: 'SI',
+        items: Array.from({ length: 20 }, () => ({
+          alergeno: long,
+          reaccion: long,
+          tipo: 'MEDICAMENTO' as const,
+          severidad: 'LEVE' as const,
+        })),
+      };
+      huge.medications = {
+        answer: 'SI',
+        items: Array.from({ length: 20 }, () => ({
+          nombre: long,
+          dosis: long,
+          frecuencia: long,
+        })),
+      };
+      const tooLarge = await publicPost(
+        clinicA.host,
+        link.token,
+        validBody(huge),
+      ).expect(400);
+      expect((tooLarge.body as { message: string[] }).message).toEqual([
+        ANSWERS_TOO_LARGE_MESSAGE,
       ]);
       const row = await raw.medicalHistorySubmission.findUniqueOrThrow({
         where: { id: link.created.id },
@@ -599,6 +644,25 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
     await as(clinicA, dentistToken)
       .post(`/medical-history/submissions/${created.id}/accept`)
       .expect(409);
+
+    // El motivo es texto libre del profesional sobre las respuestas (dato
+    // clínico): la ficha se lo muestra al equipo clínico, no a recepción.
+    const rowOf = (body: unknown) =>
+      (body as Summary[]).find((r) => r.id === created.id);
+    const forReception = await as(clinicA, receptionToken)
+      .get(`/patients/${patientId}/medical-history/requests`)
+      .expect(200);
+    expect(rowOf(forReception.body)).toMatchObject({
+      status: 'REJECTED',
+      rejectReason: null,
+    });
+    expect(forReception.text).not.toContain('Respuestas de otra persona');
+    const forDentist = await as(clinicA, dentistToken)
+      .get(`/patients/${patientId}/medical-history/requests`)
+      .expect(200);
+    expect(rowOf(forDentist.body)?.rejectReason).toBe(
+      'Respuestas de otra persona',
+    );
   });
 
   it('aceptar con los ajustes del profesional guarda los ajustes (banderas recalculadas)', async () => {

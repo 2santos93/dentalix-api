@@ -3,6 +3,7 @@ import { deriveSafetyFlags } from '../../medical-history/domain/safety-flags';
 import { ANAMNESIS_CONDITIONS } from './anamnesis-questionnaire';
 import { allNoAnswers as allNo } from './__fixtures__/anamnesis-answers';
 import {
+  ANSWERS_MAX_BYTES,
   answersValidationErrors,
   countAffirmativeAnswers,
   proposeVersionFromAnswers,
@@ -92,6 +93,51 @@ describe('respuestas del paciente → versión de la HC (DX-099)', () => {
       expect(answersValidationErrors(a)).toEqual([
         'Escriba el nombre de cada alergia.',
       ]);
+    });
+
+    it('el envío entero tiene un tope en bytes: cada texto dentro de su límite pero todos llenos de caracteres multibyte no cabe', () => {
+      // 200 caracteres de 3 bytes (UTF-8) en cada campo de 20 alergias y 20
+      // medicamentos: el DTO los admite uno a uno, pero el total pasaría el
+      // CHECK de 64 KB de la BD (un 500 en vez de un 400 en español).
+      const long = '€'.repeat(200);
+      const a = allNo();
+      a.allergies = {
+        answer: 'SI',
+        items: Array.from({ length: 20 }, () => ({
+          alergeno: long,
+          reaccion: long,
+          tipo: 'MEDICAMENTO' as const,
+          severidad: 'LEVE' as const,
+        })),
+      };
+      a.medications = {
+        answer: 'SI',
+        items: Array.from({ length: 20 }, () => ({
+          nombre: long,
+          dosis: long,
+          frecuencia: long,
+        })),
+      };
+      expect(answersValidationErrors(a)).toEqual([
+        'Sus respuestas son demasiado largas: acorte los textos e inténtelo de nuevo.',
+      ]);
+      expect(Buffer.byteLength(JSON.stringify(a), 'utf8')).toBeGreaterThan(
+        ANSWERS_MAX_BYTES,
+      );
+    });
+
+    it('un envío largo pero razonable cabe', () => {
+      const a = allNo();
+      a.allergies = {
+        answer: 'SI',
+        items: Array.from({ length: 20 }, () => ({
+          alergeno: 'a'.repeat(200),
+          reaccion: 'b'.repeat(200),
+          tipo: 'MEDICAMENTO' as const,
+          severidad: 'LEVE' as const,
+        })),
+      };
+      expect(answersValidationErrors(a)).toEqual([]);
     });
   });
 

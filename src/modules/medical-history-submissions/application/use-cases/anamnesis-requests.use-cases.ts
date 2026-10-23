@@ -206,7 +206,15 @@ export class ListPatientAnamnesisRequestsUseCase {
     @Inject(ANAMNESIS_CLOCK) private readonly clock: AnamnesisClock,
   ) {}
 
-  async execute(patientId: string): Promise<SubmissionListItem[]> {
+  /**
+   * `clinical` = quien pide ve dato clínico (CLINICAL_ROLES). El motivo del
+   * rechazo es texto libre del profesional sobre las respuestas: recepción ve
+   * el estado, no el motivo.
+   */
+  async execute(
+    patientId: string,
+    viewer: { clinical: boolean },
+  ): Promise<SubmissionListItem[]> {
     const ctx = await this.repo.loadRequestContext(patientId);
     if (!ctx) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     const now = this.clock();
@@ -214,7 +222,10 @@ export class ListPatientAnamnesisRequestsUseCase {
       patientId,
       PATIENT_REQUESTS_LIMIT,
     );
-    return rows.map((r) => withEffectiveStatus(r, now));
+    return rows.map((r) => {
+      const item = withEffectiveStatus(r, now);
+      return viewer.clinical ? item : { ...item, rejectReason: null };
+    });
   }
 }
 
