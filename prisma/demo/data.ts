@@ -1376,7 +1376,7 @@ export const DEMO_PEDIATRIC = {
   ],
 } as const;
 
-interface DemoPlanItem {
+export interface DemoPlanItem {
   code: string;
   tooth: string;
   surfaces?: ToothSurface[];
@@ -1390,6 +1390,11 @@ interface DemoPlanItem {
    */
   discountReason?: DiscountReason;
   discountBy?: 'owner';
+  /**
+   * DX-050: un DONE de antes de la producción atribuible: sin quién, sede ni
+   * fecha («Sin atribuir» en la ficha y en los reportes).
+   */
+  unattributed?: true;
 }
 
 interface DemoPayment {
@@ -1400,7 +1405,7 @@ interface DemoPayment {
   notes?: string;
 }
 
-interface DemoPlan {
+export interface DemoPlan {
   patientIndex: number;
   dentistIndex: number;
   status: TreatmentPlanStatus;
@@ -1420,6 +1425,12 @@ interface DemoPlan {
    * él, el plan es de hoy. Siempre anterior a sus abonos.
    */
   openedDaysAgo?: number;
+  /**
+   * DX-050: sede donde se hicieron sus procedimientos realizados (por
+   * defecto, la principal). Los hace el odontólogo del plan y se fechan el día
+   * del primer abono (o hoy, sin abonos).
+   */
+  doneAt?: DemoLocationKey;
   /** Plan de pagos (cuotas) sobre el total facturable del plan. */
   paymentPlan?: {
     downPayment: number;
@@ -1468,6 +1479,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.COMPLETED,
     notes: 'Profilaxis y resinas.',
+    doneAt: 'norte',
     items: [
       { code: 'PREV-PROFILAXIS', tooth: '11', status: DONE },
       { code: 'OP-RESINA-1', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
@@ -1545,6 +1557,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Tratamiento periodontal por cuadrantes.',
+    doneAt: 'norte',
     openedDaysAgo: 75,
     items: [
       { code: 'PERIO-RASPADO', tooth: '16', status: DONE },
@@ -1569,7 +1582,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     status: TreatmentPlanStatus.COMPLETED,
     notes: 'Urgencia y endodoncia de 21.',
     items: [
-      { code: 'URG-CONSULTA', tooth: '21', status: DONE },
+      // DX-050: realizado antes de la producción atribuible.
+      { code: 'URG-CONSULTA', tooth: '21', status: DONE, unattributed: true },
       { code: 'ENDO-UNI', tooth: '21', status: DONE },
     ],
     payments: [
@@ -1582,6 +1596,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Prevención odontopediátrica.',
+    doneAt: 'norte',
     openedDaysAgo: 100,
     items: [
       { code: 'PED-SELLANTE', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
