@@ -29,7 +29,7 @@ const KEY = '1b4e28ba-2fa1-41d2-883f-0016d3cca427';
 
 const OPEN_REQUIRED = 'Abre tu caja en esta sede para pagar desde el cajón.';
 const CASH_ALWAYS_IN_SESSION =
-  'Esta clínica registra el efectivo siempre en una caja abierta: marca «Desde mi caja».';
+  'Esta clínica registra el efectivo siempre en una caja abierta.';
 
 interface Line {
   currency: string;
@@ -269,6 +269,18 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
         where: { cashSessionId: receptionSession },
       }),
     ).toBe(1);
+    // La repetición no escribe nada y no se vuelve a auditar: un solo CREATE
+    // CASH_OUTFLOW de recepción para este gasto.
+    const audited = await raw.auditEvent.findMany({
+      where: { resourceType: 'EXPENSE', resourceId: firstOutflow.id },
+    });
+    expect(audited.map((e) => [e.action, e.actorUserId, e.metadata])).toEqual([
+      [
+        'CREATE',
+        receptionId,
+        expect.objectContaining({ reason: 'CASH_OUTFLOW' }) as unknown,
+      ],
+    ]);
 
     const seen = await detail(receptionSession, receptionToken);
     expect(cashLine(seen)).toMatchObject({

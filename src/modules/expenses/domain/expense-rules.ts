@@ -63,7 +63,7 @@ export const HAS_PAYMENTS_MESSAGE =
   'El gasto ya tiene pagos; anúlalo y regístralo de nuevo para cambiar la sede o la moneda.';
 /** Efectivo fuera de caja en una clínica con «exigir caja abierta» (R1). */
 export const CASH_SESSION_REQUIRED_MESSAGE =
-  'Esta clínica registra el efectivo siempre en una caja abierta: marca «Desde mi caja».';
+  'Esta clínica registra el efectivo siempre en una caja abierta.';
 /** Pago o salida desde el cajón sin caja abierta de quien paga en la sede (R1). */
 export const OPEN_CASH_SESSION_REQUIRED_MESSAGE =
   'Abre tu caja en esta sede para pagar desde el cajón.';

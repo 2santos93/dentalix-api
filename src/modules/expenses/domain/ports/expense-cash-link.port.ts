@@ -1,18 +1,16 @@
 import type { Prisma } from '@prisma/client';
 import type { ExpensePayment } from '../entities/expense.entity';
 
-/** Lo que la caja necesita saber de un pago que sale del cajón. */
+/**
+ * Lo que la caja necesita para tomar la caja de un pago que sale del cajón.
+ * Importe, moneda y día no hacen falta: el arqueo los lee de la fila del pago.
+ */
 export interface ExpenseCashContext {
   tenantId: string;
   /** Sede del gasto: la caja tiene que ser una abierta de esta sede. */
   locationId: string;
   /** Quien paga: su caja abierta es la que se toma. */
   userId: string;
-  expenseId: string;
-  /** Día civil del pago (hoy en la sede). */
-  paidOn: string;
-  amount: number;
-  currency: string;
 }
 
 /**

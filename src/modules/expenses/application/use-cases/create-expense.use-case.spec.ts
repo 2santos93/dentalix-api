@@ -34,6 +34,7 @@ import {
   FakeCashLink,
   uploadReceipt,
 } from '../__fixtures__/expense-test-kit';
+import type { IdempotencySignals } from '../idempotency-guard';
 import {
   LOCATION_ID,
   OTHER_LOCATION_ID,
@@ -271,9 +272,6 @@ describe('alta de un gasto (DX-274)', () => {
         expect.objectContaining({
           userId: ADMIN,
           locationId: LOCATION_ID,
-          amount: 1000,
-          currency: 'COP',
-          paidOn: kit.repo.today,
         }),
       ]);
     });
@@ -301,13 +299,13 @@ describe('alta de un gasto (DX-274)', () => {
       ).resolves.toMatchObject({ status: 'PARTIAL' });
     });
 
-    it('con «exigir caja abierta», el efectivo fuera de caja pide marcar «Desde mi caja»', async () => {
+    it('con «exigir caja abierta», el efectivo fuera de caja es 409 con el texto de R1', async () => {
       kit.repo.cashRequireOpenSession = true;
       link.openSession(ADMIN, LOCATION_ID);
       await expect(
         run(input({ payment: { amount: 1000, method: 'CASH' } })),
       ).rejects.toThrow(
-        'Esta clínica registra el efectivo siempre en una caja abierta: marca «Desde mi caja».',
+        'Esta clínica registra el efectivo siempre en una caja abierta.',
       );
       await expect(run(fromCash())).resolves.toMatchObject({
         status: 'PARTIAL',
@@ -392,6 +390,26 @@ describe('alta de un gasto (DX-274)', () => {
   });
 
   describe('idempotencia', () => {
+    it('signals.replayed: solo la repetición lo marca (la carrera también)', async () => {
+      const first: IdempotencySignals = {};
+      await kit.inTenant(() => create.execute(input(), ADMIN, KEY, first));
+      expect(first.replayed).toBeUndefined();
+      const again: IdempotencySignals = {};
+      await kit.inTenant(() => create.execute(input(), ADMIN, KEY, again));
+      expect(again.replayed).toBe(true);
+
+      // Dos a la vez con otra clave: las dos pasan el atajo; la que pierde
+      // recibe `created: false` del repositorio y también se marca.
+      const other = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+      const a: IdempotencySignals = {};
+      const b: IdempotencySignals = {};
+      await Promise.all([
+        kit.inTenant(() => create.execute(input(), ADMIN, other, a)),
+        kit.inTenant(() => create.execute(input(), ADMIN, other, b)),
+      ]);
+      expect([a.replayed, b.replayed].filter(Boolean)).toHaveLength(1);
+    });
+
     it('una clave que no es UUID es 400', async () => {
       await expect(run(input(), 'no-es-uuid')).rejects.toThrow(
         new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE),

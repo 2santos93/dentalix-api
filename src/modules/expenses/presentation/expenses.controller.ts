@@ -191,7 +191,8 @@ export class ExpensesController {
       'Importe, categoría, fechas, sede, pago o soporte no válidos (mensaje en español)',
   })
   @ApiConflictResponse({
-    description: 'Efectivo sin caja abierta en una clínica que la exige',
+    description:
+      'Efectivo fuera de caja en una clínica que lo exige en caja; pago «desde la caja» sin caja abierta en la sede; o la Idempotency-Key ya se usó para un gasto de otra sede',
   })
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otros datos',
@@ -284,7 +285,7 @@ export class ExpensesController {
   @ApiNotFoundResponse({ description: NOT_FOUND })
   @ApiConflictResponse({
     description:
-      'Gasto anulado, o efectivo sin caja abierta en una clínica que la exige',
+      'Gasto anulado; efectivo fuera de caja en una clínica que lo exige en caja; pago «desde la caja» sin caja abierta en la sede; o la Idempotency-Key ya se usó para un pago de otra sede',
   })
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otros datos',

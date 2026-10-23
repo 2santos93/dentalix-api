@@ -78,6 +78,10 @@ export class CreateCashOutflowUseCase {
       throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
     }
     const fingerprint = key ? cashOutflowFingerprint(input) : undefined;
+    // Esta búsqueda va ANTES de mirar la caja: una repetición tiene que
+    // devolver la original aunque la caja ya se haya cerrado. `createIdempotent`
+    // vuelve a buscar la clave; esa segunda lectura es deliberada (es la de
+    // todas las altas) y solo cuesta una consulta en la primera petición.
     if (key) {
       const existing = await guarded(() =>
         this.repo.findByIdempotencyKey(key, this.clock()),

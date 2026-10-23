@@ -20,6 +20,7 @@ import {
   OTHER_LOCATION_ID,
   TENANT_ID,
 } from '../__fixtures__/in-memory-expenses';
+import type { IdempotencySignals } from '../idempotency-guard';
 import {
   type CashOutflowInput,
   CreateCashOutflowUseCase,
@@ -141,6 +142,20 @@ describe('salida de caja menor (DX-274)', () => {
   });
 
   describe('idempotencia', () => {
+    it('signals.replayed: la primera salida no lo marca; su repetición sí', async () => {
+      link.openSession(RECEPTION, LOCATION_ID);
+      const first: IdempotencySignals = {};
+      await kit.tenant.run(TENANT_ID, () =>
+        outflow.execute(body(), RECEPTION, KEY, first),
+      );
+      expect(first.replayed).toBeUndefined();
+      const again: IdempotencySignals = {};
+      await kit.tenant.run(TENANT_ID, () =>
+        outflow.execute(body(), RECEPTION, KEY, again),
+      );
+      expect(again.replayed).toBe(true);
+    });
+
     it('repetir la misma salida devuelve la original, aunque la caja ya se haya cerrado', async () => {
       link.openSession(RECEPTION, LOCATION_ID);
       const first = await run(body(), KEY);

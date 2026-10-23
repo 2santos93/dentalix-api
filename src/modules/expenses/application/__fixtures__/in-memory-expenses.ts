@@ -333,17 +333,13 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
    * Solo se llama con enlace: sin él, comprobar e insertar no ceden el turno.
    */
   private cashSessionFor(
-    expense: { id: string; locationId: string; currency: string },
+    expense: { locationId: string },
     input: CreateExpensePaymentRepoInput & { cashLink: ExpenseCashLink },
   ): Promise<string> {
     return input.cashLink.attachToOpenSession({} as never, {
       tenantId: TENANT_ID,
       locationId: expense.locationId,
       userId: input.createdById,
-      expenseId: expense.id,
-      paidOn: input.paidOn,
-      amount: input.amount,
-      currency: expense.currency,
     });
   }
 
@@ -372,14 +368,10 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       this.failNextCreate = null;
       return Promise.reject(error);
     }
-    // El id del gasto aún no existe: la caja solo necesita sede y moneda.
+    // La caja solo necesita la sede (el gasto aún no existe).
     const cashSessionId = payment?.cashLink
       ? await this.cashSessionFor(
-          {
-            id: 'nuevo',
-            locationId: input.locationId,
-            currency: input.currency,
-          },
+          { locationId: input.locationId },
           { ...payment, cashLink: payment.cashLink },
         )
       : null;

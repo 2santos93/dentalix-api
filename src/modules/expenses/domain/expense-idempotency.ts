@@ -26,6 +26,24 @@ const money = (value: unknown): unknown =>
     ? value.toFixed(2)
     : (value ?? null);
 
+/** Espacios colapsados (categoría, proveedor). */
+const spaced = (value: unknown): unknown =>
+  typeof value === 'string'
+    ? value.trim().replace(/\s+/g, ' ')
+    : (value ?? null);
+
+/** Texto opcional: vacío equivale a ausente. */
+const optionalText = (value: unknown): unknown => {
+  const normalized = text(value);
+  return normalized === '' ? null : normalized;
+};
+
+const currencyCode = (value: unknown): unknown =>
+  typeof value === 'string' ? value.trim().toUpperCase() : (value ?? null);
+
+const lowerUuid = (value: unknown): string | null =>
+  typeof value === 'string' ? value.toLowerCase() : null;
+
 function sha(parts: unknown[]): string {
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
@@ -69,29 +87,18 @@ export interface ExpenseRequestShape {
 
 /** Huella de un alta de gasto: el cuerpo entero normalizado. */
 export function expenseRequestFingerprint(input: ExpenseRequestShape): string {
-  const supplier =
-    typeof input.supplier === 'string'
-      ? input.supplier.trim().replace(/\s+/g, ' ')
-      : (input.supplier ?? null);
+  const supplier = spaced(input.supplier);
   return sha([
-    typeof input.locationId === 'string'
-      ? input.locationId.toLowerCase()
-      : null,
-    typeof input.category === 'string'
-      ? input.category.trim().replace(/\s+/g, ' ')
-      : (input.category ?? null),
+    lowerUuid(input.locationId),
+    spaced(input.category),
     supplier === '' ? null : supplier,
-    text(input.description) === '' ? null : text(input.description),
+    optionalText(input.description),
     money(input.amount),
-    typeof input.currency === 'string'
-      ? input.currency.trim().toUpperCase()
-      : (input.currency ?? null),
+    currencyCode(input.currency),
     text(input.invoiceDate),
-    text(input.dueDate) === '' ? null : text(input.dueDate),
+    optionalText(input.dueDate),
     input.payment ? paymentParts(input.payment) : null,
-    typeof input.attachmentUploadId === 'string'
-      ? input.attachmentUploadId.toLowerCase()
-      : null,
+    lowerUuid(input.attachmentUploadId),
   ]);
 }
 
@@ -111,23 +118,14 @@ export interface CashOutflowRequestShape {
  * misma petición sigue devolviendo la original.
  */
 export function cashOutflowFingerprint(input: CashOutflowRequestShape): string {
-  const supplier =
-    typeof input.supplier === 'string'
-      ? input.supplier.trim().replace(/\s+/g, ' ')
-      : (input.supplier ?? null);
+  const supplier = spaced(input.supplier);
   return sha([
     'CASH_OUTFLOW',
-    typeof input.category === 'string'
-      ? input.category.trim().replace(/\s+/g, ' ')
-      : (input.category ?? null),
+    spaced(input.category),
     supplier === '' ? null : supplier,
-    text(input.description) === '' ? null : text(input.description),
+    optionalText(input.description),
     money(input.amount),
-    typeof input.currency === 'string'
-      ? input.currency.trim().toUpperCase()
-      : (input.currency ?? null),
-    typeof input.attachmentUploadId === 'string'
-      ? input.attachmentUploadId.toLowerCase()
-      : null,
+    currencyCode(input.currency),
+    lowerUuid(input.attachmentUploadId),
   ]);
 }

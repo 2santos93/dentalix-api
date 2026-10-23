@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { prismaRuleCode } from '../../../shared/prisma/prisma-exception.filter';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { ExpensePayment } from '../../expenses/domain/entities/expense.entity';
 import { OPEN_CASH_SESSION_REQUIRED_MESSAGE } from '../../expenses/domain/expense-rules';
 import type {
@@ -29,17 +30,6 @@ export function adjustmentReasonOf(reason: string): string {
     : `${chars.slice(0, CASH_REASON_MAX - 1).join('')}…`;
 }
 
-/** Lo que la caja necesita de la salida anulada, leído de la BD. */
-interface OutflowRow {
-  id: string;
-  tenantId: string;
-  locationId: string;
-  cashSessionId: string | null;
-  currency: string;
-  amount: Prisma.Decimal;
-  voidedAt: Date | null;
-}
-
 /**
  * Salidas de caja menor (DX-274, R1/R5): lo que la caja por turno hace DENTRO
  * de las transacciones de los pagos de gastos, como `payment-cash-session.ts`
@@ -48,7 +38,16 @@ interface OutflowRow {
  */
 @Injectable()
 export class ExpenseCashSession implements ExpenseCashLink {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  private tenantId(): string {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return tenantId;
+  }
 
   /**
    * La caja abierta de quien paga en la sede del gasto, con `FOR SHARE`: un
@@ -78,6 +77,7 @@ export class ExpenseCashSession implements ExpenseCashLink {
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.cashSession.findMany({
         where: {
+          tenantId: this.tenantId(),
           openedById: userId,
           status: 'OPEN',
           ...(locationIds ? { locationId: { in: [...locationIds] } } : {}),
@@ -106,35 +106,33 @@ export class ExpenseCashSession implements ExpenseCashLink {
     reason: string,
     by: string,
   ): Promise<void> {
-    const [row] = await tx.$queryRaw<OutflowRow[]>`
-      SELECT "id", "tenantId", "locationId", "cashSessionId", "currency",
-             "amount", "voidedAt"
-        FROM "expense_payments"
-       WHERE "id" = ${payment.id}::uuid`;
+    const tenantId = this.tenantId();
+    const row = await tx.expensePayment.findFirst({
+      where: { id: payment.id, tenantId },
+      select: {
+        id: true,
+        locationId: true,
+        cashSessionId: true,
+        currency: true,
+        amount: true,
+        voidedAt: true,
+      },
+    });
     if (!row?.cashSessionId) return; // Nunca salió de una caja.
     if (!row.voidedAt) {
       throw new Error('onPaymentVoided: el pago aún no está anulado');
     }
     // Antes de leer el destino (como los VOID): una apertura simultánea en la
     // sede recoge este ajuste pendiente o no lo ve, nunca a medias.
-    await lockCashAdjustmentAssignment(tx, row.tenantId, row.locationId);
-    const status = await lockedSessionStatus(
-      tx,
-      row.tenantId,
-      row.cashSessionId,
-    );
+    await lockCashAdjustmentAssignment(tx, tenantId, row.locationId);
+    const status = await lockedSessionStatus(tx, tenantId, row.cashSessionId);
     if (status === 'OPEN') return; // Deja de restar en su propia caja.
 
-    const target = await lockOpenSessionOf(
-      tx,
-      row.tenantId,
-      row.locationId,
-      by,
-    );
+    const target = await lockOpenSessionOf(tx, tenantId, row.locationId, by);
     try {
       await tx.cashSessionAdjustment.create({
         data: {
-          tenantId: row.tenantId,
+          tenantId,
           locationId: row.locationId,
           sessionId: target,
           kind: 'OUTFLOW_VOID',
@@ -142,7 +140,7 @@ export class ExpenseCashSession implements ExpenseCashLink {
           originalSessionId: row.cashSessionId,
           currency: row.currency,
           method: 'CASH',
-          amount: new Prisma.Decimal(row.amount),
+          amount: row.amount,
           reason: adjustmentReasonOf(reason),
           createdById: by,
         },
@@ -151,13 +149,7 @@ export class ExpenseCashSession implements ExpenseCashLink {
       // La red de los triggers y del único (una anulación por salida): con
       // los bloqueos de arriba no debería pasar; nunca como 500.
       const code = prismaRuleCode(error);
-      if (code && ['42501', '23503', '23505'].includes(code)) {
-        throw new ConflictException(OUTFLOW_VOID_CONFLICT_MESSAGE);
-      }
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
+      if (code === '42501' || code === '23503' || code === '23505') {
         throw new ConflictException(OUTFLOW_VOID_CONFLICT_MESSAGE);
       }
       throw error;

@@ -218,16 +218,15 @@ function sqlStateOf(
 }
 
 /**
- * SQLSTATE (o `P2003` de FK) de cualquier error, para los repositorios que
+ * SQLSTATE (también de `P2003` → 23503 y `P2002` → 23505) de cualquier error, para los repositorios que
  * traducen una regla de la BD a su propio mensaje en español antes de que
  * llegue a este filtro. `undefined` si no es un error de Prisma con código.
  */
 export function prismaRuleCode(error: unknown): string | undefined {
-  if (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2003'
-  ) {
-    return '23503';
+  // Los dos que Prisma traduce a su propio código (sin `meta.code`).
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === 'P2003') return '23503';
+    if (error.code === 'P2002') return '23505';
   }
   if (
     error instanceof Prisma.PrismaClientKnownRequestError ||

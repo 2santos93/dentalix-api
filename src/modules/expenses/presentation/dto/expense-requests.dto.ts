@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -166,44 +166,14 @@ export class CreateExpenseDto {
  * pagado en el acto desde la caja abierta de quien la registra. La sede es la
  * de esa caja y la fecha, hoy: no vienen en el cuerpo.
  */
-export class CreateCashOutflowDto {
-  @ApiProperty({
-    example: 'Mensajería',
-    description: 'Una predefinida o una propia activa de la clínica.',
-  })
-  @IsString({ message: CATEGORY_INVALID_MESSAGE })
-  category!: string;
-
-  @ApiPropertyOptional({ maxLength: 200, nullable: true })
-  @IsOptional()
-  @IsString({ message: SUPPLIER_MESSAGE })
-  supplier?: string | null;
-
-  @ApiPropertyOptional({ maxLength: 500, nullable: true })
-  @IsOptional()
-  @IsString({ message: DESCRIPTION_MESSAGE })
-  description?: string | null;
-
-  @ApiProperty(AMOUNT_DOC)
-  @IsNumber({}, { message: AMOUNT_MESSAGE })
-  @IsPositive({ message: AMOUNT_MESSAGE })
-  @IsMoney({ message: AMOUNT_MESSAGE })
-  amount!: number;
-
-  @ApiProperty({ example: 'COP', description: 'Código ISO 4217' })
-  @Transform(toUpperCase)
-  @IsISO4217CurrencyCode({ message: CURRENCY_MESSAGE })
-  currency!: string;
-
-  @ApiPropertyOptional({
-    format: 'uuid',
-    description:
-      'El `uploadId` de `POST /expenses/attachments/upload-url`, ya subido al almacén.',
-  })
-  @IsOptional()
-  @IsUUID('all', { message: 'La subida del soporte no es válida.' })
-  attachmentUploadId?: string;
-}
+export class CreateCashOutflowDto extends PickType(CreateExpenseDto, [
+  'category',
+  'supplier',
+  'description',
+  'amount',
+  'currency',
+  'attachmentUploadId',
+] as const) {}
 
 export class UpdateExpenseDto {
   @ApiPropertyOptional()

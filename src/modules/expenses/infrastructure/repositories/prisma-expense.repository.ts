@@ -374,10 +374,6 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           tenantId,
           locationId: expense.locationId,
           userId: input.createdById,
-          expenseId: expense.id,
-          paidOn: input.paidOn,
-          amount: input.amount,
-          currency: expense.currency,
         })
       : null;
     try {

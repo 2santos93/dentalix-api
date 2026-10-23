@@ -30,6 +30,7 @@ import {
   OTHER_LOCATION_ID,
   USER_ID,
 } from '../__fixtures__/in-memory-expenses';
+import type { IdempotencySignals } from '../idempotency-guard';
 import {
   AddExpensePaymentUseCase,
   type AddExpensePaymentInput,
@@ -148,6 +149,27 @@ describe('pagos de un gasto (DX-274)', () => {
   });
 
   describe('idempotencia', () => {
+    it('signals.replayed: solo la repetición lo marca (la carrera también)', async () => {
+      const e = kit.repo.seed({ amount: 100 });
+      const body = { amount: 10, method: 'CARD' as const };
+      const first: IdempotencySignals = {};
+      await kit.inTenant(() => add.execute(e.id, body, ADMIN, KEY, first));
+      expect(first.replayed).toBeUndefined();
+      const again: IdempotencySignals = {};
+      await kit.inTenant(() => add.execute(e.id, body, ADMIN, KEY, again));
+      expect(again.replayed).toBe(true);
+
+      const other = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
+      const a: IdempotencySignals = {};
+      const b: IdempotencySignals = {};
+      await Promise.all([
+        kit.inTenant(() => add.execute(e.id, body, ADMIN, other, a)),
+        kit.inTenant(() => add.execute(e.id, body, ADMIN, other, b)),
+      ]);
+      expect([a.replayed, b.replayed].filter(Boolean)).toHaveLength(1);
+      expect(kit.repo.paymentsOf(e.id)).toHaveLength(2);
+    });
+
     it('repetir el mismo pago con la misma clave no lo duplica', async () => {
       const e = kit.repo.seed({ amount: 100 });
       await pay(e.id, { amount: 10, method: 'CARD' }, KEY);

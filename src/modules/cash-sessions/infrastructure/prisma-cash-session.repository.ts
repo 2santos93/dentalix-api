@@ -654,8 +654,9 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       if (!session) return 'NOT_FOUND';
       if (session.status !== 'OPEN') return 'NOT_OPEN';
 
-      // Con la caja bloqueada: ningún abono puede entrar ni anularse sin
-      // esperar a este COMMIT (ver payment-cash-session.ts).
+      // Con la caja bloqueada: ningún abono ni salida de caja menor puede
+      // entrar ni anularse sin esperar a este COMMIT (ver
+      // payment-cash-session.ts y expense-cash-session.ts).
       const [source, timeZoneOf, settings] = await Promise.all([
         this.arqueoSource(tx, tenantId, id),
         resolveLocationTimeZones(tx, tenantId, [session.locationId]),

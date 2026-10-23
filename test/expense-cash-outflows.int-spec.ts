@@ -34,7 +34,7 @@ const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const cashRepo = new PrismaCashSessionRepository(prisma, tenantContext);
 const expenseRepo = new PrismaExpenseRepository(prisma, tenantContext);
-const cashLink = new ExpenseCashSession(prisma);
+const cashLink = new ExpenseCashSession(prisma, tenantContext);
 
 const SUBDOMAIN = 'dx274-outflow-int';
 const EMAIL = 'dx274-outflow-int@example.com';
@@ -265,6 +265,61 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
     expect(
       await raw.expensePayment.count({ where: { cashSessionId: sessionId } }),
     ).toBe(0);
+  });
+
+  it('una anulación que se cruza con el cierre: el cierre la cuenta y la anulación es OUTFLOW_VOID', async () => {
+    const sessionId = await openSession();
+    const created = await outflow();
+    const paymentId = created.detail.payments[0].id;
+    const updated = gate();
+    const release = gate();
+    // La anulación ya escribió `voidedAt` (sin COMMIT) y espera antes de
+    // mirar la caja: el cierre no la ve y cuenta la salida.
+    const pausedLink: ExpenseCashLink = {
+      attachToOpenSession: (...args) => cashLink.attachToOpenSession(...args),
+      openSessionLocations: (...args) => cashLink.openSessionLocations(...args),
+      onPaymentVoided: async (...args) => {
+        updated.open();
+        await release.wait;
+        return cashLink.onPaymentVoided(...args);
+      },
+    };
+    const voiding = settle(
+      inTenant(() =>
+        expenseRepo.voidPayment(
+          created.detail.id,
+          paymentId,
+          'Se cruzó con el cierre',
+          userId,
+          new Date(),
+          pausedLink,
+        ),
+      ),
+    );
+    await updated.wait;
+    const seen: ExpectedLine[][] = [];
+    await expect(closeSession(sessionId, seen)).resolves.toBe('CLOSED');
+    release.open();
+    expect((await voiding).status).toBe('fulfilled');
+
+    expect(cashLine(seen[0])).toMatchObject({
+      outflowsCount: 1,
+      expectedCents: (FLOAT - AMOUNT) * 100,
+    });
+    const adjustment = await raw.cashSessionAdjustment.findFirstOrThrow({
+      where: { expensePaymentId: paymentId },
+    });
+    expect(adjustment).toMatchObject({
+      kind: 'OUTFLOW_VOID',
+      originalSessionId: sessionId,
+      sessionId: null, // quien anula no tiene otra caja abierta: pendiente
+    });
+    expect(adjustment.amount.toNumber()).toBe(AMOUNT);
+    // La caja cerrada sigue restándola (como en su cierre).
+    const detail = await inTenant(() => cashRepo.detail(sessionId, {}));
+    expect(detail?.expected?.find((l) => l.method === 'CASH')?.expected).toBe(
+      FLOAT - AMOUNT,
+    );
   });
 
   it(`en ${ROUNDS} carreras sin orden: o cuenta en el cierre o es 409; nunca en una caja cerrada`, async () => {

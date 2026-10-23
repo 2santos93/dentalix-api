@@ -80,7 +80,7 @@ export class CashOutflowsController {
   })
   @ApiConflictResponse({
     description:
-      'Sin caja abierta (en esa sede), o con cajas abiertas en varias sedes sin elegir una',
+      'Sin caja abierta (en esa sede); con cajas abiertas en varias sedes sin elegir una; o la Idempotency-Key ya se usó para un gasto de otra sede',
   })
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otros datos',

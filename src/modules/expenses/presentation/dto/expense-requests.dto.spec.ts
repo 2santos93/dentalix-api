@@ -9,6 +9,7 @@ import {
 import {
   AddExpensePaymentDto,
   AttachExpenseReceiptDto,
+  CreateCashOutflowDto,
   CreateExpenseCategoryDto,
   CreateExpenseDto,
   CreateExpenseUploadDto,
@@ -223,6 +224,40 @@ describe('DTOs de gastos (DX-274)', () => {
         await messages(CreateExpenseCategoryDto, { name: 'Seguros' }),
       ).toEqual([]);
       expect((await messages(CreateExpenseCategoryDto, {})).length).toBe(1);
+    });
+  });
+
+  describe('salida de caja (PickType del alta)', () => {
+    it('hereda validación y transformación de los campos del alta', async () => {
+      const ok = plainToInstance(CreateCashOutflowDto, {
+        category: 'Mensajería',
+        amount: 15000,
+        currency: 'cop',
+      });
+      expect(await validate(ok, { whitelist: true })).toEqual([]);
+      expect(ok.currency).toBe('COP');
+      expect(
+        await messages(CreateCashOutflowDto, { category: 'x', amount: 0 }),
+      ).toContain(AMOUNT_MESSAGE);
+      expect(
+        await messages(CreateCashOutflowDto, { amount: 1, currency: 'COP' }),
+      ).toContain(CATEGORY_INVALID_MESSAGE);
+    });
+
+    it('no admite sede, fechas ni pago: el servidor los decide', () => {
+      const dto = plainToInstance(CreateCashOutflowDto, {
+        category: 'Mensajería',
+        amount: 1,
+        currency: 'COP',
+        locationId: '00000000-0000-4000-8000-000000000000',
+        invoiceDate: '2026-01-01',
+        payment: { amount: 1, method: 'CARD' },
+      });
+      return validate(dto, { whitelist: true }).then(() => {
+        expect(dto).not.toHaveProperty('locationId');
+        expect(dto).not.toHaveProperty('invoiceDate');
+        expect(dto).not.toHaveProperty('payment');
+      });
     });
   });
 });
