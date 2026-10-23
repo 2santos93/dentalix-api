@@ -137,6 +137,16 @@ export class AuditImportBatchDto {
   @ApiPropertyOptional() balanceRows?: number;
   @ApiPropertyOptional() balanceErrors?: number;
   @ApiPropertyOptional() balancesCreated?: number;
+  @ApiPropertyOptional({
+    description:
+      '«Añadir aunque ya tenga saldo migrado» marcado (DX-262, QA D1)',
+  })
+  balanceAddToExisting?: boolean;
+  @ApiPropertyOptional({
+    description:
+      'Saldos no creados porque el paciente ya tenía uno vivo en esa moneda (DX-262, QA D1)',
+  })
+  balancesExisting?: number;
   @ApiPropertyOptional() balancesUndone?: number;
   @ApiPropertyOptional({
     type: [AuditCurrencyTotalDto],

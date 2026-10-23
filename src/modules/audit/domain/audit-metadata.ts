@@ -93,6 +93,10 @@ export interface AuditImportBatch {
   balanceTotals?: AuditCurrencyTotal[];
   /** Lo que retiró de verdad el deshacer, por moneda (revisión M5). */
   balanceUndoneTotals?: AuditCurrencyTotal[];
+  /** «Añadir aunque ya tenga saldo migrado» marcado (QA D1). */
+  balanceAddToExisting?: boolean;
+  /** Saldos no creados porque el paciente ya tenía uno vivo (QA D1). */
+  balancesExisting?: number;
 }
 
 /** Total por moneda de la hoja de saldos (DX-262): código, filas e importe. */
@@ -239,6 +243,7 @@ const IMPORT_COUNTS = [
   'balanceErrors',
   'balancesCreated',
   'balancesUndone',
+  'balancesExisting',
 ] as const;
 const CURRENCY_CODE = /^[A-Z]{3}$/;
 const MAX_CURRENCY_TOTALS = 20;
@@ -287,6 +292,9 @@ function importBatch(value: unknown): AuditImportBatch | null {
   if (totals.length > 0) out.balanceTotals = totals;
   const undone = currencyTotals(value.balanceUndoneTotals);
   if (undone.length > 0) out.balanceUndoneTotals = undone;
+  if (typeof value.balanceAddToExisting === 'boolean') {
+    out.balanceAddToExisting = value.balanceAddToExisting;
+  }
   return out;
 }
 

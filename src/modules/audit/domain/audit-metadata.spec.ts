@@ -366,6 +366,29 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
     });
   });
 
+  it('QA D1: «Añadir aunque ya tenga saldo migrado» (solo booleano) y los no creados por eso', () => {
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: {
+          fileSha256: sha,
+          balanceAddToExisting: true,
+          balancesExisting: 2,
+        },
+      }),
+    ).toEqual({
+      importBatch: {
+        fileSha256: sha,
+        balanceAddToExisting: true,
+        balancesExisting: 2,
+      },
+    });
+    expect(
+      sanitizeAuditMetadata({
+        importBatch: { fileSha256: sha, balanceAddToExisting: 'sí' },
+      }),
+    ).toEqual({ importBatch: { fileSha256: sha } });
+  });
+
   it('un hash de la hoja que no es SHA-256 se descarta', () => {
     expect(
       sanitizeAuditMetadata({

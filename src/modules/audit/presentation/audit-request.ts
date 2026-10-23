@@ -103,6 +103,7 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
       errorRows?: unknown;
       validTotals?: unknown;
       progress?: Record<string, unknown>;
+      addToExisting?: unknown;
       undoneCount?: unknown;
       undoneTotals?: unknown;
     } | null;
@@ -128,6 +129,9 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     balanceTotals: sheet?.validTotals,
     // Revisión M5: lo que retiró de verdad el deshacer.
     balanceUndoneTotals: sheet?.undoneTotals,
+    // QA D1: si se pidió añadir a quien ya tenía saldo, y cuántos no se crearon.
+    balanceAddToExisting: sheet?.addToExisting,
+    balancesExisting: sheet?.progress?.existing,
   };
 }
 

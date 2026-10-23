@@ -766,6 +766,18 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     await drain();
     const dora = await patientByDoc('555555');
     expect((await statementOf(dora.id)).openingBalances).toHaveLength(2);
+    // La auditoría del dry-run dice que se marcó la casilla.
+    const audited = await raw.auditEvent.findFirstOrThrow({
+      where: {
+        tenantId: a.tenantId,
+        resourceType: 'PATIENT_IMPORT_BATCH',
+        resourceId: added.batch.id,
+        metadata: { path: ['reason'], equals: 'IMPORT_BALANCES_VALIDATED' },
+      },
+    });
+    expect(audited.metadata).toMatchObject({
+      importBatch: { balanceAddToExisting: true },
+    });
   });
 
   it('quitar la hoja de saldos de un dry-run; en un lote ya importado, 409', async () => {
