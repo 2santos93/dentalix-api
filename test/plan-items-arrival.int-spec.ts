@@ -2,6 +2,12 @@ import { AppointmentStatus, Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { resetDatabase } from './support/e2e-fixtures';
+import { planItemConflictMessage } from '../src/modules/appointments/infrastructure/appointment-plan-items';
+import {
+  PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
+  reservedElsewhereMessage,
+} from '../src/modules/appointments/domain/plan-item-reservation';
+import { resolveLocationTimeZones } from '../src/shared/locations/location-time-zone';
 
 /**
  * DX-271 (BE-038, BE-039): la sincronización de reservas al cambiar el estado
@@ -274,5 +280,59 @@ describe('DX-271 triggers de reserva de ítems', () => {
     const open = await appointment(new Date(Date.now() + 30 * DAY));
     await link(open, other);
     await expect(retire(open)).resolves.toBeDefined();
+  });
+
+  it('el 409 nombra la cita que de verdad reserva el ítem, no un vínculo `active` caducado de otro ítem del PATCH (M2)', async () => {
+    const held = await newItem();
+    const staleItem = await newItem();
+    // Y: cita pasada sin llegar cuyo flag `active` sigue en true porque nadie
+    // la tocó desde que venció (el reloj no reescribe la fila).
+    const stale = await appointment(new Date(Date.now() - 3 * DAY));
+    await link(stale, staleItem);
+    await owner.$transaction([
+      owner.$executeRaw`SET LOCAL session_replication_role = replica`,
+      owner.$executeRaw`UPDATE appointment_plan_items SET active=true
+        WHERE "appointmentId"=${stale}::uuid AND "planItemId"=${staleItem}::uuid`,
+    ]);
+    expect(await active(stale, staleItem)).toBe(true);
+    // X: la cita futura que de verdad lo reserva.
+    const holder = await appointment(new Date(Date.now() + 8 * DAY));
+    await link(holder, held);
+    const holderStart = (
+      await owner.appointment.findUniqueOrThrow({ where: { id: holder } })
+    ).start;
+    const another = await appointment(new Date(Date.now() + 9 * DAY));
+    const message = await asApp(async (tx) => {
+      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
+      return {
+        got: await planItemConflictMessage(
+          tx,
+          tenantId,
+          [held, staleItem],
+          another,
+        ),
+        want: reservedElsewhereMessage(holderStart, zoneOf(locationId)),
+      };
+    });
+    expect(message.got).toBe(message.want);
+    await setStatus(holder, 'CANCELLED');
+  });
+
+  it('si la cita que reserva el ítem es de una sede no permitida, no enseña su fecha (M3)', async () => {
+    const item = await newItem();
+    const holder = await appointment(new Date(Date.now() + 11 * DAY));
+    await link(holder, item);
+    const another = await appointment(new Date(Date.now() + 13 * DAY));
+    const restricted = await asApp((tx) =>
+      planItemConflictMessage(tx, tenantId, [item], another, [
+        '00000000-0000-4000-8000-000000000000',
+      ]),
+    );
+    expect(restricted).toBe(PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE);
+    const allowed = await asApp((tx) =>
+      planItemConflictMessage(tx, tenantId, [item], another, [locationId]),
+    );
+    expect(allowed).toContain('otra cita, la del ');
+    await setStatus(holder, 'CANCELLED');
   });
 });

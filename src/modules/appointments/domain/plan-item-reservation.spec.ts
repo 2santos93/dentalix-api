@@ -1,7 +1,11 @@
 import { AppointmentStatus } from '@prisma/client';
 import {
+  PLAN_ITEMS_CANCELLED_MESSAGE,
   PLAN_ITEMS_CLOSED_MESSAGE,
+  PLAN_ITEMS_NO_SHOW_MESSAGE,
+  PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
   closedForPlanItems,
+  planItemsClosedMessage,
   reservedElsewhereMessage,
 } from './plan-item-reservation';
 
@@ -58,5 +62,42 @@ describe('DX-271 reserva de ítems del plan', () => {
     expect(reservedElsewhereMessage(future, 'America/Bogota')).not.toMatch(
       /agendarlo/,
     );
+  });
+
+  it('una cita futura cancelada o no-show no «ya pasó»: lo dice su estado (M6)', () => {
+    expect(
+      planItemsClosedMessage(
+        { status: AppointmentStatus.CANCELLED, start: future },
+        now,
+      ),
+    ).toBe('Esta cita está cancelada: sus tratamientos no se cambian.');
+    expect(PLAN_ITEMS_CANCELLED_MESSAGE).not.toMatch(/ya pasó/);
+    expect(
+      planItemsClosedMessage(
+        { status: AppointmentStatus.NO_SHOW, start: future },
+        now,
+      ),
+    ).toBe(PLAN_ITEMS_NO_SHOW_MESSAGE);
+    expect(PLAN_ITEMS_NO_SHOW_MESSAGE).not.toMatch(/ya pasó/);
+  });
+
+  it('completada, o cancelada/no-show/agendada ya pasadas: «ya pasó»', () => {
+    for (const appointment of [
+      { status: AppointmentStatus.COMPLETED, start: future },
+      { status: AppointmentStatus.COMPLETED, start: past },
+      { status: AppointmentStatus.CANCELLED, start: past },
+      { status: AppointmentStatus.NO_SHOW, start: past },
+      { status: AppointmentStatus.SCHEDULED, start: past },
+    ])
+      expect(planItemsClosedMessage(appointment, now)).toBe(
+        PLAN_ITEMS_CLOSED_MESSAGE,
+      );
+  });
+
+  it('una cita de otra sede no permitida no enseña fecha ni sede (M3)', () => {
+    expect(PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE).toBe(
+      'Este tratamiento ya está reservado en otra cita de otra sede. Pide en esa sede que lo quiten de esa cita o la cancelen.',
+    );
+    expect(PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE).not.toMatch(/\d/);
   });
 });

@@ -6,10 +6,26 @@ import {
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import {
-  PLAN_ITEMS_CLOSED_MESSAGE,
+  AllowedLocations,
+  isLocationAllowed,
+} from '../../../shared/tenancy/location-access';
+import {
+  planItemsClosedMessage,
   planItemsEditable,
+  PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
   reservedElsewhereMessage,
 } from '../domain/plan-item-reservation';
+
+/** Estados que reservan (mismo predicado que `dx256_link_reservation`). */
+const PRE_ARRIVAL_RESERVING = [
+  AppointmentStatus.SCHEDULED,
+  AppointmentStatus.CONFIRMED,
+] as const;
+const IN_CLINIC_RESERVING = [
+  AppointmentStatus.ARRIVED,
+  AppointmentStatus.IN_CHAIR,
+  AppointmentStatus.READY_FOR_CHECKOUT,
+] as const;
 
 /** Estado y hora de la cita, para decidir si admite cambiar sus ítems. */
 export interface PlanItemsAppointmentState {
@@ -56,7 +72,9 @@ export async function replaceAppointmentPlanItems(
   if (!current) throw new NotFoundException('Appointment not found');
   // DX-271 (BE-039): los de una cita cerrada o pasada no se cambian.
   if (!planItemsEditable(before ?? current, current, new Date()))
-    throw new ConflictException(PLAN_ITEMS_CLOSED_MESSAGE);
+    throw new ConflictException(
+      planItemsClosedMessage(before ?? current, new Date()),
+    );
   if (ids.length > 100 || new Set(ids).size !== ids.length)
     throw new BadRequestException('Indica hasta 100 ítems distintos.');
   const items = ids.length
@@ -121,13 +139,20 @@ export function isPlanItemConflict(error: unknown): boolean {
  * fecha en la zona de la sede de esa cita. Se busca DESPUÉS del rechazo, en
  * otra transacción: la reserva viva de alguno de `planItemIds` en otra cita
  * (la más próxima). Si ya no existe (se liberó a la vez), el mensaje general.
+ *
+ * «Viva» con el mismo predicado que `dx256_link_reservation`: el flag
+ * `active` solo no basta, porque una cita que venció sin que nadie la tocara
+ * lo conserva en true (M2). Si la cita es de una sede que el usuario no tiene
+ * permitida (DX-089), no se enseña su fecha (M3).
  */
 export async function planItemConflictMessage(
   tx: Prisma.TransactionClient,
   tenantId: string,
   planItemIds: readonly string[],
   appointmentId?: string,
+  allowedLocations: AllowedLocations = 'ALL',
 ): Promise<string> {
+  const now = new Date();
   const holder =
     planItemIds.length === 0
       ? null
@@ -135,7 +160,18 @@ export async function planItemConflictMessage(
           where: {
             planItemId: { in: [...planItemIds] },
             active: true,
+            deletedAt: null,
             ...(appointmentId ? { appointmentId: { not: appointmentId } } : {}),
+            appointment: {
+              deletedAt: null,
+              OR: [
+                {
+                  status: { in: [...PRE_ARRIVAL_RESERVING] },
+                  start: { gte: now },
+                },
+                { status: { in: [...IN_CLINIC_RESERVING] } },
+              ],
+            },
           },
           orderBy: { appointment: { start: 'asc' } },
           select: {
@@ -143,6 +179,8 @@ export async function planItemConflictMessage(
           },
         });
   if (!holder) return reservedElsewhereMessage(null, 'UTC');
+  if (!isLocationAllowed(allowedLocations, holder.appointment.locationId))
+    return PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE;
   const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
     holder.appointment.locationId,
   ]);

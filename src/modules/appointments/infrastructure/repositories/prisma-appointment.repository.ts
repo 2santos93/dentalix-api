@@ -5,7 +5,7 @@ import {
   replaceAppointmentPlanItems,
 } from '../appointment-plan-items';
 import {
-  PLAN_ITEMS_CLOSED_MESSAGE,
+  planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
 import {
@@ -355,7 +355,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             new Date(),
           )
         ) {
-          throw new ConflictException(PLAN_ITEMS_CLOSED_MESSAGE);
+          throw new ConflictException(
+            planItemsClosedMessage(existing, new Date()),
+          );
         }
         // Retirar excluidos ANTES de reactivar/reagendar: el trigger no debe
         // intentar reservar los vínculos antiguos que esta misma petición quita.
@@ -485,7 +487,13 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             select: { planItemId: true },
           })
         ).map((l) => l.planItemId);
-      return planItemConflictMessage(tx, tenantId, ids, appointmentId);
+      return planItemConflictMessage(
+        tx,
+        tenantId,
+        ids,
+        appointmentId,
+        this.tenantContext.getAllowedLocationIds(),
+      );
     });
     throw new ConflictException(message);
   }

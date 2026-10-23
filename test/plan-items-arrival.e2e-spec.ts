@@ -55,11 +55,13 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
   let app: INestApplication<App>;
   let a: Clinic;
   let reception: string;
+  let receptionUserId: string;
+  let receptionEmail: string;
   let locationId: string;
   let patientId: string;
   let catalogId: string;
   const call = (
-    verb: 'get' | 'post' | 'patch',
+    verb: 'get' | 'post' | 'patch' | 'put',
     path: string,
     body?: object,
     token?: string,
@@ -144,6 +146,8 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     });
     const member = await seedMember(raw, a, ClinicRole.RECEPTION);
     reception = await loginAs(app, a.host, member.email);
+    receptionUserId = member.userId;
+    receptionEmail = member.email;
     patientId = (
       await raw.patient.create({
         data: {
@@ -366,14 +370,19 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
       'NO_SHOW',
     );
     const pastScheduled = await rawAppointment(new Date(Date.now() - 6 * DAY));
-    for (const appointment of [cancelled, noShow, pastScheduled]) {
+    // DX-271 M6: la cancelada es futura, no «ya pasó»: se dice su estado.
+    for (const [appointment, message] of [
+      [cancelled, 'Esta cita está cancelada: sus tratamientos no se cambian.'],
+      [noShow, CLOSED],
+      [pastScheduled, CLOSED],
+    ] as const) {
       const res = await call(
         'patch',
         `/appointments/${appointment.id}`,
         { planItemIds: [itemId] },
         reception,
       ).expect(409);
-      expect((res.body as { message: string }).message).toBe(CLOSED);
+      expect((res.body as { message: string }).message).toBe(message);
       expect(await links(appointment.id)).toEqual([]);
     }
     const future = await rawAppointment(new Date(Date.now() + 41 * DAY));
@@ -387,5 +396,55 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
       { planItemId: itemId, active: true, deletedAt: null },
     ]);
     expect(await planItemEvents(future.id)).toBe(1);
+  });
+
+  // Al final: restringe a recepción a la sede principal.
+  it('el 409 de reserva no enseña la fecha de una cita de una sede no permitida (M3)', async () => {
+    const {
+      planId,
+      ids: [itemId],
+    } = await acceptedItems(1);
+    await accept(planId);
+    const north = await raw.location.create({
+      data: { tenantId: a.tenantId, name: 'Sede Norte DX271' },
+    });
+    const holderStart = new Date(Date.now() + 60 * DAY);
+    const holder = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: north.id,
+        patientId,
+        providerId: a.adminUserId,
+        start: holderStart,
+        end: new Date(holderStart.getTime() + 30 * MIN),
+        status: 'SCHEDULED',
+      },
+    });
+    await rawLink(holder.id, itemId);
+    const target = await rawAppointment(new Date(Date.now() + 62 * DAY));
+    // Quien ve las dos sedes sí ve en qué cita está.
+    const open = await call('patch', `/appointments/${target.id}`, {
+      planItemIds: [itemId],
+    }).expect(409);
+    expect((open.body as { message: string }).message).toContain(
+      `la del ${wall(holderStart)}`,
+    );
+    await call('put', `/staff/${receptionUserId}/locations`, {
+      locationIds: [locationId],
+    }).expect(200);
+    const restricted = await loginAs(app, a.host, receptionEmail);
+    const res = await call(
+      'patch',
+      `/appointments/${target.id}`,
+      { planItemIds: [itemId] },
+      restricted,
+    ).expect(409);
+    const message = (res.body as { message: string }).message;
+    expect(message).toBe(
+      'Este tratamiento ya está reservado en otra cita de otra sede. Pide en esa sede que lo quiten de esa cita o la cancelen.',
+    );
+    expect(message).not.toContain(wall(holderStart).slice(0, 10));
+    expect(message).not.toContain('Norte');
+    expect(await links(target.id)).toEqual([]);
   });
 });

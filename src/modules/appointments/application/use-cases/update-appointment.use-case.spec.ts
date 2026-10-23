@@ -1567,25 +1567,35 @@ describe('UpdateAppointmentUseCase · ítems del plan de una cita cerrada (DX-27
     );
   const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
+  const PASSED = 'Esta cita ya pasó: sus tratamientos no se cambian.';
   it.each([
-    fakeAppointment({ status: AppointmentStatus.COMPLETED }),
-    fakeAppointment({ status: AppointmentStatus.NO_SHOW }),
-    fakeAppointment({ status: AppointmentStatus.CANCELLED, start: past }),
-    fakeAppointment({ start: past, end: new Date(past.getTime() + 1800000) }),
+    [fakeAppointment({ status: AppointmentStatus.COMPLETED }), PASSED],
+    [
+      fakeAppointment({ status: AppointmentStatus.NO_SHOW }),
+      'Esta cita está marcada como «no asistió»: sus tratamientos no se cambian.',
+    ],
+    [
+      fakeAppointment({ status: AppointmentStatus.CANCELLED }),
+      'Esta cita está cancelada: sus tratamientos no se cambian.',
+    ],
+    [
+      fakeAppointment({ status: AppointmentStatus.CANCELLED, start: past }),
+      PASSED,
+    ],
+    [
+      fakeAppointment({ start: past, end: new Date(past.getTime() + 1800000) }),
+      PASSED,
+    ],
   ])(
-    'planItemIds en una cita cerrada o pasada → 409 sin escribir ($status)',
-    async (existing) => {
+    'planItemIds en una cita cerrada o pasada → 409 sin escribir (%#)',
+    async (existing, message) => {
       const calls: UpdateAppointmentRepoInput[] = [];
       await expect(
         useCase(existing, calls).execute(existing.id, {
           planItemIds: [],
           notes: 'x',
         }),
-      ).rejects.toThrow(
-        new ConflictException(
-          'Esta cita ya pasó: sus tratamientos no se cambian.',
-        ),
-      );
+      ).rejects.toThrow(new ConflictException(message));
       expect(calls).toHaveLength(0);
     },
   );

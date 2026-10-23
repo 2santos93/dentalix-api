@@ -60,7 +60,7 @@ import {
   isInClinic,
 } from '../../domain/patient-flow';
 import {
-  PLAN_ITEMS_CLOSED_MESSAGE,
+  planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
 
@@ -202,7 +202,7 @@ export class UpdateAppointmentUseCase {
         new Date(),
       )
     ) {
-      throw new ConflictException(PLAN_ITEMS_CLOSED_MESSAGE);
+      throw new ConflictException(planItemsClosedMessage(existing, new Date()));
     }
 
     // DX-210: «Adelantar si hay hueco» lo cambian recepción, el odontólogo y

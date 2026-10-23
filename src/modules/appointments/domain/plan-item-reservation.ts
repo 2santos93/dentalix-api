@@ -9,6 +9,18 @@ import { isInClinic } from './patient-flow';
  */
 export const PLAN_ITEMS_CLOSED_MESSAGE =
   'Esta cita ya pasó: sus tratamientos no se cambian.';
+/** Una cita futura cancelada no «ya pasó»: se dice su estado. */
+export const PLAN_ITEMS_CANCELLED_MESSAGE =
+  'Esta cita está cancelada: sus tratamientos no se cambian.';
+/** Ídem para una cita futura marcada «no asistió». */
+export const PLAN_ITEMS_NO_SHOW_MESSAGE =
+  'Esta cita está marcada como «no asistió»: sus tratamientos no se cambian.';
+/**
+ * El ítem está reservado en una cita de una sede que el usuario no tiene
+ * permitida (DX-089): no se enseña su fecha ni su sede.
+ */
+export const PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE =
+  'Este tratamiento ya está reservado en otra cita de otra sede. Pide en esa sede que lo quiten de esa cita o la cancelen.';
 
 const CLOSED_STATUSES: ReadonlySet<AppointmentStatus> = new Set([
   AppointmentStatus.COMPLETED,
@@ -28,6 +40,23 @@ export function closedForPlanItems(
   if (CLOSED_STATUSES.has(appointment.status)) return true;
   if (isInClinic(appointment.status)) return false;
   return appointment.start.getTime() < now.getTime();
+}
+
+/**
+ * El 409 de una cita cerrada: completada o ya pasada, «ya pasó»; cancelada o
+ * no-show todavía futura, su estado.
+ */
+export function planItemsClosedMessage(
+  appointment: { status: AppointmentStatus; start: Date },
+  now: Date,
+): string {
+  if (appointment.start.getTime() >= now.getTime()) {
+    if (appointment.status === AppointmentStatus.CANCELLED)
+      return PLAN_ITEMS_CANCELLED_MESSAGE;
+    if (appointment.status === AppointmentStatus.NO_SHOW)
+      return PLAN_ITEMS_NO_SHOW_MESSAGE;
+  }
+  return PLAN_ITEMS_CLOSED_MESSAGE;
 }
 
 /**
