@@ -527,6 +527,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
           resourceType: 'MEDICAL_HISTORY_SUBMISSION',
           resourceId: link.created.id,
           actorUserId: dentistId,
+          action: 'UPDATE',
         },
       });
       expect(event.patientId).toBe(patientId);
