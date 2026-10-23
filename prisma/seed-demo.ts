@@ -935,6 +935,9 @@ class DemoSeeder {
       agreementIds.set(spec.key, id);
     }
 
+    // SEC-047: un convenio de pagador solo se asigna con una cobertura viva
+    // del paciente con ese pagador; si la demo no se la dio (Alfa), recepción
+    // la añade antes, como haría en la ficha.
     for (const a of DEMO_PATIENT_AGREEMENTS) {
       const patientId = patientIds[a.patientIndex];
       const current = await this.use(GetPatientAgreementUseCase).execute(
@@ -942,10 +945,29 @@ class DemoSeeder {
         false,
       );
       if (current.current) continue;
+      const spec = DEMO_AGREEMENTS.find((s) => s.key === a.agreementKey);
+      const payerId = payerIds.get(spec?.payerName ?? '') as string;
+      const coverages = await this.use(ListPatientCoveragesUseCase).execute(
+        patientId,
+      );
+      const coverageId =
+        coverages.find((c) => c.payer.id === payerId)?.id ??
+        (
+          await this.use(CreatePatientCoverageUseCase).execute(
+            patientId,
+            {
+              payerId,
+              planName: a.coverage.planName,
+              memberNumber: a.coverage.memberNumber,
+              isPrimary: false,
+            },
+            receptionId,
+          )
+        ).id;
       await this.use(AssignPatientAgreementUseCase).execute(
         patientId,
-        { agreementId: agreementIds.get(a.agreementKey) as string },
-        receptionId,
+        { agreementId: agreementIds.get(a.agreementKey) as string, coverageId },
+        { userId: receptionId, role: ClinicRole.RECEPTION },
       );
     }
   }

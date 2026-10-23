@@ -355,7 +355,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
     // DX-105 añade «Empresa Alfa» (8).
     expect(firstCounts.payers).toBe(8);
-    expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
+    // SEC-047: más la cobertura de Empresa Alfa del paciente con ese convenio
+    // (asignarlo exige una cobertura viva del pagador).
+    expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length + 1);
     // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
     // convenios (Sura −15 % y Empresa Alfa lista) y tres pacientes asignados.
     expect(firstCounts.price_lists).toBe(2);
