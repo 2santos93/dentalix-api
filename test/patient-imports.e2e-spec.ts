@@ -783,7 +783,18 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('el informe de un dry-run caducado ya no está: 410 en español', async () => {
     const first = (await upload('', bulkCsv(3, '3'), 'uno.csv').expect(201))
       .body as Batch;
-    await upload('', bulkCsv(3, '2'), 'dos.csv').expect(201);
+    const second = (await upload('', bulkCsv(3, '2'), 'dos.csv').expect(201))
+      .body as Batch & { reportAvailable: boolean };
+    expect(second.reportAvailable).toBe(true);
+    // La pantalla oculta «Informe» si ya no existe (revisión, menor 3).
+    const expired = await as(
+      api().get(`/api/v1/patient-imports/${first.id}`),
+      a.adminToken,
+    ).expect(200);
+    expect(expired.body).toMatchObject({
+      status: 'EXPIRED',
+      reportAvailable: false,
+    });
     const gone = await as(
       api().get(`/api/v1/patient-imports/${first.id}/errors.csv`),
       a.adminToken,

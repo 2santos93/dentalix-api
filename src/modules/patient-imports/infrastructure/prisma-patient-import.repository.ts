@@ -126,7 +126,15 @@ export interface PatientReference {
 }
 
 export type ConfirmResult =
-  { kind: 'confirmed'; batch: PatientImportBatch } | { kind: 'expired' };
+  { kind: 'confirmed'; batch: BatchRow } | { kind: 'expired' };
+
+/**
+ * Un lote SIN sus errores por fila (`issues`, hasta 10.000 y ~2 MB): lo que
+ * leen el sondeo del avance y el historial. Los errores, con `batchIssues`
+ * (los primeros) o `allIssues` (el informe).
+ */
+export type BatchRow = Omit<PatientImportBatch, 'issues'>;
+const WITHOUT_ISSUES = { issues: true } as const;
 
 /**
  * ¿Es un fallo pasajero (BD caída, conexión cortada, interbloqueo, tiempo de
@@ -295,26 +303,26 @@ export class PrismaPatientImportRepository {
     tx: Tx,
     where: { createdById?: string; before?: Date; id?: string },
   ): Promise<number> {
-    const stale = await tx.patientImportBatch.findMany({
+    // PRIMERO se caducan (UPDATE … WHERE status = 'VALIDATED' RETURNING):
+    // un lote que otra pestaña confirmó a la vez (QUEUED) no sale aquí y sus
+    // filas preparadas no se borran (revisión 2026-10-23, menor 1).
+    const expired = await tx.patientImportBatch.updateManyAndReturn({
       where: {
         status: 'VALIDATED',
         ...(where.id ? { id: where.id } : {}),
         ...(where.createdById ? { createdById: where.createdById } : {}),
         ...(where.before ? { createdAt: { lt: where.before } } : {}),
       },
+      data: { status: 'EXPIRED', issues: [], issuesPurgedAt: new Date() },
       select: { id: true },
     });
-    if (stale.length === 0) return 0;
-    const ids = stale.map((b) => b.id);
+    if (expired.length === 0) return 0;
+    const ids = expired.map((b) => b.id);
     // Housekeeping de filas de un dry-run caducado (allowlist en
     // no-hard-delete.ts): no las referencia nada y no son datos de negocio.
     // eslint-disable-next-line no-restricted-syntax -- filas preparadas de un dry-run caducado
     await tx.patientImportRow.deleteMany({
       where: { batchId: { in: ids }, outcome: 'PENDING', patientId: null },
-    });
-    await tx.patientImportBatch.updateMany({
-      where: { id: { in: ids }, status: 'VALIDATED' },
-      data: { status: 'EXPIRED', issues: [], issuesPurgedAt: new Date() },
     });
     return ids.length;
   }
@@ -396,16 +404,44 @@ export class PrismaPatientImportRepository {
     return rows.map((r) => r.id);
   }
 
-  async findBatch(id: string): Promise<PatientImportBatch | null> {
+  async findBatch(id: string): Promise<BatchRow | null> {
     return this.prisma.runWithTenant((tx) =>
-      tx.patientImportBatch.findFirst({ where: { id } }),
+      tx.patientImportBatch.findFirst({ where: { id }, omit: WITHOUT_ISSUES }),
     );
+  }
+
+  /** Los primeros `limit` errores del lote y cuántos hay, recortados en SQL. */
+  async batchIssues(
+    id: string,
+    limit: number,
+  ): Promise<{ issues: Prisma.JsonValue[]; total: number }> {
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<{ issues: Prisma.JsonValue[]; total: number }[]>`
+        SELECT jsonb_path_query_array(
+                 "issues", '$[0 to $last]',
+                 jsonb_build_object('last', ${Math.max(0, limit - 1)}::int)) AS "issues",
+               jsonb_array_length("issues")::int AS "total"
+          FROM "patient_import_batches"
+         WHERE "id" = ${id}::uuid`,
+    );
+    return rows[0] ?? { issues: [], total: 0 };
+  }
+
+  /** Todos los errores del lote (el informe descargable). */
+  async allIssues(id: string): Promise<Prisma.JsonValue[] | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.patientImportBatch.findFirst({
+        where: { id },
+        select: { issues: true },
+      }),
+    );
+    return row ? (row.issues as Prisma.JsonValue[]) : null;
   }
 
   async listBatches(
     take: number,
     skip: number,
-  ): Promise<{ items: PatientImportBatch[]; total: number }> {
+  ): Promise<{ items: BatchRow[]; total: number }> {
     return this.prisma.runWithTenant(async (tx) => {
       const where = {
         status: { notIn: ['VALIDATED', 'EXPIRED'] as PatientImportStatus[] },
@@ -413,6 +449,7 @@ export class PrismaPatientImportRepository {
       const [items, total] = await Promise.all([
         tx.patientImportBatch.findMany({
           where,
+          omit: WITHOUT_ISSUES,
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take,
           skip,
@@ -463,6 +500,7 @@ export class PrismaPatientImportRepository {
       if (status !== 'VALIDATED') throw new BatchStateError(status);
       const batch = await tx.patientImportBatch.update({
         where: { id },
+        omit: WITHOUT_ISSUES,
         data: {
           status: 'QUEUED',
           duplicateMode: input.mode,
@@ -487,7 +525,7 @@ export class PrismaPatientImportRepository {
   }
 
   /** QUEUED → RUNNING. Devuelve el lote si hay trabajo que hacer. */
-  async start(id: string): Promise<PatientImportBatch | null> {
+  async start(id: string): Promise<BatchRow | null> {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
         SELECT "status" FROM "patient_import_batches" WHERE "id" = ${id}::uuid FOR UPDATE`;
@@ -495,6 +533,7 @@ export class PrismaPatientImportRepository {
       if (status !== 'QUEUED' && status !== 'RUNNING') return null;
       return tx.patientImportBatch.update({
         where: { id },
+        omit: WITHOUT_ISSUES,
         data:
           status === 'QUEUED'
             ? { status: 'RUNNING', startedAt: new Date() }

@@ -9,7 +9,6 @@ import { createHash } from 'node:crypto';
 import type {
   ClinicCountry,
   DocType,
-  PatientImportBatch,
   PatientImportDuplicateMode,
   PatientImportFileFormat,
   PatientImportStatus,
@@ -43,6 +42,7 @@ import {
   PrismaPatientImportRepository,
   UndoBlockedError,
   importJobKey,
+  type BatchRow,
   type ConfirmResult,
 } from '../infrastructure/prisma-patient-import.repository';
 
@@ -147,6 +147,8 @@ export interface BatchView {
   undoneFilled: number | null;
   canConfirm: boolean;
   canUndo: boolean;
+  /** El informe de errores sigue disponible (ni caducado ni purgado). */
+  reportAvailable: boolean;
 }
 
 export interface BatchDetail extends BatchView {
@@ -183,7 +185,7 @@ function safeFileName(name: string): string {
   return (clean || 'archivo').slice(0, 255);
 }
 
-function mappingOf(batch: PatientImportBatch): BatchView['columnMapping'] {
+function mappingOf(batch: BatchRow): BatchView['columnMapping'] {
   const raw = batch.columnMapping as {
     columns?: ColumnMapping;
     defaultDocType?: DocType | null;
@@ -429,7 +431,9 @@ export class PatientImportsService {
         .slice(0, 80) || 'pacientes';
     return {
       fileName: `errores-${base}.csv`,
-      csv: issuesCsv(batch.issues as unknown as RowIssue[]),
+      csv: issuesCsv(
+        ((await this.repo.allIssues(id)) ?? []) as unknown as RowIssue[],
+      ),
     };
   }
 
@@ -456,24 +460,26 @@ export class PatientImportsService {
     return this.get(id);
   }
 
-  private async view(batch: PatientImportBatch): Promise<BatchView> {
+  private async view(batch: BatchRow): Promise<BatchView> {
     return this.toView(batch, await this.repo.userNames([batch.createdById]));
   }
 
-  private async detail(batch: PatientImportBatch): Promise<BatchDetail> {
-    const issues = batch.issues as unknown as RowIssue[];
+  private async detail(batch: BatchRow): Promise<BatchDetail> {
+    // Solo los primeros errores, recortados en SQL: la pantalla consulta el
+    // lote cada 1,5 s mientras importa (revisión 2026-10-23, menor 2).
+    const { issues, total } = await this.repo.batchIssues(
+      batch.id,
+      MAX_ISSUES_IN_RESPONSE,
+    );
     return {
       ...(await this.view(batch)),
-      issues: issues.slice(0, MAX_ISSUES_IN_RESPONSE),
-      issuesTotal: issues.length,
+      issues: issues as unknown as RowIssue[],
+      issuesTotal: total,
       preview: [],
     };
   }
 
-  private toView(
-    batch: PatientImportBatch,
-    names: Map<string, string>,
-  ): BatchView {
+  private toView(batch: BatchRow, names: Map<string, string>): BatchView {
     const validUntil =
       batch.createdAt.getTime() + VALIDATION_TTL_HOURS * 3_600_000;
     return {
@@ -520,6 +526,8 @@ export class PatientImportsService {
         batch.preparedRows > 0 &&
         Date.now() < validUntil,
       canUndo: batch.status === 'COMPLETED' || batch.status === 'FAILED',
+      reportAvailable:
+        batch.issuesPurgedAt === null && batch.status !== 'EXPIRED',
     };
   }
 }

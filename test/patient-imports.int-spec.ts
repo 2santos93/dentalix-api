@@ -816,4 +816,41 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       }),
     ).toMatchObject({ status: 'UNDONE', createdCount: 0, processedRows: 0 });
   });
+
+  it('el sondeo no carga los errores enteros: la lista sin `issues` y el detalle solo con los primeros (revisión, menor 2)', async () => {
+    const issues = Array.from({ length: 450 }, (_, i) => ({
+      row: i + 2,
+      column: 'doc',
+      kind: 'ERROR',
+      message: 'm',
+      value: String(i),
+    }));
+    const big = await raw.patientImportBatch.create({
+      data: batchData(b, {
+        status: 'COMPLETED',
+        duplicateMode: 'SKIP',
+        confirmedById: b.userId,
+        confirmedAt: new Date(),
+        finishedAt: new Date(),
+        issues,
+      }),
+    });
+    const { items } = await inTenant(b, () => repo.listBatches(20, 0));
+    const listed = items.find((x) => x.id === big.id);
+    expect(listed).toBeDefined();
+    expect(listed).not.toHaveProperty('issues');
+    const found = await inTenant(b, () => repo.findBatch(big.id));
+    expect(found).not.toHaveProperty('issues');
+    const head = await inTenant(b, () => repo.batchIssues(big.id, 200));
+    expect(head.total).toBe(450);
+    expect(head.issues).toHaveLength(200);
+    expect(head.issues[0]).toMatchObject({ row: 2 });
+    expect(head.issues[199]).toMatchObject({ row: 201 });
+    expect((await inTenant(b, () => repo.allIssues(big.id)))?.length).toBe(450);
+    // Otra clínica no los ve.
+    expect(await inTenant(a, () => repo.batchIssues(big.id, 200))).toEqual({
+      issues: [],
+      total: 0,
+    });
+  });
 });

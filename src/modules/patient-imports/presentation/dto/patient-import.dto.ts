@@ -257,6 +257,11 @@ export class PatientImportBatchDto {
     description: 'Terminado o fallido: se puede intentar deshacer',
   })
   canUndo!: boolean;
+  @ApiProperty({
+    description:
+      'El informe de errores (errors.csv) sigue disponible: ni caducado ni purgado a los 90 días',
+  })
+  reportAvailable!: boolean;
 }
 
 export class PatientImportBatchDetailDto extends PatientImportBatchDto {
