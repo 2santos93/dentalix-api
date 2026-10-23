@@ -165,6 +165,12 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
       api(token).post(`/appointments/${id}/confirmation-link`),
     'GET reminders': (token: string, id: string) =>
       api(token).get(`/appointments/${id}/reminders`),
+    // DX-273 «Traer a esta cita»: pasada la sede, la cita (agendada, no en
+    // la clínica) da 409; acotado sobre otra sede, 403 antes de nada.
+    'POST plan-items/:planItemId/claim': (token: string, id: string) =>
+      api(token).post(
+        `/appointments/${id}/plan-items/00000000-0000-4000-8000-000000000273/claim`,
+      ),
   } as const;
   type Route = keyof typeof ROUTES;
   const OK_STATUS: Record<Route, number> = {
@@ -172,6 +178,7 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     'POST post-op-instructions/deliveries': 201,
     'POST confirmation-link': 201,
     'GET reminders': 200,
+    'POST plan-items/:planItemId/claim': 409,
   };
 
   beforeAll(async () => {
@@ -321,7 +328,7 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     });
   });
 
-  // Matriz: 4 rutas × (acotado, sin restricción, ADMIN) × (Norte, Sur).
+  // Matriz: 5 rutas × (acotado, sin restricción, ADMIN) × (Norte, Sur).
   const MATRIX: Array<[Route, Who, Site, 'ok' | 'forbidden']> = [];
   for (const route of Object.keys(ROUTES) as Route[]) {
     MATRIX.push(
