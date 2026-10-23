@@ -888,6 +888,14 @@ Módulo `medical-history-submissions`; migraciones
   cita es de una sede no permitida, 403 sin decir cuál. Si ya nadie lo
   reserva (p. ej. se canceló la otra cita), solo recupera la reserva; si ya
   la tiene, no cambia nada. Si otra cita lo toma a la vez, 409 que dice cuál.
+  DX-288: es atómico. Tras las citas bloquea la fila del ítem (`FOR NO KEY
+  UPDATE`, que no estorba a las FK), así que dos «Traer» del mismo
+  tratamiento desde citas distintas van en fila. Y no se trae desde una cita
+  con el paciente en la clínica (409 «Este tratamiento ya lo tiene otra cita
+  con el paciente en la clínica…»): con N peticiones a la vez, una 200 y las
+  demás 409, también si alguna llega cuando la primera ya confirmó. Desde la
+  misma cita (doble clic) sigue siendo idempotente: todas 200 y un solo
+  traslado auditado.
 
 ## Odontograma: dentición, origen y anulación (DX-120)
 

@@ -19,6 +19,7 @@ import type { RecordAuditEventUseCase } from '../../../audit/application/record-
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { PlanItemReservedElsewhere } from '../../domain/entities/appointment.entity';
 import { PATIENT_FLOW_MESSAGES } from '../../domain/patient-flow';
+import { PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE } from '../../domain/plan-item-reservation';
 import { civilDateIn, civilDayRange } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
@@ -322,5 +323,25 @@ describe('UpdateAppointmentUseCase · «Traer a esta cita» (DX-273)', () => {
     await expect(
       uc.claimPlanItem('missing', 'item-1', ctx(ClinicRole.ADMIN)),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('DX-288: dos citas en la clínica traen el mismo tratamiento a la vez: una lo trae y la otra recibe el 409 del repositorio, sin segundo traslado', async () => {
+    const { repo, uc } = setup();
+    const first = todayAppointment(repo, AppointmentStatus.ARRIVED);
+    const second = todayAppointment(repo, AppointmentStatus.IN_CHAIR);
+    repo.reservedElsewhere.set(first.id, [reserved('future-1')]);
+    repo.reservedElsewhere.set(second.id, [reserved('future-1')]);
+    const outcomes = await Promise.allSettled(
+      [first, second].map((a) =>
+        uc.claimPlanItem(a.id, 'item-1', ctx(ClinicRole.RECEPTION)),
+      ),
+    );
+    expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'rejected']);
+    const loser = (outcomes[1] as PromiseRejectedResult).reason as unknown;
+    expect(loser).toBeInstanceOf(ConflictException);
+    expect((loser as ConflictException).message).toBe(
+      PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
+    );
+    expect(repo.claims.map((c) => c.appointmentId)).toEqual([first.id]);
   });
 });
