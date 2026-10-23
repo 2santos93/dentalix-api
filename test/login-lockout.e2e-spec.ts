@@ -5,6 +5,11 @@ import { App } from 'supertest/types';
 import { performance } from 'node:perf_hooks';
 import { createE2eApp } from './support/create-e2e-app';
 import {
+  ListeningApp,
+  listenOnEphemeralPort,
+  settleAll,
+} from './support/listening-app';
+import {
   Clinic,
   SEEDED_PASSWORD,
   loginAs,
@@ -17,6 +22,7 @@ import {
   accountKeyHash,
   type LoginLockoutConfig,
 } from '../src/modules/auth/domain/login-lockout';
+import { LoginLockoutService } from '../src/modules/auth/application/login-lockout.service';
 import { loadSecuritySettings } from '../src/shared/security/security-settings';
 
 /**
@@ -30,6 +36,13 @@ import { loadSecuritySettings } from '../src/shared/security/security-settings';
  * bloque abajo). El paso del tiempo se simula moviendo `blockedUntil` en la
  * BD, como haría el reloj. Detrás de un proxy de confianza (1 salto) para
  * poder variar la IP con X-Forwarded-For.
+ *
+ * DX-252 (TST-029): cada test es independiente y se puede correr solo con
+ * `-t`. La app escucha una vez en un puerto efímero y las peticiones pasan por
+ * un agente con concurrencia acotada (`listening-app.ts`); cada test usa
+ * cuentas recién creadas, los contadores se borran antes y después, y las
+ * peticiones en paralelo se esperan TODAS (`settleAll`) para que ninguna
+ * escriba un fallo después de que el test acabe.
  */
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -38,6 +51,10 @@ const raw = new PrismaClient({
 const RUN = Date.now().toString(36);
 const CLINIC_IP = '198.51.100.10';
 const WRONG = 'Mala-clave-1';
+/** Intentos simultáneos al acabar la espera (DX-048). */
+const CONCURRENT_ATTEMPTS = 10;
+/** Intentos que, como mínimo, deben coincidir dentro del servicio (DX-252). */
+const MIN_OVERLAP = 2;
 
 function lockoutApp(
   cfg: Partial<LoginLockoutConfig>,
@@ -67,6 +84,44 @@ async function clearThrottles(): Promise<void> {
   await raw.loginThrottle.deleteMany({});
 }
 
+type Member = { userId: string; email: string };
+
+let memberSeq = 0;
+let passwordHash: string | undefined;
+
+/**
+ * Cuenta nueva (email único en toda la run) con la contraseña del seed y las
+ * membresías indicadas. El hash de argon2 se calcula una vez (lo copia de la
+ * primera cuenta sembrada) para no pagar argon2 por test.
+ */
+async function newMember(
+  name: string,
+  memberships: { tenantId: string; role?: ClinicRole; deletedAt?: Date }[],
+): Promise<Member> {
+  if (!passwordHash) throw new Error('newMember antes de sembrar la plantilla');
+  const email = `${name}-${RUN}-${++memberSeq}@lockout.test`;
+  const user = await raw.user.create({
+    data: {
+      email,
+      passwordHash,
+      fullName: `Miembro ${name}`,
+      emailVerifiedAt: new Date(),
+    },
+    select: { id: true },
+  });
+  for (const m of memberships) {
+    await raw.clinicMembership.create({
+      data: {
+        tenantId: m.tenantId,
+        userId: user.id,
+        role: m.role ?? ClinicRole.DENTIST,
+        deletedAt: m.deletedAt ?? null,
+      },
+    });
+  }
+  return { userId: user.id, email };
+}
+
 function expectLocked(res: request.Response, maxSeconds: number): number {
   expect(res.status).toBe(429);
   const retryAfter = Number(res.headers['retry-after']);
@@ -86,13 +141,16 @@ const median = (values: number[]): number => {
   return sorted[Math.floor(sorted.length / 2)];
 };
 
+afterAll(() => raw.$disconnect());
+
 describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
   let app: INestApplication<App>;
+  let api: ListeningApp;
   let clinicA: Clinic;
   let clinicB: Clinic;
-  let doctora: { userId: string; email: string };
-  let recepcion: { userId: string; email: string };
-  let dentistaB: { userId: string; email: string };
+  let doctora: Member;
+  let recepcion: Member;
+  let dentistaB: Member;
 
   const login = (
     email: string,
@@ -100,7 +158,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
     ip = CLINIC_IP,
     host = clinicA.host,
   ) =>
-    request(app.getHttpServer())
+    api
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', host)
       .set('X-Forwarded-For', ip)
@@ -108,19 +166,33 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
   beforeAll(async () => {
     app = await lockoutApp({ ipFailureLimit: 100_000 });
+    // Tantos sockets como intentos simultáneos lanza el test de la carrera.
+    api = await listenOnEphemeralPort(app, CONCURRENT_ATTEMPTS);
     clinicA = await registerClinic(app, `lock-a-${RUN}`);
     clinicB = await registerClinic(app, `lock-b-${RUN}`);
-    doctora = await seedMember(raw, clinicA, ClinicRole.DENTIST);
-    recepcion = await seedMember(raw, clinicA, ClinicRole.RECEPTION);
     dentistaB = await seedMember(raw, clinicB, ClinicRole.DENTIST);
+    passwordHash = (
+      await raw.user.findUniqueOrThrow({
+        where: { id: dentistaB.userId },
+        select: { passwordHash: true },
+      })
+    ).passwordHash;
   });
 
-  beforeEach(clearThrottles);
+  // Cuentas propias de cada test: ningún fallo de otro test les llega.
+  beforeEach(async () => {
+    await clearThrottles();
+    doctora = await newMember('doctora', [{ tenantId: clinicA.tenantId }]);
+    recepcion = await newMember('recepcion', [
+      { tenantId: clinicA.tenantId, role: ClinicRole.RECEPTION },
+    ]);
+  });
+
+  afterEach(clearThrottles);
 
   afterAll(async () => {
     await clearThrottles();
-    await app.close();
-    await raw.$disconnect();
+    await (api ? api.close() : app?.close());
   });
 
   it('10 logins correctos seguidos del mismo usuario desde la misma IP nunca dan 429', async () => {
@@ -170,20 +242,45 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
   it('intentos simultáneos al acabar la espera no esquivan el backoff: solo uno llega a probar la contraseña', async () => {
     for (let i = 0; i < 5; i++) await login(doctora.email, WRONG);
     await expireAccountWait(doctora.email);
-    const results = await Promise.all(
-      Array.from({ length: 10 }, (_, i) =>
-        login(doctora.email, WRONG, `203.0.113.${100 + i}`),
-      ),
-    );
-    const statuses = results.map((r) => r.status).sort();
-    expect(statuses.filter((s) => s === 401)).toHaveLength(1);
-    expect(statuses.filter((s) => s === 429)).toHaveLength(9);
+    // DX-252: cuántos intentos están a la vez dentro del control del servicio
+    // (lectura de la espera + cobro atómico). Sin solape real, el test no
+    // probaría la carrera.
+    const lockout = app.get(LoginLockoutService, { strict: false });
+    const original = lockout.assertCanAttempt.bind(lockout);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const spy = jest
+      .spyOn(lockout, 'assertCanAttempt')
+      .mockImplementation(async (email, ip) => {
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+        try {
+          return await original(email, ip);
+        } finally {
+          inFlight--;
+        }
+      });
+    try {
+      const results = await settleAll(
+        Array.from({ length: CONCURRENT_ATTEMPTS }, (_, i) =>
+          login(doctora.email, WRONG, `203.0.113.${100 + i}`),
+        ),
+      );
+      const statuses = results.map((r) => r.status).sort();
+      expect(statuses.filter((s) => s === 401)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 429)).toHaveLength(
+        CONCURRENT_ATTEMPTS - 1,
+      );
+      expect(spy).toHaveBeenCalledTimes(CONCURRENT_ATTEMPTS);
+      expect(maxInFlight).toBeGreaterThanOrEqual(MIN_OVERLAP);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('sin enumeración: mismo 401 y mismo 429 (cuerpo y Retry-After) exista o no el email, sin diferencia de tiempo apreciable', async () => {
     const ghost = `nadie-${RUN}@lock-a.test`;
     for (let i = 0; i < 5; i++) {
-      const [real, fake] = await Promise.all([
+      const [real, fake] = await settleAll([
         login(doctora.email, WRONG),
         login(ghost, WRONG),
       ]);
@@ -270,7 +367,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
     }
 
     const unlock = (token: string, userId: string) =>
-      request(app.getHttpServer())
+      api
         .post(`/api/v1/staff/${userId}/login-unlock`)
         .set('X-Tenant-Host', clinicA.host)
         .set('Authorization', `Bearer ${token}`);
@@ -282,7 +379,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
     it('el perfil muestra el bloqueo, el ADMIN lo quita, queda auditado y la doctora entra', async () => {
       await lockDoctora();
-      const before = await request(app.getHttpServer())
+      const before = await api
         .get(`/api/v1/staff/${doctora.userId}`)
         .set('X-Tenant-Host', clinicA.host)
         .set('Authorization', `Bearer ${adminA}`)
@@ -294,7 +391,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
       await unlock(adminA, doctora.userId).expect(204);
 
-      const after = await request(app.getHttpServer())
+      const after = await api
         .get(`/api/v1/staff/${doctora.userId}`)
         .set('X-Tenant-Host', clinicA.host)
         .set('Authorization', `Bearer ${adminA}`)
@@ -324,7 +421,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
     it('un ADMIN de otra clínica no puede desbloquear (404) y la doctora sigue en espera', async () => {
       await lockDoctora();
-      await request(app.getHttpServer())
+      await api
         .post(`/api/v1/staff/${doctora.userId}/login-unlock`)
         .set('X-Tenant-Host', clinicB.host)
         .set('Authorization', `Bearer ${adminB}`)
@@ -344,7 +441,7 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
       const recepToken = await loginAs(app, clinicA.host, recepcion.email);
       await unlock(recepToken, doctora.userId).expect(403);
       const dentistB = await loginAs(app, clinicB.host, dentistaB.email);
-      await request(app.getHttpServer())
+      await api
         .post(`/api/v1/staff/${doctora.userId}/login-unlock`)
         .set('X-Tenant-Host', clinicB.host)
         .set('Authorization', `Bearer ${dentistB}`)
@@ -365,40 +462,9 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
   describe('desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213)', () => {
     const OTHER_CLINIC =
       'Esta cuenta da acceso a otra clínica: pide a la persona que espere unos minutos o que restablezca su contraseña';
-    let desactivada: { userId: string; email: string };
-    let compartida: { userId: string; email: string };
-    let soloA: { userId: string; email: string };
-
-    async function newMember(
-      name: string,
-      memberships: { tenantId: string; deletedAt?: Date }[],
-    ): Promise<{ userId: string; email: string }> {
-      const email = `${name}-${RUN}@dx213.test`;
-      const template = await raw.user.findUniqueOrThrow({
-        where: { id: doctora.userId },
-        select: { passwordHash: true },
-      });
-      const user = await raw.user.create({
-        data: {
-          email,
-          passwordHash: template.passwordHash,
-          fullName: `Miembro ${name}`,
-          emailVerifiedAt: new Date(),
-        },
-        select: { id: true },
-      });
-      for (const m of memberships) {
-        await raw.clinicMembership.create({
-          data: {
-            tenantId: m.tenantId,
-            userId: user.id,
-            role: ClinicRole.DENTIST,
-            deletedAt: m.deletedAt ?? null,
-          },
-        });
-      }
-      return { userId: user.id, email };
-    }
+    let desactivada: Member;
+    let compartida: Member;
+    let soloA: Member;
 
     /** El contador de la cuenta tal como está en la BD. */
     const counter = (email: string) =>
@@ -420,13 +486,13 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
     }
 
     const unlockInA = (userId: string) =>
-      request(app.getHttpServer())
+      api
         .post(`/api/v1/staff/${userId}/login-unlock`)
         .set('X-Tenant-Host', clinicA.host)
         .set('Authorization', `Bearer ${clinicA.adminToken}`);
 
     const detailInA = (userId: string) =>
-      request(app.getHttpServer())
+      api
         .get(`/api/v1/staff/${userId}`)
         .set('X-Tenant-Host', clinicA.host)
         .set('Authorization', `Bearer ${clinicA.adminToken}`);
@@ -548,11 +614,12 @@ describe('Bloqueo del login por fallos (DX-048, e2e)', () => {
 
 describe('Balde por IP del login (DX-048, e2e)', () => {
   let app: INestApplication<App>;
+  let api: ListeningApp;
   let clinic: Clinic;
   const IP_LIMIT = 4;
 
   const login = (email: string, password: string, ip: string) =>
-    request(app.getHttpServer())
+    api
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', clinic.host)
       .set('X-Forwarded-For', ip)
@@ -561,12 +628,16 @@ describe('Balde por IP del login (DX-048, e2e)', () => {
   beforeAll(async () => {
     await clearThrottles();
     app = await lockoutApp({ ipFailureLimit: IP_LIMIT, ipWindowMs: 60_000 });
+    api = await listenOnEphemeralPort(app);
     clinic = await registerClinic(app, `lock-ip-${RUN}`);
   });
 
+  beforeEach(clearThrottles);
+  afterEach(clearThrottles);
+
   afterAll(async () => {
     await clearThrottles();
-    await app.close();
+    await (api ? api.close() : app?.close());
   });
 
   it('solo cuenta los fallos: los aciertos desde la IP de la clínica no la bloquean', async () => {
