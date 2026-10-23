@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { prismaRuleCode } from '../../../../shared/prisma/prisma-exception.filter';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -19,7 +20,9 @@ import {
   EXPENSE_NOT_FOUND_MESSAGE,
   EXPENSE_VOIDED_MESSAGE,
   ExpenseRuleError,
+  FROM_CASH_METHOD_MESSAGE,
   LOCATION_INVALID_MESSAGE,
+  OPEN_CASH_SESSION_REQUIRED_MESSAGE,
   PAYMENT_ALREADY_VOIDED_MESSAGE,
   PAYMENT_NOT_FOUND_MESSAGE,
   expenseEditDenial,
@@ -62,6 +65,27 @@ function isUniqueViolation(error: unknown): boolean {
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2002'
   );
+}
+
+/**
+ * Una salida de caja que la BD rechaza (la red de la caja tomada con `FOR
+ * SHARE`; no debería pasar): el trigger (caja no abierta o de otra sede,
+ * 42501), la FK (23503) o el CHECK «con caja ⇒ efectivo» (23514), en español
+ * y como 409/400, nunca un 500.
+ */
+function cashRejection(error: unknown): ExpenseRuleError | null {
+  switch (prismaRuleCode(error)) {
+    case '42501':
+    case '23503':
+      return new ExpenseRuleError(
+        OPEN_CASH_SESSION_REQUIRED_MESSAGE,
+        'CONFLICT',
+      );
+    case '23514':
+      return new ExpenseRuleError(FROM_CASH_METHOD_MESSAGE, 'INVALID');
+    default:
+      return null;
+  }
 }
 
 const notFound = () =>
@@ -348,21 +372,26 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           currency: expense.currency,
         })
       : null;
-    await tx.expensePayment.create({
-      data: {
-        tenantId,
-        expenseId: expense.id,
-        locationId: expense.locationId,
-        currency: expense.currency,
-        amount: input.amount,
-        method: input.method,
-        paidOn: dateOfDay(input.paidOn),
-        cashSessionId,
-        createdById: input.createdById,
-        idempotencyKey: input.idempotencyKey ?? null,
-        idempotencyFingerprint: input.idempotencyFingerprint ?? null,
-      },
-    });
+    try {
+      await tx.expensePayment.create({
+        data: {
+          tenantId,
+          expenseId: expense.id,
+          locationId: expense.locationId,
+          currency: expense.currency,
+          amount: input.amount,
+          method: input.method,
+          paidOn: dateOfDay(input.paidOn),
+          cashSessionId,
+          createdById: input.createdById,
+          idempotencyKey: input.idempotencyKey ?? null,
+          idempotencyFingerprint: input.idempotencyFingerprint ?? null,
+        },
+      });
+    } catch (error) {
+      // Solo una salida de caja se traduce; lo demás sigue su camino.
+      throw (cashSessionId && cashRejection(error)) || error;
+    }
   }
 
   async create(

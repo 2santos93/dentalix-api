@@ -18,8 +18,9 @@ export interface ExpenseCashContext {
 /**
  * Punto de extensión hacia la caja (DX-274, R1/R5). El módulo de gastos no
  * conoce las cajas: quien quiera pagar desde el cajón o anular una salida le
- * pasa una implementación al repositorio (`CashSessionsModule` →
- * `ExpensesModule`, en un solo sentido). Sin implementación (`undefined`), el
+ * pasa una implementación al repositorio. La implementa la caja
+ * (`ExpenseCashSession`) y `ExpensesModule` importa `CashSessionsModule`, en un
+ * solo sentido: la caja no importa el módulo de gastos. Sin implementación (`undefined`), el
  * pago no toca ninguna caja.
  */
 export interface ExpenseCashLink {
@@ -32,6 +33,16 @@ export interface ExpenseCashLink {
     tx: Prisma.TransactionClient,
     ctx: ExpenseCashContext,
   ): Promise<string>;
+
+  /**
+   * Sedes (entre `locationIds`; todas si es `undefined`) donde `userId` tiene
+   * su caja abierta. Es una lectura previa: quien escribe vuelve a tomar la
+   * caja con `attachToOpenSession` dentro de su transacción.
+   */
+  openSessionLocations(
+    userId: string,
+    locationIds: readonly string[] | undefined,
+  ): Promise<string[]>;
 
   /**
    * Un pago CON caja se acaba de anular (ya con su `voidedAt`): la caja

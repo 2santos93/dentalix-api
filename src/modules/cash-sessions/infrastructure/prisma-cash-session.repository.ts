@@ -20,9 +20,11 @@ import type {
   CashAdjustmentView,
   CashClosingView,
   CashExpectedLine,
+  CashOutflow,
   CashSessionPayment,
   CashSessionSummary,
   CashSettings,
+  CashVoidedOutflow,
   CashVoidedPayment,
   MoneyAmount,
   StaffRef,
@@ -108,6 +110,13 @@ const ADJUSTMENT_SELECT = {
   createdById: true,
   sessionId: true,
   payment: { select: PAYMENT_SELECT },
+  expensePayment: {
+    select: {
+      id: true,
+      expenseId: true,
+      expense: { select: { category: true, supplier: true } },
+    },
+  },
   originalSession: {
     select: { id: true, openedAt: true, openedById: true },
   },
@@ -115,6 +124,24 @@ const ADJUSTMENT_SELECT = {
 
 type AdjustmentRow = Prisma.CashSessionAdjustmentGetPayload<{
   select: typeof ADJUSTMENT_SELECT;
+}>;
+
+/** Una salida de caja menor (DX-274): pago de gasto desde el cajón. */
+const OUTFLOW_SELECT = {
+  id: true,
+  expenseId: true,
+  amount: true,
+  currency: true,
+  createdAt: true,
+  createdById: true,
+  voidedAt: true,
+  voidedById: true,
+  voidReason: true,
+  expense: { select: { category: true, supplier: true } },
+} satisfies Prisma.ExpensePaymentSelect;
+
+type OutflowRow = Prisma.ExpensePaymentGetPayload<{
+  select: typeof OUTFLOW_SELECT;
 }>;
 
 const CLOSING_SELECT = {
@@ -168,6 +195,26 @@ const countedPayments = (sessionId: string): Prisma.PaymentWhereInput => ({
     {
       cashAdjustments: {
         some: { kind: 'VOID', originalSessionId: sessionId },
+      },
+    },
+  ],
+});
+
+/**
+ * Las salidas de caja menor (DX-274) que restan en el arqueo de una caja, con
+ * la misma regla que `countedPayments`: las vivas y las anuladas con la caja
+ * ya cerrada (su anulación es un ajuste OUTFLOW_VOID en otra caja). La caja
+ * lee `expense_payments` directamente: no depende del módulo de gastos.
+ */
+const countedOutflows = (
+  sessionId: string,
+): Prisma.ExpensePaymentWhereInput => ({
+  cashSessionId: sessionId,
+  OR: [
+    { voidedAt: null },
+    {
+      cashAdjustments: {
+        some: { kind: 'OUTFLOW_VOID', originalSessionId: sessionId },
       },
     },
   ],
@@ -390,40 +437,58 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           select: SUMMARY_SELECT,
         });
         if (!session) return null;
-        const [source, payments, adjustments, later, closings, reopenings] =
-          await Promise.all([
-            this.arqueoSource(tx, tenantId, id),
-            tx.payment.findMany({
-              where: { tenantId, cashSessionId: id },
-              select: {
-                ...PAYMENT_SELECT,
-                cashAdjustments: {
-                  where: { kind: 'VOID', originalSessionId: id },
-                  select: { id: true },
-                },
+        const [
+          source,
+          payments,
+          outflows,
+          adjustments,
+          later,
+          closings,
+          reopenings,
+        ] = await Promise.all([
+          this.arqueoSource(tx, tenantId, id),
+          tx.payment.findMany({
+            where: { tenantId, cashSessionId: id },
+            select: {
+              ...PAYMENT_SELECT,
+              cashAdjustments: {
+                where: { kind: 'VOID', originalSessionId: id },
+                select: { id: true },
               },
-              orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-            }),
-            tx.cashSessionAdjustment.findMany({
-              where: { tenantId, sessionId: id },
-              select: ADJUSTMENT_SELECT,
-              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            }),
-            tx.cashSessionAdjustment.findMany({
-              where: { tenantId, originalSessionId: id },
-              select: ADJUSTMENT_SELECT,
-              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            }),
-            tx.cashSessionClosing.findMany({
-              where: { tenantId, sessionId: id },
-              select: CLOSING_SELECT,
-              orderBy: { sequence: 'desc' },
-            }),
-            tx.cashSessionReopening.findMany({
-              where: { tenantId, sessionId: id },
-              orderBy: { sequence: 'desc' },
-            }),
-          ]);
+            },
+            orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          }),
+          tx.expensePayment.findMany({
+            where: { tenantId, cashSessionId: id },
+            select: {
+              ...OUTFLOW_SELECT,
+              cashAdjustments: {
+                where: { kind: 'OUTFLOW_VOID', originalSessionId: id },
+                select: { id: true },
+              },
+            },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          }),
+          tx.cashSessionAdjustment.findMany({
+            where: { tenantId, sessionId: id },
+            select: ADJUSTMENT_SELECT,
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          }),
+          tx.cashSessionAdjustment.findMany({
+            where: { tenantId, originalSessionId: id },
+            select: ADJUSTMENT_SELECT,
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          }),
+          tx.cashSessionClosing.findMany({
+            where: { tenantId, sessionId: id },
+            select: CLOSING_SELECT,
+            orderBy: { sequence: 'desc' },
+          }),
+          tx.cashSessionReopening.findMany({
+            where: { tenantId, sessionId: id },
+            orderBy: { sequence: 'desc' },
+          }),
+        ]);
         const timeZone = (
           await resolveLocationTimeZones(tx, tenantId, [session.locationId])
         )(session.locationId);
@@ -431,6 +496,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           session.openedById,
           ...(session.closedById ? [session.closedById] : []),
           ...payments.flatMap((p) => [p.createdById, p.voidedById]),
+          ...outflows.flatMap((o) => [o.createdById, o.voidedById]),
           ...[...adjustments, ...later].flatMap((a) => [
             a.createdById,
             a.originalSession?.openedById,
@@ -440,6 +506,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         ]);
 
         const active = payments.filter((p) => p.deletedAt === null);
+        const liveOutflows = outflows.filter((o) => o.voidedAt === null);
+        const voidedOutflows = outflows.filter((o) => o.voidedAt !== null);
         const voided = payments.filter((p) => p.deletedAt !== null);
         const closingViews = closings.map((c) => this.toClosing(c, names));
         return {
@@ -453,6 +521,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             payments: fromCents(line.paymentsCents),
             paymentsCount: line.paymentsCount,
             adjustments: fromCents(line.adjustmentsCents),
+            outflows: fromCents(line.outflowsCents),
+            outflowsCount: line.outflowsCount,
             expected: fromCents(line.expectedCents),
           })),
           payments: active.map((p) => this.toPayment(p, names, timeZone)),
@@ -462,6 +532,14 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             voidedBy: p.voidedById ? this.staff(p.voidedById, names) : null,
             voidReason: p.voidReason,
             bookedAsAdjustment: p.cashAdjustments.length > 0,
+          })),
+          outflows: liveOutflows.map((o) => this.toOutflow(o, names)),
+          voidedOutflows: voidedOutflows.map((o): CashVoidedOutflow => ({
+            ...this.toOutflow(o, names),
+            voidedAt: o.voidedAt,
+            voidedBy: o.voidedById ? this.staff(o.voidedById, names) : null,
+            voidReason: o.voidReason,
+            bookedAsAdjustment: o.cashAdjustments.length > 0,
           })),
           adjustments: adjustments.map((a) =>
             this.toAdjustment(a, names, timeZone),
@@ -485,13 +563,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     );
   }
 
-  /** Fondo, abonos que cuentan y ajustes de la caja, en céntimos. */
+  /** Fondo, abonos que cuentan, ajustes y salidas de la caja, en céntimos. */
   private async arqueoSource(
     tx: Tx,
     tenantId: string,
     sessionId: string,
   ): Promise<ArqueoSource> {
-    const [floats, payments, adjustments] = await Promise.all([
+    const [floats, payments, adjustments, outflows] = await Promise.all([
       tx.cashSessionFloat.findMany({
         where: { tenantId, sessionId },
         select: { currency: true, amount: true },
@@ -503,6 +581,11 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       tx.cashSessionAdjustment.findMany({
         where: { tenantId, sessionId },
         select: { currency: true, method: true, amount: true },
+      }),
+      // El CHECK de la BD garantiza que un pago con caja es en efectivo.
+      tx.expensePayment.findMany({
+        where: { tenantId, ...countedOutflows(sessionId) },
+        select: { currency: true, amount: true },
       }),
     ]);
     const cents = (value: Prisma.Decimal) => centsOf(value.toNumber());
@@ -520,6 +603,10 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         currency: a.currency,
         method: a.method,
         cents: cents(a.amount),
+      })),
+      outflows: outflows.map((o) => ({
+        currency: o.currency,
+        cents: cents(o.amount),
       })),
     };
   }
@@ -787,6 +874,19 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     };
   }
 
+  private toOutflow(row: OutflowRow, names: Map<string, string>): CashOutflow {
+    return {
+      id: row.id,
+      expenseId: row.expenseId,
+      category: row.expense.category,
+      supplier: row.expense.supplier,
+      amount: amountOf(row.amount),
+      currency: row.currency,
+      createdAt: row.createdAt,
+      createdBy: this.staff(row.createdById, names),
+    };
+  }
+
   private toAdjustment(
     row: AdjustmentRow,
     names: Map<string, string>,
@@ -811,6 +911,14 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             patient: payment.patient,
             paidOn: payment.paidOn,
             receiptNumber: payment.receiptNumber,
+          }
+        : null,
+      expensePayment: row.expensePayment
+        ? {
+            id: row.expensePayment.id,
+            expenseId: row.expensePayment.expenseId,
+            category: row.expensePayment.expense.category,
+            supplier: row.expensePayment.expense.supplier,
           }
         : null,
       originalSession: row.originalSession

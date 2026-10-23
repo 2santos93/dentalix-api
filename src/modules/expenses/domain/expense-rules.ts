@@ -60,8 +60,18 @@ export const EXPENSE_VOIDED_EDIT_MESSAGE =
 export const PAYMENT_ALREADY_VOIDED_MESSAGE = 'El pago ya está anulado.';
 export const HAS_PAYMENTS_MESSAGE =
   'El gasto ya tiene pagos; anúlalo y regístralo de nuevo para cambiar la sede o la moneda.';
+/** Efectivo fuera de caja en una clínica con «exigir caja abierta» (R1). */
 export const CASH_SESSION_REQUIRED_MESSAGE =
-  'Esta clínica registra el efectivo siempre en una caja abierta.';
+  'Esta clínica registra el efectivo siempre en una caja abierta: marca «Desde mi caja».';
+/** Pago o salida desde el cajón sin caja abierta de quien paga en la sede (R1). */
+export const OPEN_CASH_SESSION_REQUIRED_MESSAGE =
+  'Abre tu caja en esta sede para pagar desde el cajón.';
+export const CASH_SESSION_IN_SEVERAL_LOCATIONS_MESSAGE =
+  'Tienes cajas abiertas en varias sedes: elige la sede de la caja de la que sale el dinero.';
+export const FROM_CASH_METHOD_MESSAGE =
+  'Un pago desde la caja es siempre en efectivo.';
+export const FROM_CASH_PAID_ON_MESSAGE =
+  'Un pago desde la caja es de hoy: no admite otra fecha.';
 export const ATTACHMENT_ALREADY_MESSAGE = 'El gasto ya tiene un soporte.';
 export const IDEMPOTENCY_KEY_INVALID_MESSAGE =
   'La clave de idempotencia debe ser un UUID.';
@@ -226,6 +236,22 @@ export function validatePaidOn(value: unknown, today: string): string {
   if (day === null) throw invalid(PAID_ON_INVALID_MESSAGE);
   if (day > today) throw invalid(PAID_ON_FUTURE_MESSAGE);
   return day;
+}
+
+/**
+ * Pago desde la caja abierta (R1): siempre en efectivo y de hoy en la sede.
+ * Devuelve el día del pago (hoy); un `paidOn` distinto es un 400.
+ */
+export function validateFromCashPayment(
+  method: unknown,
+  paidOn: unknown,
+  today: string,
+): string {
+  if (method !== 'CASH') throw invalid(FROM_CASH_METHOD_MESSAGE);
+  if (paidOn !== undefined && paidOn !== null && parseDay(paidOn) !== today) {
+    throw invalid(FROM_CASH_PAID_ON_MESSAGE);
+  }
+  return today;
 }
 
 // --- Estado derivado (R2) ---------------------------------------------------

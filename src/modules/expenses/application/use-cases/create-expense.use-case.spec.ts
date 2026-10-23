@@ -13,6 +13,9 @@ import { RECEIPT_TYPE_MESSAGE } from '../../domain/expense-receipt';
 import {
   AMOUNT_MESSAGE,
   CASH_SESSION_REQUIRED_MESSAGE,
+  FROM_CASH_METHOD_MESSAGE,
+  FROM_CASH_PAID_ON_MESSAGE,
+  OPEN_CASH_SESSION_REQUIRED_MESSAGE,
   CATEGORY_INVALID_MESSAGE,
   DUE_BEFORE_INVOICE_MESSAGE,
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
@@ -27,6 +30,7 @@ import {
   buildExpenseTestKit,
   clock,
   type ExpenseTestKit,
+  FakeCashLink,
   uploadReceipt,
 } from '../__fixtures__/expense-test-kit';
 import {
@@ -36,6 +40,7 @@ import {
 import {
   type CreateExpenseInput,
   CreateExpenseUseCase,
+  type InitialPaymentInput,
   UNKNOWN_CURRENCY_MESSAGE,
 } from './create-expense.use-case';
 
@@ -228,6 +233,93 @@ describe('alta de un gasto (DX-274)', () => {
         method: 'CASH',
         cashSessionId: null,
       });
+    });
+  });
+
+  describe('pago desde la caja (R1)', () => {
+    let link: FakeCashLink;
+    beforeEach(() => {
+      link = new FakeCashLink();
+      create = new CreateExpenseUseCase(
+        kit.repo,
+        kit.resolver,
+        kit.receipts,
+        kit.whitelist,
+        clock,
+        link,
+      );
+    });
+    const fromCash = (patch: Partial<InitialPaymentInput> = {}) =>
+      input({
+        payment: {
+          amount: 1000,
+          method: 'CASH',
+          fromCashSession: true,
+          ...patch,
+        },
+      });
+
+    it('toma la caja abierta de quien registra en la sede del gasto, con fecha de hoy', async () => {
+      const sessionId = link.openSession(ADMIN, LOCATION_ID);
+      const out = await run(fromCash());
+      expect(out.payments[0]).toMatchObject({
+        method: 'CASH',
+        paidOn: kit.repo.today,
+        cashSessionId: sessionId,
+      });
+      expect(link.attached).toEqual([
+        expect.objectContaining({
+          userId: ADMIN,
+          locationId: LOCATION_ID,
+          amount: 1000,
+          currency: 'COP',
+          paidOn: kit.repo.today,
+        }),
+      ]);
+    });
+
+    it('sin caja abierta en esa sede es 409 y no queda ni gasto ni pago', async () => {
+      link.openSession(ADMIN, OTHER_LOCATION_ID);
+      await expect(run(fromCash())).rejects.toThrow(
+        new ConflictException(OPEN_CASH_SESSION_REQUIRED_MESSAGE),
+      );
+      expect(kit.repo.expenses.size).toBe(0);
+      expect(kit.repo.payments).toHaveLength(0);
+    });
+
+    it('es siempre en efectivo y de hoy (400)', async () => {
+      link.openSession(ADMIN, LOCATION_ID);
+      await expect(run(fromCash({ method: 'CARD' }))).rejects.toThrow(
+        new BadRequestException(FROM_CASH_METHOD_MESSAGE),
+      );
+      await expect(run(fromCash({ paidOn: '2026-10-22' }))).rejects.toThrow(
+        new BadRequestException(FROM_CASH_PAID_ON_MESSAGE),
+      );
+      // Hoy explícito vale.
+      await expect(
+        run(fromCash({ paidOn: kit.repo.today })),
+      ).resolves.toMatchObject({ status: 'PARTIAL' });
+    });
+
+    it('con «exigir caja abierta», el efectivo fuera de caja pide marcar «Desde mi caja»', async () => {
+      kit.repo.cashRequireOpenSession = true;
+      link.openSession(ADMIN, LOCATION_ID);
+      await expect(
+        run(input({ payment: { amount: 1000, method: 'CASH' } })),
+      ).rejects.toThrow(
+        'Esta clínica registra el efectivo siempre en una caja abierta: marca «Desde mi caja».',
+      );
+      await expect(run(fromCash())).resolves.toMatchObject({
+        status: 'PARTIAL',
+      });
+    });
+
+    it('la huella distingue un pago desde la caja de uno fuera de caja (422)', async () => {
+      link.openSession(ADMIN, LOCATION_ID);
+      await run(fromCash(), KEY);
+      await expect(
+        run(input({ payment: { amount: 1000, method: 'CASH' } }), KEY),
+      ).rejects.toThrow(UnprocessableEntityException);
     });
   });
 

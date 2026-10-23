@@ -327,21 +327,43 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
     );
   }
 
+  /**
+   * La caja de un pago desde el cajón, ANTES de escribir nada (como la
+   * transacción real: si el enlace lanza 409, no queda ni gasto ni pago).
+   * Solo se llama con enlace: sin él, comprobar e insertar no ceden el turno.
+   */
+  private cashSessionFor(
+    expense: { id: string; locationId: string; currency: string },
+    input: CreateExpensePaymentRepoInput & { cashLink: ExpenseCashLink },
+  ): Promise<string> {
+    return input.cashLink.attachToOpenSession({} as never, {
+      tenantId: TENANT_ID,
+      locationId: expense.locationId,
+      userId: input.createdById,
+      expenseId: expense.id,
+      paidOn: input.paidOn,
+      amount: input.amount,
+      currency: expense.currency,
+    });
+  }
+
   private insertPayment(
     expense: StoredExpense,
     input: CreateExpensePaymentRepoInput,
+    cashSessionId: string | null = null,
   ): StoredPayment {
     return this.seedPayment(expense.id, {
       amount: input.amount,
       method: input.method,
       paidOn: input.paidOn,
+      cashSessionId,
       createdById: input.createdById,
       idempotencyKey: input.idempotencyKey ?? null,
       idempotencyFingerprint: input.idempotencyFingerprint ?? null,
     });
   }
 
-  create(
+  async create(
     input: CreateExpenseRepoInput,
     payment: CreateExpensePaymentRepoInput | undefined,
   ): Promise<IdempotentWrite> {
@@ -350,6 +372,17 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       this.failNextCreate = null;
       return Promise.reject(error);
     }
+    // El id del gasto aún no existe: la caja solo necesita sede y moneda.
+    const cashSessionId = payment?.cashLink
+      ? await this.cashSessionFor(
+          {
+            id: 'nuevo',
+            locationId: input.locationId,
+            currency: input.currency,
+          },
+          { ...payment, cashLink: payment.cashLink },
+        )
+      : null;
     // Comprobar e insertar sin ceder el turno: es el único de la BD.
     const original = input.idempotencyKey
       ? [...this.expenses.values()].find(
@@ -377,7 +410,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       idempotencyKey: input.idempotencyKey ?? null,
       idempotencyFingerprint: input.idempotencyFingerprint ?? null,
     });
-    if (payment) this.insertPayment(row, payment);
+    if (payment) this.insertPayment(row, payment, cashSessionId);
     return Promise.resolve({
       detail: this.detail(row),
       created: true,
@@ -469,7 +502,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
     return this.detail(row);
   }
 
-  addPayment(
+  async addPayment(
     expenseId: string,
     input: CreateExpensePaymentRepoInput,
   ): Promise<IdempotentWrite> {
@@ -482,6 +515,9 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       currency: row.currency,
     });
     if (denial) throw denial;
+    const cashSessionId = input.cashLink
+      ? await this.cashSessionFor(row, { ...input, cashLink: input.cashLink })
+      : null;
     if (input.idempotencyKey) {
       const dup = this.payments.find(
         (p) => p.idempotencyKey === input.idempotencyKey,
@@ -494,7 +530,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
         });
       }
     }
-    this.insertPayment(row, input);
+    this.insertPayment(row, input, cashSessionId);
     return Promise.resolve({
       detail: this.detail(row),
       created: true,

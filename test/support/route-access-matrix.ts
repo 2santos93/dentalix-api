@@ -453,6 +453,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /cash-sessions/:id/close': BILLING,
   'POST /cash-sessions/:id/reopen': ADMIN_ONLY,
   'POST /cash-sessions/:id/adjustments': ADMIN_ONLY,
+  // DX-274: salida de caja menor desde la caja abierta de quien llama (vive
+  // en el módulo de gastos; RECEPTION solo desde la suya, por construcción).
+  'POST /cash-sessions/current/outflows': BILLING,
 
   // DX-274: gastos de la sede. La gestión es de ADMIN; recepción solo captura
   // (autorización de subida del soporte, sugerencias de proveedor y lectura de

@@ -35,6 +35,12 @@ export interface ArqueoSource {
   payments: { currency: string; method: PaymentMethod | null; cents: number }[];
   /** Ajustes que entraron en esta caja (con signo). */
   adjustments: { currency: string; method: PaymentMethod; cents: number }[];
+  /**
+   * Salidas de caja menor (DX-274): pagos de gastos desde el cajón, siempre en
+   * efectivo y en positivo; restan. Cuentan como los abonos (ver la regla en
+   * el repositorio): una anulada con la caja ya cerrada sigue restando aquí.
+   */
+  outflows: { currency: string; cents: number }[];
 }
 
 export interface ExpectedLine {
@@ -44,6 +50,9 @@ export interface ExpectedLine {
   paymentsCents: number;
   paymentsCount: number;
   adjustmentsCents: number;
+  /** Salidas de caja (en positivo: se restan). */
+  outflowsCents: number;
+  outflowsCount: number;
   expectedCents: number;
 }
 
@@ -74,6 +83,8 @@ function emptyLine(currency: string, method: PaymentMethod): ExpectedLine {
     paymentsCents: 0,
     paymentsCount: 0,
     adjustmentsCents: 0,
+    outflowsCents: 0,
+    outflowsCount: 0,
     expectedCents: 0,
   };
 }
@@ -88,7 +99,11 @@ function byCurrencyThenMethod(
   );
 }
 
-/** Lo esperado por (moneda, método): fondo + abonos + ajustes. */
+/**
+ * Lo esperado por (moneda, método): fondo + abonos + ajustes − salidas. Puede
+ * quedar negativo (R5 de DX-274): no se rechaza, para no dar un oráculo del
+ * esperado con el arqueo ciego.
+ */
 export function expectedLines(source: ArqueoSource): ExpectedLine[] {
   const lines = new Map<string, ExpectedLine>();
   const lineFor = (currency: string, method: PaymentMethod) => {
@@ -112,11 +127,19 @@ export function expectedLines(source: ArqueoSource): ExpectedLine[] {
     lineFor(adjustment.currency, adjustment.method).adjustmentsCents +=
       adjustment.cents;
   }
+  for (const outflow of source.outflows) {
+    const line = lineFor(outflow.currency, 'CASH');
+    line.outflowsCents += outflow.cents;
+    line.outflowsCount += 1;
+  }
   return [...lines.values()]
     .map((line) => ({
       ...line,
       expectedCents:
-        line.openingCents + line.paymentsCents + line.adjustmentsCents,
+        line.openingCents +
+        line.paymentsCents +
+        line.adjustmentsCents -
+        line.outflowsCents,
     }))
     .sort(byCurrencyThenMethod);
 }

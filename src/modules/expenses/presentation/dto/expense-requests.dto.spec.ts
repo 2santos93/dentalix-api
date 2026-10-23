@@ -55,17 +55,22 @@ describe('DTOs de gastos (DX-274)', () => {
       expect(plainToInstance(CreateExpenseDto, valid).currency).toBe('COP');
     });
 
-    it('no tiene fromCashSession: lo desconocido se descarta', async () => {
+    it('el pago admite fromCashSession booleano y rechaza otros tipos', async () => {
       const dto = plainToInstance(CreateExpenseDto, {
         ...valid,
         payment: { amount: 1, method: 'CASH', fromCashSession: true },
       });
-      const errors = await validate(dto, {
-        whitelist: true,
-        forbidNonWhitelisted: false,
+      expect(await validate(dto, { whitelist: true })).toEqual([]);
+      expect(dto.payment?.fromCashSession).toBe(true);
+      const bad = plainToInstance(AddExpensePaymentDto, {
+        amount: 1,
+        method: 'CASH',
+        fromCashSession: 'sí',
       });
-      expect(errors).toEqual([]);
-      expect(dto.payment).not.toHaveProperty('fromCashSession');
+      const errors = await validate(bad, { whitelist: true });
+      expect(errors.flatMap((e) => Object.values(e.constraints ?? {}))).toEqual(
+        ['fromCashSession debe ser verdadero o falso.'],
+      );
     });
 
     it.each([0, -5, 10.123, 1e12, '10', null, undefined])(

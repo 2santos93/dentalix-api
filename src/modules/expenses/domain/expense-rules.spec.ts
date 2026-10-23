@@ -25,6 +25,9 @@ import {
   validatePaidOn,
   validateSupplier,
   validateVoidReason,
+  FROM_CASH_METHOD_MESSAGE,
+  FROM_CASH_PAID_ON_MESSAGE,
+  validateFromCashPayment,
 } from './expense-rules';
 
 const messageOf = (fn: () => unknown): string | null => {
@@ -277,6 +280,26 @@ describe('reglas de un gasto (DX-274)', () => {
 
     it('un pago anulado no cuenta como pagado para el importe', () => {
       expect(edit({ amountCents: 1 }, 0, 1)).toBeNull();
+    });
+  });
+
+  describe('pago desde la caja (R1)', () => {
+    it('es en efectivo y de hoy; sin día, hoy', () => {
+      expect(validateFromCashPayment('CASH', undefined, '2026-10-23')).toBe(
+        '2026-10-23',
+      );
+      expect(validateFromCashPayment('CASH', '2026-10-23', '2026-10-23')).toBe(
+        '2026-10-23',
+      );
+      expect(() =>
+        validateFromCashPayment('CARD', undefined, '2026-10-23'),
+      ).toThrow(FROM_CASH_METHOD_MESSAGE);
+      expect(() =>
+        validateFromCashPayment('CASH', '2026-10-22', '2026-10-23'),
+      ).toThrow(FROM_CASH_PAID_ON_MESSAGE);
+      expect(() =>
+        validateFromCashPayment('CASH', 'ayer', '2026-10-23'),
+      ).toThrow(FROM_CASH_PAID_ON_MESSAGE);
     });
   });
 });

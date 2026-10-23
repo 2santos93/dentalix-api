@@ -89,6 +89,7 @@ describe('anulación de un gasto (DX-274)', () => {
     const seen: string[] = [];
     const link: ExpenseCashLink = {
       attachToOpenSession: () => Promise.reject(new Error('no se usa')),
+      openSessionLocations: () => Promise.reject(new Error('no se usa')),
       onPaymentVoided: (_tx, payment, reason, by) => {
         seen.push(`${payment.id}|${reason}|${by}`);
         return Promise.resolve();
@@ -109,6 +110,7 @@ describe('anulación de un gasto (DX-274)', () => {
     const seen: string[] = [];
     const link: ExpenseCashLink = {
       attachToOpenSession: () => Promise.reject(new Error('no se usa')),
+      openSessionLocations: () => Promise.reject(new Error('no se usa')),
       onPaymentVoided: (_tx, payment) => {
         seen.push(payment.id);
         return Promise.resolve();

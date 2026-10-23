@@ -34,19 +34,24 @@ export interface PaymentRequestShape {
   amount: unknown;
   method: unknown;
   paidOn?: unknown;
+  fromCashSession?: unknown;
 }
 
-/** Huella de un pago: gasto de la ruta + importe a 2 decimales + medio + día. */
+/** El pago, normalizado; «desde la caja» solo cuenta si es `true`. */
+function paymentParts(input: PaymentRequestShape): unknown[] {
+  const parts = [money(input.amount), input.method ?? null, text(input.paidOn)];
+  return input.fromCashSession === true ? [...parts, 'FROM_CASH'] : parts;
+}
+
+/**
+ * Huella de un pago: gasto de la ruta + importe a 2 decimales + medio + día
+ * (+ «desde la caja»).
+ */
 export function expensePaymentFingerprint(
   expenseId: string,
   input: PaymentRequestShape,
 ): string {
-  return sha([
-    expenseId.toLowerCase(),
-    money(input.amount),
-    input.method ?? null,
-    text(input.paidOn),
-  ]);
+  return sha([expenseId.toLowerCase(), ...paymentParts(input)]);
 }
 
 export interface ExpenseRequestShape {
@@ -83,13 +88,44 @@ export function expenseRequestFingerprint(input: ExpenseRequestShape): string {
       : (input.currency ?? null),
     text(input.invoiceDate),
     text(input.dueDate) === '' ? null : text(input.dueDate),
-    input.payment
-      ? [
-          money(input.payment.amount),
-          input.payment.method ?? null,
-          text(input.payment.paidOn),
-        ]
+    input.payment ? paymentParts(input.payment) : null,
+    typeof input.attachmentUploadId === 'string'
+      ? input.attachmentUploadId.toLowerCase()
       : null,
+  ]);
+}
+
+export interface CashOutflowRequestShape {
+  category: unknown;
+  supplier?: unknown;
+  description?: unknown;
+  amount: unknown;
+  currency: unknown;
+  attachmentUploadId?: unknown;
+}
+
+/**
+ * Huella de una salida de caja (`POST /cash-sessions/current/outflows`): el
+ * cuerpo tal cual llegó, con su propia etiqueta. La sede y el día los pone el
+ * servidor (la caja abierta y su «hoy»), así que no entran: repetir mañana la
+ * misma petición sigue devolviendo la original.
+ */
+export function cashOutflowFingerprint(input: CashOutflowRequestShape): string {
+  const supplier =
+    typeof input.supplier === 'string'
+      ? input.supplier.trim().replace(/\s+/g, ' ')
+      : (input.supplier ?? null);
+  return sha([
+    'CASH_OUTFLOW',
+    typeof input.category === 'string'
+      ? input.category.trim().replace(/\s+/g, ' ')
+      : (input.category ?? null),
+    supplier === '' ? null : supplier,
+    text(input.description) === '' ? null : text(input.description),
+    money(input.amount),
+    typeof input.currency === 'string'
+      ? input.currency.trim().toUpperCase()
+      : (input.currency ?? null),
     typeof input.attachmentUploadId === 'string'
       ? input.attachmentUploadId.toLowerCase()
       : null,

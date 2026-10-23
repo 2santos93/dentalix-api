@@ -4,22 +4,24 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { PaymentMethod } from '@prisma/client';
 import {
   expensePaymentFingerprint,
   parseIdempotencyKey,
 } from '../../domain/expense-idempotency';
 import {
-  CASH_SESSION_REQUIRED_MESSAGE,
   EXPENSE_NOT_FOUND_MESSAGE,
   EXPENSE_VOIDED_MESSAGE,
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
   validateAmount,
-  validatePaidOn,
 } from '../../domain/expense-rules';
+import {
+  EXPENSE_CASH_LINK,
+  type ExpenseCashLink,
+} from '../../domain/ports/expense-cash-link.port';
 import {
   EXPENSE_REPOSITORY,
   type ExpenseRepository,
@@ -27,12 +29,14 @@ import {
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
 import { guarded, rule } from '../guarded';
+import { type PaymentCashRequest, planPaymentCash } from '../payment-cash-mode';
 
-export interface AddExpensePaymentInput {
+/**
+ * Pago fuera de caja (día por defecto, hoy en la sede) o desde la caja
+ * abierta de quien paga en la sede del gasto (`fromCashSession`, R1).
+ */
+export interface AddExpensePaymentInput extends PaymentCashRequest {
   amount: number;
-  method: PaymentMethod;
-  /** Día del pago; por defecto, hoy en la sede. */
-  paidOn?: string;
 }
 
 @Injectable()
@@ -40,6 +44,9 @@ export class AddExpensePaymentUseCase {
   constructor(
     @Inject(EXPENSE_REPOSITORY) private readonly repo: ExpenseRepository,
     @Inject(EXPENSE_CLOCK) private readonly clock: ExpenseClock,
+    @Optional()
+    @Inject(EXPENSE_CASH_LINK)
+    private readonly cashLink?: ExpenseCashLink,
   ) {}
 
   /**
@@ -76,18 +83,10 @@ export class AddExpensePaymentUseCase {
 
     const amount = rule(() => validateAmount(input.amount));
     const today = await this.repo.locationToday(current.locationId, now);
-    const paidOn =
-      input.paidOn === undefined
-        ? today
-        : rule(() => validatePaidOn(input.paidOn, today));
-    // Con la clínica en «el efectivo va a una caja abierta», un pago en
-    // efectivo fuera de caja no se acepta.
-    if (
-      input.method === 'CASH' &&
-      (await this.repo.cashRequiresOpenSession())
-    ) {
-      throw new ConflictException(CASH_SESSION_REQUIRED_MESSAGE);
-    }
+    // Desde la caja: efectivo, hoy y la caja abierta de quien paga en la sede
+    // del gasto. Fuera de caja, el efectivo no se acepta si la clínica lo
+    // registra siempre en una caja abierta.
+    const plan = await planPaymentCash(input, today, this.repo, this.cashLink);
 
     const result = await guarded(() =>
       this.repo.addPayment(
@@ -95,8 +94,9 @@ export class AddExpensePaymentUseCase {
         {
           amount,
           method: input.method,
-          paidOn,
+          paidOn: plan.paidOn,
           createdById,
+          cashLink: plan.cashLink,
           idempotencyKey: key,
           idempotencyFingerprint: fingerprint,
         },

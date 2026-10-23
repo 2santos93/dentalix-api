@@ -32,6 +32,7 @@ import {
 } from '../../domain/expense-rules';
 
 const CURRENCY_MESSAGE = 'La moneda no es válida.';
+const FROM_CASH_SESSION_MESSAGE = 'fromCashSession debe ser verdadero o falso.';
 const METHOD_MESSAGE = `El medio de pago debe ser uno de: ${Object.values(PaymentMethod).join(', ')}.`;
 const STATUSES = ['PENDING', 'PARTIAL', 'PAID', 'VOIDED', 'OPEN'] as const;
 
@@ -67,11 +68,21 @@ export class InitialExpensePaymentDto {
 
   @ApiPropertyOptional({
     format: 'date',
-    description: 'Día del pago (no futuro en la sede). Por defecto, hoy.',
+    description:
+      'Día del pago (no futuro en la sede). Por defecto, hoy. Desde la caja, solo hoy.',
   })
   @IsOptional()
   @IsString({ message: PAID_ON_INVALID_MESSAGE })
   paidOn?: string;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      '«Desde mi caja» (R1): el dinero sale del cajón de la caja abierta de quien registra, en la sede del gasto. Exige `method: CASH` y el día de hoy (400 si no) y una caja abierta (409 si no). Resta del efectivo esperado de esa caja.',
+  })
+  @IsOptional()
+  @IsBoolean({ message: FROM_CASH_SESSION_MESSAGE })
+  fromCashSession?: boolean;
 }
 
 // Sin `tenantId` ni `createdById`: salen del contexto del request.
@@ -133,12 +144,56 @@ export class CreateExpenseDto {
   @ApiPropertyOptional({
     type: InitialExpensePaymentDto,
     description:
-      'Pago en la misma transacción (siempre fuera de caja). Si es en efectivo y la clínica exige caja abierta, 409.',
+      'Pago en la misma transacción, fuera de caja o desde la caja abierta (`fromCashSession`). En efectivo fuera de caja, si la clínica exige caja abierta, 409.',
   })
   @IsOptional()
   @ValidateNested()
   @Type(() => InitialExpensePaymentDto)
   payment?: InitialExpensePaymentDto;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'El `uploadId` de `POST /expenses/attachments/upload-url`, ya subido al almacén.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'La subida del soporte no es válida.' })
+  attachmentUploadId?: string;
+}
+
+/**
+ * Salida de caja menor (`POST /cash-sessions/current/outflows`): un gasto
+ * pagado en el acto desde la caja abierta de quien la registra. La sede es la
+ * de esa caja y la fecha, hoy: no vienen en el cuerpo.
+ */
+export class CreateCashOutflowDto {
+  @ApiProperty({
+    example: 'Mensajería',
+    description: 'Una predefinida o una propia activa de la clínica.',
+  })
+  @IsString({ message: CATEGORY_INVALID_MESSAGE })
+  category!: string;
+
+  @ApiPropertyOptional({ maxLength: 200, nullable: true })
+  @IsOptional()
+  @IsString({ message: SUPPLIER_MESSAGE })
+  supplier?: string | null;
+
+  @ApiPropertyOptional({ maxLength: 500, nullable: true })
+  @IsOptional()
+  @IsString({ message: DESCRIPTION_MESSAGE })
+  description?: string | null;
+
+  @ApiProperty(AMOUNT_DOC)
+  @IsNumber({}, { message: AMOUNT_MESSAGE })
+  @IsPositive({ message: AMOUNT_MESSAGE })
+  @IsMoney({ message: AMOUNT_MESSAGE })
+  amount!: number;
+
+  @ApiProperty({ example: 'COP', description: 'Código ISO 4217' })
+  @Transform(toUpperCase)
+  @IsISO4217CurrencyCode({ message: CURRENCY_MESSAGE })
+  currency!: string;
 
   @ApiPropertyOptional({
     format: 'uuid',

@@ -7,6 +7,9 @@ import {
 import {
   CASH_SESSION_REQUIRED_MESSAGE,
   EXPENSE_NOT_FOUND_MESSAGE,
+  FROM_CASH_METHOD_MESSAGE,
+  FROM_CASH_PAID_ON_MESSAGE,
+  OPEN_CASH_SESSION_REQUIRED_MESSAGE,
   EXPENSE_VOIDED_MESSAGE,
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
@@ -20,8 +23,13 @@ import {
   buildExpenseTestKit,
   clock,
   type ExpenseTestKit,
+  FakeCashLink,
 } from '../__fixtures__/expense-test-kit';
-import { USER_ID } from '../__fixtures__/in-memory-expenses';
+import {
+  LOCATION_ID,
+  OTHER_LOCATION_ID,
+  USER_ID,
+} from '../__fixtures__/in-memory-expenses';
 import {
   AddExpensePaymentUseCase,
   type AddExpensePaymentInput,
@@ -183,6 +191,75 @@ describe('pagos de un gasto (DX-274)', () => {
         pay(e.id, { amount: 10, method: 'CARD' }, KEY),
       ]);
       expect(kit.repo.paymentsOf(e.id)).toHaveLength(1);
+    });
+  });
+
+  describe('pago desde la caja (R1)', () => {
+    let link: FakeCashLink;
+    beforeEach(() => {
+      link = new FakeCashLink();
+      add = new AddExpensePaymentUseCase(kit.repo, clock, link);
+    });
+
+    it('sale de la caja abierta de quien paga en la sede del gasto', async () => {
+      const e = kit.repo.seed({ amount: 100, locationId: OTHER_LOCATION_ID });
+      const sessionId = link.openSession(ADMIN, OTHER_LOCATION_ID);
+      const out = await pay(e.id, {
+        amount: 40,
+        method: 'CASH',
+        fromCashSession: true,
+      });
+      expect(out.payments[0]).toMatchObject({
+        cashSessionId: sessionId,
+        paidOn: kit.repo.today,
+      });
+    });
+
+    it('sin caja abierta en la sede del gasto es 409 y no registra nada', async () => {
+      const e = kit.repo.seed({ amount: 100 });
+      link.openSession(ADMIN, OTHER_LOCATION_ID);
+      await expect(
+        pay(e.id, { amount: 40, method: 'CASH', fromCashSession: true }),
+      ).rejects.toThrow(
+        new ConflictException(OPEN_CASH_SESSION_REQUIRED_MESSAGE),
+      );
+      expect(kit.repo.paymentsOf(e.id)).toHaveLength(0);
+    });
+
+    it('es en efectivo y de hoy (400), y la huella lo distingue', async () => {
+      const e = kit.repo.seed({ amount: 100 });
+      link.openSession(ADMIN, LOCATION_ID);
+      await expect(
+        pay(e.id, { amount: 1, method: 'TRANSFER', fromCashSession: true }),
+      ).rejects.toThrow(new BadRequestException(FROM_CASH_METHOD_MESSAGE));
+      await expect(
+        pay(e.id, {
+          amount: 1,
+          method: 'CASH',
+          paidOn: '2026-10-01',
+          fromCashSession: true,
+        }),
+      ).rejects.toThrow(new BadRequestException(FROM_CASH_PAID_ON_MESSAGE));
+      await pay(
+        e.id,
+        { amount: 1, method: 'CASH', fromCashSession: true },
+        KEY,
+      );
+      await expect(
+        pay(e.id, { amount: 1, method: 'CASH' }, KEY),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('con «exigir caja abierta», desde la caja sí se acepta', async () => {
+      kit.repo.cashRequireOpenSession = true;
+      const e = kit.repo.seed({ amount: 100 });
+      link.openSession(ADMIN, LOCATION_ID);
+      await expect(pay(e.id, { amount: 10, method: 'CASH' })).rejects.toThrow(
+        new ConflictException(CASH_SESSION_REQUIRED_MESSAGE),
+      );
+      await expect(
+        pay(e.id, { amount: 10, method: 'CASH', fromCashSession: true }),
+      ).resolves.toMatchObject({ status: 'PARTIAL' });
     });
   });
 

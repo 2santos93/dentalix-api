@@ -13,6 +13,8 @@ import {
   EXPENSE_RECEIPT_URL_TTL,
 } from './application/expense-tokens';
 import { AddExpensePaymentUseCase } from './application/use-cases/add-expense-payment.use-case';
+import { CashSessionsModule } from '../cash-sessions/cash-sessions.module';
+import { CreateCashOutflowUseCase } from './application/use-cases/create-cash-outflow.use-case';
 import { AttachExpenseReceiptUseCase } from './application/use-cases/attach-expense-receipt.use-case';
 import { CreateExpenseUploadUseCase } from './application/use-cases/create-expense-upload.use-case';
 import { CreateExpenseUseCase } from './application/use-cases/create-expense.use-case';
@@ -36,6 +38,7 @@ import { EXPENSE_CATEGORY_REPOSITORY } from './domain/ports/expense-category-rep
 import { EXPENSE_REPOSITORY } from './domain/ports/expense-repository.port';
 import { PrismaExpenseCategoryRepository } from './infrastructure/repositories/prisma-expense-category.repository';
 import { PrismaExpenseRepository } from './infrastructure/repositories/prisma-expense.repository';
+import { CashOutflowsController } from './presentation/cash-outflows.controller';
 import { ExpenseCategoriesController } from './presentation/expense-categories.controller';
 import { ExpensesController } from './presentation/expenses.controller';
 
@@ -43,13 +46,18 @@ import { ExpensesController } from './presentation/expenses.controller';
  * Gastos de la sede (DX-274): factura o cuenta por pagar con categoría,
  * proveedor, fechas y soporte; pagos totales o parciales; anulación sin
  * borrar. Estado derivado de los pagos. El soporte sube directo al almacén
- * (`expense-receipts/`). Exporta el repositorio y los servicios de soporte y
- * categorías para que la caja registre salidas de caja menor sin repetirlos
- * (`CashSessionsModule` → `ExpensesModule`, en un solo sentido).
+ * (`expense-receipts/`). La caja (salidas de caja menor, R1/R5) entra por el
+ * puerto `EXPENSE_CASH_LINK`, que implementa y exporta `CashSessionsModule`:
+ * este módulo lo importa, en un solo sentido. `POST
+ * /cash-sessions/current/outflows` vive aquí (`CashOutflowsController`).
  */
 @Module({
-  imports: [JwtModule.register({}), StorageModule],
-  controllers: [ExpensesController, ExpenseCategoriesController],
+  imports: [JwtModule.register({}), StorageModule, CashSessionsModule],
+  controllers: [
+    ExpensesController,
+    ExpenseCategoriesController,
+    CashOutflowsController,
+  ],
   providers: [
     ListExpensesUseCase,
     GetExpenseUseCase,
@@ -58,6 +66,7 @@ import { ExpensesController } from './presentation/expenses.controller';
     VoidExpenseUseCase,
     AddExpensePaymentUseCase,
     VoidExpensePaymentUseCase,
+    CreateCashOutflowUseCase,
     CreateExpenseUploadUseCase,
     AttachExpenseReceiptUseCase,
     GetExpenseReceiptUrlUseCase,
@@ -81,12 +90,6 @@ import { ExpensesController } from './presentation/expenses.controller';
       provide: EXPENSE_CATEGORY_REPOSITORY,
       useClass: PrismaExpenseCategoryRepository,
     },
-  ],
-  exports: [
-    EXPENSE_REPOSITORY,
-    EXPENSE_CLOCK,
-    ExpenseCategoryResolver,
-    ExpenseReceiptUploads,
   ],
 })
 export class ExpensesModule {}

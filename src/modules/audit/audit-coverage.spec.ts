@@ -56,6 +56,7 @@ import {
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
 import { ExpenseCategoriesController } from '../expenses/presentation/expense-categories.controller';
 import { ExpensesController } from '../expenses/presentation/expenses.controller';
+import { CashOutflowsController } from '../expenses/presentation/cash-outflows.controller';
 import { PatientImportsController } from '../patient-imports/presentation/patient-imports.controller';
 import {
   ProviderScheduleController,
@@ -863,6 +864,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     reason: 'PAYMENT_VOIDED',
   },
+  'POST /cash-sessions/current/outflows': {
+    action: 'CREATE',
+    resource: 'EXPENSE',
+    resourceId: RES,
+    reason: 'CASH_OUTFLOW',
+  },
   'POST /expenses/:id/attachment': {
     action: 'UPDATE',
     resource: 'EXPENSE',
@@ -1049,6 +1056,7 @@ const CONTROLLERS: Type[] = [
   CashSessionsController,
   ExpensesController,
   ExpenseCategoriesController,
+  CashOutflowsController,
   ScheduleBlocksController,
   StaffController,
   ClinicalNoteTemplatesController,

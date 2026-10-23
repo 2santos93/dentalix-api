@@ -32,6 +32,7 @@ describe('arqueo de caja (DX-027)', () => {
         { currency: 'USD', method: 'TRANSFER', cents: 5_000 },
       ],
       adjustments: [{ currency: 'COP', method: 'CASH', cents: -500_000 }],
+      outflows: [],
     });
     expect(lines).toEqual([
       {
@@ -41,6 +42,8 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 3_000_000,
         paymentsCount: 2,
         adjustmentsCents: -500_000,
+        outflowsCents: 0,
+        outflowsCount: 0,
         expectedCents: 7_500_000,
       },
       {
@@ -50,6 +53,8 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 8_000_000,
         paymentsCount: 1,
         adjustmentsCents: 0,
+        outflowsCents: 0,
+        outflowsCount: 0,
         expectedCents: 8_000_000,
       },
       {
@@ -59,6 +64,8 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 100,
         paymentsCount: 1,
         adjustmentsCents: 0,
+        outflowsCents: 0,
+        outflowsCount: 0,
         expectedCents: 100,
       },
       {
@@ -68,6 +75,8 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 0,
         paymentsCount: 0,
         adjustmentsCents: 0,
+        outflowsCents: 0,
+        outflowsCount: 0,
         expectedCents: 0,
       },
       {
@@ -77,6 +86,8 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 5_000,
         paymentsCount: 1,
         adjustmentsCents: 0,
+        outflowsCents: 0,
+        outflowsCount: 0,
         expectedCents: 5_000,
       },
     ]);
@@ -87,6 +98,7 @@ describe('arqueo de caja (DX-027)', () => {
       floats: [{ currency: 'COP', cents: 1_000 }],
       payments: [{ currency: 'COP', method: 'CARD', cents: 500 }],
       adjustments: [],
+      outflows: [],
     });
     const result = arqueo(expected, [
       { currency: 'COP', method: 'CASH', cents: 900 },
@@ -125,11 +137,77 @@ describe('arqueo de caja (DX-027)', () => {
       floats: [{ currency: 'COP', cents: 1_000 }],
       payments: [{ currency: 'COP', method: 'CASH', cents: 500 }],
       adjustments: [],
+      outflows: [],
     });
     expect(
       arqueo(expected, [{ currency: 'COP', method: 'CASH', cents: 1_500 }])
         .hasDifference,
     ).toBe(false);
+  });
+
+  it('las salidas de caja (DX-274) restan del efectivo de su moneda, aunque quede negativo', () => {
+    const lines = expectedLines({
+      floats: [{ currency: 'COP', cents: 1_000_000 }],
+      payments: [
+        { currency: 'COP', method: 'CASH', cents: 200_000 },
+        { currency: 'COP', method: 'CARD', cents: 300_000 },
+      ],
+      adjustments: [{ currency: 'COP', method: 'CASH', cents: 50_000 }],
+      outflows: [
+        { currency: 'COP', cents: 150_000 },
+        { currency: 'COP', cents: 25_000 },
+        { currency: 'USD', cents: 1_000 },
+      ],
+    });
+    expect(lines).toEqual([
+      {
+        currency: 'COP',
+        method: 'CASH',
+        openingCents: 1_000_000,
+        paymentsCents: 200_000,
+        paymentsCount: 1,
+        adjustmentsCents: 50_000,
+        outflowsCents: 175_000,
+        outflowsCount: 2,
+        expectedCents: 1_075_000,
+      },
+      expect.objectContaining({
+        currency: 'COP',
+        method: 'CARD',
+        outflowsCents: 0,
+        outflowsCount: 0,
+        expectedCents: 300_000,
+      }),
+      {
+        currency: 'USD',
+        method: 'CASH',
+        openingCents: 0,
+        paymentsCents: 0,
+        paymentsCount: 0,
+        adjustmentsCents: 0,
+        outflowsCents: 1_000,
+        outflowsCount: 1,
+        expectedCents: -1_000,
+      },
+    ]);
+  });
+
+  it('una caja que cuadra con salidas: contado = esperado tras restarlas', () => {
+    const expected = expectedLines({
+      floats: [{ currency: 'COP', cents: 100_000 }],
+      payments: [],
+      adjustments: [],
+      outflows: [{ currency: 'COP', cents: 30_000 }],
+    });
+    const result = arqueo(expected, [
+      { currency: 'COP', method: 'CASH', cents: 70_000 },
+    ]);
+    expect(result.hasDifference).toBe(false);
+    expect(result.lines[0]).toMatchObject({
+      expectedCents: 70_000,
+      countedCents: 70_000,
+      differenceCents: 0,
+    });
   });
 
   it('un par (moneda, método) contado dos veces es un error del cliente', () => {

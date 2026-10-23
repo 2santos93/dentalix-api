@@ -218,6 +218,27 @@ function sqlStateOf(
 }
 
 /**
+ * SQLSTATE (o `P2003` de FK) de cualquier error, para los repositorios que
+ * traducen una regla de la BD a su propio mensaje en español antes de que
+ * llegue a este filtro. `undefined` si no es un error de Prisma con código.
+ */
+export function prismaRuleCode(error: unknown): string | undefined {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2003'
+  ) {
+    return '23503';
+  }
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError ||
+    error instanceof Prisma.PrismaClientUnknownRequestError
+  ) {
+    return sqlStateOf(error);
+  }
+  return undefined;
+}
+
+/**
  * Nombre de la constraint violada, solo para el log (nunca para la respuesta).
  * Es un identificador del esquema, no un dato: el resto del mensaje no se
  * registra porque el DETAIL de Postgres lleva la fila con datos clínicos.

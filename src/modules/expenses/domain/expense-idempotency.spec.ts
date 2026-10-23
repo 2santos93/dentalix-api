@@ -1,4 +1,5 @@
 import {
+  cashOutflowFingerprint,
   expensePaymentFingerprint,
   expenseRequestFingerprint,
   parseIdempotencyKey,
@@ -49,6 +50,14 @@ describe('idempotencia de gastos (DX-274)', () => {
         () =>
           expensePaymentFingerprint(EXPENSE, { ...base, paidOn: undefined }),
       ],
+      [
+        'desde la caja',
+        () =>
+          expensePaymentFingerprint(EXPENSE, {
+            ...base,
+            fromCashSession: true,
+          }),
+      ],
     ])('cambia con %s', (_name, other) => {
       expect(other()).not.toBe(expensePaymentFingerprint(EXPENSE, base));
     });
@@ -93,6 +102,35 @@ describe('idempotencia de gastos (DX-274)', () => {
     ])('cambia con %s', (_name, patch) => {
       expect(expenseRequestFingerprint({ ...base, ...patch })).not.toBe(
         expenseRequestFingerprint(base),
+      );
+    });
+  });
+
+  describe('huella de una salida de caja', () => {
+    const base = {
+      category: 'Mensajería',
+      supplier: 'Rappi',
+      amount: 15000,
+      currency: 'COP',
+    };
+
+    it('ignora espacios, mayúsculas de la moneda y vacíos equivalentes', () => {
+      expect(cashOutflowFingerprint(base)).toBe(
+        cashOutflowFingerprint({
+          ...base,
+          supplier: '  Rappi ',
+          currency: 'cop',
+          description: '',
+        }),
+      );
+    });
+
+    it('cambia con el importe y no coincide con la de un alta normal', () => {
+      expect(cashOutflowFingerprint({ ...base, amount: 15000.01 })).not.toBe(
+        cashOutflowFingerprint(base),
+      );
+      expect(cashOutflowFingerprint(base)).not.toBe(
+        expenseRequestFingerprint({ ...base, invoiceDate: '2026-10-23' }),
       );
     });
   });

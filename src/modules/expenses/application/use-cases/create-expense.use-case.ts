@@ -1,11 +1,10 @@
 import {
   BadRequestException,
-  ConflictException,
   Inject,
   Injectable,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { PaymentMethod } from '@prisma/client';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { ExpenseAttachment } from '../../domain/entities/expense.entity';
@@ -14,7 +13,6 @@ import {
   parseIdempotencyKey,
 } from '../../domain/expense-idempotency';
 import {
-  CASH_SESSION_REQUIRED_MESSAGE,
   IDEMPOTENCY_KEY_INVALID_MESSAGE,
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
   paymentCapDenial,
@@ -23,9 +21,12 @@ import {
   validateDescription,
   validateDueDate,
   validateInvoiceDate,
-  validatePaidOn,
   validateSupplier,
 } from '../../domain/expense-rules';
+import {
+  EXPENSE_CASH_LINK,
+  type ExpenseCashLink,
+} from '../../domain/ports/expense-cash-link.port';
 import {
   EXPENSE_REPOSITORY,
   type CreateExpensePaymentRepoInput,
@@ -36,15 +37,16 @@ import { ExpenseReceiptUploads } from '../expense-receipt-uploads';
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
 import { guarded, rule } from '../guarded';
+import { type PaymentCashRequest, planPaymentCash } from '../payment-cash-mode';
 
 export const UNKNOWN_CURRENCY_MESSAGE = 'La moneda no es válida.';
 
-/** Pago opcional en el mismo alta (siempre fuera de caja en esta versión). */
-export interface InitialPaymentInput {
+/**
+ * Pago opcional en el mismo alta: fuera de caja (día por defecto, hoy en la
+ * sede) o desde la caja abierta de quien registra (`fromCashSession`, R1).
+ */
+export interface InitialPaymentInput extends PaymentCashRequest {
   amount: number;
-  method: PaymentMethod;
-  /** Día del pago; por defecto, hoy en la sede. */
-  paidOn?: string;
 }
 
 export interface CreateExpenseInput {
@@ -78,6 +80,9 @@ export class CreateExpenseUseCase {
     private readonly receipts: ExpenseReceiptUploads,
     @Inject(CURRENCY_WHITELIST) private readonly whitelist: CurrencyWhitelist,
     @Inject(EXPENSE_CLOCK) private readonly clock: ExpenseClock,
+    @Optional()
+    @Inject(EXPENSE_CASH_LINK)
+    private readonly cashLink?: ExpenseCashLink,
   ) {}
 
   /**
@@ -96,6 +101,20 @@ export class CreateExpenseUseCase {
       throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
     }
     const fingerprint = key ? expenseRequestFingerprint(input) : undefined;
+    return this.createIdempotent(input, createdById, key, fingerprint);
+  }
+
+  /**
+   * El alta con la clave ya leída y la huella de la petición que la trajo.
+   * La salida de caja (`CreateCashOutflowUseCase`) entra por aquí con su
+   * propia huella: mismo alta, mismas reglas, una sola transacción.
+   */
+  async createIdempotent(
+    input: CreateExpenseInput,
+    createdById: string,
+    key: string | undefined,
+    fingerprint: string | undefined,
+  ): Promise<ExpenseDetailView> {
     const now = this.clock();
     if (key) {
       const existing = await this.repo.findByIdempotencyKey(key, now);
@@ -186,21 +205,18 @@ export class CreateExpenseUseCase {
       currency: ctx.currency,
     });
     if (denial) throw new BadRequestException(denial.message);
-    const paidOn =
-      payment.paidOn === undefined
-        ? ctx.today
-        : rule(() => validatePaidOn(payment.paidOn, ctx.today));
-    if (
-      payment.method === 'CASH' &&
-      (await this.repo.cashRequiresOpenSession())
-    ) {
-      throw new ConflictException(CASH_SESSION_REQUIRED_MESSAGE);
-    }
+    const plan = await planPaymentCash(
+      payment,
+      ctx.today,
+      this.repo,
+      this.cashLink,
+    );
     return {
       amount: paymentAmount,
       method: payment.method,
-      paidOn,
+      paidOn: plan.paidOn,
       createdById: ctx.createdById,
+      cashLink: plan.cashLink,
     };
   }
 
