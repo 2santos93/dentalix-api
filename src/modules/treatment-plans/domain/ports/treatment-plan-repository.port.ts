@@ -12,6 +12,8 @@ import {
   TreatmentPlanWithItems,
 } from '../entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../entities/treatment-plan-item.entity';
+import type { ItemAttributionChange } from '../plan-item-attribution';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -164,10 +166,14 @@ export interface UpdateTreatmentPlanItemRepoInput {
   discountStamp?: DiscountStamp | null;
 }
 
-/** Lo que decide un cambio de ítem: el parche y, si pasa a DONE, el espejo. */
+/**
+ * Lo que decide un cambio de ítem: el parche, si pasa a DONE el espejo, y el
+ * cambio de quién lo realizó, dónde y cuándo (DX-050).
+ */
 export interface ItemChange {
   patch: UpdateTreatmentPlanItemRepoInput;
   mirror?: DoneMirrorInput;
+  attribution?: ItemAttributionChange;
 }
 
 /**
@@ -264,8 +270,20 @@ export interface TreatmentPlanRepository {
    * PATCH DONE concurrentes se serializan y solo el primero espeja. Si el
    * espejo falla, falla todo: nunca queda un ítem DONE sin su registro
    * clínico. El odontograma es append-only: solo se inserta, nunca se cambia.
+   *
+   * DX-050: con `attribution`, en la MISMA transacción resuelve la membresía
+   * VIVA del profesional en esta clínica (404 si no la hay: otra clínica o
+   * desactivado; 400 si no atiende o no atiende en la sede), toma la sede del
+   * request (`X-Location-Id`, o la de escritura de la sesión) y escribe la
+   * atribución. Una corrección (CORRECT) o una salida de DONE (CLEAR) deja
+   * además, en la misma transacción, un `audit_event` con el antes y el
+   * después (`audit`, el contexto de la petición).
    */
-  updateItem(id: string, decide: DecideItemChange): Promise<TreatmentPlanItem>;
+  updateItem(
+    id: string,
+    decide: DecideItemChange,
+    audit?: AuditRequestContext,
+  ): Promise<TreatmentPlanItem>;
 
   /** Soft-delete: sets `deletedAt`. Never a hard delete. */
   softDeleteItem(id: string): Promise<void>;
