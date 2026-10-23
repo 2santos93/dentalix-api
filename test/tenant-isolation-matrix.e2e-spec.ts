@@ -178,6 +178,9 @@ interface SeedB {
    * DX-233: cuerpo de las excepciones).
    */
   locationId: string;
+  /** DX-050: plan propio de B con un ítem aceptado (B lo marca realizado). */
+  planId: string;
+  planItemId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -555,9 +558,37 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     clinicB = await registerClinic(app, 'clinica-aislada-b');
     a = await seedA(app, clinicA);
     const sedesB = await api(app, clinicB, 'get', '/locations').expect(200);
+    const dataB = await seedClinicData(app, clinicB, '9101');
+    const planB = await create(
+      app,
+      clinicB,
+      `/patients/${dataB.patientId}/treatment-plans`,
+      { currency: 'USD' },
+    );
+    const itemB = await create(
+      app,
+      clinicB,
+      `/treatment-plans/${planB.id}/items`,
+      {
+        toothNumber: '21',
+        catalogItemId: dataB.catalogItemId,
+        price: 100,
+      },
+    );
+    await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${planB.id}/items/${itemB.id}`,
+      {
+        status: 'ACCEPTED',
+      },
+    ).expect(200);
     b = {
-      ...(await seedClinicData(app, clinicB, '9101')),
+      ...dataB,
       locationId: (sedesB.body as IdBody[])[0].id,
+      planId: planB.id,
+      planItemId: itemB.id,
     };
     tables = await clinicTables(raw);
     // La invitación de A encola su email (DX-088): se espera a que el
@@ -838,6 +869,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'patch',
       path: () => `/treatment-plans/${a.planId}/items/${a.planItemId}`,
       body: () => ({ price: 1, notes: 'Hackeado' }),
+      status: 404,
+    },
+    // DX-050: B marca realizado SU ítem atribuyéndoselo a la dentista de A.
+    // La membresía de A no existe para B (RLS): 404, y nada de A cambia (el
+    // ítem de B tampoco: ver «B no puede atribuir…» abajo).
+    {
+      name: 'PATCH /treatment-plans/:id/items/:itemId (DX-050: realizado por un profesional de A)',
+      verb: 'patch',
+      path: () => `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      body: () => ({ status: 'DONE', performedById: a.dentistUserId }),
       status: 404,
     },
     // DX-204: «Descuento %» en bloque sobre un plan y un ítem de A.
@@ -1673,6 +1714,30 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       expect(await shotOfA()).toEqual(before);
     },
   );
+
+  it('DX-050: B no puede atribuir su ítem a un profesional de A (queda aceptado, sin atribución ni odontograma)', async () => {
+    await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      { status: 'DONE', performedById: a.dentistUserId },
+    ).expect(404);
+    expect(
+      await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: b.planItemId },
+      }),
+    ).toMatchObject({
+      status: 'ACCEPTED',
+      performedById: null,
+      performedByMembershipId: null,
+    });
+    expect(
+      await raw.toothRecord.count({
+        where: { sourcePlanItemId: b.planItemId },
+      }),
+    ).toBe(0);
+  });
 
   it('B sigue operando lo suyo (los 404 no son un "todo prohibido")', async () => {
     await api(app, clinicB, 'get', `/patients/${b.patientId}`).expect(200);
