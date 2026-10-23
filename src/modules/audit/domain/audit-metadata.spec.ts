@@ -449,3 +449,47 @@ describe('sanitizeAuditMetadata — mínimo de la visita siguiente (DX-273)', ()
     ).toHaveLength(50);
   });
 });
+
+describe('sanitizeAuditMetadata — atribución del ítem realizado (DX-050)', () => {
+  const dentist = '11111111-2222-4333-8444-555555555555';
+  const location = '66666666-7777-4888-8999-000000000000';
+
+  it('conserva quién, sede e instante antes y después (o null)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        attribution: {
+          before: {
+            performedById: dentist.toUpperCase(),
+            locationId: location,
+            completedAt: '2026-10-20T15:00:00.000Z',
+          },
+          after: { performedById: null, locationId: null, completedAt: null },
+        },
+      }),
+    ).toEqual({
+      attribution: {
+        before: {
+          performedById: dentist,
+          locationId: location,
+          completedAt: '2026-10-20T15:00:00.000Z',
+        },
+        after: { performedById: null, locationId: null, completedAt: null },
+      },
+    });
+  });
+
+  it('descarta el cambio entero si un lado no tiene la forma admitida', () => {
+    const after = { performedById: null, locationId: null, completedAt: null };
+    for (const before of [
+      { performedById: 'Dra. Ana', locationId: null, completedAt: null },
+      { performedById: null, locationId: null, completedAt: 'ayer' },
+      { performedById: null, locationId: null, completedAt: null, note: 'x' },
+      { performedById: null, locationId: null },
+    ]) {
+      expect(sanitizeAuditMetadata({ attribution: { before, after } })).toEqual(
+        {},
+      );
+    }
+    expect(sanitizeAuditMetadata({ attribution: 'x' })).toEqual({});
+  });
+});
