@@ -1,5 +1,10 @@
 import { AppointmentStatus } from '@prisma/client';
-import { Appointment } from '../entities/appointment.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import {
+  Appointment,
+  CompletedExit,
+  PlanItemReservedElsewhere,
+} from '../entities/appointment.entity';
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — the tenant comes from
 // the guarded request context (never the client, same convention as
@@ -82,6 +87,17 @@ export interface UpdateAppointmentRepoInput {
    * la misma sentencia): si otra persona lo cambió antes, 409 y nada cambia.
    */
   expectStatus?: AppointmentStatus;
+  /**
+   * DX-273: el PATCH saca la cita de COMPLETED. En la misma transacción se
+   * guarda el motivo (`appointment_status_reversals`), se recalcula el mínimo
+   * de la visita siguiente y se escribe su `audit_event`.
+   */
+  completedExit?: { reason: string; audit: AuditRequestContext };
+  /**
+   * DX-273 (revisión I1): quién hace el cambio, para auditar la reserva que
+   * recupera una cita en la clínica cuando esta deja de tenerla.
+   */
+  audit?: AuditRequestContext;
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */
@@ -96,6 +112,15 @@ export interface AppointmentUpdate {
   reopenedWaitlistEntryId: string | null;
   /** Id de la entrada que se cerró al reactivar la cita; `null` si no había. */
   resolvedWaitlistEntryId: string | null;
+  /** DX-273: solo si el PATCH sacó la cita de COMPLETED. */
+  completedExit?: CompletedExit;
+}
+
+/** Resultado de «Traer a esta cita» (DX-273). */
+export interface PlanItemClaim {
+  appointment: Appointment;
+  /** La cita que lo reservaba y lo deja de reservar; null si ninguna. */
+  fromAppointmentId: string | null;
 }
 
 export interface ListAppointmentsByRangeParams {
@@ -201,4 +226,24 @@ export interface AppointmentRepository {
    * cuyo `start` cae en `[from, to)`, opcionalmente de un profesional.
    */
   listInClinic(params: ListInClinicParams): Promise<InClinicAppointment[]>;
+
+  /**
+   * DX-273: por cita, sus tratamientos (vínculo vivo pero sin reserva) que
+   * reserva OTRA cita viva, solo de sedes permitidas al usuario. Las citas sin
+   * ninguno no salen en el mapa.
+   */
+  findPlanItemsReservedElsewhere(
+    appointmentIds: readonly string[],
+  ): Promise<Map<string, PlanItemReservedElsewhere[]>>;
+
+  /**
+   * DX-273 «Traer a esta cita»: en una transacción, la cita (en la clínica)
+   * pasa a reservar el tratamiento y la que lo reservaba deja de hacerlo, con
+   * un `audit_event` en cada una.
+   */
+  claimPlanItem(
+    appointmentId: string,
+    planItemId: string,
+    audit: AuditRequestContext,
+  ): Promise<PlanItemClaim>;
 }

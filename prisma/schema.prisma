@@ -125,31 +125,33 @@ model User {
   deletedAt               DateTime?
   memberships             ClinicMembership[]
 
-  privacyPoliciesPublished PrivacyPolicyVersion[]
-  dataConsentsRecorded     DataProcessingConsent[]
-  perioExamsPerformed      PerioExam[]
-  prescriptionsIssued      Prescription[]              @relation("PrescriptionProfessional")
-  prescriptionsVoided      Prescription[]              @relation("PrescriptionVoidedBy")
+  privacyPoliciesPublished   PrivacyPolicyVersion[]
+  dataConsentsRecorded       DataProcessingConsent[]
+  perioExamsPerformed        PerioExam[]
+  prescriptionsIssued        Prescription[]              @relation("PrescriptionProfessional")
+  prescriptionsVoided        Prescription[]              @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced           PatientImplant[]            @relation("PatientImplantProfessional")
-  implantsVoided           PatientImplant[]            @relation("PatientImplantVoidedBy")
-  implantCardsDelivered    PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced             PatientImplant[]            @relation("PatientImplantProfessional")
+  implantsVoided             PatientImplant[]            @relation("PatientImplantVoidedBy")
+  implantCardsDelivered      PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
-  uploadedPatientDocuments PatientDocument[]           @relation("PatientDocumentUploadedBy")
-  voidedPatientDocuments   PatientDocument[]           @relation("PatientDocumentVoidedBy")
-  planAcceptancesRecorded  TreatmentPlanAcceptance[]
-  tokens                   UserToken[]
-  clinicalEntryAddenda     ClinicalEntryAddendum[]
-  dentitionEventsRecorded  PatientDentitionEvent[]
-  retentionActions         PatientRetentionAction[]
-  platformAccesses         PlatformAccessAudit[]
+  uploadedPatientDocuments   PatientDocument[]           @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments     PatientDocument[]           @relation("PatientDocumentVoidedBy")
+  planAcceptancesRecorded    TreatmentPlanAcceptance[]
+  tokens                     UserToken[]
+  clinicalEntryAddenda       ClinicalEntryAddendum[]
+  dentitionEventsRecorded    PatientDentitionEvent[]
+  retentionActions           PatientRetentionAction[]
+  platformAccesses           PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts        TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
-  discountPoliciesUpdated  DiscountPolicy[]
+  planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
+  discountPoliciesUpdated    DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
-  platformAuditEvents      PlatformAuditEvent[]
+  platformAuditEvents        PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
-  postOpDeliveries         PostOpInstructionDelivery[]
+  postOpDeliveries           PostOpInstructionDelivery[]
+  // DX-273: salidas de citas de COMPLETED (con motivo).
+  appointmentStatusReversals AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
 
   @@map("users")
 }
@@ -926,6 +928,8 @@ model Appointment {
   deletedAt           DateTime?
 
   planItems        AppointmentPlanItem[]
+  // DX-273: salidas de COMPLETED, con su motivo.
+  statusReversals  AppointmentStatusReversal[]
   confirmations    AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
   waitlistOffers   WaitlistOffer[]
@@ -3987,4 +3991,26 @@ model AppointmentPlanItem {
   @@id([tenantId, appointmentId, planItemId])
   @@index([tenantId, planItemId, appointmentId])
   @@map("appointment_plan_items")
+}
+
+// DX-273: cada salida de una cita de COMPLETED (a agendada, cancelada…), con
+// el motivo que escribió ADMIN/DENTIST. El `audit_event` COMPLETED_EXIT
+// apunta aquí por id (`params.reversalId`): la auditoría no guarda texto libre.
+// Solo SELECT/INSERT para la app (evidencia); RLS FORCE por tenant.
+model AppointmentStatusReversal {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  tenantId      String            @db.Uuid
+  patientId     String            @db.Uuid
+  appointmentId String            @db.Uuid
+  fromStatus    AppointmentStatus
+  toStatus      AppointmentStatus
+  reason        String            @db.VarChar(500)
+  actorUserId   String            @db.Uuid
+  createdAt     DateTime          @default(dbgenerated("timezone('UTC'::text, now())"))
+  appointment   Appointment       @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Cascade, map: "appointment_status_reversals_appointment_fkey")
+  actor         User              @relation("AppointmentStatusReversalActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "appointment_status_reversals_actor_fkey")
+
+  @@index([tenantId, appointmentId, createdAt], map: "appointment_status_reversals_appointment_idx")
+  @@index([actorUserId], map: "appointment_status_reversals_actor_idx")
+  @@map("appointment_status_reversals")
 }

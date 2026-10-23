@@ -1,7 +1,9 @@
 import { AppointmentStatus, ClinicRole } from '@prisma/client';
 import {
   IN_CLINIC_STATUSES,
+  PATIENT_FLOW_MESSAGES,
   arrivalPunctuality,
+  normalizeStatusReason,
   checkStatusTransition,
   isInClinic,
   minutesSince,
@@ -128,10 +130,97 @@ describe('patient-flow · máquina de transiciones (DX-200)', () => {
       [SCHEDULED, COMPLETED],
       [CONFIRMED, NO_SHOW],
       [CANCELLED, SCHEDULED],
-      [COMPLETED, SCHEDULED],
     ] as const) {
       expect(check(from, to, DENTIST)).toEqual({ ok: true });
     }
+  });
+
+  // DX-273 (revisión DX-271, I1): sacar una cita de COMPLETED cambia el
+  // intervalo mínimo de la visita siguiente. Solo ADMIN y DENTIST, con motivo.
+  describe('salida de COMPLETED (DX-273)', () => {
+    const exit = (
+      to: AppointmentStatus,
+      role: ClinicRole | null,
+      statusReason?: string | null,
+    ) =>
+      checkStatusTransition({
+        from: COMPLETED,
+        to,
+        role,
+        isToday: true,
+        statusReason,
+      });
+
+    it.each([
+      [SCHEDULED, ADMIN],
+      [CANCELLED, ADMIN],
+      [SCHEDULED, DENTIST],
+      [CANCELLED, DENTIST],
+      [CONFIRMED, DENTIST],
+    ])('%s con %s y motivo: permitida', (to, role) => {
+      expect(exit(to, role, 'Se marcó completada por error')).toEqual({
+        ok: true,
+      });
+    });
+
+    it.each([
+      [SCHEDULED, RECEPTION],
+      [CANCELLED, RECEPTION],
+      [SCHEDULED, ASSISTANT],
+      [CANCELLED, ASSISTANT],
+      [CANCELLED, null],
+    ])('%s con %s: 403 en español, aunque traiga motivo', (to, role) => {
+      expect(exit(to, role, 'Se marcó completada por error')).toEqual({
+        ok: false,
+        kind: 'FORBIDDEN',
+        message: PATIENT_FLOW_MESSAGES.completedExitForbidden,
+      });
+      expect(PATIENT_FLOW_MESSAGES.completedExitForbidden).toMatch(
+        /odontólogo|administración/,
+      );
+    });
+
+    it.each([undefined, null, '', '  ', 'ab', '  ab  ', 'x'.repeat(501)])(
+      'ADMIN sin motivo válido (%p): 400',
+      (statusReason) => {
+        expect(exit(CANCELLED, ADMIN, statusReason)).toEqual({
+          ok: false,
+          kind: 'BAD_REQUEST',
+          message: PATIENT_FLOW_MESSAGES.completedExitReason,
+        });
+      },
+    );
+
+    it('el rol se mira antes que el motivo: recepción sin motivo es 403', () => {
+      expect(exit(CANCELLED, RECEPTION)).toMatchObject({
+        ok: false,
+        kind: 'FORBIDDEN',
+      });
+    });
+
+    it('quedarse en COMPLETED no es una salida', () => {
+      expect(exit(COMPLETED, RECEPTION)).toEqual({ ok: true });
+    });
+
+    it('los saltos imposibles desde COMPLETED siguen siendo 409', () => {
+      expect(exit(ARRIVED, ADMIN, 'motivo válido')).toMatchObject({
+        kind: 'CONFLICT',
+      });
+      expect(exit(IN_CHAIR, DENTIST, 'motivo válido')).toMatchObject({
+        kind: 'CONFLICT',
+      });
+    });
+
+    it('normalizeStatusReason recorta y valida 3–500 caracteres', () => {
+      expect(normalizeStatusReason('  Error de recepción  ')).toBe(
+        'Error de recepción',
+      );
+      expect(normalizeStatusReason('abc')).toBe('abc');
+      expect(normalizeStatusReason('x'.repeat(500))).toHaveLength(500);
+      expect(normalizeStatusReason('x'.repeat(501))).toBeNull();
+      expect(normalizeStatusReason(' ab ')).toBeNull();
+      expect(normalizeStatusReason(undefined)).toBeNull();
+    });
   });
 });
 

@@ -1,7 +1,10 @@
 import {
+  claimPlanItemInTx,
+  findPlanItemsReservedElsewhere,
   isPlanItemConflict,
   lockAppointmentForPlanItems,
   planItemConflictMessage,
+  recoverReservationsInTx,
   replaceAppointmentPlanItems,
 } from '../appointment-plan-items';
 import {
@@ -13,7 +16,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AppointmentStatus, Prisma } from '@prisma/client';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  nextVisitMinimums,
+  type VisitMinimumSnapshot,
+} from '../../../treatment-plans/infrastructure/visit-minimums';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -36,9 +45,15 @@ import {
   ListAppointmentsByRangeParams,
   ListInClinicParams,
   ListUpcomingAppointmentsParams,
+  PlanItemClaim,
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
-import { Appointment } from '../../domain/entities/appointment.entity';
+import {
+  Appointment,
+  CompletedExit,
+  PlanItemReservedElsewhere,
+  VisitMinimumChange,
+} from '../../domain/entities/appointment.entity';
 
 type PrismaAppointment = Prisma.AppointmentGetPayload<Record<string, never>>;
 
@@ -339,8 +354,24 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           resolveWaitlist,
           requireWantsEarlier,
           expectStatus,
+          completedExit,
+          audit,
           ...data
         } = patch;
+        // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
+        // deja de reservarlo, una cita en la clínica puede recuperarlo.
+        const reservedBefore = (
+          await tx.appointmentPlanItem.findMany({
+            where: { appointmentId: id, active: true, deletedAt: null },
+            select: { planItemId: true },
+          })
+        ).map((l) => l.planItemId);
+        // DX-273: el mínimo de la visita siguiente ANTES de sacar la cita de
+        // COMPLETED (con la fila bloqueada), para dejar claro qué cambia.
+        const minimumsBefore =
+          completedExit && existing.status === AppointmentStatus.COMPLETED
+            ? await this.visitMinimums(tx, id)
+            : null;
         // DX-271 (BE-039): con la fila bloqueada, los ítems de una cita que
         // sigue cerrada (antes y después de este PATCH) no se tocan; nada de
         // la petición se escribe.
@@ -422,6 +453,36 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             existing,
           );
         }
+        const exit =
+          completedExit && minimumsBefore
+            ? await this.recordCompletedExit(
+                tx,
+                appointment,
+                completedExit,
+                minimumsBefore,
+              )
+            : undefined;
+        // Completada: el tratamiento se hizo aquí; no vuelve a otra cita.
+        if (
+          reservedBefore.length > 0 &&
+          appointment.status !== AppointmentStatus.COMPLETED
+        ) {
+          const still = new Set(
+            (
+              await tx.appointmentPlanItem.findMany({
+                where: { appointmentId: id, active: true, deletedAt: null },
+                select: { planItemId: true },
+              })
+            ).map((l) => l.planItemId),
+          );
+          await recoverReservationsInTx(
+            tx,
+            this.requireTenantId(),
+            id,
+            reservedBefore.filter((p) => !still.has(p)),
+            audit,
+          );
+        }
         if (revokeConfirmations) {
           await tx.appointmentConfirmation.updateMany({
             where: { appointmentId: id, revokedAt: null, respondedAt: null },
@@ -456,6 +517,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           reopenedWaitlistEntryId:
             enqueued && enqueued.reopened ? enqueued.id : null,
           resolvedWaitlistEntryId,
+          ...(exit ? { completedExit: exit } : {}),
         };
       })
       .catch((error: unknown) =>
@@ -496,6 +558,135 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       );
     });
     throw new ConflictException(message);
+  }
+
+  /** Mínimos de las visitas siguientes a las de la cita (DX-273). */
+  private async visitMinimums(
+    tx: Prisma.TransactionClient,
+    appointmentId: string,
+  ): Promise<VisitMinimumSnapshot[]> {
+    const { locationId } = await tx.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      select: { locationId: true },
+    });
+    return nextVisitMinimums(
+      tx,
+      this.requireTenantId(),
+      appointmentId,
+      locationId,
+      new Date(),
+    );
+  }
+
+  /**
+   * DX-273: la cita salió de COMPLETED. En la misma transacción: el motivo
+   * (`appointment_status_reversals`), el mínimo de la visita siguiente antes
+   * y después, y su `audit_event` (sin el texto del motivo, que no es un
+   * código: la auditoría lo enlaza por `params.reversalId`).
+   */
+  private async recordCompletedExit(
+    tx: Prisma.TransactionClient,
+    appointment: { id: string; patientId: string; status: AppointmentStatus },
+    exit: { reason: string; audit: AuditRequestContext },
+    before: VisitMinimumSnapshot[],
+  ): Promise<CompletedExit> {
+    const tenantId = this.requireTenantId();
+    const after = await this.visitMinimums(tx, appointment.id);
+    const visitMinimums: VisitMinimumChange[] = before.map((b) => {
+      const a = after.find((x) => x.planId === b.planId && x.visit === b.visit);
+      return {
+        planId: b.planId,
+        visit: b.visit,
+        minimumDayBefore: b.minimumDay,
+        minimumDayAfter: a?.minimumDay ?? null,
+        anchorAppointmentIdAfter: a?.anchorAppointmentId ?? null,
+      };
+    });
+    const reversal = await tx.appointmentStatusReversal.create({
+      data: {
+        tenantId,
+        patientId: appointment.patientId,
+        appointmentId: appointment.id,
+        fromStatus: AppointmentStatus.COMPLETED,
+        toStatus: appointment.status,
+        reason: exit.reason,
+        actorUserId: exit.audit.actor.userId,
+      },
+      select: { id: true },
+    });
+    await writeAuditEvent(tx, {
+      tenantId,
+      locationId: exit.audit.locationId,
+      actor: {
+        kind: 'user',
+        userId: exit.audit.actor.userId,
+        role: exit.audit.actor.role,
+      },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: exit.audit.requestId,
+      ip: exit.audit.ip,
+      userAgent: exit.audit.userAgent,
+      metadata: {
+        reason: 'COMPLETED_EXIT',
+        status: { from: AppointmentStatus.COMPLETED, to: appointment.status },
+        params: { reversalId: reversal.id },
+        visitMinimums: visitMinimums.map((v) => ({
+          planId: v.planId,
+          visit: v.visit,
+          before: v.minimumDayBefore,
+          after: v.minimumDayAfter,
+        })),
+      },
+    });
+    return { reversalId: reversal.id, reason: exit.reason, visitMinimums };
+  }
+
+  findPlanItemsReservedElsewhere(
+    appointmentIds: readonly string[],
+  ): Promise<Map<string, PlanItemReservedElsewhere[]>> {
+    if (appointmentIds.length === 0)
+      return Promise.resolve(new Map<string, PlanItemReservedElsewhere[]>());
+    return this.prisma.runWithTenant((tx) =>
+      findPlanItemsReservedElsewhere(
+        tx,
+        this.requireTenantId(),
+        appointmentIds,
+        this.tenantContext.getAllowedLocationIds(),
+      ),
+    );
+  }
+
+  async claimPlanItem(
+    appointmentId: string,
+    planItemId: string,
+    audit: AuditRequestContext,
+  ): Promise<PlanItemClaim> {
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        const { fromAppointmentId } = await claimPlanItemInTx(tx, {
+          tenantId: this.requireTenantId(),
+          appointmentId,
+          planItemId,
+          allowedLocations: this.tenantContext.getAllowedLocationIds(),
+          audit,
+        });
+        return {
+          appointment: mapToEntity(
+            await tx.appointment.findUniqueOrThrow({
+              where: { id: appointmentId },
+              include: INCLUDE_PATIENT_NAME,
+            }),
+          ),
+          fromAppointmentId,
+        };
+      })
+      .catch((error: unknown) =>
+        // Otra cita lo tomó a la vez: 409 que dice cuál.
+        this.rethrowPlanItemConflict(error, [planItemId], appointmentId),
+      );
   }
 
   async undoArrival(id: string): Promise<Appointment | null> {

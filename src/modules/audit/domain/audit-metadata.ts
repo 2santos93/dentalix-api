@@ -53,6 +53,21 @@ export interface AuditMetadata {
    * duplicados y totales (solo números). Ni el nombre del fichero ni filas.
    */
   importBatch?: AuditImportBatch;
+  /**
+   * DX-273: al sacar una cita de COMPLETED, el mínimo de la visita siguiente
+   * de cada plan afectado antes y después (día civil, o null = sin mínimo).
+   * Solo ids, números y fechas: el motivo escrito va en
+   * `appointment_status_reversals` (`params.reversalId`).
+   */
+  visitMinimums?: AuditVisitMinimum[];
+}
+
+/** Mínimo de una visita del plan antes y después (DX-273). */
+export interface AuditVisitMinimum {
+  planId: string;
+  visit: number;
+  before: string | null;
+  after: string | null;
 }
 
 export interface AuditImportBatch {
@@ -292,6 +307,43 @@ function scheduleChange(value: unknown): AuditScheduleChange | null {
   return before && after ? { before, after } : null;
 }
 
+const MAX_VISIT_MINIMUMS = 50;
+
+function civilOrNull(value: unknown): value is string | null {
+  return (
+    value === null || (typeof value === 'string' && CIVIL_DATE.test(value))
+  );
+}
+
+/** Una entrada con exactamente esa forma, o `null`. */
+function visitMinimum(value: unknown): AuditVisitMinimum | null {
+  if (!isRecord(value)) return null;
+  const { planId, visit, before, after, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof planId !== 'string' ||
+    !UUID.test(planId) ||
+    typeof visit !== 'number' ||
+    !Number.isInteger(visit) ||
+    visit < 1 ||
+    visit > 1000 ||
+    !civilOrNull(before) ||
+    !civilOrNull(after)
+  ) {
+    return null;
+  }
+  return { planId: planId.toLowerCase(), visit, before, after };
+}
+
+/** Las entradas válidas (hasta 50); el resto se descarta. */
+function visitMinimums(value: unknown): AuditVisitMinimum[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(visitMinimum)
+    .filter((v): v is AuditVisitMinimum => v !== null)
+    .slice(0, MAX_VISIT_MINIMUMS);
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -321,5 +373,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (schedule) out.scheduleChange = schedule;
   const batch = importBatch(input.importBatch);
   if (batch) out.importBatch = batch;
+  const minimums = visitMinimums(input.visitMinimums);
+  if (minimums.length > 0) out.visitMinimums = minimums;
   return out;
 }

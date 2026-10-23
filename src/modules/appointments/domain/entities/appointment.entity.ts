@@ -74,6 +74,56 @@ export interface AppointmentWriteResult extends Appointment {
    * cómo pintarlo sin leer el texto.
    */
   warningCodes: AppointmentWarningCode[];
+  /**
+   * DX-273 (revisión DX-271, I2): tratamientos de esta cita que siguen
+   * reservados en OTRA cita viva (la reserva se quedó allí al marcar «Llegó»).
+   * Solo citas de sedes permitidas al usuario (DX-089). Vacío si no hay.
+   */
+  planItemsReservedElsewhere: PlanItemReservedElsewhere[];
+  /**
+   * DX-273: solo al sacar la cita de COMPLETED. El motivo y cómo queda el
+   * intervalo mínimo de la visita siguiente de cada plan afectado.
+   */
+  completedExit?: CompletedExit;
+}
+
+/** Un tratamiento de la cita reservado en otra cita (DX-273). */
+export interface PlanItemReservedElsewhere {
+  planItemId: string;
+  /** Nombre del procedimiento (catálogo, en español). */
+  name: string;
+  toothNumber: string;
+  /** La cita que lo reserva. */
+  appointmentId: string;
+  start: Date;
+  locationId: string;
+  locationName: string;
+  /** Zona de la sede de esa cita: la fecha se muestra en ella. */
+  timeZone: string;
+}
+
+/**
+ * Intervalo mínimo de una visita del plan antes y después de sacar de
+ * COMPLETED la cita de la visita anterior (DX-273). Día civil YYYY-MM-DD en la
+ * zona de la sede del plan, como `GET /treatment-plans/:id/visits`; `null` =
+ * sin mínimo clínico (ninguna cita de la visita anterior sigue completada, o
+ * el intervalo es 0): se puede agendar desde hoy.
+ */
+export interface VisitMinimumChange {
+  planId: string;
+  visit: number;
+  minimumDayBefore: string | null;
+  minimumDayAfter: string | null;
+  /** La cita completada que fija ahora el mínimo, o `null` si ninguna. */
+  anchorAppointmentIdAfter: string | null;
+}
+
+/** Resultado de sacar una cita de COMPLETED (DX-273). */
+export interface CompletedExit {
+  /** Fila de `appointment_status_reversals` con el motivo. */
+  reversalId: string;
+  reason: string;
+  visitMinimums: VisitMinimumChange[];
 }
 
 /** Códigos de `AppointmentWriteResult.warningCodes`. */
