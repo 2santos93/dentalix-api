@@ -11,6 +11,11 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
+import {
+  RATE_LIMIT_CONFIG,
+  loadRateLimitConfig,
+} from '../src/shared/security/rate-limit.config';
+import { tooManyRequestsException } from '../src/shared/security/too-many-requests';
 import { POSTOP_CLOCK } from '../src/modules/post-op-instructions/application/post-op-clock';
 import {
   POSTOP_LINK_EXPIRED_MESSAGE,
@@ -201,6 +206,58 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
     );
     await publicOpened(clinicB.host, token).expect(404);
     expect((await deliveryRow()).firstOpenedAt).toBeNull();
+  });
+
+  it('host desconocido → 404 en GET y opened sin modificar la entrega', async () => {
+    const before = await deliveryRow();
+    for (const send of [publicGet, publicOpened]) {
+      const res = await send('dx246-no-existe.localhost', token).expect(404);
+      expect((res.body as { message: string }).message).toBe(
+        POSTOP_LINK_NOT_FOUND_MESSAGE,
+      );
+    }
+    expect(await deliveryRow()).toEqual(before);
+  });
+
+  it('la cuota pública por IP devuelve 429 y Retry-After en GET y opened', async () => {
+    const limited = await createE2eApp({
+      override: (builder) =>
+        builder.overrideProvider(RATE_LIMIT_CONFIG).useValue({
+          ...loadRateLimitConfig((key) => process.env[key]),
+          confirmation: { limit: 2, ttlMs: 60_000 },
+        }),
+    });
+    const before = await deliveryRow();
+    try {
+      for (const method of ['get', 'post'] as const) {
+        const req = () =>
+          request(limited.getHttpServer())
+            [method](
+              `/api/v1/public/post-op-instructions/${'z'.repeat(43)}${method === 'post' ? '/opened' : ''}`,
+            )
+            .set('X-Tenant-Host', clinicA.host);
+        await req().expect(404);
+        await req().expect(404);
+        const res = await req().expect(429);
+        const retryAfter = Number(res.headers['retry-after']);
+        expect(Number.isInteger(retryAfter)).toBe(true);
+        expect(retryAfter).toBeGreaterThan(0);
+        expect(retryAfter).toBeLessThanOrEqual(60);
+        expect(res.body).toEqual(
+          tooManyRequestsException(retryAfter).getResponse(),
+        );
+        // Rotar el token no evade la cuota de la ruta.
+        await request(limited.getHttpServer())
+          [method](
+            `/api/v1/public/post-op-instructions/${token}${method === 'post' ? '/opened' : ''}`,
+          )
+          .set('X-Tenant-Host', clinicA.host)
+          .expect(429);
+      }
+      expect(await deliveryRow()).toEqual(before);
+    } finally {
+      await limited.close();
+    }
   });
 
   it('token malformado → 404', async () => {

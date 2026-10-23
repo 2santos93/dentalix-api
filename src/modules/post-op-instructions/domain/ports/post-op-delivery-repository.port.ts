@@ -115,7 +115,7 @@ export interface PostOpDeliveryRepository {
   /** Entrega del enlace público; `null` si no existe o es de otra clínica. */
   findByTokenHash(tokenHash: string): Promise<PostOpPublicDeliveryView | null>;
   /**
-   * Fija `firstOpenedAt` con la hora de la BD solo si seguía vacío (lo único
+   * Fija `firstOpenedAt` con la hora de la aplicación solo si seguía vacío (lo único
    * que la BD deja cambiar de una entrega, y una sola vez). `true` si la marcó.
    */
   markFirstOpened(id: string): Promise<boolean>;

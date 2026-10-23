@@ -3837,6 +3837,9 @@ model PostOpInstructionDelivery {
 
   @@index([tenantId, patientId, deliveredAt(sort: Desc)], map: "post_op_instruction_deliveries_tenant_patient_idx")
   @@index([tenantId, appointmentId], map: "post_op_instruction_deliveries_tenant_appointment_idx")
+  @@index([tenantId, templateId], map: "post_op_instruction_deliveries_template_idx")
+  @@index([tenantId, locationId], map: "post_op_instruction_deliveries_location_idx")
+  @@index([deliveredById], map: "post_op_instruction_deliveries_delivered_by_idx")
   @@map("post_op_instruction_deliveries")
 }
 
