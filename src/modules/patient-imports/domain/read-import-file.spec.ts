@@ -478,10 +478,12 @@ async function watchLoop<T>(
 
 /*
  * Umbral de bloqueo en la prueba: holgado frente a los ~150 ms del probe de
- * la revisión porque jest corre en paralelo en una máquina compartida; el
- * fallo que se busca es de SEGUNDOS (1,5–5,3 s antes del arreglo).
+ * la revisión porque `npm test` corre en paralelo en una máquina compartida
+ * (CPU y recolector de basura de las entradas de 25 MB de los demás casos).
+ * El fallo que se busca es de SEGUNDOS: 1,5–5,3 s antes del arreglo; el
+ * probe de la revisión mide los 150 ms con el proceso solo.
  */
-const MAX_BLOCK_MS = 300;
+const MAX_BLOCK_MS = 1_000;
 
 describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', () => {
   jest.setTimeout(60_000);
