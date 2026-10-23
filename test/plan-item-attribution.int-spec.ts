@@ -1,5 +1,7 @@
+import { NotFoundException } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
+import { resolvePerformer } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 
 // DX-050, capa DB: la atribución del ítem realizado (quién, dónde, cuándo).
@@ -237,6 +239,23 @@ describe('DX-050 · atribución del ítem realizado en la BD (int)', () => {
     await expect(
       raw.clinicMembership.delete({ where: { id: a.otherMembershipId } }),
     ).rejects.toMatchObject(FK_VIOLATION);
+  });
+
+  // Revisión DX-050: la membresía del profesional se busca por clínica en la
+  // propia consulta, no solo por la RLS (misma regla que el resto de SQL a
+  // mano del repo). Con una conexión que salta la RLS (owner), el profesional
+  // de OTRA clínica sigue sin existir: 404, nunca su membresía.
+  it('el profesional se resuelve en ESTA clínica aunque la conexión salte la RLS', async () => {
+    await expect(
+      raw.$transaction((tx) =>
+        resolvePerformer(tx, a.tenantId, b.userId, null),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      raw.$transaction((tx) =>
+        resolvePerformer(tx, a.tenantId, a.userId, a.locationId),
+      ),
+    ).resolves.toBe(a.membershipId);
   });
 
   describe('plan cerrado (DX-109)', () => {

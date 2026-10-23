@@ -477,6 +477,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       const locationId = await this.tenantContext.writeLocationId(tx);
       const membershipId = await resolvePerformer(
         tx,
+        this.requireTenantId(),
         change.performedById,
         locationId,
       );
@@ -494,6 +495,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       data.performedById = change.performedById;
       data.performedByMembershipId = await resolvePerformer(
         tx,
+        this.requireTenantId(),
         change.performedById,
         previous.performedLocationId,
       );
@@ -630,10 +632,12 @@ async function lockedPlan(
  * DX-050: membresía VIVA de `userId` en esta clínica, bloqueada FOR SHARE.
  * 404 si no la hay (otra clínica, o desactivado), 400 si no atiende (solo
  * DENTIST y ADMIN) o si está restringido a sedes (DX-089) y `locationId` no es
- * una de ellas.
+ * una de ellas. Filtra por `tenantId` en la propia consulta (no solo por la
+ * RLS), como el resto del SQL a mano.
  */
-async function resolvePerformer(
+export async function resolvePerformer(
   tx: Prisma.TransactionClient,
+  tenantId: string,
   userId: string,
   locationId: string | null,
 ): Promise<string> {
@@ -647,7 +651,8 @@ async function resolvePerformer(
                     WHERE ml."membershipId" = m."id"
                       AND ml."locationId" = ${locationId}::uuid) AS "here"
       FROM "clinic_memberships" m
-     WHERE m."userId" = ${userId}::uuid AND m."deletedAt" IS NULL
+     WHERE m."tenantId" = ${tenantId}::uuid
+       AND m."userId" = ${userId}::uuid AND m."deletedAt" IS NULL
        FOR SHARE OF m`;
   if (!member) throw new NotFoundException(PERFORMER_NOT_FOUND_MESSAGE);
   if (!isAttendingRole(member.role)) {
