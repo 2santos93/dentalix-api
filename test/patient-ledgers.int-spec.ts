@@ -46,8 +46,8 @@ type Schedule = [
   number,
   [number, number, number][],
 ];
-/** Saldo migrado (DX-262): [id, moneda, importe, 'AAAA-MM-DD', aproximada]. */
-type Opening = [string, string, number, string, boolean];
+/** Saldo migrado (DX-262): [id, moneda, importe, 'AAAA-MM-DD', aproximada, abonado]. */
+type Opening = [string, string, number, string, boolean, number];
 interface LedgerRow {
   patientId: string;
   locationId: string | null;
@@ -148,7 +148,7 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
     },
     include: {
       appointments: true,
-      openingBalances: true,
+      openingBalances: { include: { payments: true } },
       treatmentPlans: {
         include: {
           items: true,
@@ -236,6 +236,9 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         Number(o.amount),
         o.asOfDate.toISOString().slice(0, 10),
         o.asOfDateApproximate,
+        o.payments
+          .filter((x) => x.deletedAt === null && x.currency === o.currency)
+          .reduce((sum, x) => sum + Number(x.amount), 0),
       ]);
     const lastOpening = newest(liveOpenings, (o) => ms(o.createdAt));
     return {
@@ -249,7 +252,7 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
       owing:
         pa.deletedAt === null &&
         (plans.some(([, , , , , billable, own]) => billable > (own ?? 0)) ||
-          openings.length > 0),
+          openings.some(([, , amount, , , paid]) => amount > paid)),
       ledger: { plans, paymentPlans, openings },
     };
   });

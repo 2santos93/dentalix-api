@@ -1961,17 +1961,48 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   último saldo. Triggers por sentencia en `opening_balances` refrescan el
   resumen (no hay que pausarlos: cada bloque refresca a sus ≤ 500
   pacientes).
-- **Abonos y deshacer**: hoy ningún abono se imputa al saldo migrado (los
-  abonos van siempre a un plan; la imputación es DX-051). El deshacer del
-  lote **retira** sus saldos (`voidedAt`), salvo que alguno tenga un abono
-  imputado: cualquier FK a `opening_balances.id` (leída de `pg_constraint`)
-  lo bloquea con 409 «…ya tiene abonos imputados…». Un paciente creado por el
-  lote con un saldo de OTRO lote también lo bloquea.
+- **Cobrar el saldo migrado** (revisión C1): `POST
+  /opening-balances/:id/payments` (ADMIN y RECEPTION, como cualquier abono)
+  registra un abono contra el saldo: `payments.openingBalanceId` en lugar de
+  `treatmentPlanId` (CHECK `payments_target_check`: exactamente uno; FK
+  compuesta `(tenantId, openingBalanceId, patientId)` → mismo paciente y
+  clínica). Lleva su recibo de caja consecutivo por sede (DX-136, la foto
+  dice «Saldo migrado · concepto · corte» y el pendiente tras el abono),
+  entra en la caja por turno y su arqueo (DX-027), admite Idempotency-Key
+  (DX-109), cuenta para los compromisos de pago (DX-150) y se anula con
+  `DELETE /payments/:id` como cualquier abono. En la moneda del saldo y sin
+  pasar de lo pendiente: el saldo se bloquea `FOR UPDATE` en la transacción
+  del abono (dos cobros a la vez no lo pasan) y si no cabe, 400 «El abono
+  supera lo pendiente del saldo migrado: quedan …». El estado de cuenta da
+  `paid`/`pending` por saldo, el resumen de cartera guarda lo abonado
+  (`openings[i][5]`) y solo debe si queda pendiente, y la antigüedad envejece
+  solo lo pendiente.
+- **Deshacer**: el del lote se niega (409) si algún saldo migrado del lote
+  tiene abonos VIVOS (los anulados no cuentan); el bloqueo sale del catálogo
+  (toda FK a `opening_balances.id`, filtrando `deletedAt`/`voidedAt` si la
+  tabla los tiene). `POST /patient-imports/:id/balances/undo` (solo ADMIN)
+  retira SOLO los saldos del lote aunque sus pacientes ya tengan citas u otra
+  actividad (el lote sigue COMPLETED). Lo retirado (cuántos y cuánto por
+  moneda) queda en el lote (`balances.undoneCount`/`undoneTotals`) y en la
+  auditoría. Las horas de la retirada, en UTC de la BD.
+- **Retención**: a los 90 días de terminar o deshacer el lote (con los errores
+  de DX-107) se borran sus saldos preparados (`patient_import_balance_rows`:
+  documento e importe del fichero); un dry-run caducado los borra al caducar.
+- **Rendimiento del dry-run**: la búsqueda de documentos va por conjuntos
+  (`= ANY(keys)` agrupado, en patients y en las filas del lote): 5.000 claves
+  contra 20.000 pacientes en menos de 2 s (int).
+- **Topes**: la suma de las filas de un paciente y moneda no puede pasar de
+  `DECIMAL(14,2)` (error de la fila); una celda XLSX con ruido de coma
+  flotante (`178500.00000000003`) se redondea a 2 decimales. Un documento con
+  varios pacientes vivos al importar no se adivina: se cuenta aparte
+  (`progress.ambiguous`).
 - **Auditoría**: `PATIENT_IMPORT_BATCH` `UPDATE` con `reason`
-  `IMPORT_BALANCES_VALIDATED` / `IMPORT_BALANCES_REMOVED`, `EXPORT`
+  `IMPORT_BALANCES_VALIDATED` / `IMPORT_BALANCES_REMOVED` /
+  `IMPORT_BALANCES_UNDONE`, `EXPORT`
   `IMPORT_BALANCE_ERRORS`; `metadata.importBatch` lleva el hash de la hoja,
-  sus contadores y `balanceTotals` (total AGREGADO por moneda; nunca el de un
-  paciente ni documentos).
+  sus contadores, `balanceTotals` (lo previsto por moneda) y
+  `balanceUndoneTotals` (lo retirado de verdad); totales AGREGADOS, nunca el
+  de un paciente ni documentos.
 
 ## Dominios personalizados (SEC-009)
 
