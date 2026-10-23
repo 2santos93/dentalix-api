@@ -37,6 +37,11 @@
  *                  (`POST …/documents/upload-url`, DX-259), por clínica +
  *                  usuario, como invitation-email: cada una firma un POST
  *                  para subir hasta 20 MB.
+ * - anamnesis:     ver y enviar el cuestionario público de anamnesis
+ *                  (DX-099), por IP (enumeración de tokens).
+ * - anamnesis-token: las mismas rutas, por TOKEN (sin IP): un mismo enlace no
+ *                  admite ráfagas de reintentos aunque cambie la IP. La clave
+ *                  es el hash del token, nunca el token.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -58,7 +63,9 @@ export type RateLimitPolicy =
   | 'password-reset'
   | 'public-files'
   | 'direct-upload'
-  | 'patient-import';
+  | 'patient-import'
+  | 'anamnesis'
+  | 'anamnesis-token';
 
 export interface RateLimitRule {
   limit: number;
@@ -84,6 +91,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'public-files': { limit: 300, ttlMs: MINUTE },
   'direct-upload': { limit: 60, ttlMs: MINUTE },
   'patient-import': { limit: 10, ttlMs: MINUTE },
+  anamnesis: { limit: 20, ttlMs: MINUTE },
+  'anamnesis-token': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -121,5 +130,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'public-files': rule('public-files'),
     'direct-upload': rule('direct-upload'),
     'patient-import': rule('patient-import'),
+    anamnesis: rule('anamnesis'),
+    'anamnesis-token': rule('anamnesis-token'),
   };
 }

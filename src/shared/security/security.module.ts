@@ -11,6 +11,7 @@ import {
 import { RATE_LIMIT_POLICIES } from './rate-limit.decorator';
 import {
   passwordRateLimitKey,
+  publicTokenRateLimitKey,
   staffActorRateLimitKey,
 } from './rate-limit.keys';
 import { RateLimitGuard } from './rate-limit.guard';
@@ -55,6 +56,7 @@ function throttlers(
   const request = (context: ExecutionContext) =>
     context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
+      params?: Record<string, string | undefined>;
     }>();
   return [
     // `default` = límite global, por IP, en cada ruta.
@@ -83,6 +85,16 @@ function throttlers(
     },
     strict('password-reset'),
     strict('public-files'),
+    // DX-099: el cuestionario público, por IP y por token.
+    strict('anamnesis'),
+    {
+      ...strict('anamnesis-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

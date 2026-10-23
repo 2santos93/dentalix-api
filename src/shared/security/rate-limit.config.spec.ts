@@ -30,6 +30,9 @@ describe('loadRateLimitConfig', () => {
     expect(cfg['invitation-email']).toEqual({ limit: 10, ttlMs: 60_000 });
     // SEC-046: leer un fichero de importación, por clínica + usuario.
     expect(cfg['patient-import']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-099: el cuestionario público de anamnesis, por IP y por token.
+    expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
+    expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });
   });
 
   it('SEC-046: lee RATE_LIMIT_PATIENT_IMPORT_LIMIT/_TTL_MS', () => {
@@ -40,6 +43,18 @@ describe('loadRateLimitConfig', () => {
       }),
     );
     expect(cfg['patient-import']).toEqual({ limit: 3, ttlMs: 30_000 });
+  });
+
+  it('DX-099: lee el balde por token de su variable', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_ANAMNESIS_LIMIT: '5',
+        RATE_LIMIT_ANAMNESIS_TOKEN_LIMIT: '3',
+        RATE_LIMIT_ANAMNESIS_TOKEN_TTL_MS: '1000',
+      }),
+    );
+    expect(cfg.anamnesis.limit).toBe(5);
+    expect(cfg['anamnesis-token']).toEqual({ limit: 3, ttlMs: 1000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {
