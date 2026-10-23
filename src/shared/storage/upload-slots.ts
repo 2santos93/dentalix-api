@@ -38,37 +38,80 @@ export const DEFAULT_UPLOAD_TIMEOUTS: UploadTimeouts = {
   maxDurationMs: 120_000,
 };
 
+/** Por qué no hay plaza: la réplica está llena o la clave ya tiene las suyas. */
+export type SlotBusy = 'replica' | 'key';
+
+export type SlotAcquisition = { release: () => void } | { busy: SlotBusy };
+
 /**
  * DX-259 (OPS-038): semáforo de las subidas que pasan por la API en esta
  * réplica (`UPLOAD_MAX_CONCURRENCY`, por defecto 4). No hay cola: sin plaza,
  * 503 con `Retry-After` al momento, antes de leer el cuerpo.
+ *
+ * SEC-046: con `perKeyCapacity`, además, como mucho esas plazas por clave
+ * (la clínica, en la lectura de ficheros de importación). Sin clave solo
+ * cuenta el tope de la réplica.
  */
 export class UploadSlots {
   private inUse = 0;
+  private readonly perKey = new Map<string, number>();
 
   constructor(
     readonly capacity: number,
     readonly timeouts: UploadTimeouts = DEFAULT_UPLOAD_TIMEOUTS,
+    readonly perKeyCapacity: number = Number.POSITIVE_INFINITY,
   ) {}
 
   get active(): number {
     return this.inUse;
   }
 
+  /** Plazas en uso de una clave. */
+  activeFor(key: string): number {
+    return this.perKey.get(key) ?? 0;
+  }
+
+  /** Claves con alguna plaza en uso (una clave sin plazas no se guarda). */
+  get trackedKeys(): number {
+    return this.perKey.size;
+  }
+
   /** Una plaza y la función que la devuelve (idempotente), o null si no hay. */
-  tryAcquire(): (() => void) | null {
-    if (this.inUse >= this.capacity) return null;
+  tryAcquire(key?: string): (() => void) | null {
+    const got = this.acquire(key);
+    return 'release' in got ? got.release : null;
+  }
+
+  /** Como `tryAcquire`, pero sin plaza dice por qué. */
+  acquire(key?: string): SlotAcquisition {
+    if (key !== undefined && this.activeFor(key) >= this.perKeyCapacity) {
+      return { busy: 'key' };
+    }
+    if (this.inUse >= this.capacity) return { busy: 'replica' };
     this.inUse += 1;
+    if (key !== undefined) this.perKey.set(key, this.activeFor(key) + 1);
     let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.inUse -= 1;
+    return {
+      release: () => {
+        if (released) return;
+        released = true;
+        this.inUse -= 1;
+        if (key === undefined) return;
+        const left = this.activeFor(key) - 1;
+        if (left > 0) this.perKey.set(key, left);
+        // eslint-disable-next-line no-restricted-syntax -- un Map en memoria, no un dato de la BD
+        else this.perKey.delete(key);
+      },
     };
   }
 }
 
-interface UploadRequest {
+/** Lo que un guard de plazas puede mirar de la petición para su clave. */
+export interface SlotRequest {
+  user?: { tenantId?: string };
+}
+
+interface UploadRequest extends SlotRequest {
   file?: { path?: string };
   /** true cuando Node ya recibió el cuerpo entero. */
   complete?: boolean;
@@ -111,20 +154,33 @@ interface UploadLease {
  * cliente que se va no libera la plaza de una subida que sigue procesándose.
  * Si el interceptor no llegó a correr (otro guard o interceptor falló antes),
  * se devuelven al cerrarse la respuesta.
+ *
+ * Base común: `UploadSlotGuard` (subidas, DX-259) y `ImportReadSlotGuard`
+ * (lectura de ficheros de importación, SEC-046), cada uno con su semáforo.
  */
-@Injectable()
-export class UploadSlotGuard implements CanActivate {
-  constructor(@Inject(UPLOAD_SLOTS) private readonly slots: UploadSlots) {}
+export abstract class SlotGuard implements CanActivate {
+  protected abstract readonly slots: UploadSlots;
+
+  /** Clave del tope por clave (SEC-046); sin ella, solo el de la réplica. */
+  protected keyOf(_req: SlotRequest): string | undefined {
+    return undefined;
+  }
+
+  /** Mensaje del 503 cuando no hay plaza. */
+  protected busyMessage(_busy: SlotBusy): string {
+    return UPLOAD_BUSY_MESSAGE;
+  }
 
   canActivate(context: ExecutionContext): boolean {
     const http = context.switchToHttp();
     const req = http.getRequest<UploadRequest>();
     const res = http.getResponse<UploadResponse>();
-    const release = this.slots.tryAcquire();
-    if (!release) {
+    const got = this.slots.acquire(this.keyOf(req));
+    if ('busy' in got) {
       res.setHeader('Retry-After', String(UPLOAD_BUSY_RETRY_AFTER_SECONDS));
-      throw new ServiceUnavailableException(UPLOAD_BUSY_MESSAGE);
+      throw new ServiceUnavailableException(this.busyMessage(got.busy));
     }
+    const { release } = got;
     const lease: UploadLease = {
       handled: false,
       finish: () => {
@@ -171,8 +227,16 @@ export class UploadSlotGuard implements CanActivate {
   }
 }
 
+/** DX-259: plazas de las subidas que pasan por la API (`UPLOAD_SLOTS`). */
+@Injectable()
+export class UploadSlotGuard extends SlotGuard {
+  constructor(@Inject(UPLOAD_SLOTS) protected readonly slots: UploadSlots) {
+    super();
+  }
+}
+
 /**
- * Pareja de `UploadSlotGuard`: va el PRIMERO en `@UseInterceptors`, antes de
+ * Pareja de los guards de plazas (`SlotGuard`): va el PRIMERO en `@UseInterceptors`, antes de
  * multer, y devuelve la plaza y borra el temporal cuando el handler termina
  * (bien, con error o porque multer falló al leer el cuerpo).
  */
