@@ -273,7 +273,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           key !== 'resolveWaitlist' &&
           key !== 'requireWantsEarlier' &&
           key !== 'expectStatus' &&
-          key !== 'completedExit',
+          key !== 'completedExit' &&
+          key !== 'audit',
       ),
     );
     Object.assign(row, definedPatch, {

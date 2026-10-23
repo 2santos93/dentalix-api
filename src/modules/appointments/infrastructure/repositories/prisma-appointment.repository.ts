@@ -4,6 +4,7 @@ import {
   isPlanItemConflict,
   lockAppointmentForPlanItems,
   planItemConflictMessage,
+  recoverReservationsInTx,
   replaceAppointmentPlanItems,
 } from '../appointment-plan-items';
 import {
@@ -354,8 +355,17 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           requireWantsEarlier,
           expectStatus,
           completedExit,
+          audit,
           ...data
         } = patch;
+        // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
+        // deja de reservarlo, una cita en la clínica puede recuperarlo.
+        const reservedBefore = (
+          await tx.appointmentPlanItem.findMany({
+            where: { appointmentId: id, active: true, deletedAt: null },
+            select: { planItemId: true },
+          })
+        ).map((l) => l.planItemId);
         // DX-273: el mínimo de la visita siguiente ANTES de sacar la cita de
         // COMPLETED (con la fila bloqueada), para dejar claro qué cambia.
         const minimumsBefore =
@@ -452,6 +462,27 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                 minimumsBefore,
               )
             : undefined;
+        // Completada: el tratamiento se hizo aquí; no vuelve a otra cita.
+        if (
+          reservedBefore.length > 0 &&
+          appointment.status !== AppointmentStatus.COMPLETED
+        ) {
+          const still = new Set(
+            (
+              await tx.appointmentPlanItem.findMany({
+                where: { appointmentId: id, active: true, deletedAt: null },
+                select: { planItemId: true },
+              })
+            ).map((l) => l.planItemId),
+          );
+          await recoverReservationsInTx(
+            tx,
+            this.requireTenantId(),
+            id,
+            reservedBefore.filter((p) => !still.has(p)),
+            audit,
+          );
+        }
         if (revokeConfirmations) {
           await tx.appointmentConfirmation.updateMany({
             where: { appointmentId: id, revokedAt: null, respondedAt: null },

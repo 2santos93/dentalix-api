@@ -85,6 +85,7 @@ export type UpdateAppointmentInput = Omit<
   | 'preArrivalStatus'
   | 'expectStatus'
   | 'completedExit'
+  | 'audit'
 > & {
   /**
    * DX-273: motivo para sacar la cita de COMPLETED (obligatorio entonces,
@@ -99,10 +100,14 @@ export const PLAN_ITEM_CLAIM_MESSAGES = {
   notLinked: PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
 } as const;
 
-/** Estados en los que la cita ya no reserva nada: sin aviso (DX-273). */
+/**
+ * Sin aviso (DX-273): la cita ya no reserva nada (cancelada, no-show) o la
+ * visita terminó (completada, revisión M3).
+ */
 const NOT_RESERVING: ReadonlySet<AppointmentStatus> = new Set([
   AppointmentStatus.CANCELLED,
   AppointmentStatus.NO_SHOW,
+  AppointmentStatus.COMPLETED,
 ]);
 
 /** DX-210: el hueco libre al que se adelanta una cita marcada. */
@@ -411,6 +416,7 @@ export class UpdateAppointmentUseCase {
       ...(isReschedule ? { revokeConfirmations: true } : {}),
       ...(fromOpening ? { requireWantsEarlier: true } : {}),
       ...(completedExit ? { completedExit } : {}),
+      ...(auditContext ? { audit: auditContext } : {}),
       ...(enqueuesWaitlist
         ? {
             enqueueWaitlist: {

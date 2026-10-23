@@ -23,6 +23,21 @@ import {
   reservedElsewhereMessage,
 } from '../domain/plan-item-reservation';
 
+/** El ítem ya no se agenda (alta de vínculos y «Traer a esta cita»). */
+export const PLAN_ITEM_NOT_SCHEDULABLE_MESSAGE =
+  'Solo se agenda tratamiento aceptado y pendiente de un plan aceptado.';
+
+/**
+ * DX-273 (revisión I2): tratamiento que sigue por hacer: vivo, aceptado y de
+ * un plan aceptado. Lo exigen el alta de vínculos, «Traer a esta cita», la
+ * recuperación de la reserva y el aviso.
+ */
+const SCHEDULABLE_PLAN_ITEM: Prisma.TreatmentPlanItemWhereInput = {
+  deletedAt: null,
+  status: 'ACCEPTED',
+  plan: { status: 'ACCEPTED', deletedAt: null },
+};
+
 /** Estados que reservan (mismo predicado que `dx256_link_reservation`). */
 const PRE_ARRIVAL_RESERVING = [
   AppointmentStatus.SCHEDULED,
@@ -97,9 +112,7 @@ export async function replaceAppointmentPlanItems(
   if (
     items.some((i) => i.status !== 'ACCEPTED' || i.plan.status !== 'ACCEPTED')
   )
-    throw new ConflictException(
-      'Solo se agenda tratamiento aceptado y pendiente de un plan aceptado.',
-    );
+    throw new ConflictException(PLAN_ITEM_NOT_SCHEDULABLE_MESSAGE);
   await tx.appointmentPlanItem.updateMany({
     where: { appointmentId, planItemId: { notIn: ids }, deletedAt: null },
     data: { deletedAt: new Date() },
@@ -227,6 +240,7 @@ export async function findPlanItemsReservedElsewhere(
       deletedAt: null,
       active: false,
       appointment: { deletedAt: null },
+      planItem: SCHEDULABLE_PLAN_ITEM,
     },
     select: { appointmentId: true, planItemId: true },
   });
@@ -358,6 +372,12 @@ export async function claimPlanItemInTx(
   });
   if (!own) throw new NotFoundException(PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE);
   if (own.active) return { fromAppointmentId: null };
+  // Revisión I2: con las citas bloqueadas, el tratamiento sigue por hacer.
+  const schedulable = await tx.treatmentPlanItem.count({
+    where: { id: planItemId, ...SCHEDULABLE_PLAN_ITEM },
+  });
+  if (schedulable === 0)
+    throw new ConflictException(PLAN_ITEM_NOT_SCHEDULABLE_MESSAGE);
 
   const holder = await holderOf();
   if ((holder?.appointmentId ?? null) !== (seen?.appointmentId ?? null))
@@ -402,7 +422,8 @@ export async function claimPlanItemInTx(
   for (const appointment of from ? [target, from] : [target]) {
     await writeAuditEvent(tx, {
       tenantId,
-      locationId: input.audit.locationId,
+      // Cada evento en la sede de SU cita (revisión M2).
+      locationId: appointment.locationId,
       actor: {
         kind: 'user',
         userId: input.audit.actor.userId,
@@ -423,4 +444,89 @@ export async function claimPlanItemInTx(
     });
   }
   return { fromAppointmentId: from?.id ?? null };
+}
+
+/**
+ * DX-273 (revisión I1): `fromAppointmentId` dejó de reservar estos
+ * tratamientos (se canceló, se marcó no-show o se le quitaron). Si una cita
+ * con el paciente en la clínica los tiene sin reserva (la reserva se quedó en
+ * la otra al marcar «Llegó»), la más temprana la recupera en esta misma
+ * transacción: reescribir su vínculo hace que `dx256_link_reservation`
+ * recalcule `active`. Solo tratamiento por hacer y si nadie más lo reserva.
+ * Un `audit_event` PLAN_ITEM_RESERVATION_RECOVERED en la cita que lo recupera
+ * (en la sede de esa cita). Devuelve los ítems recuperados.
+ */
+export async function recoverReservationsInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  fromAppointmentId: string,
+  planItemIds: readonly string[],
+  audit: AuditRequestContext | undefined,
+): Promise<string[]> {
+  const recovered: string[] = [];
+  for (const planItemId of [...planItemIds].sort()) {
+    const holders = await tx.appointmentPlanItem.count({
+      where: { planItemId, active: true, deletedAt: null },
+    });
+    if (holders > 0) continue;
+    const candidate = await tx.appointmentPlanItem.findFirst({
+      where: {
+        planItemId,
+        active: false,
+        deletedAt: null,
+        appointmentId: { not: fromAppointmentId },
+        appointment: {
+          deletedAt: null,
+          status: { in: [...IN_CLINIC_RESERVING] },
+        },
+        planItem: SCHEDULABLE_PLAN_ITEM,
+      },
+      orderBy: [{ appointment: { start: 'asc' } }, { appointmentId: 'asc' }],
+      select: {
+        appointmentId: true,
+        patientId: true,
+        appointment: { select: { locationId: true } },
+      },
+    });
+    if (!candidate) continue;
+    const { active } = await tx.appointmentPlanItem.update({
+      where: {
+        tenantId_appointmentId_planItemId: {
+          tenantId,
+          appointmentId: candidate.appointmentId,
+          planItemId,
+        },
+      },
+      data: { deletedAt: null },
+      select: { active: true },
+    });
+    if (!active) continue;
+    recovered.push(planItemId);
+    if (!audit) continue;
+    await writeAuditEvent(tx, {
+      tenantId,
+      locationId: candidate.appointment.locationId,
+      actor: {
+        kind: 'user',
+        userId: audit.actor.userId,
+        role: audit.actor.role,
+      },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: candidate.appointmentId,
+      patient: { kind: 'patient', id: candidate.patientId },
+      requestId: audit.requestId,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      metadata: {
+        reason: 'PLAN_ITEM_RESERVATION_RECOVERED',
+        params: {
+          planItemId,
+          fromAppointmentId,
+          toAppointmentId: candidate.appointmentId,
+        },
+      },
+    });
+  }
+  return recovered;
 }

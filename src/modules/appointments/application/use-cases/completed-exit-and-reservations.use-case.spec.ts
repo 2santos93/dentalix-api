@@ -233,6 +233,33 @@ describe('UpdateAppointmentUseCase · tratamientos reservados en otra cita (DX-2
     expect(cancelled.planItemsReservedElsewhere).toEqual([]);
   });
 
+  it('una cita completada no avisa (la visita terminó, revisión M3)', async () => {
+    const { repo, uc } = setup();
+    const a = todayAppointment(repo, AppointmentStatus.READY_FOR_CHECKOUT);
+    repo.reservedElsewhere.set(a.id, [reserved('future-1')]);
+    const done = await uc.execute(
+      a.id,
+      { status: AppointmentStatus.COMPLETED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    expect(done.planItemsReservedElsewhere).toEqual([]);
+  });
+
+  it('el repositorio recibe quién cambia la cita (auditar la reserva recuperada, revisión I1)', async () => {
+    const { repo, uc } = setup();
+    const a = todayAppointment(repo, AppointmentStatus.SCHEDULED);
+    const update = jest.spyOn(repo, 'update');
+    await uc.execute(
+      a.id,
+      { status: AppointmentStatus.CANCELLED },
+      ctx(ClinicRole.RECEPTION),
+    );
+    expect(update).toHaveBeenCalledWith(
+      a.id,
+      expect.objectContaining({ audit: ctx(ClinicRole.RECEPTION) }),
+    );
+  });
+
   it('«Deshacer llegada» también lo devuelve', async () => {
     const { repo, uc } = setup();
     const a = todayAppointment(repo, AppointmentStatus.CONFIRMED);

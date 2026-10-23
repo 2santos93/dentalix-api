@@ -93,6 +93,11 @@ export interface UpdateAppointmentRepoInput {
    * de la visita siguiente y se escribe su `audit_event`.
    */
   completedExit?: { reason: string; audit: AuditRequestContext };
+  /**
+   * DX-273 (revisión I1): quién hace el cambio, para auditar la reserva que
+   * recupera una cita en la clínica cuando esta deja de tenerla.
+   */
+  audit?: AuditRequestContext;
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */

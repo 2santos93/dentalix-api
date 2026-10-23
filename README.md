@@ -721,6 +721,8 @@ hasta 1 h (SEC-028).
   DENTIST** (RECEPTION/ASSISTANT: 403 «Solo el odontólogo o la administración
   pueden sacar una cita de «Completada».»), y con `statusReason` en el
   `PATCH /appointments/:id` (3–500 caracteres tras recortar; sin él, 400).
+  El rol se mira antes que el motivo: recepción recibe 403 aunque el motivo
+  sea corto; fuera de una salida de COMPLETED el motivo se ignora.
   En la misma transacción:
   - el motivo se guarda en `appointment_status_reversals` (una fila por
     salida; la app solo tiene SELECT/INSERT; RLS FORCE por tenant; FK
@@ -747,16 +749,27 @@ hasta 1 h (SEC-028).
   [{ planItemId, name, toothNumber, appointmentId, start, locationId,
   locationName, timeZone }]`: los tratamientos de la cita con vínculo vivo pero
   sin reserva que reserva otra cita viva (mismo predicado que el trigger
-  `dx256_link_reservation`). Solo citas de sedes permitidas al usuario
-  (DX-089): las demás se omiten sin dejar rastro. Vacío en una cita cancelada
-  o no-show.
+  `dx256_link_reservation`) y que siguen por hacer (ítem vivo y aceptado de un
+  plan aceptado). Solo citas de sedes permitidas al usuario (DX-089): las
+  demás se omiten sin dejar rastro. Vacío en una cita cancelada, no-show o
+  completada.
+- **La reserva vuelve a la cita en la clínica** (revisión DX-273, I1): si la
+  cita que reservaba un tratamiento deja de hacerlo (se cancela, se marca
+  no-show o se le quita con `planItemIds`; no si se completa: se hizo allí),
+  en la misma transacción la cita **más temprana** con el paciente en la
+  clínica que lo tiene sin reserva la recupera (si nadie más lo reserva y el
+  tratamiento sigue por hacer), con un `audit_event`
+  `PLAN_ITEM_RESERVATION_RECOVERED` (`params`: `planItemId`,
+  `fromAppointmentId`, `toAppointmentId`) en la sede de esa cita.
 - **«Traer a esta cita»**: `POST /appointments/:id/plan-items/:planItemId/claim`
   (los cuatro roles de agenda). Solo con el paciente en la clínica
-  (ARRIVED, IN_CHAIR, READY_FOR_CHECKOUT; si no, 409) y con el tratamiento en
-  la cita (si no, 404). En una transacción bloquea las dos citas en orden de
+  (ARRIVED, IN_CHAIR, READY_FOR_CHECKOUT; si no, 409), con el tratamiento en
+  la cita (si no, 404) y por hacer (aceptado, de un plan aceptado; si no, 409
+  «Solo se agenda tratamiento aceptado y pendiente de un plan aceptado.»). En una transacción bloquea las dos citas en orden de
   id, retira el vínculo de la otra cita y reescribe el de esta (el trigger le
-  da la reserva), con un `audit_event` `APPOINTMENT_PLAN_ITEMS` en cada cita
-  (`params`: `planItemId`, `fromAppointmentId`, `toAppointmentId`). Si la otra
+  da la reserva), con un `audit_event` `APPOINTMENT_PLAN_ITEMS` en cada cita,
+  cada uno en la sede de su cita (`params`: `planItemId`,
+  `fromAppointmentId`, `toAppointmentId`). Si la otra
   cita es de una sede no permitida, 403 sin decir cuál. Si ya nadie lo
   reserva (p. ej. se canceló la otra cita), solo recupera la reserva; si ya
   la tiene, no cambia nada. Si otra cita lo toma a la vez, 409 que dice cuál.

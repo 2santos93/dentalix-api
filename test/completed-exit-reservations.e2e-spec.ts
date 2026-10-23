@@ -162,7 +162,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
    * agendar en otra), de 5 min y en su propio hueco, sin cruzar la medianoche.
    */
   let todaySlot = 0;
-  const todayAppointment = () => {
+  const todayAppointment = (location = locationId) => {
     const lateBy = Math.max(
       1,
       Math.min(2 + 6 * todaySlot++, minutesIntoBogotaDay(new Date()) - 6),
@@ -170,7 +170,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
     return rawAppointment(
       new Date(Date.now() - lateBy * MIN),
       'SCHEDULED',
-      locationId,
+      location,
       5,
     );
   };
@@ -293,10 +293,16 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       expect(await events(surgery.id, 'COMPLETED_EXIT')).toEqual([]);
     });
 
-    it('ADMIN sin motivo, o con uno de menos de 3 o más de 500 caracteres: 400', async () => {
+    it('ADMIN sin motivo, o con uno de menos de 3 o más de 500 caracteres: 400; recepción con motivo corto: 403 (el rol va antes)', async () => {
       const {
         surgeries: [surgery],
       } = await surgeryPlan([2]);
+      await call(
+        'patch',
+        `/appointments/${surgery.id}`,
+        { status: 'CANCELLED', statusReason: 'ab' },
+        reception,
+      ).expect(403);
       const missing = await call('patch', `/appointments/${surgery.id}`, {
         status: 'CANCELLED',
       }).expect(400);
@@ -558,16 +564,106 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       expect(await events(today.id, 'APPOINTMENT_PLAN_ITEMS')).toHaveLength(1);
     });
 
-    it('sin nadie que lo reserve ya (la futura se canceló), «Traer a esta cita» recupera la reserva', async () => {
+    it('cancelar la cita que lo reservaba devuelve la reserva a la cita en la clínica (la más temprana), auditado', async () => {
       const {
         planId,
         ids: [itemId],
       } = await acceptedItems(1);
       await accept(planId);
-      const today = await todayAppointment();
-      await rawLink(today.id, itemId);
+      // Dos citas de hoy en la clínica con el ítem sin reserva; la futura lo tiene.
+      const later = await todayAppointment();
+      const earlier = await todayAppointment();
+      expect(earlier.start.getTime()).toBeLessThan(later.start.getTime());
+      await rawLink(later.id, itemId);
+      await rawLink(earlier.id, itemId);
       const future = await rawAppointment(inDays(8));
       await rawLink(future.id, itemId);
+      for (const id of [later.id, earlier.id])
+        await call(
+          'patch',
+          `/appointments/${id}`,
+          { status: 'ARRIVED' },
+          reception,
+        ).expect(200);
+      expect((await links(earlier.id))[0].active).toBe(false);
+
+      await call(
+        'patch',
+        `/appointments/${future.id}`,
+        { status: 'CANCELLED' },
+        reception,
+      ).expect(200);
+      // En la misma transacción: la más temprana en la clínica lo reserva.
+      expect(await links(earlier.id)).toEqual([
+        { planItemId: itemId, active: true, deletedAt: null },
+      ]);
+      expect((await links(later.id))[0].active).toBe(false);
+      const [event] = await events(
+        earlier.id,
+        'PLAN_ITEM_RESERVATION_RECOVERED',
+      );
+      expect(event).toMatchObject({
+        resourceType: 'APPOINTMENT',
+        actorUserId: receptionUserId,
+        patientId,
+        locationId,
+      });
+      expect(event.metadata).toEqual({
+        reason: 'PLAN_ITEM_RESERVATION_RECOVERED',
+        params: {
+          planItemId: itemId,
+          fromAppointmentId: future.id,
+          toAppointmentId: earlier.id,
+        },
+      });
+      // La otra cita en la clínica ahora ve la reserva en la más temprana.
+      const panel = await call(
+        'get',
+        '/appointments/in-clinic',
+        undefined,
+        reception,
+      )
+        .set('X-Location-Id', locationId)
+        .expect(200);
+      const waiting = (
+        panel.body as {
+          waiting: {
+            appointmentId: string;
+            planItemsReservedElsewhere: { appointmentId: string }[];
+          }[];
+        }
+      ).waiting;
+      expect(
+        waiting
+          .find((w) => w.appointmentId === later.id)!
+          .planItemsReservedElsewhere.map((r) => r.appointmentId),
+      ).toEqual([earlier.id]);
+      expect(
+        waiting.find((w) => w.appointmentId === earlier.id)!
+          .planItemsReservedElsewhere,
+      ).toEqual([]);
+      // «Traer a esta cita» en la que ya la tiene: no cambia nada.
+      await call(
+        'post',
+        `/appointments/${earlier.id}/plan-items/${itemId}/claim`,
+        undefined,
+        reception,
+      ).expect(200);
+      expect(await events(earlier.id, 'APPOINTMENT_PLAN_ITEMS')).toEqual([]);
+    });
+
+    it('quitar el ítem de la cita futura (planItemIds) también devuelve la reserva; completar la futura no', async () => {
+      const {
+        planId,
+        ids: [itemId, otherId],
+      } = await acceptedItems(2);
+      await accept(planId);
+      const today = await todayAppointment();
+      await rawLink(today.id, itemId);
+      await rawLink(today.id, otherId);
+      const future = await rawAppointment(inDays(11));
+      await rawLink(future.id, itemId);
+      await rawLink(future.id, otherId);
       await call(
         'patch',
         `/appointments/${today.id}`,
@@ -577,10 +673,41 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       await call(
         'patch',
         `/appointments/${future.id}`,
-        { status: 'CANCELLED' },
+        { planItemIds: [otherId] },
         reception,
       ).expect(200);
-      // Nadie lo reserva: no es «reservado en otra cita».
+      const byItem = async () =>
+        Object.fromEntries(
+          (await links(today.id)).map((l) => [l.planItemId, l.active]),
+        );
+      expect(await byItem()).toEqual({ [itemId]: true, [otherId]: false });
+      // La futura se completa (se hizo allí): no se devuelve a hoy.
+      await call('patch', `/appointments/${future.id}`, {
+        status: 'COMPLETED',
+      }).expect(200);
+      expect(await byItem()).toEqual({ [itemId]: true, [otherId]: false });
+    });
+
+    it('«Traer a esta cita» y el aviso solo con tratamiento aceptado de un plan aceptado (409 como el alta)', async () => {
+      const {
+        planId,
+        ids: [itemId],
+      } = await acceptedItems(1);
+      await accept(planId);
+      const today = await todayAppointment();
+      await rawLink(today.id, itemId);
+      const future = await rawAppointment(inDays(12));
+      await rawLink(future.id, itemId);
+      await call(
+        'patch',
+        `/appointments/${today.id}`,
+        { status: 'ARRIVED' },
+        reception,
+      ).expect(200);
+      await raw.treatmentPlan.update({
+        where: { id: planId },
+        data: { status: 'CANCELLED' },
+      });
       const panel = await call(
         'get',
         '/appointments/in-clinic',
@@ -600,21 +727,60 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
         ).waiting.find((w) => w.appointmentId === today.id)!
           .planItemsReservedElsewhere,
       ).toEqual([]);
-      await call(
+      const res = await call(
         'post',
         `/appointments/${today.id}/plan-items/${itemId}/claim`,
         undefined,
         reception,
-      ).expect(200);
-      expect(await links(today.id)).toEqual([
-        { planItemId: itemId, active: true, deletedAt: null },
-      ]);
-      const [event] = await events(today.id, 'APPOINTMENT_PLAN_ITEMS');
-      expect(event.metadata).toEqual({
-        reason: 'APPOINTMENT_PLAN_ITEMS',
-        changedFields: ['planItemIds'],
-        params: { planItemId: itemId, toAppointmentId: today.id },
+      ).expect(409);
+      expect((res.body as { message: string }).message).toBe(
+        'Solo se agenda tratamiento aceptado y pendiente de un plan aceptado.',
+      );
+      expect((await links(future.id))[0]).toMatchObject({
+        active: true,
+        deletedAt: null,
       });
+      expect(await events(today.id, 'APPOINTMENT_PLAN_ITEMS')).toEqual([]);
+    });
+
+    it('dos «Traer a esta cita» a la vez del mismo tratamiento: uno gana y el otro recibe 409', async () => {
+      const {
+        planId,
+        ids: [itemId],
+      } = await acceptedItems(1);
+      await accept(planId);
+      const first = await todayAppointment();
+      const second = await todayAppointment();
+      await rawLink(first.id, itemId);
+      await rawLink(second.id, itemId);
+      const future = await rawAppointment(inDays(13));
+      await rawLink(future.id, itemId);
+      for (const id of [first.id, second.id])
+        await call(
+          'patch',
+          `/appointments/${id}`,
+          { status: 'ARRIVED' },
+          reception,
+        ).expect(200);
+      const results = await Promise.all(
+        [first.id, second.id].map((id) =>
+          call(
+            'post',
+            `/appointments/${id}/plan-items/${itemId}/claim`,
+            undefined,
+            reception,
+          ),
+        ),
+      );
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      const active = [
+        ...(await links(first.id)),
+        ...(await links(second.id)),
+        ...(await links(future.id)),
+      ].filter((l) => l.active);
+      expect(active).toHaveLength(1);
+      const winner = results[0].status === 200 ? first.id : second.id;
+      expect((await links(winner))[0].active).toBe(true);
     });
 
     it('«Traer a esta cita»: 409 si la cita no está en la clínica, 404 si el tratamiento no es de la cita o la cita es de otra clínica', async () => {
@@ -715,6 +881,40 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       expect(await links(holder.id)).toEqual([
         { planItemId: itemId, active: true, deletedAt: null },
       ]);
+
+      // La cita destino en una sede no permitida: 403 (DX-089/SEC-045).
+      const {
+        planId: northPlan,
+        ids: [northItem],
+      } = await acceptedItems(1);
+      await accept(northPlan);
+      const northToday = await todayAppointment(north.id);
+      await rawLink(northToday.id, northItem);
+      await raw.appointment.update({
+        where: { id: northToday.id },
+        data: {
+          status: 'ARRIVED',
+          arrivedAt: new Date(),
+          preArrivalStatus: 'SCHEDULED',
+        },
+      });
+      await call(
+        'post',
+        `/appointments/${northToday.id}/plan-items/${northItem}/claim`,
+        undefined,
+        restricted,
+      ).expect(403);
+
+      // Quien ve las dos sedes la trae: el evento de la cita de origen va en
+      // la sede de esa cita (Norte), el de la destino en la suya.
+      await call(
+        'post',
+        `/appointments/${today.id}/plan-items/${itemId}/claim`,
+      ).expect(200);
+      const [fromEvent] = await events(holder.id, 'APPOINTMENT_PLAN_ITEMS');
+      expect(fromEvent.locationId).toBe(north.id);
+      const [toEvent] = await events(today.id, 'APPOINTMENT_PLAN_ITEMS');
+      expect(toEvent.locationId).toBe(locationId);
     });
   });
 });

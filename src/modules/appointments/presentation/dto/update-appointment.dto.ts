@@ -10,7 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Length,
+  MaxLength,
 } from 'class-validator';
 import { AppointmentStatus } from '@prisma/client';
 import {
@@ -75,8 +75,11 @@ export class UpdateAppointmentDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )
+  // Solo forma y tope aquí: el mínimo lo decide el dominio DESPUÉS del rol
+  // (recepción recibe 403 aunque el motivo sea corto), y fuera de una salida
+  // de COMPLETED el motivo se ignora.
   @IsString({ message: PATIENT_FLOW_MESSAGES.completedExitReason })
-  @Length(STATUS_REASON_MIN, STATUS_REASON_MAX, {
+  @MaxLength(STATUS_REASON_MAX, {
     message: PATIENT_FLOW_MESSAGES.completedExitReason,
   })
   statusReason?: string;
