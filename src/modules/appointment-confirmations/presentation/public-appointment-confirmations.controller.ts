@@ -8,6 +8,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiConflictResponse,
   ApiGoneResponse,
   ApiNotFoundResponse,
@@ -54,7 +55,14 @@ export class PublicAppointmentConfirmationsController {
   @HttpCode(200)
   @ApiOkResponse({ type: PublicAppointmentConfirmationDto })
   @ApiNotFoundResponse({ description: 'Token desconocido o de otra clínica.' })
-  @ApiConflictResponse({ description: 'El enlace ya se usó para responder.' })
+  @ApiBadRequestResponse({
+    description:
+      'DX-291: cancelar con menos aviso que la política sin `acknowledgePolicy: true` (mensaje en español).',
+  })
+  @ApiConflictResponse({
+    description:
+      'El enlace ya se usó para responder, o (DX-291) la política vigente no es la que mostró la página.',
+  })
   @ApiGoneResponse({
     description: 'El enlace caducó o la cita cambió desde que se envió.',
   })
@@ -62,6 +70,9 @@ export class PublicAppointmentConfirmationsController {
     @Param('token') token: string,
     @Body() dto: RespondAppointmentConfirmationDto,
   ): Promise<PublicAppointmentConfirmationDto> {
-    return this.respondConfirmation.execute(token, dto.action);
+    return this.respondConfirmation.execute(token, dto.action, {
+      acknowledgePolicy: dto.acknowledgePolicy,
+      policyVersionId: dto.policyVersionId,
+    });
   }
 }

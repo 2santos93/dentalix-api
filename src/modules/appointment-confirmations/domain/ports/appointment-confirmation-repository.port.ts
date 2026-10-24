@@ -7,6 +7,7 @@ import {
   ClinicBranding,
   ConfirmationAppointment,
 } from '../entities/appointment-confirmation.entity';
+import type { LinkCancellationPolicy } from '../link-cancellation-policy';
 
 // Sin `tenantId` en ningún input: el tenant sale SIEMPRE del contexto del
 // request (JWT + host en la ruta autenticada, solo host en la pública), igual
@@ -34,19 +35,28 @@ export interface RespondConfirmationInput {
   /** La cita solo se toca si sigue como al emitir el enlace. */
   expectedStart: Date;
   expectedStatus: AppointmentStatus;
+  /** DX-291: el paciente aceptó la política (cancelar tarde lo exige). */
+  acknowledgePolicy?: boolean;
+  /** DX-291: la versión que le mostró la página (sin enviar: no se compara). */
+  shownPolicyVersionId?: string | null;
 }
 
 /**
  * - OK: respuesta registrada y cita actualizada, todo en una transacción.
  * - ALREADY_USED: otro clic ganó la carrera (el enlace es de un solo uso).
  * - STALE: la cita cambió entre la lectura y la escritura; no se tocó nada.
+ * - POLICY_CHANGED / ACK_REQUIRED (DX-291): la política vigente no es la que
+ *   vio el paciente, o cancela tarde sin aceptarla; no se tocó nada.
  */
-export type RespondOutcome = 'OK' | 'ALREADY_USED' | 'STALE';
+export type RespondOutcome =
+  'OK' | 'ALREADY_USED' | 'STALE' | 'POLICY_CHANGED' | 'ACK_REQUIRED';
 
 export interface ConfirmationLookup {
   confirmation: AppointmentConfirmation;
   /** `null` si la cita se borró (en blando). */
   appointment: ConfirmationAppointment | null;
+  /** DX-291: política vigente de la sede de la cita (`null` = sin política). */
+  policy: LinkCancellationPolicy | null;
 }
 
 export const APPOINTMENT_CONFIRMATION_REPOSITORY = Symbol(

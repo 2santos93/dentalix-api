@@ -36,6 +36,8 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-291: cargos por inasistencia (hijos de appointments, ítems y políticas).
+  'cancellation_fees',
   // DX-273: salidas de COMPLETED (hijas de appointments).
   'appointment_status_reversals',
   'appointment_plan_items',
@@ -840,6 +842,16 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       },
     });
     expect(noShows).toBeGreaterThanOrEqual(2);
+    // DX-291: las incidencias tienen la política comunicada (se pueden cobrar).
+    const communicated = await raw.appointment.count({
+      where: {
+        tenantId,
+        patientId: late[0].patientId,
+        policyVersionId: policies[0].id,
+        OR: [{ status: 'NO_SHOW' }, { lateCancellation: true }],
+      },
+    });
+    expect(communicated).toBe(3);
     // Las cancelaciones del calendario llevan origen y motivo, y no son tardías.
     const cancelled = await raw.appointment.findMany({
       where: { tenantId, status: 'CANCELLED', lateCancellation: false },

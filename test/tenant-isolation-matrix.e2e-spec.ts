@@ -6,6 +6,7 @@ import {
   PrismaClient,
   Sex,
 } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import request from 'supertest';
@@ -400,10 +401,34 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     leadHours: [48, 2],
   }).expect(200);
   // DX-279: política de cancelación de la sede nueva de A.
-  await create(app, a, `/locations/${location.id}/cancellation-policy`, {
-    noticeHours: 24,
-    patientText: 'Avísanos con 24 horas.',
+  const cancellationPolicy = await create(
+    app,
+    a,
+    `/locations/${location.id}/cancellation-policy`,
+    {
+      noticeHours: 24,
+      suggestedFee: 50000,
+      currency: 'COP',
+      patientText: 'Avísanos con 24 horas.',
+    },
+  );
+  // DX-291: una inasistencia de A con su cargo (fila en cancellation_fees y
+  // plan «Cargos administrativos»).
+  const noShowStart = new Date(Date.now() - 72 * 3_600_000);
+  const noShow = await raw.appointment.create({
+    data: {
+      tenantId: a.tenantId,
+      locationId: location.id,
+      patientId,
+      providerId: randomUUID(),
+      start: noShowStart,
+      end: new Date(noShowStart.getTime() + 30 * 60_000),
+      status: 'NO_SHOW',
+      noShowMarkedAt: new Date(),
+      policyVersionId: cancellationPolicy.id,
+    },
   });
+  await create(app, a, `/appointments/${noShow.id}/cancellation-fee`, {});
   const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
   // DX-089: la dentista de A queda restringida a TODAS las sedes activas de A
   // (deja filas en membership_locations sin cambiar a qué puede acceder).
@@ -1051,6 +1076,34 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'GET /patients/:id/attendance-summary',
       verb: 'get',
       path: () => `/patients/${a.patientId}/attendance-summary`,
+      status: 404,
+    },
+    // --- cargo por inasistencia y vista previa del email (DX-291) ---
+    {
+      name: 'GET /appointments/:id/cancellation-fee',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee`,
+      status: 404,
+    },
+    {
+      name: 'POST /appointments/:id/cancellation-fee',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee`,
+      body: () => ({}),
+      status: 404,
+    },
+    {
+      name: 'POST /appointments/:id/cancellation-fee/waive',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee/waive`,
+      body: () => ({ reason: 'Intento ajeno' }),
+      status: 404,
+    },
+    {
+      name: 'GET /locations/:id/cancellation-policy/email-preview',
+      verb: 'get',
+      path: () =>
+        `/locations/${a.locationId}/cancellation-policy/email-preview`,
       status: 404,
     },
     // --- reminders (DX-026) ---

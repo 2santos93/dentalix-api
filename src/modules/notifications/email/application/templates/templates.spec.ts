@@ -190,6 +190,52 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(noLink.text).not.toContain('Profesional');
   });
 
+  it('appointment-reminder lleva la política de cancelación de la sede (DX-291, {politica_cancelacion})', () => {
+    const base = {
+      patientName: 'Carolina',
+      startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+      locationName: 'Sede Norte',
+      locationAddress: null,
+      providerName: null,
+      confirmUrl: null,
+      unsubscribeUrl: null,
+    };
+    const withPolicy = renderEmail(
+      'appointment-reminder',
+      {
+        ...base,
+        cancellationPolicy: {
+          noticeHours: 24,
+          text: 'Las citas no avisadas se cobran.',
+          feeLabel: '$ 50.000 COP',
+        },
+      },
+      brand,
+    );
+    const expected =
+      'Política de cancelación: si no puedes asistir, avísanos con al menos 24 h de antelación. Las citas no avisadas se cobran. La inasistencia o la cancelación con menos aviso puede tener un cargo de $ 50.000 COP.';
+    expect(withPolicy.text).toContain(expected);
+    expect(withPolicy.html).toContain('Política de cancelación');
+
+    const htmlInjection = renderEmail(
+      'appointment-reminder',
+      {
+        ...base,
+        cancellationPolicy: {
+          noticeHours: 2,
+          text: '<script>alert(1)</script>',
+          feeLabel: null,
+        },
+      },
+      brand,
+    );
+    expect(htmlInjection.html).not.toContain('<script>');
+    expect(htmlInjection.text).not.toContain('cargo de');
+
+    const without = renderEmail('appointment-reminder', base, brand);
+    expect(without.text).not.toContain('Política de cancelación');
+  });
+
   it('appointment-reminder de un menor saluda a su tutor y nombra al paciente (DX-128)', () => {
     const email = renderEmail(
       'appointment-reminder',

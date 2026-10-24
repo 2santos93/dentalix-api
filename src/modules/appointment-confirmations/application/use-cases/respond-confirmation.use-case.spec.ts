@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   NotFoundException,
@@ -57,6 +58,8 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
         },
         response: null,
         respondedAt: null,
+        cancellationPolicy: null,
+        isLate: false,
       });
     });
 
@@ -194,6 +197,104 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       await expect(
         inTenant(() => respond.execute('B'.repeat(43), 'confirm')),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('política de cancelación en el enlace (DX-291)', () => {
+    const POLICY = {
+      id: 'pol-v2',
+      version: 2,
+      noticeHours: 24,
+      patientText: 'Avísanos con 24 h o se cobra la cita.',
+      suggestedFee: 50000,
+      currency: 'COP',
+    };
+    const fiveHours = () => ({ start: new Date(Date.now() + 5 * 3600_000) });
+
+    beforeEach(() => {
+      repo.policy = POLICY;
+    });
+
+    it('la vista PENDING lleva el texto, las horas y el importe, e isLate a 5 h de una política de 24 h', async () => {
+      const { token } = await issue(fiveHours());
+      const view = await inTenant(() => get.execute(token));
+      expect(view.cancellationPolicy).toEqual({
+        policyVersionId: 'pol-v2',
+        noticeHours: 24,
+        text: 'Avísanos con 24 h o se cobra la cita.',
+        suggestedFee: 50000,
+        currency: 'COP',
+      });
+      expect(view.isLate).toBe(true);
+    });
+
+    it('con tiempo de sobra no es tardía', async () => {
+      const { token } = await issue({
+        start: new Date(Date.now() + 48 * 3600_000),
+      });
+      const view = await inTenant(() => get.execute(token));
+      expect(view.isLate).toBe(false);
+    });
+
+    it('cancelar tarde sin acknowledgePolicy: 400 en español y la cita sigue igual', async () => {
+      const { appointment, token } = await issue(fiveHours());
+      await expect(
+        inTenant(() => respond.execute(token, 'cancel')),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Cancelación con menos de 24 h de aviso: para cancelar, acepta la política de cancelación de la clínica.',
+        ),
+      );
+      const row = repo.appointments.get(appointment.id)!;
+      expect(row.status).toBe('SCHEDULED');
+      expect(row.policyVersionId).toBeNull();
+      expect(repo.confirmations[0].respondedAt).toBeNull();
+    });
+
+    it('con acknowledgePolicy cancela, marca tardía y guarda la versión comunicada', async () => {
+      const { appointment, token } = await issue(fiveHours());
+      const view = await inTenant(() =>
+        respond.execute(token, 'cancel', {
+          acknowledgePolicy: true,
+          policyVersionId: 'pol-v2',
+        }),
+      );
+      expect(view.status).toBe('RESPONDED');
+      const row = repo.appointments.get(appointment.id)!;
+      expect(row.status).toBe('CANCELLED');
+      expect(row.noticeLate).toBe(true);
+      expect(row.policyVersionId).toBe('pol-v2');
+    });
+
+    it('«Quiero que me llamen» sigue disponible sin aceptar la política', async () => {
+      const { appointment, token } = await issue(fiveHours());
+      await inTenant(() => respond.execute(token, 'call_me'));
+      expect(
+        repo.appointments.get(appointment.id)!.callbackRequestedAt,
+      ).not.toBeNull();
+    });
+
+    it('si la página mostró otra versión: 409 y no se registra nada', async () => {
+      const { token } = await issue(fiveHours());
+      await expect(
+        inTenant(() =>
+          respond.execute(token, 'confirm', { policyVersionId: 'pol-v1' }),
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(repo.confirmations[0].respondedAt).toBeNull();
+    });
+
+    it('la vista no expone nada clínico ni de la cita más allá de lo de siempre', async () => {
+      const { token } = await issue(fiveHours());
+      const view = await inTenant(() => get.execute(token));
+      expect(Object.keys(view.appointment ?? {}).sort()).toEqual([
+        'end',
+        'locationAddress',
+        'locationName',
+        'patientFirstName',
+        'providerName',
+        'start',
+      ]);
     });
   });
 });

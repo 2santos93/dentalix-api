@@ -1401,7 +1401,9 @@ class DemoSeeder {
    * DX-279: el ADMIN guarda la política de cancelación de la sede principal
    * (por el mismo caso de uso que la API) y una paciente acumula dos
    * inasistencias y una cancelación tardía en citas pasadas de esa sede, para
-   * ver la insignia en su ficha y en sus citas.
+   * ver la insignia en su ficha y en sus citas. DX-291: esas tres citas
+   * tienen la política comunicada (como si la hubiera llevado el
+   * recordatorio), así que «Generar cargo» funciona en la demo.
    */
   private async createCancellationPolicy(
     tenantId: string,
@@ -1413,7 +1415,7 @@ class DemoSeeder {
   ): Promise<void> {
     const { location, policy, incidents } = DEMO_CANCELLATION;
     const locationId = locations[location];
-    await this.inTenant(tenantId, locationId, () =>
+    const version = await this.inTenant(tenantId, locationId, () =>
       this.use(CreateCancellationPolicyVersionUseCase).execute(
         locationId,
         { ...policy },
@@ -1447,11 +1449,13 @@ class DemoSeeder {
         `Sin hueco en la sede ${location} desde hace ${daysAgo} días`,
       );
     };
-    await this.inTenant(tenantId, locationId, async () => {
+    const incidentIds = await this.inTenant(tenantId, locationId, async () => {
       const update = this.use(UpdateAppointmentUseCase);
+      const ids: string[] = [];
       for (const daysAgo of incidents.noShowDaysAgo) {
         const a = await book(daysAgo);
         await update.execute(a.id, { status: AppointmentStatus.NO_SHOW });
+        ids.push(a.id);
       }
       const late = incidents.lateCancellation;
       const a = await book(late.daysAgo);
@@ -1463,7 +1467,15 @@ class DemoSeeder {
           at: new Date(a.start.getTime() - late.hoursBefore * 3_600_000),
         },
       });
+      ids.push(a.id);
+      return ids;
     });
+    await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.appointment.updateMany({
+        where: { id: { in: incidentIds } },
+        data: { policyVersionId: version.id },
+      }),
+    );
   }
 
   /**

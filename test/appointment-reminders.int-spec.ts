@@ -101,6 +101,8 @@ async function cleanup(): Promise<void> {
   await owner.emailOutbox.deleteMany({ where });
   await owner.appointmentConfirmation.deleteMany({ where });
   await owner.appointment.deleteMany({ where });
+  // DX-291: la versión de la política que llevó el recordatorio.
+  await owner.cancellationPolicyVersion.deleteMany({ where });
   await owner.locationReminderSettings.deleteMany({ where });
   await owner.patient.deleteMany({ where });
   await owner.clinicMembership.deleteMany({ where });
@@ -1139,6 +1141,39 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     const after = await owner.appointment.findUniqueOrThrow({ where: { id } });
     expect(after.callbackRequestedAt).toEqual(callback);
     expect(after.confirmationSentAt).not.toBeNull();
+  });
+
+  it('DX-291: el recordatorio deja constancia de la versión de la política enviada, en el registro y en la cita', async () => {
+    await configure(clinicA, [2]);
+    const policy = await owner.cancellationPolicyVersion.create({
+      data: {
+        tenantId: clinicA.tenantId,
+        locationId: clinicA.locationId,
+        version: 1,
+        noticeHours: 24,
+        suggestedFee: 50000,
+        currency: 'COP',
+        patientText: 'Avísanos con 24 horas.',
+        createdById: clinicA.providerId,
+      },
+    });
+    const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
+    const id = await appointment(
+      clinicA,
+      await patient(clinicA, 'politica@example.com'),
+      start,
+    );
+    await sweep();
+    await releaseDue(clinicA.tenantId);
+
+    const [sent] = await records(id);
+    expect(sent).toMatchObject({ status: 'SENT' });
+    const reminder = await owner.appointmentReminder.findFirstOrThrow({
+      where: { appointmentId: id },
+    });
+    expect(reminder.policyVersionId).toBe(policy.id);
+    const after = await owner.appointment.findUniqueOrThrow({ where: { id } });
+    expect(after.policyVersionId).toBe(policy.id);
   });
 
   it('SEC-036: un trabajo de la clínica B con una cita de A no lee ni envía nada', async () => {

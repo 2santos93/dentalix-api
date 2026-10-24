@@ -18,6 +18,7 @@ import { ReminderClock } from './reminder-clock';
 import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
 import { noticeRecipient } from '../../patients/domain/communication/notice-recipient';
 import { civilDateIn } from '../../../shared/time/civil-day';
+import { reminderPolicyVars } from '../../cancellation-policies/domain/reminder-policy-vars';
 
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -192,6 +193,17 @@ export class SendAppointmentReminder {
           (id, tx) => this.repo.attachOutbound(claim.id, id, tx),
         )
       ).id;
+    // DX-291: constancia de la versión de la política que lleva el email, en
+    // el recordatorio y en la cita (la comunicada al paciente), ANTES de
+    // encolarlo: un reintento que la encuentre cambiada la reescribe y manda
+    // el email con la nueva.
+    if (ctx.cancellationPolicy) {
+      await this.repo.recordPolicyVersion(
+        claim.id,
+        appointmentId,
+        ctx.cancellationPolicy.id,
+      );
+    }
     // DX-128: la de un menor saluda a su responsable (o contacto principal)
     // y nombra al paciente.
     await this.email.enqueue({
@@ -217,6 +229,7 @@ export class SendAppointmentReminder {
           linkBase && optOutToken
             ? `${linkBase}${OPT_OUT_PATH}/${optOutToken}`
             : null,
+        cancellationPolicy: reminderPolicyVars(ctx.cancellationPolicy),
       },
     });
     await this.finish(claim.id, outboundId, appointmentId, leadHours);

@@ -1,5 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsIn } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsUUID,
+  ValidateIf,
+} from 'class-validator';
 import type { ConfirmationState } from '../../domain/entities/appointment-confirmation.entity';
 import type { ConfirmationAction } from '../../application/public-confirmation-view';
 
@@ -53,6 +59,31 @@ export class PublicConfirmationClinicDto {
   logoUrl!: string | null;
 }
 
+/**
+ * DX-291: la política de cancelación vigente de la sede, tal como la lee el
+ * paciente. Sin datos clínicos.
+ */
+export class PublicCancellationPolicyDto {
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Versión mostrada: la página la devuelve en `policyVersionId` al responder.',
+  })
+  policyVersionId!: string;
+
+  @ApiProperty({ minimum: 0, maximum: 168 })
+  noticeHours!: number;
+
+  @ApiProperty({ description: 'Texto de la clínica (puede ir vacío).' })
+  text!: string;
+
+  @ApiProperty({ type: Number, nullable: true })
+  suggestedFee!: number | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'COP' })
+  currency!: string | null;
+}
+
 // Respuesta de GET y POST /public/appointment-confirmations/:token.
 export class PublicAppointmentConfirmationDto {
   @ApiProperty({
@@ -77,12 +108,46 @@ export class PublicAppointmentConfirmationDto {
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   respondedAt!: Date | null;
+
+  @ApiProperty({
+    type: PublicCancellationPolicyDto,
+    nullable: true,
+    description:
+      'DX-291: política vigente de la sede (solo con el enlace PENDING; null sin política).',
+  })
+  cancellationPolicy!: PublicCancellationPolicyDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-291: cancelar ahora tendría menos aviso que la política: cancelar exige `acknowledgePolicy`.',
+  })
+  isLate!: boolean;
 }
 
 export class RespondAppointmentConfirmationDto {
   @ApiProperty({ enum: CONFIRMATION_ACTIONS })
   @IsIn(CONFIRMATION_ACTIONS)
   action!: ConfirmationAction;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-291: el paciente acepta la política de cancelación. Obligatorio (true) para cancelar con menos aviso que la política (400 sin él).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  acknowledgePolicy?: boolean;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-291: versión de la política que mostró la página (null = ninguna). Si ya no es la vigente: 409 y la página se recarga.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  policyVersionId?: string | null;
 }
 
 // Respuesta de POST /appointments/:id/confirmation-link.

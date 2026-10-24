@@ -22,6 +22,8 @@ interface StoredReminder {
   outboundMessageId: string | null;
   sentAt: Date | null;
   failureReason?: string | null;
+  /** DX-291: versión de la política que llevaba el email. */
+  policyVersionId?: string | null;
 }
 
 /** Repositorio en memoria para los unit tests de los casos de uso (DX-026). */
@@ -30,6 +32,8 @@ export class FakeReminderRepository implements ReminderRepository {
   readonly contexts = new Map<string, ReminderSendContext>();
   readonly reminders: StoredReminder[] = [];
   readonly queuedEmails = new Set<string>();
+  /** DX-291: versión comunicada guardada en cada cita. */
+  readonly appointmentPolicyVersions = new Map<string, string>();
   candidates: Record<string, ReminderCandidate[]> = {};
   snapshot: AppointmentRemindersSnapshot | null = null;
   private seq = 0;
@@ -133,6 +137,17 @@ export class FakeReminderRepository implements ReminderRepository {
 
   emailQueuedFor(outboundMessageId: string): Promise<boolean> {
     return Promise.resolve(this.queuedEmails.has(outboundMessageId));
+  }
+
+  recordPolicyVersion(
+    reminderId: string,
+    appointmentId: string,
+    policyVersionId: string,
+  ): Promise<void> {
+    const row = this.reminders.find((r) => r.id === reminderId);
+    if (row) row.policyVersionId = policyVersionId;
+    this.appointmentPolicyVersions.set(appointmentId, policyVersionId);
+    return Promise.resolve();
   }
 
   markSent(reminderId: string, sentAt: Date): Promise<void> {

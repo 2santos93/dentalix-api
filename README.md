@@ -1662,7 +1662,7 @@ de esquemas propios de una librería).
 Porción 1: la política por sede, quién y cuándo canceló, si fue tardía y el
 resumen de asistencia del paciente. Mostrar la política al paciente (recordatorio
 y enlace con `acknowledgePolicy`), rellenar `policyVersionId` y el cargo o su
-condonación son DX-291.
+condonación son DX-291 (sección siguiente).
 
 - **Tabla `cancellation_policy_versions`** (RLS FORCE, FK compuesta a la sede,
   moneda del catálogo): horas de aviso 0–168, importe sugerido ≥ 0 con su
@@ -1717,6 +1717,68 @@ condonación son DX-291.
   cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
   citas). Las cancelaciones del calendario se registran avisadas por el
   paciente con 2 días.
+
+## Política comunicada y cargo por inasistencia (DX-291)
+
+Porción 2 de DX-279: probar que el paciente fue informado y cobrar (o
+condonar) el cargo con el flujo de plan, abono y recibo de siempre.
+
+- **Recordatorio** (DX-026): el email `appointment-reminder` lleva la variable
+  `{politica_cancelacion}` (`vars.cancellationPolicy`: horas de aviso, texto
+  de la clínica e importe formateado) con la política VIGENTE de la sede al
+  enviarlo; sin política, el bloque no sale. Antes de encolarlo se guarda la
+  versión en `appointment_reminders."policyVersionId"` y en
+  `appointments."policyVersionId"` (la comunicada; FK compuestas).
+- **Enlace público** (DX-005): `GET /public/appointment-confirmations/:token`
+  devuelve además `cancellationPolicy` (`policyVersionId`, `noticeHours`,
+  `text`, `suggestedFee`, `currency`; solo con el enlace PENDING) e `isLate`
+  (cancelar ahora tendría menos aviso que la política). Nada clínico. En el
+  `POST`, cancelar tarde exige `acknowledgePolicy: true` (400 «Cancelación con
+  menos de N h de aviso: para cancelar, acepta la política…»); confirmar y
+  «Quiero que me llamen» no. Si la página manda `policyVersionId` y ya no es
+  la vigente: 409 (la página se recarga). Toda respuesta guarda la versión
+  vigente como comunicada; cancelar guarda `PATIENT_LINK`, el aviso y si fue
+  tardía (DX-279), con la cita bloqueada y en la misma transacción.
+- **Cargo**: `GET /appointments/:id/cancellation-fee` (estado, bloqueo y si
+  el usuario puede decidir), `POST /appointments/:id/cancellation-fee`
+  (`{ amount? }`) y `POST …/cancellation-fee/waive` (`{ reason }`, 3–500).
+  ADMIN y RECEPTION pasan el guard; RECEPTION solo escribe si la política
+  VIGENTE de la sede tiene `receptionCanCharge` (403 en español). Solo una cita
+  NO_SHOW o cancelada tarde. El cargo crea (o reutiliza) el plan ACCEPTED
+  «Cargos administrativos» (`optionLabel`) del paciente en la moneda de la
+  versión COMUNICADA y le añade un ítem DONE (procedimiento inactivo
+  `ADM-CANCELACION` del catálogo de la clínica, sin diente, `completedAt` y
+  sede de la cita, sin profesional) con el importe sugerido o menos (más: 400).
+  Sale en el estado de cuenta y se cobra con `POST /treatment-plans/:id/payments`
+  y su recibo consecutivo (DX-136). Condonar (antes de cobrar) deja la
+  decisión con su motivo. 409 en español: no es inasistencia ni tardía, «No
+  consta que el paciente fuera informado de la política» (sin
+  `policyVersionId`), la versión comunicada no tiene importe, cobertura
+  `EPS_CO` vigente (día civil de la sede) en una sede de Colombia (Ley 1438
+  de 2011, art. 55), ya cobrado o condonado, o la cita cambió.
+- **Tabla `cancellation_fees`**: una fila por cita (único
+  `(tenantId, appointmentId)`), RLS FORCE, append-only para la app (sin
+  UPDATE/DELETE), FK compuestas a la cita, al ítem (por paciente), a la sede y
+  a la versión, y CHECK `cancellation_fees_status_check` (CHARGED: importe > 0,
+  moneda, ítem y versión; WAIVED: solo el motivo). **Idempotencia**: el cargo
+  bloquea la cita (`FOR UPDATE`) y el paciente (para no crear dos planes) y el
+  índice único es el respaldo: varias peticiones a la vez dejan una sola 201 y
+  las demás 409 (`test/cancellation-fee.int-spec.ts`).
+- **Auditoría**: `@Audit` sobre la cita: `CREATE APPOINTMENT`
+  `CANCELLATION_FEE_CHARGED` y `UPDATE APPOINTMENT` `CANCELLATION_FEE_WAIVED`,
+  con el paciente; nunca el texto del motivo.
+- **Bloqueo por EPS_CO**: lo fija la plataforma con
+  `CANCELLATION_FEE_BLOCK_EPS_CO` (`true` por defecto, `false` lo apaga); la
+  clínica no puede cambiarlo.
+- **Fecha de cierre (DX-091)**: aún no hay bloqueo contable; el ítem y el
+  abono se fechan con la hora del servidor (hoy), así que nunca caen en un
+  período anterior.
+- **Vista previa** (Ajustes → Sedes, solo ADMIN): `GET
+  /locations/:id/cancellation-policy/email-preview` → `{ subject, html, text }`
+  del recordatorio con la marca de la clínica y la política vigente (paciente
+  y profesional de ejemplo). No envía nada.
+- **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
+  Arango tienen la política comunicada: «Generar cargo» funciona como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
 

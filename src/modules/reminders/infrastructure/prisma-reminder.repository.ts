@@ -217,13 +217,26 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
       });
       if (!appointment) return null;
-      const [settings, zones, responsibles] = await Promise.all([
+      const [settings, zones, responsibles, policy] = await Promise.all([
         tx.locationReminderSettings.findFirst({
           where: { locationId: appointment.locationId },
           select: { enabled: true, leadHours: true },
         }),
         loadLocationTimeZones(tx, tenantId, [appointment.locationId]),
         loadNoticeResponsibles(tx, appointment.patient.id),
+        // DX-291: la política vigente de la sede, para el email.
+        tx.cancellationPolicyVersion.findFirst({
+          where: { locationId: appointment.locationId },
+          orderBy: { version: 'desc' },
+          select: {
+            id: true,
+            version: true,
+            noticeHours: true,
+            patientText: true,
+            suggestedFee: true,
+            currency: true,
+          },
+        }),
       ]);
       return {
         appointment: {
@@ -245,7 +258,33 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
         responsibles,
         settings,
+        cancellationPolicy: policy
+          ? {
+              ...policy,
+              suggestedFee:
+                policy.suggestedFee === null
+                  ? null
+                  : policy.suggestedFee.toNumber(),
+            }
+          : null,
       };
+    });
+  }
+
+  async recordPolicyVersion(
+    reminderId: string,
+    appointmentId: string,
+    policyVersionId: string,
+  ): Promise<void> {
+    await this.prisma.runWithTenant(async (tx) => {
+      await tx.appointmentReminder.updateMany({
+        where: { id: reminderId, appointmentId },
+        data: { policyVersionId },
+      });
+      await tx.appointment.updateMany({
+        where: { id: appointmentId },
+        data: { policyVersionId },
+      });
     });
   }
 
