@@ -2196,7 +2196,7 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
     tipo de pagador, los **4 últimos** caracteres del nº (ninguno si el nº
     tiene 4 o menos: serían el número entero) y si quedó verificada; nunca el
     número entero. Los logs redactan cualquier clave `memberNumber`.
-  - Migración `20261024150000_sec049_coverage_verification`: tres columnas
+  - Migración `20261024152000_sec049_coverage_verification`: tres columnas
     NULL sin relleno y un CHECK `NOT VALID` + `VALIDATE` (verificada = quién
     y cuándo, o ninguno). Matriz rol × verificada × creada por sí mismo en
     `test/patient-coverages-verification.e2e-spec.ts`.
