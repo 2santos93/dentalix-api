@@ -98,11 +98,16 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     return res.body as Coverage[];
   }
 
+  /** Alta; sin `memberNumber`, uno válido (SEC-049: lo exige el pagador externo). */
   const add = (
     patientId: string,
     body: Record<string, unknown>,
     token = tokens.RECEPTION,
-  ) => as(api().post(coverages(patientId)), token).send(body);
+  ) =>
+    as(api().post(coverages(patientId)), token).send({
+      memberNumber: '1020304050',
+      ...body,
+    });
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -120,7 +125,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }
     sanitas = await createPayer(clinic, {
       name: 'Sanitas',
-      type: 'EPS_CO',
+      type: 'PREPAGADA_CO',
       country: 'CO',
     });
     sura = await createPayer(clinic, {
@@ -155,7 +160,12 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }).expect(201);
     expect(res.body).toMatchObject({
       patientId: patient,
-      payer: { id: sanitas, name: 'Sanitas', type: 'EPS_CO', active: true },
+      payer: {
+        id: sanitas,
+        name: 'Sanitas',
+        type: 'PREPAGADA_CO',
+        active: true,
+      },
       planName: 'Plan Oro',
       memberNumber: 'AFI-778899',
       policyHolderName: 'Luis Ortiz',
@@ -420,7 +430,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       .map((e) => (e.metadata as { reason?: string }).reason)
       .filter(Boolean);
     expect(reasons).toEqual([
-      'COVERAGE_ADDED',
+      'COVERAGE_CREATED',
       'COVERAGE_CHANGED',
       'COVERAGE_REMOVED',
     ]);

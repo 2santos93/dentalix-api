@@ -30,6 +30,48 @@ function req(overrides: Partial<AuditedRequest> = {}): AuditedRequest {
 }
 
 describe('buildAuditDraft (DX-009)', () => {
+  it('cobertura (SEC-049): de la respuesta, solo el tipo de pagador, los 4 últimos del nº y si está verificada', () => {
+    const options: AuditOptions = {
+      action: 'UPDATE',
+      resource: 'PATIENT',
+      resourceId: { param: 'patientId' },
+      patient: { param: 'patientId' },
+      reason: 'COVERAGE_CREATED',
+      coverage: true,
+    };
+    const draft = buildAuditDraft(
+      options,
+      req({
+        params: { patientId: PATIENT },
+        body: { payerId: PLAN, memberNumber: '1.020.304.050' },
+        user: { sub: USER, tenantId: TENANT, role: 'RECEPTION' },
+      }),
+      {
+        id: ENTRY,
+        payer: { id: PLAN, type: 'EPS_CO' },
+        memberNumber: '1.020.304.050',
+        verifiedAt: null,
+      },
+      scope,
+    );
+    expect(draft?.actor).toEqual({
+      kind: 'user',
+      userId: USER,
+      role: 'RECEPTION',
+    });
+    expect(draft?.metadata).toEqual({
+      changedFields: ['memberNumber', 'payerId'],
+      params: { patientId: PATIENT },
+      reason: 'COVERAGE_CREATED',
+      coverage: {
+        payerType: 'EPS_CO',
+        memberNumberLast4: '4050',
+        verified: false,
+      },
+    });
+    expect(JSON.stringify(draft?.metadata)).not.toMatch(/1020|304/);
+  });
+
   it('receta segura (DX-300): códigos de los avisos y si se confirmaron; ni el texto de los avisos ni el motivo', () => {
     const options: AuditOptions = {
       action: 'CREATE',

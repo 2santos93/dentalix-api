@@ -10,6 +10,7 @@ import type {
   AuditPatientRef,
 } from '../domain/audit-event';
 import { sanitizeAuditMetadata } from '../domain/audit-metadata';
+import { memberNumberLast4 } from '../../patient-coverages/domain/member-number-rules';
 import type { AuditOptions } from './audit-options';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -164,6 +165,24 @@ function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/** SEC-049: tipo de pagador, 4 últimos del nº y verificación de la cobertura. */
+function coverageOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    payer?: { type?: unknown };
+    memberNumber?: unknown;
+    verifiedAt?: unknown;
+  };
+  return {
+    payerType: b.payer?.type,
+    memberNumberLast4:
+      typeof b.memberNumber === 'string'
+        ? memberNumberLast4(b.memberNumber)
+        : null,
+    verified: b.verifiedAt !== null && b.verifiedAt !== undefined,
+  };
+}
+
 /** Nombres (nunca valores) de los campos de primer nivel del cuerpo. */
 function bodyFields(body: unknown): string[] {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
@@ -217,6 +236,7 @@ export function buildAuditDraft(
       ...(options.prescriptionSafety
         ? { prescriptionSafety: prescriptionSafetyOf(responseBody) }
         : {}),
+      ...(options.coverage ? { coverage: coverageOf(responseBody) } : {}),
     }),
   };
 }

@@ -45,7 +45,7 @@ function nextTuesday(): string {
   }
 }
 
-const MEMBER_NUMBER = 'AFIL-777-SECRETO';
+const MEMBER_NUMBER = '7770001234';
 
 describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
   let app: INestApplication<App>;
@@ -82,8 +82,12 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
       docNumber: String(Math.floor(Math.random() * 1e9)),
     });
 
+  /** Sin `memberNumber`, el de la constante (SEC-049: lo exige la EPS). */
   const cover = (key: string, body: Record<string, unknown>) =>
-    post(clinic, `/api/v1/patients/${patients[key]}/coverages`, body);
+    post(clinic, `/api/v1/patients/${patients[key]}/coverages`, {
+      memberNumber: MEMBER_NUMBER,
+      ...body,
+    });
 
   beforeAll(async () => {
     app = await createE2eApp();

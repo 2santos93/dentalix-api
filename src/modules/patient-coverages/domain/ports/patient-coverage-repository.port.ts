@@ -18,7 +18,10 @@ export interface CreateCoverageRepoInput {
   createdById: string;
 }
 
-/** Solo lo que cambia. `isPrimary: true` la marca principal (ver `update`). */
+/**
+ * Solo lo que cambia. `isPrimary: true` la marca principal (ver `update`).
+ * `memberNumber` llega normalizado (`normalizeMemberNumber`).
+ */
 export interface UpdateCoverageRepoPatch {
   payerId?: string;
   planName?: string | null;
@@ -62,10 +65,24 @@ export interface PatientCoverageRepository {
    * red del índice parcial salta, 422 y no queda nada escrito.
    */
   create(input: CreateCoverageRepoInput): Promise<PatientCoverage>;
-  /** Igual que `create` para `patch.isPrimary: true`: edición y marca, o nada. */
+  /**
+   * Igual que `create` para `patch.isPrimary: true`: edición y marca, o nada.
+   * SEC-049: si cambia el pagador o el nº de afiliado (comparado con lo
+   * guardado, con el candado tomado), borra la verificación y el editor pasa a
+   * ser quien lo declaró (`declaredById`).
+   */
   update(
     id: string,
     patch: UpdateCoverageRepoPatch,
+  ): Promise<PatientCoverage | null>;
+  /**
+   * SEC-049: la marca verificada por `verifiedById` ahora, con el candado del
+   * paciente tomado. 409 si el nº guardado ya no es `checkedMemberNumber` (lo
+   * cambió otra petición mientras el ADMIN lo revisaba). `null` si no está viva.
+   */
+  verify(
+    id: string,
+    input: { checkedMemberNumber: string; verifiedById: string },
   ): Promise<PatientCoverage | null>;
   /**
    * Retiro lógico. Si era la principal y quedan vivas, la más antigua pasa a

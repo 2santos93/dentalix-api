@@ -30,6 +30,7 @@ const HOLDER_MESSAGE = textMessage(
 );
 const NOTES_MESSAGE = textMessage('Las notas', COVERAGE_NOTES_MAX);
 const PRIMARY_MESSAGE = 'La cobertura principal debe ser verdadero o falso.';
+const CHECKED_MEMBER_MESSAGE = 'Indica el nº de afiliado que comprobaste.';
 
 export class CoveragePayerDto {
   @ApiProperty({ format: 'uuid' })
@@ -104,6 +105,30 @@ export class PatientCoverageDto {
   migratedFromInsurerEps!: boolean;
 
   @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    type: String,
+    description:
+      'SEC-049: quién puso por última vez el pagador o el nº de afiliado (en las anteriores, quien la creó). Un rol que no es ADMIN no puede asignar un convenio con una cobertura que declaró él y nadie verificó.',
+  })
+  declaredById!: string | null;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    type: String,
+    description:
+      'SEC-049: cuándo la verificó un ADMIN; null = sin verificar. Cambiar el pagador o el nº de afiliado la borra.',
+  })
+  verifiedAt!: Date | null;
+
+  @ApiProperty({ format: 'uuid', nullable: true, type: String })
+  verifiedById!: string | null;
+
+  @ApiProperty({ nullable: true, type: String, example: 'Ana Gómez' })
+  verifiedByName!: string | null;
+
+  @ApiProperty({
     enum: ['ACTIVE', 'EXPIRED', 'NOT_STARTED'],
     description: 'Calculado a hoy en la zona de la sede.',
   })
@@ -128,7 +153,11 @@ export class CreatePatientCoverageDto {
   @MaxLength(PLAN_NAME_MAX, { message: PLAN_MESSAGE })
   planName?: string;
 
-  @ApiPropertyOptional({ maxLength: MEMBER_NUMBER_MAX })
+  @ApiPropertyOptional({
+    maxLength: MEMBER_NUMBER_MAX,
+    description:
+      'SEC-049: obligatorio con un pagador externo (EPS, prepagada, mutua, empresa), con formato por tipo; opcional con OTRO.',
+  })
   @IsOptional()
   @IsString({ message: MEMBER_MESSAGE })
   @MaxLength(MEMBER_NUMBER_MAX, { message: MEMBER_MESSAGE })
@@ -233,4 +262,16 @@ export class UpdatePatientCoverageDto {
   @IsString({ message: NOTES_MESSAGE })
   @MaxLength(COVERAGE_NOTES_MAX, { message: NOTES_MESSAGE })
   notes?: string | null;
+}
+
+/** SEC-049: verificación de una cobertura por un ADMIN. */
+export class VerifyPatientCoverageDto {
+  @ApiProperty({
+    maxLength: MEMBER_NUMBER_MAX,
+    description:
+      'El nº de afiliado que el administrador comprobó. Si ya no es el guardado (otra petición lo cambió), 409.',
+  })
+  @IsString({ message: CHECKED_MEMBER_MESSAGE })
+  @MaxLength(MEMBER_NUMBER_MAX, { message: CHECKED_MEMBER_MESSAGE })
+  checkedMemberNumber!: string;
 }

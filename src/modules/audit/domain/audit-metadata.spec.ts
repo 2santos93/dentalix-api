@@ -538,4 +538,42 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
       expect(sanitizeAuditMetadata({ cancellation })).toEqual({});
     }
   });
+
+  it('cobertura (SEC-049): tipo de pagador, 4 últimos del nº y si está verificada; nada más', () => {
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EPS_CO',
+          memberNumberLast4: '4050',
+          verified: true,
+          memberNumber: '1020304050',
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EPS_CO',
+        memberNumberLast4: '4050',
+        verified: true,
+      },
+    });
+    // Más de 4 caracteres, o con separadores, no pasa: sería el número.
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EPS_CO',
+          memberNumberLast4: '1020304050',
+          verified: false,
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EPS_CO',
+        memberNumberLast4: null,
+        verified: false,
+      },
+    });
+    expect(
+      sanitizeAuditMetadata({ coverage: { payerType: 'eps', verified: true } }),
+    ).toEqual({});
+  });
 });

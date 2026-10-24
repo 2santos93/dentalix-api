@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -12,9 +13,11 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   COVERAGE_LIMIT_MESSAGE,
   COVERAGE_PAYER_NOT_FOUND_MESSAGE,
+  COVERAGE_VERIFY_STALE_MESSAGE,
   PAYER_INACTIVE_MESSAGE,
   MAX_COVERAGES_PER_PATIENT,
 } from '../../domain/coverage-rules';
+import { memberNumberChanged } from '../../domain/member-number-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import type {
   CreateCoverageRepoInput,
@@ -43,7 +46,23 @@ const fromDateOnly = (value: string): Date =>
 const dateOrNull = (value: string | null | undefined) =>
   value === undefined ? undefined : value === null ? null : fromDateOnly(value);
 
-function toEntity(row: Row): PatientCoverage {
+/** Nombre de quien verificó cada cobertura: `users` es global, una consulta por lote. */
+async function verifierNames(
+  tx: Prisma.TransactionClient,
+  rows: readonly Row[],
+): Promise<Map<string, string>> {
+  const ids = [
+    ...new Set(rows.flatMap((r) => (r.verifiedById ? [r.verifiedById] : []))),
+  ];
+  if (ids.length === 0) return new Map();
+  const users = await tx.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fullName: true },
+  });
+  return new Map(users.map((u) => [u.id, u.fullName]));
+}
+
+function toEntity(row: Row, names: Map<string, string>): PatientCoverage {
   return {
     id: row.id,
     patientId: row.patientId,
@@ -56,6 +75,12 @@ function toEntity(row: Row): PatientCoverage {
     isPrimary: row.isPrimary,
     notes: row.notes,
     migratedFromInsurerEps: row.migratedFromInsurerEps,
+    declaredById: row.declaredById ?? row.createdById,
+    verifiedAt: row.verifiedAt,
+    verifiedById: row.verifiedById,
+    verifiedByName: row.verifiedById
+      ? (names.get(row.verifiedById) ?? null)
+      : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -184,27 +209,25 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
   }
 
   async listByPatient(patientId: string): Promise<PatientCoverage[]> {
-    const rows = await this.prisma.runWithTenant((tx) =>
-      tx.patientCoverage.findMany({
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.patientCoverage.findMany({
         where: { patientId, deletedAt: null },
         include: COVERAGE_INCLUDE,
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      }),
-    );
-    return rows.map(toEntity);
+      });
+      const names = await verifierNames(tx, rows);
+      return rows.map((r) => toEntity(r, names));
+    });
   }
 
-  async findById(
-    patientId: string,
-    id: string,
-  ): Promise<PatientCoverage | null> {
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.patientCoverage.findFirst({
+  findById(patientId: string, id: string): Promise<PatientCoverage | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.patientCoverage.findFirst({
         where: { id, patientId, deletedAt: null },
         include: COVERAGE_INCLUDE,
-      }),
-    );
-    return row ? toEntity(row) : null;
+      });
+      return row ? toEntity(row, await verifierNames(tx, [row])) : null;
+    });
   }
 
   async listPrimaryLiveByPatients(
@@ -273,12 +296,13 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
             notes: input.notes,
             createdById: input.createdById,
             updatedById: input.createdById,
+            declaredById: input.createdById,
           },
           include: COVERAGE_INCLUDE,
         });
       }),
     );
-    return toEntity(row);
+    return toEntity(row, new Map());
   }
 
   /** Lee la cobertura viva sin candado solo para saber de qué paciente es. */
@@ -305,9 +329,16 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
         // Con el candado, otra petición pudo retirarla mientras esperábamos.
         const live = await tx.patientCoverage.findFirst({
           where: { id, patientId, deletedAt: null },
-          select: { id: true, payerId: true },
+          select: { id: true, payerId: true, memberNumber: true },
         });
         if (!live) return null;
+        // SEC-049: lo verificado es ESE pagador con ESE número; si cambia
+        // cualquiera de los dos, la verificación se borra y el editor pasa a
+        // ser quien lo declaró.
+        const redeclared =
+          (patch.payerId !== undefined && patch.payerId !== live.payerId) ||
+          (patch.memberNumber !== undefined &&
+            memberNumberChanged(live.memberNumber, patch.memberNumber));
         if (patch.payerId !== undefined) {
           await assertPayerUsable(
             tx,
@@ -330,12 +361,57 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
             notes: patch.notes,
             isPrimary: patch.isPrimary,
             updatedById: patch.updatedById,
+            ...(redeclared
+              ? {
+                  declaredById: patch.updatedById,
+                  verifiedById: null,
+                  verifiedAt: null,
+                }
+              : {}),
           },
           include: COVERAGE_INCLUDE,
         });
       }),
     );
-    return row ? toEntity(row) : null;
+    return row ? this.withNames(row) : null;
+  }
+
+  async verify(
+    id: string,
+    input: { checkedMemberNumber: string; verifiedById: string },
+  ): Promise<PatientCoverage | null> {
+    const tenantId = this.requireTenantId();
+    const patientId = await this.patientOf(id);
+    if (!patientId) return null;
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      // El mismo candado que la edición: verificar y cambiar el número no se
+      // cruzan, y lo que se marca es lo que el ADMIN tenía delante.
+      await lockPatientCoverages(tx, tenantId, patientId);
+      const live = await tx.patientCoverage.findFirst({
+        where: { id, patientId, deletedAt: null },
+        select: { memberNumber: true },
+      });
+      if (!live) return null;
+      if (memberNumberChanged(live.memberNumber, input.checkedMemberNumber)) {
+        throw new ConflictException(COVERAGE_VERIFY_STALE_MESSAGE);
+      }
+      return tx.patientCoverage.update({
+        where: { id, patientId, deletedAt: null },
+        data: {
+          verifiedById: input.verifiedById,
+          verifiedAt: new Date(),
+          updatedById: input.verifiedById,
+        },
+        include: COVERAGE_INCLUDE,
+      });
+    });
+    return row ? this.withNames(row) : null;
+  }
+
+  private withNames(row: Row): Promise<PatientCoverage> {
+    return this.prisma.runWithTenant(async (tx) =>
+      toEntity(row, await verifierNames(tx, [row])),
+    );
   }
 
   async softDelete(id: string, updatedById: string): Promise<boolean> {

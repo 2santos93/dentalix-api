@@ -82,6 +82,18 @@ export interface AuditMetadata {
    * del motivo: van sellados en la receta.
    */
   prescriptionSafety?: AuditPrescriptionSafety;
+  /**
+   * SEC-049: alta, cambio o verificación de una cobertura: el tipo de
+   * pagador, los 4 últimos caracteres alfanuméricos del nº de afiliado (null
+   * si no hay o es más corto) y si quedó verificada. Nunca el número entero.
+   */
+  coverage?: AuditCoverage;
+}
+
+export interface AuditCoverage {
+  payerType: string;
+  memberNumberLast4: string | null;
+  verified: boolean;
 }
 
 export interface AuditPrescriptionSafety {
@@ -557,6 +569,29 @@ function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
  * llegara por error a cualquier clave nunca acaba en la tabla.
  */
+const LAST4 = /^[A-Za-z0-9]{1,4}$/;
+
+/** Tipo de pagador con formato de código y verificación; el resto, fuera. */
+function coverage(value: unknown): AuditCoverage | null {
+  if (!isRecord(value)) return null;
+  const { payerType, memberNumberLast4, verified } = value;
+  if (
+    typeof payerType !== 'string' ||
+    !CODE.test(payerType) ||
+    typeof verified !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    payerType,
+    memberNumberLast4:
+      typeof memberNumberLast4 === 'string' && LAST4.test(memberNumberLast4)
+        ? memberNumberLast4
+        : null,
+    verified,
+  };
+}
+
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};
@@ -589,5 +624,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (cancelled) out.cancellation = cancelled;
   const safety = prescriptionSafety(input.prescriptionSafety);
   if (safety) out.prescriptionSafety = safety;
+  const covered = coverage(input.coverage);
+  if (covered) out.coverage = covered;
   return out;
 }

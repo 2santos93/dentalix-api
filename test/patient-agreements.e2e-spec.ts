@@ -111,7 +111,10 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
 
   /** Cobertura viva del paciente con `payerId` (SEC-047: la pide el PUT). */
   const cover = (patientId: string, payerId: string) =>
-    post(clinic, `/api/v1/patients/${patientId}/coverages`, { payerId });
+    post(clinic, `/api/v1/patients/${patientId}/coverages`, {
+      payerId,
+      memberNumber: '1020304050',
+    });
 
   /** Paciente nuevo con cobertura viva de Sanitas y de Sura. */
   async function coveredPatient(
@@ -251,10 +254,11 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     const p = await createPatient(clinic, 'Cobertura');
     const mine = await post(clinic, `/api/v1/patients/${p}/coverages`, {
       payerId: sanitas,
-      memberNumber: 'AFI-SECRETO-1',
+      memberNumber: '5544332211',
     });
     const otherPayer = await post(clinic, `/api/v1/patients/${p}/coverages`, {
       payerId: sura,
+      memberNumber: '1020304050',
     });
     const res = await put(p, {
       agreementId: convenioSanitas,
@@ -262,7 +266,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     }).expect(200);
     expect((res.body as Assignment).coverageId).toBe(mine);
     // El nº de afiliado no se duplica ni se devuelve en la asignación.
-    expect(JSON.stringify(res.body)).not.toContain('AFI-SECRETO');
+    expect(JSON.stringify(res.body)).not.toContain('5544332211');
 
     const wrongPayer = await put(p, {
       agreementId: convenioSanitas,

@@ -1,11 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   COVERAGE_LIMIT_MESSAGE,
+  COVERAGE_VERIFY_STALE_MESSAGE,
   MAX_COVERAGES_PER_PATIENT,
 } from '../../domain/coverage-rules';
+import { memberNumberChanged } from '../../domain/member-number-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import type {
   CreateCoverageRepoInput,
@@ -24,13 +27,16 @@ interface Row extends Omit<PatientCoverage, 'payer'> {
  * Repositorio de coberturas en memoria con estado, como la tabla real: los
  * tests afirman sobre `rows`. `patientsKnown` son los pacientes de «esta
  * clínica» (otro id = paciente de otra clínica); `today` fija el día civil de
- * la sede; `failNextPrimaryWrite` simula la carrera del índice parcial.
+ * la sede; `failNextPrimaryWrite` simula la carrera del índice parcial;
+ * `userNames` da el nombre de quien verifica (SEC-049).
  */
 export class InMemoryPatientCoverageRepository implements PatientCoverageRepository {
   readonly rows: Row[] = [];
   readonly patientsKnown = new Set<string>();
   today = '2026-10-20';
   failNextPrimaryWrite = false;
+  readonly userNames = new Map<string, string>();
+  now = new Date('2026-10-20T15:00:00.000Z');
   readonly calls: string[] = [];
   private nextId = 1;
   private tick = 0;
@@ -54,6 +60,10 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
       isPrimary: false,
       notes: null,
       migratedFromInsurerEps: false,
+      declaredById: null,
+      verifiedAt: null,
+      verifiedById: null,
+      verifiedByName: null,
       createdAt: at,
       updatedAt: at,
       deleted: false,
@@ -146,9 +156,10 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
     if (isPrimary) {
       for (const r of this.live(input.patientId)) r.isPrimary = false;
     }
-    const { createdById: _by, ...rest } = input;
-    void _by;
-    return Promise.resolve(this.view(this.seed({ ...rest, isPrimary })));
+    const { createdById, ...rest } = input;
+    return Promise.resolve(
+      this.view(this.seed({ ...rest, isPrimary, declaredById: createdById })),
+    );
   }
 
   update(
@@ -166,12 +177,44 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
     if (patch.isPrimary) {
       for (const r of this.live(row.patientId)) r.isPrimary = false;
     }
-    const { updatedById: _by, ...fields } = patch;
-    void _by;
+    const { updatedById, ...fields } = patch;
+    // Como el repositorio Prisma: cambiar pagador o número borra la verificación.
+    if (
+      (patch.payerId !== undefined && patch.payerId !== row.payerId) ||
+      (patch.memberNumber !== undefined &&
+        memberNumberChanged(row.memberNumber, patch.memberNumber))
+    ) {
+      Object.assign(row, {
+        declaredById: updatedById,
+        verifiedAt: null,
+        verifiedById: null,
+        verifiedByName: null,
+      });
+    }
     for (const [key, value] of Object.entries(fields)) {
       if (value !== undefined)
         (row as unknown as Record<string, unknown>)[key] = value;
     }
+    return Promise.resolve(this.view(row));
+  }
+
+  verify(
+    id: string,
+    input: { checkedMemberNumber: string; verifiedById: string },
+  ): Promise<PatientCoverage | null> {
+    this.calls.push('verify');
+    const row = this.rows.find((r) => r.id === id && !r.deleted);
+    if (!row) return Promise.resolve(null);
+    if (memberNumberChanged(row.memberNumber, input.checkedMemberNumber)) {
+      return Promise.reject(
+        new ConflictException(COVERAGE_VERIFY_STALE_MESSAGE),
+      );
+    }
+    Object.assign(row, {
+      verifiedAt: this.now,
+      verifiedById: input.verifiedById,
+      verifiedByName: this.userNames.get(input.verifiedById) ?? null,
+    });
     return Promise.resolve(this.view(row));
   }
 
