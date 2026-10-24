@@ -1587,8 +1587,8 @@ condonación son DX-291.
   moneda (los dos o ninguno), texto para el paciente ≤ 1000 y
   `receptionCanCharge` (lo usará DX-291). **Append-only**: la app no tiene
   UPDATE/DELETE/TRUNCATE y el trigger `cancellation_policy_versions_immutable`
-  los rechaza (DELETE/TRUNCATE solo a un superusuario o sin
-  `app.current_tenant`, para limpiar bases de test). La vigente es la de mayor
+  los rechaza (DELETE/TRUNCATE solo a un superusuario, para limpiar bases de
+  test; no hay purga administrativa). La vigente es la de mayor
   `version`.
 - **Endpoints** (solo ADMIN, 403 «Solo un administrador puede ver y cambiar la
   política de cancelación.»): `GET /locations/:id/cancellation-policy` →
@@ -1611,10 +1611,13 @@ condonación son DX-291.
   si faltan); `cancelReasonText` es opcional. El servidor fija la hora y, con la
   fila bloqueada, calcula en UTC los minutos de aviso (hacia abajo, 0 si la
   cita ya empezó) y si es tardía (aviso **menor** que las horas de la política
-  vigente de la sede de la cita; exactamente las horas no lo es; sin política o
-  si cancela la clínica, nunca). Un cambio de hora no lo altera: se cuenta el
-  tiempo real. Queda auditado (`APPOINTMENT_CANCELLED` con origen, código del
-  motivo, aviso y tardía; nunca el texto). Marcar NO_SHOW guarda
+  vigente de la sede de la cita; exactamente las horas no lo es; sin política,
+  si cancela la clínica o si la cita estaba en la clínica —llegó, en sillón,
+  listo para cobrar— o completada, nunca). Un cambio de hora no lo altera: se
+  cuenta el tiempo real. Cancelar y mover en el mismo PATCH da 400. Queda
+  auditado con un solo evento: `APPOINTMENT_CANCELLED` (o, desde la clínica, el
+  de flujo `PATIENT_FLOW` y, desde «Completada», `COMPLETED_EXIT`), con
+  `cancellation` = origen, código del motivo, aviso y tardía; nunca el texto. Marcar NO_SHOW guarda
   `noShowMarkedAt`; salir de CANCELLED o NO_SHOW borra sus datos. El enlace
   público (DX-005) que cancela guarda `PATIENT_LINK`, la hora de la respuesta,
   el aviso y si es tardía (sin motivo ni aceptación todavía). Reagendar o

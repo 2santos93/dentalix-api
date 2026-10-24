@@ -76,19 +76,17 @@ ALTER TABLE "cancellation_policy_versions"
     ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- Inalterable: ni UPDATE ni DELETE ni TRUNCATE para la app (grants) y, además,
--- un trigger que los rechaza a cualquiera salvo el borrado de un superusuario
--- (limpieza de las bases de test) o sin clínica en la sesión (purga
--- administrativa; la app siempre la fija). search_path fijo (SEC-032).
+-- un trigger que los rechaza a cualquiera salvo el DELETE/TRUNCATE de un
+-- superusuario (limpieza de las bases de test). No hay purga administrativa:
+-- quien necesite borrar en producción es el owner, que tendría que quitar el
+-- trigger a propósito. search_path fijo (SEC-032).
 CREATE FUNCTION public."cancellation_policy_versions_immutable"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
-  IF TG_OP IN ('DELETE', 'TRUNCATE') AND (
-    coalesce(pg_catalog.current_setting('app.current_tenant', true), '') = ''
-    OR EXISTS (
-      SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = current_user AND rolsuper
-    )
+  IF TG_OP IN ('DELETE', 'TRUNCATE') AND EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = current_user AND rolsuper
   ) THEN
     RETURN OLD;
   END IF;
