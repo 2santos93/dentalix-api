@@ -704,6 +704,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       const coverage = await as(clinicA)
         .post(`/patients/${agreementPatient}/coverages`, {
           payerId: (payer.body as { id: string }).id,
+          memberNumber: 'AFI-0003',
         })
         .expect(201);
       await as(clinicA)

@@ -125,7 +125,10 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       (listed.body as { id: string; payer: { id: string } }[]).find(
         (c) => c.payer.id === payer,
       )?.id ??
-      (await create(`/patients/${patientId}/coverages`, { payerId: payer }));
+      (await create(`/patients/${patientId}/coverages`, {
+        payerId: payer,
+        memberNumber: 'AFI-0001',
+      }));
     await as()
       .put(`/patients/${patientId}/agreement`, { coverageId, ...body })
       .expect(200);
