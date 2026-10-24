@@ -2037,7 +2037,8 @@ coberturas por paciente, una principal. Sustituye al texto libre
   activo admite coberturas nuevas. El estado de cada cobertura (vigente,
   vencida, pendiente) se calcula contra el día civil de la sede.
 - **Endpoints**: `GET|POST /payers`, `PATCH|DELETE /payers/:id` y
-  `GET|POST /patients/:patientId/coverages`, `PATCH|DELETE …/:coverageId`.
+  `GET|POST /patients/:patientId/coverages`, `PATCH|DELETE …/:coverageId` y
+  `POST …/:coverageId/verification` (SEC-049, solo ADMIN).
   `GET /patients/:id`, `GET /patients` y `GET /appointments` traen `coverage`
   (resumen de la principal viva, sin nº de afiliado; un número fijo de
   consultas por página). `GET /patients?payerId=` filtra por pagador.
@@ -2045,8 +2046,10 @@ coberturas por paciente, una principal. Sustituye al texto libre
   editar, desactivar y retirar, ADMIN. Las coberturas las gestionan los 4
   roles, como «Editar» de la ficha (son datos administrativos, no clínicos).
 - **Auditoría**: las coberturas escriben UPDATE de PATIENT con `reason`
-  `COVERAGE_ADDED|CHANGED|REMOVED`; la metadata solo lleva los nombres de los
-  campos, nunca el nº de afiliado ni el titular. El catálogo de pagadores no
+  `COVERAGE_CREATED|CHANGED|VERIFIED|REMOVED` (SEC-049; el alta era
+  `COVERAGE_ADDED`); la metadata lleva los nombres de los campos y, salvo en
+  el retiro, el tipo de pagador, los 4 últimos del nº de afiliado y si está
+  verificada; nunca el nº entero ni el titular. El catálogo de pagadores no
   se audita. El GET de coberturas tampoco (la ficha ya se audita).
 - **Relleno**: la migración `…_insurer_eps_backfill` crea un pagador por
   clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
@@ -2109,10 +2112,42 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   asignación y las coberturas devuelven `payer.type` y
   `migratedFromInsurerEps` para que la web sepa qué pedir. Matriz en
   `test/patient-agreements-eligibility.e2e-spec.ts`.
-- **Riesgo aceptado (SEC-047)**: cualquier rol puede añadir una cobertura de
-  un pagador sin prueba y luego asignar su convenio; la mitigación es
-  detectiva (el informe de descuentos muestra quién asignó el convenio y
-  quién creó el ítem).
+- **Cobertura verificable (SEC-049)**: cierra el riesgo que SEC-047 dejaba
+  aceptado (cualquier rol creaba la cobertura con solo `{ payerId }` y
+  asignaba el convenio en la llamada siguiente, BE-043).
+  - Con un pagador externo, el **nº de afiliado o póliza es obligatorio** al
+    crear la cobertura, con un formato básico por tipo (400 en español): EPS,
+    de 5 a 15 dígitos (el documento del afiliado); prepagada y mutua, de 5 a
+    30 caracteres con al menos 4 dígitos; empresa, de 5 a 30 con al menos uno.
+    Nunca un mismo carácter repetido. Con OTRO sigue siendo opcional. Las
+    coberturas que ya existían sin nº (migradas o anteriores) se leen y editan
+    igual; solo se pide al cambiar su pagador o su número.
+  - **Verificar** (`POST /patients/:patientId/coverages/:coverageId/verification`,
+    solo ADMIN) guarda quién y cuándo (`verifiedById`, `verifiedAt`,
+    `verifiedByName`). Recibe `checkedMemberNumber`, el nº que el ADMIN tenía
+    delante: si ya no es el guardado, 409. Cambiar el pagador o el nº de
+    afiliado **borra la verificación** y deja la cobertura declarada por
+    quien la edita (`declaredById`; en las anteriores, `createdById`).
+  - Al asignar, un rol que no es ADMIN no puede usar una cobertura cuyo
+    pagador o nº declaró él mismo si no está verificada (403 en español que
+    dice qué falta). Sí puede si la verificó un ADMIN, si la registró otro
+    usuario o si es migrada. ADMIN asigna como antes. La comprobación se
+    repite en la transacción con la cobertura `FOR SHARE`. Una cobertura de
+    otra clínica sigue siendo 400 «Cobertura no encontrada.».
+  - Auditoría: alta, cambio y verificación son `COVERAGE_CREATED`,
+    `COVERAGE_CHANGED` y `COVERAGE_VERIFIED` (antes del alta era
+    `COVERAGE_ADDED`), con el rol en `actorRole` y en `metadata.coverage` el
+    tipo de pagador, los **4 últimos** caracteres del nº y si quedó
+    verificada; nunca el número entero. Los logs redactan cualquier clave
+    `memberNumber`.
+  - Migración `20261024150000_sec049_coverage_verification`: tres columnas
+    NULL sin relleno y un CHECK `NOT VALID` + `VALIDATE` (verificada = quién
+    y cuándo, o ninguno). Matriz rol × verificada × creada por sí mismo en
+    `test/patient-coverages-verification.e2e-spec.ts`.
+  - Riesgo que queda: dos usuarios que no son ADMIN pueden repartirse los
+    pasos (uno registra la cobertura y otro asigna el convenio). El informe de
+    descuentos sigue mostrando quién asignó el convenio y la auditoría, quién
+    registró la cobertura.
 - **Nota de despliegue (SEC-047)**: antes de publicar, avisa a los ADMIN de
   las clínicas con convenios vivos de pagador OTRO: desde la versión con
   SEC-047 solo los asigna un administrador (salvo con una cobertura migrada
