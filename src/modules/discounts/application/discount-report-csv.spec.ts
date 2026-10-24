@@ -176,6 +176,10 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       .slice(1)
       .split('\r\n')[1]
       .split(',');
+    // B5: una línea solo de convenio dice «Convenio …» como motivo y lleva el
+    // autor real (quien asignó el convenio), no un descuento sin autor.
+    expect(cells[13]).toBe('"Convenio Cortesía socios"');
+    expect(cells[15]).toBe('"Admin Clínica"');
     expect(cells.slice(17)).toEqual([
       '"Cortesía socios"',
       '2000000',
@@ -190,5 +194,26 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       'Convenio asignado por',
       'Ítem creado por',
     ]);
+  });
+
+  it('B5: sin quien asignó el convenio, el autor es quien creó el ítem', () => {
+    const agreed: DiscountReportRowView = {
+      ...row,
+      reason: null,
+      reasonNote: null,
+      itemDiscount: 0,
+      discount: 0,
+      agreementName: 'Sura',
+      basePrice: 100,
+      agreementReduction: 10,
+      agreementAssignedByName: null,
+      createdByName: 'Dr. Pérez',
+      discountByName: null,
+    };
+    const cells = toDiscountReportCsv([agreed])
+      .slice(1)
+      .split('\r\n')[1]
+      .split(',');
+    expect(cells[15]).toBe('"Dr. Pérez"');
   });
 });

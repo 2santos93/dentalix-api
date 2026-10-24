@@ -3,7 +3,7 @@ import type {
   DiscountReportQuery,
   DiscountReportRepository,
   DiscountReportRow,
-  DiscountReportTotal,
+  DiscountReportSummary,
 } from '../../domain/ports/discount-report-repository.port';
 import {
   GetDiscountReportUseCase,
@@ -52,24 +52,22 @@ class FakeRepo implements DiscountReportRepository {
   lastQuery: DiscountReportQuery | null = null;
   lastPage: { offset: number; limit: number } | undefined;
   locations = new Set(['l1']);
-  totalsResult: DiscountReportTotal[] = [
-    {
-      currency: 'COP',
-      items: 2,
-      gross: 1000000,
-      discount: 75000,
-      agreementReduction: 0,
-    },
-    { currency: 'EUR', items: 1, gross: 3, discount: 1, agreementReduction: 0 },
-  ];
+  summaryResult: DiscountReportSummary = {
+    totals: [
+      { currency: 'COP', items: 2, gross: 1000000, discount: 75000 },
+      { currency: 'EUR', items: 1, gross: 3, discount: 1 },
+    ],
+    agreementTotals: [],
+    rows: 3,
+  };
   findLocation(id: string) {
     return Promise.resolve(
       this.locations.has(id) ? { id, name: 'Sede principal' } : null,
     );
   }
-  totals(query: DiscountReportQuery) {
+  summary(query: DiscountReportQuery) {
     this.lastQuery = query;
-    return Promise.resolve(this.totalsResult);
+    return Promise.resolve(this.summaryResult);
   }
   rows(query: DiscountReportQuery, page?: { offset: number; limit: number }) {
     this.lastQuery = query;
@@ -108,7 +106,6 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
         items: 2,
         gross: 1000000,
         discount: 75000,
-        agreementReduction: 0,
         percentOfGross: 7.5,
       },
       {
@@ -116,7 +113,6 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
         items: 1,
         gross: 3,
         discount: 1,
-        agreementReduction: 0,
         percentOfGross: 33.33,
       },
     ]);
@@ -187,15 +183,13 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
 
   it('SEC-047: la rebaja de convenio va aparte, con su % sobre el precio de catálogo', async () => {
     const repo = new FakeRepo();
-    repo.totalsResult = [
-      {
-        currency: 'COP',
-        items: 1,
-        gross: 1500000,
-        discount: 0,
-        agreementReduction: 500000,
-      },
-    ];
+    // M1: una línea solo de convenio no entra en los totales de DX-204; va en
+    // los suyos, y sí cuenta para la paginación.
+    repo.summaryResult = {
+      totals: [],
+      agreementTotals: [{ currency: 'COP', items: 1, reduction: 500000 }],
+      rows: 1,
+    };
     repo.rows = () =>
       Promise.resolve([
         row({
@@ -218,10 +212,11 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
       from: '2026-10-01',
       to: '2026-10-31',
     });
-    expect(report.totals[0]).toMatchObject({
-      agreementReduction: 500000,
-      percentOfGross: 0,
-    });
+    expect(report.totals).toEqual([]);
+    expect(report.agreementTotals).toEqual([
+      { currency: 'COP', items: 1, reduction: 500000 },
+    ]);
+    expect(report.total).toBe(1);
     expect(report.items[0]).toMatchObject({
       percent: 0,
       agreementReduction: 500000,

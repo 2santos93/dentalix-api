@@ -87,14 +87,23 @@ export class DiscountReportTotalDto {
   })
   discount!: number;
 
-  @ApiProperty({
-    description:
-      'SEC-047: suma de las rebajas de convenio de esos ítems (precio de catálogo − precio del convenio). Va aparte: no suma en `discount` ni en el bruto',
-  })
-  agreementReduction!: number;
-
   @ApiProperty({ description: 'Descuento sobre el bruto, en % (2 decimales)' })
   percentOfGross!: number;
+}
+
+/** SEC-047: rebajas de convenio de una moneda, aparte de los totales de DX-204. */
+export class AgreementReductionTotalDto {
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({ description: 'Líneas con rebaja de convenio en esta moneda' })
+  items!: number;
+
+  @ApiProperty({
+    description:
+      'Suma de las rebajas de convenio (precio de catálogo − precio del convenio)',
+  })
+  reduction!: number;
 }
 
 export class DiscountReportItemDto {
@@ -295,12 +304,22 @@ export class DiscountReportDto {
   totals!: DiscountReportTotalDto[];
 
   @ApiProperty({
+    type: [AgreementReductionTotalDto],
+    description:
+      'SEC-047: rebajas de convenio por moneda. Van aparte: `totals` solo cuenta los descuentos (como en DX-204)',
+  })
+  agreementTotals!: AgreementReductionTotalDto[];
+
+  @ApiProperty({
     type: [DiscountReportItemDto],
     description: 'Página de ítems, más recientes primero',
   })
   items!: DiscountReportItemDto[];
 
-  @ApiProperty({ description: 'Ítems del periodo (todas las páginas)' })
+  @ApiProperty({
+    description:
+      'Líneas del periodo (todas las páginas): descuentos y rebajas de convenio',
+  })
   total!: number;
 
   @ApiProperty()

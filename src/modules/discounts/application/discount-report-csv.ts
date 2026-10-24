@@ -78,6 +78,25 @@ function planLabel(row: DiscountReportRowView): string {
     : `Plan del ${created}`;
 }
 
+/** SEC-047: línea que solo tiene rebaja de convenio (sin descuento propio). */
+function agreementOnly(row: DiscountReportRowView): boolean {
+  return row.discount === 0 && row.agreementReduction > 0;
+}
+
+function reasonText(row: DiscountReportRowView): string {
+  if (agreementOnly(row))
+    return text(`Convenio ${row.agreementName ?? ''}`.trim());
+  return row.reason ? text(DISCOUNT_REASON_LABELS[row.reason]) : '';
+}
+
+/** Quién: el del descuento; en una línea solo de convenio, quien lo asignó o creó el ítem. */
+function authorText(row: DiscountReportRowView): string {
+  if (agreementOnly(row)) {
+    return text(row.agreementAssignedByName ?? row.createdByName);
+  }
+  return text(row.discountByName);
+}
+
 export function toDiscountReportCsv(
   rows: readonly DiscountReportRowView[],
 ): string {
@@ -98,9 +117,9 @@ export function toDiscountReportCsv(
         money(row.itemDiscount, row.currency),
         money(row.discount, row.currency),
         row.percent.toFixed(2),
-        row.reason ? text(DISCOUNT_REASON_LABELS[row.reason]) : '',
+        reasonText(row),
         text(row.reasonNote),
-        text(row.discountByName),
+        authorText(row),
         text(row.locationName),
         text(row.agreementName),
         row.agreementName === null || row.basePrice === null

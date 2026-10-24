@@ -84,8 +84,27 @@ export interface DiscountReportTotal {
   items: number;
   gross: number;
   discount: number;
-  /** SEC-047: suma de las rebajas de convenio (aparte del descuento). */
-  agreementReduction: number;
+}
+
+/**
+ * SEC-047: rebajas de convenio de una moneda, aparte de los totales de
+ * DX-204: cuántas líneas y cuánto suman.
+ */
+export interface AgreementReductionTotal {
+  currency: string;
+  items: number;
+  reduction: number;
+}
+
+/**
+ * Totales del periodo: los de DX-204 (solo las líneas que cuentan como
+ * descuento, iguales que antes de SEC-047), los de la rebaja de convenio y
+ * el número de líneas del detalle (paginación).
+ */
+export interface DiscountReportSummary {
+  totals: DiscountReportTotal[];
+  agreementTotals: AgreementReductionTotal[];
+  rows: number;
 }
 
 export const DISCOUNT_REPORT_REPOSITORY = Symbol('DISCOUNT_REPORT_REPOSITORY');
@@ -95,7 +114,7 @@ export interface DiscountReportRepository {
   findLocation(
     locationId: string,
   ): Promise<{ id: string; name: string } | null>;
-  totals(query: DiscountReportQuery): Promise<DiscountReportTotal[]>;
+  summary(query: DiscountReportQuery): Promise<DiscountReportSummary>;
   /** Filas del periodo, más recientes primero; sin `page`, todas (CSV). */
   rows(
     query: DiscountReportQuery,

@@ -18,7 +18,7 @@ import type {
   DiscountReportQuery,
   DiscountReportRepository,
   DiscountReportRow,
-  DiscountReportTotal,
+  DiscountReportSummary,
 } from '../domain/ports/discount-report-repository.port';
 
 interface RawRow {
@@ -58,7 +58,9 @@ interface RawTotal {
   items: bigint;
   gross: Prisma.Decimal;
   discount: Prisma.Decimal;
+  agreementItems: bigint;
   agreementReduction: Prisma.Decimal;
+  rows: bigint;
 }
 
 /**
@@ -75,13 +77,17 @@ interface RawTotal {
  * SEC-047: entran también los ítems resueltos por convenio con rebaja
  * (`basePrice` > `catalogPrice`), aunque no tengan descuento propio; esa rama
  * del OR la sirve `treatment_plan_items_tenant_agreement_reduction_at_idx`.
- * La rebaja de convenio va en su columna, sin sumar en el descuento ni en el
- * bruto (el bruto sigue siendo el precio de referencia, R1 de DX-105). Quién
+ * La rebaja de convenio va en su columna y en sus propios totales: los de
+ * DX-204 (ítems, bruto, descuento y %) se agregan con `FILTER` solo sobre las
+ * líneas que cuentan como descuento, exactamente las mismas que antes de
+ * SEC-047, así que no cambian al entrar una línea solo de convenio. Quién
  * asignó el convenio es el autor de la asignación de ESE convenio al paciente
  * más reciente creada no después del ítem (la que resolvió el precio); quién
  * creó el ítem, `createdById` (NULL antes de SEC-047). Con `professionalId`,
- * una fila entra si esa persona dio el descuento o, si tiene rebaja de
- * convenio, si creó el ítem o asignó el convenio.
+ * una fila cuenta como descuento si esa persona lo dio (como en DX-204) y
+ * como rebaja de convenio si creó el ítem, asignó el convenio o dio su
+ * descuento. Una línea solo de convenio sin sede de descuento ni de
+ * presentación toma la sede con la que se resolvió el precio.
  *
  * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
  * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
@@ -147,12 +153,15 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     const byLocation = query.locationId
       ? Prisma.sql`AND d."locationId" = ${query.locationId}::uuid`
       : Prisma.empty;
-    const byProfessional = query.professionalId
-      ? Prisma.sql`AND (d."discountById" = ${query.professionalId}::uuid
-            OR (d."agreementReduction" > 0
-                AND (d."createdById" = ${query.professionalId}::uuid
-                     OR d."agreementAssignedById" = ${query.professionalId}::uuid)))`
-      : Prisma.empty;
+    const prof = query.professionalId;
+    const discountByMatch = prof
+      ? Prisma.sql`r."discountById" = ${prof}::uuid`
+      : Prisma.sql`TRUE`;
+    const agreementByMatch = prof
+      ? Prisma.sql`(r."discountById" = ${prof}::uuid
+            OR r."createdById" = ${prof}::uuid
+            OR r."agreementAssignedById" = ${prof}::uuid)`
+      : Prisma.sql`TRUE`;
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
@@ -168,7 +177,10 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                asg."createdById" AS "agreementAssignedById",
                i."createdById",
                COALESCE(i."discountAt", i."createdAt") AS "at",
-               COALESCE(i."discountLocationId", p."presentedLocationId") AS "locationId",
+               (i."discount" > 0 OR i."price" < i."catalogPrice") AS "isDiscount",
+               COALESCE(i."discountLocationId", p."presentedLocationId",
+                        CASE WHEN NOT (i."discount" > 0 OR i."price" < i."catalogPrice")
+                             THEN i."pricingLocationId" END) AS "locationId",
                p."currency", p."patientId", p."status" AS "planStatus",
                p."optionLabel" AS "planOptionLabel", p."createdAt" AS "planCreatedAt"
           FROM "treatment_plan_items" i
@@ -193,33 +205,54 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
            AND COALESCE(i."discountAt", i."createdAt") >= ${minStart}
            AND COALESCE(i."discountAt", i."createdAt") < ${maxEnd}
       ),
+      flagged AS (
+        SELECT r.*,
+               (COALESCE(r."isDiscount", FALSE) AND ${discountByMatch}) AS "countsAsDiscount",
+               (r."agreementReduction" > 0 AND ${agreementByMatch}) AS "countsAsAgreement"
+          FROM raw r
+      ),
       d AS (
-        SELECT * FROM raw d
-         WHERE (${inPeriod}) ${byLocation} ${byProfessional}
+        SELECT * FROM flagged d
+         WHERE (${inPeriod}) ${byLocation}
+           AND (d."countsAsDiscount" OR d."countsAsAgreement")
       )`;
     return { cte, zoneOf };
   }
 
-  totals(query: DiscountReportQuery): Promise<DiscountReportTotal[]> {
+  summary(query: DiscountReportQuery): Promise<DiscountReportSummary> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const { cte } = await this.discounted(tx, tenantId, query);
       const rows = await tx.$queryRaw<RawTotal[]>`
         ${cte}
-        SELECT d."currency", count(*) AS "items",
-               sum(d."price" + d."priceReduction") AS "gross",
-               sum(d."priceReduction" + d."itemDiscount") AS "discount",
-               sum(d."agreementReduction") AS "agreementReduction"
+        SELECT d."currency",
+               count(*) FILTER (WHERE d."countsAsDiscount") AS "items",
+               COALESCE(sum(d."price" + d."priceReduction") FILTER (WHERE d."countsAsDiscount"), 0) AS "gross",
+               COALESCE(sum(d."priceReduction" + d."itemDiscount") FILTER (WHERE d."countsAsDiscount"), 0) AS "discount",
+               count(*) FILTER (WHERE d."countsAsAgreement") AS "agreementItems",
+               COALESCE(sum(d."agreementReduction") FILTER (WHERE d."countsAsAgreement"), 0) AS "agreementReduction",
+               count(*) AS "rows"
           FROM d
          GROUP BY d."currency"
          ORDER BY d."currency"`;
-      return rows.map((r) => ({
-        currency: r.currency,
-        items: Number(r.items),
-        gross: r.gross.toNumber(),
-        discount: r.discount.toNumber(),
-        agreementReduction: r.agreementReduction.toNumber(),
-      }));
+      return {
+        totals: rows
+          .filter((r) => r.items > 0n)
+          .map((r) => ({
+            currency: r.currency,
+            items: Number(r.items),
+            gross: r.gross.toNumber(),
+            discount: r.discount.toNumber(),
+          })),
+        agreementTotals: rows
+          .filter((r) => r.agreementItems > 0n)
+          .map((r) => ({
+            currency: r.currency,
+            items: Number(r.agreementItems),
+            reduction: r.agreementReduction.toNumber(),
+          })),
+        rows: rows.reduce((sum, r) => sum + Number(r.rows), 0),
+      };
     });
   }
 

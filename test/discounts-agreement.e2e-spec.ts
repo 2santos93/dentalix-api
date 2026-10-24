@@ -52,6 +52,7 @@ interface ReportItem {
   createdById: string | null;
   createdByName: string | null;
   discountById: string | null;
+  locationId: string | null;
 }
 
 interface Report {
@@ -60,9 +61,9 @@ interface Report {
     items: number;
     gross: number;
     discount: number;
-    agreementReduction: number;
     percentOfGross: number;
   }[];
+  agreementTotals: { currency: string; items: number; reduction: number }[];
   items: ReportItem[];
   total: number;
 }
@@ -244,16 +245,12 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       createdById: dentist.userId,
     });
     expect(out.items.map((i) => i.itemId)).not.toContain(plainItem);
+    // M1: las líneas solo de convenio no tocan los totales de DX-204; van en
+    // los suyos y cuentan para la paginación.
     expect(out.total).toBe(2);
-    expect(out.totals).toEqual([
-      {
-        currency: 'COP',
-        items: 2,
-        gross: 1500000,
-        discount: 0,
-        agreementReduction: 2500000,
-        percentOfGross: 0,
-      },
+    expect(out.totals).toEqual([]);
+    expect(out.agreementTotals).toEqual([
+      { currency: 'COP', items: 2, reduction: 2500000 },
     ]);
   });
 
@@ -295,11 +292,79 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     expect(sura).toContain(
       '"Sura EPS −25 %",2000000,500000,"Miembro RECEPTION","Miembro DENTIST"',
     );
+    // B5: motivo «Convenio …» y el autor real en «Dado por».
+    expect(sura).toContain('"Convenio Sura EPS −25 %","","Miembro RECEPTION"');
   });
 
   it('otra clínica no ve esas rebajas', async () => {
     const out = await report(clinicB);
     expect(out.items).toEqual([]);
     expect(out.totals).toEqual([]);
+  });
+
+  it('B2: una línea solo de convenio de un plan sin presentar toma la sede con la que se resolvió el precio', async () => {
+    const locations = await as(clinicA).get('/locations').expect(200);
+    const main = (locations.body as { id: string }[])[0].id;
+    const north = (
+      await as(clinicA).post('/locations', { name: 'Sede Norte' }).expect(201)
+    ).body as { id: string };
+    const all = await report(clinicA);
+    expect(all.items.find((i) => i.itemId === suraItem)?.locationId).toBe(main);
+    const inMain = await report(clinicA, { locationId: main });
+    expect(inMain.items.map((i) => i.itemId)).toContain(suraItem);
+    const inNorth = await report(clinicA, { locationId: north.id });
+    expect(inNorth.items.map((i) => i.itemId)).not.toContain(suraItem);
+  });
+
+  it('M1: los totales de descuentos de un periodo no cambian al añadir un ítem solo de convenio', async () => {
+    // Un descuento discrecional del ADMIN en un paciente sin convenio.
+    const patient = await createPatient('Descuento');
+    const plan = await create(`/patients/${patient}/treatment-plans`, {
+      currency: 'COP',
+    });
+    await create(`/treatment-plans/${plan}/items`, {
+      toothNumber: '11',
+      catalogItemId: crown,
+      price: 2000000,
+      discount: 200000,
+      discountReason: 'PROMOTION',
+    });
+    const before = await report(clinicA);
+    expect(before.totals).toEqual([
+      {
+        currency: 'COP',
+        items: 1,
+        gross: 2000000,
+        discount: 200000,
+        percentOfGross: 10,
+      },
+    ]);
+
+    // Otro ítem solo de convenio para el paciente de Sura.
+    const suraPatient = await raw.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: suraItem },
+      select: { patientId: true },
+    });
+    await itemFor(suraPatient.patientId);
+    const after = await report(clinicA);
+    expect(after.totals).toEqual(before.totals);
+    expect(after.total).toBe(before.total + 1);
+    expect(after.agreementTotals).toEqual([
+      {
+        currency: 'COP',
+        items: before.agreementTotals[0].items + 1,
+        reduction: before.agreementTotals[0].reduction + 500000,
+      },
+    ]);
+    // Con el filtro por persona, los totales de DX-204 son los de quien dio
+    // el descuento: el DENTIST solo creó ítems de convenio.
+    const byDentist = await report(clinicA, {
+      professionalId: dentist.userId,
+    });
+    expect(byDentist.totals).toEqual([]);
+    const byAdmin = await report(clinicA, {
+      professionalId: clinicA.adminUserId,
+    });
+    expect(byAdmin.totals).toEqual(before.totals);
   });
 });
