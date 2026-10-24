@@ -47,6 +47,26 @@ describe('UpdateLocationDto · nº de registro sanitario (DX-319)', () => {
     ).toContain('«Mostrar en los documentos» debe ser verdadero o falso.');
   });
 
+  it('rechaza saltos de línea y caracteres de control o de formato (revisión)', async () => {
+    for (const value of ['A\tB', 'A\nB', 'A\u0000B', 'A‮B', 'A B']) {
+      expect(
+        (await check({ healthRegistrationNumber: value })).messages,
+      ).toEqual([
+        'El nº de registro sanitario no admite saltos de línea ni caracteres de control.',
+      ]);
+    }
+    expect(
+      (await check({ healthRegistrationNumber: 'Reg. nº 7 – Ñandú' })).messages,
+    ).toEqual([]);
+  });
+
+  it('showHealthRegistrationNumber: null es un 400 en español, no un 500', async () => {
+    expect(
+      (await check({ showHealthRegistrationNumber: null })).messages,
+    ).toEqual(['«Mostrar en los documentos» debe ser verdadero o falso.']);
+    expect((await check({})).messages).toEqual([]);
+  });
+
   it('el código REPS ya no existe: enviarlo es un 400, no un 200 mudo', async () => {
     for (const value of ['110010123401', null, '']) {
       expect((await check({ repsHabilitationCode: value })).messages).toEqual([

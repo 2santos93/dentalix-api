@@ -564,6 +564,8 @@ describe('sanitizeAuditMetadata — nº de registro sanitario de la sede (DX-319
       { before: ok },
       { before: ok, after: { number: 'A'.repeat(65), shown: true } },
       { before: ok, after: { number: 'NRS\n2', shown: true } },
+      { before: ok, after: { number: 'NRS\u202E2', shown: true } },
+      { before: ok, after: { number: 'NRS\u20282', shown: true } },
       { before: ok, after: { number: '', shown: true } },
       { before: ok, after: { number: 12, shown: true } },
       { before: ok, after: { number: 'NRS-2', shown: 'sí' } },

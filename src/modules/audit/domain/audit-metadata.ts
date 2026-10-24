@@ -237,8 +237,11 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** Lote o REF de un producto sanitario: alfanumérico con . _ - / y espacios. */
 const PRODUCT_CODE = /^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,79}$/;
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
-/** Nº de registro sanitario (DX-319): 1–64 caracteres, sin control ni saltos. */
-const HEALTH_REGISTRATION_NUMBER = /^[^\p{Cc}]{1,64}$/u;
+/**
+ * Nº de registro sanitario (DX-319): 1–64 caracteres, sin control, formato ni
+ * saltos (la misma clase que HEALTH_REGISTRATION_NUMBER_CHARS de locations).
+ */
+const HEALTH_REGISTRATION_NUMBER = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,64}$/u;
 const MAX_FIELDS = 50;
 /** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
 const MAX_SCHEDULE_ENTRIES = 500;

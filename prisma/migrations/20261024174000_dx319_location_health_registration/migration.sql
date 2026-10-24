@@ -5,7 +5,8 @@
 --                                             por país; 1–64 caracteres sin
 --                                             espacios a los lados (la API
 --                                             recorta y guarda null si queda
---                                             vacío; esto es la red).
+--                                             vacío; esto es la red), sin
+--                                             caracteres de control.
 --   locations."showHealthRegistrationNumber"  si el nº sale en los documentos
 --                                             de la sede; por defecto false.
 --
@@ -27,5 +28,6 @@ ALTER TABLE "locations" ADD CONSTRAINT "locations_health_registration_number_che
     OR (
       char_length("healthRegistrationNumber") BETWEEN 1 AND 64
       AND "healthRegistrationNumber" = btrim("healthRegistrationNumber")
+      AND "healthRegistrationNumber" !~ '[[:cntrl:]]'
     )
   );

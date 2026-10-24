@@ -211,6 +211,28 @@ describe('buildAuditDraft (DX-009)', () => {
     });
   });
 
+  it('DX-319: el antes/después del nº de registro solo pasa en un evento de LOCATION', () => {
+    const draft = buildAuditDraft(
+      { action: 'UPDATE', resource: 'PATIENT', resourceId: { param: 'id' } },
+      req({
+        params: { id: PATIENT },
+        body: { phone: '3001234567' },
+        auditMetadata: {
+          healthRegistration: {
+            before: { number: null, shown: false },
+            after: { number: 'NRS-7', shown: true },
+          },
+        },
+      }),
+      { id: PATIENT },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: ['phone'],
+      params: { id: PATIENT },
+    });
+  });
+
   it('código de la escritura (DX-039): va a metadata.reason; el motivo libre no', () => {
     const draft = buildAuditDraft(
       {

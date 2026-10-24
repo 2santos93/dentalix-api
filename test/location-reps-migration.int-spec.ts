@@ -115,8 +115,9 @@ describe('DX-319 · migración del REPS al nº de registro sanitario (int)', () 
       'repsHabilitationCode',
       'showHealthRegistrationNumber',
     ]);
-    // El CHECK nuevo: hasta 64 y sin espacios a los lados (la API recorta).
-    for (const bad of ['A'.repeat(65), ' NRS-1', '']) {
+    // El CHECK nuevo: hasta 64, sin espacios a los lados (la API recorta) y
+    // sin caracteres de control.
+    for (const bad of ['A'.repeat(65), ' NRS-1', '', 'NRS\t1', 'NRS\n1']) {
       await expect(
         target.$executeRawUnsafe(
           `UPDATE "locations" SET "healthRegistrationNumber" = $1 WHERE "id" = '${L_NONE}'`,

@@ -1413,8 +1413,19 @@ Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
   no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
   `DROP COLUMN IF EXISTS` (solo lo referenciaba su CHECK; ni vistas, ni
   funciones, ni índices, ni RLS). Con FORCE quitado durante la copia (owner
-  sin BYPASSRLS) e idempotente. El código de esta rama ya no lee la columna:
-  la migración va con el despliegue del código nuevo.
+  sin BYPASSRLS) e idempotente. El nº nuevo no admite saltos de línea ni
+  caracteres de control o de formato (DTO con `\p{Cc}\p{Cf}`, el mismo saneado
+  en la auditoría y CHECK con `[[:cntrl:]]`); `showHealthRegistrationNumber:
+  null` da 400.
+- **Runbook de despliegue (DX-319)**: el `DROP COLUMN` va en el MISMO
+  despliegue que el código que deja de leer la columna. Una instancia con el
+  código anterior que siga viva después de `migrate deploy` da 500 al leer
+  sedes (Prisma selecciona `repsHabilitationCode`). Con más de una instancia,
+  este despliegue exige **parada única** (parar todas, `migrate deploy`,
+  arrancar el código nuevo) o **desplegar primero el código nuevo** en todas
+  las instancias (no lee la columna y funciona con ella o sin ella) y solo
+  entonces correr `migrate deploy` y retirar las viejas. Nunca `migrate deploy`
+  con instancias del código anterior sirviendo tráfico.
 
 ## Registro de implantes (DX-191)
 

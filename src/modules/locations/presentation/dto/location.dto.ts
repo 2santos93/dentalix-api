@@ -11,10 +11,15 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
-import { HEALTH_REGISTRATION_NUMBER_MAX } from '../../domain/health-registration';
+import {
+  HEALTH_REGISTRATION_NUMBER_CHARS,
+  HEALTH_REGISTRATION_NUMBER_MAX,
+} from '../../domain/health-registration';
 
 export const LOCATION_PHONE_MAX = 40;
 const PHONE_MESSAGE = `El teléfono admite hasta ${LOCATION_PHONE_MAX} caracteres.`;
@@ -95,10 +100,15 @@ export class UpdateLocationDto {
   @MaxLength(HEALTH_REGISTRATION_NUMBER_MAX, {
     message: HEALTH_REGISTRATION_MESSAGE,
   })
+  @Matches(HEALTH_REGISTRATION_NUMBER_CHARS, {
+    message:
+      'El nº de registro sanitario no admite saltos de línea ni caracteres de control.',
+  })
   healthRegistrationNumber?: string | null;
 
   @ApiPropertyOptional({ description: SHOW_HEALTH_REGISTRATION_DOC })
-  @IsOptional()
+  // Sin el campo no cambia; `null` no vale (la columna es NOT NULL): 400.
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({
     message: '«Mostrar en los documentos» debe ser verdadero o falso.',
   })

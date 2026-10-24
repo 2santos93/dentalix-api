@@ -170,6 +170,20 @@ function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/**
+ * DX-319: lo que el handler añade al evento. El antes/después del nº de
+ * registro sanitario solo vale en un evento de sede (LOCATION).
+ */
+function handlerMetadata(
+  options: AuditOptions,
+  req: AuditedRequest,
+): Record<string, unknown> {
+  const { healthRegistration, ...rest } = req.auditMetadata ?? {};
+  return options.resource === 'LOCATION'
+    ? { ...rest, healthRegistration }
+    : rest;
+}
+
 /** Nombres (nunca valores) de los campos de primer nivel del cuerpo. */
 function bodyFields(body: unknown): string[] {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
@@ -203,7 +217,7 @@ export function buildAuditDraft(
     ip: req.ip ?? null,
     userAgent: header(req, 'user-agent'),
     metadata: sanitizeAuditMetadata({
-      ...req.auditMetadata,
+      ...handlerMetadata(options, req),
       ...(options.action === 'UPDATE'
         ? { changedFields: bodyFields(req.body) }
         : {}),

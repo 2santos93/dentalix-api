@@ -6,6 +6,15 @@
  */
 export const HEALTH_REGISTRATION_NUMBER_MAX = 64;
 
+/**
+ * Sin saltos de línea ni caracteres de control o de formato (\p{Cc}, \p{Cf}:
+ * p. ej. U+202E invierte el texto impreso; U+2028/U+2029 son saltos). La misma
+ * clase la aplican el DTO y el saneado de la auditoría; la BD tiene un CHECK
+ * con [[:cntrl:]].
+ */
+export const HEALTH_REGISTRATION_NUMBER_CHARS =
+  /^[^\p{Cc}\p{Cf}\u2028\u2029]*$/u;
+
 /** Recortado; vacío o null = quitarlo (null), ausente = no tocarlo. */
 export function normalizeHealthRegistrationNumber(
   raw: string | null | undefined,

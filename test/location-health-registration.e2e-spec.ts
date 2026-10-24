@@ -155,6 +155,35 @@ describe('Nº de registro sanitario de la sede (DX-319, e2e)', () => {
     }).expect(400);
   });
 
+  it('caracteres de control o de formato y la casilla a null → 400 en español, nada cambia (revisión)', async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: location.id },
+    });
+    for (const value of ['A\tB', 'A\nB', 'A\u0000B', 'A\u202EB']) {
+      const res = await patch(a, a.adminToken, location.id, {
+        healthRegistrationNumber: value,
+      }).expect(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'no admite saltos de línea ni caracteres de control',
+      );
+    }
+    const nullShow = await patch(a, a.adminToken, location.id, {
+      showHealthRegistrationNumber: null,
+    }).expect(400);
+    expect(JSON.stringify(nullShow.body)).toContain(
+      '«Mostrar en los documentos» debe ser verdadero o falso.',
+    );
+    const after = await raw.location.findUniqueOrThrow({
+      where: { id: location.id },
+    });
+    expect(after.healthRegistrationNumber).toBe(
+      before.healthRegistrationNumber,
+    );
+    expect(after.showHealthRegistrationNumber).toBe(
+      before.showHealthRegistrationNumber,
+    );
+  });
+
   it('el campo REPS en el cuerpo → 400 y no cambia nada', async () => {
     const before = await raw.location.findUniqueOrThrow({
       where: { id: location.id },
@@ -187,6 +216,14 @@ describe('Nº de registro sanitario de la sede (DX-319, e2e)', () => {
   );
 
   it('el ADMIN de otra clínica no llega a la sede (404) y no la cambia', async () => {
+    const auditOfLocation = () =>
+      raw.auditEvent.findMany({
+        where: { resourceType: 'LOCATION', resourceId: location.id },
+        orderBy: { occurredAt: 'asc' },
+        select: { id: true, tenantId: true },
+      });
+    const eventsBefore = await auditOfLocation();
+    expect(eventsBefore.length).toBeGreaterThan(0);
     await patch(b, b.adminToken, location.id, {
       healthRegistrationNumber: 'Hackeada',
       showHealthRegistrationNumber: false,
@@ -196,11 +233,9 @@ describe('Nº de registro sanitario de la sede (DX-319, e2e)', () => {
     });
     expect(row.healthRegistrationNumber).toBeNull();
     expect(row.showHealthRegistrationNumber).toBe(true);
-    // Ni rastro del intento en la auditoría de A.
-    expect(
-      await raw.auditEvent.count({
-        where: { tenantId: b.tenantId, resourceId: location.id },
-      }),
-    ).toBe(0);
+    // El intento de B no deja evento sobre la sede (ni en A ni en B).
+    const eventsAfter = await auditOfLocation();
+    expect(eventsAfter).toEqual(eventsBefore);
+    expect(eventsAfter.every((e) => e.tenantId === a.tenantId)).toBe(true);
   });
 });

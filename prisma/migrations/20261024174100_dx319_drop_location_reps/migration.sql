@@ -23,8 +23,9 @@
 -- locations_receipt_prefix_guard.
 --
 -- Despliegue: el código de esta rama ya no selecciona la columna; una
--- instancia del código anterior que siga viva tras la migración fallaría al
--- leer sedes, así que la migración va con el despliegue del código nuevo.
+-- instancia del código anterior que siga viva tras la migración da 500 al
+-- leer sedes. Parada única, o el código nuevo en todas las instancias ANTES
+-- de `migrate deploy` (README, «Runbook de despliegue (DX-319)»).
 --
 -- Grants: no aplica.
 
