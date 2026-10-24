@@ -1,5 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -25,11 +25,17 @@ export const STAFF_CANCELLATION = {
 } as const;
 const passwordService = new PasswordService();
 
-/** App de Nest configurada como main.ts (prefijo, pipes y filtro global). */
-export async function createE2eApp(): Promise<INestApplication<App>> {
-  const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
-  }).compile();
+/**
+ * App de Nest configurada como main.ts (prefijo, pipes y filtro global).
+ * `override` permite `overrideProvider(...)` antes de compilar (DX-207: la
+ * matriz de aislamiento captura los emails para leer los tokens de A).
+ */
+export async function createE2eApp(
+  override?: (builder: TestingModuleBuilder) => void,
+): Promise<INestApplication<App>> {
+  const builder = Test.createTestingModule({ imports: [AppModule] });
+  override?.(builder);
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication<INestApplication<App>>();
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

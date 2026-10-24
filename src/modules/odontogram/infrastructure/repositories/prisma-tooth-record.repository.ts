@@ -186,4 +186,31 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
     );
     return zoneOf(locationId);
   }
+
+  // DX-207: bajo RLS y además con el tenant explícito (defensa en
+  // profundidad: la columna del registro no tiene FK que lo respalde).
+  async catalogItemExists(catalogItemId: string): Promise<boolean> {
+    const tenantId = this.requireTenantId();
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.dentalCatalogItem.findFirst({
+        where: { id: catalogItemId, tenantId, deletedAt: null },
+        select: { id: true },
+      }),
+    );
+    return row !== null;
+  }
+
+  async clinicalEntryOfPatientExists(
+    patientId: string,
+    clinicalEntryId: string,
+  ): Promise<boolean> {
+    const tenantId = this.requireTenantId();
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.clinicalEntry.findFirst({
+        where: { id: clinicalEntryId, tenantId, patientId, deletedAt: null },
+        select: { id: true },
+      }),
+    );
+    return row !== null;
+  }
 }

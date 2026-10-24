@@ -181,22 +181,74 @@ describe('AddToothRecordUseCase', () => {
 
     expect(result.performedById).toBe('user-77');
   });
+});
 
-  it('does NOT existence-check catalogItemId/clinicalEntryId — forwards them as given (RLS renders a bad/cross-tenant ref harmless; follow-up)', async () => {
+describe('AddToothRecordUseCase — pertenencia de la prestación y la evolución (DX-207)', () => {
+  function repoWithRefs(): InMemoryToothRecordRepository {
     const repo = new InMemoryToothRecordRepository();
+    repo.catalogItemIds.add('cat-propia');
+    repo.clinicalEntryPatients.set('evo-p1', 'p1');
+    repo.clinicalEntryPatients.set('evo-p2', 'p2');
+    return repo;
+  }
+
+  it('guarda la prestación y la evolución cuando son de la clínica y del paciente', async () => {
+    const repo = repoWithRefs();
     const uc = makeUseCase(repo);
 
     const result = await uc.execute('p1', {
       toothNumber: '11',
-      surfaces: [],
-      kind: CatalogKind.DIAGNOSIS,
-      catalogItemId: 'not-a-real-item',
-      clinicalEntryId: 'not-a-real-entry',
+      kind: CatalogKind.PROCEDURE,
+      catalogItemId: 'cat-propia',
+      clinicalEntryId: 'evo-p1',
     });
 
-    expect(result.catalogItemId).toBe('not-a-real-item');
-    expect(result.clinicalEntryId).toBe('not-a-real-entry');
+    expect(result.catalogItemId).toBe('cat-propia');
+    expect(result.clinicalEntryId).toBe('evo-p1');
   });
+
+  it('rechaza con 404 una prestación que no está en el catálogo de esta clínica, sin insertar', async () => {
+    const repo = repoWithRefs();
+    const uc = makeUseCase(repo);
+
+    await expect(
+      uc.execute('p1', {
+        toothNumber: '11',
+        kind: CatalogKind.PROCEDURE,
+        catalogItemId: 'cat-de-otra-clinica',
+      }),
+    ).rejects.toThrow(
+      new NotFoundException(
+        'Prestación no encontrada en el catálogo de esta clínica.',
+      ),
+    );
+    expect(repo.rows).toHaveLength(0);
+  });
+
+  it.each([
+    ['de otra clínica', 'evo-de-otra-clinica'],
+    ['de otro paciente de la clínica', 'evo-p2'],
+  ])(
+    'rechaza con 404 una evolución %s, sin insertar',
+    async (_caso, clinicalEntryId) => {
+      const repo = repoWithRefs();
+      const uc = makeUseCase(repo);
+
+      await expect(
+        uc.execute('p1', {
+          toothNumber: '11',
+          kind: CatalogKind.PROCEDURE,
+          catalogItemId: 'cat-propia',
+          clinicalEntryId,
+        }),
+      ).rejects.toThrow(
+        new NotFoundException(
+          'Evolución no encontrada en la historia clínica de este paciente',
+        ),
+      );
+      expect(repo.rows).toHaveLength(0);
+    },
+  );
 });
 
 describe('AddToothRecordUseCase — pertenencia del paciente (SEC-004)', () => {
