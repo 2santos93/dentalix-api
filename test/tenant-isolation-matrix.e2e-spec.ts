@@ -2551,6 +2551,36 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
       message: 'Prestación no encontrada en el catálogo de esta clínica.',
     },
+    // La prestación y la evolución del odontograma no tienen FK: el caso de
+    // uso comprueba que sean de B (y la evolución, de su paciente).
+    {
+      name: 'POST /patients/:patientId/tooth-records body.catalogItemId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/tooth-records`,
+      body: () => ({
+        toothNumber: '11',
+        kind: 'PROCEDURE',
+        catalogItemId: a.catalogItemId,
+      }),
+      bodyIds: ['catalogItemId'],
+      status: 404,
+      message: 'Prestación no encontrada en el catálogo de esta clínica.',
+    },
+    {
+      name: 'POST /patients/:patientId/tooth-records body.clinicalEntryId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/tooth-records`,
+      body: () => ({
+        toothNumber: '11',
+        kind: 'PROCEDURE',
+        catalogItemId: b.catalogItemId,
+        clinicalEntryId: a.clinicalEntryId,
+      }),
+      bodyIds: ['clinicalEntryId'],
+      status: 404,
+      message:
+        'Evolución no encontrada en la historia clínica de este paciente',
+    },
     {
       name: 'POST /treatment-plans/:id/items/bulk-discount body.itemIds[] de A',
       verb: 'post',
@@ -2871,7 +2901,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   };
 
   it('DX-207: cada id por query/cuerpo de la lista de la matriz tiene su caso, y ningún caso sobra', () => {
-    const fromCases = [...cases, ...knownGapCases].flatMap((c) => [
+    const fromCases = cases.flatMap((c) => [
       ...(c.queryIds ?? []).map((f) => `${routeOf(c)} ?${f}`),
       ...(c.bodyIds ?? []).map((f) => `${routeOf(c)} body.${f}`),
     ]);
@@ -2936,54 +2966,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           (id) => res.text.includes(id) && !sent.includes(id),
         ),
       ).toEqual([]);
-      expect(await shotOfA()).toEqual(before);
-    },
-  );
-
-  /**
-   * DX-207, hallazgo: `POST /patients/:patientId/tooth-records` NO comprueba
-   * `catalogItemId` ni `clinicalEntryId` (add-tooth-record.use-case.ts lo
-   * deja anotado como seguimiento). B puede guardar en SU odontograma un
-   * registro que apunta a la prestación o a la evolución de A. No es una
-   * fuga (la fila es de B, nada de A cambia ni se ve: la RLS deja la
-   * referencia colgando), pero sí una referencia entre clínicas sin FK. Van
-   * como `it.failing` (patrón de BE-007): cuando se compruebe la pertenencia,
-   * Jest avisará de que ya pasan y hay que moverlos a `cases`.
-   */
-  const knownGapCases: IsolationCase[] = [
-    {
-      name: 'POST /patients/:patientId/tooth-records body.catalogItemId de A',
-      verb: 'post',
-      path: () => `/patients/${b.patientId}/tooth-records`,
-      body: () => ({
-        toothNumber: '11',
-        kind: 'PROCEDURE',
-        catalogItemId: a.catalogItemId,
-      }),
-      bodyIds: ['catalogItemId'],
-      status: 404,
-    },
-    {
-      name: 'POST /patients/:patientId/tooth-records body.clinicalEntryId de A',
-      verb: 'post',
-      path: () => `/patients/${b.patientId}/tooth-records`,
-      body: () => ({
-        toothNumber: '11',
-        kind: 'PROCEDURE',
-        catalogItemId: b.catalogItemId,
-        clinicalEntryId: a.clinicalEntryId,
-      }),
-      bodyIds: ['clinicalEntryId'],
-      status: 404,
-    },
-  ];
-
-  it.failing.each(knownGapCases.map((c) => [c.name, c] as const))(
-    'B → %s: 404 y ninguna fila nueva en A ni en B (hallazgo DX-207)',
-    async (_name, c) => {
-      const before = await shotOfA();
-      const res = await api(app, clinicB, c.verb, c.path(), c.body?.());
-      expect({ status: res.status }).toEqual({ status: c.status });
       expect(await shotOfA()).toEqual(before);
     },
   );

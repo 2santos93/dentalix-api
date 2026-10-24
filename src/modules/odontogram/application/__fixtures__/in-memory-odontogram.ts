@@ -20,6 +20,10 @@ import {
  */
 export class InMemoryToothRecordRepository implements ToothRecordRepository {
   readonly rows: ToothRecord[] = [];
+  /** DX-207: prestaciones del catálogo de ESTA clínica. */
+  readonly catalogItemIds = new Set<string>();
+  /** DX-207: evoluciones de ESTA clínica → su paciente. */
+  readonly clinicalEntryPatients = new Map<string, string>();
   private nextId = 1;
 
   constructor(
@@ -113,6 +117,19 @@ export class InMemoryToothRecordRepository implements ToothRecordRepository {
 
   clinicTimeZone(): Promise<string> {
     return Promise.resolve(this.timeZone);
+  }
+
+  catalogItemExists(catalogItemId: string): Promise<boolean> {
+    return Promise.resolve(this.catalogItemIds.has(catalogItemId));
+  }
+
+  clinicalEntryOfPatientExists(
+    patientId: string,
+    clinicalEntryId: string,
+  ): Promise<boolean> {
+    return Promise.resolve(
+      this.clinicalEntryPatients.get(clinicalEntryId) === patientId,
+    );
   }
 }
 
