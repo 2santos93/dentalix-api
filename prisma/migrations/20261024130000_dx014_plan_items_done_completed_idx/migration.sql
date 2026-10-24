@@ -1,0 +1,11 @@
+-- DX-014: producción de «Comparar sedes» = ítems DONE con "completedAt" en el
+-- período (DX-050). Sin este índice la consulta recorre TODOS los ítems de la
+-- clínica (seq scan) aunque pida un mes: crece con la historia, no con la
+-- ventana (docs/perf/DX-014.md). Parcial con el mismo predicado que la
+-- consulta (realizados y vivos) y con lo que suma en INCLUDE, para que un mes
+-- se lea solo del índice. CONCURRENTLY para no bloquear las escrituras de
+-- treatment_plan_items; única sentencia (no puede ir en transacción).
+-- Aditivo. Si se corta, deja un índice INVALID: el IF NOT EXISTS no lo
+-- repara; hay que `DROP INDEX CONCURRENTLY
+-- "treatment_plan_items_tenant_done_completed_idx"` y repetirla.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plan_items_tenant_done_completed_idx" ON "treatment_plan_items" ("tenantId", "completedAt") INCLUDE ("performedLocationId", "planId", "price", "discount") WHERE "status" = 'DONE' AND "deletedAt" IS NULL;

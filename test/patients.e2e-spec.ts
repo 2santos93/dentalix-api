@@ -449,4 +449,53 @@ describe('Patients (e2e)', () => {
       .expect(200);
     expect(getHistory.text).toBe('');
   });
+  it('DX-287: alta y edición con el mismo documento escrito distinto dan 409; la clave la guarda la BD', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Doc',
+      subdomain: 'clinica-doc',
+      email: 'owner@clinica-doc.com',
+    });
+    const send = (req: request.Test) =>
+      req
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    const create = (docNumber: string) =>
+      send(request(app.getHttpServer()).post('/api/v1/patients')).send({
+        firstName: 'Doc',
+        lastName: docNumber,
+        docType: DocType.CC,
+        docNumber,
+        sex: Sex.F,
+      });
+    const first = (await create('80.100.200').expect(201))
+      .body as PatientResponseBody;
+    const keyOf = async (id: string) =>
+      (
+        await raw.$queryRaw<{ docKey: string | null }[]>`
+          SELECT "docKey" FROM "patients" WHERE "id" = ${id}::uuid`
+      )[0].docKey;
+    expect(await keyOf(first.id)).toBe('80100200');
+
+    const dup = await create('80100200').expect(409);
+    expect((dup.body as { message: string }).message).toBe(
+      'Ya existe un paciente con ese número de documento.',
+    );
+    await create(' 80-100-200 ').expect(409);
+
+    const other = (await create('80.100.201').expect(201))
+      .body as PatientResponseBody;
+    await send(
+      request(app.getHttpServer()).patch(`/api/v1/patients/${other.id}`),
+    )
+      .send({ docNumber: '80 100 200' })
+      .expect(409);
+    // El propio paciente puede reescribir su documento con otro formato.
+    await send(
+      request(app.getHttpServer()).patch(`/api/v1/patients/${first.id}`),
+    )
+      .send({ docNumber: '80100200' })
+      .expect(200);
+    expect(await keyOf(first.id)).toBe('80100200');
+    expect(await keyOf(other.id)).toBe('80100201');
+  });
 });

@@ -16,7 +16,14 @@ import {
   PRESCRIPTION_REPOSITORY,
   type PrescriptionRepository,
 } from '../../domain/ports/prescription-repository.port';
-import { findAllergyMatches } from '../../domain/allergy-match';
+import {
+  ageInYears,
+  checkPrescriptionSafety,
+  hasBlockingAlerts,
+  type SafetyAlert,
+  type SafetyCheckResult,
+  type SafetyItem,
+} from '../../domain/prescription-safety';
 import {
   computePrescriptionHash,
   type PrescriptionItemContent,
@@ -53,9 +60,27 @@ export interface IssuePrescriptionInput {
   notes?: string;
   /** Registro profesional / nº de colegiado si el perfil aún no lo tiene. */
   professionalLicense?: string;
-  /** Confirmación explícita del profesional ante una alerta de alergia. */
+  /**
+   * Confirmación explícita ante una alerta de alergia (DX-013). Desde DX-300
+   * cuenta como `safetyOverride` (clientes anteriores).
+   */
   allergyOverride?: boolean;
+  /** DX-300: confirmación explícita de los avisos bloqueantes. */
+  safetyOverride?: boolean;
+  /** DX-300: motivo de la confirmación (obligatorio si hay bloqueantes). */
+  safetyOverrideReason?: string;
 }
+
+/** Previsualización de avisos (DX-300) para el modal, antes de emitir. */
+export interface PrescriptionSafetyPreview {
+  rulesVersion: string;
+  /** `MISSING` = el paciente no tiene anamnesis. */
+  anamnesis: 'PRESENT' | 'MISSING';
+  hasBlocking: boolean;
+  alerts: SafetyAlert[];
+}
+
+export const SAFETY_OVERRIDE_REASON_MAX = 500;
 
 export interface PrescriptionIssuerView {
   country: ClinicCountry;
@@ -154,6 +179,26 @@ function toItemContent(
   };
 }
 
+/** Los avisos con la edad del paciente el día de hoy en la zona de la sede. */
+function safetyFor(
+  patient: PrescriptionPatient,
+  items: readonly SafetyItem[],
+  today: string,
+): SafetyCheckResult {
+  return checkPrescriptionSafety({
+    items,
+    anamnesis: patient.anamnesis,
+    ageYears: patient.birthDate ? ageInYears(patient.birthDate, today) : null,
+  });
+}
+
+function conflictMessage(blocking: SafetyAlert[], confirmed: boolean): string {
+  const detail = blocking.map((a) => a.message).join(' ');
+  return confirmed
+    ? `Escribe el motivo por el que emites la receta pese a los avisos de seguridad. ${detail}`
+    : `Avisos de seguridad sin confirmar: ${detail} Confirma y escribe el motivo para emitir igualmente.`;
+}
+
 function hashOf(rx: Prescription): string {
   return computePrescriptionHash({
     ...rx,
@@ -197,8 +242,9 @@ export class IssuePrescriptionUseCase {
 
   /**
    * Emitir = foto congelada. Valida los campos legales del país de la sede,
-   * comprueba las alergias de la anamnesis vigente (409 sin confirmación
-   * explícita), escribe la cantidad en letras y sella todo con un SHA-256.
+   * recalcula los avisos de seguridad con la anamnesis vigente (DX-300: 409
+   * si hay bloqueantes sin confirmación y motivo), escribe la cantidad en
+   * letras y sella todo (avisos y motivo incluidos) con un SHA-256.
    * Profesional, sede y hora salen del servidor, nunca del cuerpo.
    */
   async execute(
@@ -232,27 +278,35 @@ export class IssuePrescriptionUseCase {
     }
 
     const issuedAt = this.now();
+    const today = todayIn(issuer.location.timeZone, issuedAt);
     const dispensationDate = resolveDispensationDate(
       input.dispensationDate,
-      todayIn(issuer.location.timeZone, issuedAt),
+      today,
     );
     const items = input.items.map((item, i) => toItemContent(item, i + 1));
 
-    const allergyMatches = findAllergyMatches(
-      items.map((i) => i.activeIngredient),
-      patient.allergies,
-    );
-    if (allergyMatches.length > 0 && input.allergyOverride !== true) {
-      const detail = allergyMatches
-        .map((m) => `${m.allergen} (${m.activeIngredient})`)
-        .join(', ');
+    // DX-300: avisos recalculados AQUÍ, en el servidor, con la anamnesis
+    // vigente: lo que el modal enseñó antes es solo una previsualización.
+    const safety = safetyFor(patient, items, today);
+    const blocking = safety.alerts.filter((a) => a.severity === 'BLOCKING');
+    const confirmed =
+      input.safetyOverride === true || input.allergyOverride === true;
+    const reason = trimmedOrNull(input.safetyOverrideReason);
+    if (reason !== null && reason.length > SAFETY_OVERRIDE_REASON_MAX) {
+      throw new BadRequestException(
+        `El motivo admite como mucho ${SAFETY_OVERRIDE_REASON_MAX} caracteres`,
+      );
+    }
+    if (blocking.length > 0 && (!confirmed || reason === null)) {
       throw new ConflictException({
         statusCode: 409,
         error: 'Conflict',
-        message: `Alerta de alergia: el paciente tiene registrada alergia a ${detail}. Confirma que prescribes igualmente.`,
-        allergyMatches,
+        message: conflictMessage(blocking, confirmed),
+        allergyMatches: safety.allergyMatches,
+        safetyAlerts: safety.alerts,
       });
     }
+    const allergyMatches = safety.allergyMatches;
 
     const content = {
       country,
@@ -276,6 +330,9 @@ export class IssuePrescriptionUseCase {
       notes: trimmedOrNull(input.notes),
       allergyOverride: allergyMatches.length > 0,
       allergyMatches,
+      safetyRulesVersion: safety.rulesVersion,
+      safetyAlerts: safety.alerts,
+      safetyOverrideReason: hasBlockingAlerts(safety.alerts) ? reason : null,
       items,
     };
     const created = await this.repo.create({
@@ -291,6 +348,45 @@ export class IssuePrescriptionUseCase {
       );
     }
     return created;
+  }
+}
+
+@Injectable()
+export class CheckPrescriptionSafetyUseCase {
+  constructor(
+    @Inject(PRESCRIPTION_REPOSITORY)
+    private readonly repo: PrescriptionRepository,
+    @Inject(PRESCRIPTION_CLOCK)
+    private readonly now: PrescriptionClock,
+  ) {}
+
+  /**
+   * DX-300: los avisos que daría la emisión con lo que el modal lleva escrito
+   * (sin validar campos legales ni guardar nada). 404 si el paciente no es de
+   * esta clínica. Solo una vista previa: la emisión los vuelve a calcular.
+   */
+  async execute(
+    patientId: string,
+    items: readonly SafetyItem[],
+    professionalUserId: string,
+  ): Promise<PrescriptionSafetyPreview> {
+    const patient = await this.repo.loadPatient(patientId);
+    if (!patient) {
+      throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    }
+    // La sede del request da la zona horaria del «hoy» de la edad.
+    const issuer = await this.repo.loadIssuer(professionalUserId);
+    const safety = safetyFor(
+      patient,
+      items,
+      todayIn(issuer.location.timeZone, this.now()),
+    );
+    return {
+      rulesVersion: safety.rulesVersion,
+      anamnesis: patient.anamnesis ? 'PRESENT' : 'MISSING',
+      hasBlocking: hasBlockingAlerts(safety.alerts),
+      alerts: safety.alerts,
+    };
   }
 }
 

@@ -31,6 +31,15 @@ const row: DiscountReportRowView = {
   discountOn: '2026-10-02',
   locationId: 'l1',
   locationName: ' -Sede',
+  priceSource: 'CATALOG',
+  agreementName: null,
+  basePrice: null,
+  agreementReduction: 0,
+  agreementPercent: 0,
+  agreementAssignedById: null,
+  agreementAssignedByName: null,
+  createdById: 'u1',
+  createdByName: '=creador',
 };
 
 describe('CSV del informe de descuentos (DX-204)', () => {
@@ -64,6 +73,11 @@ describe('CSV del informe de descuentos (DX-204)', () => {
         `"'+cmd malicioso"`,
         `"'@admin"`,
         `"' -Sede"`,
+        '""',
+        '',
+        '0.00',
+        '""',
+        `"'=creador"`,
       ].join(','),
     );
   });
@@ -133,5 +147,73 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       .slice(1)
       .split('\r\n')[1];
     expect(line).toContain(`,"'=1+1",`);
+  });
+
+  it('SEC-047: la rebaja de convenio sale aparte, con quién asignó el convenio y quién creó el ítem', () => {
+    const agreed: DiscountReportRowView = {
+      ...row,
+      currency: 'COP',
+      priceSource: 'AGREEMENT_PERCENT',
+      agreementName: 'Cortesía socios',
+      basePrice: 2000000,
+      catalogPrice: 0,
+      price: 0,
+      priceReduction: 0,
+      itemDiscount: 0,
+      discount: 0,
+      percent: 0,
+      agreementReduction: 2000000,
+      agreementPercent: 100,
+      agreementAssignedById: 'u9',
+      agreementAssignedByName: 'Admin Clínica',
+      createdByName: 'Dr. Pérez',
+      discountById: null,
+      discountByName: null,
+      reason: null,
+      reasonNote: null,
+    };
+    const cells = toDiscountReportCsv([agreed])
+      .slice(1)
+      .split('\r\n')[1]
+      .split(',');
+    // B5: una línea solo de convenio dice «Convenio …» como motivo y lleva el
+    // autor real (quien asignó el convenio), no un descuento sin autor.
+    expect(cells[13]).toBe('"Convenio Cortesía socios"');
+    expect(cells[15]).toBe('"Admin Clínica"');
+    expect(cells.slice(17)).toEqual([
+      '"Cortesía socios"',
+      '2000000',
+      '2000000',
+      '"Admin Clínica"',
+      '"Dr. Pérez"',
+    ]);
+    expect(DISCOUNT_REPORT_CSV_HEADER.slice(17)).toEqual([
+      'Convenio',
+      'Precio sin convenio',
+      'Rebaja por convenio',
+      'Convenio asignado por',
+      'Ítem creado por',
+    ]);
+  });
+
+  it('B5: sin quien asignó el convenio, el autor es quien creó el ítem', () => {
+    const agreed: DiscountReportRowView = {
+      ...row,
+      reason: null,
+      reasonNote: null,
+      itemDiscount: 0,
+      discount: 0,
+      agreementName: 'Sura',
+      basePrice: 100,
+      agreementReduction: 10,
+      agreementAssignedByName: null,
+      createdByName: 'Dr. Pérez',
+      discountByName: null,
+    };
+    const cells = toDiscountReportCsv([agreed])
+      .slice(1)
+      .split('\r\n')[1]
+      .split(',');
+    expect(cells[15]).toBe('"Dr. Pérez"');
   });
 });

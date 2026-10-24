@@ -15,6 +15,8 @@ import { PatientAgreementsController } from '../patient-agreements/presentation/
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
+import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
+import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
@@ -39,6 +41,7 @@ import { PaymentPlansController } from '../payment-plans/presentation/payment-pl
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
+import { CancellationPolicyController } from '../cancellation-policies/presentation/cancellation-policy.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
@@ -225,6 +228,43 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
     reason: 'NO_CHANGES_CONFIRMED',
+  },
+  // DX-099: anamnesis por enlace. Nunca la URL, el token, las respuestas ni
+  // el motivo del rechazo: solo el id del envío y el código. El envío del
+  // paciente se audita en su transacción (sin actor, origen LINK).
+  'POST /patients/:patientId/medical-history/requests': {
+    action: 'CREATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: RES,
+    patient: P,
+    reason: 'ANAMNESIS_LINK_CREATED',
+  },
+  'GET /medical-history/submissions/:id': {
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+  },
+  'POST /medical-history/submissions/:id/accept': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+    reason: 'ANAMNESIS_ACCEPTED',
+  },
+  'POST /medical-history/submissions/:id/reject': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+    reason: 'ANAMNESIS_REJECTED',
+  },
+  'POST /medical-history/submissions/:id/revoke': {
+    action: 'UPDATE',
+    resource: 'MEDICAL_HISTORY_SUBMISSION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'medicalHistorySubmission', param: 'id' },
+    reason: 'ANAMNESIS_LINK_REVOKED',
   },
 
   'POST /patients/:patientId/clinical-entries': {
@@ -433,6 +473,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PRESCRIPTION',
     resourceId: RES,
     patient: P,
+    // DX-300: códigos de los avisos de seguridad y si se confirmaron.
+    prescriptionSafety: true,
+  },
+  // DX-300: la previsualización de avisos lee la anamnesis vigente.
+  'POST /patients/:patientId/prescriptions/safety-check': {
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY',
+    patient: P,
+    reason: 'PRESCRIPTION_SAFETY_CHECK',
   },
   'GET /prescriptions/:id': {
     action: 'VIEW',
@@ -787,6 +836,13 @@ const EXPECTED: Record<string, AuditOptions> = {
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },
+  // DX-279: nueva versión de la política de cancelación de una sede.
+  'POST /locations/:id/cancellation-policy': {
+    action: 'CREATE',
+    resource: 'CANCELLATION_POLICY',
+    resourceId: RES,
+    reason: 'CANCELLATION_POLICY_CHANGED',
+  },
   'GET /reports/discounts': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN_ITEM',
@@ -986,6 +1042,8 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
+  PatientAnamnesisRequestsController,
+  MedicalHistorySubmissionsController,
   PatientResponsiblePartiesController,
   PatientCoveragesController,
   PatientAgreementsController,
@@ -1018,6 +1076,7 @@ const CONTROLLERS: Type[] = [
   AccountStatementController,
   ReceivablesController,
   DiscountPolicyController,
+  CancellationPolicyController,
   DiscountReportController,
   CollectionsController,
   CashSessionsController,

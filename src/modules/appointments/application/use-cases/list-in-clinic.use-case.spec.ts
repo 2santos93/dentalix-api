@@ -209,6 +209,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
       planItemId: 'item-1',
       name: 'Implante',
       toothNumber: '36',
+      heldInClinic: false,
       appointmentId: 'future-1',
       start: at('2026-10-26T14:00:00.000Z'),
       locationId: 'bog',

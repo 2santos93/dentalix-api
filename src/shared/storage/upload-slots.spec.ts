@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { ExecutionContext } from '@nestjs/common';
 import { ServiceUnavailableException } from '@nestjs/common';
 import {
+  DEFAULT_UPLOAD_TIMEOUTS,
   UPLOAD_BUSY_MESSAGE,
   UploadSlotGuard,
   UploadSlotInterceptor,
@@ -207,5 +208,44 @@ describe('UploadSlots / UploadSlotGuard (DX-259, OPS-038)', () => {
       .intercept(ctx, { handle: () => throwError(() => new Error('x')) })
       .subscribe({ error: () => undefined });
     expect(slots.active).toBe(0);
+  });
+});
+
+describe('UploadSlots con tope por clave (SEC-046)', () => {
+  it('como mucho `perKeyCapacity` por clave, además del tope de la réplica', () => {
+    const slots = new UploadSlots(2, DEFAULT_UPLOAD_TIMEOUTS, 1);
+    const a = slots.acquire('clinica-a');
+    expect('release' in a).toBe(true);
+    // La misma clave: sin plaza, aunque a la réplica le queda una.
+    expect(slots.acquire('clinica-a')).toEqual({ busy: 'key' });
+    expect(slots.activeFor('clinica-a')).toBe(1);
+    const b = slots.acquire('clinica-b');
+    expect('release' in b).toBe(true);
+    // Réplica llena: otra clave tampoco entra.
+    expect(slots.acquire('clinica-c')).toEqual({ busy: 'replica' });
+    expect(slots.active).toBe(2);
+    if ('release' in a) {
+      a.release();
+      a.release();
+    }
+    expect(slots.active).toBe(1);
+    expect(slots.activeFor('clinica-a')).toBe(0);
+    expect('release' in slots.acquire('clinica-a')).toBe(true);
+  });
+
+  it('sin clave solo cuenta el tope de la réplica (los usos de DX-259)', () => {
+    const slots = new UploadSlots(2, DEFAULT_UPLOAD_TIMEOUTS, 1);
+    expect(slots.tryAcquire()).not.toBeNull();
+    expect(slots.tryAcquire()).not.toBeNull();
+    expect(slots.tryAcquire()).toBeNull();
+  });
+
+  it('una clave sin plazas en uso no deja rastro (no crece con cada clínica)', () => {
+    const slots = new UploadSlots(4, DEFAULT_UPLOAD_TIMEOUTS, 2);
+    for (let i = 0; i < 100; i++) {
+      const r = slots.tryAcquire(`clinica-${i}`);
+      r?.();
+    }
+    expect(slots.trackedKeys).toBe(0);
   });
 });

@@ -71,6 +71,11 @@ import {
 } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
@@ -83,7 +88,7 @@ const DISCOUNT_FORBIDDEN =
 const DISCOUNT_UNPROCESSABLE =
   'DX-204: por encima del umbral de la política falta el motivo (con rebaja de precio: «… Indica el motivo del descuento.»), o «Otro» sin nota, o nota sin motivo';
 
-interface AuthenticatedRequest {
+interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;
 }
 
@@ -126,6 +131,7 @@ export class TreatmentPlansController {
     private readonly rejectTreatmentPlan: RejectTreatmentPlanUseCase,
     private readonly createPlanAlternative: CreatePlanAlternativeUseCase,
     private readonly applyBulkDiscount: ApplyBulkDiscountUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Audit({
@@ -400,10 +406,26 @@ export class TreatmentPlansController {
     patient: { lookup: 'treatmentPlanItem', param: 'itemId' },
   })
   @Patch('treatment-plans/:id/items/:itemId')
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description:
+      'DX-050: sede donde se realizó al pasar a DONE; sin ella, la de escritura de la sesión (la principal o la primera permitida)',
+  })
   @ApiOkResponse({ type: TreatmentPlanItemDto })
-  @ApiForbiddenResponse({ description: DISCOUNT_FORBIDDEN })
+  @ApiBadRequestResponse({
+    description:
+      'DX-050: pasar a DONE sin `performedById` quien no atiende (ASSISTANT); el profesional no atiende (ASSISTANT/RECEPTION) o no atiende en la sede; `completedAt` al pasar a DONE o futuro; `performedById`/`completedAt` en un ítem que no queda DONE. Mensaje en español',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Ítem inexistente o de otra clínica; DX-050: `performedById` que no es miembro activo de esta clínica (otra clínica o desactivado)',
+  })
+  @ApiForbiddenResponse({
+    description: `${DISCOUNT_FORBIDDEN}. DX-050: cambiar quién o cuándo de un ítem DONE (solo ADMIN); sacarlo de DONE (solo ADMIN o quien lo realizó)`,
+  })
   @ApiConflictResponse({
-    description: `${DISCOUNT_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio`,
+    description: `${DISCOUNT_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio; cerrado: DX-050 admite además corregir quién o cuándo de un ítem DONE, sin otro cambio`,
   })
   @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
   updateItem(
@@ -411,9 +433,9 @@ export class TreatmentPlansController {
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<TreatmentPlanItem> {
-    // El actor (token, nunca el body) firma el registro del odontograma que
-    // crea marcar el ítem DONE (Pieza B) y decide el tope del descuento
-    // (DX-204).
+    // El actor (token, nunca el body) decide el tope del descuento (DX-204)
+    // y, si atiende, es por defecto quien realizó el ítem (DX-050), que firma
+    // el registro del odontograma (Pieza B).
     return this.updateTreatmentPlanItem.execute(
       itemId,
       {
@@ -424,8 +446,12 @@ export class TreatmentPlansController {
         status: dto.status,
         surfaces: dto.surfaces,
         notes: dto.notes,
+        performedById: dto.performedById,
+        completedAt:
+          dto.completedAt === undefined ? undefined : new Date(dto.completedAt),
       },
       actorRole(req),
+      auditRequestContext(req, this.tenantContext),
     );
   }
 

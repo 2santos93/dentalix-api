@@ -194,7 +194,9 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
         select: { id: true },
       });
       if (!existing) {
-        throw new NotFoundException('Catalog item not found');
+        throw new NotFoundException(
+          'Prestación no encontrada en el catálogo de esta clínica.',
+        );
       }
 
       const item = await tx.dentalCatalogItem.update({

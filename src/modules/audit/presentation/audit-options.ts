@@ -40,4 +40,11 @@ export interface AuditOptions {
    * del fichero, el modo y los totales de la respuesta (solo números).
    */
   importBatch?: true;
+  /**
+   * DX-300: receta emitida. La metadata guarda la versión de las reglas, los
+   * CÓDIGOS de los avisos de seguridad (bloqueantes e informativos) y si se
+   * confirmaron con motivo; ni el texto de los avisos ni el del motivo (van
+   * sellados en la receta, `resourceId`).
+   */
+  prescriptionSafety?: true;
 }

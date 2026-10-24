@@ -449,3 +449,93 @@ describe('sanitizeAuditMetadata — mínimo de la visita siguiente (DX-273)', ()
     ).toHaveLength(50);
   });
 });
+
+describe('sanitizeAuditMetadata — atribución del ítem realizado (DX-050)', () => {
+  const dentist = '11111111-2222-4333-8444-555555555555';
+  const location = '66666666-7777-4888-8999-000000000000';
+
+  it('conserva quién, sede e instante antes y después (o null)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        attribution: {
+          before: {
+            performedById: dentist.toUpperCase(),
+            locationId: location,
+            completedAt: '2026-10-20T15:00:00.000Z',
+          },
+          after: { performedById: null, locationId: null, completedAt: null },
+        },
+      }),
+    ).toEqual({
+      attribution: {
+        before: {
+          performedById: dentist,
+          locationId: location,
+          completedAt: '2026-10-20T15:00:00.000Z',
+        },
+        after: { performedById: null, locationId: null, completedAt: null },
+      },
+    });
+  });
+
+  it('descarta el cambio entero si un lado no tiene la forma admitida', () => {
+    const after = { performedById: null, locationId: null, completedAt: null };
+    for (const before of [
+      { performedById: 'Dra. Ana', locationId: null, completedAt: null },
+      { performedById: null, locationId: null, completedAt: 'ayer' },
+      { performedById: null, locationId: null, completedAt: null, note: 'x' },
+      { performedById: null, locationId: null },
+    ]) {
+      expect(sanitizeAuditMetadata({ attribution: { before, after } })).toEqual(
+        {},
+      );
+    }
+    expect(sanitizeAuditMetadata({ attribution: 'x' })).toEqual({});
+  });
+});
+
+describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
+  it('conserva origen, código del motivo, minutos de aviso y si fue tardía', () => {
+    const cancellation = {
+      byKind: 'STAFF_FOR_PATIENT',
+      reasonCode: 'ILLNESS',
+      noticeMinutes: 300,
+      lateCancellation: true,
+    };
+    expect(sanitizeAuditMetadata({ cancellation })).toEqual({ cancellation });
+    expect(
+      sanitizeAuditMetadata({
+        cancellation: {
+          ...cancellation,
+          byKind: 'PATIENT_LINK',
+          reasonCode: null,
+        },
+      }),
+    ).toEqual({
+      cancellation: {
+        ...cancellation,
+        byKind: 'PATIENT_LINK',
+        reasonCode: null,
+      },
+    });
+  });
+
+  it('descarta la cancelación entera con texto libre, códigos ajenos o números raros', () => {
+    const base = {
+      byKind: 'CLINIC',
+      reasonCode: 'CLINIC_RESCHEDULE',
+      noticeMinutes: 60,
+      lateCancellation: false,
+    };
+    for (const cancellation of [
+      { ...base, reasonText: 'Tiene gripe' },
+      { ...base, byKind: 'OTRO' },
+      { ...base, reasonCode: 'Gripe' },
+      { ...base, noticeMinutes: -1 },
+      { ...base, noticeMinutes: 1.5 },
+      { ...base, lateCancellation: 'sí' },
+    ]) {
+      expect(sanitizeAuditMetadata({ cancellation })).toEqual({});
+    }
+  });
+});

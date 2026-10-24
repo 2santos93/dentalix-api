@@ -17,9 +17,12 @@ import {
 import {
   planItemsClosedMessage,
   planItemsEditable,
+  heldInClinicMessage,
+  heldInClinicToday,
   PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
   PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
   PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
+  reservationHolderView,
   reservedElsewhereMessage,
 } from '../domain/plan-item-reservation';
 
@@ -224,7 +227,9 @@ function liveReservingAppointment(now: Date): Prisma.AppointmentWhereInput {
 /**
  * DX-273 (revisión DX-271, I2): por cita, sus tratamientos con vínculo vivo
  * pero sin reserva (`active` false) que reserva OTRA cita viva. Solo citas de
- * sedes permitidas (DX-089): las demás se omiten sin dejar rastro.
+ * sedes permitidas (DX-089): las demás se omiten sin dejar rastro, salvo la
+ * de hoy con el paciente en la clínica (DX-293), que sale con `heldInClinic`
+ * y sin cita, hora ni sede (`reservationHolderView`).
  */
 export async function findPlanItemsReservedElsewhere(
   tx: Prisma.TransactionClient,
@@ -234,6 +239,7 @@ export async function findPlanItemsReservedElsewhere(
 ): Promise<Map<string, PlanItemReservedElsewhere[]>> {
   const out = new Map<string, PlanItemReservedElsewhere[]>();
   if (appointmentIds.length === 0) return out;
+  const now = new Date();
   const own = await tx.appointmentPlanItem.findMany({
     where: {
       appointmentId: { in: [...appointmentIds] },
@@ -250,18 +256,14 @@ export async function findPlanItemsReservedElsewhere(
       planItemId: { in: [...new Set(own.map((l) => l.planItemId))] },
       active: true,
       deletedAt: null,
-      appointment: {
-        ...liveReservingAppointment(new Date()),
-        ...(allowedLocations === 'ALL'
-          ? {}
-          : { locationId: { in: [...allowedLocations] } }),
-      },
+      appointment: liveReservingAppointment(now),
     },
     select: {
       planItemId: true,
       appointmentId: true,
       appointment: {
         select: {
+          status: true,
           start: true,
           locationId: true,
           location: { select: { name: true } },
@@ -287,24 +289,40 @@ export async function findPlanItemsReservedElsewhere(
   for (const link of own) {
     const holder = byItem.get(link.planItemId);
     if (!holder || holder.appointmentId === link.appointmentId) continue;
+    const view = reservationHolderView(
+      {
+        appointmentId: holder.appointmentId,
+        status: holder.appointment.status,
+        start: holder.appointment.start,
+        locationId: holder.appointment.locationId,
+        locationName: holder.appointment.location.name,
+      },
+      {
+        timeZone: zoneOf(holder.appointment.locationId),
+        locationAllowed: isLocationAllowed(
+          allowedLocations,
+          holder.appointment.locationId,
+        ),
+        now,
+      },
+    );
+    if (!view) continue;
     const list = out.get(link.appointmentId) ?? [];
     list.push({
       planItemId: link.planItemId,
       name: labels.get(holder.planItem.catalogItemId) ?? 'Tratamiento',
       toothNumber: holder.planItem.toothNumber,
-      appointmentId: holder.appointmentId,
-      start: holder.appointment.start,
-      locationId: holder.appointment.locationId,
-      locationName: holder.appointment.location.name,
-      timeZone: zoneOf(holder.appointment.locationId),
+      ...view,
     });
     out.set(link.appointmentId, list);
   }
+  // Por fecha de la titular; las de sede no permitida (sin fecha), al final.
+  const startOf = (r: PlanItemReservedElsewhere) =>
+    r.start?.getTime() ?? Number.POSITIVE_INFINITY;
   for (const list of out.values())
     list.sort(
       (a, b) =>
-        a.start.getTime() - b.start.getTime() ||
-        a.planItemId.localeCompare(b.planItemId),
+        startOf(a) - startOf(b) || a.planItemId.localeCompare(b.planItemId),
     );
   return out;
 }
@@ -333,6 +351,14 @@ export interface ClaimPlanItemInput {
  * «Traer» cruzados) y todo se revalida con ellas bloqueadas. Un
  * `audit_event` APPOINTMENT_PLAN_ITEMS en cada cita, en la misma transacción.
  * Si ya lo reserva, no cambia nada. Devuelve la cita de la que vino (o null).
+ *
+ * DX-288: atómico entre citas distintas. Después de las citas se bloquea la
+ * fila del ítem (FOR NO KEY UPDATE: no estorba a las FK que la miran), así
+ * que dos «Traer» del mismo tratamiento se ponen en fila aunque no
+ * compartan ninguna cita. Y no se trae desde una cita de hoy (día civil de
+ * su sede) con el paciente en la clínica: la que llega después de la
+ * primera (a la vez o no) recibe 409 en vez de quitársela. Una cita
+ * olvidada en la clínica de otro día no lo impide.
  */
 export async function claimPlanItemInTx(
   tx: Prisma.TransactionClient,
@@ -348,7 +374,17 @@ export async function claimPlanItemInTx(
         appointmentId: { not: appointmentId },
         appointment: liveReservingAppointment(new Date()),
       },
-      select: { appointmentId: true },
+      select: {
+        appointmentId: true,
+        appointment: {
+          select: {
+            status: true,
+            start: true,
+            locationId: true,
+            location: { select: { name: true } },
+          },
+        },
+      },
     });
   const seen = await holderOf();
   const ids = [appointmentId, ...(seen ? [seen.appointmentId] : [])].sort();
@@ -372,7 +408,12 @@ export async function claimPlanItemInTx(
   });
   if (!own) throw new NotFoundException(PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE);
   if (own.active) return { fromAppointmentId: null };
-  // Revisión I2: con las citas bloqueadas, el tratamiento sigue por hacer.
+  await tx.$queryRaw`
+    SELECT 1 FROM treatment_plan_items
+     WHERE id=${planItemId}::uuid AND "tenantId"=${tenantId}::uuid
+       FOR NO KEY UPDATE`;
+  // Revisión I2 (y DX-288 B1): con las citas y el ítem bloqueados, el
+  // tratamiento sigue por hacer.
   const schedulable = await tx.treatmentPlanItem.count({
     where: { id: planItemId, ...SCHEDULABLE_PLAN_ITEM },
   });
@@ -380,13 +421,41 @@ export async function claimPlanItemInTx(
     throw new ConflictException(PLAN_ITEM_NOT_SCHEDULABLE_MESSAGE);
 
   const holder = await holderOf();
+  // DX-288 (revisión M1): la titular en la clínica de HOY (zona de su sede)
+  // no lo suelta; una olvidada de otro día, sí. El 409 dice cuál solo si su
+  // sede está permitida (DX-089).
+  const held = holder?.appointment;
+  const zoneOf = held
+    ? await resolveLocationTimeZones(tx, tenantId, [held.locationId])
+    : null;
+  const heldToday =
+    held && zoneOf
+      ? heldInClinicToday(held, zoneOf(held.locationId), new Date())
+      : false;
+  const heldConflict = () =>
+    new ConflictException(
+      heldInClinicMessage(
+        held &&
+          zoneOf &&
+          isLocationAllowed(input.allowedLocations, held.locationId)
+          ? {
+              start: held.start,
+              timeZone: zoneOf(held.locationId),
+              locationName: held.location.name,
+            }
+          : null,
+      ),
+    );
   if ((holder?.appointmentId ?? null) !== (seen?.appointmentId ?? null))
-    throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+    throw heldToday
+      ? heldConflict()
+      : new ConflictException(PATIENT_FLOW_MESSAGES.stale);
   const from = holder
     ? locked.find((a) => a.id === holder.appointmentId)!
     : null;
   if (from && !isLocationAllowed(input.allowedLocations, from.locationId))
     throw new ForbiddenException(PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE);
+  if (heldToday) throw heldConflict();
 
   if (from)
     await tx.appointmentPlanItem.update({

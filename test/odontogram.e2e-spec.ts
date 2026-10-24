@@ -290,4 +290,74 @@ describe('Odontogram (e2e)', () => {
       true,
     );
   });
+  it('DX-207: la prestación y la evolución tienen que ser de la clínica y del paciente (404 en español, sin insertar)', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Odonto Refs',
+      subdomain: 'clinica-odonto-refs',
+      email: 'owner@clinica-odonto-refs.com',
+    });
+    const call = (verb: 'get' | 'post', path: string) =>
+      request(app.getHttpServer())
+        [verb](`/api/v1${path}`)
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    const patient = await createPatient(
+      app,
+      clinic.accessToken,
+      clinic.subdomain,
+      '4101',
+    );
+    const other = await createPatient(
+      app,
+      clinic.accessToken,
+      clinic.subdomain,
+      '4102',
+    );
+    const catalog = await call('get', '/catalog/items?kind=PROCEDURE').expect(
+      200,
+    );
+    const procedureId = (catalog.body as { id: string }[])[0].id;
+    const entryOf = async (patientId: string): Promise<string> =>
+      (
+        (
+          await call('post', `/patients/${patientId}/clinical-entries`)
+            .send({ notes: 'Evolución' })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+    const ownEntry = await entryOf(patient.id);
+    const otherPatientEntry = await entryOf(other.id);
+    const record = (extra: object) =>
+      call('post', `/patients/${patient.id}/tooth-records`).send({
+        toothNumber: '21',
+        kind: CatalogKind.PROCEDURE,
+        ...extra,
+      });
+
+    const unknownItem = await record({
+      catalogItemId: '00000000-0000-4000-8000-000000000000',
+    }).expect(404);
+    expect((unknownItem.body as { message: string }).message).toBe(
+      'Prestación no encontrada en el catálogo de esta clínica.',
+    );
+    const foreignEntry = await record({
+      catalogItemId: procedureId,
+      clinicalEntryId: otherPatientEntry,
+    }).expect(404);
+    expect((foreignEntry.body as { message: string }).message).toBe(
+      'Evolución no encontrada en la historia clínica de este paciente',
+    );
+    expect(
+      await raw.toothRecord.count({ where: { patientId: patient.id } }),
+    ).toBe(0);
+
+    const ok = await record({
+      catalogItemId: procedureId,
+      clinicalEntryId: ownEntry,
+    }).expect(201);
+    expect(ok.body).toMatchObject({
+      catalogItemId: procedureId,
+      clinicalEntryId: ownEntry,
+    });
+  });
 });

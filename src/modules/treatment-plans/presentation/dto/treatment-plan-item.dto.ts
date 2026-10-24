@@ -127,6 +127,46 @@ export class TreatmentPlanItemDto {
   @ApiProperty({ enum: TreatmentPlanItemStatus })
   status!: TreatmentPlanItemStatus;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-050: usuario que realizó el procedimiento. Null fuera de DONE y en los DONE anteriores a DX-050 («Sin atribuir»)',
+  })
+  performedById!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-050: su nombre (también si ya no es miembro activo de la clínica)',
+  })
+  performedByName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-050: sede donde se realizó (la del request al marcarlo)',
+  })
+  performedLocationId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-050: su nombre',
+  })
+  performedLocationName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-050: cuándo se realizó (hora del servidor al marcarlo)',
+  })
+  completedAt!: Date | null;
+
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 

@@ -1,5 +1,6 @@
 import {
   passwordRateLimitKey,
+  publicTokenRateLimitKey,
   staffActorRateLimitKey,
 } from './rate-limit.keys';
 
@@ -88,5 +89,26 @@ describe('staffActorRateLimitKey (DX-088)', () => {
       staffActorRateLimitKey('p', 'Bearer basura'),
     );
     expect(staffActorRateLimitKey('p', undefined)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('publicTokenRateLimitKey (DX-099)', () => {
+  const token = 'A'.repeat(43);
+
+  it('mismo token comparte balde, otro token no; nunca guarda el token', () => {
+    const a = publicTokenRateLimitKey('ruta-anamnesis-token', token);
+    expect(publicTokenRateLimitKey('ruta-anamnesis-token', token)).toBe(a);
+    expect(
+      publicTokenRateLimitKey('ruta-anamnesis-token', 'B'.repeat(43)),
+    ).not.toBe(a);
+    expect(publicTokenRateLimitKey('otra-ruta', token)).not.toBe(a);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(a).not.toContain(token);
+  });
+
+  it('sin token (ruta mal formada) cae en un balde común de la ruta', () => {
+    expect(publicTokenRateLimitKey('r', undefined)).toBe(
+      publicTokenRateLimitKey('r', ''),
+    );
   });
 });

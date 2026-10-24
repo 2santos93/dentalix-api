@@ -35,17 +35,20 @@ import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module
 import { AccountStatementModule } from './modules/account-statement/account-statement.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
 import { DiscountsModule } from './modules/discounts/discounts.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
 import { DataConsentsModule } from './modules/data-consents/data-consents.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
+import { CancellationPoliciesModule } from './modules/cancellation-policies/cancellation-policies.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
 import { ProviderScheduleModule } from './modules/provider-schedule/provider-schedule.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
 import { PostOpInstructionsModule } from './modules/post-op-instructions/post-op-instructions.module';
+import { MedicalHistorySubmissionsModule } from './modules/medical-history-submissions/medical-history-submissions.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { ImplantsModule } from './modules/implants/implants.module';
@@ -102,6 +105,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AccountStatementModule,
     ReceivablesModule,
     DiscountsModule,
+    ReportsModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,
     // DX-027: caja por turno (apertura, cierre con arqueo, reapertura).
@@ -109,6 +113,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     DataConsentsModule,
     InventoryModule,
     LocationsModule,
+    // DX-279: política de cancelación por sede (versiones append-only).
+    CancellationPoliciesModule,
     LocationScheduleModule,
     // DX-233: horario de cada profesional por sede y cuadrante.
     ProviderScheduleModule,
@@ -118,6 +124,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     DashboardModule,
     ConsentsModule,
     PostOpInstructionsModule,
+    // DX-099: anamnesis previa a la cita por enlace seguro.
+    MedicalHistorySubmissionsModule,
     PeriodontalModule,
     PrescriptionsModule,
     ImplantsModule,

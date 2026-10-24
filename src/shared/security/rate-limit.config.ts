@@ -37,10 +37,20 @@
  *                  (`POST …/documents/upload-url`, DX-259), por clínica +
  *                  usuario, como invitation-email: cada una firma un POST
  *                  para subir hasta 20 MB.
+ * - anamnesis:     ver y enviar el cuestionario público de anamnesis
+ *                  (DX-099), por IP (enumeración de tokens).
+ * - anamnesis-token: las mismas rutas, por TOKEN (sin IP): un mismo enlace no
+ *                  admite ráfagas de reintentos aunque cambie la IP. La clave
+ *                  es el hash del token, nunca el token.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
  *                  normal es bajo, así que frena a quien pida nombres al azar.
+ * - patient-import: leer un fichero de importación de pacientes (inspect,
+ *                  dry-run y hoja de saldos, SEC-046), por clínica + usuario
+ *                  y con UN balde para las tres rutas (no uno por ruta):
+ *                  cada lectura puede costar decenas de MB y segundos de CPU.
+ *                  El tope de lecturas a la vez es aparte (`ImportReadSlotInterceptor`).
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -52,7 +62,10 @@ export type RateLimitPolicy =
   | 'invitation-email'
   | 'password-reset'
   | 'public-files'
-  | 'direct-upload';
+  | 'direct-upload'
+  | 'patient-import'
+  | 'anamnesis'
+  | 'anamnesis-token';
 
 export interface RateLimitRule {
   limit: number;
@@ -77,6 +90,9 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'password-reset': { limit: 10, ttlMs: 15 * MINUTE },
   'public-files': { limit: 300, ttlMs: MINUTE },
   'direct-upload': { limit: 60, ttlMs: MINUTE },
+  'patient-import': { limit: 10, ttlMs: MINUTE },
+  anamnesis: { limit: 20, ttlMs: MINUTE },
+  'anamnesis-token': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -113,5 +129,8 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'password-reset': rule('password-reset'),
     'public-files': rule('public-files'),
     'direct-upload': rule('direct-upload'),
+    'patient-import': rule('patient-import'),
+    anamnesis: rule('anamnesis'),
+    'anamnesis-token': rule('anamnesis-token'),
   };
 }

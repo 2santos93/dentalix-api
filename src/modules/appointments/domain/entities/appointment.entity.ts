@@ -1,4 +1,8 @@
-import { AppointmentStatus } from '@prisma/client';
+import {
+  AppointmentStatus,
+  CancellationByKind,
+  CancellationReasonCode,
+} from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
 
 /**
@@ -58,6 +62,22 @@ export interface Appointment {
   arrivedAt: Date | null;
   seatedAt: Date | null;
   readyForCheckoutAt: Date | null;
+  /**
+   * DX-279: cancelación (solo en CANCELLED; null en las canceladas antiguas):
+   * hora del servidor, quién (enlace del paciente, el personal por el
+   * paciente o la clínica), motivo del catálogo y texto opcional, minutos de
+   * aviso y si fue tardía según la política vigente de su sede.
+   */
+  cancelledAt: Date | null;
+  cancelledByKind: CancellationByKind | null;
+  cancelReasonCode: CancellationReasonCode | null;
+  cancelReasonText: string | null;
+  noticeMinutes: number | null;
+  lateCancellation: boolean | null;
+  /** DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW). */
+  noShowMarkedAt: Date | null;
+  /** DX-279: versión de la política comunicada al paciente (DX-291; hoy null). */
+  policyVersionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -77,7 +97,9 @@ export interface AppointmentWriteResult extends Appointment {
   /**
    * DX-273 (revisión DX-271, I2): tratamientos de esta cita que siguen
    * reservados en OTRA cita viva (la reserva se quedó allí al marcar «Llegó»).
-   * Solo citas de sedes permitidas al usuario (DX-089). Vacío si no hay.
+   * Solo citas de sedes permitidas al usuario (DX-089), salvo una de hoy con
+   * el paciente en la clínica, que sale sin sus datos (DX-293). Vacío si no
+   * hay.
    */
   planItemsReservedElsewhere: PlanItemReservedElsewhere[];
   /**
@@ -93,13 +115,21 @@ export interface PlanItemReservedElsewhere {
   /** Nombre del procedimiento (catálogo, en español). */
   name: string;
   toothNumber: string;
-  /** La cita que lo reserva. */
-  appointmentId: string;
-  start: Date;
-  locationId: string;
-  locationName: string;
-  /** Zona de la sede de esa cita: la fecha se muestra en ella. */
-  timeZone: string;
+  /**
+   * DX-293: la cita que lo reserva es de hoy (día civil de su sede) con el
+   * paciente en la clínica. «Traer a esta cita» daría el 409 de DX-288.
+   */
+  heldInClinic: boolean;
+  /**
+   * La cita que lo reserva, su inicio, su sede y la zona de esa sede (la
+   * fecha se muestra en ella). `null` todos si esa sede no está permitida al
+   * usuario (DX-089): solo ocurre con `heldInClinic`.
+   */
+  appointmentId: string | null;
+  start: Date | null;
+  locationId: string | null;
+  locationName: string | null;
+  timeZone: string | null;
 }
 
 /**

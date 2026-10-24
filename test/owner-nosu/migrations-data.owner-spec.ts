@@ -204,6 +204,21 @@ const FIXTURE_DX225 = [
      FROM generate_series(1, 4500) AS g`,
 ];
 
+/**
+ * Esquema de 20261024100000 (DX-287): documentos escritos de varias formas
+ * en las dos clínicas para el relleno por lotes de "docKey" (con la clínica
+ * fijada, sin NO FORCE): 4.500 en B para que haya 3 lotes, uno solo con
+ * puntuación (clave vacía, no NULL) y los demás pacientes sin documento.
+ */
+const FIXTURE_DX287 = [
+  `UPDATE "patients" SET "docNumber" = '1.111.111' WHERE "id" = '${P_A}'`,
+  `UPDATE "patients" SET "docNumber" = ' ab-12 345 ' WHERE "id" = '${P_B}'`,
+  `UPDATE "patients" SET "docNumber" = 'cc-' || "lastName"
+    WHERE "tenantId" = '${T_B}' AND "firstName" = 'Lote'`,
+  `INSERT INTO "patients" ("id","tenantId","firstName","lastName","docNumber","updatedAt")
+   VALUES (gen_random_uuid(), '${T_A}', 'Solo', 'Puntos', '.-.', now())`,
+];
+
 interface Step {
   /** Se aplican todas las migraciones con nombre < `until`. */
   until: string;
@@ -251,8 +266,9 @@ const STEPS: Step[] = [
   // dx225: claves generadas de implantes, "phoneTail" con su trigger, relleno
   // por lotes con la clínica fijada (sin NO FORCE) e índice CONCURRENTLY.
   { until: '20261021120000', fixture: FIXTURE_DX225 },
+  // dx236 (etiqueta del diagnóstico) y las siguientes hasta DX-287.
   {
-    until: '99999999999999',
+    until: '20261024100000',
     fixture: [
       `INSERT INTO icd10_codes (code, label_es) VALUES ('K02.1', 'Texto anterior al backfill')`,
       `WITH e AS (
@@ -264,6 +280,9 @@ const STEPS: Step[] = [
        SELECT gen_random_uuid(), "tenantId", "patientId", id, 'K02.1', 'PRINCIPAL', 0 FROM e`,
     ],
   },
+  // dx287: "docKey" con su trigger, relleno por lotes con la clínica fijada
+  // (sin NO FORCE), índice CONCURRENTLY y ANALYZE; y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_DX287 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -660,6 +679,52 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         `SELECT has_table_privilege('dentalix_app', 'icd10_codes', 'UPDATE') AS v`,
       ),
     ).toBe(false);
+  }, 180_000);
+
+  it('clave de documento (DX-287): el relleno por lotes ve los pacientes de las dos clínicas y da la regla de docKey()', async () => {
+    await run(STEPS[16]);
+    expect(
+      await scalar<string>(
+        `SELECT count(*) FILTER (WHERE "docNumber" IS NOT NULL) || ':' ||
+                count(*) FILTER (WHERE "docNumber" IS NOT NULL AND "docKey" IS NULL) || ':' ||
+                count(*) FILTER (WHERE "docNumber" IS NULL AND "docKey" IS NOT NULL) || ':' ||
+                count(*) FILTER (WHERE "docKey" <> pg_catalog.upper(pg_catalog.regexp_replace("docNumber", '[^0-9A-Za-z]', '', 'g'))) AS v
+           FROM "patients"`,
+      ),
+    ).toBe('4503:0:0:0');
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("docKey", ',' ORDER BY "tenantId") AS v
+           FROM "patients" WHERE "id" IN ('${P_A}', '${P_B}')`,
+      ),
+    ).toBe('1111111,AB12345');
+    expect(
+      await scalar<string>(
+        `SELECT "docKey" AS v FROM "patients" WHERE "docNumber" = '.-.'`,
+      ),
+    ).toBe('');
+    expect(
+      await scalar<string>(
+        `SELECT "docKey" AS v FROM "patients"
+          WHERE "tenantId" = '${T_B}' AND "lastName" = 'N4500'`,
+      ),
+    ).toBe('CCN4500');
+    expect(
+      await scalar<boolean>(
+        `SELECT indisvalid AS v FROM pg_index
+          WHERE indexrelid = 'public.patients_tenant_doc_key_live_idx'::regclass`,
+      ),
+    ).toBe(true);
+    // Las altas posteriores las calcula el trigger.
+    await target.$executeRawUnsafe(
+      `INSERT INTO "patients" ("id","tenantId","firstName","lastName","docNumber","updatedAt")
+       VALUES (gen_random_uuid(), '${T_A}', 'Nuevo', 'Trigger', 'x-9.9', now())`,
+    );
+    expect(
+      await scalar<string>(
+        `SELECT "docKey" AS v FROM "patients" WHERE "docNumber" = 'x-9.9'`,
+      ),
+    ).toBe('X99');
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

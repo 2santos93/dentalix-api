@@ -1,0 +1,13 @@
+-- SEC-047: el informe de descuentos (DX-204) incluye los ítems resueltos por
+-- convenio con rebaja (precio de catálogo "basePrice" por encima de la
+-- referencia del convenio "catalogPrice"), aunque no tengan descuento propio.
+-- Este parcial sirve esa rama del OR del informe; la otra la sigue sirviendo
+-- treatment_plan_items_tenant_effective_discount_at_idx (SEC-041), que no se
+-- toca. PARCIAL y de expresión: no declarable en Prisma (ver schema.prisma). El
+-- predicado es el mismo texto que usa la consulta del informe.
+--
+-- Aditiva. CONCURRENTLY para no bloquear las escrituras de los ítems del plan
+-- (como 20261023140100_dx262_payments_opening_balance_idx); única sentencia
+-- (no puede ir en transacción). Si se corta, deja un índice INVALID: el IF NOT
+-- EXISTS no lo repara; hay que DROP INDEX CONCURRENTLY y repetirla.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plan_items_tenant_agreement_reduction_at_idx" ON "treatment_plan_items" ("tenantId", (COALESCE("discountAt", "createdAt"))) WHERE "agreementId" IS NOT NULL AND "basePrice" > "catalogPrice" AND "deletedAt" IS NULL;

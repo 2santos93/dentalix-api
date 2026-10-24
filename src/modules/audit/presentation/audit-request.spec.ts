@@ -30,6 +30,69 @@ function req(overrides: Partial<AuditedRequest> = {}): AuditedRequest {
 }
 
 describe('buildAuditDraft (DX-009)', () => {
+  it('receta segura (DX-300): códigos de los avisos y si se confirmaron; ni el texto de los avisos ni el motivo', () => {
+    const options: AuditOptions = {
+      action: 'CREATE',
+      resource: 'PRESCRIPTION',
+      resourceId: { response: 'id' },
+      patient: { param: 'patientId' },
+      prescriptionSafety: true,
+    };
+    const draft = buildAuditDraft(
+      options,
+      req({ params: { patientId: PATIENT } }),
+      {
+        id: ENTRY,
+        safetyRulesVersion: 'RX_SAFETY_V1',
+        safetyAlerts: [
+          {
+            code: 'INTERACTION_ANTICOAGULANT_NSAID',
+            severity: 'BLOCKING',
+            message: 'Interacción grave: el paciente toma Warfarina',
+          },
+          { code: 'ANTIRESORPTIVE_MRONJ', severity: 'INFO', message: 'x' },
+          { code: 'no es un código', severity: 'INFO', message: 'x' },
+        ],
+        safetyOverrideReason: 'INR estable',
+      },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      params: { patientId: PATIENT },
+      prescriptionSafety: {
+        rulesVersion: 'RX_SAFETY_V1',
+        blocking: ['INTERACTION_ANTICOAGULANT_NSAID'],
+        info: ['ANTIRESORPTIVE_MRONJ'],
+        overridden: true,
+      },
+    });
+    expect(JSON.stringify(draft?.metadata)).not.toMatch(/Warfarina|INR/);
+  });
+
+  it('receta segura (DX-300): una receta sin avisos deja la marca vacía y sin confirmación', () => {
+    const draft = buildAuditDraft(
+      {
+        action: 'CREATE',
+        resource: 'PRESCRIPTION',
+        prescriptionSafety: true,
+      },
+      req(),
+      {
+        id: ENTRY,
+        safetyRulesVersion: 'RX_SAFETY_V1',
+        safetyAlerts: [],
+        safetyOverrideReason: null,
+      },
+      scope,
+    );
+    expect(draft?.metadata.prescriptionSafety).toEqual({
+      rulesVersion: 'RX_SAFETY_V1',
+      blocking: [],
+      info: [],
+      overridden: false,
+    });
+  });
+
   it('búsqueda por lote (DX-191): lote/REF de la query y filas de la respuesta', () => {
     const options: AuditOptions = {
       action: 'EXPORT',

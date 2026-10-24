@@ -7,12 +7,20 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
 } from 'class-validator';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
+import {
+  CANCEL_REASON_TEXT_MAX,
+  CANCELLATION_MESSAGES,
+  CANCELLATION_REASON_CODES,
+  STAFF_CANCELLATION_KINDS,
+  type StaffCancellationKind,
+} from '../../../cancellation-policies/domain/cancellation-policy';
 import {
   PATIENT_FLOW_MESSAGES,
   STATUS_REASON_MAX,
@@ -83,6 +91,43 @@ export class UpdateAppointmentDto {
     message: PATIENT_FLOW_MESSAGES.completedExitReason,
   })
   statusReason?: string;
+
+  @ApiPropertyOptional({
+    enum: STAFF_CANCELLATION_KINDS,
+    description:
+      'DX-279: quién cancela, OBLIGATORIO al pasar a CANCELLED (400 sin él): STAFF_FOR_PATIENT (el paciente lo comunica al personal) o CLINIC (la clínica cancela o reprograma; nunca cuenta como tardía). El enlace público (PATIENT_LINK) no pasa por aquí. En cualquier otro cambio se ignora.',
+  })
+  @IsOptional()
+  @IsIn(STAFF_CANCELLATION_KINDS, {
+    message: CANCELLATION_MESSAGES.byKindRequired,
+  })
+  cancelledByKind?: StaffCancellationKind;
+
+  @ApiPropertyOptional({
+    enum: CANCELLATION_REASON_CODES,
+    description:
+      'DX-279: motivo del catálogo cerrado, OBLIGATORIO al pasar a CANCELLED (400 sin él). El servidor guarda la hora (UTC), los minutos de aviso y si es tardía según la política vigente de la sede de la cita; queda auditado (APPOINTMENT_CANCELLED, sin el texto libre).',
+  })
+  @IsOptional()
+  @IsEnum(CancellationReasonCode, {
+    message: CANCELLATION_MESSAGES.reasonRequired,
+  })
+  cancelReasonCode?: CancellationReasonCode;
+
+  @ApiPropertyOptional({
+    maxLength: CANCEL_REASON_TEXT_MAX,
+    description:
+      'DX-279: detalle opcional del motivo (hasta 500 caracteres; vacío = sin detalle). No pidas datos de salud. Solo al pasar a CANCELLED.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString({ message: CANCELLATION_MESSAGES.reasonText })
+  @MaxLength(CANCEL_REASON_TEXT_MAX, {
+    message: CANCELLATION_MESSAGES.reasonText,
+  })
+  cancelReasonText?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

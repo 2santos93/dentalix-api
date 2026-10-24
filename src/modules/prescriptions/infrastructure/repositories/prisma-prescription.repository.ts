@@ -5,6 +5,12 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import type { AllergyMatch } from '../../domain/allergy-match';
 import type {
+  SafetyAlert,
+  SafetyAnamnesis,
+  SafetyRule,
+  SafetySeverity,
+} from '../../domain/prescription-safety';
+import type {
   Prescription,
   PrescriptionIssuer,
   PrescriptionPatient,
@@ -46,17 +52,92 @@ function readMatches(value: Prisma.JsonValue | null): AllergyMatch[] {
   );
 }
 
-/** `alergeno` de cada alergia de la anamnesis (JSON validado al guardarla). */
-function readAllergens(value: Prisma.JsonValue | null | undefined): string[] {
+type JsonRecord = Record<string, Prisma.JsonValue>;
+
+function isRecord(value: Prisma.JsonValue | undefined): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** El campo de texto `key` de cada objeto de una lista JSON de la anamnesis. */
+function readNames(
+  value: Prisma.JsonValue | null | undefined,
+  key: string,
+): string[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((a) =>
-    a &&
-    typeof a === 'object' &&
-    !Array.isArray(a) &&
-    typeof a.alergeno === 'string'
-      ? [a.alergeno]
-      : [],
+  return value.flatMap((entry) =>
+    isRecord(entry) && typeof entry[key] === 'string' ? [entry[key]] : [],
   );
+}
+
+/** Peso plausible (kg) de `vitalSigns.peso`; si no, null. */
+function readWeight(value: Prisma.JsonValue | null): number | null {
+  if (!isRecord(value)) return null;
+  const peso = value.peso;
+  return typeof peso === 'number' && peso > 0 && peso < 400 ? peso : null;
+}
+
+/**
+ * DX-300: lo que la receta segura lee de la versión vigente. Las casillas
+ * salen de `safetyFlags` (las deriva el servidor al guardar la anamnesis).
+ */
+function readSafetyAnamnesis(history: {
+  allergies: Prisma.JsonValue | null;
+  medications: Prisma.JsonValue | null;
+  vitalSigns: Prisma.JsonValue | null;
+  safetyFlags: Prisma.JsonValue | null;
+}): SafetyAnamnesis {
+  const flags = isRecord(history.safetyFlags) ? history.safetyFlags : {};
+  const flag = (key: string) => flags[key] === true;
+  const weeks = flags.semanasEmbarazo;
+  return {
+    allergens: readNames(history.allergies, 'alergeno'),
+    medications: readNames(history.medications, 'nombre'),
+    flags: {
+      alergiaPenicilina: flag('alergiaPenicilina'),
+      alergiaAnestesico: flag('alergiaAnestesico'),
+      alergiaLatex: flag('alergiaLatex'),
+      embarazo: flag('embarazo'),
+      semanasEmbarazo:
+        typeof weeks === 'number' && Number.isFinite(weeks) ? weeks : null,
+      anticoagulantes: flag('anticoagulantes'),
+      bifosfonatos: flag('bifosfonatos'),
+    },
+    weightKg: readWeight(history.vitalSigns),
+  };
+}
+
+const SAFETY_RULES: readonly SafetyRule[] = [
+  'ALLERGY',
+  'INTERACTION',
+  'PREGNANCY',
+  'ANTIRESORPTIVE',
+  'PEDIATRIC_DOSE',
+  'NO_ANAMNESIS',
+];
+const SAFETY_SEVERITIES: readonly SafetySeverity[] = ['BLOCKING', 'INFO'];
+
+/** null = receta anterior a DX-300 (columna NULL). */
+function readSafetyAlerts(
+  value: Prisma.JsonValue | null,
+): SafetyAlert[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.flatMap((a) => {
+    if (!isRecord(a)) return [];
+    const rule = SAFETY_RULES.find((r) => r === a.rule);
+    const severity = SAFETY_SEVERITIES.find((s) => s === a.severity);
+    const { code, message, source, activeIngredient } = a;
+    if (
+      !rule ||
+      !severity ||
+      typeof code !== 'string' ||
+      typeof message !== 'string' ||
+      typeof source !== 'string' ||
+      !(activeIngredient === null || typeof activeIngredient === 'string')
+    ) {
+      return [];
+    }
+    return [{ rule, code, severity, activeIngredient, message, source }];
+  });
 }
 
 function mapRow(row: Row): Prescription {
@@ -84,6 +165,9 @@ function mapRow(row: Row): Prescription {
     notes: row.notes,
     allergyOverride: row.allergyOverride,
     allergyMatches: readMatches(row.allergyMatches),
+    safetyRulesVersion: row.safetyRulesVersion,
+    safetyAlerts: readSafetyAlerts(row.safetyAlerts),
+    safetyOverrideReason: row.safetyOverrideReason,
     contentHash: row.contentHash,
     voidedAt: row.voidedAt,
     voidedById: row.voidedById,
@@ -185,13 +269,22 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         },
       });
       if (!patient) return null;
-      // Anamnesis VIGENTE = la versión más alta (append-only).
+      // Anamnesis VIGENTE = la versión más alta (append-only), en la misma
+      // transacción con RLS de la clínica que el paciente.
       const history = await tx.medicalHistoryVersion.findFirst({
         where: { patientId, deletedAt: null },
         orderBy: { version: 'desc' },
-        select: { allergies: true },
+        select: {
+          allergies: true,
+          medications: true,
+          vitalSigns: true,
+          safetyFlags: true,
+        },
       });
-      return { ...patient, allergies: readAllergens(history?.allergies) };
+      return {
+        ...patient,
+        anamnesis: history ? readSafetyAnamnesis(history) : null,
+      };
     });
   }
 
@@ -209,8 +302,14 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
 
   async create(input: CreatePrescriptionRepoInput): Promise<Prescription> {
     const tenantId = this.requireTenantId();
-    const { items, allergyMatches, dispensationDate, validUntil, ...rest } =
-      input;
+    const {
+      items,
+      allergyMatches,
+      safetyAlerts,
+      dispensationDate,
+      validUntil,
+      ...rest
+    } = input;
     // Receta y medicamentos en la MISMA transacción: el trigger de la base solo
     // admite medicamentos insertados por la transacción que creó la receta.
     const row = await this.prisma.runWithTenant((tx) =>
@@ -221,6 +320,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
           dispensationDate: fromDateOnly(dispensationDate),
           validUntil: fromDateOnly(validUntil),
           allergyMatches: allergyMatches as unknown as Prisma.InputJsonValue,
+          safetyAlerts: safetyAlerts as unknown as Prisma.InputJsonValue,
           items: { create: items },
         },
         include: INCLUDE,

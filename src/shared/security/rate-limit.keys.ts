@@ -72,3 +72,15 @@ export function passwordRateLimitKey(
       : '';
   return sha256(`${prefix}-${ip}-${who}`);
 }
+
+/**
+ * Balde `anamnesis-token` (DX-099): por el TOKEN de la ruta pública, sin IP.
+ * La clave guarda el hash, nunca el token en claro.
+ */
+export function publicTokenRateLimitKey(
+  prefix: string,
+  token: unknown,
+): string {
+  const value = typeof token === 'string' ? token : '';
+  return sha256(`${prefix}-token:${sha256(value)}`);
+}

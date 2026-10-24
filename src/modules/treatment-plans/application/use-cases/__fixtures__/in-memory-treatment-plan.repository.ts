@@ -33,6 +33,7 @@ import {
   optionSiblingsToReject,
   siblingRejectionBlockedMessage,
 } from '../../../domain/plan-options';
+import type { ItemAttributionChange } from '../../../domain/plan-item-attribution';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
 // have no `deletedAt` field — same convention as Appointment. The fake still
@@ -46,6 +47,15 @@ type StoredPlan = TreatmentPlan & {
 type StoredItem = TreatmentPlanItem & { deletedAt: Date | null };
 
 let seq = 0;
+
+/** DX-050: un ítem sin atribución (fuera de DONE, o «Sin atribuir»). */
+const NO_ATTRIBUTION = {
+  performedById: null,
+  performedByName: null,
+  performedLocationId: null,
+  performedLocationName: null,
+  completedAt: null,
+} as const;
 const NOW = new Date('2026-01-01T00:00:00.000Z');
 
 /**
@@ -126,6 +136,11 @@ export class InMemoryTreatmentPlanRepository
       discountAt: overrides.discountAt ?? null,
       discountLocationId: overrides.discountLocationId ?? null,
       status: overrides.status ?? TreatmentPlanItemStatus.PROPOSED,
+      performedById: overrides.performedById ?? null,
+      performedByName: overrides.performedByName ?? null,
+      performedLocationId: overrides.performedLocationId ?? null,
+      performedLocationName: overrides.performedLocationName ?? null,
+      completedAt: overrides.completedAt ?? null,
       notes: overrides.notes ?? null,
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
@@ -181,6 +196,11 @@ export class InMemoryTreatmentPlanRepository
       discountAt: row.discountAt,
       discountLocationId: row.discountLocationId,
       status: row.status,
+      performedById: row.performedById,
+      performedByName: row.performedByName,
+      performedLocationId: row.performedLocationId,
+      performedLocationName: row.performedLocationName,
+      completedAt: row.completedAt,
       notes: row.notes,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -440,6 +460,7 @@ export class InMemoryTreatmentPlanRepository
       discountReasonNote: input.discountReasonNote ?? null,
       ...this.stampColumns(input.discountStamp ?? null),
       status: TreatmentPlanItemStatus.PROPOSED,
+      ...NO_ATTRIBUTION,
       notes: input.notes ?? null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -466,7 +487,7 @@ export class InMemoryTreatmentPlanRepository
     if (!row || !plan) {
       throw new NotFoundException('Treatment plan item not found');
     }
-    const { patch, mirror } = await this.decided(() =>
+    const { patch, mirror, attribution } = await this.decided(() =>
       decide({ plan, item: this.toItemEntity(row) }),
     );
     this.lastMirror = mirror;
@@ -478,7 +499,28 @@ export class InMemoryTreatmentPlanRepository
     if (discountStamp !== undefined) {
       Object.assign(row, this.stampColumns(discountStamp));
     }
+    if (attribution) Object.assign(row, this.attributionColumns(attribution));
     return this.toItemEntity(row);
+  }
+
+  /** DX-050: igual que el repositorio real, sin resolver nombres. */
+  private attributionColumns(
+    change: ItemAttributionChange,
+  ): Partial<StoredItem> {
+    if (change.kind === 'CLEAR') return NO_ATTRIBUTION;
+    if (change.kind === 'SET') {
+      return {
+        performedById: change.performedById,
+        performedLocationId: this.locationId,
+        completedAt: change.completedAt,
+      };
+    }
+    return Object.fromEntries(
+      Object.entries({
+        performedById: change.performedById,
+        completedAt: change.completedAt,
+      }).filter(([, value]) => value !== undefined),
+    );
   }
 
   /** Igual que el repositorio real: la sede es la del request (o la principal). */

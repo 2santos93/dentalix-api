@@ -14,7 +14,7 @@ import {
   assertLocalEnvironment,
   seedDemo,
 } from '../prisma/seed-demo';
-import { DEMO_COVERAGES } from '../prisma/demo/data';
+import { DEMO_COMPARISON_HISTORY, DEMO_COVERAGES } from '../prisma/demo/data';
 import { hostFor } from './support/tenant-host';
 
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
@@ -99,6 +99,9 @@ const TENANT_TABLES = [
   'clinical_entries',
   'clinical_note_template_prompts',
   'clinical_note_templates',
+  // DX-099: anamnesis por enlace (hijas de versions, appointments, patients y
+  // locations).
+  'medical_history_submissions',
   // DX-247: confirmaciones «Sin cambios hoy» (hijas de medical_history_versions).
   'medical_history_reviews',
   'medical_history_versions',
@@ -107,6 +110,8 @@ const TENANT_TABLES = [
   'waitlist_offers',
   'appointment_waitlist',
   'appointments',
+  // DX-279: versiones de la política de cancelación (las citas las citan).
+  'cancellation_policy_versions',
   'appointment_types',
   'inventory_movements',
   'inventory_items',
@@ -350,7 +355,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
     // DX-105 añade «Empresa Alfa» (8).
     expect(firstCounts.payers).toBe(8);
-    expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length);
+    // SEC-047: más la cobertura de Empresa Alfa del paciente con ese convenio
+    // (asignarlo exige una cobertura viva del pagador).
+    expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length + 1);
     // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
     // convenios (Sura −15 % y Empresa Alfa lista) y tres pacientes asignados.
     expect(firstCounts.price_lists).toBe(2);
@@ -519,6 +526,44 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         },
       }),
     ).resolves.toBe(1);
+  });
+
+  it('deja una anamnesis por enlace enviada y pendiente de revisión en la sede principal (DX-099)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const submissions = await raw.medicalHistorySubmission.findMany({
+      where: { tenantId },
+      include: { patient: true, location: true },
+    });
+    expect(submissions).toHaveLength(1);
+    const [submission] = submissions;
+    expect(submission).toMatchObject({
+      status: 'SUBMITTED',
+      resultingVersionId: null,
+      reviewedById: null,
+    });
+    expect(submission.patient.firstName).toBe('Natalia');
+    expect(submission.location.name).toBe('Sede principal');
+    expect(submission.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    // La HC de la paciente no cambia hasta que el doctor la acepte.
+    const versions = await raw.medicalHistoryVersion.findMany({
+      where: { tenantId, patientId: submission.patientId },
+    });
+    expect(versions.map((v) => v.source)).toEqual(['STAFF']);
+    // Crear el enlace (recepción) y el envío (la paciente, sin actor).
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId,
+        resourceType: 'MEDICAL_HISTORY_SUBMISSION',
+        resourceId: submission.id,
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+    expect(
+      events.map((e) => [e.action, (e.metadata as { reason?: string }).reason]),
+    ).toEqual([
+      ['CREATE', 'ANAMNESIS_LINK_CREATED'],
+      ['UPDATE', 'ANAMNESIS_SUBMITTED'],
+    ]);
   });
 
   it('deja un bloqueo de vacaciones, uno de almuerzo y 3 pendientes abiertos (DX-122)', async () => {
@@ -764,6 +809,45 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(paolaClaims.loc).toBeUndefined();
   });
 
+  it('DX-279: política de cancelación en la sede principal y una paciente con inasistencias y una cancelación tardía', async () => {
+    const tenantId = await liveDemoTenantId();
+    const policies = await raw.cancellationPolicyVersion.findMany({
+      where: { tenantId },
+      include: { location: { select: { name: true } } },
+    });
+    expect(policies).toHaveLength(1);
+    expect(policies[0]).toMatchObject({
+      version: 1,
+      noticeHours: 24,
+      currency: 'COP',
+    });
+    const late = await raw.appointment.findMany({
+      where: { tenantId, lateCancellation: true },
+    });
+    expect(late).toHaveLength(1);
+    expect(late[0]).toMatchObject({
+      status: 'CANCELLED',
+      cancelledByKind: 'STAFF_FOR_PATIENT',
+      noticeMinutes: 300,
+      locationId: policies[0].locationId,
+    });
+    const noShows = await raw.appointment.count({
+      where: {
+        tenantId,
+        patientId: late[0].patientId,
+        status: 'NO_SHOW',
+        noShowMarkedAt: { not: null },
+      },
+    });
+    expect(noShows).toBeGreaterThanOrEqual(2);
+    // Las cancelaciones del calendario llevan origen y motivo, y no son tardías.
+    const cancelled = await raw.appointment.findMany({
+      where: { tenantId, status: 'CANCELLED', lateCancellation: false },
+    });
+    expect(cancelled.length).toBeGreaterThan(0);
+    expect(cancelled.every((a) => a.cancelReasonCode !== null)).toBe(true);
+  });
+
   it('las citas cubren semana pasada/actual/próxima, varios estados, sedes y dentistas, dentro del horario', async () => {
     const tenantId = await liveDemoTenantId();
     const appointments = await raw.appointment.findMany({
@@ -790,13 +874,21 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(appointments.some((a) => a.start.getTime() > now + 2 * day)).toBe(
       true,
     );
+    // Fuera del calendario de ±15 días solo queda la historia de «Comparar
+    // sedes» (DX-014): citas ATENDIDAS de su día del mes anterior.
+    const outsideCalendar = appointments.filter(
+      (a) =>
+        a.start.getTime() <= now - 15 * day ||
+        a.start.getTime() >= now + 15 * day,
+    );
     expect(
-      appointments.every(
+      outsideCalendar.filter(
         (a) =>
-          a.start.getTime() > now - 15 * day &&
-          a.start.getTime() < now + 15 * day,
+          a.status !== 'COMPLETED' ||
+          a.reason !== DEMO_COMPARISON_HISTORY.reason ||
+          a.start.getTime() < now - 35 * day,
       ),
-    ).toBe(true);
+    ).toEqual([]);
 
     const schedules = await raw.locationSchedule.findMany({
       where: { tenantId, deletedAt: null },
@@ -894,6 +986,65 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(new Set(items.map((i) => i.locationId)).size).toBe(2);
   });
 
+  it('DX-014: las dos sedes tienen actividad en el mes anterior y en el actual', async () => {
+    const tenantId = await liveDemoTenantId();
+    const month = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' })
+        .format(d)
+        .slice(0, 7);
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+    }).format(new Date());
+    const [y, m, d] = today.split('-').map(Number);
+    const current = today.slice(0, 7);
+    const previous = month(new Date(Date.UTC(y, m - 2, 15, 12)));
+    // El mes actual solo se siembra si hay un día abierto (lunes a sábado)
+    // antes de hoy en el mes.
+    const openDayBefore = Array.from({ length: d - 1 }, (_, i) =>
+      new Date(Date.UTC(y, m - 1, i + 1)).getUTCDay(),
+    ).some((weekday) => weekday !== 0);
+    const months = openDayBefore ? [previous, current] : [previous];
+
+    const locations = await raw.location.findMany({
+      where: { tenantId },
+      select: { id: true },
+    });
+    const [appointments, payments, items] = await Promise.all([
+      raw.appointment.findMany({
+        where: { tenantId, status: 'COMPLETED', deletedAt: null },
+        select: { locationId: true, start: true },
+      }),
+      raw.payment.findMany({
+        where: { tenantId, deletedAt: null },
+        select: { locationId: true, paidAt: true },
+      }),
+      raw.treatmentPlanItem.findMany({
+        where: { tenantId, status: 'DONE', completedAt: { not: null } },
+        select: { performedLocationId: true, completedAt: true },
+      }),
+    ]);
+    for (const wanted of months) {
+      for (const { id } of locations) {
+        const where = `${wanted} en ${id}`;
+        expect({
+          where,
+          completed: appointments.some(
+            (a) => a.locationId === id && month(a.start) === wanted,
+          ),
+          paid: payments.some(
+            (p) => p.locationId === id && month(p.paidAt) === wanted,
+          ),
+          done: items.some(
+            (i) =>
+              i.performedLocationId === id &&
+              i.completedAt !== null &&
+              month(i.completedAt) === wanted,
+          ),
+        }).toEqual({ where, completed: true, paid: true, done: true });
+      }
+    }
+  });
+
   it('DX-012: un presupuesto presentable (borrador con descuento) y otro aceptado con firma', async () => {
     const tenantId = await liveDemoTenantId();
     const acceptance = await raw.treatmentPlanAcceptance.findFirstOrThrow({
@@ -916,6 +1067,34 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       },
     });
     expect(presentable.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('DX-050: los realizados quedan atribuidos (quién, sede, fecha) en las dos sedes, y uno «Sin atribuir»', async () => {
+    const tenantId = await liveDemoTenantId();
+    const done = await raw.treatmentPlanItem.findMany({
+      where: { tenantId, status: 'DONE', deletedAt: null },
+      include: {
+        performedByMembership: { select: { role: true } },
+        performedLocation: { select: { name: true } },
+      },
+    });
+    const attributed = done.filter((i) => i.performedById !== null);
+    const unattributed = done.filter((i) => i.performedById === null);
+    expect(unattributed).toHaveLength(1);
+    expect(unattributed[0]).toMatchObject({
+      performedLocationId: null,
+      completedAt: null,
+    });
+    expect(attributed.length).toBe(done.length - 1);
+    for (const item of attributed) {
+      expect(item.performedByMembership?.role).toBe('DENTIST');
+      expect(item.completedAt).not.toBeNull();
+      expect(item.completedAt!.getTime()).toBeLessThanOrEqual(Date.now());
+    }
+    expect(new Set(attributed.map((i) => i.performedLocation?.name)).size).toBe(
+      2,
+    );
+    expect(new Set(attributed.map((i) => i.performedById)).size).toBe(2);
   });
 
   it('DX-040: un grupo A/B presentado hace más de 7 días, sin cita futura, sale en «Presupuestos por seguir»', async () => {

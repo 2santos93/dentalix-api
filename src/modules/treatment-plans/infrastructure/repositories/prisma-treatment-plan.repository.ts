@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  ClinicRole,
   Prisma,
   ToothRecordStatus,
   TreatmentPlanItemStatus,
@@ -26,6 +31,16 @@ import {
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  ItemAttributionChange,
+  PERFORMER_NOT_AT_LOCATION_MESSAGE,
+  PERFORMER_NOT_ATTENDING_MESSAGE,
+  PERFORMER_NOT_FOUND_MESSAGE,
+  isAttendingRole,
+} from '../../domain/plan-item-attribution';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 
 type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
   Record<string, never>
@@ -37,9 +52,32 @@ export const ACCEPTANCE_SUMMARY = {
   select: { signerName: true, acceptedAt: true },
 } satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
 
-type PrismaTreatmentPlanWithItems = Prisma.TreatmentPlanGetPayload<{
-  include: { items: true; acceptance: typeof ACCEPTANCE_SUMMARY };
-}>;
+/**
+ * DX-050: nombre de quien realizó el ítem y de la sede, para «Realizado por
+ * Dra. X · fecha · sede». Por la membresía (también la de un miembro ya
+ * desactivado: su producción sigue siendo suya).
+ */
+export const ITEM_ATTRIBUTION_INCLUDE = {
+  performedByMembership: { select: { user: { select: { fullName: true } } } },
+  performedLocation: { select: { name: true } },
+} satisfies Prisma.TreatmentPlanItemInclude;
+
+type PrismaItemWithAttribution = PrismaTreatmentPlanItem &
+  Partial<
+    Prisma.TreatmentPlanItemGetPayload<{
+      include: typeof ITEM_ATTRIBUTION_INCLUDE;
+    }>
+  >;
+
+const ITEMS_WITH_ATTRIBUTION = {
+  where: { deletedAt: null },
+  include: ITEM_ATTRIBUTION_INCLUDE,
+} satisfies Prisma.TreatmentPlan$itemsArgs;
+
+type PrismaTreatmentPlanWithItems = PrismaTreatmentPlan & {
+  items: PrismaItemWithAttribution[];
+  acceptance: { signerName: string; acceptedAt: Date } | null;
+};
 
 export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
   return {
@@ -68,7 +106,7 @@ export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
 // `price` is a Prisma `Decimal` at the DB layer; the API-facing entity
 // exposes it as a plain `number` — same convention as
 // `PrismaDentalCatalogRepository.mapToEntity` for `defaultPrice`.
-function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
+function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
   return {
     visit: item.visit,
     visitLabel: item.visitLabel,
@@ -92,6 +130,11 @@ function mapItemToEntity(item: PrismaTreatmentPlanItem): TreatmentPlanItem {
     discountAt: item.discountAt,
     discountLocationId: item.discountLocationId,
     status: item.status,
+    performedById: item.performedById,
+    performedByName: item.performedByMembership?.user.fullName ?? null,
+    performedLocationId: item.performedLocationId,
+    performedLocationName: item.performedLocation?.name ?? null,
+    completedAt: item.completedAt,
     notes: item.notes,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -186,7 +229,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       return tx.treatmentPlan.findFirst({
         where: { id, deletedAt: null },
         include: {
-          items: { where: { deletedAt: null } },
+          items: ITEMS_WITH_ATTRIBUTION,
           acceptance: ACCEPTANCE_SUMMARY,
         },
       });
@@ -303,6 +346,8 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           agreementId: input.pricing.agreementId,
           agreementName: input.pricing.agreementName,
           pricingLocationId: input.pricing.pricingLocationId,
+          // SEC-047: autor del alta, para el informe de descuentos.
+          createdById: input.createdById,
           price: input.price,
           discount: input.discount ?? 0,
           notes: input.notes,
@@ -323,6 +368,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     const item = await this.prisma.runWithTenant(async (tx) => {
       return tx.treatmentPlanItem.findFirst({
         where: { id, deletedAt: null },
+        include: ITEM_ATTRIBUTION_INCLUDE,
       });
     });
     return item ? mapItemToEntity(item) : null;
@@ -331,6 +377,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   async updateItem(
     id: string,
     decide: DecideItemChange,
+    audit?: AuditRequestContext,
   ): Promise<TreatmentPlanItem> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -352,7 +399,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Treatment plan item not found');
       }
 
-      const { patch, mirror } = decide({
+      const { patch, mirror, attribution } = decide({
         plan,
         item: mapItemToEntity(previous),
       });
@@ -362,8 +409,40 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         data: {
           ...fields,
           ...(await discountStampData(tx, discountStamp, this.tenantContext)),
+          ...(attribution
+            ? await this.attributionData(tx, attribution, previous)
+            : {}),
         },
+        include: ITEM_ATTRIBUTION_INCLUDE,
       });
+      if (attribution && attribution.kind !== 'SET' && audit) {
+        await writeAuditEvent(tx, {
+          tenantId,
+          locationId: audit.locationId,
+          actor: {
+            kind: 'user',
+            userId: audit.actor.userId,
+            role: audit.actor.role,
+          },
+          action: 'UPDATE',
+          resourceType: 'TREATMENT_PLAN_ITEM',
+          resourceId: id,
+          patient: { kind: 'patient', id: plan.patientId },
+          requestId: audit.requestId,
+          ip: audit.ip,
+          userAgent: audit.userAgent,
+          metadata: {
+            reason:
+              attribution.kind === 'CORRECT'
+                ? 'PLAN_ITEM_ATTRIBUTION_CORRECTED'
+                : 'PLAN_ITEM_DONE_REVERTED',
+            attribution: {
+              before: attributionSide(previous),
+              after: attributionSide(item),
+            },
+          },
+        });
+      }
 
       const becameDone =
         previous.status !== TreatmentPlanItemStatus.DONE &&
@@ -373,6 +452,60 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       }
       return mapItemToEntity(item);
     });
+  }
+
+  /**
+   * DX-050: columnas de la atribución. SET y CORRECT con profesional resuelven
+   * su membresía viva en ESTA clínica (bajo RLS: la de otra clínica no
+   * existe), FOR SHARE para que no se desactive a mitad; la FK compuesta
+   * (tenantId, membresía, usuario) es la red de la BD.
+   */
+  private async attributionData(
+    tx: Prisma.TransactionClient,
+    change: ItemAttributionChange,
+    previous: PrismaTreatmentPlanItem,
+  ): Promise<Prisma.TreatmentPlanItemUncheckedUpdateInput> {
+    if (change.kind === 'CLEAR') {
+      return {
+        performedById: null,
+        performedByMembershipId: null,
+        performedLocationId: null,
+        completedAt: null,
+      };
+    }
+    if (change.kind === 'SET') {
+      // DX-089: la sede del request (ya validada contra las permitidas) o la
+      // de escritura de la sesión.
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const membershipId = await resolvePerformer(
+        tx,
+        this.requireTenantId(),
+        change.performedById,
+        locationId,
+      );
+      return {
+        performedById: change.performedById,
+        performedByMembershipId: membershipId,
+        performedLocationId: locationId,
+        completedAt: change.completedAt,
+      };
+    }
+    const data: Prisma.TreatmentPlanItemUncheckedUpdateInput = {};
+    if (change.performedById !== undefined) {
+      // La sede no se corrige: el nuevo profesional tiene que atender en la
+      // que quedó registrada (si la hay).
+      data.performedById = change.performedById;
+      data.performedByMembershipId = await resolvePerformer(
+        tx,
+        this.requireTenantId(),
+        change.performedById,
+        previous.performedLocationId,
+      );
+    }
+    if (change.completedAt !== undefined) {
+      data.completedAt = change.completedAt;
+    }
+    return data;
   }
 
   async softDeleteItem(id: string): Promise<void> {
@@ -435,6 +568,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
               this.tenantContext,
             )),
           },
+          include: ITEM_ATTRIBUTION_INCLUDE,
         });
         updated.push(mapItemToEntity(item));
       }
@@ -489,11 +623,56 @@ async function lockedPlan(
   const plan = await tx.treatmentPlan.findFirst({
     where: { id: planId, deletedAt: null },
     include: {
-      items: { where: { deletedAt: null } },
+      items: ITEMS_WITH_ATTRIBUTION,
       acceptance: ACCEPTANCE_SUMMARY,
     },
   });
   return plan ? mapToEntityWithItems(plan) : null;
+}
+
+/**
+ * DX-050: membresía VIVA de `userId` en esta clínica, bloqueada FOR SHARE.
+ * 404 si no la hay (otra clínica, o desactivado), 400 si no atiende (solo
+ * DENTIST y ADMIN) o si está restringido a sedes (DX-089) y `locationId` no es
+ * una de ellas. Filtra por `tenantId` en la propia consulta (no solo por la
+ * RLS), como el resto del SQL a mano.
+ */
+export async function resolvePerformer(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  userId: string,
+  locationId: string | null,
+): Promise<string> {
+  const [member] = await tx.$queryRaw<
+    { id: string; role: ClinicRole; restricted: boolean; here: boolean }[]
+  >`
+    SELECT m."id", m."role",
+           EXISTS (SELECT 1 FROM "membership_locations" ml
+                    WHERE ml."membershipId" = m."id") AS "restricted",
+           EXISTS (SELECT 1 FROM "membership_locations" ml
+                    WHERE ml."membershipId" = m."id"
+                      AND ml."locationId" = ${locationId}::uuid) AS "here"
+      FROM "clinic_memberships" m
+     WHERE m."tenantId" = ${tenantId}::uuid
+       AND m."userId" = ${userId}::uuid AND m."deletedAt" IS NULL
+       FOR SHARE OF m`;
+  if (!member) throw new NotFoundException(PERFORMER_NOT_FOUND_MESSAGE);
+  if (!isAttendingRole(member.role)) {
+    throw new BadRequestException(PERFORMER_NOT_ATTENDING_MESSAGE);
+  }
+  if (locationId !== null && member.restricted && !member.here) {
+    throw new BadRequestException(PERFORMER_NOT_AT_LOCATION_MESSAGE);
+  }
+  return member.id;
+}
+
+/** Un lado de la atribución en la auditoría: solo ids e instante. */
+function attributionSide(item: PrismaTreatmentPlanItem): AuditAttributionSide {
+  return {
+    performedById: item.performedById,
+    locationId: item.performedLocationId,
+    completedAt: item.completedAt?.toISOString() ?? null,
+  };
 }
 
 /**

@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import {
+  CheckPrescriptionSafetyUseCase,
   GetPrescriptionIssuerUseCase,
   GetPrescriptionUseCase,
   IssuePrescriptionUseCase,
@@ -28,8 +29,9 @@ import { PrescriptionTemplatesController } from './presentation/prescription-tem
 
 /**
  * Recetas (DX-013): emisión inmutable con campos legales por país de la sede
- * (CO/ES), alerta de alergia contra la anamnesis, anulación con motivo y
- * plantillas por clínica.
+ * (CO/ES), avisos de seguridad contra la anamnesis (DX-300: alergias,
+ * interacciones, embarazo, antirresortivos, dosis infantil), anulación con
+ * motivo y plantillas por clínica.
  */
 @Module({
   imports: [JwtModule.register({})],
@@ -40,6 +42,7 @@ import { PrescriptionTemplatesController } from './presentation/prescription-tem
   ],
   providers: [
     GetPrescriptionIssuerUseCase,
+    CheckPrescriptionSafetyUseCase,
     IssuePrescriptionUseCase,
     ListPatientPrescriptionsUseCase,
     GetPrescriptionUseCase,

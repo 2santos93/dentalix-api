@@ -3,7 +3,7 @@ import type {
   DiscountReportQuery,
   DiscountReportRepository,
   DiscountReportRow,
-  DiscountReportTotal,
+  DiscountReportSummary,
 } from '../../domain/ports/discount-report-repository.port';
 import {
   GetDiscountReportUseCase,
@@ -37,6 +37,14 @@ const row = (over: Partial<DiscountReportRow> = {}): DiscountReportRow => ({
   discountOn: '2026-10-02',
   locationId: 'l1',
   locationName: 'Sede principal',
+  priceSource: 'CATALOG',
+  agreementName: null,
+  basePrice: null,
+  agreementReduction: 0,
+  agreementAssignedById: null,
+  agreementAssignedByName: null,
+  createdById: 'u1',
+  createdByName: 'Dra. Ruiz',
   ...over,
 });
 
@@ -44,18 +52,22 @@ class FakeRepo implements DiscountReportRepository {
   lastQuery: DiscountReportQuery | null = null;
   lastPage: { offset: number; limit: number } | undefined;
   locations = new Set(['l1']);
-  totalsResult: DiscountReportTotal[] = [
-    { currency: 'COP', items: 2, gross: 1000000, discount: 75000 },
-    { currency: 'EUR', items: 1, gross: 3, discount: 1 },
-  ];
+  summaryResult: DiscountReportSummary = {
+    totals: [
+      { currency: 'COP', items: 2, gross: 1000000, discount: 75000 },
+      { currency: 'EUR', items: 1, gross: 3, discount: 1 },
+    ],
+    agreementTotals: [],
+    rows: 3,
+  };
   findLocation(id: string) {
     return Promise.resolve(
       this.locations.has(id) ? { id, name: 'Sede principal' } : null,
     );
   }
-  totals(query: DiscountReportQuery) {
+  summary(query: DiscountReportQuery) {
     this.lastQuery = query;
-    return Promise.resolve(this.totalsResult);
+    return Promise.resolve(this.summaryResult);
   }
   rows(query: DiscountReportQuery, page?: { offset: number; limit: number }) {
     this.lastQuery = query;
@@ -167,5 +179,58 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     });
     expect(rows).toHaveLength(3);
     expect(repo.lastPage).toBeUndefined();
+  });
+
+  it('SEC-047: la rebaja de convenio va aparte, con su % sobre el precio de catálogo', async () => {
+    const repo = new FakeRepo();
+    // M1: una línea solo de convenio no entra en los totales de DX-204; va en
+    // los suyos, y sí cuenta para la paginación.
+    repo.summaryResult = {
+      totals: [],
+      agreementTotals: [{ currency: 'COP', items: 1, reduction: 500000 }],
+      rows: 1,
+    };
+    repo.rows = () =>
+      Promise.resolve([
+        row({
+          itemId: 'conv',
+          priceSource: 'AGREEMENT_PERCENT',
+          agreementName: 'Empleados 25 %',
+          basePrice: 2000000,
+          catalogPrice: 1500000,
+          price: 1500000,
+          agreementReduction: 500000,
+          itemDiscount: 0,
+          discount: 0,
+          discountById: null,
+          discountByName: null,
+          agreementAssignedById: 'u2',
+          agreementAssignedByName: 'Recepción',
+        }),
+      ]);
+    const report = await new GetDiscountReportUseCase(repo).execute({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+    expect(report.totals).toEqual([]);
+    expect(report.agreementTotals).toEqual([
+      { currency: 'COP', items: 1, reduction: 500000 },
+    ]);
+    expect(report.total).toBe(1);
+    expect(report.items[0]).toMatchObject({
+      percent: 0,
+      agreementReduction: 500000,
+      agreementPercent: 25,
+      agreementAssignedByName: 'Recepción',
+      createdByName: 'Dra. Ruiz',
+    });
+  });
+
+  it('SEC-047: sin rebaja de convenio, agreementPercent es 0', async () => {
+    const report = await new GetDiscountReportUseCase(new FakeRepo()).execute({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+    expect(report.items.every((i) => i.agreementPercent === 0)).toBe(true);
   });
 });

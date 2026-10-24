@@ -12,16 +12,78 @@ export class AllergyMatchDto {
   allergen!: string;
 }
 
-/** Cuerpo del 409 por alerta de alergia. */
-export class AllergyConflictDto {
+const SAFETY_RULES = [
+  'ALLERGY',
+  'INTERACTION',
+  'PREGNANCY',
+  'ANTIRESORPTIVE',
+  'PEDIATRIC_DOSE',
+  'NO_ANAMNESIS',
+];
+
+/** Aviso de seguridad de la receta (DX-300), calculado por el servidor. */
+export class SafetyAlertDto {
+  @ApiProperty({ enum: SAFETY_RULES, enumName: 'PrescriptionSafetyRule' })
+  rule!: string;
+
+  @ApiProperty({
+    example: 'INTERACTION_ANTICOAGULANT_NSAID',
+    description: 'Referencia estable de la regla (prescription-safety.ts)',
+  })
+  code!: string;
+
+  @ApiProperty({
+    enum: ['BLOCKING', 'INFO'],
+    enumName: 'PrescriptionSafetySeverity',
+    description: 'BLOCKING exige confirmación y motivo para emitir',
+  })
+  severity!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Principio activo que lo dispara; null si es general',
+  })
+  activeIngredient!: string | null;
+
+  @ApiProperty({ description: 'Texto en español para quien prescribe' })
+  message!: string;
+
+  @ApiProperty({ example: 'SDCEP, Drug Prescribing for Dentistry' })
+  source!: string;
+}
+
+/** Cuerpo del 409 por avisos bloqueantes sin confirmar (o sin motivo). */
+export class SafetyConflictDto {
   @ApiProperty({ example: 409 })
   statusCode!: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Mensaje en español con los avisos' })
   message!: string;
 
   @ApiProperty({ type: [AllergyMatchDto] })
   allergyMatches!: AllergyMatchDto[];
+
+  @ApiProperty({ type: [SafetyAlertDto] })
+  safetyAlerts!: SafetyAlertDto[];
+}
+
+/** Respuesta de la previsualización de avisos (DX-300). */
+export class PrescriptionSafetyPreviewDto {
+  @ApiProperty({ example: 'RX_SAFETY_V1' })
+  rulesVersion!: string;
+
+  @ApiProperty({
+    enum: ['PRESENT', 'MISSING'],
+    description: 'MISSING = el paciente no tiene anamnesis',
+  })
+  anamnesis!: 'PRESENT' | 'MISSING';
+
+  @ApiProperty({ description: 'Hay avisos que exigen confirmación y motivo' })
+  hasBlocking!: boolean;
+
+  @ApiProperty({ type: [SafetyAlertDto] })
+  alerts!: SafetyAlertDto[];
 }
 
 export class PrescriptionItemDto {
@@ -87,6 +149,26 @@ export class PrescriptionDto {
   @ApiProperty({ description: 'El profesional confirmó una alerta de alergia' })
   allergyOverride!: boolean;
   @ApiProperty({ type: [AllergyMatchDto] }) allergyMatches!: AllergyMatchDto[];
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Versión de las reglas de la receta segura (DX-300); null en recetas anteriores',
+  })
+  safetyRulesVersion!: string | null;
+  @ApiProperty({
+    type: [SafetyAlertDto],
+    nullable: true,
+    description:
+      'Avisos calculados al emitir (dentro del hash); null en recetas anteriores a DX-300',
+  })
+  safetyAlerts!: SafetyAlertDto[] | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Motivo con el que se confirmaron los avisos bloqueantes',
+  })
+  safetyOverrideReason!: string | null;
   @ApiProperty({ description: 'SHA-256 (hex) del contenido emitido' })
   contentHash!: string;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })

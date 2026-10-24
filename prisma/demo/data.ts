@@ -18,6 +18,10 @@ import {
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
 import type { DemoLocationKey } from './calendar';
+import {
+  ANAMNESIS_CONDITIONS,
+  type AnamnesisAnswers,
+} from '../../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 
 // Datos FICTICIOS de la clínica demo. Nombres y documentos inventados; los
 // correos usan example.com (RFC 2606) y los teléfonos son de formato
@@ -782,11 +786,37 @@ export const DEMO_AGREEMENTS = [
   },
 ] as const;
 
-/** DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su cobertura— y uno con Alfa). */
+/**
+ * DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su
+ * cobertura— y uno con Alfa). SEC-047: el convenio exige una cobertura viva
+ * del pagador; `coverage` es la que se le añade si aún no la tiene (la de
+ * Alfa, como segunda cobertura, no principal).
+ */
 export const DEMO_PATIENT_AGREEMENTS = [
-  { patientIndex: 0, agreementKey: 'sura' },
-  { patientIndex: 4, agreementKey: 'sura' },
-  { patientIndex: 2, agreementKey: 'alfa' },
+  {
+    patientIndex: 0,
+    agreementKey: 'sura',
+    coverage: {
+      planName: 'Plan de Salud Sura',
+      memberNumber: 'DEMO-SURA-1000',
+    },
+  },
+  {
+    patientIndex: 4,
+    agreementKey: 'sura',
+    coverage: {
+      planName: 'Plan de Salud Sura',
+      memberNumber: 'DEMO-SURA-1004',
+    },
+  },
+  {
+    patientIndex: 2,
+    agreementKey: 'alfa',
+    coverage: {
+      planName: 'Convenio empresarial',
+      memberNumber: 'DEMO-ALFA-1002',
+    },
+  },
 ] as const;
 
 export interface DemoCoverage {
@@ -1376,7 +1406,7 @@ export const DEMO_PEDIATRIC = {
   ],
 } as const;
 
-interface DemoPlanItem {
+export interface DemoPlanItem {
   code: string;
   tooth: string;
   surfaces?: ToothSurface[];
@@ -1390,6 +1420,11 @@ interface DemoPlanItem {
    */
   discountReason?: DiscountReason;
   discountBy?: 'owner';
+  /**
+   * DX-050: un DONE de antes de la producción atribuible: sin quién, sede ni
+   * fecha («Sin atribuir» en la ficha y en los reportes).
+   */
+  unattributed?: true;
 }
 
 interface DemoPayment {
@@ -1400,7 +1435,7 @@ interface DemoPayment {
   notes?: string;
 }
 
-interface DemoPlan {
+export interface DemoPlan {
   patientIndex: number;
   dentistIndex: number;
   status: TreatmentPlanStatus;
@@ -1420,6 +1455,12 @@ interface DemoPlan {
    * él, el plan es de hoy. Siempre anterior a sus abonos.
    */
   openedDaysAgo?: number;
+  /**
+   * DX-050: sede donde se hicieron sus procedimientos realizados (por
+   * defecto, la principal). Los hace el odontólogo del plan y se fechan el día
+   * del primer abono (o hoy, sin abonos).
+   */
+  doneAt?: DemoLocationKey;
   /** Plan de pagos (cuotas) sobre el total facturable del plan. */
   paymentPlan?: {
     downPayment: number;
@@ -1468,6 +1509,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.COMPLETED,
     notes: 'Profilaxis y resinas.',
+    doneAt: 'norte',
     items: [
       { code: 'PREV-PROFILAXIS', tooth: '11', status: DONE },
       { code: 'OP-RESINA-1', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
@@ -1545,6 +1587,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Tratamiento periodontal por cuadrantes.',
+    doneAt: 'norte',
     openedDaysAgo: 75,
     items: [
       { code: 'PERIO-RASPADO', tooth: '16', status: DONE },
@@ -1569,7 +1612,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     status: TreatmentPlanStatus.COMPLETED,
     notes: 'Urgencia y endodoncia de 21.',
     items: [
-      { code: 'URG-CONSULTA', tooth: '21', status: DONE },
+      // DX-050: realizado antes de la producción atribuible.
+      { code: 'URG-CONSULTA', tooth: '21', status: DONE, unattributed: true },
       { code: 'ENDO-UNI', tooth: '21', status: DONE },
     ],
     payments: [
@@ -1582,6 +1626,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     dentistIndex: 1,
     status: TreatmentPlanStatus.ACCEPTED,
     notes: 'Prevención odontopediátrica.',
+    doneAt: 'norte',
     openedDaysAgo: 100,
     items: [
       { code: 'PED-SELLANTE', tooth: '16', surfaces: [OCCLUSAL], status: DONE },
@@ -2419,4 +2464,113 @@ export const DEMO_POSTOP = {
     { code: 'POI-ENDO', catalogCodes: [], appointmentTypes: ['Endodoncia'] },
   ],
   delivered: 'POI-EXO',
+} as const;
+
+/**
+ * DX-099: un cuestionario de anamnesis enviado por enlace y pendiente de
+ * revisión, para que el doctor lo vea en «Anamnesis por revisar» al entrar.
+ * Natalia (índice 2, anamnesis «sana») declara ahora alergia a la penicilina,
+ * asma y un anticonceptivo oral: la revisión los marca como añadidos y
+ * cambiados frente a su versión vigente.
+ */
+export const DEMO_ANAMNESIS_SUBMISSION: {
+  patientIndex: number;
+  answers: AnamnesisAnswers;
+} = {
+  patientIndex: 2,
+  answers: {
+    allergies: {
+      answer: 'SI',
+      items: [
+        {
+          alergeno: 'Penicilina',
+          tipo: 'MEDICAMENTO',
+          severidad: 'MODERADA',
+          reaccion: 'Ronchas y picor',
+        },
+      ],
+    },
+    conditions: ANAMNESIS_CONDITIONS.map((c) => ({
+      codigo: c.codigo,
+      answer: c.codigo === 'ASMA' ? ('SI' as const) : ('NO' as const),
+      ...(c.codigo === 'ASMA' ? { nota: 'Inhalador si hace ejercicio' } : {}),
+    })),
+    medications: {
+      answer: 'SI',
+      items: [{ nombre: 'Anticonceptivo oral', frecuencia: 'Diario' }],
+    },
+    anticoagulants: { answer: 'NO' },
+    habits: {
+      tabaquismo: { answer: 'NO' },
+      alcohol: { answer: 'SI', frecuencia: 'Fines de semana' },
+      bruxismo: { answer: 'NO_SE' },
+    },
+    pregnancy: { answer: 'NO' },
+    surgeries: { answer: 'NO' },
+  },
+};
+
+/**
+ * DX-279: política de cancelación de la sede principal (24 h de aviso, cargo
+ * sugerido de 50.000 COP) y una paciente con incidencias para ver la insignia
+ * «2 inasistencias · 1 cancelación tardía (12 meses)» en su ficha y en sus
+ * citas: Daniela Montoya Arango, con dos inasistencias y una cancelación con
+ * 5 h de aviso en citas de la semana pasada en la sede principal (en huecos
+ * libres del calendario). Las cancelaciones del calendario se
+ * registran como avisadas por el paciente 2 días antes (no tardías).
+ */
+export const DEMO_CANCELLATION = {
+  location: 'principal' as DemoLocationKey,
+  policy: {
+    noticeHours: 24,
+    suggestedFee: 50000,
+    currency: 'COP',
+    patientText:
+      'Si no puedes asistir, avísanos con al menos 24 horas de antelación para ofrecer tu hora a otro paciente. Las cancelaciones con menos aviso y las inasistencias pueden tener un cargo.',
+  },
+  calendarNoticeHours: 48,
+  calendarReasons: ['ILLNESS', 'WORK', 'TRANSPORT', 'FORGOT'] as const,
+  incidents: {
+    patientIndex: 4,
+    dentistIndex: 0,
+    /** Huecos que se prueban (hora de pared de Bogotá, en minutos). */
+    firstMinute: 7 * 60,
+    lastMinute: 18 * 60,
+    /** Dentro de la semana pasada del calendario (nada de hace más de 15 días). */
+    lastDaysAgo: 14,
+    noShowDaysAgo: [9, 10] as const,
+    lateCancellation: {
+      daysAgo: 11,
+      hoursBefore: 5,
+      reasonCode: 'WORK' as const,
+    },
+  },
+};
+
+/**
+ * DX-014: historia de «Comparar sedes» (ver `planComparisonHistory`). Un día
+ * en cada mes con dos visitas atendidas por sede de la primera dentista (sin
+ * horario propio), cada una con su procedimiento realizado allí y cobrado
+ * entero en la sede (sin saldo: no entra en la cartera). Pacientes sin planes
+ * ni convenios de la demo. Huecos fuera de las plantillas del calendario,
+ * dentro del horario de cada sede (también el sábado).
+ */
+export const DEMO_COMPARISON_HISTORY = {
+  dentistIndex: 0,
+  reason: 'Profilaxis y control',
+  patientIndexes: [14, 15, 17, 18],
+  slots: {
+    principal: [
+      [10 * 60, 30],
+      [12 * 60 + 30, 30],
+    ],
+    norte: [
+      [8 * 60, 30],
+      [9 * 60 + 15, 45],
+    ],
+  },
+  procedures: {
+    previous: ['PREV-PROFILAXIS', 'PREV-PROFILAXIS'],
+    current: ['OP-RESINA-1', 'PREV-PROFILAXIS'],
+  },
 } as const;

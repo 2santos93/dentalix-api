@@ -30,6 +30,11 @@ import {
   type DiscountActor,
 } from './item-discount';
 import { isClosedPlanItemChangeAllowed } from '../../domain/plan-status-machine';
+import {
+  decideAttribution,
+  isAttributionCorrection,
+} from '../../domain/plan-item-attribution';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { effectiveDiscountRises } from '../../../discounts/domain/effective-discount';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
@@ -43,6 +48,13 @@ export interface UpdateTreatmentPlanItemInput {
   /** DX-204: `null` quita el motivo (y su nota). */
   discountReason?: DiscountReason | null;
   discountReasonNote?: string | null;
+  /**
+   * DX-050: quién lo realizó (usuario). Al pasar a DONE, por defecto quien
+   * marca si atiende; en un ítem ya DONE, solo un ADMIN lo cambia.
+   */
+  performedById?: string;
+  /** DX-050: solo un ADMIN corrige la fecha de un ítem ya DONE. */
+  completedAt?: Date;
 }
 
 /** ¿La petición pone otro `discount` o cambia el motivo o su nota? (DX-204) */
@@ -75,13 +87,16 @@ export class UpdateTreatmentPlanItemUseCase {
   ) {}
 
   /**
-   * `actor` es el usuario del token: decide el tope del descuento (DX-204) y
-   * firma el registro del odontograma que crea marcar el ítem como realizado.
+   * `actor` es el usuario del token: decide el tope del descuento (DX-204) y,
+   * si atiende, es por defecto quien realizó el ítem (DX-050). `audit` es el
+   * contexto de la petición para el evento de una corrección de la atribución
+   * o de una salida de DONE, que el repositorio escribe en su transacción.
    */
   async execute(
     itemId: string,
     patch: UpdateTreatmentPlanItemInput,
     actor: DiscountActor,
+    audit?: AuditRequestContext,
   ): Promise<TreatmentPlanItem> {
     const existing = await this.repo.findItemById(itemId);
     if (!existing) {
@@ -112,84 +127,107 @@ export class UpdateTreatmentPlanItemUseCase {
     // BE-036: el estado del plan y del ítem se comprueban con sus filas
     // bloqueadas, dentro de la transacción: una aceptación que entre entre
     // medias no deja cambiar un plan ya aceptado.
-    return this.repo.updateItem(itemId, ({ plan, item }) => {
-      // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
-      // aceptado en un plan completado.
-      if (!isClosedPlanItemChangeAllowed(plan.status, item.status, patch)) {
-        assertPlanOpenForItems(plan);
-      }
-      // Plan aceptado con firma (DX-012): lo firmado (precio, descuento,
-      // caras, notas) no cambia y el ítem no vuelve a propuesto; avanzar el
-      // tratamiento (aceptado <-> realizado) sí.
-      if (
-        plan.acceptance &&
-        (patch.price !== undefined ||
-          patch.discount !== undefined ||
-          patch.discountReason !== undefined ||
-          patch.discountReasonNote !== undefined ||
-          patch.surfaces !== undefined ||
-          patch.notes !== undefined ||
-          patch.status === TreatmentPlanItemStatus.PROPOSED)
-      ) {
-        throw new ConflictException(SIGNED_PLAN_LOCKED_MESSAGE);
-      }
-      const price = patch.price ?? item.price;
-      const discount = patch.discount ?? item.discount;
-      if (patch.price !== undefined || patch.discount !== undefined) {
-        assertDiscountWithinPrice(price, discount);
-      }
+    return this.repo.updateItem(
+      itemId,
+      ({ plan, item }) => {
+        // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
+        // aceptado en un plan completado, o corregir quién o cuándo realizó un
+        // ítem ya realizado (DX-050).
+        if (
+          !isClosedPlanItemChangeAllowed(plan.status, item.status, patch) &&
+          !isAttributionCorrection(plan.status, item.status, patch)
+        ) {
+          assertPlanOpenForItems(plan);
+        }
+        // DX-050: con el ítem bloqueado, quién lo realizó, cuándo, y quién
+        // puede cambiarlo (400/403 antes de escribir nada).
+        const attribution = decideAttribution(item, patch, actor, at);
+        // Plan aceptado con firma (DX-012): lo firmado (precio, descuento,
+        // caras, notas) no cambia y el ítem no vuelve a propuesto; avanzar el
+        // tratamiento (aceptado <-> realizado) sí.
+        if (
+          plan.acceptance &&
+          (patch.price !== undefined ||
+            patch.discount !== undefined ||
+            patch.discountReason !== undefined ||
+            patch.discountReasonNote !== undefined ||
+            patch.surfaces !== undefined ||
+            patch.notes !== undefined ||
+            patch.status === TreatmentPlanItemStatus.PROPOSED)
+        ) {
+          throw new ConflictException(SIGNED_PLAN_LOCKED_MESSAGE);
+        }
+        const price = patch.price ?? item.price;
+        const discount = patch.discount ?? item.discount;
+        if (patch.price !== undefined || patch.discount !== undefined) {
+          assertDiscountWithinPrice(price, discount);
+        }
 
-      const { discountReason, discountReasonNote, ...rest } = patch;
-      const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;
-      const before = {
-        catalogPrice: item.catalogPrice,
-        price: item.price,
-        discount: item.discount,
-      };
-      const after = { ...before, price, discount };
-      // DX-105: sin descuentos, no se da uno nuevo ni se sube el que hubiera
-      // (bajar o quitar uno anterior a la marca sí se puede).
-      if (effectiveDiscountRises(before, after)) {
-        assertDiscountAllowed(allowDiscount, after);
-      }
-      const changes = discountFieldChanges(item, patch);
-      if (policy && touchesDiscount(before, after, changes)) {
-        assertPlanDiscountable(plan);
-        // Sin motivo en la petición se conserva el del ítem; cambiar de motivo
-        // sin nota borra la nota anterior (era de otro motivo).
-        const reason =
-          discountReason !== undefined ? discountReason : item.discountReason;
-        const note =
-          discountReasonNote !== undefined
-            ? discountReasonNote
-            : discountReason !== undefined
-              ? null
-              : item.discountReasonNote;
-        const decision = decideDiscountChange(
-          policy,
-          actor,
-          before,
-          { ...after, reason, reasonNote: note },
-          changes,
-          at,
-        );
-        if (decision) Object.assign(repoPatch, decision);
-      }
+        const {
+          discountReason,
+          discountReasonNote,
+          performedById: _performedById,
+          completedAt: _completedAt,
+          ...rest
+        } = patch;
+        const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;
+        const before = {
+          catalogPrice: item.catalogPrice,
+          price: item.price,
+          discount: item.discount,
+        };
+        const after = { ...before, price, discount };
+        // DX-105: sin descuentos, no se da uno nuevo ni se sube el que hubiera
+        // (bajar o quitar uno anterior a la marca sí se puede).
+        if (effectiveDiscountRises(before, after)) {
+          assertDiscountAllowed(allowDiscount, after);
+        }
+        const changes = discountFieldChanges(item, patch);
+        if (policy && touchesDiscount(before, after, changes)) {
+          assertPlanDiscountable(plan);
+          // Sin motivo en la petición se conserva el del ítem; cambiar de motivo
+          // sin nota borra la nota anterior (era de otro motivo).
+          const reason =
+            discountReason !== undefined ? discountReason : item.discountReason;
+          const note =
+            discountReasonNote !== undefined
+              ? discountReasonNote
+              : discountReason !== undefined
+                ? null
+                : item.discountReasonNote;
+          const decision = decideDiscountChange(
+            policy,
+            actor,
+            before,
+            { ...after, reason, reasonNote: note },
+            changes,
+            at,
+          );
+          if (decision) Object.assign(repoPatch, decision);
+        }
 
-      // Pieza B: a (PROPOSED|ACCEPTED) -> DONE transition mirrors the
-      // procedure into the odontogram — same tooth/surfaces/catalog item,
-      // status COMPLETED, linked back via `sourcePlanItemId`. DX-042
-      // (DB-013): the repository does the transition AND the insert in ONE
-      // transaction with the item locked, so two concurrent DONE never mirror
-      // twice and a failed mirror never leaves the item DONE without its
-      // clinical record. Tooth records are append-only: reverting a DONE item
-      // does not remove the record (a done procedure is history).
-      const mirror =
-        kind !== undefined && item.status !== TreatmentPlanItemStatus.DONE
-          ? { patientId: plan.patientId, kind, performedById: actor.userId }
-          : undefined;
-      return { patch: repoPatch, mirror };
-    });
+        // Pieza B: a (PROPOSED|ACCEPTED) -> DONE transition mirrors the
+        // procedure into the odontogram — same tooth/surfaces/catalog item,
+        // status COMPLETED, linked back via `sourcePlanItemId`. DX-042
+        // (DB-013): the repository does the transition AND the insert in ONE
+        // transaction with the item locked, so two concurrent DONE never mirror
+        // twice and a failed mirror never leaves the item DONE without its
+        // clinical record. Tooth records are append-only: reverting a DONE item
+        // does not remove the record (a done procedure is history).
+        // DX-050: el registro lo firma quien realizó el procedimiento, no quien
+        // lo marca.
+        const mirror =
+          kind !== undefined && attribution?.kind === 'SET'
+            ? {
+                patientId: plan.patientId,
+                kind,
+                performedById: attribution.performedById,
+              }
+            : undefined;
+        return { patch: repoPatch, mirror, attribution };
+      },
+      audit,
+    );
   }
 
   /** DX-105: `allowDiscount` del procedimiento (false si no se encuentra: cierra por defecto, como el descuento en bloque). */

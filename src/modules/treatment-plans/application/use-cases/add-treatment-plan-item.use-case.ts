@@ -87,7 +87,9 @@ export class AddTreatmentPlanItemUseCase {
       current.currency,
     );
     if (!context) {
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException(
+        'Prestación no encontrada en el catálogo de esta clínica.',
+      );
     }
     const resolved = resolveItemPrice(context);
 
@@ -142,6 +144,7 @@ export class AddTreatmentPlanItemUseCase {
         price,
         discount,
         notes: input.notes,
+        createdById: actor.userId,
         ...decision,
       };
     });

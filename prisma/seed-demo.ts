@@ -8,8 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import {
   AppointmentStatus,
   ClinicRole,
+  PaymentMethod,
   Prisma,
   ScheduleBlockKind,
+  TreatmentPlanItemStatus,
   TreatmentPlanStatus,
   WaitlistPriority,
 } from '@prisma/client';
@@ -59,7 +61,11 @@ import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use
 import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/application/use-cases/dentition.use-cases';
 import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/void-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
-import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import {
+  UpdateAppointmentUseCase,
+  type CancellationRequest,
+} from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import { CreateCancellationPolicyVersionUseCase } from '../src/modules/cancellation-policies/application/use-cases/cancellation-policy.use-cases';
 import { OVERLAP_MESSAGES } from '../src/modules/appointments/application/appointment-overlap-error';
 import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
@@ -116,6 +122,7 @@ import {
   daysUntilNextWeekday,
   daysUntilRotationCover,
   planAppointments,
+  planComparisonHistory,
   planInClinicToday,
 } from './demo/calendar';
 import { CreateScheduleBlockUseCase } from '../src/modules/schedule-blocks/application/use-cases/schedule-blocks.use-cases';
@@ -138,6 +145,8 @@ import {
   UpdatePostOpTemplateUseCase,
 } from '../src/modules/post-op-instructions/application/use-cases/post-op-templates.use-cases';
 import { DeliverPostOpInstructionsUseCase } from '../src/modules/post-op-instructions/application/use-cases/post-op-deliveries.use-cases';
+import { CreateAnamnesisRequestUseCase } from '../src/modules/medical-history-submissions/application/use-cases/anamnesis-requests.use-cases';
+import { SubmitPublicAnamnesisUseCase } from '../src/modules/medical-history-submissions/application/use-cases/public-anamnesis.use-cases';
 import {
   CreatePayerUseCase,
   ListPayersUseCase,
@@ -148,6 +157,7 @@ import {
 } from '../src/modules/patient-coverages/application/use-cases/patient-coverages.use-cases';
 import { UpdatePatientCommunicationUseCase } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
 import {
+  DEMO_ANAMNESIS_SUBMISSION,
   DEMO_CLINIC_NAME,
   DEMO_CLINICAL_ENTRIES,
   DEMO_CLINICAL_ADDENDA,
@@ -166,6 +176,7 @@ import {
   DEMO_PROFESSIONAL_LICENSES,
   demoPerioMeasures,
   DEMO_CURRENCY,
+  DEMO_COMPARISON_HISTORY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
   DEMO_LOCATIONS,
@@ -175,9 +186,12 @@ import {
   DEMO_COVERAGES,
   DEMO_RESPONSIBLES,
   DEMO_PLANS,
+  type DemoPlan,
+  type DemoPlanItem,
   DEMO_COLLECTION_NOTES,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
+  DEMO_CANCELLATION,
   DEMO_MEDICAL_ALERTS,
   DEMO_PRICES,
   DEMO_ALFA_PAYER,
@@ -614,6 +628,15 @@ class DemoSeeder {
       typeByReason,
     );
 
+    await this.createCancellationPolicy(
+      tenantId,
+      locations,
+      hours,
+      patientIds,
+      dentists,
+      ownerId,
+    );
+
     await this.inTenant(tenantId, undefined, () =>
       this.createTemplateEvolutions(ownerId, attended),
     );
@@ -626,6 +649,10 @@ class DemoSeeder {
         typeByReason,
         attended,
       ),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createAnamnesisSubmission(tenantId, patientIds, receptionId),
     );
 
     await this.createScheduleBlocksAndWaitlist(
@@ -653,6 +680,15 @@ class DemoSeeder {
       receptionId,
       catalog,
       ownerId,
+    );
+
+    await this.createComparisonHistory(
+      tenantId,
+      locations,
+      patientIds,
+      dentists,
+      receptionId,
+      catalog,
     );
 
     await this.createPlanOptions(
@@ -902,7 +938,7 @@ class DemoSeeder {
               kind: spec.kind,
               percent: spec.percent,
               priceListId: spec.priceListKey
-                ? (listIds.get(spec.priceListKey) as string)
+                ? listIds.get(spec.priceListKey)
                 : null,
             },
             receptionId,
@@ -911,6 +947,9 @@ class DemoSeeder {
       agreementIds.set(spec.key, id);
     }
 
+    // SEC-047: un convenio de pagador solo se asigna con una cobertura viva
+    // del paciente con ese pagador; si la demo no se la dio (Alfa), recepción
+    // la añade antes, como haría en la ficha.
     for (const a of DEMO_PATIENT_AGREEMENTS) {
       const patientId = patientIds[a.patientIndex];
       const current = await this.use(GetPatientAgreementUseCase).execute(
@@ -918,10 +957,29 @@ class DemoSeeder {
         false,
       );
       if (current.current) continue;
+      const spec = DEMO_AGREEMENTS.find((s) => s.key === a.agreementKey);
+      const payerId = payerIds.get(spec?.payerName ?? '') as string;
+      const coverages = await this.use(ListPatientCoveragesUseCase).execute(
+        patientId,
+      );
+      const coverageId =
+        coverages.find((c) => c.payer.id === payerId)?.id ??
+        (
+          await this.use(CreatePatientCoverageUseCase).execute(
+            patientId,
+            {
+              payerId,
+              planName: a.coverage.planName,
+              memberNumber: a.coverage.memberNumber,
+              isPrimary: false,
+            },
+            receptionId,
+          )
+        ).id;
       await this.use(AssignPatientAgreementUseCase).execute(
         patientId,
-        { agreementId: agreementIds.get(a.agreementKey) as string },
-        receptionId,
+        { agreementId: agreementIds.get(a.agreementKey) as string, coverageId },
+        { userId: receptionId, role: ClinicRole.RECEPTION },
       );
     }
   }
@@ -1279,6 +1337,7 @@ class DemoSeeder {
     );
     const appointments = this.use(CreateAppointmentUseCase);
     const attended: AttendedAppointment[] = [];
+    let cancelled = 0;
 
     for (const a of planned) {
       await this.inTenant(tenantId, locations[a.location], async () => {
@@ -1303,6 +1362,13 @@ class DemoSeeder {
         if (a.status !== AppointmentStatus.SCHEDULED) {
           await this.use(UpdateAppointmentUseCase).execute(created.id, {
             status: a.status,
+            // DX-279: cancelar exige origen y motivo; las del calendario las
+            // avisó el paciente con 2 días (antes de que exista la política).
+            ...(a.status === AppointmentStatus.CANCELLED
+              ? {
+                  cancellation: this.calendarCancellation(a.start, cancelled++),
+                }
+              : {}),
           });
         }
         if (a.status === AppointmentStatus.COMPLETED) {
@@ -1316,6 +1382,88 @@ class DemoSeeder {
       });
     }
     return attended;
+  }
+
+  /** DX-279: cancelación del calendario, avisada por el paciente con 2 días. */
+  private calendarCancellation(start: Date, n: number): CancellationRequest {
+    const { calendarNoticeHours, calendarReasons } = DEMO_CANCELLATION;
+    const at = new Date(
+      Math.min(start.getTime() - calendarNoticeHours * 3_600_000, Date.now()),
+    );
+    return {
+      byKind: 'STAFF_FOR_PATIENT',
+      reasonCode: calendarReasons[n % calendarReasons.length],
+      at,
+    };
+  }
+
+  /**
+   * DX-279: el ADMIN guarda la política de cancelación de la sede principal
+   * (por el mismo caso de uso que la API) y una paciente acumula dos
+   * inasistencias y una cancelación tardía en citas pasadas de esa sede, para
+   * ver la insignia en su ficha y en sus citas.
+   */
+  private async createCancellationPolicy(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    patientIds: string[],
+    dentists: string[],
+    ownerId: string,
+  ): Promise<void> {
+    const { location, policy, incidents } = DEMO_CANCELLATION;
+    const locationId = locations[location];
+    await this.inTenant(tenantId, locationId, () =>
+      this.use(CreateCancellationPolicyVersionUseCase).execute(
+        locationId,
+        { ...policy },
+        ownerId,
+      ),
+    );
+    // El primer hueco libre (horario de la sede, sin solape del profesional
+    // ni de la paciente) desde `daysAgo` hacia atrás, dentro de la semana
+    // pasada del calendario: la demo no tiene citas de hace más de 15 días.
+    const book = async (daysAgo: number) => {
+      for (let d = daysAgo; d <= incidents.lastDaysAgo; d++) {
+        for (let m = incidents.firstMinute; m < incidents.lastMinute; m += 30) {
+          const start = daysAgoAt(this.now, d, m);
+          const end = new Date(start.getTime() + 30 * 60_000);
+          if (!fitsBusinessHours(start, end, hours[location])) continue;
+          try {
+            return await this.use(CreateAppointmentUseCase).registerHistorical({
+              patientId: patientIds[incidents.patientIndex],
+              providerId: dentists[incidents.dentistIndex],
+              start,
+              end,
+              reason: 'Control',
+              createdById: ownerId,
+            });
+          } catch (error) {
+            if (!(error instanceof ConflictException)) throw error;
+          }
+        }
+      }
+      throw new Error(
+        `Sin hueco en la sede ${location} desde hace ${daysAgo} días`,
+      );
+    };
+    await this.inTenant(tenantId, locationId, async () => {
+      const update = this.use(UpdateAppointmentUseCase);
+      for (const daysAgo of incidents.noShowDaysAgo) {
+        const a = await book(daysAgo);
+        await update.execute(a.id, { status: AppointmentStatus.NO_SHOW });
+      }
+      const late = incidents.lateCancellation;
+      const a = await book(late.daysAgo);
+      await update.execute(a.id, {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: {
+          byKind: 'STAFF_FOR_PATIENT',
+          reasonCode: late.reasonCode,
+          at: new Date(a.start.getTime() - late.hoursBefore * 3_600_000),
+        },
+      });
+    });
   }
 
   /**
@@ -1421,6 +1569,47 @@ class DemoSeeder {
       },
       // Impreso: sin enlace, no hace falta host.
       { protocol: 'http', host: null },
+    );
+  }
+
+  /**
+   * DX-099: recepción envía el enlace de anamnesis a una paciente y ella lo
+   * responde, por los mismos casos de uso que la API (enlace con su hash,
+   * autorización vigente, envío auditado sin respuestas). Queda SUBMITTED en
+   * la sede principal: el doctor la ve en «Anamnesis por revisar» al entrar.
+   * El evento de crear el enlace es el que escribe el `@Audit` de la ruta.
+   */
+  private async createAnamnesisSubmission(
+    tenantId: string,
+    patientIds: string[],
+    receptionId: string,
+  ): Promise<void> {
+    const patientId = patientIds[DEMO_ANAMNESIS_SUBMISSION.patientIndex];
+    const created = await this.use(CreateAnamnesisRequestUseCase).execute(
+      patientId,
+      {},
+      receptionId,
+      { protocol: 'http', host: 'demo.localhost:3001' },
+    );
+    await this.use(RecordAuditEventUseCase).record({
+      tenantId,
+      locationId: null,
+      actor: { kind: 'user', userId: receptionId, role: ClinicRole.RECEPTION },
+      action: 'CREATE',
+      resourceType: 'MEDICAL_HISTORY_SUBMISSION',
+      resourceId: created.id,
+      patient: { kind: 'patient', id: patientId },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+      metadata: { reason: 'ANAMNESIS_LINK_CREATED' },
+    });
+    const token = created.url.split('/').at(-1);
+    if (!token) throw new Error('Demo DX-099: el enlace no trae token.');
+    await this.use(SubmitPublicAnamnesisUseCase).execute(
+      token,
+      { answers: DEMO_ANAMNESIS_SUBMISSION.answers, declarationAccepted: true },
+      { ipAddress: null, userAgent: null, requestId: null },
     );
   }
 
@@ -1701,6 +1890,127 @@ class DemoSeeder {
     return null;
   }
 
+  /**
+   * DX-050: un realizado de la demo se fecha el día del primer abono del plan
+   * (ningún caso de uso fecha el pasado); uno `unattributed` queda como los
+   * DONE anteriores a DX-050, sin quién, sede ni fecha. Bajo
+   * `app.current_tenant`, como el resto.
+   */
+  private async datePlanItemDone(
+    itemId: string,
+    spec: DemoPlan,
+    item: DemoPlanItem,
+  ): Promise<void> {
+    const firstPaymentDaysAgo = Math.max(
+      0,
+      ...spec.payments.map((p) => p.daysAgo),
+    );
+    const data = item.unattributed
+      ? {
+          performedById: null,
+          performedByMembershipId: null,
+          performedLocationId: null,
+          completedAt: null,
+        }
+      : { completedAt: daysAgoAt(this.now, firstPaymentDaysAgo, 10 * 60) };
+    await this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlanItem.update({ where: { id: itemId }, data }),
+    );
+  }
+
+  /**
+   * DX-014: un día con actividad en cada sede en el mes anterior y en el
+   * actual (`planComparisonHistory`), para que «Comparar sedes» compare algo
+   * cualquier día del mes. Cada visita es una cita atendida (ruta histórica,
+   * con las validaciones de horario y solapes), un plan con su procedimiento
+   * realizado allí por la dentista (DX-050, fechado a la hora de la cita) y el
+   * abono del total en la sede al terminar. Sin caja: va antes de los turnos
+   * de hoy, como el resto de abonos históricos.
+   */
+  private async createComparisonHistory(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const dentistId = dentists[DEMO_COMPARISON_HISTORY.dentistIndex];
+    const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
+    for (const visit of planComparisonHistory(
+      this.now,
+      DEMO_COMPARISON_HISTORY,
+    )) {
+      const start = daysAgoAt(this.now, visit.daysAgo, visit.startMinute);
+      const end = daysAgoAt(
+        this.now,
+        visit.daysAgo,
+        visit.startMinute + visit.durationMinutes,
+      );
+      const patientId = patientIds[visit.patientIndex];
+      await this.inTenant(tenantId, locations[visit.location], async () => {
+        const appointment = await this.use(
+          CreateAppointmentUseCase,
+        ).registerHistorical({
+          patientId,
+          providerId: dentistId,
+          start,
+          end,
+          reason: DEMO_COMPARISON_HISTORY.reason,
+          createdById: receptionId,
+        });
+        await this.use(UpdateAppointmentUseCase).execute(appointment.id, {
+          status: AppointmentStatus.COMPLETED,
+        });
+        const plan = await this.use(CreateTreatmentPlanUseCase).execute({
+          patientId,
+          currency: DEMO_CURRENCY,
+          notes: 'Control y procedimiento del día.',
+          createdById: dentistId,
+        });
+        const item = await this.use(AddTreatmentPlanItemUseCase).execute(
+          plan.id,
+          {
+            toothNumber: '16',
+            catalogItemId: catalogId(catalog, visit.procedure),
+          },
+          dentist,
+        );
+        await this.use(UpdateTreatmentPlanItemUseCase).execute(
+          item.id,
+          { status: TreatmentPlanItemStatus.DONE },
+          dentist,
+        );
+        await this.prisma.runWithTenant((tx) =>
+          tx.treatmentPlanItem.update({
+            where: { id: item.id },
+            data: { completedAt: start },
+          }),
+        );
+        for (const status of [
+          TreatmentPlanStatus.ACCEPTED,
+          TreatmentPlanStatus.COMPLETED,
+        ]) {
+          await this.use(UpdateTreatmentPlanUseCase).execute(
+            plan.id,
+            { status },
+            { role: ClinicRole.DENTIST },
+          );
+        }
+        await this.use(RecordPaymentUseCase).execute(
+          plan.id,
+          {
+            amount: Number(item.price) - Number(item.discount),
+            currency: DEMO_CURRENCY,
+            paidAt: new Date(end.getTime() + 10 * 60 * 1000),
+            method: PaymentMethod.CARD,
+          },
+          receptionId,
+        );
+      });
+    }
+  }
+
   private async createPlansAndPayments(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
@@ -1737,12 +2047,21 @@ class DemoSeeder {
             item.discountBy === 'owner' ? owner : dentist,
           );
           if (item.status !== 'PROPOSED') {
-            // DONE refleja el ítem en el odontograma (lo hace el caso de uso).
-            await this.use(UpdateTreatmentPlanItemUseCase).execute(
-              added.id,
-              { status: item.status },
-              dentist,
+            // DONE refleja el ítem en el odontograma (lo hace el caso de uso)
+            // y lo atribuye al odontólogo, en la sede del plan (DX-050).
+            await this.inTenant(
+              tenantId,
+              locations[spec.doneAt ?? 'principal'],
+              () =>
+                this.use(UpdateTreatmentPlanItemUseCase).execute(
+                  added.id,
+                  { status: item.status },
+                  dentist,
+                ),
             );
+            if (item.status === TreatmentPlanItemStatus.DONE) {
+              await this.datePlanItemDone(added.id, spec, item);
+            }
           }
         }
         // La máquina de estados (DX-040) no salta de borrador a completado:

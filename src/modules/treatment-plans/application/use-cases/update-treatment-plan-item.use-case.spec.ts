@@ -1,9 +1,17 @@
 import {
   ADMIN_ACTOR,
+  ASSISTANT_ACTOR,
+  DENTIST_ACTOR,
+  DISCOUNT_NOW,
   FIXED_CLOCK,
   testDiscountPolicy,
 } from './__fixtures__/discount-fixtures';
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
@@ -20,6 +28,7 @@ import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.ent
 import {
   DecideItemChange,
   DoneMirrorInput,
+  ItemChange,
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
@@ -50,6 +59,11 @@ function fakeItem(
     discountAt: null,
     discountLocationId: null,
     status: TreatmentPlanItemStatus.PROPOSED,
+    performedById: null,
+    performedByName: null,
+    performedLocationId: null,
+    performedLocationName: null,
+    completedAt: null,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -381,6 +395,205 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
           ADMIN_ACTOR,
         ),
       ).rejects.toThrow('odontogram write failed');
+    });
+  });
+
+  // DX-050: quién lo realizó, dónde y cuándo. El caso de uso decide con el
+  // ítem leído en la transacción; el repositorio resuelve la membresía y la
+  // sede y escribe (y audita) en esa misma transacción.
+  describe('DX-050 — producción atribuible', () => {
+    const AUDIT = {
+      tenantId: 't1',
+      locationId: 'loc-1',
+      actor: { userId: 'admin-1', role: ClinicRole.ADMIN },
+      requestId: 'req-1',
+      ip: null,
+      userAgent: null,
+    };
+
+    function capturing(
+      existing: TreatmentPlanItem,
+      plan: TreatmentPlanWithItems = planWithPatient,
+    ) {
+      const calls: { change: ItemChange; audit: unknown }[] = [];
+      const repo = makeRepo({
+        findItemById: (): Promise<TreatmentPlanItem | null> =>
+          Promise.resolve(existing),
+        updateItem: (_id, decide, audit) => {
+          try {
+            const change = decide({ plan, item: existing });
+            calls.push({ change, audit });
+            return Promise.resolve({
+              ...existing,
+              status: change.patch.status ?? existing.status,
+            });
+          } catch (error) {
+            return Promise.reject(
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          }
+        },
+      });
+      const uc = new UpdateTreatmentPlanItemUseCase(
+        repo,
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
+      return { uc, calls };
+    }
+
+    it('un DENTIST que marca DONE queda como quien lo realizó, con la hora del servidor; el odontograma lo firma él', async () => {
+      const { uc, calls } = capturing(
+        fakeItem({ status: TreatmentPlanItemStatus.ACCEPTED }),
+      );
+
+      await uc.execute(
+        'item1',
+        { status: TreatmentPlanItemStatus.DONE },
+        DENTIST_ACTOR,
+        AUDIT,
+      );
+
+      expect(calls).toEqual([
+        {
+          change: {
+            patch: { status: TreatmentPlanItemStatus.DONE },
+            mirror: {
+              patientId: 'pat1',
+              kind: CatalogKind.PROCEDURE,
+              performedById: DENTIST_ACTOR.userId,
+            },
+            attribution: {
+              kind: 'SET',
+              performedById: DENTIST_ACTOR.userId,
+              completedAt: DISCOUNT_NOW,
+            },
+          },
+          audit: AUDIT,
+        },
+      ]);
+    });
+
+    it('la asistente indica el profesional: el espejo del odontograma también es suyo', async () => {
+      const { uc, calls } = capturing(
+        fakeItem({ status: TreatmentPlanItemStatus.ACCEPTED }),
+      );
+
+      await uc.execute(
+        'item1',
+        { status: TreatmentPlanItemStatus.DONE, performedById: 'dentist-2' },
+        ASSISTANT_ACTOR,
+      );
+
+      expect(calls[0].change.patch).toEqual({
+        status: TreatmentPlanItemStatus.DONE,
+      });
+      expect(calls[0].change.mirror?.performedById).toBe('dentist-2');
+      expect(calls[0].change.attribution).toEqual({
+        kind: 'SET',
+        performedById: 'dentist-2',
+        completedAt: DISCOUNT_NOW,
+      });
+    });
+
+    it('la asistente sin profesional → 400 y no se escribe nada', async () => {
+      const { uc, calls } = capturing(
+        fakeItem({ status: TreatmentPlanItemStatus.ACCEPTED }),
+      );
+
+      await expect(
+        uc.execute(
+          'item1',
+          { status: TreatmentPlanItemStatus.DONE },
+          ASSISTANT_ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(calls).toEqual([]);
+    });
+
+    it('un DENTIST no corrige quién lo realizó → 403', async () => {
+      const { uc } = capturing(
+        fakeItem({
+          status: TreatmentPlanItemStatus.DONE,
+          performedById: 'dentist-2',
+          completedAt: DISCOUNT_NOW,
+        }),
+      );
+
+      await expect(
+        uc.execute('item1', { performedById: 'dentist-1' }, DENTIST_ACTOR),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('un ADMIN corrige quién y cuándo, también en un plan completado (DX-109)', async () => {
+      const at = new Date('2026-10-16T15:00:00.000Z');
+      const { uc, calls } = capturing(
+        fakeItem({
+          status: TreatmentPlanItemStatus.DONE,
+          performedById: 'dentist-2',
+          completedAt: DISCOUNT_NOW,
+        }),
+        {
+          ...planWithPatient,
+          status: TreatmentPlanStatus.COMPLETED,
+        },
+      );
+
+      await uc.execute(
+        'item1',
+        { performedById: 'dentist-1', completedAt: at },
+        ADMIN_ACTOR,
+        AUDIT,
+      );
+
+      expect(calls[0].change).toEqual({
+        patch: {},
+        mirror: undefined,
+        attribution: {
+          kind: 'CORRECT',
+          performedById: 'dentist-1',
+          completedAt: at,
+        },
+      });
+    });
+
+    it('en un plan completado no se corrige a la vez que otra cosa → 409', async () => {
+      const { uc } = capturing(
+        fakeItem({ status: TreatmentPlanItemStatus.DONE }),
+        {
+          ...planWithPatient,
+          status: TreatmentPlanStatus.COMPLETED,
+        },
+      );
+
+      await expect(
+        uc.execute(
+          'item1',
+          { performedById: 'dentist-1', notes: 'x' },
+          ADMIN_ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('salir de DONE limpia la atribución (ADMIN)', async () => {
+      const { uc, calls } = capturing(
+        fakeItem({
+          status: TreatmentPlanItemStatus.DONE,
+          performedById: 'dentist-2',
+          completedAt: DISCOUNT_NOW,
+        }),
+      );
+
+      await uc.execute(
+        'item1',
+        { status: TreatmentPlanItemStatus.ACCEPTED },
+        ADMIN_ACTOR,
+        AUDIT,
+      );
+
+      expect(calls[0].change.attribution).toEqual({ kind: 'CLEAR' });
+      expect(calls[0].change.mirror).toBeUndefined();
     });
   });
 });

@@ -308,3 +308,22 @@ export const ANAMNESIS_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // gestión. Escribe miles de fichas de golpe y el informe lleva datos de
 // pacientes.
 export const PATIENT_IMPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Anamnesis por enlace (DX-099) — CREAR el enlace, verlo en la ficha y
+// ANULARLO: los cuatro roles; recepción es quien de hecho lo manda. VER la
+// bandeja y las respuestas (dato clínico): CLINICAL_ROLES, recepción no.
+// ACEPTAR (crea una versión de la HC) y RECHAZAR: el odontólogo y gestión; la
+// asistente la prepara pero no firma la HC en nombre del doctor.
+export const ANAMNESIS_REQUEST_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+// Reportes de gestión (DX-014): «Comparar sedes» y su CSV. Producción, cobros,
+// citas y ocupación de todas las sedes, frente a otro período: la mirada del
+// dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
+export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

@@ -19,6 +19,12 @@ import type { PatientRepository } from '../src/modules/patients/domain/ports/pat
 import type { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 
+/** DX-279: cancelar desde la agenda exige origen y motivo. */
+const FOR_PATIENT = {
+  byKind: 'STAFF_FOR_PATIENT',
+  reasonCode: 'ILLNESS',
+} as const;
+
 // DX-122, capa DB: `schedule_blocks` y `appointment_waitlist` (RLS FORCE, FK
 // compuestas, CHECK, único parcial) y las garantías que solo Postgres da: el
 // rechazo por bloqueo con los repositorios reales, que cancelar y crear la
@@ -388,7 +394,10 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     it('cancelar y luego no-show: una sola entrada OPEN con los datos de la cita', async () => {
       const appt = await newAppointment('10:00', '10:45');
       await inA(() =>
-        update.execute(appt.id, { status: AppointmentStatus.CANCELLED }),
+        update.execute(appt.id, {
+          status: AppointmentStatus.CANCELLED,
+          cancellation: FOR_PATIENT,
+        }),
       );
       await inA(() =>
         update.execute(appt.id, { status: AppointmentStatus.NO_SHOW }),
@@ -411,7 +420,10 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
     it('reactivar la cita (CANCELLED → SCHEDULED) cierra su entrada en la misma transacción', async () => {
       const appt = await newAppointment('09:00', '09:30');
       await inA(() =>
-        update.execute(appt.id, { status: AppointmentStatus.CANCELLED }),
+        update.execute(appt.id, {
+          status: AppointmentStatus.CANCELLED,
+          cancellation: FOR_PATIENT,
+        }),
       );
       await inA(() =>
         update.execute(appt.id, { status: AppointmentStatus.SCHEDULED }),
@@ -436,7 +448,12 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         AppointmentStatus.SCHEDULED,
         AppointmentStatus.NO_SHOW,
       ]) {
-        await inA(() => update.execute(appt.id, { status }));
+        await inA(() =>
+          update.execute(appt.id, {
+            status,
+            cancellation: FOR_PATIENT,
+          }),
+        );
       }
 
       const entries = await raw.appointmentWaitlistEntry.findMany({
@@ -456,7 +473,10 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
       const appt = await newAppointment('11:00', '11:30');
       const results = await Promise.allSettled([
         inA(() =>
-          update.execute(appt.id, { status: AppointmentStatus.CANCELLED }),
+          update.execute(appt.id, {
+            status: AppointmentStatus.CANCELLED,
+            cancellation: FOR_PATIENT,
+          }),
         ),
         inA(() =>
           update.execute(appt.id, { status: AppointmentStatus.NO_SHOW }),
@@ -487,7 +507,10 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
       );
       await expect(
         inA(() =>
-          update.execute(appt.id, { status: AppointmentStatus.CANCELLED }),
+          update.execute(appt.id, {
+            status: AppointmentStatus.CANCELLED,
+            cancellation: FOR_PATIENT,
+          }),
         ),
       ).rejects.toThrow();
       const after = await raw.appointment.findUniqueOrThrow({

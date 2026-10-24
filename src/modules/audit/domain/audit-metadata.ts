@@ -63,6 +63,63 @@ export interface AuditMetadata {
    * `appointment_status_reversals` (`params.reversalId`).
    */
   visitMinimums?: AuditVisitMinimum[];
+  /**
+   * DX-050: quién realizó un ítem del plan, en qué sede y cuándo, antes y
+   * después de que un ADMIN lo corrija o de que el ítem salga de «Realizado».
+   * Solo uuids e instantes ISO (null = sin atribuir).
+   */
+  attribution?: { before: AuditAttributionSide; after: AuditAttributionSide };
+  /**
+   * DX-279: una cita cancelada desde la agenda: quién (código), el código del
+   * motivo, los minutos de aviso y si fue tardía. Nunca el texto libre del
+   * motivo (va en la cita).
+   */
+  cancellation?: AuditCancellation;
+  /**
+   * DX-300: avisos de seguridad de una receta emitida: versión de las reglas,
+   * CÓDIGOS de los bloqueantes y de los informativos, y si se confirmaron con
+   * motivo. Nunca el texto del aviso (nombra fármacos de la anamnesis) ni el
+   * del motivo: van sellados en la receta.
+   */
+  prescriptionSafety?: AuditPrescriptionSafety;
+}
+
+export interface AuditPrescriptionSafety {
+  rulesVersion: string;
+  blocking: string[];
+  info: string[];
+  overridden: boolean;
+}
+
+export const AUDIT_CANCELLATION_KINDS = [
+  'PATIENT_LINK',
+  'STAFF_FOR_PATIENT',
+  'CLINIC',
+] as const;
+
+export const AUDIT_CANCELLATION_REASONS = [
+  'ILLNESS',
+  'FORGOT',
+  'COST',
+  'TRANSPORT',
+  'WORK',
+  'CLINIC_RESCHEDULE',
+  'OTHER',
+] as const;
+
+/** Cancelación de una cita en la auditoría (DX-279): solo códigos y números. */
+export interface AuditCancellation {
+  byKind: (typeof AUDIT_CANCELLATION_KINDS)[number];
+  reasonCode: (typeof AUDIT_CANCELLATION_REASONS)[number] | null;
+  noticeMinutes: number;
+  lateCancellation: boolean;
+}
+
+/** Un lado de la atribución de un ítem realizado (DX-050). */
+export interface AuditAttributionSide {
+  performedById: string | null;
+  locationId: string | null;
+  completedAt: string | null;
 }
 
 /** Mínimo de una visita del plan antes y después (DX-273). */
@@ -410,6 +467,91 @@ function visitMinimums(value: unknown): AuditVisitMinimum[] {
     .slice(0, MAX_VISIT_MINIMUMS);
 }
 
+function uuidOrNull(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && UUID.test(value));
+}
+
+/** Un lado con exactamente esa forma, o `null`. */
+function attributionSide(value: unknown): AuditAttributionSide | null {
+  if (!isRecord(value)) return null;
+  const { performedById, locationId, completedAt, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    !uuidOrNull(performedById) ||
+    !uuidOrNull(locationId) ||
+    !(
+      completedAt === null ||
+      (typeof completedAt === 'string' && ISO_INSTANT.test(completedAt))
+    )
+  ) {
+    return null;
+  }
+  return {
+    performedById: performedById?.toLowerCase() ?? null,
+    locationId: locationId?.toLowerCase() ?? null,
+    completedAt,
+  };
+}
+
+/** Los dos lados con la forma admitida, o nada. */
+function attribution(value: unknown): AuditMetadata['attribution'] | null {
+  if (!isRecord(value)) return null;
+  const before = attributionSide(value.before);
+  const after = attributionSide(value.after);
+  return before && after ? { before, after } : null;
+}
+
+/** La cancelación entera con su forma, o nada (DX-279). */
+function cancellation(value: unknown): AuditCancellation | null {
+  if (!isRecord(value)) return null;
+  const { byKind, reasonCode, noticeMinutes, lateCancellation, ...rest } =
+    value;
+  const kind = AUDIT_CANCELLATION_KINDS.find((k) => k === byKind);
+  const reason =
+    reasonCode === null
+      ? null
+      : AUDIT_CANCELLATION_REASONS.find((r) => r === reasonCode);
+  if (
+    Object.keys(rest).length > 0 ||
+    !kind ||
+    reason === undefined ||
+    typeof noticeMinutes !== 'number' ||
+    !Number.isInteger(noticeMinutes) ||
+    noticeMinutes < 0 ||
+    typeof lateCancellation !== 'boolean'
+  ) {
+    return null;
+  }
+  return { byKind: kind, reasonCode: reason, noticeMinutes, lateCancellation };
+}
+
+const MAX_SAFETY_CODES = 50;
+
+function safetyCodes(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((c): c is string => typeof c === 'string' && CODE.test(c))
+    .slice(0, MAX_SAFETY_CODES);
+}
+
+/** Versión, códigos y confirmación con su formato, o nada (DX-300). */
+function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
+  if (!isRecord(value)) return null;
+  const { rulesVersion, overridden } = value;
+  const blocking = safetyCodes(value.blocking);
+  const info = safetyCodes(value.info);
+  if (
+    typeof rulesVersion !== 'string' ||
+    !CODE.test(rulesVersion) ||
+    typeof overridden !== 'boolean' ||
+    !blocking ||
+    !info
+  ) {
+    return null;
+  }
+  return { rulesVersion, blocking, info, overridden };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -441,5 +583,11 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (batch) out.importBatch = batch;
   const minimums = visitMinimums(input.visitMinimums);
   if (minimums.length > 0) out.visitMinimums = minimums;
+  const attributed = attribution(input.attribution);
+  if (attributed) out.attribution = attributed;
+  const cancelled = cancellation(input.cancellation);
+  if (cancelled) out.cancellation = cancelled;
+  const safety = prescriptionSafety(input.prescriptionSafety);
+  if (safety) out.prescriptionSafety = safety;
   return out;
 }

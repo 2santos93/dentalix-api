@@ -1,6 +1,7 @@
 import {
   loadS3Tuning,
   loadStorageConfig,
+  loadImportReadConcurrency,
   loadUploadMaxConcurrency,
 } from './storage-config';
 
@@ -96,5 +97,28 @@ describe('loadStorageConfig (DX-084)', () => {
     expect(
       loadUploadMaxConcurrency(from({ UPLOAD_MAX_CONCURRENCY: '2' })),
     ).toBe(2);
+  });
+
+  it('SEC-046: lecturas de importación a la vez, 2 por réplica y 1 por clínica por defecto', () => {
+    expect(loadImportReadConcurrency(from({}))).toEqual({
+      perReplica: 2,
+      perClinic: 1,
+    });
+    expect(
+      loadImportReadConcurrency(
+        from({
+          PATIENT_IMPORT_MAX_CONCURRENCY: '4',
+          PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC: '2',
+        }),
+      ),
+    ).toEqual({ perReplica: 4, perClinic: 2 });
+    expect(
+      loadImportReadConcurrency(
+        from({
+          PATIENT_IMPORT_MAX_CONCURRENCY: '0',
+          PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC: 'dos',
+        }),
+      ),
+    ).toEqual({ perReplica: 2, perClinic: 1 });
   });
 });

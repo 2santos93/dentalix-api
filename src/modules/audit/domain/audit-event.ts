@@ -22,7 +22,9 @@ export type AuditPatientRef = {
     // DX-222: la entrega de indicaciones postoperatorias recién registrada.
     | 'postOpDelivery'
     // DX-262: el saldo migrado al que se abona.
-    | 'openingBalance';
+    | 'openingBalance'
+    // DX-099: el envío de anamnesis que se revisa o se anula.
+    | 'medicalHistorySubmission';
   id: string;
 };
 

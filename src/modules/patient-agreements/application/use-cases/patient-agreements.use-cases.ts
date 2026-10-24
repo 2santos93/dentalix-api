@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ClinicRole } from '@prisma/client';
 import {
   AGREEMENT_NOT_FOUND_MESSAGE,
   validateAgreementDates,
@@ -15,6 +17,7 @@ import {
 import {
   COVERAGE_NOT_FOUND_MESSAGE,
   PATIENT_NOT_FOUND_MESSAGE,
+  coverageStatus,
   normalizeCoverageText,
 } from '../../../patient-coverages/domain/coverage-rules';
 import {
@@ -23,8 +26,12 @@ import {
 } from '../../../patient-coverages/domain/ports/patient-coverage-repository.port';
 import type { PatientAgreement } from '../../domain/entities/patient-agreement.entity';
 import {
+  COVERAGE_NOT_LIVE_MESSAGE,
   COVERAGE_PAYER_MISMATCH_MESSAGE,
+  INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE,
   PATIENT_AGREEMENT_NOT_FOUND_MESSAGE,
+  coverageRequiredMessage,
+  isExternalPayer,
   patientAgreementStatus,
   type PatientAgreementStatus,
 } from '../../domain/patient-agreement-rules';
@@ -50,6 +57,12 @@ export interface AssignAgreementInput {
   validFrom?: string | null;
   validTo?: string | null;
   notes?: string | null;
+}
+
+/** Quién asigna: usuario y rol del token (SEC-047). */
+export interface AgreementActor {
+  userId: string;
+  role: ClinicRole;
 }
 
 const withStatus = (
@@ -101,8 +114,17 @@ export class GetPatientAgreementUseCase {
 /**
  * Asigna un convenio al paciente SUSTITUYENDO el vigente (queda en el
  * historial). El convenio debe existir sin retirar; uno desactivado se acepta y
- * la asignación sale con estado `INACTIVE`. La cobertura, si viene, debe ser
- * del paciente y del mismo pagador que el convenio.
+ * la asignación sale con estado `INACTIVE`.
+ *
+ * Elegibilidad (SEC-047): el precio de convenio no cuenta como descuento, así
+ * que asignarlo no puede ser una vía libre para saltarse el tope por rol.
+ * - Convenio de un pagador externo: la cobertura es OBLIGATORIA y debe ser del
+ *   paciente, del mismo pagador y estar vigente hoy (400 si no), para
+ *   cualquier rol, ADMIN incluido.
+ * - Convenio interno (pagador `OTRO`: cortesía, empleados…): ADMIN, con la
+ *   cobertura opcional (si viene, se valida igual). Otro rol solo con una
+ *   cobertura MIGRADA de `insurerEps` del paciente y de ese pagador (vigente:
+ *   si no, 400); sin ella, 403 sin decir nada más de la cobertura.
  */
 @Injectable()
 export class AssignPatientAgreementUseCase {
@@ -119,7 +141,7 @@ export class AssignPatientAgreementUseCase {
   async execute(
     patientId: string,
     input: AssignAgreementInput,
-    by: string,
+    actor: AgreementActor,
   ): Promise<PatientAgreementView> {
     await assertPatient(this.repo, patientId);
     const validFrom = input.validFrom ?? null;
@@ -130,18 +152,39 @@ export class AssignPatientAgreementUseCase {
     const agreement = await this.agreements.findLiveById(input.agreementId);
     if (!agreement) throw new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE);
 
+    const external = isExternalPayer(agreement.payer.type);
     const coverageId = input.coverageId ?? null;
+    if (!external && actor.role !== ClinicRole.ADMIN) {
+      const migrated =
+        coverageId === null
+          ? null
+          : await this.coverages.findById(patientId, coverageId);
+      if (
+        !migrated?.migratedFromInsurerEps ||
+        migrated.payer.id !== agreement.payer.id
+      ) {
+        throw new ForbiddenException(INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE);
+      }
+    }
+    if (external && coverageId === null) {
+      throw new BadRequestException(
+        coverageRequiredMessage(agreement.payer.name),
+      );
+    }
+
+    // Antes de escribir: si la zona horaria falla, que no haya un 500 tras un
+    // alta ya confirmada.
+    const today = await this.repo.clinicToday(this.clock());
     if (coverageId !== null) {
       const coverage = await this.coverages.findById(patientId, coverageId);
       if (!coverage) throw new BadRequestException(COVERAGE_NOT_FOUND_MESSAGE);
       if (coverage.payer.id !== agreement.payer.id) {
         throw new BadRequestException(COVERAGE_PAYER_MISMATCH_MESSAGE);
       }
+      if (coverageStatus(coverage, today) !== 'ACTIVE') {
+        throw new BadRequestException(COVERAGE_NOT_LIVE_MESSAGE);
+      }
     }
-
-    // Antes de escribir: si la zona horaria falla, que no haya un 500 tras un
-    // alta ya confirmada.
-    const today = await this.repo.clinicToday(this.clock());
     // El repositorio vuelve a comprobar convenio y cobertura dentro de la
     // transacción, con el candado del paciente tomado.
     const saved = await this.repo.replace(
@@ -153,7 +196,7 @@ export class AssignPatientAgreementUseCase {
         validTo,
         notes: normalizeCoverageText(input.notes),
       },
-      by,
+      actor.userId,
     );
     return withStatus(saved, today);
   }

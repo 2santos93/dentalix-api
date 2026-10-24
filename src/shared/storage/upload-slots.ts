@@ -38,32 +38,70 @@ export const DEFAULT_UPLOAD_TIMEOUTS: UploadTimeouts = {
   maxDurationMs: 120_000,
 };
 
+/** Por qué no hay plaza: la réplica está llena o la clave ya tiene las suyas. */
+export type SlotBusy = 'replica' | 'key';
+
+export type SlotAcquisition = { release: () => void } | { busy: SlotBusy };
+
 /**
  * DX-259 (OPS-038): semáforo de las subidas que pasan por la API en esta
  * réplica (`UPLOAD_MAX_CONCURRENCY`, por defecto 4). No hay cola: sin plaza,
  * 503 con `Retry-After` al momento, antes de leer el cuerpo.
+ *
+ * SEC-046: con `perKeyCapacity`, además, como mucho esas plazas por clave
+ * (la clínica, en la lectura de ficheros de importación). Sin clave solo
+ * cuenta el tope de la réplica.
  */
 export class UploadSlots {
   private inUse = 0;
+  private readonly perKey = new Map<string, number>();
 
   constructor(
     readonly capacity: number,
     readonly timeouts: UploadTimeouts = DEFAULT_UPLOAD_TIMEOUTS,
+    readonly perKeyCapacity: number = Number.POSITIVE_INFINITY,
   ) {}
 
   get active(): number {
     return this.inUse;
   }
 
+  /** Plazas en uso de una clave. */
+  activeFor(key: string): number {
+    return this.perKey.get(key) ?? 0;
+  }
+
+  /** Claves con alguna plaza en uso (una clave sin plazas no se guarda). */
+  get trackedKeys(): number {
+    return this.perKey.size;
+  }
+
   /** Una plaza y la función que la devuelve (idempotente), o null si no hay. */
-  tryAcquire(): (() => void) | null {
-    if (this.inUse >= this.capacity) return null;
+  tryAcquire(key?: string): (() => void) | null {
+    const got = this.acquire(key);
+    return 'release' in got ? got.release : null;
+  }
+
+  /** Como `tryAcquire`, pero sin plaza dice por qué. */
+  acquire(key?: string): SlotAcquisition {
+    if (key !== undefined && this.activeFor(key) >= this.perKeyCapacity) {
+      return { busy: 'key' };
+    }
+    if (this.inUse >= this.capacity) return { busy: 'replica' };
     this.inUse += 1;
+    if (key !== undefined) this.perKey.set(key, this.activeFor(key) + 1);
     let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.inUse -= 1;
+    return {
+      release: () => {
+        if (released) return;
+        released = true;
+        this.inUse -= 1;
+        if (key === undefined) return;
+        const left = this.activeFor(key) - 1;
+        if (left > 0) this.perKey.set(key, left);
+        // eslint-disable-next-line no-restricted-syntax -- un Map en memoria, no un dato de la BD
+        else this.perKey.delete(key);
+      },
     };
   }
 }

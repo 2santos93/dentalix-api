@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { DiscountReason, Prisma, TreatmentPlanStatus } from '@prisma/client';
+import {
+  DiscountReason,
+  Prisma,
+  PriceSource,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
@@ -13,7 +18,7 @@ import type {
   DiscountReportQuery,
   DiscountReportRepository,
   DiscountReportRow,
-  DiscountReportTotal,
+  DiscountReportSummary,
 } from '../domain/ports/discount-report-repository.port';
 
 interface RawRow {
@@ -38,6 +43,14 @@ interface RawRow {
   discountAt: Date;
   locationId: string | null;
   locationName: string | null;
+  priceSource: PriceSource | null;
+  agreementName: string | null;
+  basePrice: Prisma.Decimal | null;
+  agreementReduction: Prisma.Decimal;
+  agreementAssignedById: string | null;
+  agreementAssignedByName: string | null;
+  createdById: string | null;
+  createdByName: string | null;
 }
 
 interface RawTotal {
@@ -45,6 +58,9 @@ interface RawTotal {
   items: bigint;
   gross: Prisma.Decimal;
   discount: Prisma.Decimal;
+  agreementItems: bigint;
+  agreementReduction: Prisma.Decimal;
+  rows: bigint;
 }
 
 /**
@@ -57,6 +73,21 @@ interface RawTotal {
  * zona de CADA sede, como la caja (DX-097); sin sede, la zona por defecto.
  * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
  * (mismo predicado).
+ *
+ * SEC-047: entran también los ítems resueltos por convenio con rebaja
+ * (`basePrice` > `catalogPrice`), aunque no tengan descuento propio; esa rama
+ * del OR la sirve `treatment_plan_items_tenant_agreement_reduction_at_idx`.
+ * La rebaja de convenio va en su columna y en sus propios totales: los de
+ * DX-204 (ítems, bruto, descuento y %) se agregan con `FILTER` solo sobre las
+ * líneas que cuentan como descuento, exactamente las mismas que antes de
+ * SEC-047, así que no cambian al entrar una línea solo de convenio. Quién
+ * asignó el convenio es el autor de la asignación de ESE convenio al paciente
+ * más reciente creada no después del ítem (la que resolvió el precio); quién
+ * creó el ítem, `createdById` (NULL antes de SEC-047). Con `professionalId`,
+ * una fila cuenta como descuento si esa persona lo dio (como en DX-204) y
+ * como rebaja de convenio si creó el ítem, asignó el convenio o dio su
+ * descuento. Una línea solo de convenio sin sede de descuento ni de
+ * presentación toma la sede con la que se resolvió el precio.
  *
  * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
  * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
@@ -122,9 +153,15 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     const byLocation = query.locationId
       ? Prisma.sql`AND d."locationId" = ${query.locationId}::uuid`
       : Prisma.empty;
-    const byProfessional = query.professionalId
-      ? Prisma.sql`AND d."discountById" = ${query.professionalId}::uuid`
-      : Prisma.empty;
+    const prof = query.professionalId;
+    const discountByMatch = prof
+      ? Prisma.sql`r."discountById" = ${prof}::uuid`
+      : Prisma.sql`TRUE`;
+    const agreementByMatch = prof
+      ? Prisma.sql`(r."discountById" = ${prof}::uuid
+            OR r."createdById" = ${prof}::uuid
+            OR r."agreementAssignedById" = ${prof}::uuid)`
+      : Prisma.sql`TRUE`;
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
@@ -133,46 +170,89 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                i."discount" AS "itemDiscount",
                i."discountReason", i."discountReasonNote",
                i."discountById",
+               i."priceSource", i."agreementName", i."basePrice",
+               CASE WHEN i."agreementId" IS NOT NULL
+                    THEN GREATEST(COALESCE(i."basePrice" - i."catalogPrice", 0), 0)
+                    ELSE 0 END AS "agreementReduction",
+               asg."createdById" AS "agreementAssignedById",
+               i."createdById",
                COALESCE(i."discountAt", i."createdAt") AS "at",
-               COALESCE(i."discountLocationId", p."presentedLocationId") AS "locationId",
+               (i."discount" > 0 OR i."price" < i."catalogPrice") AS "isDiscount",
+               COALESCE(i."discountLocationId", p."presentedLocationId",
+                        CASE WHEN NOT (i."discount" > 0 OR i."price" < i."catalogPrice")
+                             THEN i."pricingLocationId" END) AS "locationId",
                p."currency", p."patientId", p."status" AS "planStatus",
                p."optionLabel" AS "planOptionLabel", p."createdAt" AS "planCreatedAt"
           FROM "treatment_plan_items" i
           JOIN "treatment_plans" p
             ON p."tenantId" = i."tenantId" AND p."id" = i."planId"
+          LEFT JOIN LATERAL (
+            SELECT pa."createdById"
+              FROM "patient_agreements" pa
+             WHERE pa."tenantId" = i."tenantId"
+               AND pa."patientId" = i."patientId"
+               AND pa."agreementId" = i."agreementId"
+               AND pa."createdAt" <= i."createdAt"
+             ORDER BY pa."createdAt" DESC, pa."id" DESC
+             LIMIT 1
+          ) asg ON i."agreementId" IS NOT NULL
          WHERE i."tenantId" = ${tenantId}::uuid
-           AND (i."discount" > 0 OR i."price" < i."catalogPrice")
+           AND (i."discount" > 0 OR i."price" < i."catalogPrice"
+                OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))
            AND i."deletedAt" IS NULL
            AND p."deletedAt" IS NULL
            AND p."status" NOT IN ('REJECTED', 'CANCELLED')
            AND COALESCE(i."discountAt", i."createdAt") >= ${minStart}
            AND COALESCE(i."discountAt", i."createdAt") < ${maxEnd}
       ),
+      flagged AS (
+        SELECT r.*,
+               (COALESCE(r."isDiscount", FALSE) AND ${discountByMatch}) AS "countsAsDiscount",
+               (r."agreementReduction" > 0 AND ${agreementByMatch}) AS "countsAsAgreement"
+          FROM raw r
+      ),
       d AS (
-        SELECT * FROM raw d
-         WHERE (${inPeriod}) ${byLocation} ${byProfessional}
+        SELECT * FROM flagged d
+         WHERE (${inPeriod}) ${byLocation}
+           AND (d."countsAsDiscount" OR d."countsAsAgreement")
       )`;
     return { cte, zoneOf };
   }
 
-  totals(query: DiscountReportQuery): Promise<DiscountReportTotal[]> {
+  summary(query: DiscountReportQuery): Promise<DiscountReportSummary> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const { cte } = await this.discounted(tx, tenantId, query);
       const rows = await tx.$queryRaw<RawTotal[]>`
         ${cte}
-        SELECT d."currency", count(*) AS "items",
-               sum(d."price" + d."priceReduction") AS "gross",
-               sum(d."priceReduction" + d."itemDiscount") AS "discount"
+        SELECT d."currency",
+               count(*) FILTER (WHERE d."countsAsDiscount") AS "items",
+               COALESCE(sum(d."price" + d."priceReduction") FILTER (WHERE d."countsAsDiscount"), 0) AS "gross",
+               COALESCE(sum(d."priceReduction" + d."itemDiscount") FILTER (WHERE d."countsAsDiscount"), 0) AS "discount",
+               count(*) FILTER (WHERE d."countsAsAgreement") AS "agreementItems",
+               COALESCE(sum(d."agreementReduction") FILTER (WHERE d."countsAsAgreement"), 0) AS "agreementReduction",
+               count(*) AS "rows"
           FROM d
          GROUP BY d."currency"
          ORDER BY d."currency"`;
-      return rows.map((r) => ({
-        currency: r.currency,
-        items: Number(r.items),
-        gross: r.gross.toNumber(),
-        discount: r.discount.toNumber(),
-      }));
+      return {
+        totals: rows
+          .filter((r) => r.items > 0n)
+          .map((r) => ({
+            currency: r.currency,
+            items: Number(r.items),
+            gross: r.gross.toNumber(),
+            discount: r.discount.toNumber(),
+          })),
+        agreementTotals: rows
+          .filter((r) => r.agreementItems > 0n)
+          .map((r) => ({
+            currency: r.currency,
+            items: Number(r.agreementItems),
+            reduction: r.agreementReduction.toNumber(),
+          })),
+        rows: rows.reduce((sum, r) => sum + Number(r.rows), 0),
+      };
     });
   }
 
@@ -196,12 +276,18 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                d."discountReason" AS "reason",
                d."discountReasonNote" AS "reasonNote", d."discountById",
                u."fullName" AS "discountByName", d."at" AS "discountAt",
-               d."locationId", l."name" AS "locationName"
+               d."locationId", l."name" AS "locationName",
+               d."priceSource", d."agreementName", d."basePrice",
+               d."agreementReduction", d."agreementAssignedById",
+               ua."fullName" AS "agreementAssignedByName",
+               d."createdById", uc."fullName" AS "createdByName"
           FROM d
           JOIN "patients" pa ON pa."tenantId" = ${tenantId}::uuid AND pa."id" = d."patientId"
           LEFT JOIN "dental_catalog_items" c
             ON c."tenantId" = ${tenantId}::uuid AND c."id" = d."catalogItemId"
           LEFT JOIN "users" u ON u."id" = d."discountById"
+          LEFT JOIN "users" ua ON ua."id" = d."agreementAssignedById"
+          LEFT JOIN "users" uc ON uc."id" = d."createdById"
           LEFT JOIN "locations" l
             ON l."tenantId" = ${tenantId}::uuid AND l."id" = d."locationId"
          ORDER BY d."at" DESC, d."id" DESC
@@ -216,6 +302,8 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
         priceReduction: r.priceReduction.toNumber(),
         itemDiscount: r.itemDiscount.toNumber(),
         discount: r.priceReduction.plus(r.itemDiscount).toNumber(),
+        basePrice: r.basePrice?.toNumber() ?? null,
+        agreementReduction: r.agreementReduction.toNumber(),
       }));
     });
   }

@@ -34,7 +34,9 @@ export class UpdateCatalogItemUseCase {
       // Same rationale as patients: a missing row and a row that belongs to
       // another tenant are indistinguishable here (RLS makes cross-tenant
       // rows invisible), so both surface as NotFound.
-      throw new NotFoundException('Catalog item not found');
+      throw new NotFoundException(
+        'Prestación no encontrada en el catálogo de esta clínica.',
+      );
     }
 
     if (patch.color !== undefined && !isValidHexColor(patch.color)) {
