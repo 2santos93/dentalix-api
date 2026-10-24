@@ -1152,6 +1152,67 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   firma que confirma mientras una edición espera ya no deja cambiar el plan
   aceptado (`test/plan-item-accept-race.int-spec.ts`).
 
+## Reportes: «Comparar sedes» (DX-014)
+
+Módulo `src/modules/reports`. `GET /api/v1/reports/locations-comparison` y
+`GET /api/v1/reports/locations-comparison.csv` (solo ADMIN; DENTIST,
+RECEPTION y ASSISTANT → 403 «Solo la administración ve los reportes de la
+clínica.»), con `from`/`to` (días civiles `AAAA-MM-DD`, ambos inclusive, como
+mucho 366 días), `compare` (`previous` por defecto: los mismos días
+inmediatamente antes; `previous_year`: las mismas fechas un año antes, el
+29/02 cae en el 28; `none`) y `currency` opcional (solo los importes en esa
+moneda). Errores 400 en español.
+
+- **Una fila por sede** viva (activa o desactivada) que ve quien consulta,
+  en orden de creación, y «Total clínica». Respeta el claim `loc` (DX-089):
+  con sedes acotadas solo salen esas y el total solo las suma a ellas (hoy un
+  ADMIN nunca lleva `loc`, pero el reporte no depende de eso). La cabecera
+  `X-Location-Id` se valida como siempre pero **no acota** la comparación.
+  Las sedes retiradas no salen (ni cuentan en el total).
+- **Indicadores**: una sola definición en
+  `src/modules/reports/domain/kpi-definitions.ts` (etiqueta, unidad, si es por
+  moneda, dirección «mejor» y el texto de «Cómo se calcula»), que la respuesta
+  publica en `kpis`. Producción = Σ (precio − descuento) de los ítems DONE con
+  `completedAt` (DX-050) en el período, por `performedLocationId` y moneda del
+  plan («Sin atribuir» no cuenta); cobrado = Σ abonos no anulados por `paidAt`,
+  sede y moneda; % de cobro = cobrado ÷ producción (null sin producción);
+  citas atendidas = COMPLETED por inicio; no-show % = NO_SHOW ÷ (COMPLETED +
+  NO_SHOW + canceladas con `lateCancellation`, DX-279; las avisadas a tiempo
+  no cuentan); pacientes nuevos =
+  primera COMPLETED del paciente en la clínica, en la sede de esa cita; ticket
+  medio = cobrado ÷ pacientes distintos atendidos (en el total, cada paciente
+  una vez); ocupación % = minutos COMPLETED ÷ minutos abiertos del horario
+  semanal VIGENTE de la sede menos sus cierres (bloqueos de toda la sede que
+  no admiten citas). Sin horario configurado, ocupación null (y fuera de la
+  del total). Días civiles en la zona de cada sede (DX-097).
+- **Monedas**: nunca se suman ni se convierten. Cada importe es una lista por
+  moneda; en una fila, todas las monedas que tuvo (en el período o en el
+  comparado) salen en los cuatro indicadores de dinero. La conversión con tasa
+  queda para otra porción.
+- **Comparación**: cada valor trae `previous`, `change` (1 decimal, en la
+  unidad `changeUnit` de su KPI: % relativo, (valor − anterior) ÷ |anterior|,
+  null con anterior 0; o **puntos porcentuales** en % de cobro, no-show % y
+  ocupación %, valor − anterior: 8 % → 10 % = +2 p.p.) y `trend`
+  (`BETTER`/`WORSE`/`EQUAL` según la dirección: el no-show mejora al bajar).
+- **CSV**: mismos filtros; formato largo (una línea por sede, indicador y
+  moneda, el total al final), UTF-8 con BOM, CRLF, celdas de texto protegidas
+  contra fórmulas como el de descuentos, `Cache-Control: no-store`.
+- **Sin auditoría**, como el dashboard: son sumas por sede, sin datos de
+  ningún paciente.
+- **Consultas**: por período, una consulta agregada por fuente (nunca una por
+  sede), con el tenant explícito además de la RLS, en una transacción
+  REPEATABLE READ; los dos períodos en paralelo. Índice nuevo
+  `treatment_plan_items_tenant_done_completed_idx` (parcial, CONCURRENTLY,
+  migración `20261024130000_dx014_plan_items_done_completed_idx`) para la
+  producción. Benchmark con 5 sedes y 24 meses: medianas de 170 ms (un mes) a
+  ~470–650 ms (12 meses frente a los 12 anteriores) con la máquina cargada
+  (`docs/perf/DX-014.md`).
+- **Demo**: además del calendario, un día con actividad en cada sede en el
+  mes anterior y en el actual (citas atendidas, procedimiento realizado allí y
+  su abono), para ver la comparación cualquier día del mes
+  (`planComparisonHistory`). Si hoy es el primer día abierto del mes, el mes
+  actual solo tiene lo de hoy.
+
 ## Recibo de caja por abono (DX-136)
 
 Cada abono nuevo nace con su **recibo de caja numerado por sede** (`NOR-000123`),

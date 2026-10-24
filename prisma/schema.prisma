@@ -1626,6 +1626,10 @@ model TreatmentPlanItem {
   //     ("tenantId", COALESCE("discountAt", "createdAt"))
   //     WHERE "agreementId" IS NOT NULL AND "basePrice" > "catalogPrice" AND "deletedAt" IS NULL
   //     -> SEC-047: la rama «rebaja de convenio» del mismo informe.
+  //   treatment_plan_items_tenant_done_completed_idx ("tenantId",
+  //     "completedAt") INCLUDE ("performedLocationId", "planId", price,
+  //     discount) WHERE status = 'DONE' AND "deletedAt" IS NULL
+  //     -> DX-014: producción por período de «Comparar sedes».
   @@map("treatment_plan_items")
 }
 

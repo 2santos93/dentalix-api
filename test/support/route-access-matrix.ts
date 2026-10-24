@@ -469,6 +469,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /discount-policy': ADMIN_ONLY,
   'GET /reports/discounts': ADMIN_ONLY,
   'GET /reports/discounts.csv': ADMIN_ONLY,
+  // Reportes (loop/informes/DX-014.md): «Comparar sedes» y su CSV, la mirada
+  // del dueño sobre producción, cobros y citas de todas las sedes. Solo ADMIN.
+  'GET /reports/locations-comparison': ADMIN_ONLY,
+  'GET /reports/locations-comparison.csv': ADMIN_ONLY,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,
