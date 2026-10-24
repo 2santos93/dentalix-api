@@ -14,6 +14,11 @@ import {
   CANCELLATION_POLICY_REPOSITORY,
   type CancellationPolicyRepository,
 } from '../../domain/ports/cancellation-policy-repository.port';
+import { reminderPolicyVars } from '../../domain/reminder-policy-vars';
+import { EmailOutbox } from '../../../notifications/email/application/email-outbox.service';
+import type { RenderedEmail } from '../../../notifications/email/domain/email-message';
+import { startsAtLabel } from '../../../reminders/domain/starts-at-label';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 /** La política de una sede: la vigente y el historial (más nueva primero). */
 export interface CancellationPolicyView {
@@ -86,5 +91,55 @@ export class CreateCancellationPolicyVersionUseCase {
       );
     }
     return created;
+  }
+}
+
+/** Datos de ejemplo de la vista previa: nunca los de un paciente real. */
+export const PREVIEW_SAMPLE = {
+  patientName: 'Ana',
+  providerName: 'Dra. Laura Gómez',
+  confirmUrl: 'https://ejemplo.dentalix.app/confirmar/vista-previa',
+} as const;
+
+/**
+ * DX-291: vista previa del recordatorio por email de una sede, con su
+ * política VIGENTE en `{politica_cancelacion}` y la marca de la clínica. Los
+ * datos del paciente son de ejemplo. No encola ni registra nada.
+ */
+@Injectable()
+export class PreviewReminderEmailUseCase {
+  constructor(
+    @Inject(CANCELLATION_POLICY_REPOSITORY)
+    private readonly repo: CancellationPolicyRepository,
+    private readonly email: EmailOutbox,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  async execute(locationId: string, now = new Date()): Promise<RenderedEmail> {
+    const tenantId = this.tenantContext.getTenantId();
+    const [location, versions] = await Promise.all([
+      this.repo.findPreviewLocation(locationId),
+      this.repo.listVersions(locationId),
+    ]);
+    if (!tenantId || !location || versions === null) {
+      throw new NotFoundException(
+        CANCELLATION_POLICY_MESSAGES.locationNotFound,
+      );
+    }
+    return this.email.preview(tenantId, 'appointment-reminder', {
+      patientName: PREVIEW_SAMPLE.patientName,
+      guardianName: null,
+      startsAtLabel: startsAtLabel(
+        new Date(now.getTime() + 24 * 3_600_000),
+        location.timeZone,
+        location.country,
+      ),
+      locationName: location.name,
+      locationAddress: location.address,
+      providerName: PREVIEW_SAMPLE.providerName,
+      confirmUrl: PREVIEW_SAMPLE.confirmUrl,
+      unsubscribeUrl: null,
+      cancellationPolicy: reminderPolicyVars(versions[0] ?? null),
+    });
   }
 }

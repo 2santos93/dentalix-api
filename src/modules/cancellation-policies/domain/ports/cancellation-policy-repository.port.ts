@@ -1,7 +1,16 @@
+import type { ClinicCountry } from '@prisma/client';
 import type {
   CancellationPolicyInput,
   CancellationPolicyVersion,
 } from '../cancellation-policy';
+
+/** DX-291: lo que la vista previa del recordatorio muestra de la sede. */
+export interface PreviewLocation {
+  name: string;
+  address: string | null;
+  country: ClinicCountry;
+  timeZone: string;
+}
 
 export const CANCELLATION_POLICY_REPOSITORY = Symbol(
   'CANCELLATION_POLICY_REPOSITORY',
@@ -27,6 +36,9 @@ export interface CancellationPolicyRepository {
     input: CancellationPolicyInput,
     createdById: string,
   ): Promise<CancellationPolicyVersion | null>;
+
+  /** DX-291: la sede viva de esta clínica para la vista previa; `null` si no. */
+  findPreviewLocation(locationId: string): Promise<PreviewLocation | null>;
 
   /** ¿Existe la moneda en el catálogo (`currencies`)? */
   currencyExists(code: string): Promise<boolean>;

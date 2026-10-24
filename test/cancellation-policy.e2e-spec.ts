@@ -552,18 +552,26 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         .post(`/appointments/${id}/confirmation-link`)
         .expect(201);
       const token = (link.body as { url: string }).url.split('/confirmar/')[1];
-      await request(app.getHttpServer())
-        .post(`/api/v1/public/appointment-confirmations/${token}`)
-        .set('X-Tenant-Host', a.host)
-        .send({ action: 'cancel' })
-        .expect(200);
+      const send = (body: object) =>
+        request(app.getHttpServer())
+          .post(`/api/v1/public/appointment-confirmations/${token}`)
+          .set('X-Tenant-Host', a.host)
+          .send(body);
+      // DX-291: cancelar tarde exige aceptar la política.
+      await send({ action: 'cancel' }).expect(400);
+      await send({ action: 'cancel', acknowledgePolicy: true }).expect(200);
       const row = await raw.appointment.findUniqueOrThrow({ where: { id } });
+      const current = await raw.cancellationPolicyVersion.findFirstOrThrow({
+        where: { locationId: row.locationId },
+        orderBy: { version: 'desc' },
+      });
       expect(row).toMatchObject({
         status: 'CANCELLED',
         cancelledByKind: 'PATIENT_LINK',
         cancelReasonCode: null,
         lateCancellation: true,
-        policyVersionId: null,
+        // DX-291: la versión que vio el paciente queda como comunicada.
+        policyVersionId: current.id,
       });
       expectNotice(id, row.noticeMinutes);
       expect(row.cancelledAt).not.toBeNull();

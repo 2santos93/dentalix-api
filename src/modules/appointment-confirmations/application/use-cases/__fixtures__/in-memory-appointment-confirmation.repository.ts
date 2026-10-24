@@ -11,6 +11,11 @@ import {
   ClinicBranding,
   ConfirmationAppointment,
 } from '../../../domain/entities/appointment-confirmation.entity';
+import {
+  isLateLinkCancellation,
+  linkResponseBlock,
+  type LinkCancellationPolicy,
+} from '../../../domain/link-cancellation-policy';
 
 type StoredConfirmation = AppointmentConfirmation & { tokenHash: string };
 
@@ -25,8 +30,14 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
     ConfirmationAppointment & {
       confirmationSentAt: Date | null;
       callbackRequestedAt: Date | null;
+      /** DX-291: versión comunicada guardada al responder. */
+      policyVersionId: string | null;
+      /** DX-291: si la cancelación por el enlace fue tardía. */
+      noticeLate: boolean | null;
     }
   >();
+  /** DX-291: política vigente de la sede (una sola sede en el doble). */
+  policy: LinkCancellationPolicy | null = null;
   readonly confirmations: StoredConfirmation[] = [];
   branding: ClinicBranding | null = {
     name: 'Clínica Sonrisa',
@@ -51,6 +62,8 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       ...overrides,
       confirmationSentAt: null,
       callbackRequestedAt: null,
+      policyVersionId: null as string | null,
+      noticeLate: null as boolean | null,
     };
     this.appointments.set(appointment.id, appointment);
     return appointment;
@@ -102,6 +115,7 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
         revokedAt: found.revokedAt,
       },
       appointment: this.appointments.get(found.appointmentId) ?? null,
+      policy: this.policy,
     });
   }
 
@@ -125,6 +139,21 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
     ) {
       return Promise.resolve('STALE');
     }
+    const late = isLateLinkCancellation(
+      appointment.start,
+      input.now,
+      this.policy,
+    );
+    const block = linkResponseBlock({
+      cancelling: input.response === 'CANCEL',
+      late,
+      acknowledgePolicy: input.acknowledgePolicy === true,
+      shownPolicyVersionId: input.shownPolicyVersionId,
+      currentPolicyId: this.policy?.id ?? null,
+    });
+    if (block) return Promise.resolve(block);
+    if (this.policy) appointment.policyVersionId = this.policy.id;
+    if (input.response === 'CANCEL') appointment.noticeLate = late;
     for (const link of this.confirmations) {
       if (
         link.appointmentId === input.appointmentId &&

@@ -10,6 +10,7 @@ import {
   PaymentReceiptEmailVars,
   PostOpInstructionsEmailVars,
   RegistrationNoticeEmailVars,
+  ReminderCancellationPolicyVars,
   RenderedEmail,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
@@ -112,6 +113,25 @@ function registrationNotice(
   });
 }
 
+/**
+ * DX-291: el texto de `{politica_cancelacion}` en el recordatorio: cuántas
+ * horas de aviso pide la sede, el texto de la clínica y el cargo, si lo hay.
+ */
+export function cancellationPolicyText(
+  policy: ReminderCancellationPolicyVars,
+): string {
+  const parts = [
+    `Política de cancelación: si no puedes asistir, avísanos con al menos ${policy.noticeHours} h de antelación.`,
+  ];
+  const text = policy.text.trim();
+  if (text) parts.push(text);
+  if (policy.feeLabel)
+    parts.push(
+      `La inasistencia o la cancelación con menos aviso puede tener un cargo de ${policy.feeLabel}.`,
+    );
+  return parts.join(' ');
+}
+
 function appointmentReminder(
   vars: AppointmentReminderEmailVars,
   brand: EmailBrand | null,
@@ -143,6 +163,12 @@ function appointmentReminder(
       ? 'Usa el botón para confirmarla o avisarnos si no puedes asistir.'
       : 'Si no puedes asistir, avísanos con tiempo para darle el espacio a otro paciente.',
   });
+  if (vars.cancellationPolicy) {
+    blocks.push({
+      kind: 'note',
+      text: cancellationPolicyText(vars.cancellationPolicy),
+    });
+  }
   return renderLayout({
     brand,
     subject: `Recordatorio de ${whose} en ${clinic}`,

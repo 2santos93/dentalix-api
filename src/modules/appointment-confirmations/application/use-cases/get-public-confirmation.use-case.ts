@@ -24,13 +24,23 @@ export class GetPublicConfirmationUseCase {
   ) {}
 
   async execute(token: string): Promise<PublicConfirmationView> {
-    const { confirmation, appointment } = await findConfirmationByToken(
+    const { confirmation, appointment, policy } = await findConfirmationByToken(
       this.tenantContext,
       this.repo,
       token,
     );
-    const status = confirmationState(confirmation, appointment, new Date());
+    const now = new Date();
+    const status = confirmationState(confirmation, appointment, now);
     const clinic = await this.repo.findClinicBranding();
-    return toPublicConfirmationView(status, confirmation, appointment, clinic);
+    // DX-291: con la política vigente de la sede y si cancelar ahora sería
+    // tardío (solo lectura: abrir el enlace no registra nada).
+    return toPublicConfirmationView(
+      status,
+      confirmation,
+      appointment,
+      clinic,
+      policy,
+      now,
+    );
   }
 }

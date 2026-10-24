@@ -6,7 +6,9 @@ import { CancellationPolicyController } from './presentation/cancellation-policy
 import {
   CreateCancellationPolicyVersionUseCase,
   GetCancellationPolicyUseCase,
+  PreviewReminderEmailUseCase,
 } from './application/use-cases/cancellation-policy.use-cases';
+import { EmailModule } from '../notifications/email/email.module';
 import { CANCELLATION_POLICY_REPOSITORY } from './domain/ports/cancellation-policy-repository.port';
 import { PrismaCancellationPolicyRepository } from './infrastructure/prisma-cancellation-policy.repository';
 
@@ -16,11 +18,12 @@ import { PrismaCancellationPolicyRepository } from './infrastructure/prisma-canc
  * cancelar y el enlace público de confirmación (`findCurrentPolicyInTx`).
  */
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), EmailModule],
   controllers: [CancellationPolicyController],
   providers: [
     GetCancellationPolicyUseCase,
     CreateCancellationPolicyVersionUseCase,
+    PreviewReminderEmailUseCase,
     TokenService,
     TenantContextInterceptor,
     {

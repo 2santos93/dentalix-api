@@ -12,6 +12,7 @@ import type {
   NoticePatientFields,
   NoticeResponsible,
 } from '../../../patients/domain/communication/notice-recipient';
+import type { LinkCancellationPolicy } from '../../../appointment-confirmations/domain/link-cancellation-policy';
 
 // Sin `tenantId` en ningún input salvo el barrido, que corre como trabajo de
 // PLATAFORMA y recorre las clínicas: el tenant sale SIEMPRE del contexto
@@ -50,6 +51,8 @@ export interface ReminderSendContext {
   /** DX-203: responsables vivos del paciente (un menor o sin email: a ellos). */
   responsibles: NoticeResponsible[];
   settings: { enabled: boolean; leadHours: number[] } | null;
+  /** DX-291: política VIGENTE de la sede de la cita (`null` = sin política). */
+  cancellationPolicy: LinkCancellationPolicy | null;
 }
 
 export interface ReminderClaim {
@@ -112,6 +115,15 @@ export interface ReminderRepository {
     reminderId: string,
     outboundMessageId: string,
     tx?: Prisma.TransactionClient,
+  ): Promise<void>;
+  /**
+   * DX-291: deja constancia de la versión de la política que lleva el email:
+   * en el recordatorio y como la comunicada en la cita (una transacción).
+   */
+  recordPolicyVersion(
+    reminderId: string,
+    appointmentId: string,
+    policyVersionId: string,
   ): Promise<void>;
   /** ¿Ya hay un email en email_outbox para ese mensaje? */
   emailQueuedFor(outboundMessageId: string): Promise<boolean>;
