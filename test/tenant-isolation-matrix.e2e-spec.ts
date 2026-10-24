@@ -18,7 +18,14 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { ROUTE_ACCESS } from './support/route-access-matrix';
+import {
+  ID_INPUTS_IN_MATRIX,
+  TENANT_ISOLATION_MATRIX_SPEC,
+} from './support/tenant-id-inputs';
+import { CapturingMailer } from './support/capture-mailer';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
+import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
+import { CONFIRMATION_LINK_NOT_FOUND_MESSAGE } from '../src/modules/appointment-confirmations/application/find-confirmation-by-token';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
 
@@ -39,6 +46,14 @@ import { pdfFixture } from './support/document-fixtures';
  *
  * Lo que B manda en el cuerpo es suyo (su catálogo, su paciente...), para que
  * un 404 solo pueda venir de que el recurso de la RUTA es de A.
+ *
+ * DX-207 (TST-022): también los ids que llegan por la QUERY o el CUERPO. Los
+ * casos `queryIds`/`bodyIds` mandan, sobre una ruta y unos recursos de B, UN
+ * id de A en el campo nombrado (el resto, de B): se exige un 400/404 con el
+ * mensaje exacto en español o una lectura sin filas de A, y la misma
+ * fotografía. Las rutas públicas por `:token` (y el restablecer contraseña,
+ * con el token en el cuerpo) se atacan sin sesión en el host de B con el
+ * token de A: 404 y nada de A cambia (tampoco sus `user_tokens`).
  */
 
 // PNG real de 1x1 con un píxel visible (la API rechaza una firma en blanco).
@@ -67,6 +82,20 @@ function api(
     [verb](`/api/v1${path}`)
     .set('X-Tenant-Host', clinic.host)
     .set('Authorization', `Bearer ${token}`);
+  return body === undefined ? req : req.send(body);
+}
+
+/** DX-207: petición pública (sin sesión) en el host de una clínica. */
+function publicRequest(
+  app: INestApplication<App>,
+  clinic: Clinic,
+  verb: Verb,
+  path: string,
+  body?: object,
+): request.Test {
+  const req = request(app.getHttpServer())
+    [verb](`/api/v1${path}`)
+    .set('X-Tenant-Host', clinic.host);
   return body === undefined ? req : req.send(body);
 }
 
@@ -113,6 +142,12 @@ async function snapshot(
     where: { memberships: { some: { tenantId: tenantA } } },
     orderBy: { id: 'asc' },
   });
+  // DX-207: el token de restablecer de un miembro de A no tiene `tenantId`;
+  // usarlo desde el host de B no puede gastarlo ni invalidarlo.
+  shot.userTokens = await raw.userToken.findMany({
+    where: { user: { memberships: { some: { tenantId: tenantA } } } },
+    orderBy: { id: 'asc' },
+  });
   return shot;
 }
 
@@ -126,6 +161,19 @@ interface IsolationCase {
   status: number;
   /** Cuerpo exacto esperado (`null` = vacío) cuando no es un error. */
   responseBody?: unknown;
+  /**
+   * DX-207: ids de A que B manda por la query o el cuerpo, con el nombre que
+   * les da `test/support/uuid-inputs.ts` (`providerIds[]`,
+   * `items[].catalogItemId`...). La ruta es el `MÉTODO /ruta` del nombre.
+   */
+  queryIds?: string[];
+  bodyIds?: string[];
+  /** DX-207: el `message` exacto del error (en español). */
+  message?: string | (() => string);
+  /** DX-207: comprobación de una lectura 200 (ninguna fila de A). */
+  expectBody?: (body: unknown, text: string) => void;
+  /** DX-207: ruta pública (sin sesión) en el host de B. */
+  public?: boolean;
 }
 
 interface SeedA {
@@ -168,6 +216,12 @@ interface SeedA {
   postOpDeliveryId: string;
   /** DX-233: excepción por fecha del horario de la dentista de A. */
   providerOverrideId: string;
+  /** DX-207: una evolución de A, su política de datos y una pregunta. */
+  clinicalEntryId: string;
+  privacyPolicyId: string;
+  notePromptId: string;
+  /** DX-207: token del enlace de confirmación de la cita de A. */
+  confirmationToken: string;
 }
 
 interface SeedB {
@@ -181,12 +235,38 @@ interface SeedB {
   /** DX-050: plan propio de B con un ítem aceptado (B lo marca realizado). */
   planId: string;
   planItemId: string;
+  /**
+   * DX-207: recursos propios de B sobre los que B manda UN id de A por la
+   * query o el cuerpo (así el 400/404 solo puede venir de ese id).
+   */
+  payerId: string;
+  coverageId: string;
+  priceListId: string;
+  agreementId: string;
+  appointmentId: string;
+  waitlistEntryId: string;
+  dentistUserId: string;
+  postOpTemplateId: string;
+  consentTemplateId: string;
+  noteTemplateId: string;
+  /** Segundo paciente de B, fuera de pendientes (el primero ya está). */
+  secondPatientId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
   const date = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
   date.setUTCHours(hourUtc, 0, 0, 0);
   return date.toISOString();
+}
+
+/** DX-207: día civil (YYYY-MM-DD) a `daysAhead` días (negativo: pasado). */
+function day(daysAhead: number): string {
+  return futureAt(daysAhead, 12).slice(0, 10);
+}
+
+/** DX-207: instante ISO de las 00:00 UTC a `daysAhead` días, para la query. */
+function isoDay(daysAhead: number): string {
+  return encodeURIComponent(futureAt(daysAhead, 0));
 }
 
 async function seedClinicData(
@@ -511,6 +591,34 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     },
   );
 
+  // DX-207: una evolución de A (para `clinicalEntryId`), su política de
+  // tratamiento de datos (para `dataConsents.policyVersionId`) y el enlace de
+  // confirmación de su cita (token público).
+  const clinicalEntry = await create(
+    app,
+    a,
+    `/patients/${patientId}/clinical-entries`,
+    { notes: 'Evolución de A' },
+  );
+  await create(app, a, '/privacy-policies', {
+    policyText: 'Política de tratamiento de datos de A (Ley 1581).',
+    generalText: 'Autorizo el tratamiento de mis datos personales.',
+    sensitiveHealthText:
+      'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
+    marketingText: 'Autorizo recibir comunicaciones comerciales.',
+  });
+  const policies = await api(app, a, 'get', '/privacy-policies').expect(200);
+  const link = await api(
+    app,
+    a,
+    'post',
+    `/appointments/${appointment.id}/confirmation-link`,
+    {},
+  ).expect(201);
+  const notePrompt = await raw.clinicalNoteTemplatePrompt.findFirstOrThrow({
+    where: { templateId: noteTemplate.id },
+  });
+
   return {
     patientId,
     appointmentId: appointment.id,
@@ -543,6 +651,99 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     postOpTemplateId: postOpTemplate.id,
     postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
     providerOverrideId: providerOverride.id,
+    clinicalEntryId: clinicalEntry.id,
+    privacyPolicyId: (policies.body as { current: IdBody }).current.id,
+    notePromptId: notePrompt.id,
+    confirmationToken: (link.body as { url: string }).url.split(
+      '/confirmar/',
+    )[1],
+  };
+}
+
+/** DX-207: recursos propios de B para los casos de ids por query/cuerpo. */
+async function seedBExtras(
+  app: INestApplication<App>,
+  b: Clinic,
+  patientId: string,
+): Promise<
+  Omit<
+    SeedB,
+    'patientId' | 'catalogItemId' | 'locationId' | 'planId' | 'planItemId'
+  >
+> {
+  await api(app, b, 'put', '/locations/schedule', {
+    timezone: 'America/Bogota',
+    ranges: [],
+  }).expect(200);
+  const payer = await create(app, b, '/payers', {
+    name: 'Pagador de B',
+    type: 'EMPRESA',
+  });
+  const coverage = await create(app, b, `/patients/${patientId}/coverages`, {
+    payerId: payer.id,
+  });
+  const priceList = await create(app, b, '/price-lists', {
+    name: 'Lista de B',
+    currency: 'COP',
+  });
+  const agreement = await create(app, b, '/agreements', {
+    name: 'Convenio de B',
+    payerId: payer.id,
+    kind: 'PERCENT_DISCOUNT',
+    percent: 10,
+  });
+  // Pide adelantar: `PATCH /appointments/:id/opening` la acepta.
+  const appointment = await create(app, b, '/appointments', {
+    patientId,
+    providerId: b.adminUserId,
+    start: futureAt(8, 15),
+    end: futureAt(8, 16),
+    reason: 'Control de B',
+    wantsEarlier: true,
+  });
+  const waitlistEntry = await create(app, b, '/waitlist', { patientId });
+  const dentist = await seedMember(raw, b, ClinicRole.DENTIST);
+  const postOpTemplate = await create(app, b, '/post-op-templates', {
+    code: 'POI-B',
+    title: 'Indicaciones de B',
+    body: 'Hola {{paciente}}.',
+  });
+  const consentTemplate = await create(app, b, '/consent-templates', {
+    title: 'Consentimiento de B',
+    body: 'Yo, {{paciente}}, autorizo.',
+  });
+  const secondPatient = await create(app, b, '/patients', {
+    firstName: 'Segunda',
+    lastName: 'Paciente de B',
+    docType: DocType.CC,
+    docNumber: '9102',
+    sex: Sex.F,
+  });
+  // Con su propia política publicada, la de A no es «la vigente» de B.
+  await create(app, b, '/privacy-policies', {
+    policyText: 'Política de tratamiento de datos de B (Ley 1581).',
+    generalText: 'Autorizo el tratamiento de mis datos personales.',
+    sensitiveHealthText:
+      'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
+    marketingText: 'Autorizo recibir comunicaciones comerciales.',
+  });
+  const noteTemplate = await create(app, b, '/clinical-note-templates', {
+    name: 'Plantilla de B',
+    body: 'Superficie {{Superficie}}',
+    prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
+  });
+  return {
+    payerId: payer.id,
+    coverageId: coverage.id,
+    priceListId: priceList.id,
+    agreementId: agreement.id,
+    appointmentId: appointment.id,
+    waitlistEntryId: waitlistEntry.id,
+    dentistUserId: dentist.userId,
+    postOpTemplateId: postOpTemplate.id,
+    consentTemplateId: consentTemplate.id,
+    noteTemplateId: noteTemplate.id,
+    secondPatientId: secondPatient.id,
   };
 }
 
@@ -553,11 +754,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   let a: SeedA;
   let b: SeedB;
   let tables: TenantTable[];
+  // DX-207: los tokens de invitación y de restablecer de A solo viajan por
+  // email; se leen del transporte, como lo haría su destinatario.
+  const mailer = new CapturingMailer();
+  let invitationTokenA: string;
+  let resetTokenA: string;
   const shotOfA = (): Promise<Record<string, unknown>> =>
     snapshot(tables, clinicA.tenantId, clinicB.tenantId);
+  /** DX-207: los ids de A sembrados (ninguno puede salir en una respuesta a B). */
+  const idsOfA = (): string[] => [
+    clinicA.adminUserId,
+    ...Object.values(a as unknown as Record<string, string>).filter((v) =>
+      /^[0-9a-f-]{36}$/.test(v),
+    ),
+  ];
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp((builder) =>
+      builder.overrideProvider(MAILER).useValue(mailer),
+    );
     await resetDatabase(raw);
     clinicA = await registerClinic(app, 'clinica-aislada-a');
     clinicB = await registerClinic(app, 'clinica-aislada-b');
@@ -594,8 +809,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       locationId: (sedesB.body as IdBody[])[0].id,
       planId: planB.id,
       planItemId: itemB.id,
+      ...(await seedBExtras(app, clinicB, dataB.patientId)),
     };
     tables = await clinicTables(raw);
+    invitationTokenA = await mailer.invitationToken('invitada@a.test');
+    const ownerA = `owner@${clinicA.subdomain}.test`;
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/forgot-password')
+      .set('X-Tenant-Host', clinicA.host)
+      .send({ email: ownerA })
+      .expect(202);
+    resetTokenA = (
+      await mailer.waitFor(ownerA, /\/restablecer\/([A-Za-z0-9_-]{43})/)
+    )[1];
     // La invitación de A encola su email (DX-088): se espera a que el
     // despachador lo deje SENT para que la fotografía no cambie por él.
     await app.get(EmailDispatcher).whenIdle();
@@ -912,6 +1138,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'patch',
       path: () => `/treatment-plans/${b.planId}/items/${b.planItemId}`,
       body: () => ({ status: 'DONE', performedById: a.dentistUserId }),
+      bodyIds: ['performedById'],
       status: 404,
     },
     // DX-204: «Descuento %» en bloque sobre un plan y un ítem de A.
@@ -1292,6 +1519,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'post',
       path: () => `/patients/${b.patientId}/clinical-entries`,
       body: () => ({ notes: 'Intento', appointmentId: a.appointmentId }),
+      bodyIds: ['appointmentId'],
       status: 404,
     },
     {
@@ -1299,6 +1527,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'post',
       path: () => `/patients/${b.patientId}/clinical-entries`,
       body: () => ({ templateId: a.noteTemplateId, answers: [] }),
+      bodyIds: ['templateId'],
       status: 404,
     },
     // --- schedule-blocks y waitlist (DX-122) ---
@@ -1574,9 +1803,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         ['actorUserId', () => clinicA.adminUserId],
       ] as const
     ).map(([filter, id]): IsolationCase => ({
-      name: `GET /audit-events?${filter} de A`,
+      name: `GET /audit-events ?${filter} de A`,
       verb: 'get',
       path: () => `/audit-events?${filter}=${id()}`,
+      queryIds: [filter],
       status: 200,
       responseBody: {
         items: [],
@@ -1635,6 +1865,852 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/domains/${a.domainId}`,
       status: 404,
     },
+    // ======================================================================
+    // DX-207 (TST-022): ids de A por la QUERY. La ruta y el resto de los
+    // filtros son de B; la respuesta es un 400/404 con su mensaje en español
+    // o una lectura sin filas de A (la fotografía la comprueba el runner).
+    // ======================================================================
+    {
+      name: 'GET /appointments ?providerIds[] de A',
+      verb: 'get',
+      path: () =>
+        `/appointments?from=${isoDay(0)}&to=${isoDay(30)}&providerIds=${clinicA.adminUserId}&providerIds=${a.dentistUserId}`,
+      queryIds: ['providerIds[]'],
+      status: 400,
+      message: 'Algún profesional no pertenece a esta clínica',
+    },
+    // B tiene su propia cita en el rango: el filtro de A la deja fuera y la
+    // de A no aparece.
+    ...(
+      [
+        ['providerId', () => clinicA.adminUserId],
+        ['locationId', () => a.locationId],
+      ] as const
+    ).map(([field, id]): IsolationCase => ({
+      name: `GET /appointments ?${field} de A`,
+      verb: 'get',
+      path: () =>
+        `/appointments?from=${isoDay(0)}&to=${isoDay(30)}&${field}=${id()}`,
+      queryIds: [field],
+      status: 200,
+      responseBody: [],
+    })),
+    ...(
+      [
+        [
+          'providerId',
+          () => `providerId=${a.dentistUserId}&locationId=${b.locationId}`,
+          'Profesional no encontrado',
+        ],
+        [
+          'locationId',
+          () => `providerId=${clinicB.adminUserId}&locationId=${a.locationId}`,
+          'Sede no encontrada',
+        ],
+        [
+          'patientId',
+          () =>
+            `providerId=${clinicB.adminUserId}&locationId=${b.locationId}&patientId=${a.patientId}`,
+          'Paciente no encontrado',
+        ],
+      ] as const
+    ).map(([field, query, message]): IsolationCase => ({
+      name: `GET /appointments/openings ?${field} de A`,
+      verb: 'get',
+      path: () =>
+        `/appointments/openings?from=${day(60)}&to=${day(61)}&durationMinutes=30&${query()}`,
+      queryIds: [field],
+      status: 404,
+      message,
+    })),
+    {
+      name: 'GET /schedule-blocks ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/schedule-blocks?from=${isoDay(0)}&to=${isoDay(90)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 404,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'GET /schedule-blocks ?providerIds[] de A',
+      verb: 'get',
+      path: () =>
+        `/schedule-blocks?from=${isoDay(0)}&to=${isoDay(90)}&providerIds=${clinicA.adminUserId}&providerIds=${a.dentistUserId}`,
+      queryIds: ['providerIds[]'],
+      status: 404,
+      message: 'Profesional no encontrado',
+    },
+    {
+      // La cita de A cae en la franja. Con la sede y el profesional de A
+      // (como lo probaría un atacante) la sede se rechaza primero…
+      name: 'GET /schedule-blocks/affected-appointments ?locationId (y providerId) de A',
+      verb: 'get',
+      path: () =>
+        `/schedule-blocks/affected-appointments?start=${isoDay(6)}&end=${isoDay(9)}&providerId=${clinicA.adminUserId}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 404,
+      message: 'Sede no encontrada',
+    },
+    {
+      // …y con la sede de B, el profesional de A también.
+      name: 'GET /schedule-blocks/affected-appointments ?providerId de A',
+      verb: 'get',
+      path: () =>
+        `/schedule-blocks/affected-appointments?start=${isoDay(6)}&end=${isoDay(9)}&providerId=${clinicA.adminUserId}&locationId=${b.locationId}`,
+      queryIds: ['providerId'],
+      status: 404,
+      message: 'Profesional no encontrado',
+    },
+    {
+      name: 'GET /schedule/roster ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/schedule/roster?weekStart=${day(7)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 404,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'GET /waitlist ?locationId de A',
+      verb: 'get',
+      path: () => `/waitlist?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 404,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'GET /appointments/openings/:locationId/candidates ?providerId de A',
+      verb: 'get',
+      path: () =>
+        `/appointments/openings/${b.locationId}/candidates?start=${encodeURIComponent(futureAt(61, 15))}&end=${encodeURIComponent(futureAt(61, 16))}&providerId=${a.dentistUserId}`,
+      queryIds: ['providerId'],
+      status: 404,
+      message: 'Profesional no encontrado',
+    },
+    ...(
+      [
+        ['locationId', () => a.locationId],
+        ['cursor', () => a.planId],
+      ] as const
+    ).map(([field, id]): IsolationCase => ({
+      name: `GET /treatment-plans/unscheduled ?${field} de A`,
+      verb: 'get',
+      path: () => `/treatment-plans/unscheduled?${field}=${id()}`,
+      queryIds: [field],
+      status: 200,
+      responseBody: { items: [], nextCursor: null, limit: 25 },
+    })),
+    {
+      name: 'GET /patients/:patientId/price-quote ?catalogItemId de A',
+      verb: 'get',
+      path: () =>
+        `/patients/${b.patientId}/price-quote?catalogItemId=${a.catalogItemId}&currency=USD`,
+      queryIds: ['catalogItemId'],
+      status: 404,
+      message: 'Procedimiento no encontrado.',
+    },
+    // Reportes y cartera: la sede de A se rechaza; el profesional de A
+    // filtra a nada (ni una fila, ni un total).
+    ...(
+      [
+        [
+          '/reports/discounts',
+          `from=${day(-30)}&to=${day(0)}&`,
+          'professionalId',
+        ],
+        [
+          '/reports/discounts.csv',
+          `from=${day(-30)}&to=${day(0)}&`,
+          'professionalId',
+        ],
+        ['/receivables/aging', '', 'providerId'],
+        ['/receivables/aging.csv', '', 'providerId'],
+      ] as const
+    ).flatMap(([route, range, providerField]): IsolationCase[] => [
+      {
+        name: `GET ${route} ?locationId de A`,
+        verb: 'get',
+        path: () => `${route}?${range}locationId=${a.locationId}`,
+        queryIds: ['locationId'],
+        status: 400,
+        message: 'La sede no es de esta clínica.',
+      },
+      {
+        name: `GET ${route} ?${providerField} de A`,
+        verb: 'get',
+        path: () => `${route}?${range}${providerField}=${clinicA.adminUserId}`,
+        queryIds: [providerField],
+        status: 200,
+        expectBody: (body, text) => {
+          if (route.endsWith('.csv')) {
+            // Solo la cabecera del CSV.
+            expect(text.trim().split('\r\n')).toHaveLength(1);
+          } else {
+            expect(body).toMatchObject({ items: [], total: 0, totals: [] });
+          }
+        },
+      },
+    ]),
+    {
+      name: 'GET /cash-sessions/current ?locationId de A',
+      verb: 'get',
+      path: () => `/cash-sessions/current?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 400,
+      message: 'La sede no es de esta clínica.',
+    },
+    {
+      // A tiene una caja cerrada; B no ve ninguna.
+      name: 'GET /cash-sessions ?locationId de A',
+      verb: 'get',
+      path: () => `/cash-sessions?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
+    },
+    {
+      // B tiene pacientes; ninguno tiene la cobertura del pagador de A.
+      name: 'GET /patients ?payerId de A',
+      verb: 'get',
+      path: () => `/patients?payerId=${a.payerId}`,
+      queryIds: ['payerId'],
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
+    },
+    {
+      name: 'GET /patients/:patientId/consents/preview ?templateId de A',
+      verb: 'get',
+      path: () =>
+        `/patients/${b.patientId}/consents/preview?templateId=${a.consentTemplateId}`,
+      queryIds: ['templateId'],
+      status: 404,
+      message: 'Plantilla no encontrada',
+    },
+    {
+      name: 'GET /patients/:patientId/consents/preview ?treatmentPlanId de A',
+      verb: 'get',
+      path: () =>
+        `/patients/${b.patientId}/consents/preview?templateId=${b.consentTemplateId}&treatmentPlanId=${a.planId}`,
+      queryIds: ['treatmentPlanId'],
+      status: 404,
+      message: 'Plan de tratamiento no encontrado',
+    },
+    // `GET /payments` (la caja) no tiene `locationId` en la query: la sede va
+    // en `X-Location-Id`. La de A en la query se descarta (whitelist) y B ve
+    // su caja vacía (A tiene un abono hoy); la de A en la cabecera se rechaza.
+    {
+      name: 'GET /payments ?locationId de A (se descarta)',
+      verb: 'get',
+      path: () =>
+        `/payments?from=${day(-1)}&to=${day(1)}&locationId=${a.locationId}`,
+      status: 200,
+      expectBody: (body) =>
+        expect(body).toMatchObject({
+          items: [],
+          total: 0,
+          summary: { count: 0 },
+        }),
+    },
+    {
+      name: 'GET /payments con X-Location-Id de A',
+      verb: 'get',
+      path: () => `/payments?from=${day(-1)}&to=${day(1)}`,
+      locationId: () => a.locationId,
+      status: 400,
+    },
+    // ======================================================================
+    // DX-207 (TST-022): ids de A en el CUERPO, sobre recursos de B. Ni se crea
+    // ni se cambia nada en A ni en B (el recuento de B está en la fotografía).
+    // ======================================================================
+    {
+      // B ya publicó su política: la de A «no es la vigente» de B.
+      name: 'POST /patients body.dataConsents.policyVersionId de A',
+      verb: 'post',
+      path: () => '/patients',
+      body: () => ({
+        firstName: 'Con política',
+        lastName: 'Ajena',
+        docType: DocType.CC,
+        docNumber: '9198',
+        sex: Sex.F,
+        dataConsents: {
+          policyVersionId: a.privacyPolicyId,
+          decisions: [{ scope: 'GENERAL', granted: true }],
+        },
+      }),
+      bodyIds: ['dataConsents.policyVersionId'],
+      status: 409,
+    },
+    {
+      name: 'POST /patients/:id/payment-promises body.locationId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/payment-promises`,
+      body: () => ({
+        amount: 1000,
+        currency: 'COP',
+        dueDate: futureAt(10, 15).slice(0, 10),
+        locationId: a.locationId,
+      }),
+      bodyIds: ['locationId'],
+      status: 400,
+      message: 'La sede no es de esta clínica.',
+    },
+    {
+      name: 'POST /patients/:patientId/coverages body.payerId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/coverages`,
+      body: () => ({ payerId: a.payerId }),
+      bodyIds: ['payerId'],
+      status: 400,
+      message: 'Pagador no encontrado.',
+    },
+    {
+      name: 'PATCH /patients/:patientId/coverages/:coverageId body.payerId de A',
+      verb: 'patch',
+      path: () => `/patients/${b.patientId}/coverages/${b.coverageId}`,
+      body: () => ({ payerId: a.payerId }),
+      bodyIds: ['payerId'],
+      status: 400,
+      message: 'Pagador no encontrado.',
+    },
+    {
+      name: 'PUT /patients/:patientId/agreement body.agreementId de A',
+      verb: 'put',
+      path: () => `/patients/${b.patientId}/agreement`,
+      body: () => ({ agreementId: a.agreementId }),
+      bodyIds: ['agreementId'],
+      status: 400,
+      message: 'Convenio no encontrado.',
+    },
+    {
+      name: 'PUT /patients/:patientId/agreement body.coverageId de A',
+      verb: 'put',
+      path: () => `/patients/${b.patientId}/agreement`,
+      body: () => ({ agreementId: b.agreementId, coverageId: a.coverageId }),
+      bodyIds: ['coverageId'],
+      status: 400,
+      message: 'Cobertura no encontrada.',
+    },
+    ...(
+      [
+        [
+          'payerId',
+          () => ({ kind: 'PERCENT_DISCOUNT', percent: 5, payerId: a.payerId }),
+          'Pagador no encontrado.',
+        ],
+        [
+          'priceListId',
+          () => ({ kind: 'PRICE_LIST', priceListId: a.priceListId }),
+          'Lista de precios no encontrada.',
+        ],
+        [
+          'locationId',
+          () => ({
+            kind: 'PERCENT_DISCOUNT',
+            percent: 5,
+            locationId: a.locationId,
+          }),
+          'Sede no encontrada.',
+        ],
+      ] as const
+    ).flatMap(([field, patch, message]): IsolationCase[] => [
+      {
+        name: `POST /agreements body.${field} de A`,
+        verb: 'post',
+        path: () => '/agreements',
+        body: () => ({
+          name: `Convenio con ${field} ajeno`,
+          payerId: b.payerId,
+          ...patch(),
+        }),
+        bodyIds: [field],
+        status: 400,
+        message,
+      },
+      {
+        name: `PATCH /agreements/:id body.${field} de A`,
+        verb: 'patch',
+        path: () => `/agreements/${b.agreementId}`,
+        body: patch,
+        bodyIds: [field],
+        status: 400,
+        message,
+      },
+    ]),
+    {
+      name: 'POST /price-lists body.locationId de A',
+      verb: 'post',
+      path: () => '/price-lists',
+      body: () => ({
+        name: 'Lista con sede ajena',
+        currency: 'COP',
+        locationId: a.locationId,
+      }),
+      bodyIds: ['locationId'],
+      status: 400,
+      message: 'Sede no encontrada.',
+    },
+    {
+      name: 'PATCH /price-lists/:id body.locationId de A',
+      verb: 'patch',
+      path: () => `/price-lists/${b.priceListId}`,
+      body: () => ({ locationId: a.locationId }),
+      bodyIds: ['locationId'],
+      status: 400,
+      message: 'Sede no encontrada.',
+    },
+    {
+      name: 'PUT /price-lists/:id/items body.items[].catalogItemId de A',
+      verb: 'put',
+      path: () => `/price-lists/${b.priceListId}/items`,
+      body: () => ({ items: [{ catalogItemId: a.catalogItemId, price: 1 }] }),
+      bodyIds: ['items[].catalogItemId'],
+      status: 400,
+      message:
+        'Hay prestaciones que no existen en el catálogo de esta clínica.',
+    },
+    {
+      name: 'POST /patients/:patientId/clinical-entries body.answers[].promptId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/clinical-entries`,
+      body: () => ({
+        templateId: b.noteTemplateId,
+        answers: [{ promptId: a.notePromptId, values: ['O'] }],
+      }),
+      bodyIds: ['answers[].promptId'],
+      status: 400,
+      message: () =>
+        `La pregunta ${a.notePromptId} no es de la plantilla «Plantilla de B»`,
+    },
+    ...(
+      [
+        [
+          'patientId',
+          () => ({ patientId: a.patientId }),
+          404,
+          'Paciente no encontrado',
+        ],
+        [
+          'providerId',
+          () => ({ providerId: a.dentistUserId }),
+          404,
+          'Profesional no encontrado',
+        ],
+        [
+          'appointmentTypeId',
+          () => ({ appointmentTypeId: a.appointmentTypeId }),
+          400,
+          'El tipo de cita no existe o está desactivado',
+        ],
+        [
+          'planItemIds[]',
+          () => ({ planItemIds: [a.planItemId] }),
+          404,
+          'Algún tratamiento no existe o no pertenece a este paciente.',
+        ],
+      ] as const
+    ).map(([field, patch, status, message]): IsolationCase => ({
+      name: `POST /appointments body.${field} de A`,
+      verb: 'post',
+      path: () => '/appointments',
+      body: () => ({
+        patientId: b.patientId,
+        providerId: clinicB.adminUserId,
+        start: futureAt(9, 15),
+        end: futureAt(9, 16),
+        ...patch(),
+      }),
+      bodyIds: [field],
+      status,
+      message,
+    })),
+    {
+      name: 'PATCH /appointments/:id body.providerId de A',
+      verb: 'patch',
+      path: () => `/appointments/${b.appointmentId}`,
+      body: () => ({ providerId: a.dentistUserId }),
+      bodyIds: ['providerId'],
+      status: 404,
+      message: 'Profesional no encontrado',
+    },
+    {
+      name: 'PATCH /appointments/:id body.planItemIds[] de A',
+      verb: 'patch',
+      path: () => `/appointments/${b.appointmentId}`,
+      body: () => ({ planItemIds: [a.planItemId] }),
+      bodyIds: ['planItemIds[]'],
+      status: 404,
+      message: 'Algún tratamiento no existe o no pertenece a este paciente.',
+    },
+    {
+      // La cita de B pide adelantar (`wantsEarlier`): solo el profesional
+      // de A puede hacer fallar el movimiento.
+      name: 'PATCH /appointments/:id/opening body.providerId de A',
+      verb: 'patch',
+      path: () => `/appointments/${b.appointmentId}/opening`,
+      body: () => ({ start: futureAt(5, 15), providerId: a.dentistUserId }),
+      bodyIds: ['providerId'],
+      status: 404,
+      message: 'Profesional no encontrado',
+    },
+    {
+      name: 'PUT /staff/:userId/locations body.locationIds[] de A',
+      verb: 'put',
+      path: () => `/staff/${b.dentistUserId}/locations`,
+      body: () => ({ locationIds: [a.locationId] }),
+      bodyIds: ['locationIds[]'],
+      status: 400,
+      message: 'Alguna sede no existe en esta clínica.',
+    },
+    ...(
+      [
+        [
+          'locationId',
+          () => ({ locationId: a.locationId }),
+          'Sede no encontrada',
+        ],
+        [
+          'providerId',
+          () => ({ providerId: a.dentistUserId }),
+          'Profesional no encontrado',
+        ],
+      ] as const
+    ).map(([field, patch, message]): IsolationCase => ({
+      name: `POST /schedule-blocks body.${field} de A`,
+      verb: 'post',
+      path: () => '/schedule-blocks',
+      body: () => ({
+        start: futureAt(70, 13),
+        end: futureAt(70, 14),
+        kind: 'MEETING',
+        ...patch(),
+      }),
+      bodyIds: [field],
+      status: 404,
+      message,
+    })),
+    {
+      name: 'PUT /providers/:providerId/schedule body.locations[].locationId de A',
+      verb: 'put',
+      path: () => `/providers/${clinicB.adminUserId}/schedule`,
+      body: () => ({
+        locations: [
+          {
+            locationId: a.locationId,
+            ranges: [{ weekday: 1, startMinute: 480, endMinute: 600 }],
+          },
+        ],
+      }),
+      bodyIds: ['locations[].locationId'],
+      status: 400,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'POST /providers/:providerId/schedule-overrides body.locationId de A',
+      verb: 'post',
+      path: () => `/providers/${clinicB.adminUserId}/schedule-overrides`,
+      body: () => ({
+        locationId: a.locationId,
+        date: futureAt(92, 15).slice(0, 10),
+        ranges: [],
+      }),
+      bodyIds: ['locationId'],
+      status: 400,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'POST /waitlist body.patientId de A',
+      verb: 'post',
+      path: () => '/waitlist',
+      body: () => ({ patientId: a.patientId }),
+      bodyIds: ['patientId'],
+      status: 404,
+      message: 'Paciente no encontrado',
+    },
+    // Con el segundo paciente de B (el primero ya está en pendientes).
+    ...(
+      [
+        [
+          'locationId',
+          () => ({ locationId: a.locationId }),
+          404,
+          'Sede no encontrada',
+        ],
+        [
+          'providerId',
+          () => ({ providerId: a.dentistUserId }),
+          404,
+          'Profesional no encontrado',
+        ],
+        [
+          'appointmentTypeId',
+          () => ({ appointmentTypeId: a.appointmentTypeId }),
+          400,
+          'El tipo de cita no existe o está desactivado',
+        ],
+      ] as const
+    ).map(([field, patch, status, message]): IsolationCase => ({
+      name: `POST /waitlist body.${field} de A`,
+      verb: 'post',
+      path: () => '/waitlist',
+      body: () => ({ patientId: b.secondPatientId, ...patch() }),
+      bodyIds: [field],
+      status,
+      message,
+    })),
+    ...(
+      [
+        [
+          'providerId',
+          () => ({ providerId: a.dentistUserId }),
+          404,
+          'Profesional no encontrado',
+        ],
+        [
+          'appointmentTypeId',
+          () => ({ appointmentTypeId: a.appointmentTypeId }),
+          400,
+          'El tipo de cita no existe o está desactivado',
+        ],
+      ] as const
+    ).map(([field, patch, status, message]): IsolationCase => ({
+      name: `POST /waitlist/:id/schedule body.${field} de A`,
+      verb: 'post',
+      path: () => `/waitlist/${b.waitlistEntryId}/schedule`,
+      body: () => ({
+        providerId: clinicB.adminUserId,
+        start: futureAt(11, 15),
+        ...patch(),
+      }),
+      bodyIds: [field],
+      status,
+      message,
+    })),
+    ...(
+      [
+        [
+          'providerId',
+          () => ({ providerId: a.dentistUserId }),
+          'Profesional no encontrado',
+        ],
+        [
+          'patientId',
+          () => ({ patientId: a.patientId }),
+          'Paciente no encontrado',
+        ],
+        [
+          'waitlistEntryId',
+          () => ({ waitlistEntryId: a.waitlistEntryId }),
+          'Pendiente no encontrado',
+        ],
+        [
+          'appointmentId',
+          () => ({ appointmentId: a.appointmentId }),
+          'Cita no encontrada',
+        ],
+      ] as const
+    ).map(([field, patch, message]): IsolationCase => ({
+      name: `POST /appointments/openings/:locationId/offers body.${field} de A`,
+      verb: 'post',
+      path: () => `/appointments/openings/${b.locationId}/offers`,
+      body: () => ({
+        slotStart: futureAt(62, 15),
+        slotEnd: futureAt(62, 16),
+        providerId: clinicB.adminUserId,
+        patientId: b.patientId,
+        channel: 'PHONE',
+        ...patch(),
+      }),
+      bodyIds: [field],
+      status: 404,
+      message,
+    })),
+    {
+      // El ítem de B va también: el de A sobra (no es un ítem vivo del plan).
+      name: 'PATCH /treatment-plans/:id/visits body.items[].itemId de A',
+      verb: 'patch',
+      path: () => `/treatment-plans/${b.planId}/visits`,
+      body: () => ({
+        items: [
+          { itemId: b.planItemId, visit: 1 },
+          { itemId: a.planItemId, visit: 1 },
+        ],
+        visitIntervals: {},
+      }),
+      bodyIds: ['items[].itemId'],
+      status: 400,
+      message: 'Incluye todos los ítems vivos del plan una sola vez.',
+    },
+    {
+      name: 'POST /treatment-plans/:id/items body.catalogItemId de A',
+      verb: 'post',
+      path: () => `/treatment-plans/${b.planId}/items`,
+      body: () => ({ toothNumber: '22', catalogItemId: a.catalogItemId }),
+      bodyIds: ['catalogItemId'],
+      status: 404,
+      message: 'Prestación no encontrada en el catálogo de esta clínica.',
+    },
+    {
+      name: 'POST /treatment-plans/:id/items/bulk-discount body.itemIds[] de A',
+      verb: 'post',
+      path: () => `/treatment-plans/${b.planId}/items/bulk-discount`,
+      body: () => ({ itemIds: [a.planItemId], percent: 5 }),
+      bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    {
+      name: 'POST /cash-sessions/open body.locationId de A',
+      verb: 'post',
+      path: () => '/cash-sessions/open',
+      body: () => ({ locationId: a.locationId, floats: [] }),
+      bodyIds: ['locationId'],
+      status: 400,
+      message: 'La sede no es de esta clínica.',
+    },
+    ...(
+      [
+        [
+          'templateId',
+          () => ({ templateId: a.consentTemplateId }),
+          'Plantilla no encontrada',
+        ],
+        [
+          'treatmentPlanId',
+          () => ({ treatmentPlanId: a.planId }),
+          'Plan de tratamiento no encontrado',
+        ],
+      ] as const
+    ).map(([field, patch, message]): IsolationCase => ({
+      name: `POST /patients/:patientId/consents body.${field} de A`,
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/consents`,
+      body: () => ({
+        templateId: b.consentTemplateId,
+        templateVersion: 1,
+        signerType: 'PATIENT',
+        patientSignature: SIGNATURE_PNG,
+        professionalSignature: SIGNATURE_PNG,
+        ...patch(),
+      }),
+      bodyIds: [field],
+      status: 404,
+      message,
+    })),
+    {
+      name: 'POST /post-op-templates body.appointmentTypeIds[] de A',
+      verb: 'post',
+      path: () => '/post-op-templates',
+      body: () => ({
+        code: 'POI-AJENO',
+        title: 'Con tipo ajeno',
+        body: 'Texto',
+        appointmentTypeIds: [a.appointmentTypeId],
+      }),
+      bodyIds: ['appointmentTypeIds[]'],
+      status: 400,
+      message: 'Algún tipo de cita no existe en esta clínica',
+    },
+    ...(
+      [
+        [
+          'appointmentTypeIds[]',
+          () => ({ appointmentTypeIds: [a.appointmentTypeId] }),
+          'Algún tipo de cita no existe en esta clínica',
+        ],
+        [
+          'catalogItemIds[]',
+          () => ({ catalogItemIds: [a.catalogItemId] }),
+          'Algún procedimiento del catálogo no existe en esta clínica',
+        ],
+      ] as const
+    ).map(([field, patch, message]): IsolationCase => ({
+      name: `PATCH /post-op-templates/:id body.${field} de A`,
+      verb: 'patch',
+      path: () => `/post-op-templates/${b.postOpTemplateId}`,
+      body: patch,
+      bodyIds: [field],
+      status: 400,
+      message,
+    })),
+    {
+      name: 'POST /appointments/:appointmentId/post-op-instructions/deliveries body.templateId de A',
+      verb: 'post',
+      path: () =>
+        `/appointments/${b.appointmentId}/post-op-instructions/deliveries`,
+      body: () => ({ templateId: a.postOpTemplateId, channel: 'PRINT' }),
+      bodyIds: ['templateId'],
+      status: 404,
+      message: 'Plantilla de indicaciones no encontrada',
+    },
+    {
+      name: 'POST /patients/:patientId/medical-history/requests body.appointmentId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/medical-history/requests`,
+      body: () => ({ appointmentId: a.appointmentId }),
+      bodyIds: ['appointmentId'],
+      status: 404,
+      message: 'Cita no encontrada',
+    },
+    // ======================================================================
+    // DX-207: rutas públicas por token. El token de A, sin sesión, en el host
+    // de B: «no existe» (y nada de A cambia). Que el mismo token SÍ vale en
+    // el host de A lo comprueba «control: los tokens de A valen en su host».
+    // ======================================================================
+    ...(
+      [
+        ['get', undefined],
+        ['post', () => ({ action: 'confirm' })],
+      ] as const
+    ).map(([verb, body]): IsolationCase => ({
+      name: `${verb.toUpperCase()} /public/appointment-confirmations/:token (token de A en el host de B)`,
+      verb,
+      path: () => `/public/appointment-confirmations/${a.confirmationToken}`,
+      body,
+      public: true,
+      status: 404,
+      message: CONFIRMATION_LINK_NOT_FOUND_MESSAGE,
+    })),
+    {
+      // Contrato de la pantalla de invitación (sin enumerar): 200 NOT_FOUND,
+      // el mismo cuerpo que para un token inventado.
+      name: 'GET /public/invitations/:token (token de A en el host de B)',
+      verb: 'get',
+      path: () => `/public/invitations/${invitationTokenA}`,
+      public: true,
+      status: 200,
+      responseBody: { status: 'NOT_FOUND' },
+    },
+    {
+      name: 'POST /public/invitations/:token/accept (token de A en el host de B)',
+      verb: 'post',
+      path: () => `/public/invitations/${invitationTokenA}/accept`,
+      body: () => ({ password: 'Intrusa123!', fullName: 'Intrusa' }),
+      public: true,
+      status: 404,
+      message:
+        'La invitación no existe o el enlace ya no es válido (puede que te hayan enviado uno más reciente).',
+    },
+    {
+      name: 'POST /auth/reset-password/check (token de A en el host de B)',
+      verb: 'post',
+      path: () => '/auth/reset-password/check',
+      body: () => ({ token: resetTokenA }),
+      public: true,
+      status: 200,
+      responseBody: { status: 'INVALID' },
+    },
+    {
+      name: 'POST /auth/reset-password (token de A en el host de B)',
+      verb: 'post',
+      path: () => '/auth/reset-password',
+      body: () => ({ token: resetTokenA, password: 'Intrusa123!' }),
+      public: true,
+      status: 404,
+      message:
+        'El enlace para restablecer la contraseña no es válido o ya fue reemplazado por uno más reciente. Pide un enlace nuevo.',
+    },
   ];
 
   /**
@@ -1642,6 +2718,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
    */
   const COVERED_ELSEWHERE: Record<string, string> = {
+    // Contra el paciente de A; los casos de aquí (cita y plantilla de A) van
+    // sobre el paciente de B y prueban los ids del cuerpo (DX-207).
+    'POST /patients/:patientId/clinical-entries':
+      'patient-tenant-fk.e2e-spec.ts',
     // DX-256: «guarda dos visitas; recepción no organiza y clínica ajena no
     // encuentra el plan» prueba GET/PATCH B → 404 y snapshot de plan, ítems,
     // intervalos, aceptación y hash del presupuesto de A sin cambios.
@@ -1746,9 +2826,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'medical-history-submissions.e2e-spec.ts',
   };
 
+  /** `MÉTODO /ruta` de un caso (las dos primeras palabras de su nombre). */
+  const routeOf = (c: IsolationCase): string =>
+    c.name.split(' ').slice(0, 2).join(' ');
+
   it('cubre toda ruta de clínica con :param (aquí o en el spec citado)', () => {
+    // Solo cuentan los casos que atacan el recurso de la RUTA (los de ids por
+    // query/cuerpo y los públicos van sobre recursos de B o sin sesión).
     const covered = new Set(
-      cases.map((c) => c.name.split(' ').slice(0, 2).join(' ')),
+      cases.filter((c) => !c.queryIds && !c.bodyIds && !c.public).map(routeOf),
     );
     const byId = Object.entries(ROUTE_ACCESS)
       .filter(([key, access]) => access.kind === 'roles' && key.includes('/:'))
@@ -1763,20 +2849,161 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     }).toEqual({ sinCubrir: [], exencionSobrante: [] });
   });
 
+  /**
+   * DX-207: rutas públicas por `:token` cuyo caso «token de A en el host de
+   * B → 404 sin tocar nada de A» ya está en otro spec.
+   */
+  const PUBLIC_TOKEN_COVERED_ELSEWHERE: Record<string, string> = {
+    // «en el host de otra clínica, o con un token inventado, 404» y la baja
+    // de A sigue sin registrar.
+    'GET /public/reminder-opt-outs/:token': 'reminder-opt-out.e2e-spec.ts',
+    'POST /public/reminder-opt-outs/:token': 'reminder-opt-out.e2e-spec.ts',
+    // «el token de A en el host de B → 404» y la apertura sigue sin marcar.
+    'GET /public/post-op-instructions/:token':
+      'public-post-op-instructions.e2e-spec.ts',
+    'POST /public/post-op-instructions/:token/opened':
+      'public-post-op-instructions.e2e-spec.ts',
+    // «el token de A en el host de B → 404» (GET y POST del formulario).
+    'GET /public/medical-history/:token':
+      'medical-history-submissions.e2e-spec.ts',
+    'POST /public/medical-history/:token':
+      'medical-history-submissions.e2e-spec.ts',
+  };
+
+  it('DX-207: cada id por query/cuerpo de la lista de la matriz tiene su caso, y ningún caso sobra', () => {
+    const fromCases = [...cases, ...knownGapCases].flatMap((c) => [
+      ...(c.queryIds ?? []).map((f) => `${routeOf(c)} ?${f}`),
+      ...(c.bodyIds ?? []).map((f) => `${routeOf(c)} body.${f}`),
+    ]);
+    expect({
+      sinCaso: ID_INPUTS_IN_MATRIX.filter((id) => !fromCases.includes(id)),
+      casoFueraDeLaLista: fromCases.filter(
+        (id) => !ID_INPUTS_IN_MATRIX.includes(id),
+      ),
+    }).toEqual({ sinCaso: [], casoFueraDeLaLista: [] });
+    expect(TENANT_ISOLATION_MATRIX_SPEC).toBe(path.basename(__filename));
+  });
+
+  it('DX-207: cada ruta pública por :token tiene su caso «token de A en el host de B» (aquí o en el spec citado)', async () => {
+    const byToken = Object.entries(ROUTE_ACCESS)
+      .filter(
+        ([key, access]) =>
+          access.kind === 'public' &&
+          access.tenantScoped &&
+          key.includes('/:token'),
+      )
+      .map(([key]) => key);
+    const covered = new Set(cases.filter((c) => c.public).map(routeOf));
+    expect({
+      sinCubrir: byToken.filter(
+        (k) => !covered.has(k) && !(k in PUBLIC_TOKEN_COVERED_ELSEWHERE),
+      ),
+      exencionSobrante: Object.keys(PUBLIC_TOKEN_COVERED_ELSEWHERE).filter(
+        (k) => covered.has(k) || !byToken.includes(k),
+      ),
+    }).toEqual({ sinCubrir: [], exencionSobrante: [] });
+    for (const spec of new Set(Object.values(PUBLIC_TOKEN_COVERED_ELSEWHERE))) {
+      await expect(
+        fs.access(path.join(__dirname, spec)),
+      ).resolves.toBeUndefined();
+    }
+  });
+
   it.each(cases.map((c) => [c.name, c] as const))(
     'B → %s: responde lo esperado y no toca nada de A',
     async (_name, c) => {
       const before = await shotOfA();
-      const req = api(app, clinicB, c.verb, c.path(), c.body?.());
+      const req = c.public
+        ? publicRequest(app, clinicB, c.verb, c.path(), c.body?.())
+        : api(app, clinicB, c.verb, c.path(), c.body?.());
       if (c.locationId) req.set('X-Location-Id', c.locationId());
       const res = await req;
       expect({ status: res.status }).toEqual({ status: c.status });
       if ('responseBody' in c) {
         expect(res.text === '' ? null : res.body).toEqual(c.responseBody);
       }
+      if (c.message !== undefined) {
+        expect((res.body as { message?: unknown }).message).toBe(
+          typeof c.message === 'function' ? c.message() : c.message,
+        );
+      }
+      c.expectBody?.(res.body, res.text);
+      // Ninguna respuesta de B lleva el tenant de A ni un id de A que B no
+      // haya mandado él mismo (el eco de su propio filtro no es una fuga).
+      const sent = `${c.path()} ${JSON.stringify(c.body?.() ?? {})}`;
+      expect(
+        [clinicA.tenantId, ...idsOfA()].filter(
+          (id) => res.text.includes(id) && !sent.includes(id),
+        ),
+      ).toEqual([]);
       expect(await shotOfA()).toEqual(before);
     },
   );
+
+  /**
+   * DX-207, hallazgo: `POST /patients/:patientId/tooth-records` NO comprueba
+   * `catalogItemId` ni `clinicalEntryId` (add-tooth-record.use-case.ts lo
+   * deja anotado como seguimiento). B puede guardar en SU odontograma un
+   * registro que apunta a la prestación o a la evolución de A. No es una
+   * fuga (la fila es de B, nada de A cambia ni se ve: la RLS deja la
+   * referencia colgando), pero sí una referencia entre clínicas sin FK. Van
+   * como `it.failing` (patrón de BE-007): cuando se compruebe la pertenencia,
+   * Jest avisará de que ya pasan y hay que moverlos a `cases`.
+   */
+  const knownGapCases: IsolationCase[] = [
+    {
+      name: 'POST /patients/:patientId/tooth-records body.catalogItemId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/tooth-records`,
+      body: () => ({
+        toothNumber: '11',
+        kind: 'PROCEDURE',
+        catalogItemId: a.catalogItemId,
+      }),
+      bodyIds: ['catalogItemId'],
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/tooth-records body.clinicalEntryId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/tooth-records`,
+      body: () => ({
+        toothNumber: '11',
+        kind: 'PROCEDURE',
+        catalogItemId: b.catalogItemId,
+        clinicalEntryId: a.clinicalEntryId,
+      }),
+      bodyIds: ['clinicalEntryId'],
+      status: 404,
+    },
+  ];
+
+  it.failing.each(knownGapCases.map((c) => [c.name, c] as const))(
+    'B → %s: 404 y ninguna fila nueva en A ni en B (hallazgo DX-207)',
+    async (_name, c) => {
+      const before = await shotOfA();
+      const res = await api(app, clinicB, c.verb, c.path(), c.body?.());
+      expect({ status: res.status }).toEqual({ status: c.status });
+      expect(await shotOfA()).toEqual(before);
+    },
+  );
+
+  it('DX-207, control: los tokens de A sí valen en el host de A (el 404 de B es por el host)', async () => {
+    const pub = (verb: Verb, path: string, body?: object) =>
+      publicRequest(app, clinicA, verb, path, body);
+    await pub(
+      'get',
+      `/public/appointment-confirmations/${a.confirmationToken}`,
+    ).expect(200);
+    const invitation = await pub(
+      'get',
+      `/public/invitations/${invitationTokenA}`,
+    ).expect(200);
+    expect(invitation.body).not.toEqual({ status: 'NOT_FOUND' });
+    await pub('post', '/auth/reset-password/check', { token: resetTokenA })
+      .expect(200)
+      .expect({ status: 'VALID' });
+  });
 
   it('DX-050: B no puede atribuir su ítem a un profesional de A (queda aceptado, sin atribución ni odontograma)', async () => {
     await api(

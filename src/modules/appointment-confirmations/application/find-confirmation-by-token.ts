@@ -9,6 +9,10 @@ import {
   isWellFormedConfirmationToken,
 } from './confirmation-token';
 
+/** 404 del enlace público: inventado, caducado o de otra clínica (igual). */
+export const CONFIRMATION_LINK_NOT_FOUND_MESSAGE =
+  'El enlace de confirmación no existe o ya no es válido.';
+
 /**
  * Búsqueda común de GET y POST públicos. El tenant sale SOLO del host (no hay
  * JWT): sin tenant en contexto no hay nada que buscar, y se comprueba ANTES de
@@ -23,11 +27,11 @@ export async function findConfirmationByToken(
   token: string,
 ): Promise<ConfirmationLookup> {
   if (!tenantContext.getTenantId() || !isWellFormedConfirmationToken(token)) {
-    throw new NotFoundException('Confirmation link not found');
+    throw new NotFoundException(CONFIRMATION_LINK_NOT_FOUND_MESSAGE);
   }
   const found = await repo.findByTokenHash(hashConfirmationToken(token));
   if (!found) {
-    throw new NotFoundException('Confirmation link not found');
+    throw new NotFoundException(CONFIRMATION_LINK_NOT_FOUND_MESSAGE);
   }
   return found;
 }
