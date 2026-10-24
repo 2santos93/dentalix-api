@@ -7,10 +7,10 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // tocar la inmutabilidad de DX-038. Lo que se prueba va por la MISMA ruta que
 // la app (runWithTenant, rol dentalix_app, sujeto a RLS) o por SQL directo
 // como dentalix_app; `raw` (DIRECT_URL, superusuario) siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 const tenantContext = new TenantContextService();

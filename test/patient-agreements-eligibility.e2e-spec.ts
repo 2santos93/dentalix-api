@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -25,7 +26,7 @@ import {
 // asigna ADMIN (403 en español). Y la reproducción de la auditoría: sin esa
 // puerta, un ASSISTANT asignaba un convenio del 100 % y un DENTIST con tope del
 // 10 % presupuestaba a 0.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

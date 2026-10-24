@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -45,7 +45,7 @@ describe('DX-134 · un owner por clúster: segundo owner con error claro (owner-
   const dbB = `dx134_b_${stamp}`;
   const dbA2 = `dx134_a2_${stamp}`;
   const dir = mkdtempSync(join(tmpdir(), 'dx134-cluster-'));
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
 
@@ -106,7 +106,7 @@ describe('DX-134 · un owner por clúster: segundo owner con error claro (owner-
   }
 
   async function defaultAcls(db: string): Promise<number> {
-    const c = new PrismaClient({
+    const c = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
     try {

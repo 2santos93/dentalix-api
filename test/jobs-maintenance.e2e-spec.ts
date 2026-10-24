@@ -2,7 +2,7 @@
 import { restoreExchangeAppId } from './support/with-exchange-app-id';
 import { randomBytes } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
@@ -16,7 +16,7 @@ import type { ExchangeRateProvider } from '../src/modules/exchange/domain/ports/
 // pending_registrations), purga de email_outbox terminado y precarga diaria
 // de los tipos de cambio. El tick se provoca adelantando el `nextRunAt` de la
 // tarea en job_schedules (no se espera al reloj) y lo ejecuta el worker.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

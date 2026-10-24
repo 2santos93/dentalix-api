@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -16,7 +16,7 @@ import {
 // completa; «Deshacer llegada»; permisos por rol; el panel «En clínica» por
 // sede (la otra sede y la otra clínica no se ven; el odontólogo solo ve a sus
 // pacientes); y todo queda en auditoría.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

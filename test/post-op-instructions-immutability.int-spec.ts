@@ -5,10 +5,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 // primera apertura del enlace). Las escrituras van como el rol de la app
 // (dentalix_app, sujeto a RLS) con el GUC de tenant como lo fija la app;
 // `raw` (DIRECT_URL, superusuario) solo siembra, consulta el catálogo y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

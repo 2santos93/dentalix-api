@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -17,7 +17,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 // vigencia). Estado derivado, una sola principal (y su promoción al retirar),
 // tope de 5, pagador de otra clínica, 404 entre clínicas, los 4 roles y la
 // auditoría sin el número de afiliado.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

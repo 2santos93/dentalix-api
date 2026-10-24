@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
 import { providerWorksAt } from '../src/modules/provider-schedule/domain/provider-availability';
@@ -30,7 +30,7 @@ for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
 // todas las filas saltando la RLS, que es justo lo que hace falta para
 // comprobar que el seed no escribió nada fuera del tenant demo. El seed en sí
 // corre por DATABASE_URL (rol con RLS), igual que la API.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

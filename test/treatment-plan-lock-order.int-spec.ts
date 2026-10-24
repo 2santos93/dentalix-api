@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
@@ -10,7 +10,7 @@ import type { NewPlanAcceptance } from '../src/modules/treatment-plans/domain/po
 // bloquear primero el plan y luego el ítem. Con el orden contrario (ítem y
 // luego, en el trigger, el plan) dos transacciones se esperaban en cruz:
 // deadlock (40P01). Se prueba con los repositorios reales sobre Postgres.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

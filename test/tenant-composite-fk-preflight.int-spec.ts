@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // La comprobación previa de 20261015130000_tenant_composite_fks se ejecuta aquí
 // TAL CUAL está en la migración (se extrae del .sql, no se copia), contra la
@@ -18,11 +18,11 @@ const ROW_SECURITY_OFF = 'SET LOCAL row_security = off;';
 const PREFLIGHT = /^DO \$\$[\s\S]*?^END \$\$;$/m.exec(MIGRATION)?.[0] ?? '';
 
 // Owner (DIRECT_URL): el rol con el que corren las migraciones.
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 // Rol de la app (DATABASE_URL): sin BYPASSRLS, sujeto a la RLS FORCE.
-const app = new PrismaClient({
+const app = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

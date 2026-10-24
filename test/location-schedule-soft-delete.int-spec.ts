@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLocationScheduleRepository } from '../src/modules/location-schedule/infrastructure/repositories/prisma-location-schedule.repository';
@@ -7,7 +7,7 @@ import { HardDeleteForbiddenError } from '../src/shared/prisma/no-hard-delete';
 // Conexión de administración (DIRECT_URL, sin RLS) sólo para sembrar y para
 // mirar la tabla POR DEBAJO del repositorio: es la única forma de comprobar que
 // los tramos viejos siguen ahí y no fueron borrados de verdad.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -19,7 +19,7 @@ import {
 // columna, ASSISTANT 403), ofertas con tope de 2 por día y baja de WhatsApp
 // (DX-128), asignar un pendiente y adelantar una cita marcada, con 409 en
 // español cuando otro ya ocupó el hueco.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

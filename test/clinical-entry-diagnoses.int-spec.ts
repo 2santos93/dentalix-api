@@ -9,10 +9,10 @@ import { ICD10_ORAL_CODES } from '../src/modules/reference/domain/icd10-oral-cod
 // FORZADA y FK compuestas. Cada caso escribe como la app (runWithTenant, rol
 // dentalix_app) o con una conexión directa como dentalix_app; `raw`
 // (DIRECT_URL, superusuario) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 const tenantContext = new TenantContextService();

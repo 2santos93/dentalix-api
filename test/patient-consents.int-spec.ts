@@ -5,7 +5,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // DX-006, capa DB de patient_consents / consent_templates. Cada caso escribe
 // POR LA MISMA RUTA que la app (runWithTenant, rol dentalix_app, sujeto a RLS);
 // `raw` (DIRECT_URL, owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

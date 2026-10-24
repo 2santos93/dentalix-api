@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -31,7 +31,7 @@ import {
 //
 // DIRECT_URL (superusuario, sin RLS) solo siembra miembros y citas y lee
 // filas para comprobar que no hubo efectos.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const passwords = new PasswordService();

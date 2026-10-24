@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -20,7 +20,7 @@ import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 // cualquier rol de clínica, 401 sin sesión; los cuatro roles los recorre
 // role-matrix.e2e-spec.ts) y documentado en Swagger. El fallo se produce de
 // verdad: un handler que siempre lanza agota sus intentos en el worker.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

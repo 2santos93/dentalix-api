@@ -12,7 +12,7 @@ import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 // el barrido que los cierra (idempotente, auditado sin usuario). Lo que se
 // prueba va por la MISMA ruta que la app (runWithTenant, rol dentalix_app,
 // sujeto a RLS); `raw` (DIRECT_URL, superusuario) siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

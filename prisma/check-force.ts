@@ -36,7 +36,7 @@
  * comprobarlo. Recuperación: README, «Despliegue: roles de la BD». Solo
  * imprime nombres de tablas y roles.
  */
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 /** Tablas de clínica sin RLS a propósito (mismo motivo que rls-catalog). */
 const RLS_EXEMPT = [
@@ -93,7 +93,9 @@ async function catalogTimezone(prisma: PrismaClient): Promise<string | null> {
 
 /** `SHOW TimeZone` de una sesión real de la app (si DATABASE_URL es suya). */
 async function liveTimezone(url: string): Promise<string | null> {
-  const app = new PrismaClient({ datasources: { db: { url } } });
+  const app = new PrismaClient<Prisma.PrismaClientOptions>({
+    datasources: { db: { url } },
+  });
   try {
     const [row] = await app.$queryRaw<{ who: string; tz: string }[]>`
       SELECT current_user::text AS who, current_setting('TimeZone') AS tz`;
@@ -106,7 +108,9 @@ async function liveTimezone(url: string): Promise<string | null> {
 async function main(): Promise<number> {
   const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error('Falta DIRECT_URL o DATABASE_URL.');
-  const prisma = new PrismaClient({ datasources: { db: { url } } });
+  const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
+    datasources: { db: { url } },
+  });
   try {
     const unforced = await prisma.$queryRaw<{ name: string }[]>`
       SELECT c.relname AS name

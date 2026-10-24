@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -35,7 +35,7 @@ import type { AnamnesisAnswers } from '../src/modules/medical-history-submission
 // alerta llega a la agenda. Caducado, anulado o ya usado → 410. El reloj del
 // módulo se sobrescribe para adelantarlo. DIRECT_URL (superusuario, sin RLS)
 // solo lee filas para comprobar.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

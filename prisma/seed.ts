@@ -1,9 +1,9 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { Country, State, City } from 'country-state-city';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 
 // Corre con el rol owner (DIRECT_URL): estas tablas son globales, sin RLS.
-const prisma = new PrismaClient({
+const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

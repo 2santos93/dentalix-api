@@ -16,7 +16,7 @@ import { resolveLocationTimeZones } from '../src/shared/locations/location-time-
  * chocando con `appointment_plan_items_active_key`. Y la BD no deja retirar el
  * vínculo de una cita COMPLETED (ERRCODE propio Q0271).
  */
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const context = new TenantContextService();

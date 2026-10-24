@@ -6,6 +6,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -23,7 +24,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
 // patient_consents está permitido aquí porque esta conexión no fija
 // `app.current_tenant` (ver el trigger de 20261016180000_patient_consents).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

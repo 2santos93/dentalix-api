@@ -6,6 +6,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -20,7 +21,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // conexión sin contexto de tenant (rol dentalix_app vía DATABASE_URL) ve 0
 // filas y no podría sembrar/limpiar datos ajenos al tenant. Mismo patrón que
 // dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts / role-matrix.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

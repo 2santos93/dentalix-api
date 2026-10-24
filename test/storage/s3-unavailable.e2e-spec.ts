@@ -4,7 +4,7 @@ import {
 } from './s3-unavailable-env';
 import { createHash } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { STORAGE_UNAVAILABLE_MESSAGE } from '../../src/shared/storage/storage-errors';
@@ -17,7 +17,7 @@ import {
   type HungTcpServer,
 } from '../support/hung-tcp-server';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 /** Margen sobre S3_REQUEST_TIMEOUT_MS para el resto de la petición. */

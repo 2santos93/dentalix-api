@@ -6,6 +6,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -27,7 +28,7 @@ import {
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
 // porque esta conexión no fija `app.current_tenant` (ver el trigger de
 // 20261016213000_treatment_plan_acceptances).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

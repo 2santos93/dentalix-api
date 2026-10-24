@@ -11,7 +11,7 @@
  * cifrado a almacenamiento frío; ver informe DX-102). Solo imprime nombres de
  * partición y rangos: ningún dato de eventos.
  */
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { loadAuditPartitionConfig } from '../src/modules/audit/infrastructure/audit-retention-config';
 
 async function main(): Promise<void> {
@@ -21,7 +21,9 @@ async function main(): Promise<void> {
   );
   const url = process.env.DIRECT_URL;
   if (!url) throw new Error('Falta DIRECT_URL (conexión del owner).');
-  const prisma = new PrismaClient({ datasources: { db: { url } } });
+  const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
+    datasources: { db: { url } },
+  });
   try {
     const rows = await prisma.$queryRaw<
       { partition_name: string; range_start: Date; range_end: Date }[]

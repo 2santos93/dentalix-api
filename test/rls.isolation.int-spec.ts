@@ -1,4 +1,4 @@
-import { PrismaClient, ClinicRole } from '@prisma/client';
+import { Prisma, PrismaClient, ClinicRole } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { resetDatabase } from './support/e2e-fixtures';
@@ -9,7 +9,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // rol dentalix_app, sin BYPASSRLS) ve 0 filas y NO podría limpiar datos de
 // tenants anteriores. La prueba de aislamiento en sí corre exclusivamente por
 // `prisma.runWithTenant`, que usa DATABASE_URL (rol restringido, sin bypass).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

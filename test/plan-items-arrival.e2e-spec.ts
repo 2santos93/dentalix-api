@@ -1,5 +1,10 @@
 import { INestApplication } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
+import {
+  AppointmentStatus,
+  ClinicRole,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -19,7 +24,7 @@ import {
  *  - `planItemIds` en una cita cerrada o pasada: 409 sin tocar los vínculos
  *    ni el intervalo mínimo de la visita siguiente.
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const MIN = 60000;

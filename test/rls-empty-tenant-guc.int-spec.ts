@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDatabase } from './support/e2e-fixtures';
 
 // DX-251 (OPS-037): `set_config('app.current_tenant', …, true)` deja la
@@ -12,10 +12,10 @@ import { resetDatabase } from './support/e2e-fixtures';
 // `raw` (DIRECT_URL, owner superusuario en local/CI) solo carga filas; las
 // comprobaciones corren como la app (DATABASE_URL, dentalix_app, sin bypass).
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const app = new PrismaClient({
+const app = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

@@ -4,7 +4,7 @@ import { request as httpRequest, type ClientRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PatientImportsService } from '../src/modules/patient-imports/application/patient-imports.use-cases';
@@ -43,7 +43,7 @@ import { waitFor } from './support/wait-for';
 // español con Retry-After y el temporal borrado. Todo después de la
 // autenticación y del rol. Política `patient-import`: 10 lecturas por minuto
 // por clínica + usuario.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

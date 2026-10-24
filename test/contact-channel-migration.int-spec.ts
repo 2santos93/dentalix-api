@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // DX-128: la migración del canal de contacto con datos previos. Una BD
 // desechable recibe todas las migraciones ANTERIORES, se llena con pacientes
@@ -53,7 +53,7 @@ const SEED = [
 ];
 
 describe('DX-128 · migración del canal de contacto con datos (int)', () => {
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: process.env.DIRECT_URL } },
   });
   const db = `dx128_mig_${process.pid}_${Date.now()}`;
@@ -78,7 +78,9 @@ describe('DX-128 · migración del canal de contacto con datos (int)', () => {
       }
     }
     migrateDeploy(dir, urlFor(db));
-    target = new PrismaClient({ datasources: { db: { url: urlFor(db) } } });
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
+      datasources: { db: { url: urlFor(db) } },
+    });
     for (const sql of SEED) await target.$executeRawUnsafe(sql);
   }, 180_000);
 

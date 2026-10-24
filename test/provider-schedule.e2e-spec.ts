@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -17,7 +17,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 // excepciones por fecha, el cuadrante, permisos, auditoría y aislamiento; y su
 // efecto en la agenda: aviso PROVIDER_OFF_SCHEDULE (o 409 en modo estricto),
 // «Buscar hueco» y «Ocupar este hueco» filtrados.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

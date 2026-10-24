@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -22,7 +23,7 @@ import {
 // de catálogo − precio del convenio), quién asignó el convenio y quién creó el
 // ítem, aparte del descuento discrecional; con los filtros, en el CSV y sin
 // cruzar de clínica.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

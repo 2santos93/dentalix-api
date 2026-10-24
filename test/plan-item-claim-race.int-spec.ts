@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
@@ -15,7 +15,7 @@ import { resetDatabase } from './support/e2e-fixtures';
  * (lo normal con la máquina cargada) se lo quitaba a la primera: dos 200.
  * Repositorio real sobre Postgres; `owner` (DIRECT_URL) siembra y comprueba.
  */
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const context = new TenantContextService();
