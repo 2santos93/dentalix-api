@@ -861,13 +861,21 @@ Módulo `medical-history-submissions`; migraciones
   reserva se queda allí. Ahora la respuesta del `PATCH /appointments/:id` (y
   de «Deshacer llegada», «Asignar» un hueco y «Traer a esta cita») y cada
   persona de `GET /appointments/in-clinic` traen `planItemsReservedElsewhere:
-  [{ planItemId, name, toothNumber, appointmentId, start, locationId,
-  locationName, timeZone }]`: los tratamientos de la cita con vínculo vivo pero
-  sin reserva que reserva otra cita viva (mismo predicado que el trigger
-  `dx256_link_reservation`) y que siguen por hacer (ítem vivo y aceptado de un
-  plan aceptado). Solo citas de sedes permitidas al usuario (DX-089): las
-  demás se omiten sin dejar rastro. Vacío en una cita cancelada, no-show o
-  completada.
+  [{ planItemId, name, toothNumber, heldInClinic, appointmentId, start,
+  locationId, locationName, timeZone }]`: los tratamientos de la cita con
+  vínculo vivo pero sin reserva que reserva otra cita viva (mismo predicado
+  que el trigger `dx256_link_reservation`) y que siguen por hacer (ítem vivo y
+  aceptado de un plan aceptado). Solo citas de sedes permitidas al usuario
+  (DX-089): las demás se omiten sin dejar rastro. Vacío en una cita
+  cancelada, no-show o completada.
+  DX-293: `heldInClinic` es true si la cita que lo reserva es de hoy (día
+  civil de su sede) con el paciente en la clínica, la misma regla
+  (`heldInClinicToday`) que el 409 de «Traer a esta cita» (DX-288); la web
+  entonces no ofrece «Traer» y explica dónde está la reserva. Una titular
+  olvidada en la clínica de un día anterior o una cita futura: false. Si esa
+  titular de hoy en la clínica es de una sede no permitida, sale igualmente
+  pero con `appointmentId`, `start`, `locationId`, `locationName` y
+  `timeZone` a `null` (sin cita, hora ni sede).
 - **La reserva vuelve a la cita en la clínica** (revisión DX-273, I1): si la
   cita que reservaba un tratamiento deja de hacerlo (se cancela, se marca
   no-show o se le quita con `planItemIds`; no si se completa: se hizo allí),

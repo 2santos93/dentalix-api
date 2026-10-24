@@ -22,6 +22,7 @@ import {
   PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
   PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
   PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE,
+  reservationHolderView,
   reservedElsewhereMessage,
 } from '../domain/plan-item-reservation';
 
@@ -226,7 +227,9 @@ function liveReservingAppointment(now: Date): Prisma.AppointmentWhereInput {
 /**
  * DX-273 (revisión DX-271, I2): por cita, sus tratamientos con vínculo vivo
  * pero sin reserva (`active` false) que reserva OTRA cita viva. Solo citas de
- * sedes permitidas (DX-089): las demás se omiten sin dejar rastro.
+ * sedes permitidas (DX-089): las demás se omiten sin dejar rastro, salvo la
+ * de hoy con el paciente en la clínica (DX-293), que sale con `heldInClinic`
+ * y sin cita, hora ni sede (`reservationHolderView`).
  */
 export async function findPlanItemsReservedElsewhere(
   tx: Prisma.TransactionClient,
@@ -236,6 +239,7 @@ export async function findPlanItemsReservedElsewhere(
 ): Promise<Map<string, PlanItemReservedElsewhere[]>> {
   const out = new Map<string, PlanItemReservedElsewhere[]>();
   if (appointmentIds.length === 0) return out;
+  const now = new Date();
   const own = await tx.appointmentPlanItem.findMany({
     where: {
       appointmentId: { in: [...appointmentIds] },
@@ -252,18 +256,14 @@ export async function findPlanItemsReservedElsewhere(
       planItemId: { in: [...new Set(own.map((l) => l.planItemId))] },
       active: true,
       deletedAt: null,
-      appointment: {
-        ...liveReservingAppointment(new Date()),
-        ...(allowedLocations === 'ALL'
-          ? {}
-          : { locationId: { in: [...allowedLocations] } }),
-      },
+      appointment: liveReservingAppointment(now),
     },
     select: {
       planItemId: true,
       appointmentId: true,
       appointment: {
         select: {
+          status: true,
           start: true,
           locationId: true,
           location: { select: { name: true } },
@@ -289,24 +289,40 @@ export async function findPlanItemsReservedElsewhere(
   for (const link of own) {
     const holder = byItem.get(link.planItemId);
     if (!holder || holder.appointmentId === link.appointmentId) continue;
+    const view = reservationHolderView(
+      {
+        appointmentId: holder.appointmentId,
+        status: holder.appointment.status,
+        start: holder.appointment.start,
+        locationId: holder.appointment.locationId,
+        locationName: holder.appointment.location.name,
+      },
+      {
+        timeZone: zoneOf(holder.appointment.locationId),
+        locationAllowed: isLocationAllowed(
+          allowedLocations,
+          holder.appointment.locationId,
+        ),
+        now,
+      },
+    );
+    if (!view) continue;
     const list = out.get(link.appointmentId) ?? [];
     list.push({
       planItemId: link.planItemId,
       name: labels.get(holder.planItem.catalogItemId) ?? 'Tratamiento',
       toothNumber: holder.planItem.toothNumber,
-      appointmentId: holder.appointmentId,
-      start: holder.appointment.start,
-      locationId: holder.appointment.locationId,
-      locationName: holder.appointment.location.name,
-      timeZone: zoneOf(holder.appointment.locationId),
+      ...view,
     });
     out.set(link.appointmentId, list);
   }
+  // Por fecha de la titular; las de sede no permitida (sin fecha), al final.
+  const startOf = (r: PlanItemReservedElsewhere) =>
+    r.start?.getTime() ?? Number.POSITIVE_INFINITY;
   for (const list of out.values())
     list.sort(
       (a, b) =>
-        a.start.getTime() - b.start.getTime() ||
-        a.planItemId.localeCompare(b.planItemId),
+        startOf(a) - startOf(b) || a.planItemId.localeCompare(b.planItemId),
     );
   return out;
 }

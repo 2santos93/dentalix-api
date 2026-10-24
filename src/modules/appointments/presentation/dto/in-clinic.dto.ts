@@ -79,7 +79,7 @@ export class InClinicItemDto {
   @ApiProperty({
     type: [PlanItemReservedElsewhereDto],
     description:
-      'DX-273: tratamientos de la cita reservados en OTRA cita viva (solo sedes permitidas al usuario). Vacío si no hay.',
+      'DX-273: tratamientos de la cita reservados en OTRA cita viva (solo sedes permitidas al usuario; de otra sede, solo la de hoy con el paciente en la clínica, sin sus datos: DX-293). `heldInClinic` true: no se ofrece «Traer a esta cita». Vacío si no hay.',
   })
   planItemsReservedElsewhere!: PlanItemReservedElsewhereDto[];
 
