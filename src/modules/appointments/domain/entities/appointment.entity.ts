@@ -77,7 +77,9 @@ export interface AppointmentWriteResult extends Appointment {
   /**
    * DX-273 (revisión DX-271, I2): tratamientos de esta cita que siguen
    * reservados en OTRA cita viva (la reserva se quedó allí al marcar «Llegó»).
-   * Solo citas de sedes permitidas al usuario (DX-089). Vacío si no hay.
+   * Solo citas de sedes permitidas al usuario (DX-089), salvo una de hoy con
+   * el paciente en la clínica, que sale sin sus datos (DX-293). Vacío si no
+   * hay.
    */
   planItemsReservedElsewhere: PlanItemReservedElsewhere[];
   /**
@@ -93,13 +95,21 @@ export interface PlanItemReservedElsewhere {
   /** Nombre del procedimiento (catálogo, en español). */
   name: string;
   toothNumber: string;
-  /** La cita que lo reserva. */
-  appointmentId: string;
-  start: Date;
-  locationId: string;
-  locationName: string;
-  /** Zona de la sede de esa cita: la fecha se muestra en ella. */
-  timeZone: string;
+  /**
+   * DX-293: la cita que lo reserva es de hoy (día civil de su sede) con el
+   * paciente en la clínica. «Traer a esta cita» daría el 409 de DX-288.
+   */
+  heldInClinic: boolean;
+  /**
+   * La cita que lo reserva, su inicio, su sede y la zona de esa sede (la
+   * fecha se muestra en ella). `null` todos si esa sede no está permitida al
+   * usuario (DX-089): solo ocurre con `heldInClinic`.
+   */
+  appointmentId: string | null;
+  start: Date | null;
+  locationId: string | null;
+  locationName: string | null;
+  timeZone: string | null;
 }
 
 /**

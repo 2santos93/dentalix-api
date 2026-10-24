@@ -105,6 +105,7 @@ const reserved = (appointmentId: string): PlanItemReservedElsewhere => ({
   planItemId: 'item-1',
   name: 'Implante',
   toothNumber: '36',
+  heldInClinic: false,
   appointmentId,
   start: new Date('2026-10-30T14:00:00.000Z'),
   locationId: 'loc1',

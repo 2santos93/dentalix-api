@@ -1,6 +1,7 @@
 import { AppointmentStatus } from '@prisma/client';
 import { isInClinic } from './patient-flow';
 import { civilDateIn } from '../../../shared/time/civil-day';
+import type { PlanItemReservedElsewhere } from './entities/appointment.entity';
 
 /**
  * DX-271 (BE-039): los ítems del plan de una cita cerrada o pasada no se
@@ -50,6 +51,57 @@ export function heldInClinicToday(
     isInClinic(holder.status) &&
     civilDateIn(holder.start, timeZone) === civilDateIn(now, timeZone)
   );
+}
+
+/** La cita que reserva el tratamiento, para el aviso de DX-273. */
+export interface ReservationHolder {
+  appointmentId: string;
+  status: AppointmentStatus;
+  start: Date;
+  locationId: string;
+  locationName: string;
+}
+
+export type ReservationHolderView = Pick<
+  PlanItemReservedElsewhere,
+  | 'heldInClinic'
+  | 'appointmentId'
+  | 'start'
+  | 'locationId'
+  | 'locationName'
+  | 'timeZone'
+>;
+
+/**
+ * DX-293: qué dice el aviso de la cita titular. `heldInClinic` es la misma
+ * regla que el 409 de «Traer a esta cita» (`heldInClinicToday`). Con su sede
+ * permitida, todos sus datos; sin ella (DX-089), solo si es de hoy con el
+ * paciente en la clínica y sin cita, hora ni sede (`null` = no se enseña,
+ * como en DX-273: «Traer» daría 403).
+ */
+export function reservationHolderView(
+  holder: ReservationHolder,
+  context: { timeZone: string; locationAllowed: boolean; now: Date },
+): ReservationHolderView | null {
+  const heldInClinic = heldInClinicToday(holder, context.timeZone, context.now);
+  if (context.locationAllowed)
+    return {
+      heldInClinic,
+      appointmentId: holder.appointmentId,
+      start: holder.start,
+      locationId: holder.locationId,
+      locationName: holder.locationName,
+      timeZone: context.timeZone,
+    };
+  if (!heldInClinic) return null;
+  return {
+    heldInClinic,
+    appointmentId: null,
+    start: null,
+    locationId: null,
+    locationName: null,
+    timeZone: null,
+  };
 }
 
 /**

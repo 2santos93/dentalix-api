@@ -139,9 +139,9 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       });
       return appointment;
     };
-    /** Cita de hoy, de 1 min, que ya empezó (sin reserva). */
+    /** Cita de hoy, de 1 min y con 1 min de hueco, que ya empezó (sin reserva). */
     const startedToday = (location = locationId) =>
-      book(new Date(base - ++minutesAgo * MIN), location);
+      book(new Date(base - (minutesAgo += 2) * MIN), location);
     return { itemId, book, startedToday };
   };
   /** La titular «llegó» (por la BD) y queda con la reserva. */

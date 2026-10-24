@@ -151,23 +151,54 @@ export class PlanItemReservedElsewhereDto {
   @ApiProperty({ example: '36' })
   toothNumber!: string;
 
-  @ApiProperty({ format: 'uuid', description: 'La cita que lo reserva.' })
-  appointmentId!: string;
-
-  @ApiProperty({ format: 'date-time', description: 'Inicio de esa cita.' })
-  start!: Date;
-
-  @ApiProperty({ format: 'uuid' })
-  locationId!: string;
-
-  @ApiProperty({ description: 'Sede de esa cita.', example: 'Sede Norte' })
-  locationName!: string;
+  @ApiProperty({
+    description:
+      'DX-293: la cita que lo reserva es de hoy (día civil de su sede) con el paciente en la clínica (ARRIVED, IN_CHAIR o READY_FOR_CHECKOUT). Entonces «Traer a esta cita» responde 409 (DX-288): la web no lo ofrece y explica dónde está la reserva. Una titular olvidada en la clínica de un día anterior o una cita futura: false.',
+    example: false,
+  })
+  heldInClinic!: boolean;
 
   @ApiProperty({
-    description: 'Zona IANA de esa sede: la fecha se muestra en ella.',
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'La cita que lo reserva. null si su sede no está permitida al usuario (DX-089); solo pasa con heldInClinic true: las demás reservas de sedes no permitidas no se listan.',
+  })
+  appointmentId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Inicio de esa cita. null si su sede no está permitida.',
+  })
+  start!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Sede de esa cita. null si no está permitida.',
+  })
+  locationId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Nombre de la sede de esa cita. null si no está permitida.',
+    example: 'Sede Norte',
+  })
+  locationName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Zona IANA de esa sede: la fecha se muestra en ella. null si no está permitida.',
     example: 'America/Bogota',
   })
-  timeZone!: string;
+  timeZone!: string | null;
 }
 
 /** DX-273: el mínimo de una visita del plan antes y después de la salida. */
@@ -241,7 +272,7 @@ export class AppointmentWriteDto extends AppointmentDto {
   @ApiProperty({
     type: [PlanItemReservedElsewhereDto],
     description:
-      'DX-273: tratamientos de esta cita que siguen reservados en OTRA cita viva (p. ej. al marcar «Llegó», la reserva se quedó en la cita futura). Solo citas de sedes permitidas al usuario (DX-089): las de otras sedes se omiten. Vacío en una cita cancelada, no-show o completada. Si la cita que lo reservaba se cancela, se marca no-show o lo quita, la cita más temprana con el paciente en la clínica recupera la reserva en esa misma transacción (auditado `PLAN_ITEM_RESERVATION_RECOVERED`). Para moverla: `POST /appointments/:id/plan-items/:planItemId/claim`.',
+      'DX-273: tratamientos de esta cita que siguen reservados en OTRA cita viva (p. ej. al marcar «Llegó», la reserva se quedó en la cita futura). Solo citas de sedes permitidas al usuario (DX-089): las de otras sedes se omiten, salvo la de hoy con el paciente en la clínica, que sale con `heldInClinic` y sin cita, hora ni sede (DX-293). Vacío en una cita cancelada, no-show o completada. Si la cita que lo reservaba se cancela, se marca no-show o lo quita, la cita más temprana con el paciente en la clínica recupera la reserva en esa misma transacción (auditado `PLAN_ITEM_RESERVATION_RECOVERED`). Para moverla: `POST /appointments/:id/plan-items/:planItemId/claim` (no con `heldInClinic`: daría 409).',
   })
   planItemsReservedElsewhere!: PlanItemReservedElsewhereDto[];
 
