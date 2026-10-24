@@ -28,9 +28,11 @@
 -- Por qué trigger y no GENERATED ALWAYS … STORED: añadir una columna generada
 -- almacenada REESCRIBE patients bajo ACCESS EXCLUSIVE (con sus 8 índices,
 -- entre ellos el GIN trigram de la búsqueda): bloquea hasta las lecturas
--- durante un tiempo que crece con la tabla (medido en DX-287: ver su
--- informe). Una columna sin DEFAULT solo toca el catálogo, y el relleno por
--- lotes con COMMIT no retiene más que bloqueos de fila (DB-029, DB-048).
+-- durante un tiempo que crece con la tabla (medido: 1,4 s con 65k
+-- pacientes, por encima del segundo que admite la tarea). Una columna sin
+-- DEFAULT solo toca el catálogo (8 ms esta migración entera con 65k), y el
+-- relleno por lotes con COMMIT no retiene más que bloqueos de fila (DB-029,
+-- DB-048).
 --
 -- Bloqueo: ADD COLUMN sin DEFAULT y CREATE TRIGGER toman ACCESS EXCLUSIVE /
 -- SHARE ROW EXCLUSIVE solo un instante; lock_timeout evita quedar encolado
