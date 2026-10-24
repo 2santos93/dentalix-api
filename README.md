@@ -1142,8 +1142,8 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   el convenio o dio su descuento. Una línea solo de convenio de un plan sin
   presentar toma la sede con la que se resolvió el precio
   (`pricingLocationId`). En el CSV, su motivo es «Convenio …» y «Dado por» es
-  quien asignó el convenio (o, sin él, quien creó el ítem). Migraciones `20261023210000_sec047_plan_item_created_by` y
-  `20261023210100_sec047_plan_item_agreement_reduction_idx` (parcial
+  quien asignó el convenio (o, sin él, quien creó el ítem). Migraciones `20261024120000_sec047_plan_item_created_by` y
+  `20261024120100_sec047_plan_item_agreement_reduction_idx` (parcial
   `treatment_plan_items_tenant_agreement_reduction_at_idx`, CONCURRENTLY).
   e2e: `test/discounts-agreement.e2e-spec.ts`.
 - **Estado del plan en la transacción (BE-036)**: alta, edición y bloque
