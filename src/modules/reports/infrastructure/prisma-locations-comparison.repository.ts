@@ -72,6 +72,32 @@ interface ProviderBlockRow extends Closure {
   locationId: string | null;
 }
 
+/**
+ * ¿El horario `s` (fila de `provider_schedules`) es capacidad? Solo si su
+ * profesional sigue en el equipo (membresía y usuario vivos), atiende
+ * (DENTIST o ADMIN, `ATTENDING_ROLES`) y puede atender en ESA sede (DX-089:
+ * ADMIN o sin sedes asignadas = todas; si no, una de las suyas). Es el mismo
+ * roster que la pantalla de horarios: el horario de quien se desactivó o dejó
+ * de atender allí sigue vivo en la tabla, pero nadie lo ve ni lo puede retirar.
+ */
+const attendingSchedule = Prisma.sql`EXISTS (
+  SELECT 1
+    FROM "clinic_memberships" m
+    JOIN "users" u ON u."id" = m."userId" AND u."deletedAt" IS NULL
+   WHERE m."tenantId" = s."tenantId"
+     AND m."userId" = s."providerId"
+     AND m."deletedAt" IS NULL
+     AND m."role" IN ('DENTIST', 'ADMIN')
+     AND (m."role" = 'ADMIN'
+          OR NOT EXISTS (
+            SELECT 1 FROM "membership_locations" ml
+             WHERE ml."tenantId" = m."tenantId" AND ml."membershipId" = m."id")
+          OR EXISTS (
+            SELECT 1 FROM "membership_locations" ml
+             WHERE ml."tenantId" = m."tenantId" AND ml."membershipId" = m."id"
+               AND ml."locationId" = s."locationId"))
+)`;
+
 /** `sede|profesional`: clave de un horario de profesional en una sede. */
 const key = (locationId: string, providerId: string) =>
   `${locationId}|${providerId}`;
@@ -128,9 +154,10 @@ function emptyAggregates(): PeriodAggregates & {
  *    `appointments_tenant_location_start_idx`;
  *  - pacientes nuevos: citas COMPLETED del período sin otra COMPLETED anterior
  *    del paciente en la clínica; `appointments_tenant_patient_completed_idx`;
- *  - capacidad (BE-042): horario semanal vivo de cada profesional en cada sede
- *    (DX-233), sus excepciones del período, sus bloqueos que no admiten citas
- *    (DX-122) y los cierres de toda la sede.
+ *  - capacidad (BE-042): horario semanal vivo de cada profesional del equipo
+ *    que atiende en cada sede (DX-233, DX-089; `attendingSchedule`), sus
+ *    excepciones del período, sus bloqueos que no admiten citas (DX-122) y
+ *    los cierres de toda la sede.
  */
 @Injectable()
 export class PrismaLocationsComparisonRepository implements LocationsComparisonRepository {
@@ -233,17 +260,19 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
                  count(*) FILTER (WHERE a."status" = 'NO_SHOW') AS "noShow",
                  count(*) FILTER (WHERE a."status" = 'CANCELLED') AS "lateCancellations",
                  sum(extract(epoch FROM a."end" - a."start") / 60)
-                   FILTER (WHERE a."status" = 'COMPLETED' AND ps."id" IS NOT NULL) AS "minutes",
+                   FILTER (WHERE a."status" = 'COMPLETED' AND s."id" IS NOT NULL) AS "minutes",
                  count(DISTINCT a."patientId")
                    FILTER (WHERE a."status" = 'COMPLETED') AS "patients"
             FROM "appointments" a
             -- Como mucho un horario vivo por profesional y sede (único
             -- parcial provider_schedules_live_key): no duplica citas.
-            LEFT JOIN "provider_schedules" ps
-              ON ps."tenantId" = a."tenantId"
-             AND ps."providerId" = a."providerId"
-             AND ps."locationId" = a."locationId"
-             AND ps."deletedAt" IS NULL
+            -- Solo los horarios que son capacidad (mismo filtro abajo).
+            LEFT JOIN "provider_schedules" s
+              ON s."tenantId" = a."tenantId"
+             AND s."providerId" = a."providerId"
+             AND s."locationId" = a."locationId"
+             AND s."deletedAt" IS NULL
+             AND ${attendingSchedule}
            WHERE a."tenantId" = ${tenantId}::uuid
              AND a."deletedAt" IS NULL
              AND (a."status" IN ('COMPLETED', 'NO_SHOW')
@@ -281,7 +310,8 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
              AND r."providerId" = s."providerId" AND r."deletedAt" IS NULL
            WHERE s."tenantId" = ${tenantId}::uuid
              AND s."deletedAt" IS NULL
-             AND s."locationId" = ANY(${ids}::uuid[])`;
+             AND s."locationId" = ANY(${ids}::uuid[])
+             AND ${attendingSchedule}`;
         const providerIds = [...new Set(schedules.map((r) => r.providerId))];
 
         // Excepciones del período en esas sedes (DX-233); sin tramos = ese

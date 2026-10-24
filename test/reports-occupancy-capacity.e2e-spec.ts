@@ -48,6 +48,7 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
   let dos: string;
   let media: string;
   let sinHorario: string;
+  let jueves: string;
 
   const get = (path: string, query: object) =>
     request(app.getHttpServer())
@@ -160,6 +161,37 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
     });
     await visit(media, p7, 6, '2026-10-14T14:00:00Z', 240);
 
+    // Sede Jueves: jueves 9–13. Atiende toda la jornada la única que sigue
+    // en el equipo y puede atender allí; el horario de una desactivada y el de
+    // uno acotado (DX-089) a la Sede Tres siguen vivos, pero no son capacidad.
+    jueves = await seed.location('Sede Jueves');
+    const [p8, p9, p10] = await Promise.all(
+      ['Dra. Ocho', 'Dr. Nueve', 'Dra. Diez'].map((n) => seed.provider(n)),
+    );
+    for (const providerId of [p8, p9, p10]) {
+      await seed.providerSchedule({
+        providerId,
+        locationId: jueves,
+        ranges: [{ weekday: 4, startMinute: H(9), endMinute: H(13) }],
+      });
+    }
+    await visit(jueves, p8, 7, '2026-10-08T14:00:00Z', 240);
+    await raw.clinicMembership.updateMany({
+      where: { tenantId: a.tenantId, userId: p9 },
+      data: { deletedAt: new Date('2026-10-20T00:00:00Z') },
+    });
+    const restricted = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: a.tenantId, userId: p10 },
+      select: { id: true },
+    });
+    await raw.membershipLocation.create({
+      data: {
+        tenantId: a.tenantId,
+        membershipId: restricted.id,
+        locationId: tres,
+      },
+    });
+
     // Sede Sin horario: atendidas, pero nadie tiene horario allí.
     await visit(sinHorario, p1, 7, '2026-10-06T14:00:00Z', 60);
 
@@ -229,6 +261,11 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
       // Solo queda la de media jornada (240), que atiende 240.
       const r = await report(day('2026-10-14'));
       expect(row(r, media).metrics.occupancy.value).toBe(100);
+    });
+
+    it('el horario de quien ya no está en el equipo o no atiende en la sede (DX-089) no es capacidad', async () => {
+      const r = await report(day('2026-10-08'));
+      expect(row(r, jueves).metrics.occupancy.value).toBe(100);
     });
 
     it('una sede sin profesionales con horario sigue con ocupación null y no cuenta en el total', async () => {

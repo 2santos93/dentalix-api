@@ -136,7 +136,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     direction: 'HIGHER_IS_BETTER',
     changeUnit: 'POINTS',
     howItIsCalculated:
-      'Minutos de citas atendidas por los profesionales con horario en la sede ÷ la capacidad de la sede: la suma de los minutos del horario de cada uno de esos profesionales en ella (con sus excepciones por fecha), descontando sus bloqueos y los cierres de toda la sede. Dos profesionales en paralelo son el doble de capacidad que uno; uno de media jornada, la mitad. Nunca pasa del 100 %. Una sede sin profesionales con horario no tiene ocupación (ni cuenta en la del total). ' +
+      'Minutos de citas atendidas por los profesionales del equipo que atienden en la sede y tienen horario en ella ÷ la capacidad de la sede: la suma de los minutos del horario de cada uno de esos profesionales en ella (con sus excepciones por fecha), descontando sus bloqueos y los cierres de toda la sede. Dos profesionales en paralelo son el doble de capacidad que uno; uno de media jornada, la mitad. Nunca pasa del 100 %. Una sede sin profesionales con horario no tiene ocupación (ni cuenta en la del total). ' +
       DAYS,
   },
 };
