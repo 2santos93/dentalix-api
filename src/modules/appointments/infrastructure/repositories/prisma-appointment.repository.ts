@@ -38,8 +38,15 @@ import {
   PATIENT_FLOW_MESSAGES,
 } from '../../domain/patient-flow';
 import {
+  computeCancellationNotice,
+  type CurrentPolicyRef,
+} from '../../../cancellation-policies/domain/cancellation-policy';
+import { findCurrentPolicyInTx } from '../../../cancellation-policies/infrastructure/current-policy';
+import { cancellationAuditMetadata } from '../../domain/cancellation-audit';
+import {
   AppointmentRepository,
   AppointmentUpdate,
+  CancellationWrite,
   CreateAppointmentRepoInput,
   InClinicAppointment,
   ListAppointmentsByRangeParams,
@@ -56,6 +63,16 @@ import {
 } from '../../domain/entities/appointment.entity';
 
 type PrismaAppointment = Prisma.AppointmentGetPayload<Record<string, never>>;
+
+/** DX-279: la cita deja de estar cancelada: sin datos de una cancelación. */
+const CLEARED_CANCELLATION = {
+  cancelledAt: null,
+  cancelledByKind: null,
+  cancelReasonCode: null,
+  cancelReasonText: null,
+  noticeMinutes: null,
+  lateCancellation: null,
+} as const satisfies Prisma.AppointmentUpdateManyMutationInput;
 
 /**
  * Joins just the patient's name onto an appointment — enough for a client to
@@ -111,6 +128,14 @@ function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
     arrivedAt: appointment.arrivedAt,
     seatedAt: appointment.seatedAt,
     readyForCheckoutAt: appointment.readyForCheckoutAt,
+    cancelledAt: appointment.cancelledAt,
+    cancelledByKind: appointment.cancelledByKind,
+    cancelReasonCode: appointment.cancelReasonCode,
+    cancelReasonText: appointment.cancelReasonText,
+    noticeMinutes: appointment.noticeMinutes,
+    lateCancellation: appointment.lateCancellation,
+    noShowMarkedAt: appointment.noShowMarkedAt,
+    policyVersionId: appointment.policyVersionId,
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };
@@ -356,8 +381,17 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           expectStatus,
           completedExit,
           audit,
-          ...data
+          cancel,
+          clearCancellation,
+          ...rest
         } = patch;
+        // DX-279: los datos de la cancelación van en la MISMA sentencia que el
+        // estado (la CHECK appointments_cancellation_check se mira por fila).
+        const data: Prisma.AppointmentUpdateManyMutationInput = {
+          ...rest,
+          ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
+          ...(clearCancellation ? CLEARED_CANCELLATION : {}),
+        };
         // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
         // deja de reservarlo, una cita en la clínica puede recuperarlo.
         const reservedBefore = (
@@ -380,8 +414,8 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           !planItemsEditable(
             existing,
             {
-              status: data.status ?? existing.status,
-              start: data.start ?? existing.start,
+              status: rest.status ?? existing.status,
+              start: rest.start ?? existing.start,
             },
             new Date(),
           )
@@ -529,6 +563,47 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   }
 
   /**
+   * DX-279: columnas de una cancelación. El aviso se cuenta desde la hora del
+   * servidor hasta el inicio de la cita (cancelar y mover a la vez da 400 en
+   * el caso de uso) y se compara con la política vigente de SU sede, leída en
+   * esta transacción.
+   */
+  private async cancellationData(
+    tx: Prisma.TransactionClient,
+    id: string,
+    cancel: CancellationWrite,
+  ): Promise<Prisma.AppointmentUpdateManyMutationInput> {
+    const row = await tx.appointment.findFirstOrThrow({
+      where: { id },
+      select: { locationId: true, start: true },
+    });
+    const policy = await findCurrentPolicyInTx(tx, row.locationId);
+    const notice = computeCancellationNotice({
+      start: row.start,
+      cancelledAt: cancel.at,
+      byKind: cancel.byKind,
+      noticeHours: policy?.noticeHours ?? null,
+      attended: cancel.attended,
+    });
+    return {
+      cancelledAt: cancel.at,
+      cancelledByKind: cancel.byKind,
+      cancelReasonCode: cancel.reasonCode,
+      cancelReasonText: cancel.reasonText,
+      noticeMinutes: notice.noticeMinutes,
+      lateCancellation: notice.lateCancellation,
+    };
+  }
+
+  currentCancellationPolicy(
+    locationId: string,
+  ): Promise<CurrentPolicyRef | null> {
+    return this.prisma.runWithTenant((tx) =>
+      findCurrentPolicyInTx(tx, locationId),
+    );
+  }
+
+  /**
    * El ítem ya está reservado en otra cita viva: 409 que dice en cuál (fecha
    * en la zona de su sede). Cualquier otro error sigue su camino. Sin
    * `planItemIds` explícitos, los ítems vivos de la cita.
@@ -586,7 +661,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
    */
   private async recordCompletedExit(
     tx: Prisma.TransactionClient,
-    appointment: { id: string; patientId: string; status: AppointmentStatus },
+    appointment: Parameters<typeof cancellationAuditMetadata>[0] & {
+      id: string;
+      patientId: string;
+      status: AppointmentStatus;
+    },
     exit: { reason: string; audit: AuditRequestContext },
     before: VisitMinimumSnapshot[],
   ): Promise<CompletedExit> {
@@ -633,6 +712,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         reason: 'COMPLETED_EXIT',
         status: { from: AppointmentStatus.COMPLETED, to: appointment.status },
         params: { reversalId: reversal.id },
+        // B2 (DX-279): sacar de «Completada» a «Cancelada» lleva aquí su
+        // cancelación, sin un segundo evento.
+        ...cancellationAuditMetadata(appointment),
         visitMinimums: visitMinimums.map((v) => ({
           planId: v.planId,
           visit: v.visit,

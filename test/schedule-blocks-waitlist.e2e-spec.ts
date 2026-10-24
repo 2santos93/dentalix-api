@@ -9,6 +9,7 @@ import {
   registerClinic,
   resetDatabase,
   seedMember,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import { DAY_MONTH, dayMonthNumbers } from './support/sede-day-month';
 import { blockConflictMessage } from '../src/modules/schedule-blocks/domain/schedule-block-rules';
@@ -392,7 +393,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     const id = (appt.body as Body).id;
     for (const status of ['CANCELLED', 'NO_SHOW']) {
       await as(api().patch(`/api/v1/appointments/${id}`), reception.token)
-        .send({ status })
+        .send({ status, ...STAFF_CANCELLATION })
         .expect(200);
     }
     const page = await waitlist();
@@ -634,7 +635,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       const id = (appt.body as Body).id;
       const patch = (status: string) =>
         as(api().patch(`/api/v1/appointments/${id}`), reception.token)
-          .send({ status })
+          .send({ status, ...STAFF_CANCELLATION })
           .expect(200);
       await patch('CANCELLED');
       expect(

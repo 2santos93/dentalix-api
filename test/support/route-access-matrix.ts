@@ -360,6 +360,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
   // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
   'GET /appointments/:id/reminders': EVERY_ROLE,
+  // Política de cancelación (DX-279, loop/informes/DX-279.md): la vista previa
+  // del aviso al cancelar y la insignia de asistencia del paciente, quien
+  // gestiona la agenda (cada uno con sus sedes, DX-089).
+  'GET /appointments/:id/cancellation-preview': EVERY_ROLE,
+  'GET /patients/:id/attendance-summary': EVERY_ROLE,
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,
@@ -521,6 +526,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Ajustes → Recordatorios por sede (DX-026): solo ADMIN, también para leer.
   'GET /reminder-settings': ADMIN_ONLY,
   'PUT /reminder-settings/:locationId': ADMIN_ONLY,
+  // Ajustes → Sedes → Política de cancelación (DX-279): solo ADMIN, también
+  // para leer; guardar crea la versión siguiente.
+  'GET /locations/:id/cancellation-policy': ADMIN_ONLY,
+  'POST /locations/:id/cancellation-policy': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)

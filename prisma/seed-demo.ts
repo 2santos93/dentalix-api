@@ -60,7 +60,11 @@ import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use
 import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/application/use-cases/dentition.use-cases';
 import { VoidToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/void-tooth-record.use-case';
 import { CreateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/create-appointment.use-case';
-import { UpdateAppointmentUseCase } from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import {
+  UpdateAppointmentUseCase,
+  type CancellationRequest,
+} from '../src/modules/appointments/application/use-cases/update-appointment.use-case';
+import { CreateCancellationPolicyVersionUseCase } from '../src/modules/cancellation-policies/application/use-cases/cancellation-policy.use-cases';
 import { OVERLAP_MESSAGES } from '../src/modules/appointments/application/appointment-overlap-error';
 import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
@@ -184,6 +188,7 @@ import {
   DEMO_COLLECTION_NOTES,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
+  DEMO_CANCELLATION,
   DEMO_MEDICAL_ALERTS,
   DEMO_PRICES,
   DEMO_ALFA_PAYER,
@@ -620,6 +625,15 @@ class DemoSeeder {
       typeByReason,
     );
 
+    await this.createCancellationPolicy(
+      tenantId,
+      locations,
+      hours,
+      patientIds,
+      dentists,
+      ownerId,
+    );
+
     await this.inTenant(tenantId, undefined, () =>
       this.createTemplateEvolutions(ownerId, attended),
     );
@@ -912,7 +926,7 @@ class DemoSeeder {
               kind: spec.kind,
               percent: spec.percent,
               priceListId: spec.priceListKey
-                ? (listIds.get(spec.priceListKey) as string)
+                ? listIds.get(spec.priceListKey)
                 : null,
             },
             receptionId,
@@ -1289,6 +1303,7 @@ class DemoSeeder {
     );
     const appointments = this.use(CreateAppointmentUseCase);
     const attended: AttendedAppointment[] = [];
+    let cancelled = 0;
 
     for (const a of planned) {
       await this.inTenant(tenantId, locations[a.location], async () => {
@@ -1313,6 +1328,13 @@ class DemoSeeder {
         if (a.status !== AppointmentStatus.SCHEDULED) {
           await this.use(UpdateAppointmentUseCase).execute(created.id, {
             status: a.status,
+            // DX-279: cancelar exige origen y motivo; las del calendario las
+            // avisó el paciente con 2 días (antes de que exista la política).
+            ...(a.status === AppointmentStatus.CANCELLED
+              ? {
+                  cancellation: this.calendarCancellation(a.start, cancelled++),
+                }
+              : {}),
           });
         }
         if (a.status === AppointmentStatus.COMPLETED) {
@@ -1326,6 +1348,88 @@ class DemoSeeder {
       });
     }
     return attended;
+  }
+
+  /** DX-279: cancelación del calendario, avisada por el paciente con 2 días. */
+  private calendarCancellation(start: Date, n: number): CancellationRequest {
+    const { calendarNoticeHours, calendarReasons } = DEMO_CANCELLATION;
+    const at = new Date(
+      Math.min(start.getTime() - calendarNoticeHours * 3_600_000, Date.now()),
+    );
+    return {
+      byKind: 'STAFF_FOR_PATIENT',
+      reasonCode: calendarReasons[n % calendarReasons.length],
+      at,
+    };
+  }
+
+  /**
+   * DX-279: el ADMIN guarda la política de cancelación de la sede principal
+   * (por el mismo caso de uso que la API) y una paciente acumula dos
+   * inasistencias y una cancelación tardía en citas pasadas de esa sede, para
+   * ver la insignia en su ficha y en sus citas.
+   */
+  private async createCancellationPolicy(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    patientIds: string[],
+    dentists: string[],
+    ownerId: string,
+  ): Promise<void> {
+    const { location, policy, incidents } = DEMO_CANCELLATION;
+    const locationId = locations[location];
+    await this.inTenant(tenantId, locationId, () =>
+      this.use(CreateCancellationPolicyVersionUseCase).execute(
+        locationId,
+        { ...policy },
+        ownerId,
+      ),
+    );
+    // El primer hueco libre (horario de la sede, sin solape del profesional
+    // ni de la paciente) desde `daysAgo` hacia atrás, dentro de la semana
+    // pasada del calendario: la demo no tiene citas de hace más de 15 días.
+    const book = async (daysAgo: number) => {
+      for (let d = daysAgo; d <= incidents.lastDaysAgo; d++) {
+        for (let m = incidents.firstMinute; m < incidents.lastMinute; m += 30) {
+          const start = daysAgoAt(this.now, d, m);
+          const end = new Date(start.getTime() + 30 * 60_000);
+          if (!fitsBusinessHours(start, end, hours[location])) continue;
+          try {
+            return await this.use(CreateAppointmentUseCase).registerHistorical({
+              patientId: patientIds[incidents.patientIndex],
+              providerId: dentists[incidents.dentistIndex],
+              start,
+              end,
+              reason: 'Control',
+              createdById: ownerId,
+            });
+          } catch (error) {
+            if (!(error instanceof ConflictException)) throw error;
+          }
+        }
+      }
+      throw new Error(
+        `Sin hueco en la sede ${location} desde hace ${daysAgo} días`,
+      );
+    };
+    await this.inTenant(tenantId, locationId, async () => {
+      const update = this.use(UpdateAppointmentUseCase);
+      for (const daysAgo of incidents.noShowDaysAgo) {
+        const a = await book(daysAgo);
+        await update.execute(a.id, { status: AppointmentStatus.NO_SHOW });
+      }
+      const late = incidents.lateCancellation;
+      const a = await book(late.daysAgo);
+      await update.execute(a.id, {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: {
+          byKind: 'STAFF_FOR_PATIENT',
+          reasonCode: late.reasonCode,
+          at: new Date(a.start.getTime() - late.hoursBefore * 3_600_000),
+        },
+      });
+    });
   }
 
   /**

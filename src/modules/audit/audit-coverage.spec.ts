@@ -41,6 +41,7 @@ import { PaymentPlansController } from '../payment-plans/presentation/payment-pl
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
+import { CancellationPolicyController } from '../cancellation-policies/presentation/cancellation-policy.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
@@ -826,6 +827,13 @@ const EXPECTED: Record<string, AuditOptions> = {
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },
+  // DX-279: nueva versión de la política de cancelación de una sede.
+  'POST /locations/:id/cancellation-policy': {
+    action: 'CREATE',
+    resource: 'CANCELLATION_POLICY',
+    resourceId: RES,
+    reason: 'CANCELLATION_POLICY_CHANGED',
+  },
   'GET /reports/discounts': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN_ITEM',
@@ -1059,6 +1067,7 @@ const CONTROLLERS: Type[] = [
   AccountStatementController,
   ReceivablesController,
   DiscountPolicyController,
+  CancellationPolicyController,
   DiscountReportController,
   CollectionsController,
   CashSessionsController,

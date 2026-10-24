@@ -69,6 +69,36 @@ export interface AuditMetadata {
    * Solo uuids e instantes ISO (null = sin atribuir).
    */
   attribution?: { before: AuditAttributionSide; after: AuditAttributionSide };
+  /**
+   * DX-279: una cita cancelada desde la agenda: quién (código), el código del
+   * motivo, los minutos de aviso y si fue tardía. Nunca el texto libre del
+   * motivo (va en la cita).
+   */
+  cancellation?: AuditCancellation;
+}
+
+export const AUDIT_CANCELLATION_KINDS = [
+  'PATIENT_LINK',
+  'STAFF_FOR_PATIENT',
+  'CLINIC',
+] as const;
+
+export const AUDIT_CANCELLATION_REASONS = [
+  'ILLNESS',
+  'FORGOT',
+  'COST',
+  'TRANSPORT',
+  'WORK',
+  'CLINIC_RESCHEDULE',
+  'OTHER',
+] as const;
+
+/** Cancelación de una cita en la auditoría (DX-279): solo códigos y números. */
+export interface AuditCancellation {
+  byKind: (typeof AUDIT_CANCELLATION_KINDS)[number];
+  reasonCode: (typeof AUDIT_CANCELLATION_REASONS)[number] | null;
+  noticeMinutes: number;
+  lateCancellation: boolean;
 }
 
 /** Un lado de la atribución de un ítem realizado (DX-050). */
@@ -457,6 +487,30 @@ function attribution(value: unknown): AuditMetadata['attribution'] | null {
   return before && after ? { before, after } : null;
 }
 
+/** La cancelación entera con su forma, o nada (DX-279). */
+function cancellation(value: unknown): AuditCancellation | null {
+  if (!isRecord(value)) return null;
+  const { byKind, reasonCode, noticeMinutes, lateCancellation, ...rest } =
+    value;
+  const kind = AUDIT_CANCELLATION_KINDS.find((k) => k === byKind);
+  const reason =
+    reasonCode === null
+      ? null
+      : AUDIT_CANCELLATION_REASONS.find((r) => r === reasonCode);
+  if (
+    Object.keys(rest).length > 0 ||
+    !kind ||
+    reason === undefined ||
+    typeof noticeMinutes !== 'number' ||
+    !Number.isInteger(noticeMinutes) ||
+    noticeMinutes < 0 ||
+    typeof lateCancellation !== 'boolean'
+  ) {
+    return null;
+  }
+  return { byKind: kind, reasonCode: reason, noticeMinutes, lateCancellation };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -490,5 +544,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (minimums.length > 0) out.visitMinimums = minimums;
   const attributed = attribution(input.attribution);
   if (attributed) out.attribution = attributed;
+  const cancelled = cancellation(input.cancellation);
+  if (cancelled) out.cancellation = cancelled;
   return out;
 }

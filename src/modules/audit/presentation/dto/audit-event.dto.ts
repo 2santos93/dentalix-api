@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AuditAction, AuditResourceType, ClinicRole } from '@prisma/client';
-import { AUDIT_ORIGINS, type AuditOrigin } from '../../domain/audit-metadata';
+import {
+  AUDIT_CANCELLATION_KINDS,
+  AUDIT_CANCELLATION_REASONS,
+  AUDIT_ORIGINS,
+  type AuditCancellation,
+  type AuditOrigin,
+} from '../../domain/audit-metadata';
 
 // Forma de la respuesta de `GET /audit-events` (DX-009). Solo documenta el
 // contrato en Swagger (de ahí sale el tipo del cliente web), no valida entrada.
@@ -181,6 +187,28 @@ export class AuditAttributionChangeDto {
   after!: AuditAttributionSideDto;
 }
 
+/** DX-279: cancelación de una cita desde la agenda (solo códigos y números). */
+export class AuditCancellationDto {
+  @ApiProperty({
+    enum: AUDIT_CANCELLATION_KINDS,
+    enumName: 'AuditCancellationKind',
+  })
+  byKind!: AuditCancellation['byKind'];
+
+  @ApiProperty({
+    enum: AUDIT_CANCELLATION_REASONS,
+    enumName: 'AuditCancellationReason',
+    nullable: true,
+  })
+  reasonCode!: AuditCancellation['reasonCode'];
+
+  @ApiProperty({ example: 300 })
+  noticeMinutes!: number;
+
+  @ApiProperty()
+  lateCancellation!: boolean;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -254,6 +282,13 @@ export class AuditMetadataDto {
       'DX-050: quién realizó un ítem del plan, en qué sede y cuándo, antes y después (`reason` PLAN_ITEM_ATTRIBUTION_CORRECTED o PLAN_ITEM_DONE_REVERTED). Solo ids e instantes.',
   })
   attribution?: AuditAttributionChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditCancellationDto,
+    description:
+      'DX-279: cita cancelada desde la agenda, en su único evento (`reason` APPOINTMENT_CANCELLED; PATIENT_FLOW si estaba en la clínica; COMPLETED_EXIT si estaba completada): quién, código del motivo, minutos de aviso y si fue tardía. Nunca el texto libre del motivo.',
+  })
+  cancellation?: AuditCancellationDto;
 }
 
 export class AuditEventDto {

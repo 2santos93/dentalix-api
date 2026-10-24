@@ -9,6 +9,7 @@ import {
   registerClinic,
   resetDatabase,
   seedMember,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 
 // DX-210 en HTTP real: «Ocupar este hueco». Cancelar una cita de 30 min →
@@ -264,7 +265,7 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
       api().patch(`/api/v1/appointments/${(gabi.body as Body).id}`),
       reception.token,
     )
-      .send({ status: 'CANCELLED' })
+      .send({ status: 'CANCELLED', ...STAFF_CANCELLATION })
       .expect(200);
   });
 

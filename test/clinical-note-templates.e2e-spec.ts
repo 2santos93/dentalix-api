@@ -9,6 +9,7 @@ import {
   registerClinic,
   resetDatabase,
   seedMember,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 
 // DX-170 en HTTP real: CRUD de plantillas de evolución por rol (solo ADMIN
@@ -126,7 +127,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     status: string,
   ): Promise<void> {
     await as(api().patch(`/api/v1/appointments/${id}`), c.adminToken, c.host)
-      .send({ status })
+      .send({ status, ...STAFF_CANCELLATION })
       .expect(200);
   }
 

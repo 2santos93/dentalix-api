@@ -20,6 +20,13 @@ import { LocationsModule } from '../locations/locations.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-case';
 import { ListInClinicUseCase } from './application/use-cases/list-in-clinic.use-case';
+import { PatientAttendanceController } from './presentation/patient-attendance.controller';
+import {
+  GetPatientAttendanceUseCase,
+  PatientAttendanceFlags,
+} from './application/attendance/patient-attendance';
+import { PATIENT_ATTENDANCE_REPOSITORY } from './domain/ports/patient-attendance-repository.port';
+import { PrismaPatientAttendanceRepository } from './infrastructure/repositories/prisma-patient-attendance.repository';
 
 import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
 import { MedicalHistoryModule } from '../medical-history/medical-history.module';
@@ -50,7 +57,7 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
     // DX-247: banderas médicas mínimas de las tarjetas y de «En clínica».
     MedicalHistoryModule,
   ],
-  controllers: [AppointmentsController],
+  controllers: [AppointmentsController, PatientAttendanceController],
   providers: [
     CreateAppointmentUseCase,
     ListAppointmentsUseCase,
@@ -65,6 +72,13 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
     // listing it here makes it resolvable for @UseInterceptors on AppointmentsController.
     TenantContextInterceptor,
     { provide: APPOINTMENT_REPOSITORY, useClass: PrismaAppointmentRepository },
+    // DX-279: asistencia del paciente (resumen de 12 meses e insignia).
+    PatientAttendanceFlags,
+    GetPatientAttendanceUseCase,
+    {
+      provide: PATIENT_ATTENDANCE_REPOSITORY,
+      useClass: PrismaPatientAttendanceRepository,
+    },
   ],
   // ListUpcomingAppointmentsUseCase exportado para las «próximas citas» del
   // dashboard: la BD devuelve ya cortado en `limit` (DX-043, DB-008).

@@ -7,7 +7,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type {
@@ -63,6 +63,15 @@ import {
   normalizeStatusReason,
 } from '../../domain/patient-flow';
 import {
+  CANCELLATION_MESSAGES,
+  STAFF_CANCELLATION_KINDS,
+  computeCancellationNotice,
+  type CancellationNotice,
+  type CurrentPolicyRef,
+  type StaffCancellationKind,
+} from '../../../cancellation-policies/domain/cancellation-policy';
+import { cancellationAuditMetadata } from '../../domain/cancellation-audit';
+import {
   PLAN_ITEM_CLAIM_NOT_IN_CLINIC_MESSAGE,
   PLAN_ITEM_CLAIM_NOT_LINKED_MESSAGE,
   planItemsClosedMessage,
@@ -86,13 +95,49 @@ export type UpdateAppointmentInput = Omit<
   | 'expectStatus'
   | 'completedExit'
   | 'audit'
+  | 'cancel'
+  | 'clearCancellation'
+  | 'noShowMarkedAt'
 > & {
   /**
    * DX-273: motivo para sacar la cita de COMPLETED (obligatorio entonces,
    * 3–500 caracteres tras recortar). En cualquier otro cambio se ignora.
    */
   statusReason?: string | null;
+  /**
+   * DX-279: origen y motivo, OBLIGATORIOS al pasar la cita a CANCELLED desde
+   * la agenda (400 si faltan). En cualquier otro cambio se ignoran.
+   */
+  cancellation?: CancellationRequest;
 };
+
+/**
+ * DX-279 (M1): estados en los que el paciente ya vino (en la clínica) o la
+ * visita se completó. Cancelar desde ellos nunca es una cancelación tardía.
+ */
+function attendedStatus(status: AppointmentStatus): boolean {
+  return isInClinic(status) || status === AppointmentStatus.COMPLETED;
+}
+
+/** DX-279: lo que el personal indica al cancelar desde la agenda. */
+export interface CancellationRequest {
+  byKind?: StaffCancellationKind;
+  reasonCode?: CancellationReasonCode;
+  reasonText?: string | null;
+  /**
+   * Hora de la cancelación cuando NO es ahora: solo la siembra demo, que
+   * reconstruye cancelaciones pasadas (como `registerHistorical`). La API
+   * nunca la acepta del cliente: usa el reloj del servidor.
+   */
+  at?: Date;
+}
+
+/** DX-279: vista previa del aviso si se cancelara ahora (la pide la agenda). */
+export interface CancellationPreview extends CancellationNotice {
+  appointmentId: string;
+  /** Política vigente de la sede de la cita; `null` = sin política. */
+  policy: CurrentPolicyRef | null;
+}
 
 /** DX-273 «Traer a esta cita»: mensajes en español. */
 export const PLAN_ITEM_CLAIM_MESSAGES = {
@@ -201,13 +246,39 @@ export class UpdateAppointmentUseCase {
     );
   }
 
+  /**
+   * DX-279: minutos de aviso y si sería tardía una cancelación del paciente
+   * AHORA (reloj del servidor, UTC) contra la política vigente de la sede de
+   * la cita. Es la misma cuenta que hace el repositorio al cancelar; la de la
+   * clínica, o la de una cita en la clínica o completada, nunca es tardía.
+   */
+  async cancellationPreview(id: string): Promise<CancellationPreview> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new NotFoundException('Cita no encontrada');
+    this.tenantContext.assertLocationAllowed(existing.locationId);
+    const policy = await this.repo.currentCancellationPolicy(
+      existing.locationId,
+    );
+    return {
+      appointmentId: existing.id,
+      policy,
+      ...computeCancellationNotice({
+        start: existing.start,
+        cancelledAt: new Date(),
+        byKind: 'STAFF_FOR_PATIENT',
+        noticeHours: policy?.noticeHours ?? null,
+        attended: attendedStatus(existing.status),
+      }),
+    };
+  }
+
   private async apply(
     id: string,
     input: UpdateAppointmentInput,
     auditContext: AppointmentAuditContext | undefined,
     fromOpening: boolean,
   ): Promise<AppointmentWriteResult> {
-    const { statusReason, ...patch } = input;
+    const { statusReason, cancellation, ...patch } = input;
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as the Patient use cases: a missing row and a row
@@ -263,6 +334,23 @@ export class UpdateAppointmentUseCase {
     const flowPatch =
       nextStatus !== null
         ? await this.checkFlow(existing, nextStatus, auditContext, statusReason)
+        : {};
+    // DX-279: cancelar exige origen y motivo; salir de CANCELLED o NO_SHOW
+    // borra sus datos (coherente con la CHECK de la tabla).
+    // B1: el aviso se cuenta contra el inicio de la cita; cancelar y mover en
+    // el mismo cambio no tiene sentido y daría un aviso incoherente.
+    if (
+      nextStatus === AppointmentStatus.CANCELLED &&
+      (patch.start !== undefined ||
+        patch.end !== undefined ||
+        (patch.providerId !== undefined &&
+          patch.providerId !== existing.providerId))
+    ) {
+      throw new BadRequestException(CANCELLATION_MESSAGES.cancelAndMove);
+    }
+    const cancellationPatch =
+      nextStatus !== null
+        ? this.cancellationPatch(existing.status, nextStatus, cancellation)
         : {};
     // DX-273: la salida de COMPLETED ya pasó rol y motivo; el repositorio
     // guarda el motivo, recalcula el mínimo de la visita siguiente y la
@@ -410,6 +498,7 @@ export class UpdateAppointmentUseCase {
     const effectivePatch: UpdateAppointmentRepoInput = {
       ...patch,
       ...flowPatch,
+      ...cancellationPatch,
       ...(clearsConfirmation
         ? { confirmationSentAt: null, callbackRequestedAt: null }
         : {}),
@@ -456,6 +545,16 @@ export class UpdateAppointmentUseCase {
 
     if (isReschedule && auditContext) {
       await this.recordMove(existing, updated, auditContext);
+    }
+    // B2: un solo evento por cancelación. Desde la clínica la lleva el del
+    // flujo y desde «Completada» el de la salida (DX-273, en el repositorio).
+    if (
+      nextStatus === AppointmentStatus.CANCELLED &&
+      !flowChange &&
+      !completedExit &&
+      auditContext
+    ) {
+      await this.recordCancellation(updated, existing.status, auditContext);
     }
     if (flowChange && auditContext) {
       await this.recordStatus(
@@ -631,6 +730,78 @@ export class UpdateAppointmentUseCase {
     };
   }
 
+  /**
+   * DX-279: lo que el repositorio escribe además del estado. A CANCELLED:
+   * origen (el personal por el paciente o la clínica) y motivo del catálogo,
+   * obligatorios (400 en español), con la hora del servidor; el aviso y si es
+   * tardía los calcula el repositorio con la fila bloqueada. A NO_SHOW: la
+   * hora en que se marca. Saliendo de CANCELLED o de NO_SHOW: se borran.
+   */
+  private cancellationPatch(
+    from: AppointmentStatus,
+    to: AppointmentStatus,
+    request: CancellationRequest | undefined,
+  ): Partial<UpdateAppointmentRepoInput> {
+    const clears = {
+      ...(from === AppointmentStatus.CANCELLED
+        ? { clearCancellation: true as const }
+        : {}),
+      ...(from === AppointmentStatus.NO_SHOW ? { noShowMarkedAt: null } : {}),
+    };
+    if (to === AppointmentStatus.NO_SHOW) {
+      return { ...clears, noShowMarkedAt: new Date() };
+    }
+    if (to !== AppointmentStatus.CANCELLED) return clears;
+    const byKind = request?.byKind;
+    if (!byKind || !STAFF_CANCELLATION_KINDS.includes(byKind)) {
+      throw new BadRequestException(CANCELLATION_MESSAGES.byKindRequired);
+    }
+    if (!request.reasonCode) {
+      throw new BadRequestException(CANCELLATION_MESSAGES.reasonRequired);
+    }
+    const reasonText = request.reasonText?.trim() || null;
+    return {
+      ...clears,
+      cancel: {
+        byKind,
+        reasonCode: request.reasonCode,
+        reasonText,
+        at: request.at ?? new Date(),
+        // M1: el paciente vino (en la clínica) o la cita se completó: es una
+        // corrección del registro, nunca una cancelación tardía.
+        attended: attendedStatus(from),
+      },
+    };
+  }
+
+  /**
+   * DX-279 (DX-009): la cancelación con su origen, el código del motivo, los
+   * minutos de aviso y si fue tardía. Nunca el texto libre del motivo.
+   */
+  private recordCancellation(
+    appointment: Appointment,
+    from: AppointmentStatus,
+    ctx: AppointmentAuditContext,
+  ): Promise<void> {
+    return this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'APPOINTMENT_CANCELLED',
+        status: { from, to: appointment.status },
+        ...cancellationAuditMetadata(appointment),
+      },
+    });
+  }
+
   /** ¿La cita es de hoy en la zona de su sede (reloj del servidor)? */
   private isToday(appointment: Appointment): Promise<boolean> {
     return this.sameCivilDay(appointment, new Date());
@@ -667,7 +838,13 @@ export class UpdateAppointmentUseCase {
       requestId: ctx.requestId,
       ip: ctx.ip,
       userAgent: ctx.userAgent,
-      metadata: { reason, status: { from, to: appointment.status } },
+      metadata: {
+        reason,
+        status: { from, to: appointment.status },
+        // B2 (DX-279): la salida del flujo a «Cancelada» lleva aquí su
+        // cancelación, sin un segundo evento.
+        ...cancellationAuditMetadata(appointment),
+      },
     });
   }
 

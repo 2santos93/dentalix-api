@@ -19,6 +19,12 @@ import { civilDateIn, civilDayRange } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 
+/** DX-279: cancelar desde la agenda exige origen y motivo. */
+const FOR_PATIENT = {
+  byKind: 'STAFF_FOR_PATIENT',
+  reasonCode: 'ILLNESS',
+} as const;
+
 // DX-200: el flujo del paciente en la clínica en UpdateAppointmentUseCase
 // (llegó → en sillón → listo para cobrar → completada, y «Deshacer llegada»),
 // con la máquina de transiciones, las horas, los permisos y la auditoría.
@@ -269,7 +275,7 @@ describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
     );
     const cancelled = await uc.execute(
       a.id,
-      { status: AppointmentStatus.CANCELLED },
+      { status: AppointmentStatus.CANCELLED, cancellation: FOR_PATIENT },
       ctx(ClinicRole.RECEPTION),
     );
     expect(cancelled.arrivedAt).toBeInstanceOf(Date);
@@ -319,7 +325,7 @@ describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
     );
     await uc.execute(
       left.id,
-      { status: AppointmentStatus.CANCELLED },
+      { status: AppointmentStatus.CANCELLED, cancellation: FOR_PATIENT },
       ctx(ClinicRole.RECEPTION),
     );
     await expect(

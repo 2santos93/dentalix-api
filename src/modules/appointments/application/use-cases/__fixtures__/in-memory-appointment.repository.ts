@@ -16,6 +16,10 @@ import {
   PATIENT_FLOW_MESSAGES,
   isInClinic,
 } from '../../../domain/patient-flow';
+import {
+  computeCancellationNotice,
+  type CurrentPolicyRef,
+} from '../../../../cancellation-policies/domain/cancellation-policy';
 import type { InMemoryWaitlistRepository } from '../../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import {
   AppointmentRepository,
@@ -94,6 +98,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: overrides.arrivedAt ?? null,
       seatedAt: overrides.seatedAt ?? null,
       readyForCheckoutAt: overrides.readyForCheckoutAt ?? null,
+      cancelledAt: overrides.cancelledAt ?? null,
+      cancelledByKind: overrides.cancelledByKind ?? null,
+      cancelReasonCode: overrides.cancelReasonCode ?? null,
+      cancelReasonText: overrides.cancelReasonText ?? null,
+      noticeMinutes: overrides.noticeMinutes ?? null,
+      lateCancellation: overrides.lateCancellation ?? null,
+      noShowMarkedAt: overrides.noShowMarkedAt ?? null,
+      policyVersionId: overrides.policyVersionId ?? null,
       preArrivalStatus: overrides.preArrivalStatus ?? null,
       createdAt: overrides.createdAt ?? now,
       updatedAt: overrides.updatedAt ?? now,
@@ -130,6 +142,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: row.arrivedAt,
       seatedAt: row.seatedAt,
       readyForCheckoutAt: row.readyForCheckoutAt,
+      cancelledAt: row.cancelledAt,
+      cancelledByKind: row.cancelledByKind,
+      cancelReasonCode: row.cancelReasonCode,
+      cancelReasonText: row.cancelReasonText,
+      noticeMinutes: row.noticeMinutes,
+      lateCancellation: row.lateCancellation,
+      noShowMarkedAt: row.noShowMarkedAt,
+      policyVersionId: row.policyVersionId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -175,6 +195,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: null,
       seatedAt: null,
       readyForCheckoutAt: null,
+      cancelledAt: null,
+      cancelledByKind: null,
+      cancelReasonCode: null,
+      cancelReasonText: null,
+      noticeMinutes: null,
+      lateCancellation: null,
+      noShowMarkedAt: null,
+      policyVersionId: null,
       preArrivalStatus: null,
       createdAt: now,
       updatedAt: now,
@@ -279,12 +307,42 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           key !== 'requireWantsEarlier' &&
           key !== 'expectStatus' &&
           key !== 'completedExit' &&
-          key !== 'audit',
+          key !== 'audit' &&
+          key !== 'cancel' &&
+          key !== 'clearCancellation',
       ),
     );
     Object.assign(row, definedPatch, {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
+    // DX-279: mismo cálculo que el repositorio de Prisma, contra la política
+    // de la sede de la cita en el doble (`policies`).
+    if (patch.clearCancellation) {
+      Object.assign(row, {
+        cancelledAt: null,
+        cancelledByKind: null,
+        cancelReasonCode: null,
+        cancelReasonText: null,
+        noticeMinutes: null,
+        lateCancellation: null,
+      });
+    }
+    if (patch.cancel) {
+      const policy = this.policies.get(row.locationId) ?? null;
+      Object.assign(row, {
+        cancelledAt: patch.cancel.at,
+        cancelledByKind: patch.cancel.byKind,
+        cancelReasonCode: patch.cancel.reasonCode,
+        cancelReasonText: patch.cancel.reasonText,
+        ...computeCancellationNotice({
+          start: row.start,
+          cancelledAt: patch.cancel.at,
+          byKind: patch.cancel.byKind,
+          noticeHours: policy?.noticeHours ?? null,
+          attended: patch.cancel.attended,
+        }),
+      });
+    }
     const enqueued =
       patch.enqueueWaitlist && this.waitlist
         ? this.waitlist.enqueueFromAppointment(
@@ -333,6 +391,15 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: null,
     });
     return Promise.resolve(this.toEntity(row));
+  }
+
+  /** DX-279: política vigente de cada sede (test helper). */
+  readonly policies = new Map<string, CurrentPolicyRef>();
+
+  currentCancellationPolicy(
+    locationId: string,
+  ): Promise<CurrentPolicyRef | null> {
+    return Promise.resolve(this.policies.get(locationId) ?? null);
   }
 
   /** Test helper: nombres de los profesionales que devuelve `listInClinic`. */

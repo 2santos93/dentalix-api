@@ -7,7 +7,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
-import { resetDatabase } from './support/e2e-fixtures';
+import { resetDatabase, STAFF_CANCELLATION } from './support/e2e-fixtures';
 
 // Las horas de este spec son un `HH:MM` fijo sobre un día SIEMPRE FUTURO:
 // CreateAppointmentUseCase rechaza un `start` en el pasado, así que una fecha
@@ -319,7 +319,7 @@ describe('Appointments (e2e)', () => {
       .patch(`/api/v1/appointments/${appt1.id}`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({ status: 'CANCELLED' })
+      .send({ status: 'CANCELLED', ...STAFF_CANCELLATION })
       .expect(200);
 
     const create3 = await request(app.getHttpServer())
