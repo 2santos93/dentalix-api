@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AuditAction, AuditResourceType, ClinicRole } from '@prisma/client';
-import { AUDIT_ORIGINS, type AuditOrigin } from '../../domain/audit-metadata';
+import {
+  AUDIT_CANCELLATION_KINDS,
+  AUDIT_CANCELLATION_REASONS,
+  AUDIT_ORIGINS,
+  type AuditCancellation,
+  type AuditOrigin,
+} from '../../domain/audit-metadata';
 
 // Forma de la respuesta de `GET /audit-events` (DX-009). Solo documenta el
 // contrato en Swagger (de ahí sale el tipo del cliente web), no valida entrada.
@@ -111,6 +117,12 @@ export class AuditScheduleChangeDto {
   after!: AuditScheduleEntryDto[];
 }
 
+export class AuditCurrencyTotalDto {
+  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Filas del archivo' }) rows!: number;
+  @ApiProperty({ example: 1500000 }) amount!: number;
+}
+
 export class AuditImportBatchDto {
   @ApiProperty({ description: 'SHA-256 (hex) del archivo importado' })
   fileSha256!: string;
@@ -124,6 +136,77 @@ export class AuditImportBatchDto {
   @ApiPropertyOptional() updated?: number;
   @ApiPropertyOptional() undoneCreated?: number;
   @ApiPropertyOptional() undoneFilled?: number;
+  @ApiPropertyOptional({
+    description: 'DX-262: SHA-256 (hex) de la hoja de saldos',
+  })
+  balanceFileSha256?: string;
+  @ApiPropertyOptional() balanceRows?: number;
+  @ApiPropertyOptional() balanceErrors?: number;
+  @ApiPropertyOptional() balancesCreated?: number;
+  @ApiPropertyOptional({
+    description:
+      '«Añadir aunque ya tenga saldo migrado» marcado (DX-262, QA D1)',
+  })
+  balanceAddToExisting?: boolean;
+  @ApiPropertyOptional({
+    description:
+      'Saldos no creados porque el paciente ya tenía uno vivo en esa moneda (DX-262, QA D1)',
+  })
+  balancesExisting?: number;
+  @ApiPropertyOptional() balancesUndone?: number;
+  @ApiPropertyOptional({
+    type: [AuditCurrencyTotalDto],
+    description:
+      'DX-262: total por moneda de los saldos migrados del lote (agregado, sin convertir)',
+  })
+  balanceTotals?: AuditCurrencyTotalDto[];
+  @ApiPropertyOptional({
+    type: [AuditCurrencyTotalDto],
+    description: 'DX-262: lo que retiró de verdad el deshacer, por moneda',
+  })
+  balanceUndoneTotals?: AuditCurrencyTotalDto[];
+}
+
+/** Un lado de la atribución de un ítem realizado (DX-050). */
+export class AuditAttributionSideDto {
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  performedById!: string | null;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  locationId!: string | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  completedAt!: string | null;
+}
+
+export class AuditAttributionChangeDto {
+  @ApiProperty({ type: AuditAttributionSideDto })
+  before!: AuditAttributionSideDto;
+
+  @ApiProperty({ type: AuditAttributionSideDto })
+  after!: AuditAttributionSideDto;
+}
+
+/** DX-279: cancelación de una cita desde la agenda (solo códigos y números). */
+export class AuditCancellationDto {
+  @ApiProperty({
+    enum: AUDIT_CANCELLATION_KINDS,
+    enumName: 'AuditCancellationKind',
+  })
+  byKind!: AuditCancellation['byKind'];
+
+  @ApiProperty({
+    enum: AUDIT_CANCELLATION_REASONS,
+    enumName: 'AuditCancellationReason',
+    nullable: true,
+  })
+  reasonCode!: AuditCancellation['reasonCode'];
+
+  @ApiProperty({ example: 300 })
+  noticeMinutes!: number;
+
+  @ApiProperty()
+  lateCancellation!: boolean;
 }
 
 export class AuditMetadataDto {
@@ -192,6 +275,20 @@ export class AuditMetadataDto {
       'DX-107: lote de importación de pacientes — hash del archivo, modo de duplicados y totales (solo números).',
   })
   importBatch?: AuditImportBatchDto;
+
+  @ApiPropertyOptional({
+    type: AuditAttributionChangeDto,
+    description:
+      'DX-050: quién realizó un ítem del plan, en qué sede y cuándo, antes y después (`reason` PLAN_ITEM_ATTRIBUTION_CORRECTED o PLAN_ITEM_DONE_REVERTED). Solo ids e instantes.',
+  })
+  attribution?: AuditAttributionChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditCancellationDto,
+    description:
+      'DX-279: cita cancelada desde la agenda, en su único evento (`reason` APPOINTMENT_CANCELLED; PATIENT_FLOW si estaba en la clínica; COMPLETED_EXIT si estaba completada): quién, código del motivo, minutos de aviso y si fue tardía. Nunca el texto libre del motivo.',
+  })
+  cancellation?: AuditCancellationDto;
 }
 
 export class AuditEventDto {

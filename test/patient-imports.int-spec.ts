@@ -373,7 +373,11 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     });
 
     const result = await inTenant(a, () => repo.undo(batch!.id, a.userId));
-    expect(result).toEqual({ undoneCreated: 1, undoneFilled: 1 });
+    expect(result).toEqual({
+      undoneCreated: 1,
+      undoneFilled: 1,
+      undoneBalances: 0,
+    });
     const reverted = await raw.patient.findUniqueOrThrow({
       where: { id: before.id },
     });
@@ -461,6 +465,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'collection_notes.patientId',
       'data_processing_consents.patientId',
       'medical_history_reviews.patientId',
+      // DX-099: una anamnesis enviada por enlace también bloquea el deshacer.
+      'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
       'patient_agreements.patientId',
       'patient_consents.patientId',
@@ -763,6 +769,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     expect(await inTenant(a, () => repo.undo(batch!.id, a.userId))).toEqual({
       undoneCreated: 1,
       undoneFilled: 0,
+      undoneBalances: 0,
     });
     // El worker original sigue vivo y procesa otro bloque: aborta sin escribir.
     await expect(

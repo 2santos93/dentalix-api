@@ -60,6 +60,8 @@ export interface ReminderClaim {
 
 export interface AppointmentRemindersSnapshot {
   appointment: { start: Date; status: AppointmentStatus; deleted: boolean };
+  /** Sede de la cita: la restricción por sedes (DX-089) se comprueba con ella. */
+  locationId: string;
   settings: { enabled: boolean; leadHours: number[] } | null;
   /** Preferencia vigente del paciente de la cita (DX-128). */
   contact: ReminderContact;

@@ -201,12 +201,15 @@ function paymentReceipt(
       kind: 'paragraph',
       text: `Valor: ${vars.amountLabel} · ${vars.methodLabel} · ${vars.paidOnLabel}`,
     },
-    { kind: 'paragraph', text: `Plan: ${vars.planLabel}` },
+    {
+      kind: 'paragraph',
+      text: `${vars.toOpeningBalance ? 'Concepto' : 'Plan'}: ${vars.planLabel}`,
+    },
   );
   if (vars.balanceLabel) {
     blocks.push({
       kind: 'paragraph',
-      text: `Saldo del plan tras el abono: ${vars.balanceLabel}`,
+      text: `${vars.toOpeningBalance ? 'Saldo pendiente tras este abono' : 'Saldo del plan tras el abono'}: ${vars.balanceLabel}`,
     });
   }
   blocks.push({ kind: 'paragraph', text: `Sede: ${where}` });

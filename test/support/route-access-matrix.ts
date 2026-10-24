@@ -107,6 +107,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-222: indicaciones postoperatorias desde el enlace del email/WhatsApp.
   'GET /public/post-op-instructions/:token': PUBLIC_TENANT,
   'POST /public/post-op-instructions/:token/opened': PUBLIC_TENANT,
+  // DX-099: cuestionario de anamnesis por enlace (el paciente, sin sesión).
+  'GET /public/medical-history/:token': PUBLIC_TENANT,
+  'POST /public/medical-history/:token': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -172,6 +175,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/medical-alerts': EVERY_ROLE,
   'GET /medical-history/settings': EVERY_ROLE,
   'PUT /medical-history/settings': ADMIN_ONLY,
+  // DX-099 (loop/informes/DX-099.md): el enlace lo crea, lo ve en la ficha y
+  // lo anula cualquiera (recepción lo manda); la bandeja y las respuestas son
+  // clínicas; aceptar (crea una versión de la HC) y rechazar, solo el
+  // odontólogo y gestión.
+  'POST /patients/:patientId/medical-history/requests': EVERY_ROLE,
+  'GET /patients/:patientId/medical-history/requests': EVERY_ROLE,
+  'GET /medical-history/submissions': CLINICAL,
+  'GET /medical-history/submissions/summary': CLINICAL,
+  'GET /medical-history/submissions/:id': CLINICAL,
+  'POST /medical-history/submissions/:id/accept': roles('ADMIN', 'DENTIST'),
+  'POST /medical-history/submissions/:id/reject': roles('ADMIN', 'DENTIST'),
+  'POST /medical-history/submissions/:id/revoke': EVERY_ROLE,
   'POST /patients/:patientId/clinical-entries': CLINICAL,
   'GET /patients/:patientId/clinical-entries': CLINICAL,
   // DX-038: adendas; PATCH/PUT/DELETE solo responden 405 (HC inalterable).
@@ -243,6 +258,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /prescription-templates/:id': ADMIN_ONLY,
   'GET /patients/:patientId/prescriptions': CLINICAL,
   'POST /patients/:patientId/prescriptions': PRESCRIBERS,
+  // DX-300: previsualización de avisos de seguridad (solo quien emite).
+  'POST /patients/:patientId/prescriptions/safety-check': PRESCRIBERS,
   'GET /prescriptions/issuer': PRESCRIBERS,
   'GET /prescriptions/:id': CLINICAL,
   'POST /prescriptions/:id/void': PRESCRIBERS,
@@ -285,6 +302,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patient-imports/:id/errors.csv': ADMIN_ONLY,
   'POST /patient-imports/:id/confirm': ADMIN_ONLY,
   'POST /patient-imports/:id/undo': ADMIN_ONLY,
+  // DX-262: hoja de saldos («Saldo migrado») del lote; solo gestión.
+  'GET /patient-imports/balances-template': ADMIN_ONLY,
+  'POST /patient-imports/:id/balances': ADMIN_ONLY,
+  'POST /patient-imports/:id/balances/undo': ADMIN_ONLY,
+  'DELETE /patient-imports/:id/balances': ADMIN_ONLY,
+  'GET /patient-imports/:id/balances/errors.csv': ADMIN_ONLY,
 
   // --- Catálogo dental -----------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,
@@ -339,6 +362,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
   // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
   'GET /appointments/:id/reminders': EVERY_ROLE,
+  // Política de cancelación (DX-279, loop/informes/DX-279.md): la vista previa
+  // del aviso al cancelar y la insignia de asistencia del paciente, quien
+  // gestiona la agenda (cada uno con sus sedes, DX-089).
+  'GET /appointments/:id/cancellation-preview': EVERY_ROLE,
+  'GET /patients/:id/attendance-summary': EVERY_ROLE,
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,
@@ -397,6 +425,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ASSISTANT',
     'RECEPTION',
   ),
+  // DX-273 «Traer a esta cita» (loop/informes/DX-273.md): quien ve la agenda;
+  // que la cita esté en la clínica y la sede de la otra cita los mira el caso
+  // de uso (409 / 403).
+  'POST /appointments/:id/plan-items/:planItemId/claim': EVERY_ROLE,
   'GET /schedule-blocks': EVERY_ROLE,
   'GET /schedule-blocks/affected-appointments': EVERY_ROLE,
   'POST /schedule-blocks': roles('ADMIN', 'DENTIST', 'RECEPTION'),
@@ -413,6 +445,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // planes cobrables: loop/informes/DX-067.md.
   'GET /payments': BILLING,
   'POST /treatment-plans/:id/payments': BILLING,
+  // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
+  'POST /opening-balances/:id/payments': BILLING,
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
@@ -437,6 +471,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /discount-policy': ADMIN_ONLY,
   'GET /reports/discounts': ADMIN_ONLY,
   'GET /reports/discounts.csv': ADMIN_ONLY,
+  // Reportes (loop/informes/DX-014.md): «Comparar sedes» y su CSV, la mirada
+  // del dueño sobre producción, cobros y citas de todas las sedes. Solo ADMIN.
+  'GET /reports/locations-comparison': ADMIN_ONLY,
+  'GET /reports/locations-comparison.csv': ADMIN_ONLY,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,
@@ -518,6 +556,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Ajustes → Recordatorios por sede (DX-026): solo ADMIN, también para leer.
   'GET /reminder-settings': ADMIN_ONLY,
   'PUT /reminder-settings/:locationId': ADMIN_ONLY,
+  // Ajustes → Sedes → Política de cancelación (DX-279): solo ADMIN, también
+  // para leer; guardar crea la versión siguiente.
+  'GET /locations/:id/cancellation-policy': ADMIN_ONLY,
+  'POST /locations/:id/cancellation-policy': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)

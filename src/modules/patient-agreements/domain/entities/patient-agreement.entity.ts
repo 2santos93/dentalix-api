@@ -1,4 +1,4 @@
-import type { AgreementKind } from '@prisma/client';
+import type { AgreementKind, PayerType } from '@prisma/client';
 
 /** Convenio tal como viaja dentro de una asignación. */
 export interface AssignedAgreement {
@@ -9,7 +9,7 @@ export interface AssignedAgreement {
   /** Día civil `YYYY-MM-DD`; `null` = sin límite. */
   validFrom: string | null;
   validTo: string | null;
-  payer: { id: string; name: string };
+  payer: { id: string; name: string; type: PayerType };
 }
 
 /**

@@ -27,6 +27,12 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 
+/** DX-279: cancelar desde la agenda exige origen y motivo. */
+const FOR_PATIENT = {
+  byKind: 'STAFF_FOR_PATIENT',
+  reasonCode: 'ILLNESS',
+} as const;
+
 // Todas las horas de los fixtures son un `HH:MM` fijo sobre un día que SIEMPRE
 // está en el FUTURO respecto de la corrida, porque Create/UpdateAppointment
 // ahora rechazan un `start` en el pasado. Anclar el día (en vez de hardcodear
@@ -62,6 +68,14 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     arrivedAt: null,
     seatedAt: null,
     readyForCheckoutAt: null,
+    cancelledAt: null,
+    cancelledByKind: null,
+    cancelReasonCode: null,
+    cancelReasonText: null,
+    noticeMinutes: null,
+    lateCancellation: null,
+    noShowMarkedAt: null,
+    policyVersionId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -83,6 +97,9 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
   const { update, ...rest } = overrides;
   return {
     resolveWriteLocationId: () => Promise.resolve('loc1'),
+    findPlanItemsReservedElsewhere: () => Promise.resolve(new Map()),
+    claimPlanItem: () =>
+      Promise.reject(new Error('not implemented in this fake')),
     create: (): Promise<Appointment> =>
       Promise.reject(new Error('not implemented in this fake')),
     findById: (): Promise<Appointment | null> => Promise.resolve(null),
@@ -93,6 +110,7 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
       Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
+    currentCancellationPolicy: () => Promise.resolve(null),
     ...rest,
     update: (id: string, patch: UpdateAppointmentRepoInput) =>
       update
@@ -214,7 +232,12 @@ describe('UpdateAppointmentUseCase', () => {
       status: AppointmentStatus.CONFIRMED,
     });
 
-    expect(result).toEqual({ ...updated, warnings: [], warningCodes: [] });
+    expect(result).toEqual({
+      ...updated,
+      warnings: [],
+      warningCodes: [],
+      planItemsReservedElsewhere: [],
+    });
     // DX-005: un cambio de estado limpia los indicadores del enlace de confirmación.
     expect(receivedPatch).toEqual({
       status: AppointmentStatus.CONFIRMED,
@@ -264,7 +287,12 @@ describe('UpdateAppointmentUseCase', () => {
       end: newEnd,
     });
 
-    expect(result).toEqual({ ...updated, warnings: [], warningCodes: [] });
+    expect(result).toEqual({
+      ...updated,
+      warnings: [],
+      warningCodes: [],
+      planItemsReservedElsewhere: [],
+    });
     expect(overlapArgs).toEqual({
       providerId: existing.providerId,
       start: newStart,
@@ -508,6 +536,7 @@ describe('UpdateAppointmentUseCase', () => {
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
+        currentCancellationPolicy: () => Promise.resolve(null),
         update: (): Promise<Appointment> => Promise.reject(boom),
       });
       const uc = new UpdateAppointmentUseCase(
@@ -1111,7 +1140,7 @@ describe('UpdateAppointmentUseCase', () => {
 
       await uc.execute(
         existing.id,
-        { status: AppointmentStatus.CANCELLED },
+        { status: AppointmentStatus.CANCELLED, cancellation: FOR_PATIENT },
         ctx,
       );
       await uc.execute(existing.id, { status: AppointmentStatus.NO_SHOW }, ctx);
@@ -1196,7 +1225,7 @@ describe('UpdateAppointmentUseCase', () => {
 
         await uc.execute(
           existing.id,
-          { status: AppointmentStatus.CANCELLED },
+          { status: AppointmentStatus.CANCELLED, cancellation: FOR_PATIENT },
           ctx,
         );
         await uc.execute(existing.id, { status }, ctx);
@@ -1237,7 +1266,7 @@ describe('UpdateAppointmentUseCase', () => {
 
       await uc.execute(
         existing.id,
-        { status: AppointmentStatus.CANCELLED },
+        { status: AppointmentStatus.CANCELLED, cancellation: FOR_PATIENT },
         ctx,
       );
       await uc.execute(
@@ -1281,10 +1310,16 @@ describe('UpdateAppointmentUseCase', () => {
         inMemoryAvailability(),
       );
 
-      await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
+      await uc.execute(existing.id, {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: FOR_PATIENT,
+      });
       waitlist.markScheduled(waitlist.rows[0].id, 'otra-cita', null);
       await uc.execute(existing.id, { status: AppointmentStatus.SCHEDULED });
-      await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
+      await uc.execute(existing.id, {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: FOR_PATIENT,
+      });
       expect(waitlist.rows).toEqual([
         expect.objectContaining({
           status: 'SCHEDULED',
@@ -1308,7 +1343,10 @@ describe('UpdateAppointmentUseCase', () => {
         inMemoryAvailability(),
       );
 
-      await uc.execute(existing.id, { status: AppointmentStatus.CANCELLED });
+      await uc.execute(existing.id, {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: FOR_PATIENT,
+      });
       await uc.execute(existing.id, { status: AppointmentStatus.NO_SHOW });
       await uc.execute(existing.id, { notes: 'llamar' });
       expect(waitlist.rows[0].status).toBe('OPEN');

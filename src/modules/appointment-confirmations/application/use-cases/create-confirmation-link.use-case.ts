@@ -17,6 +17,7 @@ import {
   PublicAppointmentView,
   toPublicAppointmentView,
 } from '../public-confirmation-view';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 /** Solo una cita que todavía va a ocurrir tiene algo que confirmar. */
 const CONFIRMABLE: ReadonlySet<AppointmentStatus> = new Set([
@@ -54,6 +55,7 @@ export class CreateConfirmationLinkUseCase {
   constructor(
     @Inject(APPOINTMENT_CONFIRMATION_REPOSITORY)
     private readonly repo: AppointmentConfirmationRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -64,6 +66,10 @@ export class CreateConfirmationLinkUseCase {
     if (!appointment) {
       throw new NotFoundException('Appointment not found');
     }
+    // SEC-045 (DX-089): una cita de una sede no permitida es 403, antes de
+    // revocar el enlace vigente o emitir otro. El recordatorio automático
+    // corre sin restricción de sedes.
+    this.tenantContext.assertLocationAllowed(appointment.locationId);
     if (!CONFIRMABLE.has(appointment.status)) {
       throw new ConflictException(
         'Solo se puede pedir confirmación de una cita agendada o confirmada',

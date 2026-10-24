@@ -5,7 +5,16 @@ import type { ImportFieldKey, ImportPatientData } from './import-fields';
 import { excelSerialToDate } from './xlsx-reader';
 import type { TableRow } from './tabular-file';
 
-export type IssueKind = 'ERROR' | 'DUPLICATE_FILE' | 'DUPLICATE_EXISTING';
+/**
+ * `MERGED` (DX-262): fila de la hoja de saldos que se suma a otra del mismo
+ * paciente y moneda (un saldo migrado por paciente y moneda). No es un error.
+ */
+export type IssueKind =
+  | 'ERROR'
+  | 'DUPLICATE_FILE'
+  | 'DUPLICATE_EXISTING'
+  | 'MERGED'
+  | 'EXISTING_BALANCE';
 
 /** Un problema de una fila, tal como sale en la pantalla y en errors.csv. */
 export interface RowIssue {
@@ -177,15 +186,17 @@ function isRealDate(y: number, m: number, d: number): boolean {
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /**
- * Fecha de nacimiento: AAAA-MM-DD (o con /), DD/MM/AAAA (o con - o .; día
- * primero, como en LATAM y España) o un número de serie de Excel. Con hora
- * detrás («1990-05-03 00:00:00»), se ignora la hora. Año de 2 cifras: error
- * (¿1925 o 2025?).
+ * Día civil escrito en una celda: AAAA-MM-DD (o con /), DD/MM/AAAA (o con - o
+ * .; día primero, como en LATAM y España) o un número de serie de Excel. Con
+ * hora detrás («1990-05-03 00:00:00»), se ignora la hora. Año de 2 cifras:
+ * error (¿1925 o 2025?). La usan la fecha de nacimiento (DX-107) y la de
+ * antigüedad del saldo migrado (DX-262), cada una con sus mensajes.
  */
-export function parseBirthDate(
+export function readCivilDate(
   raw: string,
-  today: string,
-): { value: string } | { error: string } {
+):
+  | { value: string }
+  | { error: 'UNRECOGNIZED' | 'TWO_DIGIT_YEAR' | 'NOT_IN_CALENDAR' } {
   const text = raw.trim().replace(/[T ]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?Z?$/i, '');
   let y: number;
   let m: number;
@@ -197,22 +208,42 @@ export function parseBirthDate(
     [d, m, y] = [Number(match[1]), Number(match[2]), Number(match[3])];
   } else if (/^\d{4,5}(\.\d+)?$/.test(text)) {
     const iso = excelSerialToDate(Number(text));
-    if (!iso) return { error: 'Fecha de nacimiento no reconocida.' };
+    if (!iso) return { error: 'UNRECOGNIZED' };
     [y, m, d] = iso.split('-').map(Number);
   } else if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{2}$/.test(text)) {
-    return {
-      error:
-        'El año de la fecha de nacimiento tiene 2 cifras: escríbelo con 4 (DD/MM/AAAA).',
-    };
+    return { error: 'TWO_DIGIT_YEAR' };
   } else {
-    return {
-      error: 'Fecha de nacimiento no reconocida: usa DD/MM/AAAA o AAAA-MM-DD.',
-    };
+    return { error: 'UNRECOGNIZED' };
   }
-  if (!isRealDate(y, m, d)) {
-    return { error: 'La fecha de nacimiento no existe en el calendario.' };
+  if (!isRealDate(y, m, d)) return { error: 'NOT_IN_CALENDAR' };
+  return { value: `${y}-${pad(m)}-${pad(d)}` };
+}
+
+/** Fecha de nacimiento (ver `readCivilDate`): ni anterior a 1900 ni futura. */
+export function parseBirthDate(
+  raw: string,
+  today: string,
+): { value: string } | { error: string } {
+  const read = readCivilDate(raw);
+  if ('error' in read) {
+    switch (read.error) {
+      case 'TWO_DIGIT_YEAR':
+        return {
+          error:
+            'El año de la fecha de nacimiento tiene 2 cifras: escríbelo con 4 (DD/MM/AAAA).',
+        };
+      case 'NOT_IN_CALENDAR':
+        return { error: 'La fecha de nacimiento no existe en el calendario.' };
+      default:
+        return /^\s*\d{4,5}(\.\d+)?\s*$/.test(raw)
+          ? { error: 'Fecha de nacimiento no reconocida.' }
+          : {
+              error:
+                'Fecha de nacimiento no reconocida: usa DD/MM/AAAA o AAAA-MM-DD.',
+            };
+    }
   }
-  const value = `${y}-${pad(m)}-${pad(d)}`;
+  const { value } = read;
   if (value < '1900-01-01') {
     return { error: 'La fecha de nacimiento es anterior a 1900.' };
   }

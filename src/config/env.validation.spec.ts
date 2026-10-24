@@ -250,6 +250,8 @@ describe('validateEnv', () => {
           S3_MAX_SOCKETS: '100000',
           S3_MAX_ATTEMPTS: '11',
           UPLOAD_MAX_CONCURRENCY: '0',
+          PATIENT_IMPORT_MAX_CONCURRENCY: '0',
+          PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC: 'una',
         }),
       );
       for (const key of [
@@ -258,6 +260,8 @@ describe('validateEnv', () => {
         'S3_MAX_SOCKETS',
         'S3_MAX_ATTEMPTS',
         'UPLOAD_MAX_CONCURRENCY',
+        'PATIENT_IMPORT_MAX_CONCURRENCY',
+        'PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC',
       ]) {
         expect(msg).toContain(`${key} debe ser un entero`);
       }
@@ -269,6 +273,8 @@ describe('validateEnv', () => {
             S3_MAX_SOCKETS: '50',
             S3_MAX_ATTEMPTS: '3',
             UPLOAD_MAX_CONCURRENCY: '4',
+            PATIENT_IMPORT_MAX_CONCURRENCY: '2',
+            PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC: '1',
           }),
         ),
       ).not.toThrow();

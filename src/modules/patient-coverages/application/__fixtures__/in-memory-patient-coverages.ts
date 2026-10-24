@@ -53,6 +53,7 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
       validTo: null,
       isPrimary: false,
       notes: null,
+      migratedFromInsurerEps: false,
       createdAt: at,
       updatedAt: at,
       deleted: false,

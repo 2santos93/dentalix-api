@@ -5,6 +5,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import { enqueueWaitlistFromAppointment } from '../../../waitlist/infrastructure/waitlist-transitions';
+import { computeCancellationNotice } from '../../../cancellation-policies/domain/cancellation-policy';
+import { findCurrentPolicyInTx } from '../../../cancellation-policies/infrastructure/current-policy';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -27,6 +29,7 @@ const APPOINTMENT_SELECT = {
   end: true,
   status: true,
   providerId: true,
+  locationId: true,
   patient: { select: { firstName: true, phone: true, countryCode: true } },
   location: { select: { name: true, address: true } },
 } as const satisfies Prisma.AppointmentSelect;
@@ -105,6 +108,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       patientPhone: a.patient.phone,
       patientCountryCode: a.patient.countryCode,
       providerName: membership?.user.fullName ?? null,
+      locationId: a.locationId,
       locationName: a.location.name,
       locationAddress: a.location.address,
     };
@@ -201,6 +205,38 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
     });
   }
 
+  /**
+   * DX-279: el paciente cancela por el enlace: hora de la respuesta (la del
+   * servidor de BD), origen PATIENT_LINK y el aviso y si es tardía contra la
+   * política vigente de la sede de la cita. Sin motivo: el enlace no lo pide
+   * todavía (DX-291 añade el texto de la política y la aceptación). Si no
+   * hay que cancelar, el UPDATE condicional no cambia nada.
+   */
+  private async patientCancellation(
+    tx: Prisma.TransactionClient,
+    appointmentId: string,
+    start: Date,
+    cancelledAt: Date,
+  ): Promise<Prisma.AppointmentUpdateManyMutationInput> {
+    const appointment = await tx.appointment.findFirstOrThrow({
+      where: { id: appointmentId },
+      select: { locationId: true },
+    });
+    const policy = await findCurrentPolicyInTx(tx, appointment.locationId);
+    const notice = computeCancellationNotice({
+      start,
+      cancelledAt,
+      byKind: 'PATIENT_LINK',
+      noticeHours: policy?.noticeHours ?? null,
+    });
+    return {
+      cancelledAt,
+      cancelledByKind: 'PATIENT_LINK',
+      noticeMinutes: notice.noticeMinutes,
+      lateCancellation: notice.lateCancellation,
+    };
+  }
+
   async respond(input: RespondConfirmationInput): Promise<RespondOutcome> {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
@@ -247,7 +283,17 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
             start: input.expectedStart,
             status: input.expectedStatus,
           },
-          data: appointmentPatchFor(input.response, claimed.respondedAt),
+          data: {
+            ...appointmentPatchFor(input.response, claimed.respondedAt),
+            ...(input.response === AppointmentConfirmationResponse.CANCEL
+              ? await this.patientCancellation(
+                  tx,
+                  input.appointmentId,
+                  input.expectedStart,
+                  claimed.respondedAt,
+                )
+              : {}),
+          },
         });
         if (updated.count === 0) throw new StaleAppointmentError();
         // Una respuesta cierra todos los enlaces vivos en el mismo COMMIT.

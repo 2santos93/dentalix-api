@@ -31,6 +31,14 @@ function fakeAppointment(id: string): Appointment {
     arrivedAt: null,
     seatedAt: null,
     readyForCheckoutAt: null,
+    cancelledAt: null,
+    cancelledByKind: null,
+    cancelReasonCode: null,
+    cancelReasonText: null,
+    noticeMinutes: null,
+    lateCancellation: null,
+    noShowMarkedAt: null,
+    policyVersionId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
@@ -41,6 +49,9 @@ function makeRepo(
 ): AppointmentRepository {
   return {
     resolveWriteLocationId: () => Promise.resolve('loc1'),
+    findPlanItemsReservedElsewhere: () => Promise.resolve(new Map()),
+    claimPlanItem: () =>
+      Promise.reject(new Error('not implemented in this fake')),
     create: (input: CreateAppointmentRepoInput): Promise<Appointment> =>
       Promise.reject(
         new Error(
@@ -55,6 +66,7 @@ function makeRepo(
       Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
+    currentCancellationPolicy: () => Promise.resolve(null),
     update: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
     ...overrides,

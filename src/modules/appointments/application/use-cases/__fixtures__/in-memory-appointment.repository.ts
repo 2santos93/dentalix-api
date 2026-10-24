@@ -1,12 +1,25 @@
 import { ConflictException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../../waitlist/domain/waitlist-rules';
-import { Appointment } from '../../../domain/entities/appointment.entity';
+import {
+  Appointment,
+  PlanItemReservedElsewhere,
+} from '../../../domain/entities/appointment.entity';
+import type { AuditRequestContext } from '../../../../audit/domain/audit-request-context';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
+import {
+  heldInClinicToday,
+  PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
+} from '../../../domain/plan-item-reservation';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../../shared/locations/default-business-hours';
 import {
   PATIENT_FLOW_MESSAGES,
   isInClinic,
 } from '../../../domain/patient-flow';
+import {
+  computeCancellationNotice,
+  type CurrentPolicyRef,
+} from '../../../../cancellation-policies/domain/cancellation-policy';
 import type { InMemoryWaitlistRepository } from '../../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import {
   AppointmentRepository,
@@ -14,6 +27,7 @@ import {
   CreateAppointmentRepoInput,
   InClinicAppointment,
   ListInClinicParams,
+  PlanItemClaim,
   ListAppointmentsByRangeParams,
   ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
@@ -84,6 +98,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: overrides.arrivedAt ?? null,
       seatedAt: overrides.seatedAt ?? null,
       readyForCheckoutAt: overrides.readyForCheckoutAt ?? null,
+      cancelledAt: overrides.cancelledAt ?? null,
+      cancelledByKind: overrides.cancelledByKind ?? null,
+      cancelReasonCode: overrides.cancelReasonCode ?? null,
+      cancelReasonText: overrides.cancelReasonText ?? null,
+      noticeMinutes: overrides.noticeMinutes ?? null,
+      lateCancellation: overrides.lateCancellation ?? null,
+      noShowMarkedAt: overrides.noShowMarkedAt ?? null,
+      policyVersionId: overrides.policyVersionId ?? null,
       preArrivalStatus: overrides.preArrivalStatus ?? null,
       createdAt: overrides.createdAt ?? now,
       updatedAt: overrides.updatedAt ?? now,
@@ -120,6 +142,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: row.arrivedAt,
       seatedAt: row.seatedAt,
       readyForCheckoutAt: row.readyForCheckoutAt,
+      cancelledAt: row.cancelledAt,
+      cancelledByKind: row.cancelledByKind,
+      cancelReasonCode: row.cancelReasonCode,
+      cancelReasonText: row.cancelReasonText,
+      noticeMinutes: row.noticeMinutes,
+      lateCancellation: row.lateCancellation,
+      noShowMarkedAt: row.noShowMarkedAt,
+      policyVersionId: row.policyVersionId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -165,6 +195,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       arrivedAt: null,
       seatedAt: null,
       readyForCheckoutAt: null,
+      cancelledAt: null,
+      cancelledByKind: null,
+      cancelReasonCode: null,
+      cancelReasonText: null,
+      noticeMinutes: null,
+      lateCancellation: null,
+      noShowMarkedAt: null,
+      policyVersionId: null,
       preArrivalStatus: null,
       createdAt: now,
       updatedAt: now,
@@ -267,12 +305,44 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           key !== 'enqueueWaitlist' &&
           key !== 'resolveWaitlist' &&
           key !== 'requireWantsEarlier' &&
-          key !== 'expectStatus',
+          key !== 'expectStatus' &&
+          key !== 'completedExit' &&
+          key !== 'audit' &&
+          key !== 'cancel' &&
+          key !== 'clearCancellation',
       ),
     );
     Object.assign(row, definedPatch, {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
+    // DX-279: mismo cálculo que el repositorio de Prisma, contra la política
+    // de la sede de la cita en el doble (`policies`).
+    if (patch.clearCancellation) {
+      Object.assign(row, {
+        cancelledAt: null,
+        cancelledByKind: null,
+        cancelReasonCode: null,
+        cancelReasonText: null,
+        noticeMinutes: null,
+        lateCancellation: null,
+      });
+    }
+    if (patch.cancel) {
+      const policy = this.policies.get(row.locationId) ?? null;
+      Object.assign(row, {
+        cancelledAt: patch.cancel.at,
+        cancelledByKind: patch.cancel.byKind,
+        cancelReasonCode: patch.cancel.reasonCode,
+        cancelReasonText: patch.cancel.reasonText,
+        ...computeCancellationNotice({
+          start: row.start,
+          cancelledAt: patch.cancel.at,
+          byKind: patch.cancel.byKind,
+          noticeHours: policy?.noticeHours ?? null,
+          attended: patch.cancel.attended,
+        }),
+      });
+    }
     const enqueued =
       patch.enqueueWaitlist && this.waitlist
         ? this.waitlist.enqueueFromAppointment(
@@ -287,8 +357,18 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
             patch.resolveWaitlist.resolvedById,
           )
         : null;
+    if (patch.completedExit) this.completedExits.push(patch.completedExit);
     return Promise.resolve({
       appointment: this.toEntity(row),
+      ...(patch.completedExit
+        ? {
+            completedExit: {
+              reversalId: `reversal-${this.completedExits.length}`,
+              reason: patch.completedExit.reason,
+              visitMinimums: [],
+            },
+          }
+        : {}),
       waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
       reopenedWaitlistEntryId:
         enqueued && enqueued.reopened ? enqueued.id : null,
@@ -313,6 +393,15 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return Promise.resolve(this.toEntity(row));
   }
 
+  /** DX-279: política vigente de cada sede (test helper). */
+  readonly policies = new Map<string, CurrentPolicyRef>();
+
+  currentCancellationPolicy(
+    locationId: string,
+  ): Promise<CurrentPolicyRef | null> {
+    return Promise.resolve(this.policies.get(locationId) ?? null);
+  }
+
   /** Test helper: nombres de los profesionales que devuelve `listInClinic`. */
   readonly providerNames = new Map<string, string>();
 
@@ -328,5 +417,75 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         providerName: this.providerNames.get(r.providerId) ?? null,
       }));
     return Promise.resolve(items);
+  }
+
+  /** DX-273: lo que el repositorio recibió para sacar citas de COMPLETED. */
+  readonly completedExits: NonNullable<
+    UpdateAppointmentRepoInput['completedExit']
+  >[] = [];
+
+  /** DX-273: tratamientos reservados en otra cita, por cita (test helper). */
+  readonly reservedElsewhere = new Map<string, PlanItemReservedElsewhere[]>();
+
+  /** DX-273: las llamadas a «Traer a esta cita». */
+  readonly claims: {
+    appointmentId: string;
+    planItemId: string;
+    audit: AuditRequestContext;
+  }[] = [];
+
+  findPlanItemsReservedElsewhere(
+    appointmentIds: readonly string[],
+  ): Promise<Map<string, PlanItemReservedElsewhere[]>> {
+    return Promise.resolve(
+      new Map(
+        appointmentIds.flatMap((id) => {
+          const items = this.reservedElsewhere.get(id) ?? [];
+          return items.length ? [[id, items] as const] : [];
+        }),
+      ),
+    );
+  }
+
+  claimPlanItem(
+    appointmentId: string,
+    planItemId: string,
+    audit: AuditRequestContext,
+  ): Promise<PlanItemClaim> {
+    const row = this.rows.find(
+      (r) => r.id === appointmentId && r.deletedAt === null,
+    );
+    if (!row) return Promise.reject(new Error('not found'));
+    const items = this.reservedElsewhere.get(appointmentId) ?? [];
+    const moved = items.find((i) => i.planItemId === planItemId);
+    // DX-288: como el repositorio real, no se trae desde una cita de hoy
+    // con el paciente en la clínica (zona por defecto: el fake no tiene
+    // sedes con zona).
+    const holder = moved && this.rows.find((r) => r.id === moved.appointmentId);
+    if (
+      holder &&
+      heldInClinicToday(holder, DEFAULT_BUSINESS_HOURS_TIMEZONE, new Date())
+    )
+      return Promise.reject(
+        new ConflictException(PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE),
+      );
+    this.claims.push({ appointmentId, planItemId, audit });
+    this.reservedElsewhere.set(
+      appointmentId,
+      items.filter((i) => i.planItemId !== planItemId),
+    );
+    // Las demás citas con el ítem ven ahora la reserva en esta.
+    for (const [id, list] of this.reservedElsewhere)
+      if (id !== appointmentId)
+        this.reservedElsewhere.set(
+          id,
+          list.map((i) =>
+            i.planItemId === planItemId ? { ...i, appointmentId } : i,
+          ),
+        );
+    return Promise.resolve({
+      appointment: this.toEntity(row),
+      fromAppointmentId: moved?.appointmentId ?? null,
+    });
   }
 }

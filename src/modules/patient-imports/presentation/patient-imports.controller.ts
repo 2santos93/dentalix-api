@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   HttpCode,
@@ -32,9 +33,11 @@ import {
   ApiOperation,
   ApiPayloadTooLargeResponse,
   ApiProduces,
+  ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { readFile } from 'node:fs/promises';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
@@ -45,6 +48,12 @@ import { PATIENT_IMPORT_ROLES } from '../../auth/presentation/guards/clinic-role
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
+import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
+import {
+  UPLOAD_BUSY_MESSAGE,
+  UploadSlotInterceptor,
+} from '../../../shared/storage/upload-slots';
 import {
   FILE_TOO_LARGE_MESSAGE,
   IMPORT_FIELD_KEYS,
@@ -54,21 +63,31 @@ import {
 import type { ColumnMapping } from '../domain/column-mapping';
 import {
   ACTIVE_IMPORT_MESSAGE,
+  BALANCES_NOT_EDITABLE_MESSAGE,
+  BALANCE_REPORT_GONE_MESSAGE,
   NOT_FOUND_MESSAGE,
   PatientImportsService,
   REPORT_GONE_MESSAGE,
   type BatchDetail,
   type InspectResult,
+  type UploadedFile as ImportUpload,
 } from '../application/patient-imports.use-cases';
 import {
   ConfirmPatientImportDto,
   CreatePatientImportDto,
+  UploadBalancesDto,
   ListPatientImportsQueryDto,
   PatientImportBatchDetailDto,
   PatientImportInspectDto,
   PatientImportListDto,
 } from './dto/patient-import.dto';
 import { ImportMultipartErrorsFilter } from './import-multipart-errors.filter';
+import {
+  IMPORT_READ_BUSY_MESSAGE,
+  IMPORT_READ_CLINIC_BUSY_MESSAGE,
+  ImportReadSlotInterceptor,
+  ImportUploadSlotGuard,
+} from './import-read-slots';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
@@ -85,6 +104,12 @@ const LOCATION_HEADER = {
 };
 
 const FILE_INTERCEPTOR = FileInterceptor('file', {
+  // SEC-046: el cuerpo se recibe con un semáforo propio y los plazos de las
+  // subidas (ImportUploadSlotGuard, DX-259) a un temporal en disco (lo borra
+  // UploadSlotInterceptor al terminar, también con error o si el cliente
+  // aborta), no a un Buffer. La plaza de LECTURA (ImportReadSlotInterceptor)
+  // se toma después, con el fichero ya en disco.
+  dest: UPLOAD_TEMP_DIR,
   defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_IMPORT_BYTES,
@@ -100,6 +125,25 @@ const FILE_BODY = {
   description:
     'CSV (UTF-8, Latin-1 o UTF-16; separador «,» «;» o tabulador) o .xlsx; hasta 5 MB y 10.000 filas',
 } as const;
+
+const READ_BUSY_RESPONSE = {
+  description: `${UPLOAD_BUSY_MESSAGE} (semáforo de subidas, antes de recibir el cuerpo) / ${IMPORT_READ_CLINIC_BUSY_MESSAGE} / ${IMPORT_READ_BUSY_MESSAGE} (con el fichero ya recibido). Siempre con Retry-After. SEC-046: como mucho 2 lecturas a la vez por réplica y 1 por clínica (configurable).`,
+};
+
+/**
+ * SEC-046: el fichero que multer dejó en el temporal, ya en memoria para el
+ * lector. Se llama dentro del handler, con la plaza de lectura tomada.
+ */
+async function loadUpload(
+  file: Express.Multer.File | undefined,
+): Promise<ImportUpload | undefined> {
+  if (!file?.path) return undefined;
+  return {
+    originalname: file.originalname,
+    size: file.size,
+    buffer: await readFile(file.path),
+  };
+}
 
 const INVALID_MAPPING_MESSAGE =
   'El mapeo de columnas no es válido: debe ser un JSON { campo: cabecera }.';
@@ -134,8 +178,9 @@ export function parseMappingField(
 
 /**
  * Importación de pacientes desde CSV/XLSX (DX-107). Solo ADMIN. El fichero
- * no se guarda: se lee en memoria, se guarda su hash y lo necesario para el
- * informe. `GET /:id` no se audita a propósito: la pantalla lo consulta cada
+ * no se guarda: multer lo deja en un temporal en disco que se borra al
+ * terminar, se lee con una plaza de lectura (SEC-046) y se guarda su hash y
+ * lo necesario para el informe. `GET /:id` no se audita a propósito: la pantalla lo consulta cada
  * pocos segundos mientras importa; su informe (`errors.csv`) sí.
  */
 @ApiTags('patient-imports')
@@ -170,6 +215,23 @@ export class PatientImportsController {
     return this.imports.template();
   }
 
+  @Get('balances-template')
+  @ApiOperation({
+    summary: 'Plantilla CSV de la hoja de saldos («Saldo migrado», DX-262)',
+    description:
+      'numero_documento, importe, moneda, fecha_antiguedad (opcional) y concepto (opcional). UTF-8 con BOM; una fila de ejemplo ficticia que hay que borrar.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Plantilla CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="plantilla-saldos.csv"')
+  balanceTemplate(): string {
+    return this.imports.balanceTemplate();
+  }
+
   @Post('inspect')
   @HttpCode(200)
   @ApiOperation({
@@ -191,11 +253,18 @@ export class PatientImportsController {
       'Archivo vacío, de otro formato, con cabeceras repetidas o con más de 10.000 filas',
   })
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
-  @UseInterceptors(FILE_INTERCEPTOR)
-  inspect(
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportUploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
+  async inspect(
     @UploadedFile() file: Express.Multer.File | undefined,
   ): Promise<InspectResult> {
-    return this.imports.inspect(file);
+    return this.imports.inspect(await loadUpload(file));
   }
 
   @Audit({
@@ -235,14 +304,21 @@ export class PatientImportsController {
     description: 'Archivo o mapeo inválidos (mensaje en español)',
   })
   @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
-  @UseInterceptors(FILE_INTERCEPTOR)
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportUploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
   async create(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() dto: CreatePatientImportDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<BatchDetail> {
     return this.imports.dryRun(
-      file,
+      await loadUpload(file),
       {
         columns: parseMappingField(dto.mapping),
         defaultDocType: dto.defaultDocType,
@@ -307,6 +383,141 @@ export class PatientImportsController {
     action: 'UPDATE',
     resource: 'PATIENT_IMPORT_BATCH',
     resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_VALIDATED',
+    importBatch: true,
+  })
+  @Post(':id/balances')
+  @ApiOperation({
+    summary:
+      'Hoja de saldos del lote (DX-262): validar el «Saldo migrado» (dry-run)',
+    description:
+      'Solo con el lote validado y sin confirmar. Valida cada fila (documento del paciente en la clínica o en el archivo de pacientes del lote, importe > 0, moneda admitida, fecha de antigüedad no futura, concepto ≤ 200), suma las filas del mismo paciente y moneda y devuelve el total por moneda del archivo y de lo que se importará. NO crea ningún saldo: se importan al confirmar el lote, después de los pacientes. Volver a subirla la reemplaza.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: FILE_BODY,
+        addToExisting: {
+          type: 'string',
+          enum: ['true', 'false'],
+          description:
+            '«Añadir aunque ya tenga saldo migrado» (QA D1). Por defecto false: un paciente con un saldo migrado vivo en esa moneda de otro lote no recibe otro (error de la fila con el importe, el lote y el corte del existente).',
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({ type: PatientImportBatchDetailDto })
+  @ApiBadRequestResponse({
+    description:
+      'Archivo vacío, de otro formato, sin las columnas de documento, importe o moneda; addToExisting que no es true/false',
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: BALANCES_NOT_EDITABLE_MESSAGE })
+  @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportUploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
+  async balances(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: UploadBalancesDto,
+  ): Promise<BatchDetail> {
+    return this.imports.dryRunBalances(
+      id,
+      await loadUpload(file),
+      dto.addToExisting === 'true',
+    );
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_REMOVED',
+    importBatch: true,
+  })
+  @Delete(':id/balances')
+  @ApiOperation({
+    summary: 'Quitar la hoja de saldos de un lote aún sin confirmar (DX-262)',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: BALANCES_NOT_EDITABLE_MESSAGE })
+  removeBalances(@Param('id', ParseUUIDPipe) id: string): Promise<BatchDetail> {
+    return this.imports.removeBalances(id);
+  }
+
+  @Audit({
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCE_ERRORS',
+  })
+  @Get(':id/balances/errors.csv')
+  @ApiOperation({
+    summary: 'Informe de errores y avisos de la hoja de saldos (CSV, DX-262)',
+    description:
+      'Fila, columna, tipo, motivo y valor. UTF-8 con BOM; fórmulas neutralizadas (inyección CSV).',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Fichero CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiGoneResponse({ description: BALANCE_REPORT_GONE_MESSAGE })
+  async balanceErrors(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const report = await this.imports.balanceErrorsCsv(id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${report.fileName}"`,
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    return report.csv;
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_BALANCES_UNDONE',
+    importBatch: true,
+  })
+  @Post(':id/balances/undo')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Retirar solo los saldos migrados del lote (DX-262)',
+    description:
+      'Retira en blando los «Saldo migrado» vivos del lote aunque sus pacientes ya tengan citas u otra actividad (el lote sigue importado). Se niega (409) si alguno tiene abonos vivos: hay que anularlos antes.',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({
+    description: 'El lote no está terminado o algún saldo tiene abonos',
+  })
+  undoBalances(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<BatchDetail> {
+    return this.imports.undoBalances(id, req.user.sub);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
     reason: 'IMPORT_CONFIRMED',
     importBatch: true,
   })
@@ -315,7 +526,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Paso 3: confirmar e importar en segundo plano',
     description:
-      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos (Ley 1581) registrada: la ficha la marca pendiente.',
+      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando): primero los pacientes y después, si el lote trae hoja de saldos, un «Saldo migrado» por paciente y moneda (DX-262). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos (Ley 1581) registrada: la ficha la marca pendiente.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
@@ -342,7 +553,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Deshacer el lote',
     description:
-      'Retira en blando SOLO los pacientes que creó el lote y revierte los campos que rellenó (si siguen con el valor del lote). Se niega (409) si alguno de los creados ya tiene citas, historia clínica, planes, pagos u otros datos.',
+      'Retira en blando SOLO los pacientes que creó el lote, revierte los campos que rellenó (si siguen con el valor del lote) y retira sus saldos migrados (DX-262). Se niega (409) si alguno de los creados ya tiene citas, historia clínica, planes, pagos, saldos de otra importación u otros datos, o si algún saldo migrado del lote tiene abonos imputados.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })

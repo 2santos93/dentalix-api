@@ -97,7 +97,18 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     progress?: Record<string, unknown>;
     undoneCreated?: unknown;
     undoneFilled?: unknown;
+    balances?: {
+      fileSha256?: unknown;
+      totalRows?: unknown;
+      errorRows?: unknown;
+      validTotals?: unknown;
+      progress?: Record<string, unknown>;
+      addToExisting?: unknown;
+      undoneCount?: unknown;
+      undoneTotals?: unknown;
+    } | null;
   };
+  const sheet = b.balances ?? undefined;
   return {
     fileSha256: b.fileSha256,
     mode: b.duplicateMode,
@@ -109,6 +120,47 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     updated: b.progress?.updatedCount,
     undoneCreated: b.undoneCreated,
     undoneFilled: b.undoneFilled,
+    // DX-262: la hoja de saldos y su total por moneda (lo que se importa).
+    balanceFileSha256: sheet?.fileSha256,
+    balanceRows: sheet?.totalRows,
+    balanceErrors: sheet?.errorRows,
+    balancesCreated: sheet?.progress?.created,
+    balancesUndone: sheet?.undoneCount,
+    balanceTotals: sheet?.validTotals,
+    // Revisión M5: lo que retiró de verdad el deshacer.
+    balanceUndoneTotals: sheet?.undoneTotals,
+    // QA D1: si se pidió añadir a quien ya tenía saldo, y cuántos no se crearon.
+    balanceAddToExisting: sheet?.addToExisting,
+    balancesExisting: sheet?.progress?.existing,
+  };
+}
+
+/** DX-300: códigos de los avisos de la receta emitida y si se confirmaron. */
+function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    safetyRulesVersion?: unknown;
+    safetyAlerts?: unknown;
+    safetyOverrideReason?: unknown;
+  };
+  if (!Array.isArray(b.safetyAlerts)) return null;
+  const codes = (severity: string) =>
+    (b.safetyAlerts as unknown[]).flatMap((a) =>
+      typeof a === 'object' &&
+      a !== null &&
+      'severity' in a &&
+      a.severity === severity &&
+      'code' in a
+        ? [a.code]
+        : [],
+    );
+  return {
+    rulesVersion: b.safetyRulesVersion,
+    blocking: codes('BLOCKING'),
+    info: codes('INFO'),
+    overridden:
+      typeof b.safetyOverrideReason === 'string' &&
+      b.safetyOverrideReason !== '',
   };
 }
 
@@ -161,6 +213,9 @@ export function buildAuditDraft(
         : {}),
       ...(options.importBatch
         ? { importBatch: importBatchOf(responseBody) }
+        : {}),
+      ...(options.prescriptionSafety
+        ? { prescriptionSafety: prescriptionSafetyOf(responseBody) }
         : {}),
     }),
   };

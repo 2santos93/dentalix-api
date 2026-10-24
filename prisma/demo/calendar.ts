@@ -303,3 +303,93 @@ export function planInClinicToday(
   }
   return planned;
 }
+
+/** DX-014: una cita atendida de la historia de «Comparar sedes». */
+export interface PlannedHistoryVisit {
+  month: 'previous' | 'current';
+  /** Días respecto de hoy (Bogotá): siempre en el pasado (≥ 1). */
+  daysAgo: number;
+  location: DemoLocationKey;
+  /** Minutos de pared desde las 00:00 en Bogotá. */
+  startMinute: number;
+  durationMinutes: number;
+  /** Índice del paciente en `DEMO_PATIENTS`. */
+  patientIndex: number;
+  /** Código del procedimiento del catálogo que se realiza en la cita. */
+  procedure: string;
+}
+
+/** Plantilla de un día de la historia por sede (ver `DEMO_COMPARISON_HISTORY`). */
+export interface HistoryTemplate {
+  patientIndexes: readonly number[];
+  /** [inicio en minutos de pared, duración] por sede: fuera de SLOT_TEMPLATES. */
+  slots: Record<DemoLocationKey, readonly (readonly [number, number])[]>;
+  procedures: Record<'previous' | 'current', readonly string[]>;
+}
+
+/**
+ * DX-014: un día con actividad en cada sede en el MES ANTERIOR y en el ACTUAL
+ * (calendario de Bogotá), para que «Comparar sedes» compare algo cualquier
+ * día del mes. El calendario normal (lunes de la semana pasada → sábado de la
+ * próxima) puede no tocar el mes anterior.
+ *  - Mes anterior: el mismo día del mes que hoy (o su último día), y si es
+ *    domingo (cerrado), el sábado antes (o el lunes después, si es el día 1).
+ *    Queda entre ~28 y ~31 días atrás: dentro de los 60 días de los abonos.
+ *  - Mes actual: el primer día abierto (lunes a sábado) ANTES de hoy. Si no hay
+ *    (hoy es el primer día abierto del mes), no se siembra: el mes solo tiene
+ *    lo de hoy, y la demo no depende de la hora de la corrida.
+ * Los huecos van fuera de las plantillas del calendario, así que el
+ * profesional y los pacientes no se pisan con él.
+ */
+export function planComparisonHistory(
+  now: Date,
+  template: HistoryTemplate,
+): PlannedHistoryVisit[] {
+  const today = bogotaDay(now, 0);
+  const date = new Date(today.utcMidnight);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const dayOfMonth = date.getUTCDate();
+  const daysAgoOf = (utcMidnight: number) =>
+    Math.round((today.utcMidnight - utcMidnight) / DAY_MS);
+  const weekdayOf = (utcMidnight: number) => new Date(utcMidnight).getUTCDay();
+
+  const anchors: { month: 'previous' | 'current'; daysAgo: number }[] = [];
+  const lastOfPrevious = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  let previousDay = Math.min(dayOfMonth, lastOfPrevious);
+  if (weekdayOf(Date.UTC(year, month - 1, previousDay)) === 0) {
+    previousDay += previousDay === 1 ? 1 : -1;
+  }
+  anchors.push({
+    month: 'previous',
+    daysAgo: daysAgoOf(Date.UTC(year, month - 1, previousDay)),
+  });
+  for (let day = 1; day < dayOfMonth; day++) {
+    const utcMidnight = Date.UTC(year, month, day);
+    if (weekdayOf(utcMidnight) === 0) continue;
+    anchors.push({ month: 'current', daysAgo: daysAgoOf(utcMidnight) });
+    break;
+  }
+
+  const visits: PlannedHistoryVisit[] = [];
+  for (const anchor of anchors) {
+    let patient = 0;
+    for (const location of ['principal', 'norte'] as const) {
+      template.slots[location].forEach(([startMinute, durationMinutes], i) => {
+        visits.push({
+          ...anchor,
+          location,
+          startMinute,
+          durationMinutes,
+          patientIndex:
+            template.patientIndexes[patient++ % template.patientIndexes.length],
+          procedure:
+            template.procedures[anchor.month][
+              i % template.procedures[anchor.month].length
+            ],
+        });
+      });
+    }
+  }
+  return visits;
+}

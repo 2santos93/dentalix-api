@@ -79,6 +79,8 @@ describe('buildReceiptSnapshot (DX-136)', () => {
         optionLabel: 'Opción A: implante',
         createdAt: '2026-09-01T15:00:00.000Z',
       },
+      // DX-262: un abono a un plan no tiene saldo migrado.
+      openingBalance: null,
       planBalance: {
         currency: 'COP',
         billable: 900000,

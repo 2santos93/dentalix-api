@@ -10,6 +10,7 @@ import type {
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
 } from '../../domain/ports/prescription-repository.port';
+import { emptySafetyAnamnesis } from '../../domain/prescription-safety';
 import type { PrescriptionTemplate } from '../../domain/entities/prescription-template.entity';
 import type {
   PrescriptionTemplateRepoInput,
@@ -54,7 +55,7 @@ export function makePatient(
     docType: 'CC',
     docNumber: '1020304050',
     birthDate: new Date('1985-03-02T00:00:00.000Z'),
-    allergies: [],
+    anamnesis: emptySafetyAnamnesis(),
     ...overrides,
   };
 }

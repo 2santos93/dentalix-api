@@ -5,6 +5,7 @@ import {
 } from '../../../../shared/time/civil-day';
 import { discountPercent } from '../../domain/discount-policy';
 import {
+  type AgreementReductionTotal,
   DISCOUNT_REPORT_REPOSITORY,
   type DiscountReportQuery,
   type DiscountReportRepository,
@@ -41,6 +42,8 @@ export interface DiscountReportRowView extends DiscountReportRow {
    * catálogo si el precio se rebajó; si no, el precio). SEC-041.
    */
   percent: number;
+  /** SEC-047: % de la rebaja de convenio sobre el precio de catálogo. */
+  agreementPercent: number;
 }
 
 export interface DiscountReport {
@@ -49,6 +52,9 @@ export interface DiscountReport {
   /** Sede del filtro (parámetro o cabecera); null = toda la clínica. */
   scope: { location: { id: string; name: string } | null };
   totals: DiscountReportTotalView[];
+  /** SEC-047: rebajas de convenio por moneda, aparte de `totals`. */
+  agreementTotals: AgreementReductionTotal[];
+  /** Líneas del detalle (descuentos y rebajas de convenio). */
   items: DiscountReportRowView[];
   total: number;
   page: number;
@@ -104,20 +110,21 @@ export class GetDiscountReportUseCase {
       input.pageSize ?? DISCOUNT_REPORT_DEFAULT_PAGE_SIZE,
       DISCOUNT_REPORT_MAX_PAGE_SIZE,
     );
-    const [totals, rows] = await Promise.all([
-      this.repo.totals(query),
+    const [summary, rows] = await Promise.all([
+      this.repo.summary(query),
       this.repo.rows(query, { offset: (page - 1) * pageSize, limit: pageSize }),
     ]);
     return {
       from: query.from,
       to: query.to,
       scope: { location },
-      totals: totals.map((t) => ({
+      totals: summary.totals.map((t) => ({
         ...t,
         percentOfGross: discountPercent(t.gross, t.discount),
       })),
+      agreementTotals: summary.agreementTotals,
       items: rows.map(withPercent),
-      total: totals.reduce((sum, t) => sum + t.items, 0),
+      total: summary.rows,
       page,
       pageSize,
     };
@@ -136,5 +143,9 @@ function withPercent(row: DiscountReportRow): DiscountReportRowView {
   return {
     ...row,
     percent: discountPercent(row.price + row.priceReduction, row.discount),
+    agreementPercent:
+      row.basePrice === null
+        ? 0
+        : discountPercent(row.basePrice, row.agreementReduction),
   };
 }

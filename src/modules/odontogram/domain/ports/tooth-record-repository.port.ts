@@ -92,4 +92,20 @@ export interface ToothRecordRepository {
 
   /** Zona IANA de la sede activa (o la por defecto): corta los días de `asOf`. */
   clinicTimeZone(): Promise<string>;
+
+  /**
+   * DX-207: ¿la prestación está en el catálogo de ESTA clínica (bajo RLS, sin
+   * borrar)? `tooth_records.catalogItemId` no tiene FK: sin esto se guardaba
+   * una referencia al catálogo de otra clínica.
+   */
+  catalogItemExists(catalogItemId: string): Promise<boolean>;
+
+  /**
+   * DX-207: ¿la evolución es de ESTE paciente en ESTA clínica (bajo RLS, sin
+   * borrar)? `tooth_records.clinicalEntryId` tampoco tiene FK.
+   */
+  clinicalEntryOfPatientExists(
+    patientId: string,
+    clinicalEntryId: string,
+  ): Promise<boolean>;
 }

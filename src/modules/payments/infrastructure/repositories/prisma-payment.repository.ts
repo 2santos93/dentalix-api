@@ -13,8 +13,14 @@ import {
 import {
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
   isSameRequest,
+  paymentTargetKey,
   type IdempotentPayment,
 } from '../../domain/idempotency';
+import {
+  OPENING_BALANCE_NOT_FOUND_MESSAGE,
+  openingBalanceCurrencyMessage,
+  openingBalanceOverpaidMessage,
+} from '../../domain/opening-balance-payment';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   loadLocationTimeZones,
@@ -34,6 +40,7 @@ import {
   CreatePaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
+  OpeningBalanceTarget,
   PaymentRepository,
   PaymentVoidAudit,
   PaymentVoidTarget,
@@ -42,6 +49,7 @@ import {
 import { Payment } from '../../domain/entities/payment.entity';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 import { formatReceiptNumber } from '../../domain/receipt-number';
+import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
 import { issuePaymentReceipt } from '../receipts/issue-payment-receipt';
 import {
   assignPaymentToCashSession,
@@ -84,6 +92,7 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     id: payment.id,
     tenantId: payment.tenantId,
     treatmentPlanId: payment.treatmentPlanId,
+    openingBalanceId: payment.openingBalanceId,
     patientId: payment.patientId,
     amount: payment.amount.toNumber(),
     currency: payment.currency,
@@ -126,6 +135,14 @@ const CASH_PAYMENT_SELECT = {
       patient: { select: { id: true, firstName: true, lastName: true } },
     },
   },
+  // DX-262: un abono contra un saldo migrado no tiene plan.
+  openingBalance: {
+    select: {
+      id: true,
+      concept: true,
+      patient: { select: { id: true, firstName: true, lastName: true } },
+    },
+  },
 } satisfies Prisma.PaymentSelect;
 
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
@@ -161,17 +178,34 @@ function mapToCashPayment(
     method: row.method,
     notes: row.notes,
     location: { id: row.location.id, name: row.location.name },
-    // `Payment.patientId` es la copia desnormalizada de `plan.patientId` (ver
-    // RecordPaymentUseCase), así que el paciente del plan ES el del abono.
-    patient: {
-      id: row.plan.patient.id,
-      fullName: `${row.plan.patient.firstName} ${row.plan.patient.lastName}`,
-    },
-    treatmentPlan: {
-      id: row.plan.id,
-      status: row.plan.status,
-      createdAt: row.plan.createdAt,
-    },
+    // `Payment.patientId` es la copia desnormalizada del paciente del plan (o
+    // del saldo migrado, DX-262): las FK compuestas lo garantizan.
+    patient: patientOfCashRow(row),
+    treatmentPlan: row.plan
+      ? {
+          id: row.plan.id,
+          status: row.plan.status,
+          createdAt: row.plan.createdAt,
+        }
+      : null,
+    openingBalance: row.openingBalance
+      ? { id: row.openingBalance.id, concept: row.openingBalance.concept }
+      : null,
+  };
+}
+
+function patientOfCashRow(row: PrismaCashPayment): {
+  id: string;
+  fullName: string;
+} {
+  const patient = row.plan?.patient ?? row.openingBalance?.patient;
+  if (!patient) {
+    // payments_target_check: todo abono tiene plan o saldo migrado.
+    throw new Error(`Abono ${row.id} sin plan ni saldo migrado`);
+  }
+  return {
+    id: patient.id,
+    fullName: `${patient.firstName} ${patient.lastName}`,
   };
 }
 
@@ -311,7 +345,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
             input.requestFingerprint !== undefined &&
             !isSameRequest(
               original,
-              input.treatmentPlanId,
+              paymentTargetKey({
+                treatmentPlanId: input.treatmentPlanId,
+                openingBalanceId: input.openingBalanceId ?? null,
+              }),
               input.requestFingerprint,
             )
           ) {
@@ -337,20 +374,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // DX-109 (BE-013): en el MISMO SELECT bloqueante se lee el estado: un
       // plan rechazado o cancelado no admite abonos (409), y nadie puede
       // rechazarlo o cancelarlo entre esta lectura y el INSERT. COMPLETED sí.
-      const [plan] = await tx.$queryRaw<
-        { id: string; status: TreatmentPlanStatus }[]
-      >`
-        SELECT "id", "status" FROM "treatment_plans"
-         WHERE "id" = ${input.treatmentPlanId}::uuid
-           AND "patientId" = ${input.patientId}::uuid
-           AND "deletedAt" IS NULL
-         FOR SHARE`;
-      if (!plan) {
-        throw new NotFoundException('Treatment plan not found');
-      }
-      if (!isPlanBillable(plan.status)) {
-        throw new ConflictException(notBillableMessage(plan.status));
-      }
+      const targetBalance = input.openingBalanceId
+        ? await this.lockOpeningBalance(tx, input)
+        : (await this.lockPlan(tx, input), null);
       // Sede del request si el cliente la fijó (X-Location-Id, ya validada
       // contra esta clínica); si no, la de escritura de la sesión: la sede por
       // defecto sin restricción (lo de siempre) o la primera permitida
@@ -383,6 +409,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           tenantId,
           cashSessionId: cash.cashSessionId,
           treatmentPlanId: input.treatmentPlanId,
+          openingBalanceId: input.openingBalanceId ?? null,
           patientId: input.patientId,
           amount: input.amount,
           currency: input.currency,
@@ -412,6 +439,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           tenantId,
           locationId,
           treatmentPlanId: created.treatmentPlanId,
+          openingBalanceId: created.openingBalanceId,
           patientId: created.patientId,
           amount: entity.amount,
           currency: created.currency,
@@ -420,11 +448,90 @@ export class PrismaPaymentRepository implements PaymentRepository {
           paidOn: entity.paidOn,
           createdById: created.createdById,
         },
-        input.receiptPlanBalance,
+        targetBalance ?? input.receiptPlanBalance,
       );
       return { ...entity, receiptNumber };
     });
     return payment;
+  }
+
+  /**
+   * DB-014 / DX-109: el plan se vuelve a validar DENTRO de la transacción del
+   * INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
+   * compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
+   * comprobación y el alta (la FK compuesta no mira `deletedAt`). En el MISMO
+   * SELECT se lee el estado: un plan rechazado o cancelado no admite abonos
+   * (409). COMPLETED sí.
+   */
+  private async lockPlan(
+    tx: Prisma.TransactionClient,
+    input: CreatePaymentRepoInput,
+  ): Promise<void> {
+    const [plan] = await tx.$queryRaw<
+      { id: string; status: TreatmentPlanStatus }[]
+    >`
+      SELECT "id", "status" FROM "treatment_plans"
+       WHERE "id" = ${input.treatmentPlanId}::uuid
+         AND "patientId" = ${input.patientId}::uuid
+         AND "deletedAt" IS NULL
+       FOR SHARE`;
+    if (!plan) {
+      throw new NotFoundException('Treatment plan not found');
+    }
+    if (!isPlanBillable(plan.status)) {
+      throw new ConflictException(notBillableMessage(plan.status));
+    }
+  }
+
+  /**
+   * DX-262: el saldo migrado del abono, vivo y del paciente, bloqueado FOR
+   * UPDATE hasta el COMMIT (dos abonos simultáneos al mismo saldo se ponen en
+   * fila y el segundo ve el primero), en su moneda y sin pasarse de lo
+   * pendiente (400). Devuelve el saldo tras el abono para el recibo.
+   */
+  private async lockOpeningBalance(
+    tx: Prisma.TransactionClient,
+    input: CreatePaymentRepoInput,
+  ): Promise<ReceiptPlanBalance> {
+    const tenantId = this.requireTenantId();
+    const [balance] = await tx.$queryRaw<
+      { amount: Prisma.Decimal; currency: string }[]
+    >`
+      SELECT "amount", "currency" FROM "opening_balances"
+       WHERE "tenantId" = ${tenantId}::uuid
+         AND "id" = ${input.openingBalanceId}::uuid
+         AND "patientId" = ${input.patientId}::uuid
+         AND "voidedAt" IS NULL
+       FOR UPDATE`;
+    if (!balance) {
+      throw new NotFoundException(OPENING_BALANCE_NOT_FOUND_MESSAGE);
+    }
+    if (balance.currency !== input.currency) {
+      throw new BadRequestException(
+        openingBalanceCurrencyMessage(balance.currency),
+      );
+    }
+    const [{ paid }] = await tx.$queryRaw<{ paid: Prisma.Decimal | null }[]>`
+      SELECT sum("amount") AS "paid" FROM "payments"
+       WHERE "tenantId" = ${tenantId}::uuid
+         AND "openingBalanceId" = ${input.openingBalanceId}::uuid
+         AND "currency" = ${balance.currency}
+         AND "deletedAt" IS NULL`;
+    const amountCents = Math.round(balance.amount.toNumber() * 100);
+    const paidCents = Math.round((paid?.toNumber() ?? 0) * 100);
+    const pendingCents = amountCents - paidCents;
+    const thisCents = Math.round(input.amount * 100);
+    if (thisCents > pendingCents) {
+      throw new BadRequestException(
+        openingBalanceOverpaidMessage(pendingCents / 100, balance.currency),
+      );
+    }
+    return {
+      currency: balance.currency,
+      billable: amountCents / 100,
+      paid: (paidCents + thisCents) / 100,
+      balance: (pendingCents - thisCents) / 100,
+    };
   }
 
   async resolvePaidOn(paidAt: Date | { civilDate: string }): Promise<string> {
@@ -478,6 +585,44 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const payments = await tx.payment.findMany({
         where: { treatmentPlanId, deletedAt: null },
+        include: PAYMENT_INCLUDE,
+        orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      });
+      return this.toEntities(tx, payments);
+    });
+  }
+
+  async findOpeningBalance(id: string): Promise<OpeningBalanceTarget | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const balance = await tx.openingBalance.findFirst({
+        where: { id, tenantId, voidedAt: null },
+        select: { id: true, patientId: true, currency: true, amount: true },
+      });
+      if (!balance) return null;
+      const paid = await tx.payment.aggregate({
+        where: {
+          tenantId,
+          openingBalanceId: id,
+          currency: balance.currency,
+          deletedAt: null,
+        },
+        _sum: { amount: true },
+      });
+      return {
+        id: balance.id,
+        patientId: balance.patientId,
+        currency: balance.currency,
+        amount: balance.amount.toNumber(),
+        paid: paid._sum.amount?.toNumber() ?? 0,
+      };
+    });
+  }
+
+  async listByOpeningBalance(openingBalanceId: string): Promise<Payment[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const payments = await tx.payment.findMany({
+        where: { openingBalanceId, deletedAt: null },
         include: PAYMENT_INCLUDE,
         orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });

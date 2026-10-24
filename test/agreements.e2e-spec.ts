@@ -23,7 +23,7 @@ const raw = new PrismaClient({
 interface AgreementBody {
   id: string;
   name: string;
-  payer: { id: string; name: string };
+  payer: { id: string; name: string; type: string };
   kind: 'PERCENT_DISCOUNT' | 'PRICE_LIST';
   percent: number | null;
   percentByCategory: Record<string, number> | null;
@@ -615,9 +615,11 @@ describe('Convenios (e2e, DX-105)', () => {
       const res = await admin(api().patch(`/api/v1/agreements/${a.id}`))
         .send({ payerId: second })
         .expect(200);
+      // SEC-047: el pagador viaja con su tipo.
       expect((res.body as AgreementBody).payer).toEqual({
         id: second,
         name: 'Segundo pagador',
+        type: 'EMPRESA',
       });
     });
 

@@ -8,7 +8,7 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
-import { resetDatabase } from './support/e2e-fixtures';
+import { resetDatabase, STAFF_CANCELLATION } from './support/e2e-fixtures';
 
 // DX-005: enlace firmado de confirmación de cita, contra Postgres real (RLS +
 // FK compuestas). Cubre: generación con permisos por rol, solo hash en BD,
@@ -304,7 +304,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         .patch(`/api/v1/appointments/${appt.id}`)
         .set('X-Tenant-Host', clinicA.host)
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
-        .send({ status: 'CANCELLED' })
+        .send({ status: 'CANCELLED', ...STAFF_CANCELLATION })
         .expect(200);
       await generateLink(clinicA, appt.id).expect(409);
     });

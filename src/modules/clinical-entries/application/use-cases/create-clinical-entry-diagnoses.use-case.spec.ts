@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
 import { InMemoryClinicalNoteTemplateRepository } from '../../../clinical-note-templates/application/__fixtures__/in-memory-clinical-note-templates';
@@ -10,6 +11,7 @@ function setup() {
     repo,
     patientsInClinic('p1'),
     new InMemoryClinicalNoteTemplateRepository(),
+    new TenantContextService(),
   );
   return { repo, uc };
 }

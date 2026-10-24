@@ -60,6 +60,8 @@ interface CurrencyAcc {
  * - Plan con saldo < 0 (pagado de más, o cancelado/rechazado con abonos) y
  *   abonos hechos en otra moneda que la del plan: saldo a favor de esa moneda.
  *   Va aparte, nunca se resta de los tramos; por eso `balance = debt − credit`.
+ * - Saldo migrado (DX-262): una línea por saldo, desde su fecha de corte
+ *   (aproximada si el archivo no la traía y se usó la de la importación).
  * - «Hoy» y el día de `agingFrom` son días civiles de la zona de la sede (DX-097).
  *   El vencimiento de una cuota es su día UTC, como en deriveStatuses.
  */
@@ -72,6 +74,7 @@ export function computePatientAging(
       plans: ledger.plans,
       payments: ledger.paid.map((p) => ({ ...p, voidedAt: null })),
       paymentPlans: ledger.paymentPlans,
+      openingBalances: ledger.openings,
     },
     options.now,
   );
@@ -126,6 +129,19 @@ export function computePatientAging(
         approximate: true,
       });
     }
+  }
+
+  // Saldo migrado (DX-262): lo que queda pendiente tras sus abonos, exigible
+  // desde su fecha de corte; aproximado si es la de la importación.
+  for (const o of balances.openingBalances) {
+    const cents = toCents(o.pending);
+    if (cents <= 0) continue;
+    acc(o.currency).lines.push({
+      cents,
+      ageDays: Math.max(0, ageInDays(o.asOfDate, today)),
+      due: true,
+      approximate: o.asOfDateApproximate,
+    });
   }
 
   const nextOf = new Map(

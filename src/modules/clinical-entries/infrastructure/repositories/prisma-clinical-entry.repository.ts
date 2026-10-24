@@ -199,6 +199,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
         patientId: row.patientId,
         status: row.status,
         start: row.start,
+        locationId: row.locationId,
         timeZone:
           zones.get(row.locationId) ?? timeZoneForCountry(row.location.country),
       };

@@ -1,4 +1,7 @@
-import { patientAgreementStatus } from './patient-agreement-rules';
+import {
+  isExternalPayer,
+  patientAgreementStatus,
+} from './patient-agreement-rules';
 
 const TODAY = '2026-10-20';
 const agreement = (extra: object = {}) => ({
@@ -48,5 +51,22 @@ describe('patientAgreementStatus', () => {
     expect(status({ validTo: '2026-10-19' }, { validFrom: '2026-10-21' })).toBe(
       'EXPIRED',
     );
+  });
+});
+
+describe('isExternalPayer (SEC-047)', () => {
+  it('mutuas, prepagadas, EPS y empresas son pagadores externos', () => {
+    for (const type of [
+      'MUTUA_ES',
+      'PREPAGADA_CO',
+      'EPS_CO',
+      'EMPRESA',
+    ] as const) {
+      expect(isExternalPayer(type)).toBe(true);
+    }
+  });
+
+  it('OTRO es un convenio interno (cortesía, empleados)', () => {
+    expect(isExternalPayer('OTRO')).toBe(false);
   });
 });

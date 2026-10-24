@@ -9,6 +9,7 @@ import {
   resetDatabase,
   seedMember,
   loginAs,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -305,7 +306,7 @@ describe('DX-256 visitas y agenda', () => {
     await call(
       'patch',
       `/appointments/${id}`,
-      { status: 'CANCELLED' },
+      { status: 'CANCELLED', ...STAFF_CANCELLATION },
       reception,
     ).expect(200);
     expect(await linkEvents()).toHaveLength(4); // Cancelar no solicita editar vínculos.

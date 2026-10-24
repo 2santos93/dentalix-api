@@ -56,10 +56,23 @@ type PaymentPlanTuple = [
   installments: [sequence: number, dueMs: number, amount: number][],
 ];
 
+/** Saldo migrado vivo (DX-262): id, moneda, importe, fecha de corte, aproximada. */
+type OpeningTuple = [
+  id: string,
+  currency: string,
+  amount: number,
+  asOfDate: string,
+  approximate: boolean,
+  /** Abonado vivo en su moneda (revisión C1); ausente antes de ella. */
+  paid?: number,
+];
+
 /** El `ledger` de una fila de `patient_ledgers`. */
 interface LedgerJson {
   plans: PlanTuple[];
   paymentPlans: PaymentPlanTuple[];
+  /** Ausente en las filas anteriores a DX-262 (sin saldos migrados). */
+  openings?: OpeningTuple[];
 }
 
 /** Una fila de `patient_ledgers`, con el `ledger` como texto JSON. */
@@ -80,6 +93,15 @@ export function toLedger({
     locationId,
     plans: [],
     paid: [],
+    openings: (ledger.openings ?? []).map(
+      ([id, currency, amount, asOfDate, approximate]) => ({
+        id,
+        currency,
+        amount,
+        asOfDate,
+        asOfDateApproximate: approximate,
+      }),
+    ),
     paymentPlans: ledger.paymentPlans.map(
       ([
         id,
@@ -104,6 +126,16 @@ export function toLedger({
       }),
     ),
   };
+  for (const [id, currency, , , , paid] of ledger.openings ?? []) {
+    if (paid) {
+      out.paid.push({
+        treatmentPlanId: null,
+        openingBalanceId: id,
+        currency,
+        amount: paid,
+      });
+    }
+  }
   for (const [
     id,
     status,

@@ -1,7 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
-import { DiscountReason, TreatmentPlanStatus } from '@prisma/client';
+import {
+  DiscountReason,
+  PriceSource,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import {
   DISCOUNT_REPORT_DEFAULT_PAGE_SIZE,
   DISCOUNT_REPORT_MAX_DAYS,
@@ -85,6 +89,21 @@ export class DiscountReportTotalDto {
 
   @ApiProperty({ description: 'Descuento sobre el bruto, en % (2 decimales)' })
   percentOfGross!: number;
+}
+
+/** SEC-047: rebajas de convenio de una moneda, aparte de los totales de DX-204. */
+export class AgreementReductionTotalDto {
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({ description: 'Líneas con rebaja de convenio en esta moneda' })
+  items!: number;
+
+  @ApiProperty({
+    description:
+      'Suma de las rebajas de convenio (precio de catálogo − precio del convenio)',
+  })
+  reduction!: number;
 }
 
 export class DiscountReportItemDto {
@@ -189,6 +208,65 @@ export class DiscountReportItemDto {
 
   @ApiProperty({ type: String, nullable: true })
   locationName!: string | null;
+
+  @ApiProperty({
+    enum: PriceSource,
+    nullable: true,
+    description:
+      'DX-105: de dónde salió el precio de referencia (null en ítems anteriores)',
+  })
+  priceSource!: PriceSource | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Convenio con el que se resolvió el precio al dar de alta el ítem',
+  })
+  agreementName!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-105: precio de catálogo al dar de alta el ítem (sin convenio)',
+  })
+  basePrice!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-047: rebaja de convenio (precio de catálogo − precio del convenio; 0 sin convenio). Aparte del descuento total',
+  })
+  agreementReduction!: number;
+
+  @ApiProperty({
+    description:
+      'SEC-047: % de la rebaja de convenio sobre el precio de catálogo, 2 decimales',
+  })
+  agreementPercent!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'SEC-047: quién asignó el convenio al paciente',
+  })
+  agreementAssignedById!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  agreementAssignedByName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'SEC-047: quién dio de alta el ítem (null en los anteriores a SEC-047)',
+  })
+  createdById!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  createdByName!: string | null;
 }
 
 export class DiscountReportLocationDto {
@@ -226,12 +304,22 @@ export class DiscountReportDto {
   totals!: DiscountReportTotalDto[];
 
   @ApiProperty({
+    type: [AgreementReductionTotalDto],
+    description:
+      'SEC-047: rebajas de convenio por moneda. Van aparte: `totals` solo cuenta los descuentos (como en DX-204)',
+  })
+  agreementTotals!: AgreementReductionTotalDto[];
+
+  @ApiProperty({
     type: [DiscountReportItemDto],
     description: 'Página de ítems, más recientes primero',
   })
   items!: DiscountReportItemDto[];
 
-  @ApiProperty({ description: 'Ítems del periodo (todas las páginas)' })
+  @ApiProperty({
+    description:
+      'Líneas del periodo (todas las páginas): descuentos y rebajas de convenio',
+  })
   total!: number;
 
   @ApiProperty()

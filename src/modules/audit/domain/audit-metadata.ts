@@ -51,8 +51,83 @@ export interface AuditMetadata {
   /**
    * DX-107: lote de importación de pacientes — SHA-256 del fichero, modo de
    * duplicados y totales (solo números). Ni el nombre del fichero ni filas.
+   * DX-262: y su hoja de saldos — hash, contadores y el total por moneda
+   * (importe AGREGADO del lote, pedido por el criterio de auditoría; nunca
+   * el de un paciente ni su documento).
    */
   importBatch?: AuditImportBatch;
+  /**
+   * DX-273: al sacar una cita de COMPLETED, el mínimo de la visita siguiente
+   * de cada plan afectado antes y después (día civil, o null = sin mínimo).
+   * Solo ids, números y fechas: el motivo escrito va en
+   * `appointment_status_reversals` (`params.reversalId`).
+   */
+  visitMinimums?: AuditVisitMinimum[];
+  /**
+   * DX-050: quién realizó un ítem del plan, en qué sede y cuándo, antes y
+   * después de que un ADMIN lo corrija o de que el ítem salga de «Realizado».
+   * Solo uuids e instantes ISO (null = sin atribuir).
+   */
+  attribution?: { before: AuditAttributionSide; after: AuditAttributionSide };
+  /**
+   * DX-279: una cita cancelada desde la agenda: quién (código), el código del
+   * motivo, los minutos de aviso y si fue tardía. Nunca el texto libre del
+   * motivo (va en la cita).
+   */
+  cancellation?: AuditCancellation;
+  /**
+   * DX-300: avisos de seguridad de una receta emitida: versión de las reglas,
+   * CÓDIGOS de los bloqueantes y de los informativos, y si se confirmaron con
+   * motivo. Nunca el texto del aviso (nombra fármacos de la anamnesis) ni el
+   * del motivo: van sellados en la receta.
+   */
+  prescriptionSafety?: AuditPrescriptionSafety;
+}
+
+export interface AuditPrescriptionSafety {
+  rulesVersion: string;
+  blocking: string[];
+  info: string[];
+  overridden: boolean;
+}
+
+export const AUDIT_CANCELLATION_KINDS = [
+  'PATIENT_LINK',
+  'STAFF_FOR_PATIENT',
+  'CLINIC',
+] as const;
+
+export const AUDIT_CANCELLATION_REASONS = [
+  'ILLNESS',
+  'FORGOT',
+  'COST',
+  'TRANSPORT',
+  'WORK',
+  'CLINIC_RESCHEDULE',
+  'OTHER',
+] as const;
+
+/** Cancelación de una cita en la auditoría (DX-279): solo códigos y números. */
+export interface AuditCancellation {
+  byKind: (typeof AUDIT_CANCELLATION_KINDS)[number];
+  reasonCode: (typeof AUDIT_CANCELLATION_REASONS)[number] | null;
+  noticeMinutes: number;
+  lateCancellation: boolean;
+}
+
+/** Un lado de la atribución de un ítem realizado (DX-050). */
+export interface AuditAttributionSide {
+  performedById: string | null;
+  locationId: string | null;
+  completedAt: string | null;
+}
+
+/** Mínimo de una visita del plan antes y después (DX-273). */
+export interface AuditVisitMinimum {
+  planId: string;
+  visit: number;
+  before: string | null;
+  after: string | null;
 }
 
 export interface AuditImportBatch {
@@ -66,6 +141,26 @@ export interface AuditImportBatch {
   updated?: number;
   undoneCreated?: number;
   undoneFilled?: number;
+  /** DX-262: hoja de saldos del lote. */
+  balanceFileSha256?: string;
+  balanceRows?: number;
+  balanceErrors?: number;
+  balancesCreated?: number;
+  balancesUndone?: number;
+  balanceTotals?: AuditCurrencyTotal[];
+  /** Lo que retiró de verdad el deshacer, por moneda (revisión M5). */
+  balanceUndoneTotals?: AuditCurrencyTotal[];
+  /** «Añadir aunque ya tenga saldo migrado» marcado (QA D1). */
+  balanceAddToExisting?: boolean;
+  /** Saldos no creados porque el paciente ya tenía uno vivo (QA D1). */
+  balancesExisting?: number;
+}
+
+/** Total por moneda de la hoja de saldos (DX-262): código, filas e importe. */
+export interface AuditCurrencyTotal {
+  currency: string;
+  rows: number;
+  amount: number;
 }
 
 /** Un tramo del horario de un profesional en la auditoría (DX-233). */
@@ -201,7 +296,39 @@ const IMPORT_COUNTS = [
   'updated',
   'undoneCreated',
   'undoneFilled',
+  'balanceRows',
+  'balanceErrors',
+  'balancesCreated',
+  'balancesUndone',
+  'balancesExisting',
 ] as const;
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+const MAX_CURRENCY_TOTALS = 20;
+
+/** Totales por moneda con código ISO, filas enteras e importe a céntimos. */
+function currencyTotals(value: unknown): AuditCurrencyTotal[] {
+  if (!Array.isArray(value)) return [];
+  const out: AuditCurrencyTotal[] = [];
+  for (const item of value.slice(0, MAX_CURRENCY_TOTALS)) {
+    if (!isRecord(item)) continue;
+    const { currency, rows, amount } = item;
+    if (
+      typeof currency !== 'string' ||
+      !CURRENCY_CODE.test(currency) ||
+      typeof rows !== 'number' ||
+      !Number.isInteger(rows) ||
+      rows < 0 ||
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      Math.round(amount * 100) / 100 !== amount
+    ) {
+      continue;
+    }
+    out.push({ currency, rows, amount });
+  }
+  return out;
+}
 
 /** Hash con formato y contadores enteros ≥ 0 (el resto se descarta); sin hash, nada. */
 function importBatch(value: unknown): AuditImportBatch | null {
@@ -213,6 +340,17 @@ function importBatch(value: unknown): AuditImportBatch | null {
   for (const key of IMPORT_COUNTS) {
     const n = value[key];
     if (typeof n === 'number' && Number.isInteger(n) && n >= 0) out[key] = n;
+  }
+  const { balanceFileSha256 } = value;
+  if (typeof balanceFileSha256 === 'string' && SHA256.test(balanceFileSha256)) {
+    out.balanceFileSha256 = balanceFileSha256;
+  }
+  const totals = currencyTotals(value.balanceTotals);
+  if (totals.length > 0) out.balanceTotals = totals;
+  const undone = currencyTotals(value.balanceUndoneTotals);
+  if (undone.length > 0) out.balanceUndoneTotals = undone;
+  if (typeof value.balanceAddToExisting === 'boolean') {
+    out.balanceAddToExisting = value.balanceAddToExisting;
   }
   return out;
 }
@@ -292,6 +430,128 @@ function scheduleChange(value: unknown): AuditScheduleChange | null {
   return before && after ? { before, after } : null;
 }
 
+const MAX_VISIT_MINIMUMS = 50;
+
+function civilOrNull(value: unknown): value is string | null {
+  return (
+    value === null || (typeof value === 'string' && CIVIL_DATE.test(value))
+  );
+}
+
+/** Una entrada con exactamente esa forma, o `null`. */
+function visitMinimum(value: unknown): AuditVisitMinimum | null {
+  if (!isRecord(value)) return null;
+  const { planId, visit, before, after, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof planId !== 'string' ||
+    !UUID.test(planId) ||
+    typeof visit !== 'number' ||
+    !Number.isInteger(visit) ||
+    visit < 1 ||
+    visit > 1000 ||
+    !civilOrNull(before) ||
+    !civilOrNull(after)
+  ) {
+    return null;
+  }
+  return { planId: planId.toLowerCase(), visit, before, after };
+}
+
+/** Las entradas válidas (hasta 50); el resto se descarta. */
+function visitMinimums(value: unknown): AuditVisitMinimum[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(visitMinimum)
+    .filter((v): v is AuditVisitMinimum => v !== null)
+    .slice(0, MAX_VISIT_MINIMUMS);
+}
+
+function uuidOrNull(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && UUID.test(value));
+}
+
+/** Un lado con exactamente esa forma, o `null`. */
+function attributionSide(value: unknown): AuditAttributionSide | null {
+  if (!isRecord(value)) return null;
+  const { performedById, locationId, completedAt, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    !uuidOrNull(performedById) ||
+    !uuidOrNull(locationId) ||
+    !(
+      completedAt === null ||
+      (typeof completedAt === 'string' && ISO_INSTANT.test(completedAt))
+    )
+  ) {
+    return null;
+  }
+  return {
+    performedById: performedById?.toLowerCase() ?? null,
+    locationId: locationId?.toLowerCase() ?? null,
+    completedAt,
+  };
+}
+
+/** Los dos lados con la forma admitida, o nada. */
+function attribution(value: unknown): AuditMetadata['attribution'] | null {
+  if (!isRecord(value)) return null;
+  const before = attributionSide(value.before);
+  const after = attributionSide(value.after);
+  return before && after ? { before, after } : null;
+}
+
+/** La cancelación entera con su forma, o nada (DX-279). */
+function cancellation(value: unknown): AuditCancellation | null {
+  if (!isRecord(value)) return null;
+  const { byKind, reasonCode, noticeMinutes, lateCancellation, ...rest } =
+    value;
+  const kind = AUDIT_CANCELLATION_KINDS.find((k) => k === byKind);
+  const reason =
+    reasonCode === null
+      ? null
+      : AUDIT_CANCELLATION_REASONS.find((r) => r === reasonCode);
+  if (
+    Object.keys(rest).length > 0 ||
+    !kind ||
+    reason === undefined ||
+    typeof noticeMinutes !== 'number' ||
+    !Number.isInteger(noticeMinutes) ||
+    noticeMinutes < 0 ||
+    typeof lateCancellation !== 'boolean'
+  ) {
+    return null;
+  }
+  return { byKind: kind, reasonCode: reason, noticeMinutes, lateCancellation };
+}
+
+const MAX_SAFETY_CODES = 50;
+
+function safetyCodes(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((c): c is string => typeof c === 'string' && CODE.test(c))
+    .slice(0, MAX_SAFETY_CODES);
+}
+
+/** Versión, códigos y confirmación con su formato, o nada (DX-300). */
+function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
+  if (!isRecord(value)) return null;
+  const { rulesVersion, overridden } = value;
+  const blocking = safetyCodes(value.blocking);
+  const info = safetyCodes(value.info);
+  if (
+    typeof rulesVersion !== 'string' ||
+    !CODE.test(rulesVersion) ||
+    typeof overridden !== 'boolean' ||
+    !blocking ||
+    !info
+  ) {
+    return null;
+  }
+  return { rulesVersion, blocking, info, overridden };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -321,5 +581,13 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (schedule) out.scheduleChange = schedule;
   const batch = importBatch(input.importBatch);
   if (batch) out.importBatch = batch;
+  const minimums = visitMinimums(input.visitMinimums);
+  if (minimums.length > 0) out.visitMinimums = minimums;
+  const attributed = attribution(input.attribution);
+  if (attributed) out.attribution = attributed;
+  const cancelled = cancellation(input.cancellation);
+  if (cancelled) out.cancellation = cancelled;
+  const safety = prescriptionSafety(input.prescriptionSafety);
+  if (safety) out.prescriptionSafety = safety;
   return out;
 }

@@ -1,4 +1,8 @@
-import type { DiscountReason, TreatmentPlanStatus } from '@prisma/client';
+import type {
+  DiscountReason,
+  PriceSource,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 
 /** Filtros del informe ya validados (DX-204). Días civiles inclusive. */
 export interface DiscountReportQuery {
@@ -11,7 +15,9 @@ export interface DiscountReportQuery {
 /**
  * Una línea del informe: un ítem vivo con descuento en el periodo. SEC-041: el
  * descuento es el EFECTIVO, la rebaja del precio frente al de catálogo más el
- * `discount` del ítem.
+ * `discount` del ítem. SEC-047: también los ítems resueltos por convenio con
+ * rebaja, aunque no tengan descuento propio; la rebaja de convenio va APARTE
+ * (`agreementReduction`), no suma en `discount`.
  */
 export interface DiscountReportRow {
   itemId: string;
@@ -46,6 +52,26 @@ export interface DiscountReportRow {
   discountOn: string;
   locationId: string | null;
   locationName: string | null;
+  /** DX-105: origen del precio de referencia (null = ítem anterior a DX-105). */
+  priceSource: PriceSource | null;
+  /** Convenio con el que se resolvió el precio (foto del alta). */
+  agreementName: string | null;
+  /** DX-105: precio de catálogo al dar de alta el ítem (sin convenio). */
+  basePrice: number | null;
+  /**
+   * SEC-047: rebaja de convenio, max(0, basePrice − catalogPrice) en un ítem
+   * resuelto por convenio; 0 en el resto.
+   */
+  agreementReduction: number;
+  /**
+   * SEC-047: quién asignó el convenio al paciente (la asignación de ese
+   * convenio vigente al dar de alta el ítem); null sin convenio.
+   */
+  agreementAssignedById: string | null;
+  agreementAssignedByName: string | null;
+  /** SEC-047: quién dio de alta el ítem; null en los anteriores a SEC-047. */
+  createdById: string | null;
+  createdByName: string | null;
 }
 
 /**
@@ -60,6 +86,27 @@ export interface DiscountReportTotal {
   discount: number;
 }
 
+/**
+ * SEC-047: rebajas de convenio de una moneda, aparte de los totales de
+ * DX-204: cuántas líneas y cuánto suman.
+ */
+export interface AgreementReductionTotal {
+  currency: string;
+  items: number;
+  reduction: number;
+}
+
+/**
+ * Totales del periodo: los de DX-204 (solo las líneas que cuentan como
+ * descuento, iguales que antes de SEC-047), los de la rebaja de convenio y
+ * el número de líneas del detalle (paginación).
+ */
+export interface DiscountReportSummary {
+  totals: DiscountReportTotal[];
+  agreementTotals: AgreementReductionTotal[];
+  rows: number;
+}
+
 export const DISCOUNT_REPORT_REPOSITORY = Symbol('DISCOUNT_REPORT_REPOSITORY');
 
 export interface DiscountReportRepository {
@@ -67,7 +114,7 @@ export interface DiscountReportRepository {
   findLocation(
     locationId: string,
   ): Promise<{ id: string; name: string } | null>;
-  totals(query: DiscountReportQuery): Promise<DiscountReportTotal[]>;
+  summary(query: DiscountReportQuery): Promise<DiscountReportSummary>;
   /** Filas del periodo, más recientes primero; sin `page`, todas (CSV). */
   rows(
     query: DiscountReportQuery,

@@ -669,6 +669,84 @@ hasta 1 h (SEC-028).
   meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
   tienen anamnesis (p. ej. Daniela Montoya).
 
+## Anamnesis previa a la cita por enlace (DX-099)
+
+El paciente responde su anamnesis desde el móvil antes de la cita y un
+profesional la revisa; la historia clínica no cambia hasta que se acepta.
+Módulo `medical-history-submissions`; migraciones
+`20261023160000_dx099_enums` y
+`20261023160100_dx099_medical_history_submissions`.
+
+- **Tabla `medical_history_submissions`**: paciente, cita opcional, sede de
+  la bandeja (la de la cita o la de escritura de la sesión), `tokenHash`
+  (SHA-256 del token de 32 bytes; el token solo viaja en la URL y en la
+  respuesta que lo crea), `expiresAt`, `revokedAt`, `status`
+  (`PENDING_PATIENT`, `SUBMITTED`, `ACCEPTED`, `REJECTED`, `EXPIRED`),
+  `questionnaireVersion`, `answers` (JSONB, ≤ 64 KB), revisor, fecha, motivo
+  del rechazo y `resultingVersionId`. RLS FORCE, FK compuestas por tenant
+  (paciente, cita del MISMO paciente, sede y versión resultante del MISMO
+  paciente), CHECK de coherencia por estado y sin borrado duro (DELETE y
+  TRUNCATE solo superusuario). El trigger `medical_history_submissions_guard`
+  impide reescribir las respuestas y tocar un envío revisado o caducado. Un
+  enlace sin usar cuya fecha pasó se ve `EXPIRED` sin barrido.
+- **Origen de la versión**: `medical_history_versions.source` (`STAFF` por
+  defecto, `PATIENT_FORM` al aceptar el formulario; autor = quien revisa). Va
+  en `MedicalHistoryDto.source`.
+- **Cuestionario** (`domain/anamnesis-questionnaire.ts`, versión
+  `2026-10-v1`): fijo y versionado en código; mismos bloques y `codigo` que la
+  HC del personal (alergias, enfermedades, medicación y anticoagulantes,
+  hábitos, embarazo y cirugías), preguntas Sí/No/No sé con seguimiento. Al
+  aceptar, «Sí» = lo declarado, «No» = nada, «No sé» = lo que ya había; lo
+  que el formulario no pregunta (antecedentes odontológicos, signos vitales,
+  notas) se conserva. Toda alergia declarada entra como alerta; «Sí» a
+  anticoagulantes añade el medicamento y enciende la bandera aunque no diga
+  cuál (`deriveSafetyFlags` reconoce ahora `anticoagul`/`antiagregant`).
+- **Personal**:
+  - `POST /patients/:patientId/medical-history/requests` (los 4 roles;
+    `appointmentId` opcional): un solo uso, caduca a los 7 días o al inicio de
+    la cita (lo que llegue antes) y anula el enlace anterior que aún esperaba.
+    Devuelve la URL una única vez y `whatsapp` (`phone` + `text` para
+    `wa.me`: saludo, clínica y enlace; nada clínico) o el motivo de no tenerlo
+    (sin móvil con indicativo, baja de envíos de DX-128). Cita de otro
+    paciente 400, empezada o no agendada 422, de otra sede 403. Sin
+    autorización SENSITIVE_HEALTH vigente y sin política publicada, 409.
+  - `GET /patients/:patientId/medical-history/requests` (los 4 roles): los
+    últimos 10 envíos con su estado, sin respuestas.
+  - `GET /medical-history/submissions?status=SUBMITTED` (bandeja,
+    ADMIN/DENTIST/ASSISTANT): en las sedes del alcance de la sesión (SEC-045);
+    las más antiguas primero. `GET …/summary` → `{ submitted }` (contador del
+    menú).
+  - `GET /medical-history/submissions/:id` (ídem): respuestas, versión
+    vigente, propuesta, banderas resultantes y **diferencias** (`ADDED`,
+    `REMOVED`, `CHANGED`; los «Sí» primero; sin versión previa, todo nuevo).
+  - `POST …/:id/accept` y `POST …/:id/reject` (`reason` 3–500): solo ADMIN y
+    DENTIST; el resto 403 «Solo un odontólogo o un administrador puede aceptar
+    o rechazar la anamnesis.». Aceptar crea **exactamente una** versión en la
+    misma transacción que el cambio de estado (fila bloqueada `FOR UPDATE` y
+    candado por paciente de DX-247); con `medicalHistory` guarda los ajustes
+    del profesional en vez de la propuesta. Ya revisada o aún sin enviar, 409.
+  - `POST …/:id/revoke` (los 4 roles): anula un enlace sin usar.
+- **Público** (sin sesión, tenant por host, `@RateLimit('anamnesis',
+  'anamnesis-token')`: por IP y por token, un balde por ruta):
+  `GET /public/medical-history/:token` devuelve solo el cuestionario, la marca
+  de la clínica y el nombre de pila (nunca apellidos, documento ni datos de
+  salud anteriores) y, si falta SENSITIVE_HEALTH, el texto versionado de la
+  política (DX-037). `POST` guarda las respuestas una vez (transición
+  condicional); exige la casilla de veracidad (400) y, si hacía falta, la
+  autorización (422; se guarda con canal `PATIENT_LINK`, sin usuario). Token
+  malformado, desconocido o de otra clínica 404; caducado, anulado o ya usado
+  410 «Este enlace ya no es válido, contacte con su clínica.».
+- **Auditoría** (`MEDICAL_HISTORY_SUBMISSION`): crear el enlace
+  (`ANAMNESIS_LINK_CREATED`), ver la revisión, aceptar (`ANAMNESIS_ACCEPTED`),
+  rechazar (`ANAMNESIS_REJECTED`) y anular (`ANAMNESIS_LINK_REVOKED`), con el
+  paciente; el envío del paciente (`ANAMNESIS_SUBMITTED`, origen `LINK`) y su
+  autorización (`DATA_CONSENT`, `ANAMNESIS_LINK`) sin actor, en la misma
+  transacción (`audit_events_actor_check` admite solo esas dos). Nunca la URL,
+  el token, las respuestas ni el motivo.
+- **Seed demo**: Natalia Vargas envió su cuestionario (alergia a la
+  penicilina, asma, anticonceptivo, alcohol los fines de semana) y queda en
+  «Anamnesis por revisar» de la sede principal.
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`
@@ -708,6 +786,129 @@ hasta 1 h (SEC-028).
 - Seed demo: en la sede principal, hoy, dos pacientes en espera (una antes de
   su hora, otra 3 min tarde), una en el sillón y otra lista para cobrar
   (dentro del horario de hoy; con la sede cerrada, ninguna).
+
+## Producción atribuible: quién realizó cada ítem, dónde y cuándo (DX-050)
+
+- **Columnas** de `treatment_plan_items` (migración
+  `20261023160000_dx050_plan_item_attribution`, aditiva): `performedById` (el
+  usuario, como `appointments.providerId`), `performedByMembershipId` (su
+  membresía en esta clínica), `performedLocationId` y `completedAt`. FK
+  COMPUESTA `("tenantId","performedByMembershipId","performedById")` →
+  `clinic_memberships("tenantId","id","userId")`: quien lo realizó es miembro de
+  la MISMA clínica y la membresía es la de ese usuario; la sede, FK compuesta a
+  `locations`. CHECK: usuario y membresía van juntos, y un ítem que no está
+  DONE no lleva atribución. Los DONE anteriores quedan a NULL («Sin atribuir»);
+  sin backfill.
+- **Marcar DONE** (`PATCH /treatment-plans/:id/items/:itemId` con
+  `status: DONE`, el único camino que realiza un ítem; las reservas por cita
+  no lo hacen): `performedById` opcional si quien marca atiende (DENTIST o
+  ADMIN, se usa él); si no (ASSISTANT), 400 «Indica qué profesional realizó el
+  procedimiento.». El profesional tiene que ser miembro VIVO de esta clínica
+  (otra clínica o desactivado: 404), atender (ASSISTANT/RECEPTION: 400) y, si
+  está restringido a sedes (DX-089), atender en la sede (400). La sede es la de
+  `X-Location-Id` (o la de escritura de la sesión) y `completedAt` la hora del
+  servidor (400 si llega). Todo en la transacción del ítem, con la membresía
+  `FOR SHARE`. El registro del odontograma (`sourcePlanItemId`) lo firma quien
+  lo realizó.
+- **Corregir** quién o cuándo de un DONE: solo ADMIN (403 a los demás), fecha no
+  futura; también en un plan cerrado (el trigger
+  `treatment_plan_items_locked_when_closed` admite ese cambio y nada más). La
+  sede no se corrige. Queda un `audit_event` en la misma transacción con
+  `reason` PLAN_ITEM_ATTRIBUTION_CORRECTED y `metadata.attribution`
+  (`before`/`after`: usuario, sede e instante; solo ids).
+- **Salir de DONE** (a aceptado o propuesto): lo hacen ADMIN o quien lo realizó
+  (un «marcado por error»; 403 a otro, para que nadie se lleve la producción
+  ajena). La atribución se limpia y queda el evento PLAN_ITEM_DONE_REVERTED con
+  el antes.
+- **Respuesta**: cada ítem trae `performedById`, `performedByName`,
+  `performedLocationId`, `performedLocationName` y `completedAt` (null = sin
+  realizar o «Sin atribuir»).
+
+## Visitas del plan: salida de «Completada» y reservas en otra cita (DX-256, DX-271, DX-273)
+
+- **Intervalo mínimo** (DX-256): la visita N de un plan aceptado no se agenda
+  antes de la última cita **COMPLETED** de la visita N−1 más su intervalo
+  (`visitIntervals`), en días civiles de la sede del plan
+  (`GET /treatment-plans/:id/visits` → `minimumDate`/`minimumDay`). Sin cita
+  completada de la visita anterior (o con intervalo 0), el mínimo es hoy.
+- **Salida de COMPLETED** (DX-273): pasar una cita completada a cualquier otro
+  estado (agendada, confirmada, cancelada, no-show) solo lo hacen **ADMIN y
+  DENTIST** (RECEPTION/ASSISTANT: 403 «Solo el odontólogo o la administración
+  pueden sacar una cita de «Completada».»), y con `statusReason` en el
+  `PATCH /appointments/:id` (3–500 caracteres tras recortar; sin él, 400).
+  El rol se mira antes que el motivo: recepción recibe 403 aunque el motivo
+  sea corto; fuera de una salida de COMPLETED el motivo se ignora.
+  En la misma transacción:
+  - el motivo se guarda en `appointment_status_reversals` (una fila por
+    salida; la app solo tiene SELECT/INSERT; RLS FORCE por tenant; FK
+    compuesta a la cita con borrado en cascada);
+  - el mínimo de la visita siguiente de cada plan afectado **se recalcula de
+    forma explícita**: con la última cita de la visita anterior que **siga**
+    completada; si ya no queda ninguna, queda **sin mínimo** (se puede agendar
+    desde hoy). No se conserva el mínimo anterior a propósito: si la cita se
+    sacó de «Completada» es porque esa visita no se hizo (o no así), y su
+    intervalo dejaría a la siguiente bloqueada sin motivo clínico. Por eso la
+    salida queda restringida a quien responde de la clínica y con motivo;
+  - la respuesta trae `completedExit: { reversalId, reason, visitMinimums }`
+    con `minimumDayBefore`, `minimumDayAfter` (null = sin mínimo) y
+    `anchorAppointmentIdAfter` por visita;
+  - un `audit_event` (`APPOINTMENT`, `UPDATE`, `reason` `COMPLETED_EXIT`) con
+    `status { from, to }`, `params.reversalId` y `visitMinimums` (plan,
+    visita, día antes y después). El texto del motivo no va en la auditoría
+    (solo admite códigos, DX-009): se llega a él por `reversalId`.
+- **Tratamientos reservados en otra cita** (DX-273, revisión DX-271 I2): con
+  DX-271 «Llegó» no choca si el tratamiento ya lo reserva otra cita viva; la
+  reserva se queda allí. Ahora la respuesta del `PATCH /appointments/:id` (y
+  de «Deshacer llegada», «Asignar» un hueco y «Traer a esta cita») y cada
+  persona de `GET /appointments/in-clinic` traen `planItemsReservedElsewhere:
+  [{ planItemId, name, toothNumber, heldInClinic, appointmentId, start,
+  locationId, locationName, timeZone }]`: los tratamientos de la cita con
+  vínculo vivo pero sin reserva que reserva otra cita viva (mismo predicado
+  que el trigger `dx256_link_reservation`) y que siguen por hacer (ítem vivo y
+  aceptado de un plan aceptado). Solo citas de sedes permitidas al usuario
+  (DX-089): las demás se omiten sin dejar rastro. Vacío en una cita
+  cancelada, no-show o completada.
+  DX-293: `heldInClinic` es true si la cita que lo reserva es de hoy (día
+  civil de su sede) con el paciente en la clínica, la misma regla
+  (`heldInClinicToday`) que el 409 de «Traer a esta cita» (DX-288); la web
+  entonces no ofrece «Traer» y explica dónde está la reserva. Una titular
+  olvidada en la clínica de un día anterior o una cita futura: false. Si esa
+  titular de hoy en la clínica es de una sede no permitida, sale igualmente
+  pero con `appointmentId`, `start`, `locationId`, `locationName` y
+  `timeZone` a `null` (sin cita, hora ni sede).
+- **La reserva vuelve a la cita en la clínica** (revisión DX-273, I1): si la
+  cita que reservaba un tratamiento deja de hacerlo (se cancela, se marca
+  no-show o se le quita con `planItemIds`; no si se completa: se hizo allí),
+  en la misma transacción la cita **más temprana** con el paciente en la
+  clínica que lo tiene sin reserva la recupera (si nadie más lo reserva y el
+  tratamiento sigue por hacer), con un `audit_event`
+  `PLAN_ITEM_RESERVATION_RECOVERED` (`params`: `planItemId`,
+  `fromAppointmentId`, `toAppointmentId`) en la sede de esa cita.
+- **«Traer a esta cita»**: `POST /appointments/:id/plan-items/:planItemId/claim`
+  (los cuatro roles de agenda). Solo con el paciente en la clínica
+  (ARRIVED, IN_CHAIR, READY_FOR_CHECKOUT; si no, 409), con el tratamiento en
+  la cita (si no, 404) y por hacer (aceptado, de un plan aceptado; si no, 409
+  «Solo se agenda tratamiento aceptado y pendiente de un plan aceptado.»). En una transacción bloquea las dos citas en orden de
+  id, retira el vínculo de la otra cita y reescribe el de esta (el trigger le
+  da la reserva), con un `audit_event` `APPOINTMENT_PLAN_ITEMS` en cada cita,
+  cada uno en la sede de su cita (`params`: `planItemId`,
+  `fromAppointmentId`, `toAppointmentId`). Si la otra
+  cita es de una sede no permitida, 403 sin decir cuál. Si ya nadie lo
+  reserva (p. ej. se canceló la otra cita), solo recupera la reserva; si ya
+  la tiene, no cambia nada. Si otra cita lo toma a la vez, 409 que dice cuál.
+  DX-288: es atómico. Tras las citas bloquea la fila del ítem (`FOR NO KEY
+  UPDATE`, que no estorba a las FK), así que dos «Traer» del mismo
+  tratamiento desde citas distintas van en fila. Y no se trae desde una cita
+  **de hoy** (día civil de la zona de su sede) con el paciente en la clínica:
+  409 «Este tratamiento ya lo tiene otra cita con el paciente en la clínica,
+  la de hoy a las 09:00 (Sede…). No se puede traer…», con la hora y la sede
+  solo si esa sede está permitida al usuario (si no, el mismo texto sin
+  datos, DX-089). Con N peticiones a la vez, una 200 y las demás 409, también
+  si alguna llega cuando la primera ya confirmó. Una cita olvidada en la
+  clínica de un día anterior no lo impide: se trae normalmente. El estado del
+  tratamiento (por hacer) se comprueba con el ítem ya bloqueado. Desde la
+  misma cita (doble clic) sigue siendo idempotente: todas 200 y un solo
+  traslado auditado.
 
 ## Odontograma: dentición, origen y anulación (DX-120)
 
@@ -924,11 +1125,93 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   El informe y su CSV muestran precio de catálogo, rebaja de precio, descuento
   del ítem y el total (bruto = precio de referencia); el índice parcial pasa a
   `treatment_plan_items_tenant_effective_discount_at_idx`.
+- **Rebaja de convenio en el informe (SEC-047)**. El informe y su CSV
+  incluyen también los ítems resueltos por convenio con rebaja (`basePrice` >
+  `catalogPrice`), aunque no tengan descuento propio, con `agreementName`,
+  `basePrice`, `agreementReduction` (max(0, `basePrice` − `catalogPrice`)) y
+  su %, quién asignó el convenio (`agreementAssignedById`/`Name`: el autor de
+  la asignación de ese convenio al paciente más reciente no posterior al alta
+  del ítem) y quién creó el ítem (`createdById`/`Name`, columna nueva de
+  `treatment_plan_items`, NULL en los ítems anteriores). La rebaja de convenio
+  va APARTE: los totales de DX-204 (`totals`: ítems, bruto, descuento y %) se
+  agregan con `FILTER` solo sobre las líneas que cuentan como descuento y no
+  cambian al entrar una línea solo de convenio; las rebajas van en
+  `agreementTotals` (líneas y suma por moneda) y `total` (paginación) cuenta
+  todas las líneas. Con `professionalId`, una línea cuenta como descuento si
+  esa persona lo dio (como en DX-204) y como rebaja si creó el ítem, asignó
+  el convenio o dio su descuento. Una línea solo de convenio de un plan sin
+  presentar toma la sede con la que se resolvió el precio
+  (`pricingLocationId`). En el CSV, su motivo es «Convenio …» y «Dado por» es
+  quien asignó el convenio (o, sin él, quien creó el ítem). Migraciones `20261024120000_sec047_plan_item_created_by` y
+  `20261024120100_sec047_plan_item_agreement_reduction_idx` (parcial
+  `treatment_plan_items_tenant_agreement_reduction_at_idx`, CONCURRENTLY).
+  e2e: `test/discounts-agreement.e2e-spec.ts`.
 - **Estado del plan en la transacción (BE-036)**: alta, edición y bloque
   bloquean la fila del plan (FOR SHARE; el ítem, FOR UPDATE), la releen y solo
   entonces validan si está aceptado, firmado o cerrado. Una aceptación sin
   firma que confirma mientras una edición espera ya no deja cambiar el plan
   aceptado (`test/plan-item-accept-race.int-spec.ts`).
+
+## Reportes: «Comparar sedes» (DX-014)
+
+Módulo `src/modules/reports`. `GET /api/v1/reports/locations-comparison` y
+`GET /api/v1/reports/locations-comparison.csv` (solo ADMIN; DENTIST,
+RECEPTION y ASSISTANT → 403 «Solo la administración ve los reportes de la
+clínica.»), con `from`/`to` (días civiles `AAAA-MM-DD`, ambos inclusive, como
+mucho 366 días), `compare` (`previous` por defecto: los mismos días
+inmediatamente antes; `previous_year`: las mismas fechas un año antes, el
+29/02 cae en el 28; `none`) y `currency` opcional (solo los importes en esa
+moneda). Errores 400 en español.
+
+- **Una fila por sede** viva (activa o desactivada) que ve quien consulta,
+  en orden de creación, y «Total clínica». Respeta el claim `loc` (DX-089):
+  con sedes acotadas solo salen esas y el total solo las suma a ellas (hoy un
+  ADMIN nunca lleva `loc`, pero el reporte no depende de eso). La cabecera
+  `X-Location-Id` se valida como siempre pero **no acota** la comparación.
+  Las sedes retiradas no salen (ni cuentan en el total).
+- **Indicadores**: una sola definición en
+  `src/modules/reports/domain/kpi-definitions.ts` (etiqueta, unidad, si es por
+  moneda, dirección «mejor» y el texto de «Cómo se calcula»), que la respuesta
+  publica en `kpis`. Producción = Σ (precio − descuento) de los ítems DONE con
+  `completedAt` (DX-050) en el período, por `performedLocationId` y moneda del
+  plan («Sin atribuir» no cuenta); cobrado = Σ abonos no anulados por `paidAt`,
+  sede y moneda; % de cobro = cobrado ÷ producción (null sin producción);
+  citas atendidas = COMPLETED por inicio; no-show % = NO_SHOW ÷ (COMPLETED +
+  NO_SHOW + canceladas con `lateCancellation`, DX-279; las avisadas a tiempo
+  no cuentan); pacientes nuevos =
+  primera COMPLETED del paciente en la clínica, en la sede de esa cita; ticket
+  medio = cobrado ÷ pacientes distintos atendidos (en el total, cada paciente
+  una vez); ocupación % = minutos COMPLETED ÷ minutos abiertos del horario
+  semanal VIGENTE de la sede menos sus cierres (bloqueos de toda la sede que
+  no admiten citas). Sin horario configurado, ocupación null (y fuera de la
+  del total). Días civiles en la zona de cada sede (DX-097).
+- **Monedas**: nunca se suman ni se convierten. Cada importe es una lista por
+  moneda; en una fila, todas las monedas que tuvo (en el período o en el
+  comparado) salen en los cuatro indicadores de dinero. La conversión con tasa
+  queda para otra porción.
+- **Comparación**: cada valor trae `previous`, `change` (1 decimal, en la
+  unidad `changeUnit` de su KPI: % relativo, (valor − anterior) ÷ |anterior|,
+  null con anterior 0; o **puntos porcentuales** en % de cobro, no-show % y
+  ocupación %, valor − anterior: 8 % → 10 % = +2 p.p.) y `trend`
+  (`BETTER`/`WORSE`/`EQUAL` según la dirección: el no-show mejora al bajar).
+- **CSV**: mismos filtros; formato largo (una línea por sede, indicador y
+  moneda, el total al final), UTF-8 con BOM, CRLF, celdas de texto protegidas
+  contra fórmulas como el de descuentos, `Cache-Control: no-store`.
+- **Sin auditoría**, como el dashboard: son sumas por sede, sin datos de
+  ningún paciente.
+- **Consultas**: por período, una consulta agregada por fuente (nunca una por
+  sede), con el tenant explícito además de la RLS, en una transacción
+  REPEATABLE READ; los dos períodos en paralelo. Índice nuevo
+  `treatment_plan_items_tenant_done_completed_idx` (parcial, CONCURRENTLY,
+  migración `20261024130000_dx014_plan_items_done_completed_idx`) para la
+  producción. Benchmark con 5 sedes y 24 meses: medianas de 170 ms (un mes) a
+  ~470–650 ms (12 meses frente a los 12 anteriores) con la máquina cargada
+  (`docs/perf/DX-014.md`).
+- **Demo**: además del calendario, un día con actividad en cada sede en el
+  mes anterior y en el actual (citas atendidas, procedimiento realizado allí y
+  su abono), para ver la comparación cualquier día del mes
+  (`planComparisonHistory`). Si hoy es el primer día abierto del mes, el mes
+  actual solo tiene lo de hoy.
 
 ## Recibo de caja por abono (DX-136)
 
@@ -1374,6 +1657,67 @@ de esquemas propios de una librería).
   DELETE de ese rol lo acota a `"tenantId" IS NULL` la política RESTRICTIVA
   `email_outbox_dispatcher_delete_platform`.
 
+## Política de cancelación e inasistencias (DX-279)
+
+Porción 1: la política por sede, quién y cuándo canceló, si fue tardía y el
+resumen de asistencia del paciente. Mostrar la política al paciente (recordatorio
+y enlace con `acknowledgePolicy`), rellenar `policyVersionId` y el cargo o su
+condonación son DX-291.
+
+- **Tabla `cancellation_policy_versions`** (RLS FORCE, FK compuesta a la sede,
+  moneda del catálogo): horas de aviso 0–168, importe sugerido ≥ 0 con su
+  moneda (los dos o ninguno), texto para el paciente ≤ 1000 y
+  `receptionCanCharge` (lo usará DX-291). **Append-only**: la app no tiene
+  UPDATE/DELETE/TRUNCATE y el trigger `cancellation_policy_versions_immutable`
+  los rechaza (DELETE/TRUNCATE solo a un superusuario, para limpiar bases de
+  test; no hay purga administrativa). La vigente es la de mayor
+  `version`.
+- **Endpoints** (solo ADMIN, 403 «Solo un administrador puede ver y cambiar la
+  política de cancelación.»): `GET /locations/:id/cancellation-policy` →
+  `{ locationId, current, versions }` y `POST` con `{ noticeHours,
+  suggestedFee?, currency?, patientText?, receptionCanCharge? }`, que crea la
+  versión siguiente (sede bloqueada: dos guardados a la vez no repiten número).
+  400 en español; otra clínica: 404. Queda en `audit_events`
+  (`CREATE`, `CANCELLATION_POLICY`, `CANCELLATION_POLICY_CHANGED`).
+- **Columnas de `appointments`**: `cancelledAt`, `cancelledByKind`
+  (`PATIENT_LINK | STAFF_FOR_PATIENT | CLINIC`), `cancelReasonCode` (ILLNESS,
+  FORGOT, COST, TRANSPORT, WORK, CLINIC_RESCHEDULE, OTHER), `cancelReasonText`
+  (≤ 500), `noticeMinutes`, `lateCancellation`, `noShowMarkedAt` y
+  `policyVersionId` (FK compuesta; NULL hasta DX-291). CHECK
+  `appointments_cancellation_check`: solo una cita CANCELLED lleva datos de
+  cancelación; hora, quién, aviso y tardía van juntos (las canceladas antiguas
+  no tienen ninguno y siguen siendo válidas); el personal siempre da motivo;
+  aviso ≥ 0; la clínica nunca es tardía; `noShowMarkedAt` solo en NO_SHOW.
+- **Cancelar** (`PATCH /appointments/:id` a CANCELLED) exige
+  `cancelledByKind` (`STAFF_FOR_PATIENT` o `CLINIC`) y `cancelReasonCode` (400
+  si faltan); `cancelReasonText` es opcional. El servidor fija la hora y, con la
+  fila bloqueada, calcula en UTC los minutos de aviso (hacia abajo, 0 si la
+  cita ya empezó) y si es tardía (aviso **menor** que las horas de la política
+  vigente de la sede de la cita; exactamente las horas no lo es; sin política,
+  si cancela la clínica o si la cita estaba en la clínica —llegó, en sillón,
+  listo para cobrar— o completada, nunca). Un cambio de hora no lo altera: se
+  cuenta el tiempo real. Cancelar y mover en el mismo PATCH da 400. Queda
+  auditado con un solo evento: `APPOINTMENT_CANCELLED` (o, desde la clínica, el
+  de flujo `PATIENT_FLOW` y, desde «Completada», `COMPLETED_EXIT`), con
+  `cancellation` = origen, código del motivo, aviso y tardía; nunca el texto. Marcar NO_SHOW guarda
+  `noShowMarkedAt`; salir de CANCELLED o NO_SHOW borra sus datos. El enlace
+  público (DX-005) que cancela guarda `PATIENT_LINK`, la hora de la respuesta,
+  el aviso y si es tardía (sin motivo ni aceptación todavía). Reagendar o
+  adelantar a un hueco no cancela nunca. `GET
+  /appointments/:id/cancellation-preview` da el aviso si se cancelara ahora.
+- **Resumen**: `GET /patients/:id/attendance-summary` (los cuatro roles):
+  citas ya empezadas, inasistencias y cancelaciones tardías cuyo inicio cae en
+  los últimos 12 meses, por sede y en total, calculado al pedirlo. Un miembro
+  restringido (DX-089) solo cuenta sus sedes (sin mirar la cabecera). `GET
+  /appointments` trae `attendance` por cita con la misma regla, en una sola
+  consulta para todo el lote (índice parcial
+  `appointments_tenant_patient_incidents_idx`), y omite `cancelReasonText`.
+- **Demo**: la sede principal tiene una política de 24 h con cargo sugerido de
+  50.000 COP, y Daniela Montoya Arango tiene dos inasistencias y una
+  cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
+  citas). Las cancelaciones del calendario se registran avisadas por el
+  paciente con 2 días.
+
 ## Recordatorios de cita por email (DX-026)
 
 Módulo `src/modules/reminders`. Reutiliza la cola y el cron con candado
@@ -1679,7 +2023,48 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   como descuento discrecional; la rebaja del convenio no.
 - **Roles**: leer convenios, los 4 roles; listas de precios, ADMIN y rol
   clínico; crear, editar y retirar ambos, ADMIN. Asignar convenio al paciente,
-  los 4 roles. `price-quote`, roles clínicos.
+  los 4 roles, con la elegibilidad de SEC-047 (abajo). `price-quote`, roles
+  clínicos.
+- **Elegibilidad al asignar (SEC-047)**: como la rebaja de convenio no cuenta
+  como descuento discrecional, asignar un convenio no puede saltarse el tope
+  por rol de DX-204. Un convenio de un **pagador externo** (tipo MUTUA_ES,
+  PREPAGADA_CO, EPS_CO o EMPRESA) exige `coverageId` con una cobertura del
+  paciente, de ese pagador, sin retirar y **vigente hoy** (día civil de la
+  sede), para cualquier rol, ADMIN incluido: si no, 400 en español. Un
+  convenio **interno** (pagador de tipo OTRO: cortesía, empleados, socios)
+  lo asigna ADMIN, con la cobertura opcional (si viene, se valida igual). Otro
+  rol solo si manda una cobertura **migrada** (`migratedFromInsurerEps`, que
+  solo crea el relleno de DX-153 y la API no puede marcar) del paciente y de
+  ese pagador, vigente; si no, 403 en español con la pista de pedir al
+  administrador que reclasifique el pagador. `GET /agreements`, la
+  asignación y las coberturas devuelven `payer.type` y
+  `migratedFromInsurerEps` para que la web sepa qué pedir. Matriz en
+  `test/patient-agreements-eligibility.e2e-spec.ts`.
+- **Riesgo aceptado (SEC-047)**: cualquier rol puede añadir una cobertura de
+  un pagador sin prueba y luego asignar su convenio; la mitigación es
+  detectiva (el informe de descuentos muestra quién asignó el convenio y
+  quién creó el ítem).
+- **Nota de despliegue (SEC-047)**: antes de publicar, avisa a los ADMIN de
+  las clínicas con convenios vivos de pagador OTRO: desde la versión con
+  SEC-047 solo los asigna un administrador (salvo con una cobertura migrada
+  del paciente). Si el pagador es una aseguradora o una empresa, que lo
+  reclasifiquen en Ajustes → Pagadores. Consulta (como owner, salta la RLS):
+
+  ```sql
+  SELECT t."name" AS clinica, py."name" AS pagador, a."name" AS convenio,
+         count(DISTINCT pa."patientId") FILTER (WHERE pa."deletedAt" IS NULL) AS pacientes_asignados,
+         count(DISTINCT pc."patientId") FILTER (WHERE pc."migratedFromInsurerEps") AS pacientes_con_cobertura_migrada
+    FROM "agreements" a
+    JOIN "payers" py ON py."tenantId" = a."tenantId" AND py."id" = a."payerId"
+    JOIN "tenants" t ON t."id" = a."tenantId"
+    LEFT JOIN "patient_agreements" pa
+      ON pa."tenantId" = a."tenantId" AND pa."agreementId" = a."id"
+    LEFT JOIN "patient_coverages" pc
+      ON pc."tenantId" = a."tenantId" AND pc."payerId" = py."id" AND pc."deletedAt" IS NULL
+   WHERE a."deletedAt" IS NULL AND py."deletedAt" IS NULL AND py."type" = 'OTRO'
+   GROUP BY t."name", py."name", a."name"
+   ORDER BY t."name", py."name", a."name";
+  ```
 - **Auditoría**: recursos `AGREEMENT` y `PRICE_LIST`; la asignación se audita
   como `PATIENT` con `reason` `AGREEMENT_ASSIGNED|AGREEMENT_REMOVED`. La
   metadata lleva nombres de campos, nunca importes ni datos del paciente.
@@ -1799,9 +2184,9 @@ migraciones `20261020200000_dx151_enums`,
 
 Lo que gasta cada sede: factura o cuenta por pagar con categoría, proveedor,
 importe, fechas y soporte, pagada total o parcialmente. Módulo `expenses`;
-migraciones `20261023120000_dx274_enums`, `…120100_dx274_expenses`,
-`…120200_dx274_cash_adjustment_outflow`, `…120300_dx274_audit_events_idx` y
-`…120400_dx274_expense_idempotency`. Incluye las salidas de caja menor
+migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
+`…150200_dx274_cash_adjustment_outflow`, `…150300_dx274_audit_events_idx` y
+`…150400_dx274_expense_idempotency`. Incluye las salidas de caja menor
 (el dinero del cajón) y el resumen mensual «ingresos − gastos» con CSV.
 
 - **Tablas**: `expense_categories` (propias de la clínica; las predefinidas
@@ -1924,6 +2309,45 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   grande no para la API. Cualquier fallo inesperado del lector es un 400
   genérico en español. **El fichero no se guarda**: solo su nombre, tamaño,
   SHA-256, el mapeo y lo que necesita el informe.
+- **Tope de lecturas y throttle (SEC-046)**: leer un fichero (inspect,
+  dry-run `POST /` y hoja de saldos `POST /:id/balances`) puede ocupar ~30–85
+  MB y segundos de CPU, y cualquiera que se registre es ADMIN de su clínica.
+  Por eso:
+  - **Recepción del cuerpo, con un semáforo de subidas propio**: las tres
+    rutas llevan `ImportUploadSlotGuard` + `UploadSlotInterceptor`: el guard
+    de DX-259 sobre un semáforo SOLO de importaciones, con el mismo tope
+    (`UPLOAD_MAX_CONCURRENCY`) y plazos (`UPLOAD_IDLE_TIMEOUT_MS` y
+    `UPLOAD_MAX_DURATION_MS`, 408 al vencer). Así una ráfaga de
+    importaciones, o quien gotea sus cuerpos, no deja sin plaza el avatar,
+    los documentos ni `/files/uploads` de las demás clínicas (y al revés).
+    Multer escribe el fichero en el temporal de las subidas
+    (`os.tmpdir()/dentalix-uploads`), no en memoria.
+  - **Plazas de lectura** (`ImportReadSlotInterceptor`, detrás del
+    `FileInterceptor`): se toman **con el fichero ya en disco**, así que un
+    cliente que gotea el cuerpo no retiene ninguna. Como mucho
+    `PATIENT_IMPORT_MAX_CONCURRENCY` lecturas a la vez en cada réplica
+    (default **2**, 1..64) y `PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC` por
+    clínica (default **1**, 1..64). Sin plaza, **503** al momento (sin cola)
+    con `Retry-After: 5`: «Ya se está leyendo otro archivo de importación de
+    esta clínica…» o «Hay otras importaciones leyéndose ahora mismo…»; el
+    temporal se borra igual. Todo corre después de `JwtAuthGuard` y
+    `RolesGuard`: un anónimo (401) o un no-ADMIN (403) no ocupa plaza de
+    subida ni de lectura.
+  - **Liberación**: la plaza de lectura vuelve al terminar el handler (bien
+    o con error); la de subida y el temporal, al terminar también (o al
+    abortar el cliente a mitad del cuerpo: `UploadSlotInterceptor`).
+  - **Rate limit `patient-import`**: 10 lecturas por minuto por clínica +
+    usuario (`RATE_LIMIT_PATIENT_IMPORT_LIMIT`/`_TTL_MS`), con **un balde
+    común** para las tres rutas (no uno por ruta); **429** en español con
+    `Retry-After`. Corre antes que las plazas: un 429 no ocupa ninguna; un
+    503 sí gasta una unidad del balde (con `Retry-After: 5`, un reintento a
+    mano no lo agota).
+  - Prueba de carga (lenta: no corre por defecto; en CI, en su propio paso):
+    `RUN_SLOW_TESTS=1 npm run test:e2e -- test/patient-imports-load`. 20
+    lecturas en paralelo del XLSX de la auditoría: el pico de RSS crece < 300
+    MB (medido: +26 MB una clínica, +62 MB veinte clínicas; sin el tope, +916
+    MB). A medio plazo: `readImportFile` en un `worker_thread` con
+    `resourceLimits`.
 - **Validación por fila** (motivo en español, columna tal como se llama en el
   fichero): nombres y apellidos obligatorios; tipo de documento por alias (CC,
   «cédula», TI, CE, PASAPORTE, RC→OTRO…) o el de por defecto; nº de documento
@@ -1944,6 +2368,21 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   `patients/infrastructure/patient-doc-lock.ts`) y buscan por la clave
   normalizada: «1.111.111» y «1111111» nunca dan dos pacientes, y el alta
   manual de un documento ya existente escrito distinto da 409.
+- **Clave del documento indexada (DX-287)**: la clave es
+  `patients."docKey"` (solo `[0-9A-Z]`: se quita todo lo demás y luego se
+  pasa a mayúsculas, sin depender de Unicode ni de la locale). La calcula
+  la BD con `public.dx_doc_key` en el trigger `patients_doc_key` (también
+  para las altas del código anterior) y es la misma regla que `docKey()`
+  (`patients/domain/doc-key.ts`). Alta, edición, dry-run, hoja de saldos y
+  cada bloque de la importación comparan `"docKey" = …` / `= ANY(…)` con el
+  índice parcial `patients_tenant_doc_key_live_idx ("tenantId","docKey")
+  WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
+  un Index Scan (con 60k pacientes, 0,03 ms por alta y ~2–4 ms por bloque
+  de 250, frente a 80 ms y 130 ms recorriendo la clínica). La expresión
+  `regexp_replace(upper(...))` no sirve en SQL de la app: no es LEAKPROOF y
+  bajo RLS no usa índice (lo vigila `test/invariants/doc-key-sql.spec.ts`).
+  El índice no es único: hay duplicados ambiguos anteriores a DX-107; el
+  candado de asesoría sigue siendo quien serializa las altas.
 - **Trabajo por bloques** (DX-085): 250 filas por transacción corta; la
   clínica sigue operando (solo se bloquean las filas del bloque, nunca la tabla
   `patients`). Idempotente (retoma desde las filas `PENDING`); al agotar los 5
@@ -2004,6 +2443,114 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   (el dry-run lo avisa en la fila).
 - **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
   con separador `;`, errores, un repetido y uno de la clínica demo).
+
+## Saldo inicial «Saldo migrado» (DX-262)
+
+Porción 2 de DX-107: la clínica que llega de Excel o de otro programa trae las
+deudas de sus pacientes. En el asistente de importación, después de validar
+los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
+(CSV o XLSX, mismos topes: 5 MB y 10.000 filas). Solo ADMIN.
+
+- **Columnas** (por sinónimos, sin tildes; plantilla en
+  `GET /patient-imports/balances-template`): `numero_documento`, `importe`,
+  `moneda`, `fecha_antiguedad` (opcional) y `concepto` (opcional, ≤ 200;
+  por defecto «Saldo migrado»). Sin documento, importe o moneda: 400.
+- **Endpoints**: `POST /patient-imports/:id/balances` (dry-run, lote
+  VALIDATED y vigente; volver a subirla la reemplaza), `DELETE
+  /patient-imports/:id/balances` (quitarla), `GET
+  /patient-imports/:id/balances/errors.csv`. El lote (`GET /:id`) trae
+  `balances` (totales por moneda del archivo y de lo que se importa, lo
+  importado de verdad, avance y deshecho) y `balanceIssues`.
+- **Validación por fila** (en español, con su columna): documento que no es
+  de ningún paciente vivo de la clínica ni del archivo de pacientes del lote
+  (o ambiguo: «1.111» y «1111» anteriores a DX-107), importe no positivo, con
+  más de 2 decimales o ilegible, moneda fuera del catálogo `currencies` (el
+  mismo de planes y abonos), fecha futura o irreconocible. Importe: el último
+  separador es el decimal si hay «.» y «,»; con uno solo seguido de 3 cifras,
+  de miles (`150.000`); en una celda numérica de XLSX, siempre decimal.
+- **Un saldo por paciente y moneda y lote**: las filas repetidas se suman (aviso
+  `MERGED` en el dry-run), con la fecha más antigua y el primer concepto.
+  Las monedas nunca se mezclan ni se convierten.
+- **La misma hoja dos veces no duplica la deuda** (QA D1): si el paciente ya
+  tiene un saldo migrado VIVO en esa moneda de otro lote, cada fila suya es
+  un error del dry-run que dice cuál («Este paciente ya tiene un saldo
+  migrado vivo de 80.000,00 COP (lote «x.csv» del dd/mm/aaaa, corte
+  dd/mm/aaaa): no se crea otro…») y no se importa. Solo con el campo
+  `addToExisting=true` del multipart (casilla «Añadir aunque ya tenga saldo
+  migrado» en la web, guardada en el lote como `balanceAddToExisting`) se
+  crea otro, con el aviso `EXISTING_BALANCE`. El trabajo lo vuelve a
+  comprobar al importar (un lote confirmado y aún en cola cuando se valida
+  el siguiente): sin la casilla, esa fila queda SKIPPED y se cuenta en
+  `progress.existing`. Un saldo retirado no cuenta.
+- **Al confirmar**, el trabajo `patient-imports.process` importa primero los
+  pacientes y después los saldos en bloques de 500 (transacción corta, un
+  `INSERT … ON CONFLICT DO NOTHING` por bloque: idempotente). Sin fecha en el
+  archivo, la fecha de corte es el día de la importación en la zona de la
+  sede del lote y queda marcada **aproximada**. La sede del saldo es la del
+  lote (la de `X-Location-Id` al subir los pacientes).
+- **Tabla `opening_balances`**: RLS FORCE, FK compuestas por tenant (paciente,
+  sede, lote), moneda del catálogo, `CHECK amount > 0`, concepto 1–200, único
+  `(tenant, lote, paciente, moneda)`. Inmutable salvo la retirada
+  (`voidedAt`/`voidedById`, trigger `opening_balances_guard`); la app no la
+  borra.
+- **Estado de cuenta (DX-011)**: `openingBalances[]` (fecha de corte, «aprox.»,
+  concepto, abonado y pendiente), `summary[].openingBalance` (el cargo
+  original) y `summary[].openingPending` (lo que queda tras sus abonos: lo que
+  «incluye» el saldo, QA D5); `balance = budgeted + openingBalance − paid`.
+  También en el familiar (DX-203).
+- **Cartera (DX-145/DX-155)**: `patient_ledgers_compute` añade `openings` al
+  resumen; un saldo migrado vivo hace deudor al paciente (aunque no tenga
+  planes) y envejece desde su fecha de corte (aproximado si lo es). Si no hay
+  cita atendida, abono ni plan presentado, la sede de la deuda es la del
+  último saldo. Triggers por sentencia en `opening_balances` refrescan el
+  resumen (no hay que pausarlos: cada bloque refresca a sus ≤ 500
+  pacientes).
+- **Cobrar el saldo migrado** (revisión C1): `POST
+  /opening-balances/:id/payments` (ADMIN y RECEPTION, como cualquier abono)
+  registra un abono contra el saldo: `payments.openingBalanceId` en lugar de
+  `treatmentPlanId` (CHECK `payments_target_check`: exactamente uno; FK
+  compuesta `(tenantId, openingBalanceId, patientId)` → mismo paciente y
+  clínica). Lleva su recibo de caja consecutivo por sede (DX-136, la foto
+  dice «Saldo migrado · concepto · corte» y el pendiente tras el abono; el
+  correo, «Concepto» y «Saldo pendiente tras este abono», revisión N1),
+  entra en la caja por turno y su arqueo (DX-027), admite Idempotency-Key
+  (DX-109), cuenta para los compromisos de pago (DX-150) y se anula con
+  `DELETE /payments/:id` como cualquier abono. En la moneda del saldo y sin
+  pasar de lo pendiente: el saldo se bloquea `FOR UPDATE` en la transacción
+  del abono (dos cobros a la vez no lo pasan) y si no cabe, 400 «El abono
+  supera lo pendiente del saldo migrado: quedan …». El estado de cuenta da
+  `paid`/`pending` por saldo, el resumen de cartera guarda lo abonado
+  (`openings[i][5]`) y solo debe si queda pendiente, y la antigüedad envejece
+  solo lo pendiente.
+- **Deshacer**: el del lote se niega (409) si algún saldo migrado del lote
+  tiene abonos VIVOS (los anulados no cuentan); el bloqueo sale del catálogo
+  (toda FK a `opening_balances.id`, filtrando `deletedAt`/`voidedAt` si la
+  tabla los tiene). `POST /patient-imports/:id/balances/undo` (solo ADMIN)
+  retira SOLO los saldos del lote aunque sus pacientes ya tengan citas u otra
+  actividad (el lote sigue COMPLETED). Lo retirado (cuántos y cuánto por
+  moneda) queda en el lote (`balances.undoneCount`/`undoneTotals`) y en la
+  auditoría. Las horas de la retirada, en UTC de la BD.
+- **Retención**: a los 90 días de terminar o deshacer el lote (con los errores
+  de DX-107) se borran sus saldos preparados (`patient_import_balance_rows`:
+  documento e importe del fichero); un dry-run caducado los borra al caducar.
+- **Rendimiento del dry-run**: la búsqueda de documentos va por conjuntos
+  (`= ANY(keys)` agrupado, en patients por `"docKey"` con su índice y en las
+  filas del lote con `public.dx_doc_key`): 5.000 claves contra 20.000
+  pacientes en menos de 2 s (int).
+- **Topes**: la suma de las filas de un paciente y moneda no puede pasar de
+  `DECIMAL(14,2)` (error de la fila); una celda XLSX con ruido de coma
+  flotante (`178500.00000000003`, `300000000.00000006`) se redondea a 2
+  decimales con una tolerancia relativa de 16 ULP del valor (revisión N2;
+  un tercer decimal real, ≥ 0,001, sigue siendo error hasta el tope). Un documento con
+  varios pacientes vivos al importar no se adivina: se cuenta aparte
+  (`progress.ambiguous`).
+- **Auditoría**: `PATIENT_IMPORT_BATCH` `UPDATE` con `reason`
+  `IMPORT_BALANCES_VALIDATED` / `IMPORT_BALANCES_REMOVED` /
+  `IMPORT_BALANCES_UNDONE`, `EXPORT`
+  `IMPORT_BALANCE_ERRORS`; `metadata.importBatch` lleva el hash de la hoja,
+  sus contadores, `balanceTotals` (lo previsto por moneda) y
+  `balanceUndoneTotals` (lo retirado de verdad); totales AGREGADOS, nunca el
+  de un paciente ni documentos.
 
 ## Dominios personalizados (SEC-009)
 
@@ -2479,6 +3026,42 @@ e2e `test/patient-documents-direct.e2e-spec.ts` (MinIO, 19 MB subidos por
 (disco y semáforo) y `test/storage/s3-unavailable.e2e-spec.ts` (503 a tiempo
 con el almacén colgado).
 
+## Receta segura (DX-300)
+
+Módulo `prescriptions`, reglas en `src/modules/prescriptions/domain/prescription-safety.ts`
+(versión `RX_SAFETY_V1`; fuentes SDCEP *Drug Prescribing for Dentistry* y BNF
+for Children, citadas en el módulo junto a los topes de dosis). Es una ayuda a
+la prescripción: no sustituye el juicio clínico.
+
+- **Qué lee**: la anamnesis VIGENTE (versión más alta, bajo RLS en la misma
+  transacción que el paciente): lista de alergias y casillas
+  `safetyFlags.alergiaPenicilina/alergiaAnestesico/alergiaLatex`, medicación
+  habitual (`medications[].nombre`), `embarazo`/`semanasEmbarazo`,
+  `anticoagulantes`, `bifosfonatos` y `vitalSigns.peso`; y la edad por la fecha
+  de nacimiento el día de hoy en la zona de la sede.
+- **Reglas**: `ALLERGY`, `INTERACTION` (anticoagulante —cumarínicos, ACOD,
+  heparinas o la casilla— con AINE, metronidazol, macrólidos o azoles; solo un
+  antiagregante —clopidogrel, AAS…— con AINE; metotrexato con AINE), `PREGNANCY` (AINE desde la semana
+  20 o sin semanas; tetraciclinas; metronidazol en el 1.er trimestre),
+  `ANTIRESORPTIVE` (informativo), `PEDIATRIC_DOSE` (< 12 años: amoxicilina,
+  ibuprofeno y paracetamol en mg/kg por toma y por día; en una combinación
+  «875/125 mg» cuenta el primer número; sin peso pide el peso)
+  y `NO_ANAMNESIS` (informativo). Cada aviso: `rule`, `code`, `severity`
+  (`BLOCKING`/`INFO`), `message` en español y `source`.
+- **Previsualización**: `POST /patients/:patientId/prescriptions/safety-check`
+  (DENTIST/ADMIN; auditada como `VIEW MEDICAL_HISTORY` con
+  `reason: PRESCRIPTION_SAFETY_CHECK`). No guarda nada.
+- **Emisión**: recalcula los avisos; con bloqueantes exige `safetyOverride:
+  true` (o el `allergyOverride` de clientes anteriores) y `safetyOverrideReason`
+  → si no, 409 en español con `safetyAlerts`. La receta guarda
+  `safetyRulesVersion`, `safetyAlerts` y `safetyOverrideReason` dentro del hash
+  (formato v2); el `audit_event` CREATE lleva `metadata.prescriptionSafety`
+  (versión, códigos bloqueantes e informativos y si se confirmó; nunca textos).
+- **Migración** `20261024140000_dx300_prescription_safety`: tres columnas
+  NULLABLE y un CHECK (`NOT VALID` + `VALIDATE`). Las recetas anteriores quedan
+  con NULL y su hash se sigue calculando con el formato v1 (test de regresión
+  con el valor de DX-013 en `prescription-hash.spec.ts`).
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y
@@ -2638,7 +3221,13 @@ dentalix_email_dispatcher`) o repón la política como en
   <columna> IS NULL`) para poder repetirla si se corta. Después, el índice
   `CONCURRENTLY` en otro fichero. Modelo:
   `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
-  `test/owner-nosu/migrations-data.owner-spec.ts`.
+  `test/owner-nosu/migrations-data.owner-spec.ts`; y
+  `20261024100000…100300_dx287_patients_doc_key*`, que además recorre por
+  cursor (`id > último`, nunca `ORDER BY … LIMIT` sobre lo pendiente) y
+  termina con un `ANALYZE` de la columna (SHARE UPDATE EXCLUSIVE). Una
+  columna `GENERATED … STORED` nueva reescribe la tabla bajo ACCESS
+  EXCLUSIVE: en `patients`, 1,4 s con 65k pacientes (DX-287), así que ahí
+  va por trigger.
 - **Políticas con `NULLIF`: `app.current_tenant` puede llegar vacío**
   (DX-251, OPS-037): tras una transacción con `set_config(…, true)` la
   variable no vuelve a NULL, queda en `''` el resto de la sesión, y `migrate

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
@@ -28,6 +29,11 @@ import {
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { ODONTOGRAM_CLOCK, type OdontogramClock } from '../odontogram-clock';
 import { patientBirthDate } from './dentition.use-cases';
+import { CLINICAL_ENTRY_NOT_FOUND_MESSAGE } from '../../../clinical-entries/application/clinical-record-errors';
+
+/** DX-207: 404 de una prestación que no está en el catálogo de esta clínica. */
+export const TOOTH_RECORD_CATALOG_ITEM_NOT_FOUND_MESSAGE =
+  'Prestación no encontrada en el catálogo de esta clínica.';
 
 // FDI/ISO-3950 tooth codes: permanent dentition is quadrants 1-4 with tooth
 // position 1-8 (11-18, 21-28, 31-38, 41-48); primary (deciduous) dentition is
@@ -65,11 +71,9 @@ export function isValidCatalogKind(kind: unknown): kind is CatalogKind {
 // `performedById` is passed as a separate explicit argument sourced from
 // `req.user.sub` in the controller, never taken from the request body.
 //
-// `catalogItemId`/`clinicalEntryId` are optional and are deliberately NOT
-// existence/ownership-checked here: a bad or cross-tenant id would only ever
-// resolve to nothing under RLS when later joined, so it renders harmlessly.
-// Follow-up: add an explicit existence check once the catalog/entry lookups
-// are wired through this module (tracked, not scope-creeped into Task 2).
+// `catalogItemId`/`clinicalEntryId` are optional; when present they must be
+// of THIS clinic (and the entry, of THIS patient) — DX-207: the columns have
+// no FK, so without the check a cross-tenant id was stored as-is.
 export interface AddToothRecordInput {
   toothNumber: string;
   surfaces?: ToothSurface[];
@@ -151,6 +155,7 @@ export class AddToothRecordUseCase {
       birthDate,
       input.toothNumber,
     );
+    await this.assertReferencesBelong(patientId, input);
 
     // Rebuild the payload from only the known fields — same defensive
     // convention as CreateClinicalEntryUseCase / CreateCatalogItemUseCase:
@@ -169,6 +174,32 @@ export class AddToothRecordUseCase {
       origin: input.origin,
       recordedAt: input.recordedAt,
     });
+  }
+
+  /**
+   * DX-207: la prestación tiene que estar en el catálogo de ESTA clínica y la
+   * evolución, en la historia de ESTE paciente (404, como un id inexistente:
+   * bajo RLS uno ajeno no se distingue de uno que no existe).
+   */
+  private async assertReferencesBelong(
+    patientId: string,
+    input: AddToothRecordInput,
+  ): Promise<void> {
+    if (
+      input.catalogItemId !== undefined &&
+      !(await this.repo.catalogItemExists(input.catalogItemId))
+    ) {
+      throw new NotFoundException(TOOTH_RECORD_CATALOG_ITEM_NOT_FOUND_MESSAGE);
+    }
+    if (
+      input.clinicalEntryId !== undefined &&
+      !(await this.repo.clinicalEntryOfPatientExists(
+        patientId,
+        input.clinicalEntryId,
+      ))
+    ) {
+      throw new NotFoundException(CLINICAL_ENTRY_NOT_FOUND_MESSAGE);
+    }
   }
 
   /**

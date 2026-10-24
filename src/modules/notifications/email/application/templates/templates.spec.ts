@@ -272,6 +272,25 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.html).not.toContain('<a href');
     });
 
+    it('DX-262 (revisión N1): un abono al saldo migrado no habla de «plan»', () => {
+      const email = renderEmail(
+        'payment-receipt',
+        {
+          ...base,
+          planLabel: 'Saldo migrado · Ortodoncia · corte 15/03/2026',
+          toOpeningBalance: true,
+        },
+        brand,
+      );
+      expect(email.text).toContain(
+        'Concepto: Saldo migrado · Ortodoncia · corte 15/03/2026',
+      );
+      expect(email.text).toContain(
+        'Saldo pendiente tras este abono: $ 450.000',
+      );
+      expect(email.text).not.toMatch(/Plan:|Saldo del plan/);
+    });
+
     it('DX-203: el que va al responsable lo saluda a él y dice de quién es el abono', () => {
       const email = renderEmail(
         'payment-receipt',

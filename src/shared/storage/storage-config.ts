@@ -160,6 +160,31 @@ export function loadUploadMaxConcurrency(
   );
 }
 
+/**
+ * SEC-046: lecturas de ficheros de importación de pacientes a la vez (inspect,
+ * dry-run y hoja de saldos), en cada réplica y por clínica. Cada una puede
+ * ocupar ~85 MB (descompresión de hasta 32 MB de XML y sus cadenas).
+ */
+export const IMPORT_READ_CONCURRENCY_LIMITS = {
+  PATIENT_IMPORT_MAX_CONCURRENCY: { range: [1, 64], fallback: 2 },
+  PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC: { range: [1, 64], fallback: 1 },
+} as const satisfies Record<
+  string,
+  { range: readonly [number, number]; fallback: number }
+>;
+
+export function loadImportReadConcurrency(
+  get: (key: string) => string | undefined,
+): { perReplica: number; perClinic: number } {
+  const int = (key: keyof typeof IMPORT_READ_CONCURRENCY_LIMITS): number =>
+    boundedInt(get(key), IMPORT_READ_CONCURRENCY_LIMITS[key].range) ??
+    IMPORT_READ_CONCURRENCY_LIMITS[key].fallback;
+  return {
+    perReplica: int('PATIENT_IMPORT_MAX_CONCURRENCY'),
+    perClinic: int('PATIENT_IMPORT_MAX_CONCURRENCY_PER_CLINIC'),
+  };
+}
+
 /** DX-259: plazos de las subidas que pasan por la API (`UploadSlotGuard`). */
 export const UPLOAD_TIMEOUT_LIMITS = {
   UPLOAD_IDLE_TIMEOUT_MS: { range: [1_000, 300_000], fallback: 15_000 },

@@ -78,6 +78,8 @@ model Tenant {
   postOpTemplates           PostOpInstructionTemplate[]
   postOpTemplateLinks       PostOpInstructionTemplateLink[]
   postOpDeliveries          PostOpInstructionDelivery[]
+  // DX-099: anamnesis enviadas por enlace al paciente.
+  medicalHistorySubmissions MedicalHistorySubmission[]
   // DX-151: documentos de los pacientes.
   patientDocuments          PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -92,6 +94,9 @@ model Tenant {
   expenseCategories         ExpenseCategory[]
   expenses                  Expense[]
   expensePayments           ExpensePayment[]
+  // DX-262: hoja de saldos del importador y saldos migrados.
+  patientImportBalanceRows  PatientImportBalanceRow[]
+  openingBalances           OpeningBalance[]
 
   @@map("tenants")
 }
@@ -129,31 +134,38 @@ model User {
   deletedAt               DateTime?
   memberships             ClinicMembership[]
 
-  privacyPoliciesPublished PrivacyPolicyVersion[]
-  dataConsentsRecorded     DataProcessingConsent[]
-  perioExamsPerformed      PerioExam[]
-  prescriptionsIssued      Prescription[]              @relation("PrescriptionProfessional")
-  prescriptionsVoided      Prescription[]              @relation("PrescriptionVoidedBy")
+  privacyPoliciesPublished   PrivacyPolicyVersion[]
+  dataConsentsRecorded       DataProcessingConsent[]
+  perioExamsPerformed        PerioExam[]
+  prescriptionsIssued        Prescription[]              @relation("PrescriptionProfessional")
+  prescriptionsVoided        Prescription[]              @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced           PatientImplant[]            @relation("PatientImplantProfessional")
-  implantsVoided           PatientImplant[]            @relation("PatientImplantVoidedBy")
-  implantCardsDelivered    PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced             PatientImplant[]            @relation("PatientImplantProfessional")
+  implantsVoided             PatientImplant[]            @relation("PatientImplantVoidedBy")
+  implantCardsDelivered      PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
-  uploadedPatientDocuments PatientDocument[]           @relation("PatientDocumentUploadedBy")
-  voidedPatientDocuments   PatientDocument[]           @relation("PatientDocumentVoidedBy")
-  planAcceptancesRecorded  TreatmentPlanAcceptance[]
-  tokens                   UserToken[]
-  clinicalEntryAddenda     ClinicalEntryAddendum[]
-  dentitionEventsRecorded  PatientDentitionEvent[]
-  retentionActions         PatientRetentionAction[]
-  platformAccesses         PlatformAccessAudit[]
+  uploadedPatientDocuments   PatientDocument[]           @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments     PatientDocument[]           @relation("PatientDocumentVoidedBy")
+  planAcceptancesRecorded    TreatmentPlanAcceptance[]
+  tokens                     UserToken[]
+  clinicalEntryAddenda       ClinicalEntryAddendum[]
+  dentitionEventsRecorded    PatientDentitionEvent[]
+  retentionActions           PatientRetentionAction[]
+  platformAccesses           PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts        TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
-  discountPoliciesUpdated  DiscountPolicy[]
+  planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
+  discountPoliciesUpdated    DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
-  platformAuditEvents      PlatformAuditEvent[]
+  platformAuditEvents        PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
-  postOpDeliveries         PostOpInstructionDelivery[]
+  postOpDeliveries           PostOpInstructionDelivery[]
+  // DX-099: enlaces de anamnesis creados y envíos revisados.
+  medicalHistorySubmissionsCreated  MedicalHistorySubmission[] @relation("MedicalHistorySubmissionCreatedBy")
+  medicalHistorySubmissionsReviewed MedicalHistorySubmission[] @relation("MedicalHistorySubmissionReviewedBy")
+  // DX-273: salidas de citas de COMPLETED (con motivo).
+  appointmentStatusReversals AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
+  // DX-279: versiones de la política de cancelación que creó.
+  cancellationPolicyVersions CancellationPolicyVersion[]
 
   @@map("users")
 }
@@ -219,6 +231,8 @@ model Location {
   patientImportBatches      PatientImportBatch[]
   // DX-274: gastos de la sede y sus pagos (los de caja menor son salidas).
   expenses                  Expense[]
+  // DX-262: saldos migrados registrados en la sede.
+  openingBalances           OpeningBalance[]
   planAcceptances           TreatmentPlanAcceptance[]
   presentedPlans            TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
@@ -233,6 +247,8 @@ model Location {
   planItemDiscounts         TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
   planItemPricings          TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
+  // DX-050: ítems de plan realizados en esta sede.
+  planItemsPerformed        TreatmentPlanItem[]         @relation("TreatmentPlanItemPerformedLocation")
   // DX-027: cajas por turno de la sede y sus ajustes.
   cashSessions              CashSession[]
   cashAdjustments           CashSessionAdjustment[]
@@ -240,12 +256,16 @@ model Location {
   membershipLocations       MembershipLocation[]
   // DX-222: indicaciones postoperatorias entregadas en la sede.
   postOpDeliveries          PostOpInstructionDelivery[]
+  // DX-099: anamnesis por revisar de la sede.
+  medicalHistorySubmissions MedicalHistorySubmission[]
   // DX-105: listas y convenios de la sede.
   priceLists                PriceList[]
   agreements                Agreement[]
   // DX-233: horario de los profesionales en la sede y sus excepciones.
   providerSchedules         ProviderSchedule[]
   providerScheduleOverrides ProviderScheduleOverride[]
+  // DX-279: versiones de la política de cancelación de la sede.
+  cancellationPolicyVersions CancellationPolicyVersion[]
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -271,6 +291,8 @@ model ClinicMembership {
   user                User                 @relation(fields: [userId], references: [id])
   // DX-089: sedes a las que se restringe el miembro (sin filas = todas).
   locations           MembershipLocation[]
+  // DX-050: procedimientos del plan que realizó.
+  performedPlanItems  TreatmentPlanItem[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -281,6 +303,10 @@ model ClinicMembership {
   // Destino de la FK compuesta (tenantId, membershipId) de membership_locations
   // (SEC-004): la membresía tiene que ser del MISMO tenant.
   @@unique([tenantId, id], map: "clinic_memberships_tenant_id_key")
+  // DX-050: destino de la FK compuesta (tenantId, performedByMembershipId,
+  // performedById) de treatment_plan_items: la membresía es de la MISMA
+  // clínica y del MISMO usuario.
+  @@unique([tenantId, id, userId], map: "clinic_memberships_tenant_id_user_key")
   @@index([tenantId])
   @@map("clinic_memberships")
 }
@@ -420,6 +446,11 @@ model Patient {
   // DX-225: últimos 8 dígitos del teléfono (dx_phone_tail). Lo mantiene el
   // trigger `patients_phone_tail`; la app solo lo lee en SQL (BAJA por móvil).
   phoneTail                    String?               @ignore
+  // DX-287: clave del documento (public.dx_doc_key: solo [0-9A-Z], la regla de
+  // docKey() en patients/domain/doc-key.ts). La mantiene el trigger
+  // `patients_doc_key`; la app solo la lee en SQL (alta, edición e importación
+  // buscan «1.111.111» = «1111111» por el índice, también bajo RLS).
+  docKey                       String?               @ignore
   // DX-107: lote de importación que CREÓ al paciente (NULL si se dio de alta a
   // mano). «Deshacer lote» retira en blando solo los de su lote. FK compuesta
   // por tenant (patients_import_batch_fkey).
@@ -428,6 +459,9 @@ model Patient {
   importBatch            PatientImportBatch?         @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
   importRows             PatientImportRow[]
+  // DX-262: saldos migrados y su hoja de saldos.
+  importBalanceRows      PatientImportBalanceRow[]
+  openingBalances        OpeningBalance[]
   medicalHistoryVersions MedicalHistoryVersion[]
   // DX-247: confirmaciones «Sin cambios hoy» de su anamnesis.
   medicalHistoryReviews  MedicalHistoryReview[]
@@ -465,6 +499,8 @@ model Patient {
   agreements             PatientAgreement[]
   // DX-222: indicaciones postoperatorias que se le entregaron.
   postOpDeliveries       PostOpInstructionDelivery[]
+  // DX-099: anamnesis enviadas por enlace.
+  medicalHistorySubmissions MedicalHistorySubmission[]
   country                Country?                    @relation(fields: [countryCode], references: [code])
   city                   City?                       @relation(fields: [cityId], references: [id])
 
@@ -491,6 +527,11 @@ model Patient {
   //   patients_tenant_import_batch_idx ("tenantId", import_batch_id)
   //     WHERE import_batch_id IS NOT NULL
   //     -> pacientes de un lote (deshacer, DX-107) y lado hijo de su FK.
+  //   patients_tenant_doc_key_live_idx ("tenantId", "docKey")
+  //     WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL
+  //     -> paciente vivo por documento normalizado: alta y edición manual,
+  //        importación y hoja de saldos (DX-107, DX-262, DX-287). No único:
+  //        hay duplicados ambiguos anteriores a DX-107 («1.111» y «1111»).
   @@map("patients")
 }
 
@@ -512,6 +553,9 @@ model MedicalHistoryVersion {
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
   hasCriticalAlert Boolean   @default(false)
+  // DX-099: tecleada por el personal o aceptada desde el formulario del
+  // paciente (autor = quien la revisó).
+  source           MedicalHistorySource @default(STAFF)
   createdById      String?   @db.Uuid
   createdAt        DateTime  @default(now())
   deletedAt        DateTime?
@@ -522,6 +566,8 @@ model MedicalHistoryVersion {
   patient Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id])
   // DX-247: confirmaciones «Sin cambios hoy» sobre esta versión.
   reviews MedicalHistoryReview[]
+  // DX-099: el envío del paciente que la originó (si vino del formulario).
+  submissions MedicalHistorySubmission[]
 
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
   // DX-247: destino de la FK compuesta de medical_history_reviews (misma
@@ -555,6 +601,63 @@ model MedicalHistoryReview {
   @@index([tenantId, patientId, reviewedAt(sort: Desc)], map: "medical_history_reviews_tenant_patient_idx")
   @@index([tenantId, medicalHistoryVersionId], map: "medical_history_reviews_tenant_version_idx")
   @@map("medical_history_reviews")
+}
+
+/// DX-099: origen de una versión de la anamnesis.
+enum MedicalHistorySource {
+  STAFF
+  PATIENT_FORM
+}
+
+/// DX-099: estado de un envío de la anamnesis por enlace.
+enum MedicalHistorySubmissionStatus {
+  PENDING_PATIENT
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+/// DX-099: anamnesis previa a la cita por enlace seguro. Del token solo se
+/// guarda el hash; las respuestas (dato clínico, RLS) no cambian una vez
+/// enviadas y la HC no cambia hasta que un ADMIN o DENTIST las acepta, en una
+/// transacción que crea exactamente una versión (`resultingVersionId`). Sin
+/// borrado duro (trigger) y ciclo de vida en la BD
+/// (medical_history_submissions_guard, CHECK de estado).
+model MedicalHistorySubmission {
+  id                   String                         @id @default(uuid()) @db.Uuid
+  tenantId             String                         @db.Uuid
+  patientId            String                         @db.Uuid
+  appointmentId        String?                        @db.Uuid
+  /// Sede de la bandeja: la de la cita o la de quien creó el enlace.
+  locationId           String                         @db.Uuid
+  tokenHash            String                         @unique
+  expiresAt            DateTime
+  revokedAt            DateTime?
+  status               MedicalHistorySubmissionStatus @default(PENDING_PATIENT)
+  questionnaireVersion String
+  answers              Json?
+  submittedAt          DateTime?
+  reviewedById         String?                        @db.Uuid
+  reviewedAt           DateTime?
+  rejectReason         String?
+  resultingVersionId   String?                        @db.Uuid
+  createdById          String                         @db.Uuid
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient          Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "medical_history_submissions_patient_fkey")
+  appointment      Appointment?           @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_submissions_appointment_fkey")
+  location         Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "medical_history_submissions_location_fkey")
+  resultingVersion MedicalHistoryVersion? @relation(fields: [tenantId, patientId, resultingVersionId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_submissions_version_fkey")
+  createdBy        User                   @relation("MedicalHistorySubmissionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "medical_history_submissions_created_by_fkey")
+  reviewedBy       User?                  @relation("MedicalHistorySubmissionReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict, map: "medical_history_submissions_reviewed_by_fkey")
+
+  @@index([tenantId, status, locationId, submittedAt], map: "medical_history_submissions_inbox_idx")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "medical_history_submissions_patient_idx")
+  @@index([createdById], map: "medical_history_submissions_created_by_idx")
+  @@map("medical_history_submissions")
 }
 
 model ClinicalEntry {
@@ -927,11 +1030,29 @@ model Appointment {
   // DX-200: el estado (SCHEDULED o CONFIRMED) al que vuelve «Deshacer
   // llegada». Solo con la cita en ARRIVED.
   preArrivalStatus    AppointmentStatus?
+  // DX-279: cancelación (solo en CANCELLED, CHECK appointments_cancellation_check):
+  // hora del servidor (UTC), quién, motivo del catálogo cerrado y texto
+  // opcional (≤ 500), minutos de aviso (≥ 0) y si fue tardía según la política
+  // vigente de la sede. Hora, quién, aviso y tardía van juntos (todos o
+  // ninguno: las canceladas antiguas no tienen ninguno).
+  cancelledAt         DateTime?
+  cancelledByKind     CancellationByKind?
+  cancelReasonCode    CancellationReasonCode?
+  cancelReasonText    String?            @db.VarChar(500)
+  noticeMinutes       Int?
+  lateCancellation    Boolean?
+  // DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW; null en las antiguas).
+  noShowMarkedAt      DateTime?
+  // DX-279: versión de la política COMUNICADA al paciente (recordatorio o
+  // enlace). La rellena DX-291; hasta entonces, null.
+  policyVersionId     String?            @db.Uuid
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
 
   planItems        AppointmentPlanItem[]
+  // DX-273: salidas de COMPLETED, con su motivo.
+  statusReversals  AppointmentStatusReversal[]
   confirmations    AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
   waitlistOffers   WaitlistOffer[]
@@ -945,6 +1066,8 @@ model Appointment {
   clinicalEntries  ClinicalEntry[]
   // DX-222: indicaciones postoperatorias entregadas por esta cita.
   postOpDeliveries PostOpInstructionDelivery[]
+  // DX-099: anamnesis enviadas para esta cita.
+  medicalHistorySubmissions MedicalHistorySubmission[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -954,6 +1077,8 @@ model Appointment {
   location        Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
   // FK COMPUESTA (DX-121): el tipo tiene que ser del MISMO tenant.
   appointmentType AppointmentType? @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
+  // FK COMPUESTA (DX-279): la versión comunicada es de la MISMA clínica.
+  policyVersion   CancellationPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "appointments_policy_version_fkey")
 
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
@@ -984,6 +1109,13 @@ model Appointment {
   //     start) WHERE status IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
   //     AND "deletedAt" IS NULL
   //     -> DX-200: panel «En clínica» de la sede.
+  //   appointments_tenant_patient_incidents_idx ("tenantId", "patientId",
+  //     start) INCLUDE ("locationId", status, "lateCancellation") WHERE
+  //     "deletedAt" IS NULL AND (status = 'NO_SHOW' OR "lateCancellation")
+  //     -> DX-279: resumen de asistencia del paciente e insignia de la agenda.
+  //   appointments_tenant_policy_version_idx ("tenantId", "policyVersionId")
+  //     WHERE "policyVersionId" IS NOT NULL
+  //     -> DX-279: lado hijo de la FK compuesta a la versión de la política.
   @@map("appointments")
 }
 
@@ -1238,6 +1370,8 @@ enum DataConsentScope {
 enum DataConsentChannel {
   IN_PERSON
   LEGACY
+  // DX-099: la da el propio paciente en el formulario de anamnesis por enlace.
+  PATIENT_LINK
 }
 
 // DX-037: versión publicada de la política de tratamiento de datos de UNA
@@ -1424,6 +1558,11 @@ model TreatmentPlanItem {
   agreementName     String?
   // Sede con la que se resolvió el precio.
   pricingLocationId String?                 @db.Uuid
+  // SEC-047: quién dio de alta el ítem (puntero suave a User, como
+  // `TreatmentPlan.createdById`). Una alternativa lo copia de su origen. NULL
+  // en los ítems anteriores a SEC-047. El informe de descuentos lo muestra
+  // junto a la rebaja de convenio.
+  createdById       String?                 @db.Uuid
   price             Decimal                 @db.Decimal(12, 2)
   // Descuento del ítem en la moneda del plan (DX-012). CHECK 0 <= discount <= price
   // (treatment_plan_items_discount_nonneg / _subtotal_nonneg).
@@ -1445,14 +1584,30 @@ model TreatmentPlanItem {
   discountAt         DateTime?
   discountLocationId String?         @db.Uuid
 
-  plan             TreatmentPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
-  discountBy       User?         @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
+  // DX-050: producción atribuible. Quién lo realizó (el usuario, como
+  // `Appointment.providerId`, y su membresía en ESTA clínica), en qué sede y
+  // cuándo (hora del servidor). Se escriben al pasar a DONE, solo un ADMIN
+  // corrige quién o cuándo, y se limpian al salir de DONE (auditado). NULL en
+  // los DONE anteriores a DX-050: «Sin atribuir». CHECK
+  // treatment_plan_items_performed_by_pair: usuario y membresía van juntos.
+  performedById           String?   @db.Uuid
+  performedByMembershipId String?   @db.Uuid
+  performedLocationId     String?   @db.Uuid
+  completedAt             DateTime?
+
+  plan                  TreatmentPlan     @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
+  // FK COMPUESTA (DX-050): quien lo realizó es miembro de la MISMA clínica, y
+  // la membresía es la de ese usuario.
+  performedByMembership ClinicMembership? @relation(fields: [tenantId, performedByMembershipId, performedById], references: [tenantId, id, userId], onDelete: Restrict, map: "treatment_plan_items_performed_by_fkey")
+  // FK COMPUESTA (DX-050): la sede donde se realizó es de la MISMA clínica.
+  performedLocation     Location?         @relation("TreatmentPlanItemPerformedLocation", fields: [tenantId, performedLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_performed_location_fkey")
+  discountBy            User?             @relation("TreatmentPlanItemDiscountBy", fields: [discountById], references: [id], onDelete: Restrict, map: "treatment_plan_items_discount_by_fkey")
   // FK COMPUESTA (SEC-004): la sede del descuento es de la MISMA clínica.
-  discountLocation Location?     @relation("TreatmentPlanItemDiscountLocation", fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
+  discountLocation      Location?         @relation("TreatmentPlanItemDiscountLocation", fields: [tenantId, discountLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_discount_location_fkey")
   // FK COMPUESTA (SEC-004, DX-105): el convenio aplicado es de la MISMA clínica.
-  agreement        Agreement?    @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
+  agreement             Agreement?        @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
   // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
-  pricingLocation  Location?     @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
+  pricingLocation       Location?         @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
 
   @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
   @@index([tenantId, planId])
@@ -1460,6 +1615,9 @@ model TreatmentPlanItem {
   @@index([tenantId, pricingLocationId], map: "treatment_plan_items_tenant_pricing_location_idx")
   @@index([tenantId, discountLocationId])
   @@index([discountById])
+  // DX-050: lados hijos de las FK de quien lo realizó y de la sede.
+  @@index([tenantId, performedByMembershipId, performedById], map: "treatment_plan_items_tenant_performed_by_idx")
+  @@index([tenantId, performedLocationId], map: "treatment_plan_items_tenant_performed_location_idx")
   // PARCIAL (WHERE "deletedAt" IS NULL), no declarable en Prisma:
   //   treatment_plan_items_tenant_plan_billable_idx ("tenantId", "planId")
   //     INCLUDE (price, discount, status)
@@ -1470,6 +1628,14 @@ model TreatmentPlanItem {
   //     WHERE ("discount" > 0 OR "price" < "catalogPrice") AND "deletedAt" IS NULL
   //     -> DX-204/SEC-041: informe de descuentos por periodo (descuento o
   //        rebaja de precio).
+  //   treatment_plan_items_tenant_agreement_reduction_at_idx
+  //     ("tenantId", COALESCE("discountAt", "createdAt"))
+  //     WHERE "agreementId" IS NOT NULL AND "basePrice" > "catalogPrice" AND "deletedAt" IS NULL
+  //     -> SEC-047: la rama «rebaja de convenio» del mismo informe.
+  //   treatment_plan_items_tenant_done_completed_idx ("tenantId",
+  //     "completedAt") INCLUDE ("performedLocationId", "planId", price,
+  //     discount) WHERE status = 'DONE' AND "deletedAt" IS NULL
+  //     -> DX-014: producción por período de «Comparar sedes».
   @@map("treatment_plan_items")
 }
 
@@ -1620,6 +1786,10 @@ model Currency {
   expenses         Expense[]
   // DX-105: listas de precios en esa moneda.
   priceLists       PriceList[]
+  // DX-262: saldos migrados en esa moneda.
+  openingBalances  OpeningBalance[]
+  // DX-279: importe sugerido de la política de cancelación en esa moneda.
+  cancellationPolicyVersions CancellationPolicyVersion[]
 
   @@map("currencies")
 }
@@ -1707,7 +1877,10 @@ model Payment {
   id                     String         @id @default(uuid()) @db.Uuid
   tenantId               String         @db.Uuid
   locationId             String         @db.Uuid
-  treatmentPlanId        String         @db.Uuid
+  // DX-262: un abono va a un plan O a un saldo migrado (CHECK
+  // payments_target_check: exactamente uno de los dos).
+  treatmentPlanId        String?        @db.Uuid
+  openingBalanceId       String?        @db.Uuid
   patientId              String         @db.Uuid
   amount                 Decimal        @db.Decimal(14, 2)
   currency               String
@@ -1739,8 +1912,10 @@ model Payment {
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
   // transitividad el paciente también es del tenant (treatment_plans ya tiene
   // su FK compuesta a patients), sin una tercera FK.
-  plan     TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
-  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  plan           TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
+  // DX-262: abono contra el saldo migrado del MISMO paciente y tenant.
+  openingBalance OpeningBalance? @relation(fields: [tenantId, openingBalanceId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payments_opening_balance_fkey")
+  location       Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
@@ -1760,6 +1935,9 @@ model Payment {
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
+  // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
+  //   payments_tenant_opening_balance_idx ("tenantId", "openingBalanceId")
+  //     WHERE "openingBalanceId" IS NOT NULL
   @@index([tenantId, treatmentPlanId])
   @@index([tenantId, patientId])
   // Ya existía en SQL (20260801150000_add_locations) sin declararse aquí; se
@@ -2342,6 +2520,12 @@ model Prescription {
   // Alerta de alergia confirmada por el profesional (y contra qué alergias).
   allergyOverride      Boolean            @default(false)
   allergyMatches       Json?
+  // DX-300: avisos de seguridad calculados por el servidor al emitir, versión
+  // de las reglas (prescription-safety.ts) y motivo con el que se confirmaron
+  // los bloqueantes. NULL en las recetas emitidas antes (hash v1).
+  safetyRulesVersion   String?
+  safetyAlerts         Json?
+  safetyOverrideReason String?
   // SHA-256 (hex) del contenido emitido (prescription-hash.ts).
   contentHash          String
   voidedAt             DateTime?
@@ -2463,6 +2647,9 @@ enum AuditResourceType {
   POSTOP_DELIVERY
   // DX-151: documentos del paciente (subir, ver, descargar, anular).
   PATIENT_DOCUMENT
+  // DX-099: anamnesis por enlace (crear el enlace, envío del paciente, ver,
+  // aceptar, rechazar y anular).
+  MEDICAL_HISTORY_SUBMISSION
   // DX-105: convenios y listas de precios (altas, cambios, retiros, asignaciones).
   AGREEMENT
   PRICE_LIST
@@ -2474,6 +2661,8 @@ enum AuditResourceType {
   PATIENT_IMPORT_BATCH
   // DX-274: gasto de la sede (alta, edición, soporte, pagos, anulación).
   EXPENSE
+  // DX-279: nueva versión de la política de cancelación de una sede.
+  CANCELLATION_POLICY
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3953,10 +4142,48 @@ model PatientImportBatch {
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt
 
-  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  location Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
-  rows     PatientImportRow[]
-  patients Patient[]
+  // DX-262: hoja de saldos («Saldo migrado») del lote, opcional. Se sube con
+  // el lote VALIDATED (dry-run propio) y se importa al confirmar, después de
+  // los pacientes. El fichero tampoco se guarda: nombre, hash y totales.
+  balanceFileName       String?
+  balanceFileSha256     String?                  @db.Char(64)
+  balanceFileFormat     PatientImportFileFormat?
+  balanceFileSizeBytes  Int?
+  balanceTotalRows      Int                      @default(0)
+  /// Filas con error (importe, moneda, fecha, documento inexistente…).
+  balanceErrorRows      Int                      @default(0)
+  /// Filas sumadas a otra del mismo paciente y moneda.
+  balanceMergedRows     Int                      @default(0)
+  /// Saldos a crear (uno por paciente y moneda).
+  balancePreparedRows   Int                      @default(0)
+  balanceProcessedRows  Int                      @default(0)
+  balanceCreatedCount   Int                      @default(0)
+  /// Saldos no creados al importar (su paciente no llegó a existir).
+  balanceSkippedCount   Int                      @default(0)
+  /// [{ currency, rows, cents }]: todas las filas con importe y moneda legibles.
+  balanceFileTotals     Json                     @default("[]")
+  /// [{ currency, rows, cents }]: lo que se importa.
+  balanceValidTotals    Json                     @default("[]")
+  /// Errores y avisos por fila de la hoja (mismo formato que `issues`).
+  balanceIssues         Json                     @default("[]")
+  /// Saldos migrados que retiró el deshacer.
+  balanceUndoneCount    Int?
+  /// [{ currency, rows, cents }] de los saldos que retiró de verdad el deshacer.
+  balanceUndoneTotals   Json                     @default("[]")
+  /// Saldos no creados porque su documento era de varios pacientes vivos.
+  balanceAmbiguousCount Int                      @default(0)
+  /// «Añadir aunque ya tenga saldo migrado» (QA D1): sin marcar, un paciente con
+  /// un saldo migrado vivo de otro lote en esa moneda no recibe otro.
+  balanceAddToExisting  Boolean                  @default(false)
+  /// Saldos no creados al importar porque el paciente ya tenía uno vivo (QA D1).
+  balanceExistingCount  Int                      @default(0)
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location        Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
+  rows            PatientImportRow[]
+  patients        Patient[]
+  balanceRows     PatientImportBalanceRow[]
+  openingBalances OpeningBalance[]
 
   @@unique([tenantId, id], map: "patient_import_batches_tenant_id_key")
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)], map: "patient_import_batches_tenant_created_idx")
@@ -3991,6 +4218,81 @@ model PatientImportRow {
   @@unique([tenantId, batchId, rowNumber], map: "patient_import_rows_tenant_batch_row_key")
   @@index([tenantId, patientId], map: "patient_import_rows_tenant_patient_idx")
   @@map("patient_import_rows")
+}
+
+/// DX-262: saldo de la hoja de saldos preparado por el dry-run (uno por
+/// paciente y moneda, ya sumadas las filas repetidas). El trabajo lo convierte
+/// en un `OpeningBalance` al importar, buscando al paciente por `docKey`.
+model PatientImportBalanceRow {
+  id          String                  @id @default(uuid()) @db.Uuid
+  tenantId    String                  @db.Uuid
+  batchId     String                  @db.Uuid
+  /// Primera fila del fichero que lo forma.
+  rowNumber   Int
+  /// Clave del documento del paciente (`docKey`: mayúsculas, solo letras y dígitos).
+  docKey      String
+  currency    String
+  amount      Decimal                 @db.Decimal(14, 2)
+  /// NULL: el fichero no traía fecha; se usará el día de la importación.
+  asOfDate    DateTime?               @db.Date
+  concept     String?
+  sourceRows  Int                     @default(1)
+  outcome     PatientImportRowOutcome @default(PENDING)
+  patientId   String?                 @db.Uuid
+  processedAt DateTime?
+
+  tenant  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  batch   PatientImportBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_balance_rows_batch_fkey")
+  patient Patient?           @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_balance_rows_patient_fkey")
+
+  @@unique([tenantId, batchId, docKey, currency], map: "patient_import_balance_rows_tenant_batch_doc_key")
+  @@index([tenantId, batchId, outcome, rowNumber], map: "patient_import_balance_rows_tenant_batch_outcome_idx")
+  @@index([tenantId, patientId], map: "patient_import_balance_rows_tenant_patient_idx")
+  @@map("patient_import_balance_rows")
+}
+
+/// DX-262: saldo inicial «Saldo migrado» de un paciente en una moneda, traído
+/// de su programa anterior con un lote de importación. Entra en el estado de
+/// cuenta (DX-011) y en la cartera por antigüedad (DX-145) desde `asOfDate`.
+/// Inmutable salvo su retirada (`voidedAt`, al deshacer el lote): trigger
+/// `opening_balances_guard`. Hoy ningún abono se le imputa (DX-051).
+model OpeningBalance {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @db.Uuid
+  /// Sede del lote (la activa al subirlo): sede de la deuda si el paciente no
+  /// tiene citas atendidas, abonos ni planes presentados.
+  locationId          String    @db.Uuid
+  patientId           String    @db.Uuid
+  importBatchId       String    @db.Uuid
+  currency            String
+  amount              Decimal   @db.Decimal(14, 2)
+  /// Día civil desde el que cuenta la deuda (fecha de corte).
+  asOfDate            DateTime  @db.Date
+  /// `asOfDate` es el día de la importación: el fichero no traía fecha.
+  asOfDateApproximate Boolean   @default(false)
+  concept             String
+  /// Filas del fichero sumadas en este saldo.
+  sourceRows          Int       @default(1)
+  /// Puntero suave a User (quién confirmó el lote).
+  createdById         String    @db.Uuid
+  createdAt           DateTime  @default(now())
+  voidedAt            DateTime?
+  voidedById          String?   @db.Uuid
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_location_fkey")
+  patient     Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_patient_fkey")
+  batch       PatientImportBatch @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "opening_balances_batch_fkey")
+  currencyRef Currency           @relation(fields: [currency], references: [code], onDelete: Restrict, map: "opening_balances_currency_fkey")
+  /// Abonos registrados contra este saldo (vivos: `deletedAt` NULL).
+  payments    Payment[]
+
+  @@unique([tenantId, id], map: "opening_balances_tenant_id_key")
+  @@unique([tenantId, id, patientId], map: "opening_balances_tenant_id_patient_key")
+  @@unique([tenantId, importBatchId, patientId, currency], map: "opening_balances_tenant_batch_patient_currency_key")
+  @@index([tenantId, patientId], map: "opening_balances_tenant_patient_idx")
+  @@index([tenantId, locationId], map: "opening_balances_tenant_location_idx")
+  @@map("opening_balances")
 }
 
 // DX-256: historial de ítems agendados; active se mantiene con triggers.
@@ -4130,4 +4432,76 @@ model ExpensePayment {
   @@unique([tenantId, id], map: "expense_payments_tenant_id_key")
   @@index([tenantId, expenseId], map: "expense_payments_tenant_expense_idx")
   @@map("expense_payments")
+}
+
+// DX-273: cada salida de una cita de COMPLETED (a agendada, cancelada…), con
+// el motivo que escribió ADMIN/DENTIST. El `audit_event` COMPLETED_EXIT
+// apunta aquí por id (`params.reversalId`): la auditoría no guarda texto libre.
+// Solo SELECT/INSERT para la app (evidencia); RLS FORCE por tenant.
+model AppointmentStatusReversal {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  tenantId      String            @db.Uuid
+  patientId     String            @db.Uuid
+  appointmentId String            @db.Uuid
+  fromStatus    AppointmentStatus
+  toStatus      AppointmentStatus
+  reason        String            @db.VarChar(500)
+  actorUserId   String            @db.Uuid
+  createdAt     DateTime          @default(dbgenerated("timezone('UTC'::text, now())"))
+  appointment   Appointment       @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Cascade, map: "appointment_status_reversals_appointment_fkey")
+  actor         User              @relation("AppointmentStatusReversalActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "appointment_status_reversals_actor_fkey")
+
+  @@index([tenantId, appointmentId, createdAt], map: "appointment_status_reversals_appointment_idx")
+  @@index([actorUserId], map: "appointment_status_reversals_actor_idx")
+  @@map("appointment_status_reversals")
+}
+
+// DX-279: quién canceló una cita. CLINIC nunca cuenta como tardía.
+enum CancellationByKind {
+  PATIENT_LINK
+  STAFF_FOR_PATIENT
+  CLINIC
+}
+
+// DX-279: motivo de la cancelación, catálogo CERRADO (sin datos de salud
+// obligatorios): enfermedad, olvido, costo, transporte, trabajo, la clínica
+// reprograma, otro.
+enum CancellationReasonCode {
+  ILLNESS
+  FORGOT
+  COST
+  TRANSPORT
+  WORK
+  CLINIC_RESCHEDULE
+  OTHER
+}
+
+/// DX-279: política de cancelación de una sede, APPEND-ONLY: editarla crea la
+/// versión siguiente (trigger cancellation_policy_versions_immutable y sin
+/// UPDATE/DELETE para la app). La vigente es la de mayor `version`. Horas de
+/// aviso 0–168, importe sugerido ≥ 0 con su moneda (los dos o ninguno) y el
+/// texto para el paciente (≤ 1000). RLS FORCE por tenant.
+model CancellationPolicyVersion {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  tenantId           String   @db.Uuid
+  locationId         String   @db.Uuid
+  version            Int
+  noticeHours        Int
+  suggestedFee       Decimal? @db.Decimal(14, 2)
+  currency           String?
+  patientText        String   @default("") @db.VarChar(1000)
+  /// Lo usará el cargo por inasistencia (DX-291): RECEPTION también puede generarlo.
+  receptionCanCharge Boolean  @default(false)
+  createdById        String   @db.Uuid
+  createdAt          DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  location     Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_policy_versions_location_fkey")
+  currencyRef  Currency?     @relation(fields: [currency], references: [code], onDelete: Restrict, map: "cancellation_policy_versions_currency_fkey")
+  createdBy    User          @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "cancellation_policy_versions_created_by_fkey")
+  appointments Appointment[]
+
+  @@unique([tenantId, locationId, version], map: "cancellation_policy_versions_location_version_key")
+  @@unique([tenantId, id], map: "cancellation_policy_versions_tenant_id_key")
+  @@index([createdById], map: "cancellation_policy_versions_created_by_idx")
+  @@map("cancellation_policy_versions")
 }

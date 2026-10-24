@@ -25,6 +25,15 @@ import {
 import { dedupeRows, type CandidateRow } from '../domain/dedupe';
 import { issuesCsv, templateCsv } from '../domain/import-csv';
 import {
+  aggregateBalances,
+  balanceTemplateCsv,
+  resolveBalanceColumns,
+  totalsByCurrency,
+  validateBalanceRow,
+  type BalanceCandidate,
+  type CurrencyTotal,
+} from '../domain/opening-balance-sheet';
+import {
   IMPORT_FIELDS,
   type ImportFieldKey,
   type ImportPatientData,
@@ -44,6 +53,7 @@ import {
   importJobKey,
   type BatchRow,
   type ConfirmResult,
+  type ImportedBalanceTotal,
 } from '../infrastructure/prisma-patient-import.repository';
 
 export const PROCESS_IMPORT_JOB = 'patient-imports.process';
@@ -69,6 +79,28 @@ export const LOCATION_MESSAGE =
   'La sede activa no está disponible: elige una sede activa y vuelve a subir el archivo.';
 export const MISSING_FILE_MESSAGE =
   'Falta el archivo: adjúntalo en el campo «file».';
+export const BALANCES_NOT_EDITABLE_MESSAGE =
+  'La hoja de saldos solo se puede cambiar antes de confirmar la importación.';
+export const BALANCE_REPORT_GONE_MESSAGE =
+  'Este lote no tiene hoja de saldos o su informe ya no está disponible.';
+
+/** Mensaje del deshacer bloqueado (pacientes con actividad o saldos con abonos). */
+export function undoBlockedMessage(
+  err: UndoBlockedError,
+  withBalances = false,
+): string {
+  if (err.balances > 0) {
+    return err.balances === 1
+      ? 'No se puede deshacer: 1 saldo migrado de este lote ya tiene abonos. Anula esos abonos antes de deshacer.'
+      : `No se puede deshacer: ${err.balances} saldos migrados de este lote ya tienen abonos. Anula esos abonos antes de deshacer.`;
+  }
+  const hint = withBalances
+    ? ' Si solo quieres quitar sus saldos migrados, usa «Retirar saldos migrados».'
+    : '';
+  return err.patients === 1
+    ? `No se puede deshacer: 1 paciente de este lote ya tiene citas, historia clínica, planes, pagos, saldos de otra importación u otros datos registrados. Corrígelo desde su ficha.${hint}`
+    : `No se puede deshacer: ${err.patients} pacientes de este lote ya tienen citas, historia clínica, planes, pagos, saldos de otra importación u otros datos registrados. Corrígelos desde su ficha.${hint}`;
+}
 
 const STATE_MESSAGES: Partial<Record<PatientImportStatus, string>> = {
   QUEUED: 'Este lote ya está confirmado y en cola.',
@@ -112,6 +144,51 @@ export interface PreviewRow {
   data: ImportPatientData;
 }
 
+/** Total por moneda en unidades de la moneda (no céntimos). */
+export interface BalanceCurrencyTotal {
+  currency: string;
+  rows: number;
+  amount: number;
+}
+
+/** Hoja de saldos del lote (DX-262). */
+export interface BalancesView {
+  fileName: string;
+  fileFormat: PatientImportFileFormat;
+  fileSizeBytes: number;
+  fileSha256: string;
+  totalRows: number;
+  /** Filas que se importan (las sumadas a otra incluidas). */
+  validRows: number;
+  errorRows: number;
+  mergedRows: number;
+  /** Saldos a crear: uno por paciente y moneda. */
+  preparedCount: number;
+  /** «Añadir aunque ya tenga saldo migrado» marcado al subir la hoja. */
+  addToExisting: boolean;
+  /** Todas las filas con importe y moneda legibles, por moneda. */
+  fileTotals: BalanceCurrencyTotal[];
+  /** Lo que se importa, por moneda. */
+  validTotals: BalanceCurrencyTotal[];
+  /** Saldos migrados vivos del lote, por moneda (lo importado de verdad). */
+  imported: { currency: string; count: number; amount: number }[];
+  progress: {
+    processed: number;
+    created: number;
+    /** No creados: su paciente no existía al importar. */
+    skipped: number;
+    /** No creados: su documento era de varios pacientes vivos. */
+    ambiguous: number;
+    /** No creados: ya tenía un saldo migrado vivo en esa moneda (QA D1). */
+    existing: number;
+  };
+  undoneCount: number | null;
+  /** Lo que retiró de verdad el deshacer, por moneda. */
+  undoneTotals: BalanceCurrencyTotal[];
+  /** Hay saldos vivos y el lote está terminado: se pueden retirar solos. */
+  canUndo: boolean;
+}
+
 export interface BatchView {
   id: string;
   status: PatientImportStatus;
@@ -149,12 +226,27 @@ export interface BatchView {
   canUndo: boolean;
   /** El informe de errores sigue disponible (ni caducado ni purgado). */
   reportAvailable: boolean;
+  /** Hoja de saldos (DX-262); null si el lote no trae. */
+  balances: BalancesView | null;
 }
 
 export interface BatchDetail extends BatchView {
   issues: RowIssue[];
   issuesTotal: number;
   preview: PreviewRow[];
+  /** Errores y avisos de la hoja de saldos (los primeros). */
+  balanceIssues: RowIssue[];
+  balanceIssuesTotal: number;
+}
+
+const fromCents = (cents: number) => Math.round(cents) / 100;
+
+function toAmounts(raw: unknown): BalanceCurrencyTotal[] {
+  return ((raw ?? []) as CurrencyTotal[]).map((t) => ({
+    currency: t.currency,
+    rows: t.rows,
+    amount: fromCents(t.cents),
+  }));
 }
 
 function sha256(bytes: Buffer): string {
@@ -324,6 +416,8 @@ export class PatientImportsService {
     const view = await this.view(batch);
     return {
       ...view,
+      balanceIssues: [],
+      balanceIssuesTotal: 0,
       issues: issues.slice(0, MAX_ISSUES_IN_RESPONSE),
       issuesTotal: issues.length,
       preview: prepared.slice(0, PREVIEW_ROWS).map((r) => ({
@@ -342,7 +436,11 @@ export class PatientImportsService {
   ): Promise<BatchDetail> {
     const current = await this.repo.findBatch(id);
     if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
-    if (current.status === 'VALIDATED' && current.preparedRows === 0) {
+    if (
+      current.status === 'VALIDATED' &&
+      current.preparedRows === 0 &&
+      current.balancePreparedRows === 0
+    ) {
       throw new ConflictException(NOTHING_TO_IMPORT_MESSAGE);
     }
     // Un lote anterior atascado (su trabajo murió) no bloquea la clínica.
@@ -410,8 +508,11 @@ export class PatientImportsService {
       (page - 1) * pageSize,
     );
     const names = await this.repo.userNames(items.map((b) => b.createdById));
+    const imported = await this.repo.importedBalanceTotalsByBatch(
+      items.filter((b) => b.balanceFileSha256 !== null).map((b) => b.id),
+    );
     return {
-      items: items.map((b) => this.toView(b, names)),
+      items: items.map((b) => this.toView(b, names, imported)),
       total,
       page,
       pageSize,
@@ -437,6 +538,202 @@ export class PatientImportsService {
     };
   }
 
+  // -------------------------------------------------------------------------
+  // Hoja de saldos «Saldo migrado» (DX-262)
+  // -------------------------------------------------------------------------
+
+  balanceTemplate(): string {
+    return balanceTemplateCsv();
+  }
+
+  /**
+   * Dry-run de la hoja de saldos de un lote VALIDATED (antes de confirmar):
+   * valida cada fila, busca al paciente por su documento en la clínica y en
+   * el archivo de pacientes del lote, suma las filas del mismo paciente y
+   * moneda y guarda los saldos preparados con los totales por moneda. NO crea
+   * ningún saldo migrado. Volver a subirla la reemplaza.
+   *
+   * Un paciente que ya tiene un saldo migrado vivo en esa moneda de otro
+   * lote no recibe otro (QA D1: subir dos veces la misma hoja duplicaba la
+   * deuda), salvo con `addToExisting` («Añadir aunque ya tenga saldo
+   * migrado»).
+   */
+  async dryRunBalances(
+    id: string,
+    file: UploadedFile | undefined,
+    addToExisting = false,
+  ): Promise<BatchDetail> {
+    const f = requireFile(file);
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    this.assertBalancesEditable(current);
+    const parsed = await readFile(f);
+    let cols;
+    try {
+      cols = resolveBalanceColumns(parsed.table.headers);
+    } catch (err) {
+      if (err instanceof ImportFileError)
+        throw new BadRequestException(err.message);
+      throw err;
+    }
+    const country = await this.repo.locationCountry(current.locationId);
+    const timeZone = timeZoneForCountry(country as ClinicCountry);
+    const ctx = {
+      today: civilDateIn(new Date(), timeZone),
+      currencies: new Set(await this.repo.currencyCodes()),
+      format: parsed.format,
+    };
+
+    const issues: RowIssue[] = [];
+    const candidates: BalanceCandidate[] = [];
+    const counted: { currency: string; cents: number }[] = [];
+    let invalidRows = 0;
+    let n = 0;
+    for (const row of parsed.table.rows) {
+      if (++n % YIELD_EVERY === 0) await yieldToEventLoop();
+      const validated = validateBalanceRow(
+        row,
+        cols,
+        ctx,
+        parsed.table.headers,
+      );
+      if (validated.counted) counted.push(validated.counted);
+      if (validated.candidate) candidates.push(validated.candidate);
+      else {
+        invalidRows += 1;
+        issues.push(...validated.issues);
+      }
+    }
+    const keys = [...new Set(candidates.map((c) => c.docKey))];
+    const docs = await this.repo.knownDocs(id, keys);
+    const existing = await this.repo.existingBalances(id, keys, timeZone);
+    const aggregated = aggregateBalances(
+      candidates,
+      docs,
+      cols.docNumber,
+      existing,
+      addToExisting,
+    );
+    issues.push(...aggregated.issues);
+    issues.sort((x, y) => x.row - y.row);
+
+    let saved: BatchRow | null;
+    try {
+      saved = await this.repo.saveBalances(id, {
+        fileName: safeFileName(f.originalname),
+        fileSha256: sha256(f.buffer),
+        fileFormat: parsed.format,
+        fileSizeBytes: f.size,
+        totalRows: parsed.table.rows.length,
+        errorRows: invalidRows + aggregated.errorRows,
+        mergedRows: aggregated.mergedRows,
+        fileTotals: totalsByCurrency(counted),
+        validTotals: aggregated.validTotals,
+        issues,
+        prepared: aggregated.prepared,
+        addToExisting,
+      });
+    } catch (err) {
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(BALANCES_NOT_EDITABLE_MESSAGE);
+      }
+      throw err;
+    }
+    if (!saved) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    return {
+      ...(await this.view(saved)),
+      issues: [],
+      issuesTotal: 0,
+      preview: [],
+      balanceIssues: issues.slice(0, MAX_ISSUES_IN_RESPONSE),
+      balanceIssuesTotal: issues.length,
+    };
+  }
+
+  /** Quita la hoja de saldos de un lote aún sin confirmar. */
+  async removeBalances(id: string): Promise<BatchDetail> {
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    this.assertBalancesEditable(current);
+    let cleared: BatchRow | null;
+    try {
+      cleared = await this.repo.clearBalances(id);
+    } catch (err) {
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(BALANCES_NOT_EDITABLE_MESSAGE);
+      }
+      throw err;
+    }
+    if (!cleared) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    return this.detail(cleared);
+  }
+
+  async balanceErrorsCsv(
+    id: string,
+  ): Promise<{ fileName: string; csv: string }> {
+    const batch = await this.repo.findBatch(id);
+    if (!batch) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    if (
+      batch.balanceFileName === null ||
+      batch.issuesPurgedAt ||
+      batch.status === 'EXPIRED'
+    ) {
+      throw new GoneException(BALANCE_REPORT_GONE_MESSAGE);
+    }
+    const base =
+      batch.balanceFileName
+        .replace(/\.[^.]*$/, '')
+        .replace(/[^\w.-]+/g, '_')
+        .slice(0, 80) || 'saldos';
+    return {
+      fileName: `errores-${base}.csv`,
+      csv: issuesCsv(
+        ((await this.repo.allIssues(id, 'balances')) ??
+          []) as unknown as RowIssue[],
+      ),
+    };
+  }
+
+  /** Solo un lote VALIDATED y vigente admite (o quita) su hoja de saldos. */
+  private assertBalancesEditable(batch: BatchRow): void {
+    if (batch.status !== 'VALIDATED') {
+      throw new ConflictException(
+        batch.status === 'EXPIRED'
+          ? EXPIRED_MESSAGE
+          : BALANCES_NOT_EDITABLE_MESSAGE,
+      );
+    }
+    if (
+      Date.now() >=
+      batch.createdAt.getTime() + VALIDATION_TTL_HOURS * 3_600_000
+    ) {
+      throw new ConflictException(EXPIRED_MESSAGE);
+    }
+  }
+
+  /**
+   * Retira SOLO los saldos migrados del lote (DX-262, revisión C1), aunque
+   * sus pacientes ya tengan actividad. 409 si alguno tiene abonos vivos.
+   */
+  async undoBalances(id: string, actorId: string): Promise<BatchDetail> {
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    try {
+      await this.repo.undoBalances(id, actorId);
+    } catch (err) {
+      if (err instanceof UndoBlockedError) {
+        throw new ConflictException(undoBlockedMessage(err));
+      }
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(
+          STATE_MESSAGES[err.status] ?? EXPIRED_MESSAGE,
+        );
+      }
+      throw err;
+    }
+    return this.get(id);
+  }
+
   async undo(id: string, actorId: string): Promise<BatchDetail> {
     const current = await this.repo.findBatch(id);
     if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
@@ -445,9 +742,7 @@ export class PatientImportsService {
     } catch (err) {
       if (err instanceof UndoBlockedError) {
         throw new ConflictException(
-          err.patients === 1
-            ? 'No se puede deshacer: 1 paciente de este lote ya tiene citas, historia clínica, planes, pagos u otros datos registrados. Corrígelo desde su ficha.'
-            : `No se puede deshacer: ${err.patients} pacientes de este lote ya tienen citas, historia clínica, planes, pagos u otros datos registrados. Corrígelos desde su ficha.`,
+          undoBlockedMessage(err, current.balanceCreatedCount > 0),
         );
       }
       if (err instanceof BatchStateError) {
@@ -461,25 +756,86 @@ export class PatientImportsService {
   }
 
   private async view(batch: BatchRow): Promise<BatchView> {
-    return this.toView(batch, await this.repo.userNames([batch.createdById]));
+    const [names, imported] = await Promise.all([
+      this.repo.userNames([batch.createdById]),
+      batch.balanceFileSha256 === null
+        ? Promise.resolve(new Map<string, ImportedBalanceTotal[]>())
+        : this.repo.importedBalanceTotalsByBatch([batch.id]),
+    ]);
+    return this.toView(batch, names, imported);
   }
 
   private async detail(batch: BatchRow): Promise<BatchDetail> {
     // Solo los primeros errores, recortados en SQL: la pantalla consulta el
     // lote cada 1,5 s mientras importa (revisión 2026-10-23, menor 2).
-    const { issues, total } = await this.repo.batchIssues(
-      batch.id,
-      MAX_ISSUES_IN_RESPONSE,
-    );
+    const [{ issues, total }, balanceIssues] = await Promise.all([
+      this.repo.batchIssues(batch.id, MAX_ISSUES_IN_RESPONSE),
+      batch.balanceFileSha256 === null
+        ? Promise.resolve({ issues: [], total: 0 })
+        : this.repo.batchIssues(batch.id, MAX_ISSUES_IN_RESPONSE, 'balances'),
+    ]);
     return {
       ...(await this.view(batch)),
       issues: issues as unknown as RowIssue[],
       issuesTotal: total,
       preview: [],
+      balanceIssues: balanceIssues.issues as unknown as RowIssue[],
+      balanceIssuesTotal: balanceIssues.total,
     };
   }
 
-  private toView(batch: BatchRow, names: Map<string, string>): BatchView {
+  private balancesOf(
+    batch: BatchRow,
+    imported: Map<string, ImportedBalanceTotal[]>,
+  ): BalancesView | null {
+    if (
+      batch.balanceFileName === null ||
+      batch.balanceFileSha256 === null ||
+      batch.balanceFileFormat === null ||
+      batch.balanceFileSizeBytes === null
+    ) {
+      return null;
+    }
+    return {
+      fileName: batch.balanceFileName,
+      fileFormat: batch.balanceFileFormat,
+      fileSizeBytes: batch.balanceFileSizeBytes,
+      fileSha256: batch.balanceFileSha256,
+      totalRows: batch.balanceTotalRows,
+      validRows: batch.balanceTotalRows - batch.balanceErrorRows,
+      errorRows: batch.balanceErrorRows,
+      mergedRows: batch.balanceMergedRows,
+      preparedCount: batch.balancePreparedRows,
+      addToExisting: batch.balanceAddToExisting,
+      fileTotals: toAmounts(batch.balanceFileTotals),
+      validTotals: toAmounts(batch.balanceValidTotals),
+      imported: (imported.get(batch.id) ?? []).map((t) => ({
+        currency: t.currency,
+        count: t.count,
+        amount: fromCents(t.cents),
+      })),
+      progress: {
+        processed: batch.balanceProcessedRows,
+        created: batch.balanceCreatedCount,
+        skipped: batch.balanceSkippedCount,
+        ambiguous: batch.balanceAmbiguousCount,
+        existing: batch.balanceExistingCount,
+      },
+      undoneCount: batch.balanceUndoneCount,
+      undoneTotals: toAmounts(batch.balanceUndoneTotals),
+      canUndo:
+        (batch.status === 'COMPLETED' || batch.status === 'FAILED') &&
+        (imported.get(batch.id) ?? []).length > 0,
+    };
+  }
+
+  private toView(
+    batch: BatchRow,
+    names: Map<string, string>,
+    imported: Map<string, ImportedBalanceTotal[]> = new Map(),
+  ): BatchView {
+    const toProcess = batch.preparedRows + batch.balancePreparedRows;
+    const processed = batch.processedRows + batch.balanceProcessedRows;
     const validUntil =
       batch.createdAt.getTime() + VALIDATION_TTL_HOURS * 3_600_000;
     return {
@@ -509,10 +865,9 @@ export class PatientImportsService {
         updatedCount: batch.updatedCount,
         skippedCount: batch.skippedCount,
         failedCount: batch.failedCount,
+        // Pacientes y, después, saldos migrados (DX-262).
         percent:
-          batch.preparedRows === 0
-            ? 100
-            : Math.floor((batch.processedRows / batch.preparedRows) * 100),
+          toProcess === 0 ? 100 : Math.floor((processed / toProcess) * 100),
       },
       duplicateMode: batch.duplicateMode,
       confirmedAt: batch.confirmedAt,
@@ -523,11 +878,12 @@ export class PatientImportsService {
       undoneFilled: batch.undoneFilled,
       canConfirm:
         batch.status === 'VALIDATED' &&
-        batch.preparedRows > 0 &&
+        toProcess > 0 &&
         Date.now() < validUntil,
       canUndo: batch.status === 'COMPLETED' || batch.status === 'FAILED',
       reportAvailable:
         batch.issuesPurgedAt === null && batch.status !== 'EXPIRED',
+      balances: this.balancesOf(batch, imported),
     };
   }
 }

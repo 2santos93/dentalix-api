@@ -68,7 +68,7 @@ function isUtcMidnight(instant: Date): boolean {
  * distinción, `new Date` leería el día como medianoche UTC, que en Bogotá es
  * la tarde del día ANTERIOR.
  */
-function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
+export function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {
     const civilDate = parseCivilDate(value);
     if (civilDate === null) {
@@ -91,14 +91,14 @@ function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   return instant;
 }
 
-function isFinitePositive(value: unknown): value is number {
+export function isFinitePositive(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 // Idempotency-Key must be a UUID (the client contract). Validated here rather
 // than via a DTO because it's a header, not a body field — same reason
 // tenant/createdById live outside RecordPaymentInput.
-const UUID_RE =
+export const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
@@ -190,6 +190,7 @@ export class RecordPaymentUseCase {
 
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
+      openingBalanceId: null,
       patientId: plan.patientId,
       amount: input.amount,
       currency,

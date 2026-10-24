@@ -94,7 +94,9 @@ export class GetPaymentReceiptUseCase {
       voidReason: legacy.voidReason,
       snapshot: buildReceiptSnapshot({
         ...legacy.snapshotInput,
-        planBalance: await this.currentBalance(source.treatmentPlanId),
+        planBalance: source.treatmentPlanId
+          ? await this.currentBalance(source.treatmentPlanId)
+          : null,
       }),
     };
   }

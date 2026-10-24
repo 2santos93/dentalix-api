@@ -421,12 +421,14 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
   });
 
   describe('alerta de alergia', () => {
-    it('409 sin allergyOverride, con las coincidencias; no se guarda nada', async () => {
+    it('409 sin confirmación, con las coincidencias; no se guarda nada', async () => {
       const res = await as(clinicA, dentistA.token)
         .post(rxPath(allergicA), { items: [amoxicilina] })
         .expect(409);
       expect(res.body).toMatchObject({
-        message: expect.stringContaining('Alerta de alergia') as string,
+        message: expect.stringContaining(
+          'Avisos de seguridad sin confirmar',
+        ) as string,
         allergyMatches: [
           { activeIngredient: 'Amoxicilina', allergen: 'Penicilina' },
         ],
@@ -437,11 +439,18 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       expect(list.body).toEqual([]);
     });
 
-    it('con allergyOverride=true emite y guarda la confirmación', async () => {
+    it('con allergyOverride=true (cliente anterior) y motivo emite y guarda la confirmación', async () => {
+      await as(clinicA, dentistA.token)
+        .post(rxPath(allergicA), {
+          items: [amoxicilina],
+          allergyOverride: true,
+        })
+        .expect(409);
       const res = await as(clinicA, dentistA.token)
         .post(rxPath(allergicA), {
           items: [amoxicilina],
           allergyOverride: true,
+          safetyOverrideReason: 'Prueba cutánea negativa',
         })
         .expect(201);
       expect(res.body).toMatchObject({
@@ -449,7 +458,225 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         allergyMatches: [
           { activeIngredient: 'Amoxicilina', allergen: 'Penicilina' },
         ],
+        safetyOverrideReason: 'Prueba cutánea negativa',
       });
+    });
+  });
+
+  describe('receta segura (DX-300)', () => {
+    const metronidazol = {
+      ...amoxicilina,
+      activeIngredient: 'Metronidazol',
+      dose: '1 tableta',
+      quantityUnit: 'tabletas',
+    };
+    const paracetamol = { ...ibuprofeno, activeIngredient: 'Paracetamol' };
+    const check = (patientId: string, items: object[]) =>
+      as(clinicA, dentistA.token).post(`${rxPath(patientId)}/safety-check`, {
+        items,
+      });
+    interface Preview {
+      anamnesis: 'PRESENT' | 'MISSING';
+      hasBlocking: boolean;
+      alerts: { code: string; severity: string; message: string }[];
+    }
+    const codesOf = (body: unknown) =>
+      (body as Preview).alerts.map((a) => a.code);
+
+    let penFlagA: string;
+    let warfarinA: string;
+    let pregnantA: string;
+    let childA: string;
+    let childNoWeightA: string;
+
+    beforeAll(async () => {
+      const sixYearsAgo = new Date();
+      sixYearsAgo.setUTCFullYear(sixYearsAgo.getUTCFullYear() - 6);
+      sixYearsAgo.setUTCMonth(sixYearsAgo.getUTCMonth() - 1);
+      const childBirth = sixYearsAgo.toISOString().slice(0, 10);
+      penFlagA = await createPatient(clinicA, 'Pena', 'RX-A-10');
+      warfarinA = await createPatient(
+        clinicA,
+        'Wanda',
+        'RX-A-11',
+        '1970-01-01',
+      );
+      pregnantA = await createPatient(clinicA, 'Paula', 'RX-A-12');
+      childA = await createPatient(clinicA, 'Nico', 'RX-A-13', childBirth);
+      childNoWeightA = await createPatient(
+        clinicA,
+        'Nora',
+        'RX-A-14',
+        childBirth,
+      );
+
+      // La casilla «Alergia a penicilina» marcada con la lista vacía (p. ej.
+      // una versión importada): solo se puede escribir así.
+      await raw.medicalHistoryVersion.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId: penFlagA,
+          version: 1,
+          allergies: [],
+          safetyFlags: { alergiaPenicilina: true },
+          hasCriticalAlert: true,
+        },
+      });
+      await as(clinicA, dentistA.token)
+        .put(`/patients/${warfarinA}/medical-history`, {
+          medications: [{ nombre: 'Warfarina 5 mg', esAlerta: true }],
+        })
+        .expect(200);
+      await as(clinicA, dentistA.token)
+        .put(`/patients/${pregnantA}/medical-history`, {
+          embarazo: true,
+          semanasEmbarazo: 24,
+        })
+        .expect(200);
+      await as(clinicA, dentistA.token)
+        .put(`/patients/${childA}/medical-history`, {
+          vitalSigns: { peso: 20 },
+        })
+        .expect(200);
+      await as(clinicA, dentistA.token)
+        .put(`/patients/${childNoWeightA}/medical-history`, {})
+        .expect(200);
+    });
+
+    it('casilla «Alergia a penicilina» con la lista vacía: la previsualización avisa y emitir sin confirmación da 409', async () => {
+      const preview = await check(penFlagA, [amoxicilina]).expect(200);
+      expect(preview.body).toMatchObject({
+        anamnesis: 'PRESENT',
+        hasBlocking: true,
+        alerts: [{ code: 'ALLERGY_MATCH', severity: 'BLOCKING' }],
+      });
+      const res = await as(clinicA, dentistA.token)
+        .post(rxPath(penFlagA), { items: [amoxicilina] })
+        .expect(409);
+      expect((res.body as { message: string }).message).toContain('penicilina');
+    });
+
+    it('warfarina: ibuprofeno y metronidazol bloquean; 409 sin motivo, 201 con confirmación y motivo en safetyAlerts, en el hash y en la auditoría', async () => {
+      expect(codesOf((await check(warfarinA, [ibuprofeno])).body)).toEqual([
+        'INTERACTION_ANTICOAGULANT_NSAID',
+      ]);
+      expect(codesOf((await check(warfarinA, [metronidazol])).body)).toEqual([
+        'INTERACTION_ANTICOAGULANT_METRONIDAZOLE',
+      ]);
+      await as(clinicA, dentistA.token)
+        .post(rxPath(warfarinA), { items: [ibuprofeno] })
+        .expect(409);
+      const noReason = await as(clinicA, dentistA.token)
+        .post(rxPath(warfarinA), { items: [ibuprofeno], safetyOverride: true })
+        .expect(409);
+      expect((noReason.body as { message: string }).message).toContain(
+        'Escribe el motivo',
+      );
+
+      const res = await as(clinicA, dentistA.token)
+        .post(rxPath(warfarinA), {
+          items: [ibuprofeno],
+          safetyOverride: true,
+          safetyOverrideReason: 'INR estable; pauta de 2 días',
+        })
+        .expect(201);
+      const body = res.body as RxBody & {
+        safetyRulesVersion: string;
+        safetyAlerts: { code: string; severity: string }[];
+        safetyOverrideReason: string;
+      };
+      expect(body.safetyRulesVersion).toBe('RX_SAFETY_V1');
+      expect(body.safetyOverrideReason).toBe('INR estable; pauta de 2 días');
+      expect(body.safetyAlerts).toEqual([
+        expect.objectContaining({
+          code: 'INTERACTION_ANTICOAGULANT_NSAID',
+          severity: 'BLOCKING',
+        }),
+      ]);
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${body.id}`)
+        .expect(200);
+      expect((doc.body as RxBody).integrityOk).toBe(true);
+
+      const event = await raw.auditEvent.findFirstOrThrow({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceId: body.id,
+          action: 'CREATE',
+        },
+      });
+      expect(event.metadata).toMatchObject({
+        prescriptionSafety: {
+          rulesVersion: 'RX_SAFETY_V1',
+          blocking: ['INTERACTION_ANTICOAGULANT_NSAID'],
+          info: [],
+          overridden: true,
+        },
+      });
+      expect(JSON.stringify(event.metadata)).not.toContain('Warfarina');
+    });
+
+    it('embarazo de 24 semanas: un AINE bloquea; paracetamol no', async () => {
+      const nsaid = await check(pregnantA, [ibuprofeno]).expect(200);
+      expect(codesOf(nsaid.body)).toEqual(['PREGNANCY_NSAID']);
+      const ok = await check(pregnantA, [paracetamol]).expect(200);
+      expect(ok.body).toMatchObject({ hasBlocking: false, alerts: [] });
+    });
+
+    it('niño de 6 años y 20 kg: amoxicilina 1 g/8 h supera el tope; sin peso pide el peso; un adulto no tiene aviso de dosis', async () => {
+      const amox1g = { ...amoxicilina, concentration: '1 g', dose: '1 g' };
+      const child = await check(childA, [amox1g]).expect(200);
+      expect((child.body as Preview).alerts).toEqual([
+        expect.objectContaining({
+          code: 'PEDIATRIC_DOSE_EXCEEDED',
+          severity: 'BLOCKING',
+          message: expect.stringContaining('50 mg/kg/toma') as string,
+        }),
+      ]);
+      const noWeight = await check(childNoWeightA, [amox1g]).expect(200);
+      expect((noWeight.body as Preview).alerts[0].message).toContain(
+        'Registra el peso para comprobar la dosis',
+      );
+      const adult = await check(warfarinA, [amox1g]).expect(200);
+      expect(adult.body).toMatchObject({ alerts: [] });
+    });
+
+    it('sin anamnesis: la previsualización lo dice y la receta lo registra', async () => {
+      const noHistory = await createPatient(clinicA, 'Sina', 'RX-A-15');
+      const preview = await check(noHistory, [amoxicilina]).expect(200);
+      expect(preview.body).toMatchObject({
+        anamnesis: 'MISSING',
+        hasBlocking: false,
+        alerts: [
+          {
+            code: 'NO_ANAMNESIS',
+            message:
+              'Sin anamnesis vigente: no se han podido comprobar alergias ni interacciones',
+          },
+        ],
+      });
+      const res = await as(clinicA, dentistA.token)
+        .post(rxPath(noHistory), { items: [amoxicilina] })
+        .expect(201);
+      expect(
+        (res.body as { safetyAlerts: { code: string }[] }).safetyAlerts.map(
+          (a) => a.code,
+        ),
+      ).toEqual(['NO_ANAMNESIS']);
+    });
+
+    it('la previsualización: solo quien emite, 404 desde otra clínica, 400 en español', async () => {
+      await as(clinicA, assistantA)
+        .post(`${rxPath(warfarinA)}/safety-check`, { items: [] })
+        .expect(403);
+      await as(clinicA, receptionA)
+        .post(`${rxPath(warfarinA)}/safety-check`, { items: [] })
+        .expect(403);
+      await as(clinicB)
+        .post(`${rxPath(warfarinA)}/safety-check`, { items: [ibuprofeno] })
+        .expect(404);
+      const bad = await check(warfarinA, [{ activeIngredient: 5 }]).expect(400);
+      expect(JSON.stringify(bad.body)).toContain('El principio activo');
     });
   });
 

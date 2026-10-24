@@ -126,6 +126,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
       minutesInStatus: 30,
       waitedMinutes: 30,
       punctuality: 'ON_TIME',
+      planItemsReservedElsewhere: [],
     });
     // Solo nombre y hora: nada clínico (ni motivo ni notas).
     expect(view.waiting[0]).not.toHaveProperty('reason');
@@ -193,6 +194,34 @@ describe('ListInClinicUseCase (DX-200)', () => {
     );
     expect(all.scope).toBe('LOCATION');
     expect(all.waiting).toHaveLength(2);
+  });
+
+  it('DX-273: cada persona trae los tratamientos reservados en otra cita', async () => {
+    const { repo, uc } = setup();
+    const waiting = repo.seed({
+      locationId: 'bog',
+      status: AppointmentStatus.ARRIVED,
+      start: at('2026-10-19T14:00:00.000Z'),
+      end: at('2026-10-19T14:30:00.000Z'),
+      arrivedAt: at('2026-10-19T13:58:00.000Z'),
+    });
+    const reserved = {
+      planItemId: 'item-1',
+      name: 'Implante',
+      toothNumber: '36',
+      heldInClinic: false,
+      appointmentId: 'future-1',
+      start: at('2026-10-26T14:00:00.000Z'),
+      locationId: 'bog',
+      locationName: 'Sede Principal',
+      timeZone: 'America/Bogota',
+    };
+    repo.reservedElsewhere.set(waiting.id, [reserved]);
+    const view = await uc.execute(
+      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'r' },
+      NOW,
+    );
+    expect(view.waiting[0].planItemsReservedElsewhere).toEqual([reserved]);
   });
 
   it('«hoy» es el día civil de la sede: a las 22:30 de Bogotá ya es mañana en Madrid', async () => {

@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayUnique,
@@ -6,11 +7,25 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
 } from 'class-validator';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
+import {
+  CANCEL_REASON_TEXT_MAX,
+  CANCELLATION_MESSAGES,
+  CANCELLATION_REASON_CODES,
+  STAFF_CANCELLATION_KINDS,
+  type StaffCancellationKind,
+} from '../../../cancellation-policies/domain/cancellation-policy';
+import {
+  PATIENT_FLOW_MESSAGES,
+  STATUS_REASON_MAX,
+  STATUS_REASON_MIN,
+} from '../../domain/patient-flow';
 
 // All fields optional (partial update: reschedule start/end and/or change
 // status — e.g. CONFIRMED, or "cancel" = CANCELLED, never a hard delete).
@@ -51,11 +66,68 @@ export class UpdateAppointmentDto {
   @ApiPropertyOptional({
     enum: AppointmentStatus,
     description:
-      'DX-200: flujo en la clínica sin saltos (409 si no): ARRIVED desde SCHEDULED/CONFIRMED y solo el día de la cita (RECEPTION, ASSISTANT, ADMIN; fija `arrivedAt`); IN_CHAIR desde ARRIVED y READY_FOR_CHECKOUT desde IN_CHAIR (DENTIST, ASSISTANT, ADMIN; fijan `seatedAt` / `readyForCheckoutAt`); la salida a COMPLETED (o CANCELLED si se fue sin pasar al sillón) desde el flujo, RECEPTION, ASSISTANT, ADMIN. Nunca NO_SHOW desde el flujo; para volver a agendada, `POST /appointments/:id/undo-arrival`. Las horas las pone el servidor. Rol sin permiso: 403.',
+      'DX-200: flujo en la clínica sin saltos (409 si no): ARRIVED desde SCHEDULED/CONFIRMED y solo el día de la cita (RECEPTION, ASSISTANT, ADMIN; fija `arrivedAt`); IN_CHAIR desde ARRIVED y READY_FOR_CHECKOUT desde IN_CHAIR (DENTIST, ASSISTANT, ADMIN; fijan `seatedAt` / `readyForCheckoutAt`); la salida a COMPLETED (o CANCELLED si se fue sin pasar al sillón) desde el flujo, RECEPTION, ASSISTANT, ADMIN. Nunca NO_SHOW desde el flujo; para volver a agendada, `POST /appointments/:id/undo-arrival`. Las horas las pone el servidor. Rol sin permiso: 403. DX-273: salir de COMPLETED (a cualquier otro estado) solo ADMIN y DENTIST, con `statusReason` (403 / 400).',
   })
   @IsOptional()
   @IsEnum(AppointmentStatus)
   status?: AppointmentStatus;
+
+  @ApiPropertyOptional({
+    minLength: STATUS_REASON_MIN,
+    maxLength: STATUS_REASON_MAX,
+    example: 'La cirugía no se hizo: se marcó completada por error.',
+    description:
+      'DX-273: motivo OBLIGATORIO para sacar la cita de COMPLETED (a SCHEDULED, CONFIRMED, CANCELLED…), de 3 a 500 caracteres tras recortar; sin él, 400. Esa salida solo la hacen ADMIN y DENTIST (RECEPTION/ASSISTANT: 403). Se guarda en `appointment_status_reversals` y queda auditado (`COMPLETED_EXIT`). El mínimo de la visita siguiente del plan se recalcula con la última cita de la visita anterior que siga completada (o queda sin mínimo); la respuesta lo dice en `completedExit.visitMinimums`. En cualquier otro cambio se ignora.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  // Solo forma y tope aquí: el mínimo lo decide el dominio DESPUÉS del rol
+  // (recepción recibe 403 aunque el motivo sea corto), y fuera de una salida
+  // de COMPLETED el motivo se ignora.
+  @IsString({ message: PATIENT_FLOW_MESSAGES.completedExitReason })
+  @MaxLength(STATUS_REASON_MAX, {
+    message: PATIENT_FLOW_MESSAGES.completedExitReason,
+  })
+  statusReason?: string;
+
+  @ApiPropertyOptional({
+    enum: STAFF_CANCELLATION_KINDS,
+    description:
+      'DX-279: quién cancela, OBLIGATORIO al pasar a CANCELLED (400 sin él): STAFF_FOR_PATIENT (el paciente lo comunica al personal) o CLINIC (la clínica cancela o reprograma; nunca cuenta como tardía). El enlace público (PATIENT_LINK) no pasa por aquí. En cualquier otro cambio se ignora.',
+  })
+  @IsOptional()
+  @IsIn(STAFF_CANCELLATION_KINDS, {
+    message: CANCELLATION_MESSAGES.byKindRequired,
+  })
+  cancelledByKind?: StaffCancellationKind;
+
+  @ApiPropertyOptional({
+    enum: CANCELLATION_REASON_CODES,
+    description:
+      'DX-279: motivo del catálogo cerrado, OBLIGATORIO al pasar a CANCELLED (400 sin él). El servidor guarda la hora (UTC), los minutos de aviso y si es tardía según la política vigente de la sede de la cita; queda auditado (APPOINTMENT_CANCELLED, sin el texto libre).',
+  })
+  @IsOptional()
+  @IsEnum(CancellationReasonCode, {
+    message: CANCELLATION_MESSAGES.reasonRequired,
+  })
+  cancelReasonCode?: CancellationReasonCode;
+
+  @ApiPropertyOptional({
+    maxLength: CANCEL_REASON_TEXT_MAX,
+    description:
+      'DX-279: detalle opcional del motivo (hasta 500 caracteres; vacío = sin detalle). No pidas datos de salud. Solo al pasar a CANCELLED.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString({ message: CANCELLATION_MESSAGES.reasonText })
+  @MaxLength(CANCEL_REASON_TEXT_MAX, {
+    message: CANCELLATION_MESSAGES.reasonText,
+  })
+  cancelReasonText?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

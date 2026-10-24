@@ -15,7 +15,9 @@ import { currencyDecimals } from '../domain/discount-policy';
  * de implantes (DX-191): UTF-8 con BOM, CRLF, texto entre comillas y celdas
  * que empiezan (tras blancos) por = + - @ (o tabulador/CR) prefijadas con «'»
  * para que la hoja no las ejecute como fórmula (inyección CSV). La nota del
- * motivo es texto libre.
+ * motivo es texto libre. SEC-047: al final, el convenio, el precio sin
+ * convenio, la rebaja por convenio (aparte del descuento total), quién asignó
+ * el convenio y quién creó el ítem.
  */
 export const DISCOUNT_REPORT_CSV_HEADER = [
   'Fecha',
@@ -35,6 +37,11 @@ export const DISCOUNT_REPORT_CSV_HEADER = [
   'Nota del motivo',
   'Dado por',
   'Sede',
+  'Convenio',
+  'Precio sin convenio',
+  'Rebaja por convenio',
+  'Convenio asignado por',
+  'Ítem creado por',
 ] as const;
 
 // Mismas etiquetas que la web.
@@ -67,6 +74,25 @@ function planLabel(row: DiscountReportRowView): string {
     : `Plan del ${created}`;
 }
 
+/** SEC-047: línea que solo tiene rebaja de convenio (sin descuento propio). */
+function agreementOnly(row: DiscountReportRowView): boolean {
+  return row.discount === 0 && row.agreementReduction > 0;
+}
+
+function reasonText(row: DiscountReportRowView): string {
+  if (agreementOnly(row))
+    return text(`Convenio ${row.agreementName ?? ''}`.trim());
+  return row.reason ? text(DISCOUNT_REASON_LABELS[row.reason]) : '';
+}
+
+/** Quién: el del descuento; en una línea solo de convenio, quien lo asignó o creó el ítem. */
+function authorText(row: DiscountReportRowView): string {
+  if (agreementOnly(row)) {
+    return text(row.agreementAssignedByName ?? row.createdByName);
+  }
+  return text(row.discountByName);
+}
+
 export function toDiscountReportCsv(
   rows: readonly DiscountReportRowView[],
 ): string {
@@ -87,10 +113,17 @@ export function toDiscountReportCsv(
         money(row.itemDiscount, row.currency),
         money(row.discount, row.currency),
         row.percent.toFixed(2),
-        row.reason ? text(DISCOUNT_REASON_LABELS[row.reason]) : '',
+        reasonText(row),
         text(row.reasonNote),
-        text(row.discountByName),
+        authorText(row),
         text(row.locationName),
+        text(row.agreementName),
+        row.agreementName === null || row.basePrice === null
+          ? ''
+          : money(row.basePrice, row.currency),
+        money(row.agreementReduction, row.currency),
+        text(row.agreementAssignedByName),
+        text(row.createdByName),
       ].join(','),
     );
   }

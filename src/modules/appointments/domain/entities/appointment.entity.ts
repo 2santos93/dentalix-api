@@ -1,4 +1,8 @@
-import { AppointmentStatus } from '@prisma/client';
+import {
+  AppointmentStatus,
+  CancellationByKind,
+  CancellationReasonCode,
+} from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
 
 /**
@@ -58,6 +62,22 @@ export interface Appointment {
   arrivedAt: Date | null;
   seatedAt: Date | null;
   readyForCheckoutAt: Date | null;
+  /**
+   * DX-279: cancelación (solo en CANCELLED; null en las canceladas antiguas):
+   * hora del servidor, quién (enlace del paciente, el personal por el
+   * paciente o la clínica), motivo del catálogo y texto opcional, minutos de
+   * aviso y si fue tardía según la política vigente de su sede.
+   */
+  cancelledAt: Date | null;
+  cancelledByKind: CancellationByKind | null;
+  cancelReasonCode: CancellationReasonCode | null;
+  cancelReasonText: string | null;
+  noticeMinutes: number | null;
+  lateCancellation: boolean | null;
+  /** DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW). */
+  noShowMarkedAt: Date | null;
+  /** DX-279: versión de la política comunicada al paciente (DX-291; hoy null). */
+  policyVersionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,6 +94,66 @@ export interface AppointmentWriteResult extends Appointment {
    * cómo pintarlo sin leer el texto.
    */
   warningCodes: AppointmentWarningCode[];
+  /**
+   * DX-273 (revisión DX-271, I2): tratamientos de esta cita que siguen
+   * reservados en OTRA cita viva (la reserva se quedó allí al marcar «Llegó»).
+   * Solo citas de sedes permitidas al usuario (DX-089), salvo una de hoy con
+   * el paciente en la clínica, que sale sin sus datos (DX-293). Vacío si no
+   * hay.
+   */
+  planItemsReservedElsewhere: PlanItemReservedElsewhere[];
+  /**
+   * DX-273: solo al sacar la cita de COMPLETED. El motivo y cómo queda el
+   * intervalo mínimo de la visita siguiente de cada plan afectado.
+   */
+  completedExit?: CompletedExit;
+}
+
+/** Un tratamiento de la cita reservado en otra cita (DX-273). */
+export interface PlanItemReservedElsewhere {
+  planItemId: string;
+  /** Nombre del procedimiento (catálogo, en español). */
+  name: string;
+  toothNumber: string;
+  /**
+   * DX-293: la cita que lo reserva es de hoy (día civil de su sede) con el
+   * paciente en la clínica. «Traer a esta cita» daría el 409 de DX-288.
+   */
+  heldInClinic: boolean;
+  /**
+   * La cita que lo reserva, su inicio, su sede y la zona de esa sede (la
+   * fecha se muestra en ella). `null` todos si esa sede no está permitida al
+   * usuario (DX-089): solo ocurre con `heldInClinic`.
+   */
+  appointmentId: string | null;
+  start: Date | null;
+  locationId: string | null;
+  locationName: string | null;
+  timeZone: string | null;
+}
+
+/**
+ * Intervalo mínimo de una visita del plan antes y después de sacar de
+ * COMPLETED la cita de la visita anterior (DX-273). Día civil YYYY-MM-DD en la
+ * zona de la sede del plan, como `GET /treatment-plans/:id/visits`; `null` =
+ * sin mínimo clínico (ninguna cita de la visita anterior sigue completada, o
+ * el intervalo es 0): se puede agendar desde hoy.
+ */
+export interface VisitMinimumChange {
+  planId: string;
+  visit: number;
+  minimumDayBefore: string | null;
+  minimumDayAfter: string | null;
+  /** La cita completada que fija ahora el mínimo, o `null` si ninguna. */
+  anchorAppointmentIdAfter: string | null;
+}
+
+/** Resultado de sacar una cita de COMPLETED (DX-273). */
+export interface CompletedExit {
+  /** Fila de `appointment_status_reversals` con el motivo. */
+  reversalId: string;
+  reason: string;
+  visitMinimums: VisitMinimumChange[];
 }
 
 /** Códigos de `AppointmentWriteResult.warningCodes`. */

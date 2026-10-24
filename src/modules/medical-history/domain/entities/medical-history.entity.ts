@@ -1,6 +1,12 @@
 export type AllergyType = 'MEDICAMENTO' | 'MATERIAL' | 'ALIMENTO' | 'AMBIENTAL';
 export type AllergySeverity = 'LEVE' | 'MODERADA' | 'ANAFILAXIA';
 export type ConditionStatus = 'SI' | 'NO' | 'DESCONOCE';
+/**
+ * DX-099: de dónde salió una versión: tecleada por el personal (STAFF) o
+ * aceptada por un profesional desde el formulario que llenó el paciente por
+ * enlace (PATIENT_FORM; el autor es quien la revisó).
+ */
+export type MedicalHistorySource = 'STAFF' | 'PATIENT_FORM';
 
 export interface Allergy {
   alergeno: string;
@@ -96,6 +102,7 @@ export interface MedicalHistory {
   notes: string | null;
   safetyFlags: SafetyFlags;
   hasCriticalAlert: boolean;
+  source: MedicalHistorySource;
   createdById: string | null;
   createdAt: Date;
 }
