@@ -161,6 +161,26 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     await income(loc1, 200000, 'COP', '2026-10-01T03:00:00Z');
     // Otra sede y otra moneda.
     await income(loc2, 50.25, 'USD', '2026-10-10T17:00:00Z');
+    // Sede Norte en Madrid: 23:30Z del 31 oct ya es 1 nov allí (UTC+1) y aún
+    // 31 oct en Bogotá, donde está la sede principal: dos zonas en una petición.
+    const schedule = await raw.locationSchedule.findFirst({
+      where: { locationId: loc2, deletedAt: null },
+    });
+    if (schedule) {
+      await raw.locationSchedule.update({
+        where: { id: schedule.id },
+        data: { timezone: 'Europe/Madrid' },
+      });
+    } else {
+      await raw.locationSchedule.create({
+        data: {
+          tenantId: clinic.tenantId,
+          locationId: loc2,
+          timezone: 'Europe/Madrid',
+        },
+      });
+    }
+    await income(loc2, 10, 'USD', '2026-10-31T23:30:00Z');
 
     await expense({
       category: 'Arriendo',
@@ -281,6 +301,22 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       expect(
         await rowsOf(`from=2026-09-01&to=2026-10-31&locationId=${foreignId}`),
       ).toEqual([]);
+    });
+
+    it('con sedes en zonas distintas, cada abono cuenta en el mes de SU sede', async () => {
+      const rows = await rowsOf('from=2026-10-01&to=2026-11-30');
+      const key = (r: SummaryRow) =>
+        `${r.month} ${r.locationName} ${r.currency}`;
+      const byKey = new Map(rows.map((r) => [key(r), r.income]));
+      // Norte (Madrid): 1 nov. La principal (Bogotá) sigue en octubre.
+      expect(byKey.get('2026-11 Sede Norte USD')).toBe(10);
+      expect(byKey.get('2026-10 Sede Norte USD')).toBe(50.25);
+      expect(byKey.get('2026-10 Sede principal COP')).toBe(1500000.5);
+    });
+
+    it('/expenses/summary no cae en :id (la ruta fija va antes)', async () => {
+      const res = await summary('from=2026-10-01&to=2026-10-31').expect(200);
+      expect((res.body as SummaryBody).rows.length).toBeGreaterThan(0);
     });
 
     it('sin movimientos, lista vacía', async () => {

@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -25,9 +26,11 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiPayloadTooLargeResponse,
+  ApiProduces,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -46,6 +49,8 @@ import { AttachExpenseReceiptUseCase } from '../application/use-cases/attach-exp
 import { CreateExpenseUploadUseCase } from '../application/use-cases/create-expense-upload.use-case';
 import { CreateExpenseUseCase } from '../application/use-cases/create-expense.use-case';
 import { GetExpenseReceiptUrlUseCase } from '../application/use-cases/get-expense-receipt-url.use-case';
+import { toExpensesSummaryCsv } from '../application/expenses-summary-csv';
+import { GetExpenseSummaryUseCase } from '../application/use-cases/get-expense-summary.use-case';
 import { GetExpenseUseCase } from '../application/use-cases/get-expense.use-case';
 import { ListExpensesUseCase } from '../application/use-cases/list-expenses.use-case';
 import { SuggestSuppliersUseCase } from '../application/use-cases/suggest-suppliers.use-case';
@@ -59,6 +64,7 @@ import {
   AttachExpenseReceiptDto,
   CreateExpenseDto,
   CreateExpenseUploadDto,
+  ExpenseSummaryQueryDto,
   ListExpensesQueryDto,
   ReceiptUrlQueryDto,
   SuppliersQueryDto,
@@ -70,7 +76,9 @@ import {
   ExpensePageDto,
   ExpenseReceiptUploadDto,
   ExpenseReceiptUrlDto,
+  ExpenseSummaryDto,
 } from './dto/expense.dto';
+import { CSV_RESPONSE, sendCsv } from './csv-response';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
@@ -117,6 +125,7 @@ export class ExpensesController {
     private readonly attachReceipt: AttachExpenseReceiptUseCase,
     private readonly receiptUrl: GetExpenseReceiptUrlUseCase,
     private readonly suggestSuppliers: SuggestSuppliersUseCase,
+    private readonly summary: GetExpenseSummaryUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -155,6 +164,44 @@ export class ExpensesController {
   @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
   suppliers(@Query() query: SuppliersQueryDto): Promise<string[]> {
     return this.suggestSuppliers.execute(query.query);
+  }
+
+  @Audit({ action: 'VIEW', resource: 'EXPENSE', reason: 'EXPENSE_SUMMARY' })
+  @Get('summary')
+  @ApiOperation({
+    summary: 'Resumen mensual: ingresos − gastos por sede y moneda',
+    description:
+      'Gastos no anulados por fecha de factura (devengado), con su desglose por categoría; ingresos = abonos vivos por el día civil de la sede. Rango de hasta 366 días; las monedas no se convierten. Respeta las sedes permitidas del usuario.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: ExpenseSummaryDto })
+  @ApiBadRequestResponse({
+    description: 'Periodo no válido o de más de 366 días',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  summaryOf(
+    @Query() query: ExpenseSummaryQueryDto,
+  ): ReturnType<GetExpenseSummaryUseCase['execute']> {
+    return this.summary.execute(query);
+  }
+
+  @Audit({ action: 'EXPORT', resource: 'EXPENSE', reason: 'EXPENSE_SUMMARY' })
+  @Get('summary.csv')
+  @ApiOperation({ summary: 'Resumen mensual en CSV' })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiProduces('text/csv')
+  @ApiOkResponse(CSV_RESPONSE)
+  @ApiBadRequestResponse({
+    description: 'Periodo no válido o de más de 366 días',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  async summaryCsv(
+    @Query() query: ExpenseSummaryQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const summary = await this.summary.execute(query);
+    sendCsv(res, `gastos-resumen-${summary.from}-${summary.to}.csv`);
+    return toExpensesSummaryCsv(summary.rows);
   }
 
   @Audit({ action: 'VIEW', resource: 'EXPENSE' })

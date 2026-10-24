@@ -58,7 +58,6 @@ import { ExpensesController } from './presentation/expenses.controller';
 @Module({
   imports: [JwtModule.register({}), StorageModule, CashSessionsModule],
   controllers: [
-    // Antes que `ExpensesController`: `expenses/summary` no es un `:id`.
     ExpenseReportsController,
     ExpensesController,
     ExpenseCategoriesController,

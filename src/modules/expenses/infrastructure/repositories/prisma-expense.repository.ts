@@ -163,8 +163,12 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   }
 
   async locationNames(): Promise<Map<string, string>> {
+    const tenantId = this.requireTenantId();
     const locations = await this.prisma.runWithTenant((tx) =>
-      tx.location.findMany({ select: { id: true, name: true } }),
+      tx.location.findMany({
+        where: { tenantId },
+        select: { id: true, name: true },
+      }),
     );
     return new Map(locations.map((l) => [l.id, l.name]));
   }
@@ -181,7 +185,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   }
 
   // --- Lecturas ---------------------------------------------------------------
-  async list(filters: ExpenseListFilters, now: Date): Promise<ExpenseList> {
+  async list(
+    filters: ExpenseListFilters,
+    now: Date,
+    withTotal = true,
+  ): Promise<ExpenseList> {
     const tenantId = this.requireTenantId();
     const scope = this.tenantContext.scopeLocationIds();
     // Una sede pedida fuera de las visibles no devuelve nada (ni la delata).
@@ -204,7 +212,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       const args = { tenantId, filters, scope, todays: { ids, days } };
       // En orden: una transacción interactiva usa una sola conexión.
       const rows = await tx.$queryRaw<ExpenseListRow[]>(pageQuery(args));
-      const [count] = await tx.$queryRaw<{ total: number }[]>(countQuery(args));
+      const [count] = withTotal
+        ? await tx.$queryRaw<{ total: number }[]>(countQuery(args))
+        : [];
       const todayOf = new Map(ids.map((id, i) => [id, days[i]]));
       const items = rows.map((row) =>
         mapExpense(
@@ -215,7 +225,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       );
       return {
         items,
-        total: count?.total ?? 0,
+        total: count?.total ?? rows.length,
         page: filters.page,
         pageSize: filters.pageSize,
       };

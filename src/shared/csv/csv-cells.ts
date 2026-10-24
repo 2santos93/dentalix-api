@@ -1,5 +1,5 @@
 /*
- * Celdas de los CSV de exportación (cartera, descuentos, gastos): texto entre
+ * Celdas de los CSV de exportación (descuentos y gastos): texto entre
  * comillas, sin saltos de línea, y con el prefijo «'» cuando empieza (tras
  * blancos) por = + - @ (o tabulador/CR) para que la hoja de cálculo no lo
  * ejecute como fórmula (inyección CSV).

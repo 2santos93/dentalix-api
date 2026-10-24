@@ -1,4 +1,5 @@
 import { ClinicRole, DiscountReason } from '@prisma/client';
+import { currencyDecimals } from '../../../shared/money/currency-decimals';
 
 /**
  * Política de descuentos de la clínica (DX-204): el % máximo de descuento que
@@ -96,15 +97,9 @@ export function discountPercent(price: number, discount: number): number {
   return Math.round((discount / price) * 10000) / 100;
 }
 
-/**
- * Monedas que se cobran sin decimales. COP: en Colombia no circulan centavos y
- * los presupuestos se redondean al peso; CLP no tiene unidad menor.
- */
-const ZERO_DECIMAL_CURRENCIES = new Set(['COP', 'CLP', 'JPY', 'KRW', 'PYG']);
-
-export function currencyDecimals(currency: string): 0 | 2 {
-  return ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 0 : 2;
-}
+// Vive en `shared/money` (también lo usan los CSV de gastos); se reexporta aquí
+// para no tocar a quienes ya la importan de la política de descuentos.
+export { currencyDecimals };
 
 /** Redondea a la unidad de la moneda, la mitad hacia arriba. */
 export function roundToCurrency(amount: number, currency: string): number {

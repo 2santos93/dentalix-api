@@ -100,6 +100,7 @@ export class ListExpensesUseCase {
         pageSize: EXPORT_MAX_ROWS + 1,
       },
       this.clock(),
+      false,
     );
     if (page.items.length > EXPORT_MAX_ROWS) {
       throw new BadRequestException(EXPORT_TOO_MANY_MESSAGE);

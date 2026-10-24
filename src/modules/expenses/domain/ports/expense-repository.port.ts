@@ -109,8 +109,16 @@ export interface ExpenseRepository {
   /** `Tenant.cashRequireOpenSession`: el efectivo exige una caja abierta. */
   cashRequiresOpenSession(): Promise<boolean>;
 
-  /** Página de gastos de las sedes visibles, con su estado y lo pagado. */
-  list(filters: ExpenseListFilters, now: Date): Promise<ExpenseList>;
+  /**
+   * Página de gastos de las sedes visibles, con su estado y lo pagado. Con
+   * `withTotal: false` se salta el conteo (la exportación no lo necesita) y
+   * `total` es el nº de filas devueltas.
+   */
+  list(
+    filters: ExpenseListFilters,
+    now: Date,
+    withTotal?: boolean,
+  ): Promise<ExpenseList>;
 
   /**
    * Gasto con sus pagos si está en una sede visible para el usuario; si no

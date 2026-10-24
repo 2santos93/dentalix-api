@@ -1,5 +1,5 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
-import { currencyDecimals } from '../../discounts/domain/discount-policy';
+import { currencyDecimals } from '../../../shared/money/currency-decimals';
 import type { ExpenseStatus } from '../domain/entities/expense.entity';
 import type { ExpenseView } from './expense-view';
 

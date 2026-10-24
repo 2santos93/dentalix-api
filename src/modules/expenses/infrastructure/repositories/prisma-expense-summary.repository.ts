@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -55,6 +55,7 @@ export class PrismaExpenseSummaryRepository implements ExpenseSummaryRepository 
       async (tx) => {
         // En orden: una transacción interactiva usa una sola conexión.
         const locations = await tx.location.findMany({
+          where: { tenantId, ...(scope && { id: { in: scope } }) },
           select: { id: true, name: true },
         });
         const zones = await loadLocationTimeZones(tx, tenantId, scope);
@@ -84,7 +85,18 @@ export class PrismaExpenseSummaryRepository implements ExpenseSummaryRepository 
     zones: Map<string, string>,
   ): Promise<SummaryIncomeRow[]> {
     const rows: SummaryIncomeRow[] = [];
-    for (const branch of civilPeriodByZone(query.from, query.to, zones)) {
+    let branches: ReturnType<typeof civilPeriodByZone>;
+    try {
+      branches = civilPeriodByZone(query.from, query.to, zones);
+    } catch (error) {
+      // Un día que no existe en la zona de alguna sede (p. ej. 2011-12-30 en
+      // Pacific/Apia): es la petición la que no vale, no un fallo del servidor.
+      if (error instanceof RangeError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+    for (const branch of branches) {
       const found = await tx.$queryRaw<RawRow[]>`
         SELECT to_char((p."paidAt" AT TIME ZONE 'UTC') AT TIME ZONE ${branch.timeZone}, 'YYYY-MM') AS "month",
                p."locationId", p."currency",
