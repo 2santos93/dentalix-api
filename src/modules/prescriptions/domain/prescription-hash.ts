@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ClinicCountry } from '@prisma/client';
 import type { AllergyMatch } from './allergy-match';
+import type { SafetyAlert } from './prescription-safety';
 
 export interface PrescriptionItemContent {
   position: number;
@@ -40,6 +41,14 @@ export interface PrescriptionHashInput {
   notes: string | null;
   allergyOverride: boolean;
   allergyMatches: AllergyMatch[];
+  /**
+   * DX-300. `null` en las tres = receta emitida antes de la receta segura:
+   * se sella con el formato v1 de siempre, así su hash sigue validando. Una
+   * receta nueva lleva siempre la versión y la lista (aunque esté vacía).
+   */
+  safetyRulesVersion: string | null;
+  safetyAlerts: SafetyAlert[] | null;
+  safetyOverrideReason: string | null;
   items: PrescriptionItemContent[];
 }
 
@@ -47,12 +56,11 @@ export interface PrescriptionHashInput {
  * SHA-256 (hex) del contenido emitido. Mismo criterio que el consentimiento
  * (consent-hash.ts): ARRAY JSON con orden fijo y versión al principio, así que
  * las fronteras entre campos no se pueden correr y el formato puede cambiar
- * sin invalidar los hashes guardados. La anulación (estado, quién, cuándo,
+ * sin invalidar los hashes guardados (DX-300 añadió la v2). La anulación (estado, quién, cuándo,
  * motivo) NO entra: anular no altera lo que se prescribió.
  */
 export function computePrescriptionHash(input: PrescriptionHashInput): string {
-  const canonical = JSON.stringify([
-    'dentalix-prescription-v1',
+  const fields = [
     input.country,
     input.issuedAt.toISOString(),
     input.dispensationDate,
@@ -88,6 +96,26 @@ export function computePrescriptionHash(input: PrescriptionHashInput): string {
       i.packages,
       i.instructions,
     ]),
-  ]);
+  ];
+  // v1 (DX-013) intacto para las recetas emitidas antes de DX-300; v2 añade
+  // al final versión de reglas, avisos y motivo de la confirmación.
+  const canonical = JSON.stringify(
+    input.safetyAlerts === null
+      ? ['dentalix-prescription-v1', ...fields]
+      : [
+          'dentalix-prescription-v2',
+          ...fields,
+          input.safetyRulesVersion,
+          input.safetyAlerts.map((a) => [
+            a.rule,
+            a.code,
+            a.severity,
+            a.activeIngredient,
+            a.message,
+            a.source,
+          ]),
+          input.safetyOverrideReason,
+        ],
+  );
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }

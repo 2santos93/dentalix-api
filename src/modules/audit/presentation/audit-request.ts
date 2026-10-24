@@ -135,6 +135,35 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/** DX-300: códigos de los avisos de la receta emitida y si se confirmaron. */
+function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    safetyRulesVersion?: unknown;
+    safetyAlerts?: unknown;
+    safetyOverrideReason?: unknown;
+  };
+  if (!Array.isArray(b.safetyAlerts)) return null;
+  const codes = (severity: string) =>
+    (b.safetyAlerts as unknown[]).flatMap((a) =>
+      typeof a === 'object' &&
+      a !== null &&
+      'severity' in a &&
+      a.severity === severity &&
+      'code' in a
+        ? [a.code]
+        : [],
+    );
+  return {
+    rulesVersion: b.safetyRulesVersion,
+    blocking: codes('BLOCKING'),
+    info: codes('INFO'),
+    overridden:
+      typeof b.safetyOverrideReason === 'string' &&
+      b.safetyOverrideReason !== '',
+  };
+}
+
 /** Nombres (nunca valores) de los campos de primer nivel del cuerpo. */
 function bodyFields(body: unknown): string[] {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
@@ -184,6 +213,9 @@ export function buildAuditDraft(
         : {}),
       ...(options.importBatch
         ? { importBatch: importBatchOf(responseBody) }
+        : {}),
+      ...(options.prescriptionSafety
+        ? { prescriptionSafety: prescriptionSafetyOf(responseBody) }
         : {}),
     }),
   };

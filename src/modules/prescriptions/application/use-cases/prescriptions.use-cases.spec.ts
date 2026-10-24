@@ -18,10 +18,16 @@ import {
   GetPrescriptionUseCase,
   IssuePrescriptionUseCase,
   ListPatientPrescriptionsUseCase,
+  CheckPrescriptionSafetyUseCase,
   VoidPrescriptionUseCase,
   type IssuePrescriptionInput,
 } from './prescriptions.use-cases';
 import { computePrescriptionHash } from '../../domain/prescription-hash';
+import {
+  emptySafetyAnamnesis,
+  PRESCRIPTION_SAFETY_RULES_VERSION,
+  type SafetyAnamnesis,
+} from '../../domain/prescription-safety';
 
 // 15:00 UTC = 10:00 en Bogotá y 17:00 en Madrid, el mismo día 16.
 const NOW = new Date('2026-10-16T15:00:00.000Z');
@@ -147,35 +153,123 @@ describe('IssuePrescriptionUseCase', () => {
     expect(repo.savedLicenses).toEqual([]);
   });
 
-  describe('alerta de alergia', () => {
-    beforeEach(() => {
+  describe('receta segura (DX-300)', () => {
+    const ibuprofeno = {
+      ...amoxicilina,
+      activeIngredient: 'Ibuprofeno',
+      concentration: '400 mg',
+      dose: '1 comprimido',
+      quantityUnit: 'comprimidos',
+    };
+    const withAnamnesis = (
+      overrides: Partial<Omit<SafetyAnamnesis, 'flags'>> & {
+        flags?: Partial<SafetyAnamnesis['flags']>;
+      },
+    ) => {
+      const base = emptySafetyAnamnesis();
       repo.patients.set(
         PATIENT_ID,
-        makePatient({ allergies: ['Penicilina', 'Látex'] }),
+        makePatient({
+          anamnesis: {
+            ...base,
+            ...overrides,
+            flags: { ...base.flags, ...overrides.flags },
+          },
+        }),
       );
-    });
-
-    it('409 sin allergyOverride, con las coincidencias, y no guarda nada', async () => {
-      const promise = useCase.execute(PATIENT_ID, input(), DENTIST_ID);
+    };
+    const conflict = async (promise: Promise<unknown>) => {
       await expect(promise).rejects.toBeInstanceOf(ConflictException);
       const error = (await promise.catch(
         (e: unknown) => e,
       )) as ConflictException;
-      expect(error.getResponse()).toMatchObject({
+      return error.getResponse() as Record<string, unknown>;
+    };
+
+    it('casilla «Alergia a penicilina» con la lista vacía: amoxicilina da 409 con el aviso y no guarda nada', async () => {
+      withAnamnesis({ flags: { alergiaPenicilina: true } });
+      const body = await conflict(
+        useCase.execute(PATIENT_ID, input(), DENTIST_ID),
+      );
+      expect(body).toMatchObject({
         statusCode: 409,
-        message:
-          'Alerta de alergia: el paciente tiene registrada alergia a Penicilina (Amoxicilina). Confirma que prescribes igualmente.',
+        message: expect.stringContaining(
+          'Avisos de seguridad sin confirmar',
+        ) as string,
         allergyMatches: [
-          { activeIngredient: 'Amoxicilina', allergen: 'Penicilina' },
+          { activeIngredient: 'Amoxicilina', allergen: 'penicilina' },
+        ],
+        safetyAlerts: [
+          expect.objectContaining({
+            code: 'ALLERGY_MATCH',
+            severity: 'BLOCKING',
+          }),
         ],
       });
       expect(repo.rows).toEqual([]);
     });
 
-    it('con allergyOverride=true emite y guarda la confirmación', async () => {
+    it('confirmación sin motivo (o en blanco): 409 que pide el motivo', async () => {
+      withAnamnesis({ allergens: ['Penicilina'] });
+      for (const reason of [undefined, '   ']) {
+        const body = await conflict(
+          useCase.execute(
+            PATIENT_ID,
+            input({ safetyOverride: true, safetyOverrideReason: reason }),
+            DENTIST_ID,
+          ),
+        );
+        expect(body.message).toContain('Escribe el motivo');
+      }
+      expect(repo.rows).toEqual([]);
+    });
+
+    it('warfarina: ibuprofeno solo se emite con confirmación y motivo, que quedan en la receta y en el hash', async () => {
+      withAnamnesis({ medications: ['Warfarina 5 mg'] });
+      await conflict(
+        useCase.execute(PATIENT_ID, input({ items: [ibuprofeno] }), DENTIST_ID),
+      );
       const rx = await useCase.execute(
         PATIENT_ID,
-        input({ allergyOverride: true }),
+        input({
+          items: [ibuprofeno],
+          safetyOverride: true,
+          safetyOverrideReason: '  INR estable; pauta de 2 días  ',
+        }),
+        DENTIST_ID,
+      );
+      expect(rx.safetyRulesVersion).toBe(PRESCRIPTION_SAFETY_RULES_VERSION);
+      expect(rx.safetyOverrideReason).toBe('INR estable; pauta de 2 días');
+      expect(rx.safetyAlerts).toEqual([
+        expect.objectContaining({
+          code: 'INTERACTION_ANTICOAGULANT_NSAID',
+          severity: 'BLOCKING',
+        }),
+      ]);
+      expect(rx.allergyOverride).toBe(false);
+      expect(rx.contentHash).toBe(
+        computePrescriptionHash({
+          ...rx,
+          items: rx.items.map(({ id: _id, ...item }) => item),
+        }),
+      );
+    });
+
+    it('allergyOverride (cliente anterior) cuenta como confirmación; el motivo sigue siendo obligatorio', async () => {
+      withAnamnesis({ allergens: ['Penicilina', 'Látex'] });
+      await conflict(
+        useCase.execute(
+          PATIENT_ID,
+          input({ allergyOverride: true }),
+          DENTIST_ID,
+        ),
+      );
+      const rx = await useCase.execute(
+        PATIENT_ID,
+        input({
+          allergyOverride: true,
+          safetyOverrideReason: 'Prueba cutánea negativa',
+        }),
         DENTIST_ID,
       );
       expect(rx.allergyOverride).toBe(true);
@@ -184,17 +278,92 @@ describe('IssuePrescriptionUseCase', () => {
       ]);
     });
 
-    it('allergyOverride sin coincidencias no queda como confirmación', async () => {
+    it('sin bloqueantes, la confirmación y el motivo no se guardan', async () => {
       const rx = await useCase.execute(
         PATIENT_ID,
         input({
           items: [{ ...amoxicilina, activeIngredient: 'Clorhexidina' }],
           allergyOverride: true,
+          safetyOverride: true,
+          safetyOverrideReason: 'Por si acaso',
         }),
         DENTIST_ID,
       );
       expect(rx.allergyOverride).toBe(false);
       expect(rx.allergyMatches).toEqual([]);
+      expect(rx.safetyAlerts).toEqual([]);
+      expect(rx.safetyOverrideReason).toBeNull();
+    });
+
+    it('sin anamnesis: se emite y la receta registra el aviso', async () => {
+      repo.patients.set(PATIENT_ID, makePatient({ anamnesis: null }));
+      const rx = await useCase.execute(PATIENT_ID, input(), DENTIST_ID);
+      expect(rx.safetyAlerts).toEqual([
+        expect.objectContaining({
+          code: 'NO_ANAMNESIS',
+          severity: 'INFO',
+          message:
+            'Sin anamnesis vigente: no se han podido comprobar alergias ni interacciones',
+        }),
+      ]);
+    });
+
+    it('edad por fecha de nacimiento en la zona de la sede: 6 años y 20 kg con amoxicilina 1 g/8 h → 409', async () => {
+      repo.patients.set(
+        PATIENT_ID,
+        makePatient({
+          birthDate: new Date('2020-10-16T00:00:00.000Z'),
+          anamnesis: { ...emptySafetyAnamnesis(), weightKg: 20 },
+        }),
+      );
+      const body = await conflict(
+        useCase.execute(
+          PATIENT_ID,
+          input({
+            items: [{ ...amoxicilina, concentration: '1 g', dose: '1 g' }],
+          }),
+          DENTIST_ID,
+        ),
+      );
+      expect(body.message).toContain('50 mg/kg/toma');
+    });
+  });
+
+  describe('previsualizar avisos', () => {
+    it('devuelve los avisos que daría la emisión, sin guardar nada', async () => {
+      const base = emptySafetyAnamnesis();
+      repo.patients.set(
+        PATIENT_ID,
+        makePatient({
+          anamnesis: {
+            ...base,
+            flags: { ...base.flags, embarazo: true, semanasEmbarazo: 24 },
+          },
+        }),
+      );
+      const check = new CheckPrescriptionSafetyUseCase(repo, () => NOW);
+      const result = await check.execute(
+        PATIENT_ID,
+        [
+          { activeIngredient: 'Ibuprofeno' },
+          { activeIngredient: 'Paracetamol' },
+        ],
+        DENTIST_ID,
+      );
+      expect(result).toEqual({
+        rulesVersion: PRESCRIPTION_SAFETY_RULES_VERSION,
+        anamnesis: 'PRESENT',
+        hasBlocking: true,
+        alerts: [expect.objectContaining({ code: 'PREGNANCY_NSAID' })],
+      });
+      expect(repo.rows).toEqual([]);
+    });
+
+    it('404 si el paciente no es de esta clínica', async () => {
+      const check = new CheckPrescriptionSafetyUseCase(repo, () => NOW);
+      await expect(
+        check.execute('00000000-0000-4000-8000-0000000000ff', [], DENTIST_ID),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -283,6 +452,20 @@ describe('Listar, ver y anular', () => {
     await expect(
       get.execute('00000000-0000-4000-8000-0000000000ff'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('una receta emitida antes de DX-300 (sin avisos) sigue validando con el hash v1', async () => {
+    const legacy = repo.rows[0];
+    legacy.safetyRulesVersion = null;
+    legacy.safetyAlerts = null;
+    legacy.safetyOverrideReason = null;
+    legacy.contentHash = computePrescriptionHash({
+      ...legacy,
+      items: legacy.items.map(({ id: _id, ...item }) => item),
+    });
+    const doc = await new GetPrescriptionUseCase(repo).execute(id);
+    expect(doc.integrityOk).toBe(true);
+    expect(doc.safetyAlerts).toBeNull();
   });
 
   it('anula con motivo, autor y fecha del servidor; la integridad sigue intacta', async () => {
