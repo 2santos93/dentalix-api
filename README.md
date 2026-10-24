@@ -1197,7 +1197,7 @@ moneda). Errores 400 en español.
   esas monedas salen con `change`/`trend` null y `previousUnattributed: true`;
   la fila lleva `previousPeriodUnattributed` (y la respuesta, si alguna fila
   la lleva). El instante de DX-050 lo da `dx_production_attributed_since()`:
-  la migración `20261024150000_dx305_production_attributed_since` copió en su
+  la migración `20261024151000_dx305_production_attributed_since` copió en su
   cuerpo el `finished_at` de la migración de DX-050 de esa base (la app no lee
   `_prisma_migrations`). El CSV lo dice en la columna «Aviso».
 - **Rango de fechas** (DX-305, BE-044): `checkPeriodDays` en
