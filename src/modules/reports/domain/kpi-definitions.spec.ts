@@ -105,6 +105,19 @@ describe('kpi-definitions (DX-014)', () => {
       expect(kpis.occupancy).toBe(25);
     });
 
+    it('no-show % = no asistió ÷ (atendidas + no asistió + cancelaciones tardías)', () => {
+      // 2 ÷ (15 + 2 + 3) = 10 %; sin las tardías en la base sería 11,76 %.
+      const kpis = computeKpis(
+        aggregates({ completed: 15, noShow: 2, lateCancellations: 3 }),
+        [],
+      );
+      expect(kpis.noShowRate).toBe(10);
+      // Solo tardías (sin atendidas ni no-show): 0 %, no null.
+      expect(
+        computeKpis(aggregates({ lateCancellations: 2 }), []).noShowRate,
+      ).toBe(0);
+    });
+
     it('una moneda sin producción da % de cobro null (no 0 ni infinito)', () => {
       const kpis = computeKpis(
         aggregates({ collected: new Map([['EUR', 50]]) }),
@@ -210,6 +223,7 @@ describe('kpi-definitions (DX-014)', () => {
         collected: new Map([['COP', 50]]),
         completed: 10,
         noShow: 1,
+        lateCancellations: 2,
         attendedPatients: 8,
         newPatients: 2,
         completedMinutes: 300,
@@ -223,6 +237,7 @@ describe('kpi-definitions (DX-014)', () => {
         ]),
         completed: 5,
         noShow: 4,
+        lateCancellations: 1,
         attendedPatients: 5,
         newPatients: 1,
         completedMinutes: 100,
@@ -240,6 +255,7 @@ describe('kpi-definitions (DX-014)', () => {
       expect(total).toMatchObject({
         completed: 15,
         noShow: 5,
+        lateCancellations: 3,
         attendedPatients: 11,
         newPatients: 3,
         completedMinutes: 400,

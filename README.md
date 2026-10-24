@@ -1177,7 +1177,8 @@ moneda). Errores 400 en español.
   plan («Sin atribuir» no cuenta); cobrado = Σ abonos no anulados por `paidAt`,
   sede y moneda; % de cobro = cobrado ÷ producción (null sin producción);
   citas atendidas = COMPLETED por inicio; no-show % = NO_SHOW ÷ (COMPLETED +
-  NO_SHOW) (no hay cancelación tardía en `appointments`); pacientes nuevos =
+  NO_SHOW + canceladas con `lateCancellation`, DX-279; las avisadas a tiempo
+  no cuentan); pacientes nuevos =
   primera COMPLETED del paciente en la clínica, en la sede de esa cita; ticket
   medio = cobrado ÷ pacientes distintos atendidos (en el total, cada paciente
   una vez); ocupación % = minutos COMPLETED ÷ minutos abiertos del horario

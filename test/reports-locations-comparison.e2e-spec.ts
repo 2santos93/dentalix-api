@@ -227,6 +227,25 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       status: 'COMPLETED',
     });
 
+    // Diciembre en la Norte (DX-279): 3 atendidas, 1 no-show, 1 cancelación
+    // tardía y 1 avisada a tiempo.
+    for (const [status, late] of [
+      ['COMPLETED', undefined],
+      ['COMPLETED', undefined],
+      ['COMPLETED', undefined],
+      ['NO_SHOW', undefined],
+      ['CANCELLED', true],
+      ['CANCELLED', false],
+    ] as const) {
+      await seed.appointment({
+        locationId: norte,
+        patientId: p5,
+        day: '2026-12-03',
+        status,
+        lateCancellation: late,
+      });
+    }
+
     tokens.ADMIN = a.adminToken;
     for (const role of [
       ClinicRole.DENTIST,
@@ -305,6 +324,18 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       value: 9,
       previous: 23,
     });
+  });
+
+  it('no-show % suma las cancelaciones tardías al denominador; las avisadas no cuentan', async () => {
+    const december = await report({
+      from: '2026-12-01',
+      to: '2026-12-31',
+      compare: 'none',
+    });
+    // 1 ÷ (3 + 1 + 1 tardía) = 20 %; sin las tardías sería 25 %.
+    expect(row(december, norte).metrics.noShowRate.value).toBe(20);
+    expect(row(december, norte).metrics.completedAppointments.value).toBe(3);
+    expect(december.total.metrics.noShowRate.value).toBe(20);
   });
 
   it('cobrado por moneda y por día civil de la sede; el anulado no cuenta', async () => {

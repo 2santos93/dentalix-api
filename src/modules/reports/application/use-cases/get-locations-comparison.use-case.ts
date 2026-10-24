@@ -84,7 +84,7 @@ export interface ComparisonRow {
   isActive: boolean;
   /** Zona de la sede (null en el total, que mezcla las de cada sede). */
   timeZone: string | null;
-  /** ¿Hubo algún cobro, producción o cita (atendida o no-show) en el período? */
+  /** ¿Hubo algún cobro, producción o cita (atendida, no-show o cancelada tarde) en el período? */
   hasActivity: boolean;
   metrics: ComparisonMetrics;
 }
@@ -109,7 +109,8 @@ function hasActivity(a: PeriodAggregates): boolean {
     anyAmount(a.production) ||
     anyAmount(a.collected) ||
     a.completed > 0 ||
-    a.noShow > 0
+    a.noShow > 0 ||
+    a.lateCancellations > 0
   );
 }
 

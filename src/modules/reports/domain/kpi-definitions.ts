@@ -104,7 +104,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     direction: 'LOWER_IS_BETTER',
     changeUnit: 'POINTS',
     howItIsCalculated:
-      'Citas «No asistió» ÷ (atendidas + no asistió) cuyo inicio cae en el período, en %. Las canceladas no cuentan. Mejora al bajar.',
+      'Citas «No asistió» ÷ (atendidas + no asistió + cancelaciones tardías) cuyo inicio cae en el período, en %. Las cancelaciones tardías son las que no respetaron el aviso de la política de la sede (DX-279); las canceladas a tiempo no cuentan. La variación va en puntos. Mejora al bajar.',
   },
   newPatients: {
     key: 'newPatients',
@@ -149,6 +149,8 @@ export interface PeriodAggregates {
   collected: ReadonlyMap<string, number>;
   completed: number;
   noShow: number;
+  /** Citas canceladas tarde según la política de la sede (DX-279). */
+  lateCancellations: number;
   /** Pacientes distintos con alguna cita COMPLETED. */
   attendedPatients: number;
   newPatients: number;
@@ -163,6 +165,7 @@ export const EMPTY_AGGREGATES: PeriodAggregates = {
   collected: new Map(),
   completed: 0,
   noShow: 0,
+  lateCancellations: 0,
   attendedPatients: 0,
   newPatients: 0,
   completedMinutes: 0,
@@ -220,7 +223,7 @@ export function computeKpis(
       ),
     })),
     completedAppointments: a.completed,
-    noShowRate: percent(a.noShow, a.completed + a.noShow),
+    noShowRate: percent(a.noShow, a.completed + a.noShow + a.lateCancellations),
     newPatients: a.newPatients,
     averageTicket: currencies.map((currency) => ({
       currency,
@@ -274,6 +277,7 @@ export function combineAggregates(
     collected: sumByCurrency(list.map((a) => a.collected)),
     completed: list.reduce((s, a) => s + a.completed, 0),
     noShow: list.reduce((s, a) => s + a.noShow, 0),
+    lateCancellations: list.reduce((s, a) => s + a.lateCancellations, 0),
     attendedPatients,
     newPatients: list.reduce((s, a) => s + a.newPatients, 0),
     completedMinutes: scheduled.reduce((s, a) => s + a.completedMinutes, 0),

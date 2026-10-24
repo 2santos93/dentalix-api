@@ -33,6 +33,7 @@ interface AppointmentRow {
   locationId: string | null;
   completed: bigint;
   noShow: bigint;
+  lateCancellations: bigint;
   minutes: Prisma.Decimal | null;
   patients: bigint;
 }
@@ -82,6 +83,7 @@ function emptyAggregates(): PeriodAggregates & {
     collected: new Map(),
     completed: 0,
     noShow: 0,
+    lateCancellations: 0,
     attendedPatients: 0,
     newPatients: 0,
     completedMinutes: 0,
@@ -98,7 +100,8 @@ function emptyAggregates(): PeriodAggregates & {
  *    índice `treatment_plan_items_tenant_performed_location_idx`;
  *  - cobrado: abonos no anulados por `paidAt`, sede y moneda;
  *    `payments_tenantId_locationId_paidAt_active_idx`;
- *  - citas atendidas, no-show, minutos y pacientes distintos (por sede y del
+ *  - citas atendidas, no-show, cancelaciones tardías (DX-279), minutos y
+ *    pacientes distintos (por sede y del
  *    conjunto con GROUPING SETS); `appointments_tenant_location_start_idx`;
  *  - pacientes nuevos: citas COMPLETED del período sin otra COMPLETED anterior
  *    del paciente en la clínica; `appointments_tenant_patient_completed_idx`;
@@ -204,6 +207,7 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
           SELECT a."locationId",
                  count(*) FILTER (WHERE a."status" = 'COMPLETED') AS "completed",
                  count(*) FILTER (WHERE a."status" = 'NO_SHOW') AS "noShow",
+                 count(*) FILTER (WHERE a."status" = 'CANCELLED') AS "lateCancellations",
                  sum(extract(epoch FROM a."end" - a."start") / 60)
                    FILTER (WHERE a."status" = 'COMPLETED') AS "minutes",
                  count(DISTINCT a."patientId")
@@ -211,7 +215,8 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
             FROM "appointments" a
            WHERE a."tenantId" = ${tenantId}::uuid
              AND a."deletedAt" IS NULL
-             AND a."status" IN ('COMPLETED', 'NO_SHOW')
+             AND (a."status" IN ('COMPLETED', 'NO_SHOW')
+                  OR (a."status" = 'CANCELLED' AND a."lateCancellation" IS TRUE))
              AND ${inPeriod(Prisma.sql`a."locationId"`, Prisma.sql`a."start"`, branches)}
            GROUP BY GROUPING SETS ((a."locationId"), ())`;
 
@@ -277,6 +282,7 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
           if (!a) continue;
           a.completed = Number(r.completed);
           a.noShow = Number(r.noShow);
+          a.lateCancellations = Number(r.lateCancellations);
           a.completedMinutes = Math.round(r.minutes?.toNumber() ?? 0);
           a.attendedPatients = Number(r.patients);
         }

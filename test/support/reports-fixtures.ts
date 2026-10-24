@@ -143,6 +143,8 @@ export class ReportSeeder {
     patientId: string;
     day: string;
     status: AppointmentStatus;
+    /** Solo CANCELLED (DX-279): cancelada por el paciente, tardía o no. */
+    lateCancellation?: boolean;
   }): Promise<void> {
     const dentist = await this.dentist();
     let offset = 0;
@@ -159,6 +161,14 @@ export class ReportSeeder {
         start,
         end: new Date(start.getTime() + 30 * 60_000),
         status: input.status,
+        ...(input.lateCancellation === undefined
+          ? {}
+          : {
+              cancelledAt: new Date(start.getTime() - 60 * 60_000),
+              cancelledByKind: 'PATIENT_LINK' as const,
+              noticeMinutes: input.lateCancellation ? 60 : 3 * 24 * 60,
+              lateCancellation: input.lateCancellation,
+            }),
       },
     });
   }
