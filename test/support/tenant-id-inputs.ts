@@ -142,10 +142,9 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'PATCH /expenses/:id body.locationId': 'expenses.e2e-spec.ts',
   'POST /expenses body.attachmentUploadId': 'expenses.e2e-spec.ts',
   'POST /expenses/:id/attachment body.uploadId': 'expenses.e2e-spec.ts',
-  // La salida de caja pasa por el mismo alta y la misma comprobación de la
-  // subida (`ExpenseReceiptUploads`, por clínica y usuario).
+  // «una subida de otra clínica no sirve de soporte de una salida (404)».
   'POST /cash-sessions/current/outflows body.attachmentUploadId':
-    'expenses.e2e-spec.ts',
+    'expense-cash-outflows.e2e-spec.ts',
   // Una sede ajena en la lista, el resumen y sus CSV no devuelve nada.
   'GET /expenses ?locationId': 'expenses-reports.e2e-spec.ts',
   'GET /expenses.csv ?locationId': 'expenses-reports.e2e-spec.ts',

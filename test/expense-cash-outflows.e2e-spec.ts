@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -300,6 +301,32 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
         createdBy: expect.objectContaining({ id: receptionId }) as unknown,
       }),
     ]);
+  });
+
+  it('una subida de otra clínica no sirve de soporte de una salida (404) y no deja nada', async () => {
+    const other = await registerClinic(app, 'caja-salidas-otra');
+    const bytes = Buffer.from('%PDF-1.4 soporte de otra clínica');
+    const ticket = await request(server())
+      .post('/api/v1/expenses/attachments/upload-url')
+      .set('X-Tenant-Host', other.host)
+      .set('Authorization', `Bearer ${other.adminToken}`)
+      .send({
+        name: 'soporte.pdf',
+        mimeType: 'application/pdf',
+        size: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      })
+      .expect(200);
+    const before = await raw.expense.count({
+      where: { tenantId: clinic.tenantId },
+    });
+    await outflow({
+      amount: 2_000,
+      attachmentUploadId: (ticket.body as { uploadId: string }).uploadId,
+    }).expect(404);
+    expect(
+      await raw.expense.count({ where: { tenantId: clinic.tenantId } }),
+    ).toBe(before);
   });
 
   it('con X-Location-Id de otra sede, la caja tiene que estar en esa sede (409)', async () => {

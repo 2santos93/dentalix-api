@@ -277,3 +277,45 @@ describe('PrismaExpenseRepository: repeticiones y salidas de caja (DX-274)', () 
     });
   });
 });
+
+describe('lista de gastos: exportación sin conteo (DX-274)', () => {
+  const filters = { page: 1, pageSize: 10_001 };
+
+  function buildList() {
+    const sqls: string[] = [];
+    const tx = {
+      $queryRaw: jest.fn((arg: unknown) => {
+        // Las zonas son una plantilla etiquetada; la página y el conteo, `Prisma.Sql`.
+        if (typeof (arg as { sql?: string }).sql === 'string') {
+          sqls.push((arg as { sql: string }).sql);
+          return Promise.resolve(
+            sqls.at(-1)!.includes('count(*)') ? [{ total: 7 }] : [],
+          );
+        }
+        return Promise.resolve([]);
+      }),
+    };
+    const prisma = {
+      runWithTenant: (fn: (tx: unknown) => unknown) => fn(tx),
+    } as unknown as PrismaService;
+    const tenant = new TenantContextService();
+    const repo = new PrismaExpenseRepository(prisma, tenant);
+    return {
+      sqls,
+      run: (withTotal?: boolean) =>
+        tenant.run(TENANT, () => repo.list(filters, NOW, withTotal)),
+    };
+  }
+
+  it('por defecto cuenta; con withTotal=false no ejecuta el COUNT y total = filas', async () => {
+    const counted = buildList();
+    expect((await counted.run()).total).toBe(7);
+    expect(counted.sqls.some((q) => q.includes('count(*)'))).toBe(true);
+
+    const exported = buildList();
+    const page = await exported.run(false);
+    expect(exported.sqls).toHaveLength(1);
+    expect(exported.sqls[0]).not.toContain('count(*)');
+    expect(page).toMatchObject({ items: [], total: 0 });
+  });
+});
