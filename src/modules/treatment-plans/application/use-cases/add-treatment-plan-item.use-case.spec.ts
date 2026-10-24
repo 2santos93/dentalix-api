@@ -317,6 +317,27 @@ describe('AddTreatmentPlanItemUseCase', () => {
     expect(result.status).toBe(TreatmentPlanItemStatus.PROPOSED);
   });
 
+  it('SEC-047: firma el alta con quien crea el ítem (el informe de descuentos lo muestra)', async () => {
+    let captured: Omit<AddTreatmentPlanItemRepoInput, 'planId'> | undefined;
+    const repo = makeRepo({}, (input) => {
+      captured = input;
+    });
+    const uc = new AddTreatmentPlanItemUseCase(
+      repo,
+      catalogPricing(makeCatalogRepo()),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
+
+    await uc.execute(
+      'plan1',
+      { toothNumber: '26', catalogItemId: 'cat1' },
+      ADMIN_ACTOR,
+    );
+
+    expect(captured?.createdById).toBe(ADMIN_ACTOR.userId);
+  });
+
   it('passes surfaces and notes through untouched', async () => {
     let captured: Omit<AddTreatmentPlanItemRepoInput, 'planId'> | undefined;
     const repo = makeRepo({}, (input) => {

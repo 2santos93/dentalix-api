@@ -14,7 +14,10 @@ import {
 // DX-105 en HTTP real: el convenio del paciente. Una asignación viva que se
 // sustituye (la anterior queda en el historial), cobertura del mismo pagador,
 // convenio desactivado con aviso, estado a hoy, 404 entre clínicas, los 4 roles
-// y la auditoría sin las notas.
+// y la auditoría sin las notas. SEC-047: la matriz rol × cobertura × tipo de
+// convenio (pagador externo o interno) vive en
+// `patient-agreements-eligibility.e2e-spec.ts`; aquí cada asignación de un
+// convenio de pagador lleva su cobertura viva.
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -26,7 +29,7 @@ interface Assignment {
     id: string;
     name: string;
     active: boolean;
-    payer: { name: string };
+    payer: { name: string; type: string };
   };
   coverageId: string | null;
   validFrom: string | null;
@@ -106,6 +109,22 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     token = tokens.RECEPTION,
   ) => as(api().put(url(patientId)), token).send(body);
 
+  /** Cobertura viva del paciente con `payerId` (SEC-047: la pide el PUT). */
+  const cover = (patientId: string, payerId: string) =>
+    post(clinic, `/api/v1/patients/${patientId}/coverages`, { payerId });
+
+  /** Paciente nuevo con cobertura viva de Sanitas y de Sura. */
+  async function coveredPatient(
+    firstName: string,
+  ): Promise<{ id: string; sanitas: string; sura: string }> {
+    const id = await createPatient(clinic, firstName);
+    return {
+      id,
+      sanitas: await cover(id, sanitas),
+      sura: await cover(id, sura),
+    };
+  }
+
   async function read(patientId: string, history = true): Promise<Body> {
     const res = await as(
       api().get(`${url(patientId)}${history ? '?includeHistory=true' : ''}`),
@@ -172,9 +191,10 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   });
 
   it('PUT asigna el convenio con estado, pagador y sin retiro', async () => {
-    const p = await createPatient(clinic, 'Asignada');
+    const { id: p, sanitas: cov } = await coveredPatient('Asignada');
     const res = await put(p, {
       agreementId: convenioSanitas,
+      coverageId: cov,
       validFrom: dayFromNow(-30),
       validTo: dayFromNow(30),
       notes: '  Plan oro  ',
@@ -183,9 +203,12 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       patientId: p,
       status: 'ACTIVE',
       notes: 'Plan oro',
-      coverageId: null,
+      coverageId: cov,
       retiredAt: null,
-      agreement: { name: 'Convenio Sanitas', payer: { name: 'Sanitas' } },
+      agreement: {
+        name: 'Convenio Sanitas',
+        payer: { name: 'Sanitas', type: 'EPS_CO' },
+      },
     });
     expect((await read(p, false)).current?.id).toBe(
       (res.body as Assignment).id,
@@ -193,11 +216,19 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   });
 
   it('un segundo PUT sustituye al primero y este aparece en el historial', async () => {
-    const p = await createPatient(clinic, 'Sustituida');
-    const first = (await put(p, { agreementId: convenioSanitas }).expect(200))
-      .body as Assignment;
-    const second = (await put(p, { agreementId: convenioSura }).expect(200))
-      .body as Assignment;
+    const c = await coveredPatient('Sustituida');
+    const p = c.id;
+    const first = (
+      await put(p, {
+        agreementId: convenioSanitas,
+        coverageId: c.sanitas,
+      }).expect(200)
+    ).body as Assignment;
+    const second = (
+      await put(p, { agreementId: convenioSura, coverageId: c.sura }).expect(
+        200,
+      )
+    ).body as Assignment;
     expect(second.id).not.toBe(first.id);
 
     const out = await read(p);
@@ -278,25 +309,27 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   });
 
   it('un convenio desactivado se asigna con aviso: estado INACTIVE', async () => {
-    const p = await createPatient(clinic, 'Inactivo');
+    const { id: p, sanitas: cov } = await coveredPatient('Inactivo');
     const off = await createAgreement(clinic, 'Convenio apagado', sanitas);
     await as(api().patch(`/api/v1/agreements/${off}`), tokens.ADMIN)
       .send({ active: false })
       .expect(200);
-    const res = await put(p, { agreementId: off }).expect(200);
+    const res = await put(p, { agreementId: off, coverageId: cov }).expect(200);
     expect((res.body as Assignment).status).toBe('INACTIVE');
     expect((await read(p)).current?.status).toBe('INACTIVE');
   });
 
   it('el estado mira la vigencia de la asignación Y la del convenio', async () => {
-    const p = await createPatient(clinic, 'Vigencias');
+    const { id: p, sanitas: cov } = await coveredPatient('Vigencias');
     await put(p, {
       agreementId: convenioSanitas,
+      coverageId: cov,
       validTo: dayFromNow(-5),
     }).expect(200);
     expect((await read(p)).current?.status).toBe('EXPIRED');
     await put(p, {
       agreementId: convenioSanitas,
+      coverageId: cov,
       validFrom: dayFromNow(5),
     }).expect(200);
     expect((await read(p)).current?.status).toBe('NOT_STARTED');
@@ -307,14 +340,21 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       sanitas,
       { validTo: dayFromNow(-5) },
     );
-    await put(p, { agreementId: expiredAgreement }).expect(200);
+    await put(p, { agreementId: expiredAgreement, coverageId: cov }).expect(
+      200,
+    );
     expect((await read(p)).current?.status).toBe('EXPIRED');
   });
 
   it('DELETE retira la vigente (204): current null y queda en el historial', async () => {
-    const p = await createPatient(clinic, 'Retirada');
-    const a = (await put(p, { agreementId: convenioSanitas }).expect(200))
-      .body as Assignment;
+    const c = await coveredPatient('Retirada');
+    const p = c.id;
+    const a = (
+      await put(p, {
+        agreementId: convenioSanitas,
+        coverageId: c.sanitas,
+      }).expect(200)
+    ).body as Assignment;
     await as(api().delete(url(p)), tokens.RECEPTION).expect(204);
     const out = await read(p);
     expect(out.current).toBeNull();
@@ -324,14 +364,14 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       'El paciente no tiene convenio asignado.',
     );
     // Y se puede volver a asignar.
-    await put(p, { agreementId: convenioSura }).expect(200);
+    await put(p, { agreementId: convenioSura, coverageId: c.sura }).expect(200);
     expect((await read(p)).history).toHaveLength(1);
   });
 
   it('un convenio con pacientes asignados no se puede retirar; sin asignación, sí', async () => {
-    const p = await createPatient(clinic, 'Bloqueo');
+    const { id: p, sanitas: cov } = await coveredPatient('Bloqueo');
     const own = await createAgreement(clinic, 'Convenio en uso', sanitas);
-    await put(p, { agreementId: own }).expect(200);
+    await put(p, { agreementId: own, coverageId: cov }).expect(200);
     await as(api().delete(`/api/v1/agreements/${own}`), tokens.ADMIN).expect(
       409,
     );
@@ -342,14 +382,14 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   });
 
   it('GET /patients/:id trae el resumen del convenio, y los listados no', async () => {
-    const p = await createPatient(clinic, 'Ficha');
+    const { id: p, sura: cov } = await coveredPatient('Ficha');
     const none = await as(api().get(`/api/v1/patients/${p}`), tokens.ASSISTANT);
     expect((none.body as { agreement: unknown }).agreement).toEqual({
       status: 'NONE',
       agreementName: null,
       payerName: null,
     });
-    await put(p, { agreementId: convenioSura }).expect(200);
+    await put(p, { agreementId: convenioSura, coverageId: cov }).expect(200);
     const detail = await as(
       api().get(`/api/v1/patients/${p}`),
       tokens.ASSISTANT,
@@ -386,7 +426,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   });
 
   it('los 4 roles leen, asignan y retiran', async () => {
-    const p = await createPatient(clinic, 'Roles');
+    const { id: p, sanitas: cov } = await coveredPatient('Roles');
     for (const role of [
       ClinicRole.ADMIN,
       ClinicRole.DENTIST,
@@ -394,7 +434,11 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       ClinicRole.RECEPTION,
     ]) {
       await as(api().get(url(p)), tokens[role]).expect(200);
-      await put(p, { agreementId: convenioSanitas }, tokens[role]).expect(200);
+      await put(
+        p,
+        { agreementId: convenioSanitas, coverageId: cov },
+        tokens[role],
+      ).expect(200);
       await as(api().delete(url(p)), tokens[role]).expect(204);
     }
     expect((await read(p)).history).toHaveLength(4);
@@ -412,8 +456,10 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
 
   it('audita asignar y retirar como UPDATE de PATIENT, sin las notas ni fechas', async () => {
     const p = await createPatient(clinic, 'Auditada');
+    const cov = await cover(p, sanitas);
     await put(p, {
       agreementId: convenioSanitas,
+      coverageId: cov,
       notes: 'nota secreta del convenio',
     }).expect(200);
     await as(api().get(url(p)), tokens.RECEPTION).expect(200);
@@ -424,8 +470,8 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       orderBy: { occurredAt: 'asc' },
       select: { action: true, resourceType: true, metadata: true },
     });
-    const withReason = events.filter(
-      (e) => (e.metadata as { reason?: string }).reason,
+    const withReason = events.filter((e) =>
+      (e.metadata as { reason?: string }).reason?.startsWith('AGREEMENT_'),
     );
     expect(
       withReason.map((e) => (e.metadata as { reason: string }).reason),
@@ -435,8 +481,9 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
         (e) => e.action === 'UPDATE' && e.resourceType === 'PATIENT',
       ),
     ).toBe(true);
-    // El GET no se audita: aparte del alta del paciente, solo hay esos dos.
-    expect(events.filter((e) => e.action !== 'CREATE')).toHaveLength(2);
+    // El GET no se audita: aparte del alta del paciente y de su cobertura,
+    // solo hay esos dos.
+    expect(events.filter((e) => e.action !== 'CREATE')).toHaveLength(3);
     const text = await raw.$queryRaw<{ found: boolean }[]>`
       SELECT bool_or(metadata::text ~* 'nota secreta') AS found
         FROM audit_events
@@ -445,11 +492,14 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   });
 
   it('dos PUT simultáneos: queda una sola viva y ninguno da 500', async () => {
-    const p = await createPatient(clinic, 'Carrera');
+    const c = await coveredPatient('Carrera');
+    const p = c.id;
     const results = await Promise.all(
-      [convenioSanitas, convenioSura, convenioSanitas].map((agreementId) =>
-        put(p, { agreementId }),
-      ),
+      [
+        { agreementId: convenioSanitas, coverageId: c.sanitas },
+        { agreementId: convenioSura, coverageId: c.sura },
+        { agreementId: convenioSanitas, coverageId: c.sanitas },
+      ].map((body) => put(p, body)),
     );
     for (const r of results) expect([200, 422]).toContain(r.status);
     const live = await raw.patientAgreement.count({

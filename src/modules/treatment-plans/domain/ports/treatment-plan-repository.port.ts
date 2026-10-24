@@ -119,6 +119,8 @@ export interface AddTreatmentPlanItemRepoInput {
   discountReason?: DiscountReason | null;
   discountReasonNote?: string | null;
   discountStamp?: DiscountStamp | null;
+  /** SEC-047: quién da de alta el ítem (el informe de descuentos lo muestra). */
+  createdById: string;
 }
 
 /**

@@ -18,7 +18,7 @@ describe('PatientAgreementFlags', () => {
     );
     agreementId = agreements.seed({
       name: 'Convenio Sura',
-      payer: { id: 'payer-sura', name: 'Sura' },
+      payer: { id: 'payer-sura', name: 'Sura', type: 'EPS_CO' },
     }).id;
   });
 
@@ -65,13 +65,13 @@ describe('PatientAgreementFlags', () => {
   it('la vigencia del convenio también cuenta, y un convenio inactivo gana', async () => {
     const expired = agreements.seed({
       name: 'Vencido',
-      payer: { id: 'p', name: 'Sura' },
+      payer: { id: 'p', name: 'Sura', type: 'EPS_CO' },
       validTo: '2026-10-19',
     });
     repo.seed({ patientId: 'p-1', agreementId: expired.id });
     const inactive = agreements.seed({
       name: 'Apagado',
-      payer: { id: 'p', name: 'Sura' },
+      payer: { id: 'p', name: 'Sura', type: 'EPS_CO' },
       active: false,
       validTo: '2026-10-19',
     });

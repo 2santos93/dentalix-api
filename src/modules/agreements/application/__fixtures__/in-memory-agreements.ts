@@ -1,3 +1,4 @@
+import type { PayerType } from '@prisma/client';
 import { Agreement } from '../../domain/entities/agreement.entity';
 import {
   AgreementRepository,
@@ -18,6 +19,8 @@ export class InMemoryAgreementRepository implements AgreementRepository {
   readonly deleted = new Set<string>();
   readonly liveAssignments = new Map<string, number>();
   readonly payers = new Map<string, string>();
+  /** Tipo del pagador por id; sin entrada, EPS_CO. */
+  readonly payerTypes = new Map<string, PayerType>();
   readonly priceLists = new Map<string, { name: string; currency: string }>();
   /** Último parche recibido por `update`, para afirmar qué columnas se tocan. */
   lastPatch: UpdateAgreementRepoInput | null = null;
@@ -27,7 +30,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     const row: Agreement = {
       id: `agreement-${this.nextId++}`,
       name: 'Convenio base',
-      payer: { id: 'payer-1', name: 'Sanitas' },
+      payer: { id: 'payer-1', name: 'Sanitas', type: 'EPS_CO' },
       kind: 'PERCENT_DISCOUNT',
       percent: 10,
       percentByCategory: null,
@@ -43,6 +46,14 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     };
     this.rows.push(row);
     return row;
+  }
+
+  private payerOf(id: string): Agreement['payer'] {
+    return {
+      id,
+      name: this.payers.get(id) ?? 'Pagador',
+      type: this.payerTypes.get(id) ?? 'EPS_CO',
+    };
   }
 
   private live(): Agreement[] {
@@ -84,10 +95,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     return Promise.resolve(
       this.seed({
         name: input.name,
-        payer: {
-          id: input.payerId,
-          name: this.payers.get(input.payerId) ?? 'Pagador',
-        },
+        payer: this.payerOf(input.payerId),
         kind: input.kind,
         percent: input.percent,
         percentByCategory: input.percentByCategory,
@@ -110,10 +118,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     if (!row) return Promise.resolve(null);
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.payerId !== undefined) {
-      row.payer = {
-        id: patch.payerId,
-        name: this.payers.get(patch.payerId) ?? 'Pagador',
-      };
+      row.payer = this.payerOf(patch.payerId);
     }
     if (patch.kind !== undefined) row.kind = patch.kind;
     if (patch.percent !== undefined) row.percent = patch.percent;

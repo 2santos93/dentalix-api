@@ -346,6 +346,8 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           agreementId: input.pricing.agreementId,
           agreementName: input.pricing.agreementName,
           pricingLocationId: input.pricing.pricingLocationId,
+          // SEC-047: autor del alta, para el informe de descuentos.
+          createdById: input.createdById,
           price: input.price,
           discount: input.discount ?? 0,
           notes: input.notes,

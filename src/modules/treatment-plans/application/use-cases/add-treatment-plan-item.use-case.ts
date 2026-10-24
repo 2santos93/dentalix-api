@@ -142,6 +142,7 @@ export class AddTreatmentPlanItemUseCase {
         price,
         discount,
         notes: input.notes,
+        createdById: actor.userId,
         ...decision,
       };
     });

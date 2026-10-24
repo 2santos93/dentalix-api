@@ -786,11 +786,37 @@ export const DEMO_AGREEMENTS = [
   },
 ] as const;
 
-/** DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su cobertura— y uno con Alfa). */
+/**
+ * DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su
+ * cobertura— y uno con Alfa). SEC-047: el convenio exige una cobertura viva
+ * del pagador; `coverage` es la que se le añade si aún no la tiene (la de
+ * Alfa, como segunda cobertura, no principal).
+ */
 export const DEMO_PATIENT_AGREEMENTS = [
-  { patientIndex: 0, agreementKey: 'sura' },
-  { patientIndex: 4, agreementKey: 'sura' },
-  { patientIndex: 2, agreementKey: 'alfa' },
+  {
+    patientIndex: 0,
+    agreementKey: 'sura',
+    coverage: {
+      planName: 'Plan de Salud Sura',
+      memberNumber: 'DEMO-SURA-1000',
+    },
+  },
+  {
+    patientIndex: 4,
+    agreementKey: 'sura',
+    coverage: {
+      planName: 'Plan de Salud Sura',
+      memberNumber: 'DEMO-SURA-1004',
+    },
+  },
+  {
+    patientIndex: 2,
+    agreementKey: 'alfa',
+    coverage: {
+      planName: 'Convenio empresarial',
+      memberNumber: 'DEMO-ALFA-1002',
+    },
+  },
 ] as const;
 
 export interface DemoCoverage {

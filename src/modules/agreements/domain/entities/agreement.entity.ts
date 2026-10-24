@@ -1,4 +1,4 @@
-import { AgreementKind } from '@prisma/client';
+import { AgreementKind, PayerType } from '@prisma/client';
 
 /**
  * Convenio de la clínica con un pagador (DX-105): o un descuento porcentual
@@ -9,7 +9,11 @@ import { AgreementKind } from '@prisma/client';
 export interface Agreement {
   id: string;
   name: string;
-  payer: { id: string; name: string };
+  /**
+   * `type` decide quién puede asignarlo (SEC-047): con un pagador externo
+   * hace falta una cobertura viva del paciente con él; con `OTRO`, solo ADMIN.
+   */
+  payer: { id: string; name: string; type: PayerType };
   kind: AgreementKind;
   /** Solo `PERCENT_DISCOUNT` (0–100). */
   percent: number | null;
