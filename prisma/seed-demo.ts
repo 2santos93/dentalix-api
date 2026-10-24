@@ -1403,7 +1403,9 @@ class DemoSeeder {
    * inasistencias y una cancelación tardía en citas pasadas de esa sede, para
    * ver la insignia en su ficha y en sus citas. DX-291: esas tres citas
    * tienen la política comunicada (como si la hubiera llevado el
-   * recordatorio), así que «Generar cargo» funciona en la demo.
+   * recordatorio); como la paciente tiene EPS_CO, su cargo sale bloqueado
+   * (Ley 1438). Otra inasistencia, de un paciente sin EPS y también con la
+   * política comunicada, deja probar «Generar cargo» en la demo.
    */
   private async createCancellationPolicy(
     tenantId: string,
@@ -1425,7 +1427,10 @@ class DemoSeeder {
     // El primer hueco libre (horario de la sede, sin solape del profesional
     // ni de la paciente) desde `daysAgo` hacia atrás, dentro de la semana
     // pasada del calendario: la demo no tiene citas de hace más de 15 días.
-    const book = async (daysAgo: number) => {
+    const book = async (
+      daysAgo: number,
+      patientIndex: number = incidents.patientIndex,
+    ) => {
       for (let d = daysAgo; d <= incidents.lastDaysAgo; d++) {
         for (let m = incidents.firstMinute; m < incidents.lastMinute; m += 30) {
           const start = daysAgoAt(this.now, d, m);
@@ -1433,7 +1438,7 @@ class DemoSeeder {
           if (!fitsBusinessHours(start, end, hours[location])) continue;
           try {
             return await this.use(CreateAppointmentUseCase).registerHistorical({
-              patientId: patientIds[incidents.patientIndex],
+              patientId: patientIds[patientIndex],
               providerId: dentists[incidents.dentistIndex],
               start,
               end,
@@ -1468,6 +1473,13 @@ class DemoSeeder {
         },
       });
       ids.push(a.id);
+      const { chargeable } = incidents;
+      const noShow = await book(
+        chargeable.noShowDaysAgo,
+        chargeable.patientIndex,
+      );
+      await update.execute(noShow.id, { status: AppointmentStatus.NO_SHOW });
+      ids.push(noShow.id);
       return ids;
     });
     await this.prisma.runWithTenant(tenantId, (tx) =>
