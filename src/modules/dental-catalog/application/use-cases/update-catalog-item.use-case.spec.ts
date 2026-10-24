@@ -22,7 +22,6 @@ function fakeItem(
     labelPt: null,
     color: '#FF0000',
     defaultPrice: null,
-    cupsCode: null,
     allowDiscount: true,
     active: true,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -160,48 +159,6 @@ describe('UpdateCatalogItemUseCase', () => {
     await uc.execute(existing.id, { code: '  CAR-002  ' });
 
     expect(receivedPatch?.code).toBe('CAR-002');
-  });
-});
-
-describe('UpdateCatalogItemUseCase · CUPS (DX-212)', () => {
-  function capture() {
-    let received: UpdateDentalCatalogItemRepoInput | undefined;
-    const repo = makeRepo({
-      findById: () => Promise.resolve(fakeItem()),
-      update: (_id: string, patch: UpdateDentalCatalogItemRepoInput) => {
-        received = patch;
-        return Promise.resolve(fakeItem({ cupsCode: patch.cupsCode ?? null }));
-      },
-    });
-    return { uc: new UpdateCatalogItemUseCase(repo), patch: () => received };
-  }
-
-  it('guarda el CUPS normalizado (mayúsculas, sin espacios)', async () => {
-    const { uc, patch } = capture();
-    await uc.execute('c1', { cupsCode: ' a1b2c3 ' });
-    expect(patch()?.cupsCode).toBe('A1B2C3');
-  });
-
-  it('vacío o null quita el código', async () => {
-    const { uc, patch } = capture();
-    await uc.execute('c1', { cupsCode: '' });
-    expect(patch()?.cupsCode).toBeNull();
-  });
-
-  it('formato inválido: 400 con el formato esperado, sin escribir', async () => {
-    const { uc, patch } = capture();
-    await expect(uc.execute('c1', { cupsCode: '89-20' })).rejects.toThrow(
-      new BadRequestException(
-        'El código CUPS debe tener 6 caracteres alfanuméricos (p. ej. 890203)',
-      ),
-    );
-    expect(patch()).toBeUndefined();
-  });
-
-  it('sin el campo, no lo toca', async () => {
-    const { uc, patch } = capture();
-    await uc.execute('c1', { labelEs: 'Caries' });
-    expect(patch()).not.toHaveProperty('cupsCode');
   });
 });
 

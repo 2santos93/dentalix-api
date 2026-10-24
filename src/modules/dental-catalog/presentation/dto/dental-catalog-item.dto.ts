@@ -39,13 +39,6 @@ export class DentalCatalogItemDto {
   defaultPrice!: number | null;
 
   @ApiProperty({
-    type: String,
-    nullable: true,
-    description: 'DX-212: código CUPS (6 alfanuméricos) o null.',
-  })
-  cupsCode!: string | null;
-
-  @ApiProperty({
     description:
       'DX-105: false = la prestación no admite descuentos (ni % de convenio ni discrecionales).',
   })

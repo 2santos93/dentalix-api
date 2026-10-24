@@ -73,17 +73,6 @@ export class UpdateCatalogItemDto {
   defaultPrice?: number;
 
   @ApiPropertyOptional({
-    type: String,
-    nullable: true,
-    example: '890203',
-    description:
-      'DX-212: código CUPS del procedimiento, 6 caracteres alfanuméricos (400 con el formato esperado si no). Vacío o null lo quita. Solo ADMIN.',
-  })
-  @IsOptional()
-  @IsString()
-  cupsCode?: string | null;
-
-  @ApiPropertyOptional({
     description: 'DX-105: false = la prestación no admite descuentos.',
   })
   @IsOptional()

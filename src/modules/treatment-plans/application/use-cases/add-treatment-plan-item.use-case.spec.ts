@@ -61,7 +61,6 @@ function fakeCatalogItem(
     labelPt: null,
     color: '#FFFFFF',
     defaultPrice: 200,
-    cupsCode: null,
     allowDiscount: true,
     active: true,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

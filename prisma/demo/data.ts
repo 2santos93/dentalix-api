@@ -109,22 +109,6 @@ export const NORTE_SCHEDULE: ScheduleRange[] = [
   { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 },
 ];
 
-/** Tarifas (COP) que la clínica demo pone a los ítems del catálogo por defecto. */
-/**
- * DX-212: códigos CUPS de algunos procedimientos del catálogo, para probar
- * «RDA: listo» en local. Ejemplos de demo con el formato de la Res. CUPS
- * vigente (6 caracteres): verifícalos contra la tabla oficial antes de usarlos
- * en una clínica real. Los ítems sin CUPS salen como faltantes en el RDA.
- */
-export const DEMO_CUPS: Record<string, string> = {
-  'IMG-CONSULTA': '890203',
-  'PREV-PROFILAXIS': '997002',
-  'OP-RESINA-1': '232101',
-  'OP-RESINA-2': '232102',
-  'ENDO-UNI': '237101',
-  'CX-EXO-SIMPLE': '230101',
-};
-
 /** DX-212: código de habilitación REPS (12 dígitos) de la sede principal. */
 export const DEMO_PRINCIPAL_REPS = '110010123401';
 
@@ -134,6 +118,7 @@ export const DEMO_PRINCIPAL_REPS = '110010123401';
  */
 export const DEMO_PRINCIPAL_PHONE = '+57 601 555 0101';
 
+/** Tarifas (COP) que la clínica demo pone a los ítems del catálogo por defecto. */
 export const DEMO_PRICES: Record<string, number> = {
   'IMG-CONSULTA': 80000,
   'IMG-RX-PERIAPICAL': 35000,
@@ -1093,7 +1078,7 @@ interface DemoClinicalEntry {
   daysAgo: number;
   reason: string;
   notes: string;
-  /** DX-212: diagnósticos CIE-10 (principal primero). Sin ellos: «RDA: faltan». */
+  /** DX-212: diagnósticos CIE-10 (principal primero). */
   diagnoses?: readonly {
     icd10Code: string;
     kind: 'PRINCIPAL' | 'RELACIONADO';
@@ -1109,7 +1094,6 @@ export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
     reason: 'Valoración inicial',
     notes:
       'Paciente refiere sensibilidad al frío en 36. Se observa lesión cariosa oclusal. Se indica resina y profilaxis. Se refuerza técnica de cepillado.',
-    // DX-212: con REPS en la sede principal y registro de la Dra., «RDA: listo».
     diagnoses: [
       { icd10Code: 'K02.1', kind: 'PRINCIPAL', toothFdi: '36' },
       { icd10Code: 'K05.1', kind: 'RELACIONADO' },

@@ -204,8 +204,7 @@ model Location {
   // una serie que ya numeró recibos en la clínica.
   receiptPrefix        String?
   // DX-212: código de habilitación REPS de la sede (12 dígitos, CHECK
-  // locations_reps_habilitation_code_format). Lo pide el RDA (Res. 1888/2025)
-  // en las sedes de Colombia; solo lo edita ADMIN.
+  // locations_reps_habilitation_code_format); solo lo edita ADMIN.
   repsHabilitationCode String?
   // DX-222: teléfono de la sede para las indicaciones postoperatorias
   // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
@@ -783,7 +782,7 @@ model ClinicalEntryAddendum {
   @@map("clinical_entry_addenda")
 }
 
-// DX-212: tipo de diagnóstico del RIPS/RDA: uno principal y hasta 3 relacionados.
+// DX-212: tipo de diagnóstico CIE-10 de la evolución: uno principal y hasta 3 relacionados.
 enum ClinicalDiagnosisKind {
   PRINCIPAL
   RELACIONADO
@@ -852,9 +851,6 @@ model DentalCatalogItem {
   labelPt       String?
   color         String
   defaultPrice  Decimal?    @db.Decimal(12, 2)
-  // DX-212: código CUPS del procedimiento (6 caracteres alfanuméricos, CHECK
-  // dental_catalog_items_cups_code_format). Lo piden el RDA y el RIPS.
-  cupsCode      String?
   // DX-105: false = el procedimiento no recibe convenio ni descuento porcentual.
   allowDiscount Boolean     @default(true)
   active        Boolean     @default(true)
@@ -2640,7 +2636,7 @@ enum AuditResourceType {
   // DX-027: caja por turno (abrir, cerrar, reabrir, ajustar, ver) y los
   // ajustes de caja de la clínica.
   CASH_SESSION
-  // DX-212: cambios del catálogo (CUPS) y de las sedes (código REPS).
+  // DX-212: cambios del catálogo y de las sedes (código REPS).
   DENTAL_CATALOG_ITEM
   LOCATION
   // DX-222: plantillas de indicaciones postoperatorias (crear, editar,
