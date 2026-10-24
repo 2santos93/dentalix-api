@@ -172,6 +172,16 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
       });
     });
 
+    it('acepta céntimos que no son exactos en coma flotante (19,99 · 1,15 · 0,29)', () => {
+      for (const amount of [19.99, 1.15, 0.29, 4.35]) {
+        expect(resolveChargeAmount(amount, 25, fmt)).toEqual({
+          ok: true,
+          amount,
+        });
+      }
+      expect(resolveChargeAmount(1.155, 25, fmt).ok).toBe(false);
+    });
+
     it('nunca por encima del sugerido (400 con el tope)', () => {
       expect(resolveChargeAmount(50000.01, 50000, fmt)).toEqual({
         ok: false,

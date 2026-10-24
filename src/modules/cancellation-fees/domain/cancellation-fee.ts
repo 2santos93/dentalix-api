@@ -6,6 +6,7 @@ import type {
   PayerType,
 } from '@prisma/client';
 import { coverageStatus } from '../../patient-coverages/domain/coverage-rules';
+import { decimalPlaces } from '../../../shared/validation/bounded-decimal';
 
 /**
  * Cargo por inasistencia o cancelación tardía (DX-291, porción 2 de DX-279).
@@ -154,7 +155,7 @@ export function resolveChargeAmount(
   if (
     !Number.isFinite(requested) ||
     requested <= 0 ||
-    Math.round(requested * 100) !== requested * 100
+    decimalPlaces(requested) > 2
   ) {
     return { ok: false, message: CANCELLATION_FEE_MESSAGES.amount };
   }
