@@ -24,6 +24,7 @@ import type {
   PatientCoverageRepository,
   PrimaryCoverageRow,
   UpdateCoverageRepoPatch,
+  VerifyCoverageRepoInput,
 } from '../../domain/ports/patient-coverage-repository.port';
 
 export const PRIMARY_RACE_MESSAGE =
@@ -378,21 +379,25 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
 
   async verify(
     id: string,
-    input: { checkedMemberNumber: string; verifiedById: string },
+    input: VerifyCoverageRepoInput,
   ): Promise<PatientCoverage | null> {
     const tenantId = this.requireTenantId();
     const patientId = await this.patientOf(id);
     if (!patientId) return null;
     const row = await this.prisma.runWithTenant(async (tx) => {
-      // El mismo candado que la edición: verificar y cambiar el número no se
-      // cruzan, y lo que se marca es lo que el ADMIN tenía delante.
+      // El mismo candado que la edición: verificar y cambiar el pagador o el
+      // número no se cruzan, y lo que se marca es lo que el ADMIN tenía
+      // delante (el caso de uso ya miró que ese pagador es externo).
       await lockPatientCoverages(tx, tenantId, patientId);
       const live = await tx.patientCoverage.findFirst({
         where: { id, patientId, deletedAt: null },
-        select: { memberNumber: true },
+        select: { memberNumber: true, payerId: true },
       });
       if (!live) return null;
-      if (memberNumberChanged(live.memberNumber, input.checkedMemberNumber)) {
+      if (
+        live.payerId !== input.expectedPayerId ||
+        memberNumberChanged(live.memberNumber, input.checkedMemberNumber)
+      ) {
         throw new ConflictException(COVERAGE_VERIFY_STALE_MESSAGE);
       }
       return tx.patientCoverage.update({

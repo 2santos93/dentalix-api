@@ -82,7 +82,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
       docNumber: String(Math.floor(Math.random() * 1e9)),
     });
 
-  /** Sin `memberNumber`, el de la constante (SEC-049: lo exige la EPS). */
+  /** Sin `memberNumber`, el de la constante (SEC-049: lo exige el pagador externo). */
   const cover = (key: string, body: Record<string, unknown>) =>
     post(clinic, `/api/v1/patients/${patients[key]}/coverages`, {
       memberNumber: MEMBER_NUMBER,

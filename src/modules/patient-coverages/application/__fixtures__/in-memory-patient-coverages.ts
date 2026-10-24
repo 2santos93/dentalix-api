@@ -15,6 +15,7 @@ import type {
   PatientCoverageRepository,
   PrimaryCoverageRow,
   UpdateCoverageRepoPatch,
+  VerifyCoverageRepoInput,
 } from '../../domain/ports/patient-coverage-repository.port';
 import type { InMemoryPayerRepository } from '../../../payers/application/__fixtures__/in-memory-payers';
 
@@ -200,12 +201,15 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
 
   verify(
     id: string,
-    input: { checkedMemberNumber: string; verifiedById: string },
+    input: VerifyCoverageRepoInput,
   ): Promise<PatientCoverage | null> {
     this.calls.push('verify');
     const row = this.rows.find((r) => r.id === id && !r.deleted);
     if (!row) return Promise.resolve(null);
-    if (memberNumberChanged(row.memberNumber, input.checkedMemberNumber)) {
+    if (
+      row.payerId !== input.expectedPayerId ||
+      memberNumberChanged(row.memberNumber, input.checkedMemberNumber)
+    ) {
       return Promise.reject(
         new ConflictException(COVERAGE_VERIFY_STALE_MESSAGE),
       );

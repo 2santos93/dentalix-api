@@ -1,10 +1,13 @@
 /**
  * Nº de afiliado o póliza de una cobertura (SEC-049). Con un pagador externo
- * (EPS, prepagada, mutua o aseguradora, empresa) es obligatorio en las
- * coberturas nuevas y tiene un formato básico por tipo: sin él, cualquiera
- * creaba la cobertura con solo el pagador y se asignaba el convenio. Las
- * coberturas que ya existían sin número (migradas o anteriores) se leen igual
- * y no se tocan mientras no cambie su pagador o su número.
+ * es obligatorio en las coberturas nuevas: sin él, cualquiera creaba la
+ * cobertura con solo el pagador y se asignaba el convenio. La regla de formato
+ * es UNA y la misma para todo pagador externo, sin supuestos de país ni de
+ * tipo de pagador (DX-311): tras normalizar, de 4 a 40 caracteres (letras,
+ * dígitos, espacio, `-`, `.` o `/`), con al menos un dígito y que no sea un
+ * mismo carácter repetido. Las coberturas que ya existían sin número
+ * (migradas o anteriores) se leen igual y no se tocan mientras no cambie su
+ * pagador o su número.
  *
  * Es un dato personal: ningún mensaje lo repite y la auditoría solo guarda
  * sus 4 últimos caracteres (`memberNumberLast4`).
@@ -12,40 +15,24 @@
 import type { PayerType } from '@prisma/client';
 import { isExternalPayer } from '../../payers/domain/payer-rules';
 
+export const MEMBER_NUMBER_MIN = 4;
+export const MEMBER_NUMBER_RULE_MAX = 40;
+
+export const MEMBER_NUMBER_REQUIRED_MESSAGE =
+  'El nº de afiliado o póliza es obligatorio con un pagador externo.';
+export const MEMBER_NUMBER_FORMAT_MESSAGE = `El nº de afiliado o póliza debe tener entre ${MEMBER_NUMBER_MIN} y ${MEMBER_NUMBER_RULE_MAX} caracteres: letras, números, espacios, guiones, puntos o barras.`;
+export const MEMBER_NUMBER_DIGIT_MESSAGE =
+  'El nº de afiliado o póliza debe tener al menos un número.';
 export const MEMBER_NUMBER_REPEATED_MESSAGE =
-  'El nº de afiliado no puede ser un mismo carácter repetido.';
+  'El nº de afiliado o póliza no puede ser un mismo carácter repetido.';
 
-const EPS_FORMAT_MESSAGE =
-  'En una EPS, el nº de afiliado es el documento del afiliado: de 5 a 15 dígitos, sin letras.';
-const POLICY_FORMAT_MESSAGE =
-  'El nº de póliza o de contrato debe tener de 5 a 30 caracteres (letras, números, espacios, puntos, guiones o barras), con al menos 4 dígitos.';
-const EMPLOYEE_FORMAT_MESSAGE =
-  'El nº de empleado o de afiliado debe tener de 5 a 30 caracteres (letras, números, espacios, puntos, guiones o barras), con al menos un dígito.';
-
-const REQUIRED_MESSAGES: Record<Exclude<PayerType, 'OTRO'>, string> = {
-  EPS_CO:
-    'En una EPS, el nº de afiliado es obligatorio: es el documento del afiliado.',
-  PREPAGADA_CO:
-    'En una prepagada, el nº de contrato o de afiliado es obligatorio.',
-  MUTUA_ES:
-    'En una mutua o aseguradora, el nº de póliza o de tarjeta es obligatorio.',
-  EMPRESA:
-    'En un convenio de empresa, el nº de empleado o de afiliado es obligatorio.',
-};
-
-/** Alfanumérico en los extremos; en medio, también espacio . - / */
-const SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9 ./-]*[A-Za-z0-9])?$/;
-const EPS_SHAPE = /^\d(?:[\d .-]*\d)?$/;
+/** Letras de cualquier alfabeto, dígitos 0-9, espacio y `- . /`. */
+const ALLOWED = /^[\p{L}0-9 ./-]+$/u;
+const NOT_ALPHANUMERIC = /[^\p{L}0-9]/gu;
 
 /** ¿El tipo de pagador exige nº de afiliado? Los externos; OTRO no. */
 export function requiresMemberNumber(type: PayerType): boolean {
   return isExternalPayer(type);
-}
-
-export function memberNumberRequiredMessage(
-  type: Exclude<PayerType, 'OTRO'>,
-): string {
-  return REQUIRED_MESSAGES[type];
 }
 
 /** Recorta los extremos y colapsa los espacios internos; vacío = `null`. */
@@ -55,41 +42,30 @@ export function normalizeMemberNumber(
   return value?.trim().replace(/\s+/g, ' ') || null;
 }
 
-const alphanumerics = (value: string): string =>
-  value.replace(/[^A-Za-z0-9]/g, '');
-
-const digitCount = (value: string): number => value.replace(/\D/g, '').length;
+const alphanumerics = (value: string): string[] => [
+  ...value.replace(NOT_ALPHANUMERIC, ''),
+];
 
 /**
- * Mensaje en español si el número no vale para ese tipo de pagador, o `null`.
- * Recibe el número ya normalizado. Nunca repite el valor.
+ * Mensaje en español si el número no vale, o `null`. Recibe el número ya
+ * normalizado. Nunca repite el valor.
  */
 export function memberNumberError(
   type: PayerType,
   value: string | null,
 ): string | null {
-  if (type === 'OTRO') return null;
-  if (value === null) return memberNumberRequiredMessage(type);
-  const chars = alphanumerics(value);
-  if (type === 'EPS_CO') {
-    const digits = digitCount(value);
-    if (!EPS_SHAPE.test(value) || digits < 5 || digits > 15) {
-      return EPS_FORMAT_MESSAGE;
-    }
-  } else {
-    const minDigits = type === 'EMPRESA' ? 1 : 4;
-    if (
-      !SHAPE.test(value) ||
-      value.length < 5 ||
-      value.length > 30 ||
-      digitCount(value) < minDigits
-    ) {
-      return type === 'EMPRESA'
-        ? EMPLOYEE_FORMAT_MESSAGE
-        : POLICY_FORMAT_MESSAGE;
-    }
+  if (!requiresMemberNumber(type)) return null;
+  if (value === null) return MEMBER_NUMBER_REQUIRED_MESSAGE;
+  const length = [...value].length;
+  if (
+    length < MEMBER_NUMBER_MIN ||
+    length > MEMBER_NUMBER_RULE_MAX ||
+    !ALLOWED.test(value)
+  ) {
+    return MEMBER_NUMBER_FORMAT_MESSAGE;
   }
-  if (new Set(chars.toUpperCase()).size === 1) {
+  if (!/[0-9]/.test(value)) return MEMBER_NUMBER_DIGIT_MESSAGE;
+  if (new Set(alphanumerics(value.toUpperCase())).size === 1) {
     return MEMBER_NUMBER_REPEATED_MESSAGE;
   }
   return null;
@@ -102,7 +78,7 @@ export function memberNumberError(
 export function memberNumberLast4(value: string | null): string | null {
   if (value === null) return null;
   const chars = alphanumerics(value);
-  return chars.length > 4 ? chars.slice(-4) : null;
+  return chars.length > 4 ? chars.slice(-4).join('') : null;
 }
 
 /** ¿Cambia el número? Compara lo normalizado (otros espacios no cuentan). */

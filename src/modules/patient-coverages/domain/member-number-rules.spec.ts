@@ -1,21 +1,22 @@
 import {
+  MEMBER_NUMBER_DIGIT_MESSAGE,
+  MEMBER_NUMBER_FORMAT_MESSAGE,
   MEMBER_NUMBER_REPEATED_MESSAGE,
+  MEMBER_NUMBER_REQUIRED_MESSAGE,
   memberNumberChanged,
   memberNumberError,
   memberNumberLast4,
-  memberNumberRequiredMessage,
   normalizeMemberNumber,
   requiresMemberNumber,
 } from './member-number-rules';
 
-describe('nº de afiliado o póliza (SEC-049)', () => {
+const EXTERNAL = ['EPS_CO', 'PREPAGADA_CO', 'MUTUA_ES', 'EMPRESA'] as const;
+
+describe('nº de afiliado o póliza (SEC-049, regla única DX-311)', () => {
   describe('requiresMemberNumber', () => {
-    it.each(['EPS_CO', 'PREPAGADA_CO', 'MUTUA_ES', 'EMPRESA'] as const)(
-      '%s (pagador externo) lo exige',
-      (type) => {
-        expect(requiresMemberNumber(type)).toBe(true);
-      },
-    );
+    it.each(EXTERNAL)('%s (pagador externo) lo exige', (type) => {
+      expect(requiresMemberNumber(type)).toBe(true);
+    });
 
     it('OTRO (interno: cortesía, empleados) no', () => {
       expect(requiresMemberNumber('OTRO')).toBe(false);
@@ -32,22 +33,35 @@ describe('nº de afiliado o póliza (SEC-049)', () => {
   });
 
   describe('memberNumberError', () => {
-    it('sin número, con un pagador externo: el mensaje dice qué tipo de pagador', () => {
-      expect(memberNumberError('EPS_CO', null)).toBe(
-        memberNumberRequiredMessage('EPS_CO'),
+    it('mensajes neutros, sin tipo de pagador ni país', () => {
+      expect(MEMBER_NUMBER_REQUIRED_MESSAGE).toBe(
+        'El nº de afiliado o póliza es obligatorio con un pagador externo.',
       );
-      expect(memberNumberRequiredMessage('EPS_CO')).toBe(
-        'En una EPS, el nº de afiliado es obligatorio: es el documento del afiliado.',
+      expect(MEMBER_NUMBER_FORMAT_MESSAGE).toBe(
+        'El nº de afiliado o póliza debe tener entre 4 y 40 caracteres: letras, números, espacios, guiones, puntos o barras.',
       );
-      expect(memberNumberRequiredMessage('PREPAGADA_CO')).toBe(
-        'En una prepagada, el nº de contrato o de afiliado es obligatorio.',
+      expect(MEMBER_NUMBER_DIGIT_MESSAGE).toBe(
+        'El nº de afiliado o póliza debe tener al menos un número.',
       );
-      expect(memberNumberRequiredMessage('MUTUA_ES')).toBe(
-        'En una mutua o aseguradora, el nº de póliza o de tarjeta es obligatorio.',
+      expect(MEMBER_NUMBER_REPEATED_MESSAGE).toBe(
+        'El nº de afiliado o póliza no puede ser un mismo carácter repetido.',
       );
-      expect(memberNumberRequiredMessage('EMPRESA')).toBe(
-        'En un convenio de empresa, el nº de empleado o de afiliado es obligatorio.',
-      );
+      for (const message of [
+        MEMBER_NUMBER_REQUIRED_MESSAGE,
+        MEMBER_NUMBER_FORMAT_MESSAGE,
+        MEMBER_NUMBER_DIGIT_MESSAGE,
+        MEMBER_NUMBER_REPEATED_MESSAGE,
+      ]) {
+        expect(message).not.toMatch(/EPS|prepagada|mutua|documento|c[ée]dula/i);
+      }
+    });
+
+    it('sin número, con cualquier pagador externo: obligatorio', () => {
+      for (const type of EXTERNAL) {
+        expect(memberNumberError(type, null)).toBe(
+          MEMBER_NUMBER_REQUIRED_MESSAGE,
+        );
+      }
     });
 
     it('OTRO admite no tenerlo y cualquier texto', () => {
@@ -55,53 +69,46 @@ describe('nº de afiliado o póliza (SEC-049)', () => {
       expect(memberNumberError('OTRO', 'x')).toBeNull();
     });
 
-    it('EPS: de 5 a 15 dígitos, con puntos, espacios o guiones de separador', () => {
-      expect(memberNumberError('EPS_CO', '1020304050')).toBeNull();
-      expect(memberNumberError('EPS_CO', '1.020.304.050')).toBeNull();
-      expect(memberNumberError('EPS_CO', '52 123')).toBeNull();
-      const message =
-        'En una EPS, el nº de afiliado es el documento del afiliado: de 5 a 15 dígitos, sin letras.';
-      expect(memberNumberError('EPS_CO', '1234')).toBe(message);
-      expect(memberNumberError('EPS_CO', '1234567890123456')).toBe(message);
-      expect(memberNumberError('EPS_CO', 'AB123456')).toBe(message);
-      expect(memberNumberError('EPS_CO', '-123456')).toBe(message);
-    });
-
-    it('prepagada y mutua: de 5 a 30 caracteres con al menos 4 dígitos', () => {
-      for (const type of ['PREPAGADA_CO', 'MUTUA_ES'] as const) {
-        expect(memberNumberError(type, '10-123456-01')).toBeNull();
-        expect(memberNumberError(type, 'POL/2026/0042')).toBeNull();
-        const message = memberNumberError(type, 'ABC12');
-        expect(message).toBe(
-          'El nº de póliza o de contrato debe tener de 5 a 30 caracteres (letras, números, espacios, puntos, guiones o barras), con al menos 4 dígitos.',
-        );
-        expect(memberNumberError(type, 'A1')).toBe(message);
-        expect(memberNumberError(type, `1234${'A'.repeat(27)}`)).toBe(message);
-        expect(memberNumberError(type, '1234#5')).toBe(message);
+    it('la misma regla para todo pagador externo', () => {
+      const cases: [string, string | null][] = [
+        ['1020304050', null],
+        ['A123', null],
+        ['10-123456-01', null],
+        ['POL/2026/0042', null],
+        ['1.020.304.050', null],
+        ['EMP 001', null],
+        ['Ñandú-77', null],
+        [`1${'A'.repeat(39)}`, null],
+        ['A12', MEMBER_NUMBER_FORMAT_MESSAGE],
+        [`1${'A'.repeat(40)}`, MEMBER_NUMBER_FORMAT_MESSAGE],
+        ['1234#5', MEMBER_NUMBER_FORMAT_MESSAGE],
+        ['12_345', MEMBER_NUMBER_FORMAT_MESSAGE],
+        ['EMPLEADO', MEMBER_NUMBER_DIGIT_MESSAGE],
+        ['POL-ABC', MEMBER_NUMBER_DIGIT_MESSAGE],
+        ['0000', MEMBER_NUMBER_REPEATED_MESSAGE],
+        ['1111-1111', MEMBER_NUMBER_REPEATED_MESSAGE],
+        ['aAaA1', null],
+      ];
+      for (const type of EXTERNAL) {
+        for (const [value, expected] of cases) {
+          expect([value, memberNumberError(type, value)]).toEqual([
+            value,
+            expected,
+          ]);
+        }
       }
     });
 
-    it('empresa: de 5 a 30 caracteres con al menos un dígito', () => {
-      expect(memberNumberError('EMPRESA', 'EMP-001')).toBeNull();
-      const message =
-        'El nº de empleado o de afiliado debe tener de 5 a 30 caracteres (letras, números, espacios, puntos, guiones o barras), con al menos un dígito.';
-      expect(memberNumberError('EMPRESA', 'EMPLEADO')).toBe(message);
-      expect(memberNumberError('EMPRESA', 'E-1')).toBe(message);
-    });
-
-    it('un mismo carácter repetido no es un número', () => {
-      expect(memberNumberError('EPS_CO', '00000')).toBe(
-        MEMBER_NUMBER_REPEATED_MESSAGE,
-      );
-      expect(memberNumberError('MUTUA_ES', '1111-1111')).toBe(
-        MEMBER_NUMBER_REPEATED_MESSAGE,
-      );
-    });
-
     it('ningún mensaje repite el número recibido', () => {
-      const value = '99887766554433221100';
-      for (const type of ['EPS_CO', 'PREPAGADA_CO', 'EMPRESA'] as const) {
-        expect(memberNumberError(type, value) ?? '').not.toContain('9988');
+      for (const value of [
+        '9988776655443322110099887766554433221100X',
+        '9988#',
+        'ABCDEFGH',
+        '99999999',
+      ]) {
+        const message = memberNumberError('EMPRESA', value);
+        expect(message).not.toBeNull();
+        expect(message).not.toContain(value.slice(0, 4));
       }
     });
   });
@@ -110,12 +117,13 @@ describe('nº de afiliado o póliza (SEC-049)', () => {
     it('solo los 4 últimos caracteres alfanuméricos, sin separadores', () => {
       expect(memberNumberLast4('1.020.304.050')).toBe('4050');
       expect(memberNumberLast4('POL/2026/00-42')).toBe('0042');
+      expect(memberNumberLast4('POL-Ñ123')).toBe('Ñ123');
       expect(memberNumberLast4(null)).toBeNull();
     });
 
     it('un número de 4 o menos no se revela entero', () => {
-      expect(memberNumberLast4('1234')).toBeNull();
-      expect(memberNumberLast4('A1')).toBeNull();
+      expect(memberNumberLast4('A123')).toBeNull();
+      expect(memberNumberLast4('12-34')).toBeNull();
     });
   });
 

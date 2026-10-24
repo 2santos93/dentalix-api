@@ -265,7 +265,8 @@ export class UpdatePatientCoverageUseCase {
  * SEC-049: un ADMIN verifica la cobertura de un pagador externo (comprobó el
  * nº de afiliado con el carné o el pagador). Con eso, cualquier rol puede
  * asignar el convenio de ese pagador con ella. `checkedMemberNumber` es el nº
- * que el ADMIN tenía delante: si ya no es el guardado, 409 y nada cambia.
+ * que el ADMIN tenía delante: si ya no es el guardado, o cambió el pagador
+ * entretanto, 409 y nada cambia.
  * Volver a verificar actualiza quién y cuándo.
  */
 @Injectable()
@@ -291,6 +292,7 @@ export class VerifyPatientCoverageUseCase {
     }
     const saved = await this.repo.verify(coverageId, {
       checkedMemberNumber,
+      expectedPayerId: current.payer.id,
       verifiedById,
     });
     if (!saved) throw new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE);

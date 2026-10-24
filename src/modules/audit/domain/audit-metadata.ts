@@ -564,12 +564,8 @@ function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
   return { rulesVersion, blocking, info, overridden };
 }
 
-/**
- * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
- * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
- * llegara por error a cualquier clave nunca acaba en la tabla.
- */
-const LAST4 = /^[A-Za-z0-9]{1,4}$/;
+/** Los 4 últimos del nº de afiliado: letras de cualquier alfabeto o dígitos. */
+const LAST4 = /^[\p{L}0-9]{1,4}$/u;
 
 /** Tipo de pagador con formato de código y verificación; el resto, fuera. */
 function coverage(value: unknown): AuditCoverage | null {
@@ -592,6 +588,11 @@ function coverage(value: unknown): AuditCoverage | null {
   };
 }
 
+/**
+ * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
+ * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
+ * llegara por error a cualquier clave nunca acaba en la tabla.
+ */
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};

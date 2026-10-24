@@ -2116,18 +2116,20 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   aceptado (cualquier rol creaba la cobertura con solo `{ payerId }` y
   asignaba el convenio en la llamada siguiente, BE-043).
   - Con un pagador externo, el **nº de afiliado o póliza es obligatorio** al
-    crear la cobertura, con un formato básico por tipo (400 en español): EPS,
-    de 5 a 15 dígitos (el documento del afiliado); prepagada y mutua, de 5 a
-    30 caracteres con al menos 4 dígitos; empresa, de 5 a 30 con al menos uno.
-    Nunca un mismo carácter repetido. Con OTRO sigue siendo opcional. Las
+    crear la cobertura, con UNA regla igual para todo pagador externo, sin
+    supuestos de país ni de tipo (DX-311; 400 en español que nunca repite el
+    número): tras normalizar (extremos recortados, espacios colapsados), de 4
+    a 40 caracteres, solo letras, dígitos, espacio y `-./`, al menos un dígito
+    y no un mismo carácter repetido. Con OTRO sigue siendo opcional. Las
     coberturas que ya existían sin nº (migradas o anteriores) se leen y editan
     igual; solo se pide al cambiar su pagador o su número.
   - **Verificar** (`POST /patients/:patientId/coverages/:coverageId/verification`,
     solo ADMIN) guarda quién y cuándo (`verifiedById`, `verifiedAt`,
     `verifiedByName`). Recibe `checkedMemberNumber`, el nº que el ADMIN tenía
-    delante: si ya no es el guardado, 409. Cambiar el pagador o el nº de
-    afiliado **borra la verificación** y deja la cobertura declarada por
-    quien la edita (`declaredById`; en las anteriores, `createdById`).
+    delante: si ya no es el guardado, o el pagador cambió entretanto, 409.
+    Cambiar el pagador o el nº de afiliado **borra la verificación** y deja
+    la cobertura declarada por quien la edita (`declaredById`; en las
+    anteriores, `createdById`).
   - Al asignar, un rol que no es ADMIN no puede usar una cobertura cuyo
     pagador o nº declaró él mismo si no está verificada (403 en español que
     dice qué falta). Sí puede si la verificó un ADMIN, si la registró otro
@@ -2137,9 +2139,9 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   - Auditoría: alta, cambio y verificación son `COVERAGE_CREATED`,
     `COVERAGE_CHANGED` y `COVERAGE_VERIFIED` (antes del alta era
     `COVERAGE_ADDED`), con el rol en `actorRole` y en `metadata.coverage` el
-    tipo de pagador, los **4 últimos** caracteres del nº y si quedó
-    verificada; nunca el número entero. Los logs redactan cualquier clave
-    `memberNumber`.
+    tipo de pagador, los **4 últimos** caracteres del nº (ninguno si el nº
+    tiene 4 o menos: serían el número entero) y si quedó verificada; nunca el
+    número entero. Los logs redactan cualquier clave `memberNumber`.
   - Migración `20261024150000_sec049_coverage_verification`: tres columnas
     NULL sin relleno y un CHECK `NOT VALID` + `VALIDATE` (verificada = quién
     y cuándo, o ninguno). Matriz rol × verificada × creada por sí mismo en

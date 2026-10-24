@@ -156,7 +156,7 @@ export class CreatePatientCoverageDto {
   @ApiPropertyOptional({
     maxLength: MEMBER_NUMBER_MAX,
     description:
-      'SEC-049: obligatorio con un pagador externo (EPS, prepagada, mutua, empresa), con formato por tipo; opcional con OTRO.',
+      'SEC-049: obligatorio con un pagador externo (todo tipo salvo OTRO), con la misma regla para todos: tras normalizar, de 4 a 40 caracteres (letras, dígitos, espacio, `-`, `.` o `/`), al menos un dígito y no un mismo carácter repetido; opcional con OTRO.',
   })
   @IsOptional()
   @IsString({ message: MEMBER_MESSAGE })
@@ -269,7 +269,7 @@ export class VerifyPatientCoverageDto {
   @ApiProperty({
     maxLength: MEMBER_NUMBER_MAX,
     description:
-      'El nº de afiliado que el administrador comprobó. Si ya no es el guardado (otra petición lo cambió), 409.',
+      'El nº de afiliado que el administrador comprobó. Si ya no es el guardado, o cambió el pagador (otra petición los cambió), 409.',
   })
   @IsString({ message: CHECKED_MEMBER_MESSAGE })
   @MaxLength(MEMBER_NUMBER_MAX, { message: CHECKED_MEMBER_MESSAGE })

@@ -75,4 +75,4 @@ export const COVERAGE_VERIFY_NO_NUMBER_MESSAGE =
 export const COVERAGE_VERIFY_INTERNAL_MESSAGE =
   'Esta cobertura es de un pagador interno (cortesía, empleados): no hace falta verificarla.';
 export const COVERAGE_VERIFY_STALE_MESSAGE =
-  'El nº de afiliado de esta cobertura cambió mientras lo revisabas: vuelve a abrirla y compruébalo.';
+  'El pagador o el nº de afiliado de esta cobertura cambió mientras lo revisabas: vuelve a abrirla y compruébalo.';

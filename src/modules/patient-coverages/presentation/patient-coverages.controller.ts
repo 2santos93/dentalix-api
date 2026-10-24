@@ -184,7 +184,7 @@ export class PatientCoveragesController {
   @ApiNotFoundResponse({ description: 'Paciente o cobertura no encontrado' })
   @ApiConflictResponse({
     description:
-      'El nº de afiliado cambió mientras el administrador lo revisaba',
+      'El pagador o el nº de afiliado cambió mientras el administrador lo revisaba',
   })
   verify(
     @Param('patientId', uuidPipe('del paciente')) patientId: string,

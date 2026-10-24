@@ -16,7 +16,10 @@ import {
   PATIENT_NOT_FOUND_MESSAGE,
   PAYER_INACTIVE_MESSAGE,
 } from '../../domain/coverage-rules';
-import { memberNumberRequiredMessage } from '../../domain/member-number-rules';
+import {
+  MEMBER_NUMBER_DIGIT_MESSAGE,
+  MEMBER_NUMBER_REQUIRED_MESSAGE,
+} from '../../domain/member-number-rules';
 import { InMemoryPatientCoverageRepository } from '../__fixtures__/in-memory-patient-coverages';
 import {
   COVERAGE_PAYER_NOT_FOUND_MESSAGE,
@@ -357,10 +360,10 @@ describe('casos de uso de coberturas (DX-153)', () => {
   });
 
   describe('nº de afiliado y verificación (SEC-049)', () => {
-    let eps: string;
+    let external: string;
     let verify: VerifyPatientCoverageUseCase;
     beforeEach(() => {
-      eps = payers.seed({ name: 'Sura EPS', type: 'EPS_CO' }).id;
+      external = payers.seed({ name: 'Aseguradora Norte', type: 'EMPRESA' }).id;
       verify = new VerifyPatientCoverageUseCase(
         repo,
         () => new Date('2026-10-20T15:00:00.000Z'),
@@ -370,20 +373,28 @@ describe('casos de uso de coberturas (DX-153)', () => {
 
     it('alta con un pagador externo sin nº: 400 en español y nada escrito', async () => {
       await expect(
-        create.execute(PATIENT, { payerId: eps, memberNumber: '  ' }, 'u1'),
+        create.execute(
+          PATIENT,
+          { payerId: external, memberNumber: '  ' },
+          'u1',
+        ),
       ).rejects.toThrow(
-        new BadRequestException(memberNumberRequiredMessage('EPS_CO')),
+        new BadRequestException(MEMBER_NUMBER_REQUIRED_MESSAGE),
       );
       await expect(
-        create.execute(PATIENT, { payerId: eps, memberNumber: 'AB12' }, 'u1'),
-      ).rejects.toThrow(BadRequestException);
+        create.execute(
+          PATIENT,
+          { payerId: external, memberNumber: 'ABCD' },
+          'u1',
+        ),
+      ).rejects.toThrow(new BadRequestException(MEMBER_NUMBER_DIGIT_MESSAGE));
       expect(repo.rows).toHaveLength(0);
     });
 
     it('alta con nº válido: normalizado, declarada por quien la crea y sin verificar', async () => {
       const out = await create.execute(
         PATIENT,
-        { payerId: eps, memberNumber: ' 1020  304050 ' },
+        { payerId: external, memberNumber: ' 1020  304050 ' },
         'u1',
       );
       expect(out).toMatchObject({
@@ -395,7 +406,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
     });
 
     it('una cobertura anterior sin nº se edita (notas, fechas) sin pedirlo', async () => {
-      const old = repo.seed({ patientId: PATIENT, payerId: eps });
+      const old = repo.seed({ patientId: PATIENT, payerId: external });
       await expect(
         update.execute(PATIENT, old.id, { notes: 'Llamar antes' }, 'u2'),
       ).resolves.toMatchObject({ notes: 'Llamar antes', memberNumber: null });
@@ -404,26 +415,26 @@ describe('casos de uso de coberturas (DX-153)', () => {
     it('cambiar el pagador a uno externo o vaciar el nº lo exige', async () => {
       const c = await create.execute(PATIENT, { payerId: sanitas }, 'u1');
       await expect(
-        update.execute(PATIENT, c.id, { payerId: eps }, 'u1'),
+        update.execute(PATIENT, c.id, { payerId: external }, 'u1'),
       ).rejects.toThrow(
-        new BadRequestException(memberNumberRequiredMessage('EPS_CO')),
+        new BadRequestException(MEMBER_NUMBER_REQUIRED_MESSAGE),
       );
       const e = await create.execute(
         PATIENT,
-        { payerId: eps, memberNumber: '1020304050' },
+        { payerId: external, memberNumber: '1020304050' },
         'u1',
       );
       await expect(
         update.execute(PATIENT, e.id, { memberNumber: null }, 'u1'),
       ).rejects.toThrow(
-        new BadRequestException(memberNumberRequiredMessage('EPS_CO')),
+        new BadRequestException(MEMBER_NUMBER_REQUIRED_MESSAGE),
       );
     });
 
     it('verificar: marca quién y cuándo, con el nombre de quien verifica', async () => {
       const c = await create.execute(
         PATIENT,
-        { payerId: eps, memberNumber: '1020304050' },
+        { payerId: external, memberNumber: '1020304050' },
         'u1',
       );
       const out = await verify.execute(PATIENT, c.id, '1020304050', 'admin-1');
@@ -442,7 +453,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
       await expect(
         verify.execute(PATIENT, 'no-existe', '1', 'admin-1'),
       ).rejects.toThrow(new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE));
-      const legacy = repo.seed({ patientId: PATIENT, payerId: eps });
+      const legacy = repo.seed({ patientId: PATIENT, payerId: external });
       await expect(
         verify.execute(PATIENT, legacy.id, '', 'admin-1'),
       ).rejects.toThrow(
@@ -460,7 +471,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
       );
       const c = await create.execute(
         PATIENT,
-        { payerId: eps, memberNumber: '1020304050' },
+        { payerId: external, memberNumber: '1020304050' },
         'u1',
       );
       await expect(
@@ -469,11 +480,35 @@ describe('casos de uso de coberturas (DX-153)', () => {
       expect(repo.rows.find((r) => r.id === c.id)?.verifiedAt).toBeNull();
     });
 
-    it('editar el nº (o el pagador) borra la verificación y el editor pasa a declararlo', async () => {
-      const otherEps = payers.seed({ name: 'Compensar', type: 'EPS_CO' }).id;
+    it('verificar: 409 si el pagador cambió entre la lectura y el candado', async () => {
       const c = await create.execute(
         PATIENT,
-        { payerId: eps, memberNumber: '1020304050' },
+        { payerId: external, memberNumber: '1020304050' },
+        'u1',
+      );
+      const moved = payers.seed({ name: 'Cortesía', type: 'OTRO' }).id;
+      const read = repo.findById.bind(repo);
+      // Otra petición cambia el pagador justo después de que el caso de uso lea.
+      jest.spyOn(repo, 'findById').mockImplementationOnce(async (p, id) => {
+        const seen = await read(p, id);
+        const row = repo.rows.find((r) => r.id === id);
+        if (row) row.payerId = moved;
+        return seen;
+      });
+      await expect(
+        verify.execute(PATIENT, c.id, '1020304050', 'admin-1'),
+      ).rejects.toThrow(new ConflictException(COVERAGE_VERIFY_STALE_MESSAGE));
+      expect(repo.rows.find((r) => r.id === c.id)?.verifiedAt).toBeNull();
+    });
+
+    it('editar el nº (o el pagador) borra la verificación y el editor pasa a declararlo', async () => {
+      const otherExternal = payers.seed({
+        name: 'Aseguradora Sur',
+        type: 'EMPRESA',
+      }).id;
+      const c = await create.execute(
+        PATIENT,
+        { payerId: external, memberNumber: '1020304050' },
         'u1',
       );
       await verify.execute(PATIENT, c.id, '1020304050', 'admin-1');
@@ -507,7 +542,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
       const moved = await update.execute(
         PATIENT,
         c.id,
-        { payerId: otherEps },
+        { payerId: otherExternal },
         'u3',
       );
       expect(moved).toMatchObject({ verifiedAt: null, declaredById: 'u3' });

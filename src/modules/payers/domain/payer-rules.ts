@@ -56,7 +56,7 @@ export function validatePayerTypeCountry(
 /**
  * SEC-047: ¿es un pagador externo real? `OTRO` («Otro / sin clasificar») es el
  * de los convenios internos —cortesía, empleados, socios—, que nadie de fuera
- * respalda; el resto (EPS, prepagada, mutua, empresa) sí. SEC-049: una
+ * respalda; el resto de tipos sí. SEC-049: una
  * cobertura de un pagador externo lleva nº de afiliado obligatorio.
  */
 export function isExternalPayer(type: PayerType): boolean {

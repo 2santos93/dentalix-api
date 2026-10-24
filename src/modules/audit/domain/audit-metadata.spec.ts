@@ -543,7 +543,7 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     expect(
       sanitizeAuditMetadata({
         coverage: {
-          payerType: 'EPS_CO',
+          payerType: 'EMPRESA',
           memberNumberLast4: '4050',
           verified: true,
           memberNumber: '1020304050',
@@ -551,7 +551,7 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EPS_CO',
+        payerType: 'EMPRESA',
         memberNumberLast4: '4050',
         verified: true,
       },
@@ -560,20 +560,40 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     expect(
       sanitizeAuditMetadata({
         coverage: {
-          payerType: 'EPS_CO',
+          payerType: 'EMPRESA',
           memberNumberLast4: '1020304050',
           verified: false,
         },
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EPS_CO',
+        payerType: 'EMPRESA',
         memberNumberLast4: null,
         verified: false,
       },
     });
     expect(
-      sanitizeAuditMetadata({ coverage: { payerType: 'eps', verified: true } }),
+      sanitizeAuditMetadata({
+        coverage: { payerType: 'empresa', verified: true },
+      }),
     ).toEqual({});
+  });
+
+  it('cobertura (SEC-049): los 4 últimos admiten letras de cualquier alfabeto (DX-311)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: 'Ñ123',
+          verified: false,
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: 'Ñ123',
+        verified: false,
+      },
+    });
   });
 });

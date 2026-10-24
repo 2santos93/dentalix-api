@@ -34,14 +34,16 @@ type Role = (typeof ROLES)[number];
 
 const SELF_DECLARED =
   'Registraste tú el pagador o el nº de afiliado de esta cobertura y aún no la ha verificado un administrador: pide a un administrador que la verifique (o que asigne él el convenio).';
-const EPS_REQUIRED =
-  'En una EPS, el nº de afiliado es obligatorio: es el documento del afiliado.';
-const EPS_FORMAT =
-  'En una EPS, el nº de afiliado es el documento del afiliado: de 5 a 15 dígitos, sin letras.';
+// Una regla única para todo pagador externo, sin supuestos de país (DX-311).
+const REQUIRED =
+  'El nº de afiliado o póliza es obligatorio con un pagador externo.';
+const FORMAT =
+  'El nº de afiliado o póliza debe tener entre 4 y 40 caracteres: letras, números, espacios, guiones, puntos o barras.';
+const NO_DIGIT = 'El nº de afiliado o póliza debe tener al menos un número.';
 const VERIFY_ADMIN_ONLY =
   'Solo un administrador puede verificar una cobertura.';
 const VERIFY_STALE =
-  'El nº de afiliado de esta cobertura cambió mientras lo revisabas: vuelve a abrirla y compruébalo.';
+  'El pagador o el nº de afiliado de esta cobertura cambió mientras lo revisabas: vuelve a abrirla y compruébalo.';
 const COVERAGE_NOT_FOUND = 'Cobertura no encontrada.';
 
 const NUMBER = '1020304050';
@@ -52,7 +54,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
   let other: Clinic;
   const tokens = {} as Record<Role, string>;
   const userIds = {} as Record<Role, string>;
-  let sura: string;
+  let payer: string;
   let agreement: string;
   let foreignPatient: string;
   let foreignCoverage: string;
@@ -94,7 +96,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
     );
 
   const createCoverage = (patientId: string, token: string) =>
-    post(coverages(patientId), { payerId: sura, memberNumber: NUMBER }, token);
+    post(coverages(patientId), { payerId: payer, memberNumber: NUMBER }, token);
 
   const verify = (
     patientId: string,
@@ -135,16 +137,16 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       tokens[role] = await loginAs(app, clinic.host, member.email);
       userIds[role] = member.userId;
     }
-    sura = await post(
+    payer = await post(
       '/api/v1/payers',
-      { name: 'Sura EPS', type: 'EPS_CO', country: 'CO' },
+      { name: 'Aseguradora Norte', type: 'EMPRESA' },
       tokens.ADMIN,
     );
     agreement = await post(
       '/api/v1/agreements',
       {
-        name: 'Sura EPS 100 %',
-        payerId: sura,
+        name: 'Aseguradora Norte 100 %',
+        payerId: payer,
         kind: 'PERCENT_DISCOUNT',
         percent: 100,
       },
@@ -154,7 +156,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
     // La otra clínica: su pagador con el mismo nombre y una cobertura VERIFICADA.
     const foreignPayer = await post(
       '/api/v1/payers',
-      { name: 'Sura EPS', type: 'EPS_CO', country: 'CO' },
+      { name: 'Aseguradora Norte', type: 'EMPRESA' },
       other.adminToken,
       other.host,
     );
@@ -182,21 +184,25 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
 
   describe('nº de afiliado obligatorio con un pagador externo', () => {
     it.each(ROLES)(
-      '%s: sin nº o con un formato que no es de EPS, 400 en español y nada escrito',
+      '%s: sin nº, con un formato no válido o sin ningún número, 400 en español y nada escrito',
       async (role) => {
         const patient = await createPatient(`Sin número ${role}`);
         const missing = await as(api().post(coverages(patient)), tokens[role])
-          .send({ payerId: sura })
+          .send({ payerId: payer })
           .expect(400);
-        expect(message(missing)).toBe(EPS_REQUIRED);
+        expect(message(missing)).toBe(REQUIRED);
         const blank = await as(api().post(coverages(patient)), tokens[role])
-          .send({ payerId: sura, memberNumber: '   ' })
+          .send({ payerId: payer, memberNumber: '   ' })
           .expect(400);
-        expect(message(blank)).toBe(EPS_REQUIRED);
+        expect(message(blank)).toBe(REQUIRED);
         const bad = await as(api().post(coverages(patient)), tokens[role])
-          .send({ payerId: sura, memberNumber: 'AFI-12' })
+          .send({ payerId: payer, memberNumber: 'AF#12' })
           .expect(400);
-        expect(message(bad)).toBe(EPS_FORMAT);
+        expect(message(bad)).toBe(FORMAT);
+        const noDigit = await as(api().post(coverages(patient)), tokens[role])
+          .send({ payerId: payer, memberNumber: 'POLIZA' })
+          .expect(400);
+        expect(message(noDigit)).toBe(NO_DIGIT);
         expect(
           await raw.patientCoverage.count({ where: { patientId: patient } }),
         ).toBe(0);
@@ -222,7 +228,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
         data: {
           tenantId: clinic.tenantId,
           patientId: patient,
-          payerId: sura,
+          payerId: payer,
           isPrimary: true,
           migratedFromInsurerEps: true,
         },
@@ -253,7 +259,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       await assign(patient, migrated.id, tokens.RECEPTION).expect(200);
     });
 
-    it('quitar el nº de una cobertura de EPS es 400', async () => {
+    it('quitar el nº de una cobertura de un pagador externo es 400', async () => {
       const patient = await createPatient('Quitar número');
       const coverageId = await createCoverage(patient, tokens.ADMIN);
       const res = await as(
@@ -262,7 +268,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       )
         .send({ memberNumber: null })
         .expect(400);
-      expect(message(res)).toBe(EPS_REQUIRED);
+      expect(message(res)).toBe(REQUIRED);
     });
   });
 
@@ -373,7 +379,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           actorUserId: userIds.RECEPTION,
           metadata: expect.objectContaining({
             coverage: {
-              payerType: 'EPS_CO',
+              payerType: 'EMPRESA',
               memberNumberLast4: '4050',
               verified: false,
             },
@@ -386,7 +392,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           actorUserId: clinic.adminUserId,
           metadata: expect.objectContaining({
             coverage: {
-              payerType: 'EPS_CO',
+              payerType: 'EMPRESA',
               memberNumberLast4: '4050',
               verified: true,
             },
@@ -455,7 +461,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       expect(message(res)).toBe(VERIFY_STALE);
 
       const legacy = await raw.patientCoverage.create({
-        data: { tenantId: clinic.tenantId, patientId: patient, payerId: sura },
+        data: { tenantId: clinic.tenantId, patientId: patient, payerId: payer },
         select: { id: true },
       });
       const noNumber = await verify(patient, legacy.id).expect(400);
@@ -486,7 +492,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       const foreign = await verify(foreignPatient, foreignCoverage).expect(404);
       expect(message(foreign)).toBe('Paciente no encontrado.');
       for (const res of [own, foreign]) {
-        expect(JSON.stringify(res.body)).not.toMatch(/9988|6655|Sura/);
+        expect(JSON.stringify(res.body)).not.toMatch(/9988|6655|Aseguradora/);
       }
       const row = await raw.patientCoverage.findUniqueOrThrow({
         where: { id: foreignCoverage },

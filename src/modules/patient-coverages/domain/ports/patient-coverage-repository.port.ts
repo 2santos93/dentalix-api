@@ -22,6 +22,13 @@ export interface CreateCoverageRepoInput {
  * Solo lo que cambia. `isPrimary: true` la marca principal (ver `update`).
  * `memberNumber` llega normalizado (`normalizeMemberNumber`).
  */
+/** SEC-049: lo que el ADMIN tenía delante al verificar, y quién verifica. */
+export interface VerifyCoverageRepoInput {
+  checkedMemberNumber: string;
+  expectedPayerId: string;
+  verifiedById: string;
+}
+
 export interface UpdateCoverageRepoPatch {
   payerId?: string;
   planName?: string | null;
@@ -77,12 +84,13 @@ export interface PatientCoverageRepository {
   ): Promise<PatientCoverage | null>;
   /**
    * SEC-049: la marca verificada por `verifiedById` ahora, con el candado del
-   * paciente tomado. 409 si el nº guardado ya no es `checkedMemberNumber` (lo
-   * cambió otra petición mientras el ADMIN lo revisaba). `null` si no está viva.
+   * paciente tomado. 409 si el nº guardado ya no es `checkedMemberNumber` o
+   * el pagador ya no es `expectedPayerId` (otra petición los cambió mientras
+   * el ADMIN la revisaba). `null` si no está viva.
    */
   verify(
     id: string,
-    input: { checkedMemberNumber: string; verifiedById: string },
+    input: VerifyCoverageRepoInput,
   ): Promise<PatientCoverage | null>;
   /**
    * Retiro lógico. Si era la principal y quedan vivas, la más antigua pasa a

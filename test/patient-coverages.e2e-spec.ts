@@ -125,7 +125,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }
     sanitas = await createPayer(clinic, {
       name: 'Sanitas',
-      type: 'PREPAGADA_CO',
+      type: 'EPS_CO',
       country: 'CO',
     });
     sura = await createPayer(clinic, {
@@ -160,12 +160,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }).expect(201);
     expect(res.body).toMatchObject({
       patientId: patient,
-      payer: {
-        id: sanitas,
-        name: 'Sanitas',
-        type: 'PREPAGADA_CO',
-        active: true,
-      },
+      payer: { id: sanitas, name: 'Sanitas', type: 'EPS_CO', active: true },
       planName: 'Plan Oro',
       memberNumber: 'AFI-778899',
       policyHolderName: 'Luis Ortiz',
