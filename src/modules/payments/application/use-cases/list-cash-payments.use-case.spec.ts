@@ -1,6 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { ClinicRole, PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
-import { ListCashPaymentsUseCase } from './list-cash-payments.use-case';
+import {
+  CASH_PERIOD_TOO_LONG_MESSAGE,
+  INVALID_CASH_PERIOD_MESSAGE,
+  ListCashPaymentsUseCase,
+} from './list-cash-payments.use-case';
+import { PERIOD_DAY_OUT_OF_RANGE_MESSAGE } from '../../../../shared/time/civil-day';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import type {
   CashRegisterPage,
@@ -127,6 +132,19 @@ describe('ListCashPaymentsUseCase', () => {
     await expect(
       useCase.execute({ from: '2026-01-01', to: '2027-01-02' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([
+    [{ from: '2026-10-02', to: '2026-10-01' }, INVALID_CASH_PERIOD_MESSAGE],
+    [{ from: '2026-01-01', to: '2027-01-02' }, CASH_PERIOD_TOO_LONG_MESSAGE],
+    [{ from: '9999-12-30', to: '9999-12-31' }, PERIOD_DAY_OUT_OF_RANGE_MESSAGE],
+    [{ from: '2026-10-01', to: '2101-01-01' }, PERIOD_DAY_OUT_OF_RANGE_MESSAGE],
+  ])('400 en español sin consultar (BE-044): %j', async (input, message) => {
+    const repo = new SpyPaymentRepository();
+    await expect(useCaseFor(repo).execute(input)).rejects.toThrow(
+      new BadRequestException(message),
+    );
+    expect(repo.calls).toHaveLength(0);
   });
 
   it('rechaza una fecha que no existe en el calendario (2026-02-30)', async () => {
