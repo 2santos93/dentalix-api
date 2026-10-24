@@ -1,10 +1,12 @@
+import { effectiveCommunicationChanges } from '../../domain/communication/communication-changes';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ContactChannel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   PATIENT_NOT_FOUND_MESSAGE,
-  type PatientCommunicationPatch,
+  type PatientCommunicationUpdate,
+  type PatientCommunicationUpdateResult,
   type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
@@ -137,27 +139,40 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
 
   update(
     patientId: string,
-    patch: PatientCommunicationPatch,
+    update: PatientCommunicationUpdate,
     invalidateOptOutLinksAt?: Date,
-  ): Promise<PatientCommunicationState> {
+  ): Promise<PatientCommunicationUpdateResult> {
     return this.prisma.runWithTenant(async (tx) => {
-      const { count } = await tx.patient.updateMany({
-        where: { id: patientId, deletedAt: null },
-        data: patch,
+      // El mismo orden que emisión/consumo: paciente, después enlaces.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients" WHERE "id" = ${patientId}::uuid
+          AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!locked.length)
+        throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+      const row = await tx.patient.findFirstOrThrow({
+        where: { id: patientId },
+        select: SELECT,
       });
-      if (count === 0) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
-      // El UPDATE anterior bloquea paciente antes que enlaces, igual que emisión/consumo.
+      const current = await this.toState(tx, row);
+      const patch = typeof update === 'function' ? update(current) : update;
+      const changedFields = effectiveCommunicationChanges(current, patch);
+      let state = current;
+      if (changedFields.length) {
+        const saved = await tx.patient.update({
+          where: { id: patientId },
+          data: patch,
+          select: SELECT,
+        });
+        state = await this.toState(tx, saved);
+      }
+      // Se invalida incluso con preferencias iguales; no crea una falsa escritura de paciente.
       if (invalidateOptOutLinksAt) {
         await tx.reminderOptOutLink.updateMany({
           where: { patientId, usedAt: null },
           data: { usedAt: invalidateOptOutLinksAt },
         });
       }
-      const row = await tx.patient.findFirstOrThrow({
-        where: { id: patientId },
-        select: SELECT,
-      });
-      return this.toState(tx, row);
+      return { state, changedFields };
     });
   }
 }
