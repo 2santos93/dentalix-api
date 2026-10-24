@@ -32,12 +32,14 @@ import {
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import {
+  CheckPrescriptionSafetyUseCase,
   GetPrescriptionIssuerUseCase,
   GetPrescriptionUseCase,
   IssuePrescriptionUseCase,
   ListPatientPrescriptionsUseCase,
   VoidPrescriptionUseCase,
   type PrescriptionIssuerView,
+  type PrescriptionSafetyPreview,
 } from '../application/use-cases/prescriptions.use-cases';
 import type {
   Prescription,
@@ -45,13 +47,15 @@ import type {
 } from '../domain/entities/prescription.entity';
 import {
   IssuePrescriptionDto,
+  PrescriptionSafetyCheckDto,
   VoidPrescriptionDto,
 } from './dto/issue-prescription.dto';
 import {
-  AllergyConflictDto,
   PrescriptionDocumentDto,
   PrescriptionDto,
   PrescriptionIssuerDto,
+  PrescriptionSafetyPreviewDto,
+  SafetyConflictDto,
 } from './dto/prescription.dto';
 import { Audit } from '../../audit/presentation/audit.decorator';
 
@@ -82,6 +86,7 @@ export class PatientPrescriptionsController {
   constructor(
     private readonly listPrescriptions: ListPatientPrescriptionsUseCase,
     private readonly issuePrescription: IssuePrescriptionUseCase,
+    private readonly checkSafety: CheckPrescriptionSafetyUseCase,
   ) {}
 
   @Audit({
@@ -103,11 +108,45 @@ export class PatientPrescriptionsController {
     return this.listPrescriptions.execute(patientId);
   }
 
+  /**
+   * DX-300: lee la anamnesis vigente del paciente (alergias, medicación,
+   * embarazo, peso) para calcular los avisos: queda auditada como lectura de
+   * la anamnesis. Declarada antes que cualquier `:id`.
+   */
+  @Audit({
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY',
+    patient: { param: 'patientId' },
+    reason: 'PRESCRIPTION_SAFETY_CHECK',
+  })
+  @Post('safety-check')
+  @HttpCode(200)
+  @Roles(...PRESCRIPTION_ISSUE_ROLES)
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({
+    type: PrescriptionSafetyPreviewDto,
+    description:
+      'Avisos de seguridad que daría la emisión con estos medicamentos (alergias con las casillas de la anamnesis, interacciones, embarazo, antirresortivos, dosis infantil por peso, sin anamnesis). Solo una vista previa: no guarda nada y la emisión los vuelve a calcular. Es una ayuda: no sustituye el juicio clínico.',
+  })
+  @ApiBadRequestResponse({ description: 'Cuerpo inválido (en español)' })
+  @ApiNotFoundResponse({
+    description: 'Paciente no encontrado en esta clínica',
+  })
+  @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN emiten recetas' })
+  safetyCheck(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Body() dto: PrescriptionSafetyCheckDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PrescriptionSafetyPreview> {
+    return this.checkSafety.execute(patientId, dto.items, req.user.sub);
+  }
+
   @Audit({
     action: 'CREATE',
     resource: 'PRESCRIPTION',
     resourceId: { response: 'id' },
     patient: { param: 'patientId' },
+    prescriptionSafety: true,
   })
   @Post()
   @Roles(...PRESCRIPTION_ISSUE_ROLES)
@@ -121,9 +160,9 @@ export class PatientPrescriptionsController {
     description: 'Paciente no encontrado en esta clínica',
   })
   @ApiConflictResponse({
-    type: AllergyConflictDto,
+    type: SafetyConflictDto,
     description:
-      'Alerta de alergia: un principio activo coincide con una alergia de la anamnesis y no se envió allergyOverride=true',
+      'Avisos de seguridad bloqueantes (DX-300: alergia —lista o casillas de la anamnesis—, interacción grave, embarazo, dosis infantil) sin `safetyOverride=true` y `safetyOverrideReason`; mensaje en español con los avisos',
   })
   @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN emiten recetas' })
   issue(
@@ -139,6 +178,8 @@ export class PatientPrescriptionsController {
         notes: dto.notes,
         professionalLicense: dto.professionalLicense,
         allergyOverride: dto.allergyOverride,
+        safetyOverride: dto.safetyOverride,
+        safetyOverrideReason: dto.safetyOverrideReason,
       },
       req.user.sub,
     );

@@ -473,6 +473,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PRESCRIPTION',
     resourceId: RES,
     patient: P,
+    // DX-300: códigos de los avisos de seguridad y si se confirmaron.
+    prescriptionSafety: true,
+  },
+  // DX-300: la previsualización de avisos lee la anamnesis vigente.
+  'POST /patients/:patientId/prescriptions/safety-check': {
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY',
+    patient: P,
+    reason: 'PRESCRIPTION_SAFETY_CHECK',
   },
   'GET /prescriptions/:id': {
     action: 'VIEW',

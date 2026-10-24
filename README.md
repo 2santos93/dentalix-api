@@ -2920,6 +2920,40 @@ e2e `test/patient-documents-direct.e2e-spec.ts` (MinIO, 19 MB subidos por
 (disco y semáforo) y `test/storage/s3-unavailable.e2e-spec.ts` (503 a tiempo
 con el almacén colgado).
 
+## Receta segura (DX-300)
+
+Módulo `prescriptions`, reglas en `src/modules/prescriptions/domain/prescription-safety.ts`
+(versión `RX_SAFETY_V1`; fuentes SDCEP *Drug Prescribing for Dentistry* y BNF
+for Children, citadas en el módulo junto a los topes de dosis). Es una ayuda a
+la prescripción: no sustituye el juicio clínico.
+
+- **Qué lee**: la anamnesis VIGENTE (versión más alta, bajo RLS en la misma
+  transacción que el paciente): lista de alergias y casillas
+  `safetyFlags.alergiaPenicilina/alergiaAnestesico/alergiaLatex`, medicación
+  habitual (`medications[].nombre`), `embarazo`/`semanasEmbarazo`,
+  `anticoagulantes`, `bifosfonatos` y `vitalSigns.peso`; y la edad por la fecha
+  de nacimiento el día de hoy en la zona de la sede.
+- **Reglas**: `ALLERGY`, `INTERACTION` (anticoagulante con AINE, metronidazol,
+  macrólidos o azoles; metotrexato con AINE), `PREGNANCY` (AINE desde la semana
+  20 o sin semanas; tetraciclinas; metronidazol en el 1.er trimestre),
+  `ANTIRESORPTIVE` (informativo), `PEDIATRIC_DOSE` (< 12 años: amoxicilina,
+  ibuprofeno y paracetamol en mg/kg por toma y por día; sin peso pide el peso)
+  y `NO_ANAMNESIS` (informativo). Cada aviso: `rule`, `code`, `severity`
+  (`BLOCKING`/`INFO`), `message` en español y `source`.
+- **Previsualización**: `POST /patients/:patientId/prescriptions/safety-check`
+  (DENTIST/ADMIN; auditada como `VIEW MEDICAL_HISTORY` con
+  `reason: PRESCRIPTION_SAFETY_CHECK`). No guarda nada.
+- **Emisión**: recalcula los avisos; con bloqueantes exige `safetyOverride:
+  true` (o el `allergyOverride` de clientes anteriores) y `safetyOverrideReason`
+  → si no, 409 en español con `safetyAlerts`. La receta guarda
+  `safetyRulesVersion`, `safetyAlerts` y `safetyOverrideReason` dentro del hash
+  (formato v2); el `audit_event` CREATE lleva `metadata.prescriptionSafety`
+  (versión, códigos bloqueantes e informativos y si se confirmó; nunca textos).
+- **Migración** `20261024140000_dx300_prescription_safety`: tres columnas
+  NULLABLE y un CHECK (`NOT VALID` + `VALIDATE`). Las recetas anteriores quedan
+  con NULL y su hash se sigue calculando con el formato v1 (test de regresión
+  con el valor de DX-013 en `prescription-hash.spec.ts`).
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y

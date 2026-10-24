@@ -1,6 +1,7 @@
 import type { ClinicCountry } from '@prisma/client';
 import type { AllergyMatch } from '../allergy-match';
 import type { PrescriptionItemContent } from '../prescription-hash';
+import type { SafetyAlert } from '../prescription-safety';
 import type {
   Prescription,
   PrescriptionIssuer,
@@ -29,6 +30,9 @@ export interface CreatePrescriptionRepoInput {
   notes: string | null;
   allergyOverride: boolean;
   allergyMatches: AllergyMatch[];
+  safetyRulesVersion: string;
+  safetyAlerts: SafetyAlert[];
+  safetyOverrideReason: string | null;
   contentHash: string;
   items: PrescriptionItemContent[];
 }
@@ -50,7 +54,10 @@ export interface PrescriptionRepository {
   /** Sede activa del request (o la principal) y el profesional del token. */
   loadIssuer(professionalUserId: string): Promise<PrescriptionIssuer>;
 
-  /** `null` si el paciente no es de la clínica en contexto (RLS). */
+  /**
+   * `null` si el paciente no es de la clínica en contexto (RLS). Con su
+   * anamnesis vigente (DX-300), leída en la misma transacción y bajo RLS.
+   */
   loadPatient(patientId: string): Promise<PrescriptionPatient | null>;
 
   /** Guarda el registro profesional en la membresía del usuario. */

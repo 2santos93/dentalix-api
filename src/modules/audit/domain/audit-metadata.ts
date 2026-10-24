@@ -75,6 +75,20 @@ export interface AuditMetadata {
    * motivo (va en la cita).
    */
   cancellation?: AuditCancellation;
+  /**
+   * DX-300: avisos de seguridad de una receta emitida: versión de las reglas,
+   * CÓDIGOS de los bloqueantes y de los informativos, y si se confirmaron con
+   * motivo. Nunca el texto del aviso (nombra fármacos de la anamnesis) ni el
+   * del motivo: van sellados en la receta.
+   */
+  prescriptionSafety?: AuditPrescriptionSafety;
+}
+
+export interface AuditPrescriptionSafety {
+  rulesVersion: string;
+  blocking: string[];
+  info: string[];
+  overridden: boolean;
 }
 
 export const AUDIT_CANCELLATION_KINDS = [
@@ -511,6 +525,33 @@ function cancellation(value: unknown): AuditCancellation | null {
   return { byKind: kind, reasonCode: reason, noticeMinutes, lateCancellation };
 }
 
+const MAX_SAFETY_CODES = 50;
+
+function safetyCodes(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((c): c is string => typeof c === 'string' && CODE.test(c))
+    .slice(0, MAX_SAFETY_CODES);
+}
+
+/** Versión, códigos y confirmación con su formato, o nada (DX-300). */
+function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
+  if (!isRecord(value)) return null;
+  const { rulesVersion, overridden } = value;
+  const blocking = safetyCodes(value.blocking);
+  const info = safetyCodes(value.info);
+  if (
+    typeof rulesVersion !== 'string' ||
+    !CODE.test(rulesVersion) ||
+    typeof overridden !== 'boolean' ||
+    !blocking ||
+    !info
+  ) {
+    return null;
+  }
+  return { rulesVersion, blocking, info, overridden };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -546,5 +587,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (attributed) out.attribution = attributed;
   const cancelled = cancellation(input.cancellation);
   if (cancelled) out.cancellation = cancelled;
+  const safety = prescriptionSafety(input.prescriptionSafety);
+  if (safety) out.prescriptionSafety = safety;
   return out;
 }

@@ -2512,6 +2512,12 @@ model Prescription {
   // Alerta de alergia confirmada por el profesional (y contra qué alergias).
   allergyOverride      Boolean            @default(false)
   allergyMatches       Json?
+  // DX-300: avisos de seguridad calculados por el servidor al emitir, versión
+  // de las reglas (prescription-safety.ts) y motivo con el que se confirmaron
+  // los bloqueantes. NULL en las recetas emitidas antes (hash v1).
+  safetyRulesVersion   String?
+  safetyAlerts         Json?
+  safetyOverrideReason String?
   // SHA-256 (hex) del contenido emitido (prescription-hash.ts).
   contentHash          String
   voidedAt             DateTime?

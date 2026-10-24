@@ -2793,6 +2793,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patients/:patientId/data-consents': 'data-consents.e2e-spec.ts',
     'GET /patients/:patientId/prescriptions': 'prescriptions.e2e-spec.ts',
     'POST /patients/:patientId/prescriptions': 'prescriptions.e2e-spec.ts',
+    // DX-300: B → 404 sobre el paciente de A en la previsualización de avisos.
+    'POST /patients/:patientId/prescriptions/safety-check':
+      'prescriptions.e2e-spec.ts',
     'GET /prescriptions/:id': 'prescriptions.e2e-spec.ts',
     'POST /prescriptions/:id/void': 'prescriptions.e2e-spec.ts',
     // DX-191: B → 404 sobre el paciente y el implante de A, y la búsqueda por

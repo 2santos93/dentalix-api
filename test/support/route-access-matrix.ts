@@ -258,6 +258,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /prescription-templates/:id': ADMIN_ONLY,
   'GET /patients/:patientId/prescriptions': CLINICAL,
   'POST /patients/:patientId/prescriptions': PRESCRIBERS,
+  // DX-300: previsualización de avisos de seguridad (solo quien emite).
+  'POST /patients/:patientId/prescriptions/safety-check': PRESCRIBERS,
   'GET /prescriptions/issuer': PRESCRIBERS,
   'GET /prescriptions/:id': CLINICAL,
   'POST /prescriptions/:id/void': PRESCRIBERS,

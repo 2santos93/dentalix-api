@@ -59,12 +59,72 @@ export class IssuePrescriptionDto {
   professionalLicense?: string;
 
   @ApiPropertyOptional({
+    deprecated: true,
     description:
-      'Confirmación explícita del profesional ante una alerta de alergia. Sin ella, una coincidencia con la anamnesis da 409.',
+      'Clientes anteriores a DX-300: confirmación ante una alerta de alergia. Cuenta como `safetyOverride`; el motivo sigue siendo obligatorio.',
   })
   @IsOptional()
   @IsBoolean({ message: 'allergyOverride debe ser verdadero o falso' })
   allergyOverride?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-300: confirmación explícita de los avisos bloqueantes (alergia, interacción, embarazo, dosis infantil). Sin ella, o sin `safetyOverrideReason`, la API responde 409 con los avisos.',
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'safetyOverride debe ser verdadero o falso' })
+  safetyOverride?: boolean;
+
+  @ApiPropertyOptional({
+    maxLength: 500,
+    example: 'INR estable; pauta corta acordada con hematología',
+    description:
+      'DX-300: motivo de la confirmación. Queda en la receta (dentro del hash). Se ignora si no hay avisos bloqueantes.',
+  })
+  @IsOptional()
+  @IsString({ message: 'El motivo debe ser un texto' })
+  @MaxLength(500, { message: 'El motivo admite como mucho 500 caracteres' })
+  safetyOverrideReason?: string;
+}
+
+const CHECK_TEXT_MAX = 200;
+const checkText = (field: string) => ({
+  message: `${field} debe ser un texto de como mucho ${CHECK_TEXT_MAX} caracteres`,
+});
+
+/** Lo que la previsualización de avisos necesita de cada medicamento. */
+export class SafetyCheckItemDto {
+  @ApiProperty({ maxLength: CHECK_TEXT_MAX, example: 'Ibuprofeno' })
+  @IsString(checkText('El principio activo'))
+  @MaxLength(CHECK_TEXT_MAX, checkText('El principio activo'))
+  activeIngredient!: string;
+
+  @ApiPropertyOptional({ maxLength: CHECK_TEXT_MAX, example: '400 mg' })
+  @IsOptional()
+  @IsString(checkText('La concentración'))
+  @MaxLength(CHECK_TEXT_MAX, checkText('La concentración'))
+  concentration?: string;
+
+  @ApiPropertyOptional({ maxLength: CHECK_TEXT_MAX, example: '1 comprimido' })
+  @IsOptional()
+  @IsString(checkText('La dosis'))
+  @MaxLength(CHECK_TEXT_MAX, checkText('La dosis'))
+  dose?: string;
+
+  @ApiPropertyOptional({ maxLength: CHECK_TEXT_MAX, example: 'Cada 8 horas' })
+  @IsOptional()
+  @IsString(checkText('La frecuencia'))
+  @MaxLength(CHECK_TEXT_MAX, checkText('La frecuencia'))
+  frequency?: string;
+}
+
+export class PrescriptionSafetyCheckDto {
+  @ApiProperty({ type: [SafetyCheckItemDto], description: '0 a 10' })
+  @IsArray({ message: 'Los medicamentos deben ser una lista' })
+  @ArrayMaxSize(10, { message: 'Una receta admite como mucho 10 medicamentos' })
+  @ValidateNested({ each: true })
+  @Type(() => SafetyCheckItemDto)
+  items!: SafetyCheckItemDto[];
 }
 
 export class VoidPrescriptionDto {

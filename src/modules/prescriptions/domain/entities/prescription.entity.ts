@@ -5,6 +5,7 @@ import type {
 } from '@prisma/client';
 import type { AllergyMatch } from '../allergy-match';
 import type { PrescriptionItemContent } from '../prescription-hash';
+import type { SafetyAlert, SafetyAnamnesis } from '../prescription-safety';
 
 export interface PrescriptionItem extends PrescriptionItemContent {
   id: string;
@@ -41,6 +42,12 @@ export interface Prescription {
   notes: string | null;
   allergyOverride: boolean;
   allergyMatches: AllergyMatch[];
+  /** DX-300: versión de las reglas; null en recetas anteriores. */
+  safetyRulesVersion: string | null;
+  /** DX-300: avisos calculados al emitir; null en recetas anteriores. */
+  safetyAlerts: SafetyAlert[] | null;
+  /** DX-300: motivo de la confirmación de los avisos bloqueantes. */
+  safetyOverrideReason: string | null;
   contentHash: string;
   voidedAt: Date | null;
   voidedById: string | null;
@@ -64,8 +71,12 @@ export interface PrescriptionPatient {
   docType: DocType;
   docNumber: string | null;
   birthDate: Date | null;
-  /** `alergeno` de cada alergia de la anamnesis vigente. */
-  allergies: string[];
+  /**
+   * Lo que la receta segura (DX-300) lee de la anamnesis VIGENTE: alergias
+   * (lista y casillas), medicación habitual, embarazo, anticoagulantes,
+   * bifosfonatos y peso. null = el paciente no tiene anamnesis.
+   */
+  anamnesis: SafetyAnamnesis | null;
 }
 
 /** Desde dónde y quién emite: sede activa (o la principal) y profesional. */
