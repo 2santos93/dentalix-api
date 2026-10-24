@@ -2254,8 +2254,9 @@ migraciones `20261020200000_dx151_enums`,
 Lo que gasta cada sede: factura o cuenta por pagar con categoría, proveedor,
 importe, fechas y soporte, pagada total o parcialmente. Módulo `expenses`;
 migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
-`…150200_dx274_cash_adjustment_outflow`, `…150300_dx274_audit_events_idx` y
-`…150400_dx274_expense_idempotency`. Incluye las salidas de caja menor
+`…150200_dx274_cash_adjustment_outflow`, `…150300_dx274_audit_events_idx`,
+`…150400_dx274_expense_idempotency` y
+`…150500_dx274_idempotency_immutable`. Incluye las salidas de caja menor
 (el dinero del cajón) y el resumen mensual «ingresos − gastos» con CSV.
 
 - **Tablas**: `expense_categories` (propias de la clínica; las predefinidas
@@ -2335,6 +2336,20 @@ migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
   `EXPENSE_VOIDED` o `PAYMENT_VOIDED`, `PAYMENT_ADDED`, VIEW y EXPORT); la
   metadata solo lleva los nombres de los campos, nunca el proveedor ni la
   descripción.
+- **Despliegue** (todo aditivo; el código anterior sigue funcionando con las
+  migraciones aplicadas):
+  1. Aplicar las migraciones `20261024150000` … `20261024150500` (`prisma
+     migrate deploy`). `…150300` crea un índice no concurrente sobre
+     `audit_events` (bloquea sus escrituras mientras se construye, como DX-279):
+     mejor en una hora de poco tráfico. `…150200` toma un bloqueo breve sobre
+     `cash_session_adjustments`.
+  2. **Antes o junto al despliegue de la API**, añadir al bucket de producción
+     la regla de ciclo de vida de `expense-receipts/pending/` (24 h): la
+     migración no la aplica y sin ella las subidas que nadie adjunta no se
+     limpian. Es la misma regla que `patient-documents/pending/`; ver
+     [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)
+     (JSON de AWS y, en R2, una regla por prefijo).
+  3. Sin variables de entorno nuevas.
 - **Demo**: `npm run seed:demo` crea tres gastos de la sede principal (uno
   pagado, uno pagado a medias con el vencimiento pasado y uno pendiente) y una
   salida de caja menor de recepción en el turno ABIERTO de la tarde; la caja

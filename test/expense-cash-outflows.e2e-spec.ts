@@ -4,6 +4,7 @@ import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
+import { withBody } from './support/with-body';
 import {
   Clinic,
   loginAs,
@@ -121,10 +122,12 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
     token = clinic.adminToken,
     locationId?: string,
   ) => {
-    const req = request(server())
-      [verb](`/api/v1${path}`)
-      .set('X-Tenant-Host', clinic.host)
-      .set('Authorization', `Bearer ${token}`);
+    const req = withBody(
+      request(server())
+        [verb](`/api/v1${path}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${token}`),
+    );
     return locationId ? req.set('X-Location-Id', locationId) : req;
   };
 

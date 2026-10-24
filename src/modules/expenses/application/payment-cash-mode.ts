@@ -1,7 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import type { PaymentMethod } from '@prisma/client';
 import {
-  CASH_SESSION_REQUIRED_MESSAGE,
+  EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
   validateFromCashPayment,
   validatePaidOn,
 } from '../domain/expense-rules';
@@ -50,7 +50,7 @@ export async function planPaymentCash(
       ? today
       : rule(() => validatePaidOn(request.paidOn, today));
   if (request.method === 'CASH' && (await repo.cashRequiresOpenSession())) {
-    throw new ConflictException(CASH_SESSION_REQUIRED_MESSAGE);
+    throw new ConflictException(EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE);
   }
   return { paidOn };
 }

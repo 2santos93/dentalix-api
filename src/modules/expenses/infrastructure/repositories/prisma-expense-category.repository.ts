@@ -32,7 +32,11 @@ export class PrismaExpenseCategoryRepository implements ExpenseCategoryRepositor
   async listActive(): Promise<ExpenseCategory[]> {
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.expenseCategory.findMany({
-        where: { deletedAt: null, active: true },
+        where: {
+          tenantId: this.requireTenantId(),
+          deletedAt: null,
+          active: true,
+        },
       }),
     );
     // El orden de la BD depende del collation; el catálogo se ordena en `es`.
@@ -45,18 +49,19 @@ export class PrismaExpenseCategoryRepository implements ExpenseCategoryRepositor
     key: string,
     onlyActive: boolean,
   ): Promise<ExpenseCategory | null> {
+    const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      // RLS acota a la clínica. `dx_search_normalize` es la misma regla que
-      // `categoryKey`.
+      // `dx_search_normalize` es la misma regla que `categoryKey`.
       const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "expense_categories"
-         WHERE "deletedAt" IS NULL
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "deletedAt" IS NULL
            ${onlyActive ? Prisma.sql`AND "active"` : Prisma.empty}
            AND public.dx_search_normalize("name") = ${key}
          LIMIT 1`;
       if (rows.length === 0) return null;
       const row = await tx.expenseCategory.findFirst({
-        where: { id: rows[0].id, deletedAt: null },
+        where: { tenantId, id: rows[0].id, deletedAt: null },
       });
       return row ? mapCategory(row) : null;
     });
@@ -81,8 +86,8 @@ export class PrismaExpenseCategoryRepository implements ExpenseCategoryRepositor
       );
       return mapCategory(row);
     } catch (error) {
-      // El único (tenantId, name) entre las vivas cierra la carrera que la
-      // comparación sin tildes del caso de uso no puede.
+      // El único (tenantId, dx_search_normalize(name)) entre las vivas cierra
+      // la carrera «Café» / «cafe» que la comparación del caso de uso no puede.
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
@@ -94,9 +99,10 @@ export class PrismaExpenseCategoryRepository implements ExpenseCategoryRepositor
   }
 
   async retire(id: string): Promise<boolean> {
+    const tenantId = this.requireTenantId();
     const { count } = await this.prisma.runWithTenant((tx) =>
       tx.expenseCategory.updateMany({
-        where: { id, deletedAt: null },
+        where: { tenantId, id, deletedAt: null },
         data: { active: false, deletedAt: new Date() },
       }),
     );

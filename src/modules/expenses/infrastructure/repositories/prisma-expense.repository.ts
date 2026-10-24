@@ -128,7 +128,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       if (requested) {
         this.tenantContext.assertLocationAllowed(requested);
         const location = await tx.location.findFirst({
-          where: { id: requested, isActive: true, deletedAt: null },
+          where: { tenantId, id: requested, isActive: true, deletedAt: null },
           select: { id: true },
         });
         if (!location) {
@@ -243,7 +243,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     now: Date,
   ): Promise<ExpenseDetail | null> {
     const row = await tx.expense.findFirst({
-      where: { id, ...this.tenantContext.locationScope() },
+      where: {
+        tenantId: this.requireTenantId(),
+        id,
+        ...this.tenantContext.locationScope(),
+      },
       include: { payments: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } },
     });
     if (!row) return null;
@@ -271,7 +275,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       // Por clínica, no por sede: la clave ya usada con otra sede no puede
       // llegar a un INSERT que chocaría con el único (500).
       const row = await tx.expense.findFirst({
-        where: { idempotencyKey: key },
+        where: { tenantId: this.requireTenantId(), idempotencyKey: key },
         select: { id: true, idempotencyFingerprint: true },
       });
       if (!row) return null;
@@ -281,24 +285,53 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     });
   }
 
+  /**
+   * El pago creado con esta clave (por clínica, no por sede). Si está en una
+   * sede que el usuario no ve: 409 en español, nunca un 500 ni su contenido.
+   */
+  private async storedPaymentIn(
+    tx: Prisma.TransactionClient,
+    key: string,
+  ): Promise<{ expenseId: string; fingerprint: string | null } | null> {
+    const tenantId = this.requireTenantId();
+    const row = await tx.expensePayment.findFirst({
+      where: { tenantId, idempotencyKey: key },
+      select: { expenseId: true, idempotencyFingerprint: true },
+    });
+    if (!row) return null;
+    const visible = await tx.expense.count({
+      where: {
+        tenantId,
+        id: row.expenseId,
+        ...this.tenantContext.locationScope(),
+      },
+    });
+    if (visible === 0) throw keyUsedElsewhere();
+    return {
+      expenseId: row.expenseId,
+      fingerprint: row.idempotencyFingerprint,
+    };
+  }
+
+  /** La respuesta original de un pago repetido con la misma clave, si la hay. */
+  private async paymentReplayIn(
+    tx: Prisma.TransactionClient,
+    key: string,
+    now: Date,
+  ): Promise<IdempotentWrite | null> {
+    const stored = await this.storedPaymentIn(tx, key);
+    if (!stored) return null;
+    return {
+      detail: await this.requireDetail(tx, stored.expenseId, now),
+      created: false,
+      fingerprint: stored.fingerprint,
+    };
+  }
+
   findPaymentByIdempotencyKey(
     key: string,
   ): Promise<{ expenseId: string; fingerprint: string | null } | null> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const row = await tx.expensePayment.findFirst({
-        where: { idempotencyKey: key },
-        select: { expenseId: true, idempotencyFingerprint: true },
-      });
-      if (!row) return null;
-      const visible = await tx.expense.count({
-        where: { id: row.expenseId, ...this.tenantContext.locationScope() },
-      });
-      if (visible === 0) throw keyUsedElsewhere();
-      return {
-        expenseId: row.expenseId,
-        fingerprint: row.idempotencyFingerprint,
-      };
-    });
+    return this.prisma.runWithTenant((tx) => this.storedPaymentIn(tx, key));
   }
 
   async suppliers(query: string, limit: number): Promise<SupplierSuggestion[]> {
@@ -333,7 +366,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
 
   async attachmentKeyInUse(key: string): Promise<boolean> {
     const count = await this.prisma.runWithTenant((tx) =>
-      tx.expense.count({ where: { attachmentKey: key } }),
+      tx.expense.count({
+        where: { tenantId: this.requireTenantId(), attachmentKey: key },
+      }),
     );
     return count > 0;
   }
@@ -348,6 +383,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     tx: Prisma.TransactionClient,
     id: string,
   ): Promise<LockedExpense> {
+    const tenantId = this.requireTenantId();
     const scope = this.tenantContext.scopeLocationIds();
     const scopeSql =
       scope === undefined
@@ -357,7 +393,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       SELECT "id", "locationId", "currency",
              ("amount" * 100)::bigint AS "amountCents", "voidedAt"
         FROM "expenses"
-       WHERE "id" = ${id}::uuid ${scopeSql}
+       WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid ${scopeSql}
        FOR UPDATE`;
     if (rows.length === 0) throw notFound();
     return rows[0];
@@ -478,7 +514,10 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   ): Promise<ExpenseDetail> {
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await this.lockExpense(tx, id);
-      const current = await tx.expense.findUniqueOrThrow({ where: { id } });
+      const tenantId = this.requireTenantId();
+      const current = await tx.expense.findUniqueOrThrow({
+        where: { id, tenantId },
+      });
       const totals = await this.paymentTotals(tx, id);
       const denial = expenseEditDenial({
         current: {
@@ -509,7 +548,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
             : null;
       validateDueDate(dueDate, invoiceDate);
       await tx.expense.update({
-        where: { id },
+        where: { id, tenantId },
         data: {
           category: patch.category,
           supplier: patch.supplier,
@@ -544,7 +583,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   ): Promise<ExpensePayment> {
     const voided = mapPayment(
       await tx.expensePayment.update({
-        where: { id: paymentId },
+        where: { id: paymentId, tenantId: this.requireTenantId() },
         // La BD fija la hora del servidor (trigger); `now` es solo el valor
         // que exige el CHECK de anulación completa.
         data: { voidedAt: now, voidedById: by, voidReason: reason },
@@ -571,8 +610,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await this.lockExpense(tx, id);
       if (locked.voidedAt) throw conflict(EXPENSE_ALREADY_VOIDED_MESSAGE);
+      const tenantId = this.requireTenantId();
       const live = await tx.expensePayment.findMany({
-        where: { expenseId: id, voidedAt: null },
+        where: { tenantId, expenseId: id, voidedAt: null },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: { id: true },
       });
@@ -580,32 +620,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         await this.voidOnePayment(tx, payment.id, reason, by, now, cashLink);
       }
       await tx.expense.update({
-        where: { id },
+        where: { id, tenantId },
         data: { voidedAt: now, voidedById: by, voidReason: reason },
       });
       return this.requireDetail(tx, id, now);
     });
-  }
-
-  /** El pago ya creado con esta Idempotency-Key, si la hay (misma transacción). */
-  private async replayedPayment(
-    tx: Prisma.TransactionClient,
-    input: CreateExpensePaymentRepoInput,
-    now: Date,
-  ): Promise<IdempotentWrite | null> {
-    if (!input.idempotencyKey) return null;
-    const stored = await tx.expensePayment.findFirst({
-      where: { idempotencyKey: input.idempotencyKey },
-      select: { expenseId: true, idempotencyFingerprint: true },
-    });
-    if (!stored) return null;
-    const detail = await this.detailIn(tx, stored.expenseId, now);
-    if (!detail) throw keyUsedElsewhere();
-    return {
-      detail,
-      created: false,
-      fingerprint: stored.idempotencyFingerprint,
-    };
   }
 
   async addPayment(
@@ -619,7 +638,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         // Con el gasto bloqueado: si otra petición con la misma clave ya
         // pagó (p. ej. el doble clic en «pagar todo»), esa es la respuesta,
         // no un 400 del tope.
-        const replay = await this.replayedPayment(tx, input, now);
+        const replay = input.idempotencyKey
+          ? await this.paymentReplayIn(tx, input.idempotencyKey, now)
+          : null;
         if (replay) return replay;
         if (locked.voidedAt) throw conflict(EXPENSE_VOIDED_MESSAGE);
         const { liveCents } = await this.paymentTotals(tx, expenseId);
@@ -639,19 +660,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       });
     } catch (error) {
       if (input.idempotencyKey && isUniqueViolation(error)) {
-        const original = await this.findPaymentByIdempotencyKey(
-          input.idempotencyKey,
+        const key = input.idempotencyKey;
+        const replay = await this.prisma.runWithTenant((tx) =>
+          this.paymentReplayIn(tx, key, now),
         );
-        if (original) {
-          const detail = await this.findById(original.expenseId, now);
-          if (detail) {
-            return {
-              detail,
-              created: false,
-              fingerprint: original.fingerprint,
-            };
-          }
-        }
+        if (replay) return replay;
       }
       throw error;
     }
@@ -668,7 +681,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     return this.prisma.runWithTenant(async (tx) => {
       await this.lockExpense(tx, expenseId);
       const payment = await tx.expensePayment.findFirst({
-        where: { id: paymentId, expenseId },
+        where: { tenantId: this.requireTenantId(), id: paymentId, expenseId },
         select: { id: true, voidedAt: true },
       });
       if (!payment) {
@@ -691,7 +704,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       // La fila está bloqueada: o no tiene soporte y lo fija esta petición, o
       // lo tiene (otra se adelantó) y es un 409. El trigger de la BD es la red.
       const { count } = await tx.expense.updateMany({
-        where: { id, attachmentKey: null },
+        where: { tenantId: this.requireTenantId(), id, attachmentKey: null },
         data: {
           attachmentKey: attachment.key,
           attachmentMime: attachment.mime,

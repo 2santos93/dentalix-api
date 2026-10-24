@@ -13,6 +13,7 @@ import {
   SUMMARY_PERIOD_TOO_LONG_MESSAGE,
 } from '../src/modules/expenses/application/use-cases/get-expense-summary.use-case';
 import { createE2eApp } from './support/create-e2e-app';
+import { withBody } from './support/with-body';
 import {
   Clinic,
   loginAs,
@@ -59,10 +60,12 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     token: string = admin(),
     host: string = clinic.host,
   ) =>
-    request(app.getHttpServer())
-      [verb](`/api/v1${url}`)
-      .set('X-Tenant-Host', host)
-      .set('Authorization', `Bearer ${token}`);
+    withBody(
+      request(app.getHttpServer())
+        [verb](`/api/v1${url}`)
+        .set('X-Tenant-Host', host)
+        .set('Authorization', `Bearer ${token}`),
+    );
 
   const summary = (query: string, location?: string) => {
     const req = call('get', `/expenses/summary?${query}`);

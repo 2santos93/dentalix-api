@@ -39,7 +39,11 @@ jobs:
         run: npm audit --omit=dev --audit-level=critical
       - run: npx prisma generate
       # `npm run lint` lleva --fix (reescribiría y "pasaría"); en CI solo se comprueba.
+      # El lint con tipos de src y test juntos pasa del heap por defecto (~4 GB):
+      # el script ya sube el heap; el env lo deja explícito para quien lo cambie.
       - run: npm run lint:check
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - run: npx tsc --noEmit
       - run: npm test
       - run: npm run build

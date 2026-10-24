@@ -12,7 +12,7 @@ import {
 import { RECEIPT_TYPE_MESSAGE } from '../../domain/expense-receipt';
 import {
   AMOUNT_MESSAGE,
-  CASH_SESSION_REQUIRED_MESSAGE,
+  EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
   FROM_CASH_METHOD_MESSAGE,
   FROM_CASH_PAID_ON_MESSAGE,
   OPEN_CASH_SESSION_REQUIRED_MESSAGE,
@@ -218,7 +218,9 @@ describe('alta de un gasto (DX-274)', () => {
       kit.repo.cashRequireOpenSession = true;
       await expect(
         run(input({ payment: { amount: 1000, method: 'CASH' } })),
-      ).rejects.toThrow(new ConflictException(CASH_SESSION_REQUIRED_MESSAGE));
+      ).rejects.toThrow(
+        new ConflictException(EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE),
+      );
       // Otros medios no necesitan caja.
       await expect(
         run(input({ payment: { amount: 1000, method: 'TRANSFER' } })),

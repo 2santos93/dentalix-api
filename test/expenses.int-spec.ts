@@ -360,6 +360,11 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
       }),
     );
     await create('Mantenimiento locativo');
+    // Sin mayúsculas, tildes ni espacios de más: «Café» y « cafe » son la misma.
+    await create('Café del consultorio');
+    await expect(create('  CAFE   del  consultorio ')).rejects.toMatchObject({
+      code: 'P2002',
+    });
     await expect(
       raw.expenseCategory.create({
         data: {
@@ -466,6 +471,23 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
       await expect(
         raw.expensePayment.delete({ where: { id: payment.id } }),
       ).resolves.toBeDefined();
+    });
+
+    it('la clave de idempotencia del pago no se reescribe, ni al anularlo', async () => {
+      const { payment } = await pay();
+      await expect(
+        asA((tx) =>
+          tx.expensePayment.update({
+            where: { id: payment.id },
+            data: {
+              idempotencyFingerprint: 'otra',
+              voidedAt: new Date(),
+              voidedById: userId,
+              voidReason: 'Pago repetido',
+            },
+          }),
+        ),
+      ).rejects.toThrow(/inalterable/);
     });
 
     it('lo único que se edita es la anulación, y una sola vez', async () => {
@@ -691,6 +713,26 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           }),
         ),
       ).rejects.toThrow(/no se anula de nuevo/);
+    });
+
+    it('la clave de idempotencia y su huella no se reescriben', async () => {
+      const e = await expense(a);
+      await expect(
+        asA((tx) =>
+          tx.expense.update({
+            where: { id: e.id },
+            data: { idempotencyKey: '3f2504e0-4f89-41d3-9a0c-0305e82c3301' },
+          }),
+        ),
+      ).rejects.toThrow(/inalterable/);
+      await expect(
+        asA((tx) =>
+          tx.expense.update({
+            where: { id: e.id },
+            data: { idempotencyFingerprint: 'otra' },
+          }),
+        ),
+      ).rejects.toThrow(/inalterable/);
     });
 
     it('la clínica, el autor y el alta no cambian', async () => {

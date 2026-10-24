@@ -7,7 +7,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { RECEIPT_TYPE_MESSAGE } from '../src/modules/expenses/domain/expense-receipt';
 import {
-  CASH_SESSION_REQUIRED_MESSAGE,
+  EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
   CATEGORY_DUPLICATE_MESSAGE,
   CATEGORY_INVALID_MESSAGE,
   HAS_PAYMENTS_MESSAGE,
@@ -16,6 +16,7 @@ import {
 import { FILE_STORAGE } from '../src/shared/storage/file-storage.port';
 import type { FileStoragePort } from '../src/shared/storage/file-storage.port';
 import { createE2eApp } from './support/create-e2e-app';
+import { withBody } from './support/with-body';
 import {
   htmlFake,
   jpegFixture,
@@ -118,10 +119,12 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     token: string = admin(),
     host: string = clinic.host,
   ) =>
-    request(app.getHttpServer())
-      [verb](`/api/v1${url}`)
-      .set('X-Tenant-Host', host)
-      .set('Authorization', `Bearer ${token}`);
+    withBody(
+      request(app.getHttpServer())
+        [verb](`/api/v1${url}`)
+        .set('X-Tenant-Host', host)
+        .set('Authorization', `Bearer ${token}`),
+    );
 
   let seq = 0;
   /** Un gasto válido; `patch` sobreescribe campos. */
@@ -589,7 +592,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         const res = await pay(e.id, { amount: 1000, method: 'CASH' }).expect(
           409,
         );
-        expect(messageOf(res)).toBe(CASH_SESSION_REQUIRED_MESSAGE);
+        expect(messageOf(res)).toBe(EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE);
         await call('post', '/expenses')
           .send(body({ payment: { amount: 1000, method: 'CASH' } }))
           .expect(409);

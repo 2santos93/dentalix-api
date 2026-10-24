@@ -62,7 +62,7 @@ export const PAYMENT_ALREADY_VOIDED_MESSAGE = 'El pago ya está anulado.';
 export const HAS_PAYMENTS_MESSAGE =
   'El gasto ya tiene pagos; anúlalo y regístralo de nuevo para cambiar la sede o la moneda.';
 /** Efectivo fuera de caja en una clínica con «exigir caja abierta» (R1). */
-export const CASH_SESSION_REQUIRED_MESSAGE =
+export const EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE =
   'Esta clínica registra el efectivo siempre en una caja abierta.';
 /** Pago o salida desde el cajón sin caja abierta de quien paga en la sede (R1). */
 export const OPEN_CASH_SESSION_REQUIRED_MESSAGE =

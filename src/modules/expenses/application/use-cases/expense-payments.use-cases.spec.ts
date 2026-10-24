@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
-  CASH_SESSION_REQUIRED_MESSAGE,
+  EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
   EXPENSE_NOT_FOUND_MESSAGE,
   FROM_CASH_METHOD_MESSAGE,
   FROM_CASH_PAID_ON_MESSAGE,
@@ -132,7 +132,7 @@ describe('pagos de un gasto (DX-274)', () => {
       kit.repo.cashRequireOpenSession = true;
       const e = kit.repo.seed({ amount: 100 });
       await expect(pay(e.id, { amount: 10, method: 'CASH' })).rejects.toThrow(
-        new ConflictException(CASH_SESSION_REQUIRED_MESSAGE),
+        new ConflictException(EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE),
       );
       expect(kit.repo.paymentsOf(e.id)).toHaveLength(0);
       await expect(
@@ -277,7 +277,7 @@ describe('pagos de un gasto (DX-274)', () => {
       const e = kit.repo.seed({ amount: 100 });
       link.openSession(ADMIN, LOCATION_ID);
       await expect(pay(e.id, { amount: 10, method: 'CASH' })).rejects.toThrow(
-        new ConflictException(CASH_SESSION_REQUIRED_MESSAGE),
+        new ConflictException(EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE),
       );
       await expect(
         pay(e.id, { amount: 10, method: 'CASH', fromCashSession: true }),

@@ -27,8 +27,10 @@
 -- DX-134: la FK nueva se añade con FORCE quitado en las dos tablas (hija
 -- cash_session_adjustments y referenciada expense_payments) y devuelto al
 -- final; la columna es nueva y está entera a NULL. El CHECK se añade NOT VALID
--- y se valida en la misma migración (SHARE UPDATE EXCLUSIVE, no bloquea
--- escrituras durante el recorrido).
+-- y se valida en la misma migración. La migración corre en UNA transacción:
+-- ADD COLUMN, DROP/ADD CONSTRAINT toman ACCESS EXCLUSIVE sobre
+-- cash_session_adjustments hasta el COMMIT, así que sí bloquean escrituras
+-- mientras dura (la tabla es pequeña: milisegundos).
 --
 -- Compatible hacia atrás: AÑADE una columna NULL, un índice y una FK; el CHECK
 -- nuevo acepta todo lo que aceptaba el anterior (la columna es NULL en las
