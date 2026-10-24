@@ -2084,6 +2084,21 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   `patients/infrastructure/patient-doc-lock.ts`) y buscan por la clave
   normalizada: «1.111.111» y «1111111» nunca dan dos pacientes, y el alta
   manual de un documento ya existente escrito distinto da 409.
+- **Clave del documento indexada (DX-287)**: la clave es
+  `patients."docKey"` (solo `[0-9A-Z]`: se quita todo lo demás y luego se
+  pasa a mayúsculas, sin depender de Unicode ni de la locale). La calcula
+  la BD con `public.dx_doc_key` en el trigger `patients_doc_key` (también
+  para las altas del código anterior) y es la misma regla que `docKey()`
+  (`patients/domain/doc-key.ts`). Alta, edición, dry-run, hoja de saldos y
+  cada bloque de la importación comparan `"docKey" = …` / `= ANY(…)` con el
+  índice parcial `patients_tenant_doc_key_live_idx ("tenantId","docKey")
+  WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
+  un Index Scan (con 60k pacientes, 0,03 ms por alta y ~2–4 ms por bloque
+  de 250, frente a 80 ms y 130 ms recorriendo la clínica). La expresión
+  `regexp_replace(upper(...))` no sirve en SQL de la app: no es LEAKPROOF y
+  bajo RLS no usa índice (lo vigila `test/invariants/doc-key-sql.spec.ts`).
+  El índice no es único: hay duplicados ambiguos anteriores a DX-107; el
+  candado de asesoría sigue siendo quien serializa las altas.
 - **Trabajo por bloques** (DX-085): 250 filas por transacción corta; la
   clínica sigue operando (solo se bloquean las filas del bloque, nunca la tabla
   `patients`). Idempotente (retoma desde las filas `PENDING`); al agotar los 5
@@ -2235,8 +2250,9 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   de DX-107) se borran sus saldos preparados (`patient_import_balance_rows`:
   documento e importe del fichero); un dry-run caducado los borra al caducar.
 - **Rendimiento del dry-run**: la búsqueda de documentos va por conjuntos
-  (`= ANY(keys)` agrupado, en patients y en las filas del lote): 5.000 claves
-  contra 20.000 pacientes en menos de 2 s (int).
+  (`= ANY(keys)` agrupado, en patients por `"docKey"` con su índice y en las
+  filas del lote con `public.dx_doc_key`): 5.000 claves contra 20.000
+  pacientes en menos de 2 s (int).
 - **Topes**: la suma de las filas de un paciente y moneda no puede pasar de
   `DECIMAL(14,2)` (error de la fila); una celda XLSX con ruido de coma
   flotante (`178500.00000000003`, `300000000.00000006`) se redondea a 2
@@ -2871,7 +2887,13 @@ dentalix_email_dispatcher`) o repón la política como en
   <columna> IS NULL`) para poder repetirla si se corta. Después, el índice
   `CONCURRENTLY` en otro fichero. Modelo:
   `20261020100100…100400_dx225_patients_phone_tail*`, con su tramo en
-  `test/owner-nosu/migrations-data.owner-spec.ts`.
+  `test/owner-nosu/migrations-data.owner-spec.ts`; y
+  `20261024100000…100300_dx287_patients_doc_key*`, que además recorre por
+  cursor (`id > último`, nunca `ORDER BY … LIMIT` sobre lo pendiente) y
+  termina con un `ANALYZE` de la columna (SHARE UPDATE EXCLUSIVE). Una
+  columna `GENERATED … STORED` nueva reescribe la tabla bajo ACCESS
+  EXCLUSIVE: en `patients`, 1,4 s con 65k pacientes (DX-287), así que ahí
+  va por trigger.
 - **Políticas con `NULLIF`: `app.current_tenant` puede llegar vacío**
   (DX-251, OPS-037): tras una transacción con `set_config(…, true)` la
   variable no vuelve a NULL, queda en `''` el resto de la sesión, y `migrate

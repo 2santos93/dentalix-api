@@ -844,4 +844,68 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect(items.map((i) => i.status)).not.toContain('VALIDATED');
     expect(items[0].id).toBe(two.id);
   });
+  it('DX-287: el documento ya guardado con otro formato es duplicado en el dry-run y al importar, y el alta manual da 409', async () => {
+    const create = (docType: string, docNumber: string) =>
+      as(api().post('/api/v1/patients'), b.adminToken, b).send({
+        docType,
+        docNumber,
+        firstName: 'Manual',
+        lastName: docNumber,
+        sex: 'F',
+      });
+    await create('CC', '55.123.456').expect(201);
+    await create('PASSPORT', 'ab 12 345').expect(201);
+    const dry = (
+      await upload(
+        '',
+        csvOf([
+          'CC;55123456;Ana;Mismo;;;;;', // 2: «55.123.456» ya existe
+          'PASAPORTE;AB-12345;Bea;Mismo;;;;;', // 3: «ab 12 345» ya existe
+          'CC;66.000.001;Nuevo;Paciente;;;;;', // 4: nuevo
+        ]),
+        'formatos.csv',
+        {},
+        b.adminToken,
+        b,
+      ).expect(201)
+    ).body as Batch;
+    expect(dry.totals).toEqual({
+      totalRows: 3,
+      validRows: 1,
+      duplicateRows: 2,
+      errorRows: 0,
+    });
+    expect(dry.preview.map((p) => [p.rowNumber, p.status])).toEqual([
+      [2, 'EXISTING'],
+      [3, 'EXISTING'],
+      [4, 'NEW'],
+    ]);
+    await as(
+      api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
+      b.adminToken,
+      b,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    expect((await getBatch(dry.id, b)).progress).toMatchObject({
+      processedRows: 3,
+      createdCount: 1,
+      skippedCount: 2,
+    });
+    // Un paciente vivo por clave, y la clave la guardó la BD (trigger).
+    const keys = await raw.$queryRaw<{ docKey: string; n: number }[]>`
+      SELECT "docKey", count(*)::int AS n FROM "patients"
+       WHERE "tenantId" = ${b.tenantId}::uuid AND "deletedAt" IS NULL
+         AND "docKey" IN ('55123456', 'AB12345', '66000001')
+       GROUP BY "docKey" ORDER BY "docKey"`;
+    expect(keys).toEqual([
+      { docKey: '55123456', n: 1 },
+      { docKey: '66000001', n: 1 },
+      { docKey: 'AB12345', n: 1 },
+    ]);
+    // Y el alta manual con el formato del archivo (o al revés) no duplica.
+    await create('CC', '55-123-456').expect(409);
+    await create('CC', '66000001').expect(409);
+  });
 });
