@@ -9,6 +9,7 @@ import {
   heldInClinicMessage,
   heldInClinicToday,
   planItemsClosedMessage,
+  reservationHolderView,
   reservedElsewhereMessage,
 } from './plan-item-reservation';
 
@@ -193,4 +194,127 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
     );
     expect(PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE).not.toMatch(/\d/);
   });
+});
+
+describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
+  const TZ = 'America/Bogota';
+  // 23/10/2026 15:00 en Bogotá.
+  const now = new Date('2026-10-23T20:00:00.000Z');
+  const holder = (status: AppointmentStatus, start: string) => ({
+    appointmentId: 'b1',
+    status,
+    start: new Date(start),
+    locationId: 'loc-norte',
+    locationName: 'Sede Norte',
+  });
+
+  it.each([
+    AppointmentStatus.ARRIVED,
+    AppointmentStatus.IN_CHAIR,
+    AppointmentStatus.READY_FOR_CHECKOUT,
+  ])(
+    'titular de hoy en la clínica (%s), sede permitida: heldInClinic con su hora y sede',
+    (status) => {
+      expect(
+        reservationHolderView(holder(status, '2026-10-23T14:05:00.000Z'), {
+          timeZone: TZ,
+          locationAllowed: true,
+          now,
+        }),
+      ).toEqual({
+        heldInClinic: true,
+        appointmentId: 'b1',
+        start: new Date('2026-10-23T14:05:00.000Z'),
+        locationId: 'loc-norte',
+        locationName: 'Sede Norte',
+        timeZone: TZ,
+      });
+    },
+  );
+
+  it('es la misma regla que el 409 de «Traer a esta cita» (heldInClinicToday)', () => {
+    const cases = [
+      holder(AppointmentStatus.ARRIVED, '2026-10-23T14:05:00.000Z'),
+      holder(AppointmentStatus.ARRIVED, '2026-10-22T22:00:00.000Z'),
+      holder(AppointmentStatus.IN_CHAIR, '2026-10-24T01:00:00.000Z'),
+      holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
+      holder(AppointmentStatus.CONFIRMED, '2026-10-23T21:00:00.000Z'),
+    ];
+    for (const h of cases)
+      expect(
+        reservationHolderView(h, { timeZone: TZ, locationAllowed: true, now })
+          ?.heldInClinic,
+      ).toBe(heldInClinicToday(h, TZ, now));
+  });
+
+  it('titular olvidada en la clínica de un día anterior: heldInClinic false («Traer» sigue)', () => {
+    expect(
+      reservationHolderView(
+        holder(AppointmentStatus.ARRIVED, '2026-10-22T22:00:00.000Z'),
+        { timeZone: TZ, locationAllowed: true, now },
+      ),
+    ).toMatchObject({ heldInClinic: false, appointmentId: 'b1' });
+  });
+
+  it('titular futura: heldInClinic false y el resto igual que antes', () => {
+    expect(
+      reservationHolderView(
+        holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
+        { timeZone: TZ, locationAllowed: true, now },
+      ),
+    ).toEqual({
+      heldInClinic: false,
+      appointmentId: 'b1',
+      start: new Date('2026-10-30T14:00:00.000Z'),
+      locationId: 'loc-norte',
+      locationName: 'Sede Norte',
+      timeZone: TZ,
+    });
+  });
+
+  it('el día es el de la zona de la sede de la titular', () => {
+    // 23/10 22:30 UTC: en Madrid ya es el 24/10, «ahora» es el 23/10.
+    expect(
+      reservationHolderView(
+        holder(AppointmentStatus.IN_CHAIR, '2026-10-23T22:30:00.000Z'),
+        { timeZone: 'Europe/Madrid', locationAllowed: true, now },
+      )?.heldInClinic,
+    ).toBe(false);
+  });
+
+  it('sede no permitida y titular de hoy en la clínica: heldInClinic sin cita, hora ni sede (DX-089)', () => {
+    expect(
+      reservationHolderView(
+        holder(AppointmentStatus.IN_CHAIR, '2026-10-23T14:05:00.000Z'),
+        { timeZone: TZ, locationAllowed: false, now },
+      ),
+    ).toEqual({
+      heldInClinic: true,
+      appointmentId: null,
+      start: null,
+      locationId: null,
+      locationName: null,
+      timeZone: null,
+    });
+  });
+
+  it.each([
+    ['futura', AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'],
+    [
+      'olvidada de otro día',
+      AppointmentStatus.ARRIVED,
+      '2026-10-22T22:00:00.000Z',
+    ],
+  ])(
+    'sede no permitida y titular %s: no se enseña (como en DX-273)',
+    (_label, status, start) => {
+      expect(
+        reservationHolderView(holder(status, start), {
+          timeZone: TZ,
+          locationAllowed: false,
+          now,
+        }),
+      ).toBeNull();
+    },
+  );
 });

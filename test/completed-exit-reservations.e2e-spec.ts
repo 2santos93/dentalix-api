@@ -50,6 +50,8 @@ interface ReservedElsewhere {
   planItemId: string;
   name: string;
   toothNumber: string;
+  /** DX-293: la titular es de hoy con el paciente en la clínica. */
+  heldInClinic: boolean;
   appointmentId: string;
   start: string;
   locationId: string;
@@ -480,6 +482,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
         planItemId: itemId,
         name: 'Implante',
         toothNumber: '36',
+        heldInClinic: false,
         appointmentId: futureId,
         start: futureStart.toISOString(),
         locationId,
