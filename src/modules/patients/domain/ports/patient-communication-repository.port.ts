@@ -44,6 +44,17 @@ export interface PatientCommunicationPatch {
   reminderOptOutSource?: ReminderOptOutSource | null;
 }
 
+/** El plan se evalúa dentro de la TX, sobre la fila del paciente bloqueada. */
+export type PatientCommunicationUpdate =
+  | PatientCommunicationPatch
+  | ((current: PatientCommunicationState) => PatientCommunicationPatch);
+
+export interface PatientCommunicationUpdateResult {
+  state: PatientCommunicationState;
+  /** Cambios de preferencias efectivos frente al estado protegido por el lock. */
+  changedFields: string[];
+}
+
 export const PATIENT_COMMUNICATION_REPOSITORY = Symbol(
   'PATIENT_COMMUNICATION_REPOSITORY',
 );
@@ -71,10 +82,10 @@ export interface PatientCommunicationRepository {
   locationCountry(): Promise<string | null>;
   /** Canal con el que nacen los pacientes de la clínica. */
   clinicDefaultChannel(): Promise<ContactChannel>;
-  /** Aplica el cambio y devuelve el estado nuevo (404 si ya no existe). */
+  /** Aplica bajo lock y devuelve estado/diff efectivos (404 si ya no existe). */
   update(
     patientId: string,
-    patch: PatientCommunicationPatch,
+    update: PatientCommunicationUpdate,
     invalidateOptOutLinksAt?: Date,
-  ): Promise<PatientCommunicationState>;
+  ): Promise<PatientCommunicationUpdateResult>;
 }

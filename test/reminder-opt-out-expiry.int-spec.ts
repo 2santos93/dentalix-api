@@ -489,3 +489,72 @@ test('I1 avisos append-only: app no puede actualizar, borrar ni truncar', async 
   ).rejects.toThrow();
   expect(await owner.reminderOptOutMatchWarning.count()).toBe(1);
 });
+
+test('reactivación devuelve cambios efectivos sobre estado bloqueado y conserva edición concurrente', async () => {
+  const old = await link();
+  const reached = barrier();
+  const resume = barrier();
+  const gatedPrisma = new Proxy(prisma, {
+    get(target, key) {
+      if (key === 'runWithTenant')
+        return (
+          fn: (
+            tx: import('@prisma/client').Prisma.TransactionClient,
+          ) => Promise<unknown>,
+        ) =>
+          target.runWithTenant(
+            async (tx) => {
+              reached.release();
+              await resume.promise;
+              return fn(tx);
+            },
+            { timeout: 15000 },
+          );
+      const value: unknown = Reflect.get(target, key);
+      return value;
+    },
+  });
+  const gatedComms = new PrismaPatientCommunicationRepository(
+    gatedPrisma,
+    context,
+  );
+  const pending = inTenant(() =>
+    gatedComms.update(
+      patient,
+      (current) => {
+        expect(current.reminderOptOutAt).toEqual(NOW);
+        expect(current).toMatchObject({
+          phone: '+573209876543',
+          contactChannel: 'NONE',
+        });
+        return patch;
+      },
+      NOW,
+    ),
+  );
+  try {
+    await reached.promise;
+    expect(
+      await inTenant(() =>
+        repo.optOut(patient, { source: 'LINK', at: NOW, linkId: old.id }),
+      ),
+    ).toBe(true);
+    await inTenant(() =>
+      comms.update(patient, { phone: '+573209876543', contactChannel: 'NONE' }),
+    );
+    resume.release();
+    const result = await pending;
+    expect(result.changedFields).toEqual(['reminderOptOutAt']);
+    expect(result.state).toMatchObject({
+      reminderOptOutAt: null,
+      reminderOptOutSource: null,
+      phone: '+573209876543',
+      contactChannel: 'NONE',
+    });
+    const unchanged = await inTenant(() => comms.update(patient, patch, NOW));
+    expect(unchanged.changedFields).toEqual([]);
+  } finally {
+    resume.release();
+    await pending;
+  }
+});

@@ -334,15 +334,47 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
     });
 
+    it('audita la reactivación efectiva de una baja concurrente posterior a lecturaACTIVE', async () => {
+      repo.add(ANA);
+      const originalUpdate = repo.update.bind(repo);
+      jest.spyOn(repo, 'update').mockImplementationOnce((...args) => {
+        repo.add(ANA, {
+          reminderOptOutAt: new Date(NOW.getTime() - 1000),
+          reminderOptOutSource: 'LINK',
+          phone: '+573209876543',
+          contactChannel: 'NONE',
+        });
+        return originalUpdate(...args);
+      });
+      const result = await update.execute(ANA, { reminderOptOut: false }, ctx);
+      expect(result).toMatchObject({
+        reminderOptOut: null,
+        phone: '+573209876543',
+        contactChannel: 'NONE',
+      });
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(lastAudit()).toMatchObject({
+        actor: { kind: 'user', userId: RECEPTION, role: 'RECEPTION' },
+        metadata: { origin: 'STAFF', changedFields: ['reminderOptOutAt'] },
+      });
+    });
+
+    it('no audita una reactivación que ya realizó otra petición antes del lock', async () => {
+      repo.add(ANA, { reminderOptOutAt: NOW, reminderOptOutSource: 'LINK' });
+      const originalUpdate = repo.update.bind(repo);
+      jest.spyOn(repo, 'update').mockImplementationOnce((...args) => {
+        repo.add(ANA);
+        return originalUpdate(...args);
+      });
+      await update.execute(ANA, { reminderOptOut: false }, ctx);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('reactivar invalida aunque lectura previa dijera activo, sin auditoría ficticia', async () => {
       repo.add(ANA);
       const write = jest.spyOn(repo, 'update');
       await update.execute(ANA, { reminderOptOut: false }, ctx);
-      expect(write).toHaveBeenCalledWith(
-        ANA,
-        { reminderOptOutAt: null, reminderOptOutSource: null },
-        NOW,
-      );
+      expect(write).toHaveBeenCalledWith(ANA, expect.any(Function), NOW);
       expect(audit.record).not.toHaveBeenCalled();
     });
 
@@ -350,11 +382,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       repo.add(ANA, { reminderOptOutAt: NOW, reminderOptOutSource: 'LINK' });
       const write = jest.spyOn(repo, 'update');
       const view = await update.execute(ANA, { reminderOptOut: false }, ctx);
-      expect(write).toHaveBeenCalledWith(
-        ANA,
-        { reminderOptOutAt: null, reminderOptOutSource: null },
-        NOW,
-      );
+      expect(write).toHaveBeenCalledWith(ANA, expect.any(Function), NOW);
       expect(view.reminderOptOut).toBeNull();
       expect(lastAudit().metadata.changedFields).toEqual(['reminderOptOutAt']);
     });
