@@ -3,7 +3,7 @@
 --
 -- DX-102 (audit_events particionada) exige un índice parcial
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType".
--- Va en su PROPIA migración, después de 20261023210000_dx279_enums, que añadió
+-- Va en su PROPIA migración, después de 20261024110000_dx279_enums, que añadió
 -- el valor.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.
