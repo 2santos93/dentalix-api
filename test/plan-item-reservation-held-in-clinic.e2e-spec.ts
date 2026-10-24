@@ -318,7 +318,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
     const holder = await startedToday(north.id);
     await putInClinic(holder.id, AppointmentStatus.IN_CHAIR);
     const today = await startedToday();
-    // Otra del mismo paciente, futura en Norte: sigue sin enseñarse (DX-273).
+    // Otro paciente con la reserva en una cita futura de Norte: sigue sin
+    // enseñarse (DX-273).
     const futureItem = await freshScenario();
     const futureToday = await futureItem.startedToday();
     const futureNorth = await futureItem.book(
