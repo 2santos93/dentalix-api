@@ -42,6 +42,7 @@ import { AccountStatementController } from '../account-statement/presentation/ac
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
 import { CancellationPolicyController } from '../cancellation-policies/presentation/cancellation-policy.controller';
+import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
@@ -847,6 +848,22 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     reason: 'CANCELLATION_POLICY_CHANGED',
   },
+  // DX-291: cargo por inasistencia o cancelación tardía y su condonación
+  // (sobre la cita; el motivo de la condonación nunca va a la metadata).
+  'POST /appointments/:id/cancellation-fee': {
+    action: 'CREATE',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'CANCELLATION_FEE_CHARGED',
+  },
+  'POST /appointments/:id/cancellation-fee/waive': {
+    action: 'UPDATE',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'CANCELLATION_FEE_WAIVED',
+  },
   'GET /reports/discounts': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN_ITEM',
@@ -1160,6 +1177,7 @@ const CONTROLLERS: Type[] = [
   ReceivablesController,
   DiscountPolicyController,
   CancellationPolicyController,
+  CancellationFeeController,
   DiscountReportController,
   CollectionsController,
   CashSessionsController,

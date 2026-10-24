@@ -31,6 +31,7 @@
  * DX-259: `S3_CONNECT_TIMEOUT_MS`, `S3_REQUEST_TIMEOUT_MS`, `S3_MAX_SOCKETS`,
  * `S3_MAX_ATTEMPTS` (cliente S3) y `UPLOAD_MAX_CONCURRENCY` (subidas que pasan
  * por la API a la vez en cada réplica).
+ * DX-291: `CANCELLATION_FEE_BLOCK_EPS_CO` (true | false; por defecto true).
  */
 
 import {
@@ -398,6 +399,17 @@ function auditProblems(env: Env): string[] {
   return problems;
 }
 
+/**
+ * DX-291: bloqueo del cargo por inasistencia a pacientes con EPS activa en
+ * sedes de Colombia. Lo decide la plataforma (no la clínica): `true` (por
+ * defecto) o `false`.
+ */
+function cancellationFeeProblems(env: Env): string[] {
+  const raw = str(env, 'CANCELLATION_FEE_BLOCK_EPS_CO');
+  if (raw == null || /^(true|false)$/i.test(raw.trim())) return [];
+  return ['CANCELLATION_FEE_BLOCK_EPS_CO debe ser "true" o "false".'];
+}
+
 /** DX-085: papel del proceso y ajustes de la cola de trabajos. */
 function jobsProblems(env: Env): string[] {
   const problems: string[] = [];
@@ -702,6 +714,7 @@ export function validateEnv(env: Env): Env {
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
+  problems.push(...cancellationFeeProblems(env));
   problems.push(...jobsProblems(env));
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));

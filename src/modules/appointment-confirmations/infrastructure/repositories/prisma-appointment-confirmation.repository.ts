@@ -6,7 +6,10 @@ import {
 } from '@prisma/client';
 import { enqueueWaitlistFromAppointment } from '../../../waitlist/infrastructure/waitlist-transitions';
 import { computeCancellationNotice } from '../../../cancellation-policies/domain/cancellation-policy';
-import { findCurrentPolicyInTx } from '../../../cancellation-policies/infrastructure/current-policy';
+import {
+  linkResponseBlock,
+  type LinkCancellationPolicy,
+} from '../../domain/link-cancellation-policy';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -70,6 +73,42 @@ function appointmentPatchFor(
 
 /** Fuerza el ROLLBACK de `respond` cuando la cita cambió bajo nuestros pies. */
 class StaleAppointmentError extends Error {}
+
+/** DX-291: fuerza el ROLLBACK cuando la política no deja registrar la respuesta. */
+class PolicyBlockError extends Error {
+  constructor(readonly outcome: 'POLICY_CHANGED' | 'ACK_REQUIRED') {
+    super(outcome);
+  }
+}
+
+/**
+ * DX-291: política VIGENTE de una sede (la de mayor versión), con el texto
+ * para el paciente, dentro de la transacción del llamador.
+ */
+async function currentLinkPolicy(
+  tx: Prisma.TransactionClient,
+  locationId: string,
+): Promise<LinkCancellationPolicy | null> {
+  const policy = await tx.cancellationPolicyVersion.findFirst({
+    where: { locationId },
+    orderBy: { version: 'desc' },
+    select: {
+      id: true,
+      version: true,
+      noticeHours: true,
+      patientText: true,
+      suggestedFee: true,
+      currency: true,
+    },
+  });
+  return policy
+    ? {
+        ...policy,
+        suggestedFee:
+          policy.suggestedFee === null ? null : policy.suggestedFee.toNumber(),
+      }
+    : null;
+}
 
 @Injectable()
 export class PrismaAppointmentConfirmationRepository implements AppointmentConfirmationRepository {
@@ -189,6 +228,10 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           appointment: appointment
             ? await this.toAppointment(tx, appointment)
             : null,
+          // DX-291: la política que verá el paciente, en la misma foto.
+          policy: appointment
+            ? await currentLinkPolicy(tx, appointment.locationId)
+            : null,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
@@ -206,34 +249,50 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
   }
 
   /**
-   * DX-279: el paciente cancela por el enlace: hora de la respuesta (la del
-   * servidor de BD), origen PATIENT_LINK y el aviso y si es tardía contra la
-   * política vigente de la sede de la cita. Sin motivo: el enlace no lo pide
-   * todavía (DX-291 añade el texto de la política y la aceptación). Si no
-   * hay que cancelar, el UPDATE condicional no cambia nada.
+   * DX-279/291: lo que la respuesta escribe por la política vigente de la
+   * sede de la cita. Cancelar guarda la hora de la respuesta (la del servidor
+   * de BD), origen PATIENT_LINK, el aviso y si es tardía (sin motivo: el
+   * enlace no lo pide); cancelar tarde sin aceptar la política, o con otra
+   * versión que la que vio el paciente, deshace todo (PolicyBlockError). Toda
+   * respuesta guarda la versión vigente como la comunicada al paciente. Si no
+   * hay que tocar la cita, el UPDATE condicional no cambia nada.
    */
-  private async patientCancellation(
+  private async policyPatch(
     tx: Prisma.TransactionClient,
-    appointmentId: string,
-    start: Date,
-    cancelledAt: Date,
+    input: RespondConfirmationInput,
+    respondedAt: Date,
   ): Promise<Prisma.AppointmentUpdateManyMutationInput> {
     const appointment = await tx.appointment.findFirstOrThrow({
-      where: { id: appointmentId },
+      where: { id: input.appointmentId },
       select: { locationId: true },
     });
-    const policy = await findCurrentPolicyInTx(tx, appointment.locationId);
+    const policy = await currentLinkPolicy(tx, appointment.locationId);
+    const cancelling =
+      input.response === AppointmentConfirmationResponse.CANCEL;
     const notice = computeCancellationNotice({
-      start,
-      cancelledAt,
+      start: input.expectedStart,
+      cancelledAt: respondedAt,
       byKind: 'PATIENT_LINK',
       noticeHours: policy?.noticeHours ?? null,
     });
+    const block = linkResponseBlock({
+      cancelling,
+      late: notice.lateCancellation,
+      acknowledgePolicy: input.acknowledgePolicy === true,
+      shownPolicyVersionId: input.shownPolicyVersionId,
+      currentPolicyId: policy?.id ?? null,
+    });
+    if (block) throw new PolicyBlockError(block);
     return {
-      cancelledAt,
-      cancelledByKind: 'PATIENT_LINK',
-      noticeMinutes: notice.noticeMinutes,
-      lateCancellation: notice.lateCancellation,
+      ...(policy ? { policyVersionId: policy.id } : {}),
+      ...(cancelling
+        ? {
+            cancelledAt: respondedAt,
+            cancelledByKind: 'PATIENT_LINK' as const,
+            noticeMinutes: notice.noticeMinutes,
+            lateCancellation: notice.lateCancellation,
+          }
+        : {}),
     };
   }
 
@@ -285,14 +344,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           },
           data: {
             ...appointmentPatchFor(input.response, claimed.respondedAt),
-            ...(input.response === AppointmentConfirmationResponse.CANCEL
-              ? await this.patientCancellation(
-                  tx,
-                  input.appointmentId,
-                  input.expectedStart,
-                  claimed.respondedAt,
-                )
-              : {}),
+            ...(await this.policyPatch(tx, input, claimed.respondedAt)),
           },
         });
         if (updated.count === 0) throw new StaleAppointmentError();
@@ -314,6 +366,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       });
     } catch (error) {
       if (error instanceof StaleAppointmentError) return 'STALE';
+      if (error instanceof PolicyBlockError) return error.outcome;
       throw error;
     }
   }

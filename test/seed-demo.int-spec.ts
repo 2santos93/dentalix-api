@@ -36,6 +36,8 @@ const raw = new PrismaClient({
 
 // Toda tabla con `tenantId`, en orden seguro para borrar (hijas primero).
 const TENANT_TABLES = [
+  // DX-291: cargos por inasistencia (hijos de appointments, ítems y políticas).
+  'cancellation_fees',
   // DX-273: salidas de COMPLETED (hijas de appointments).
   'appointment_status_reversals',
   'appointment_plan_items',
@@ -849,6 +851,43 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       },
     });
     expect(noShows).toBeGreaterThanOrEqual(2);
+    // DX-291: las incidencias tienen la política comunicada (se pueden cobrar).
+    const communicated = await raw.appointment.count({
+      where: {
+        tenantId,
+        patientId: late[0].patientId,
+        policyVersionId: policies[0].id,
+        OR: [{ status: 'NO_SHOW' }, { lateCancellation: true }],
+      },
+    });
+    expect(communicated).toBe(3);
+    // DX-291: esa paciente tiene EPS_CO (Sura) en una sede de Colombia, así
+    // que su cargo sale bloqueado (Ley 1438 art. 55); otra inasistencia con
+    // la política comunicada, de un paciente SIN EPS_CO, sí se puede cobrar.
+    const epsCo = {
+      deletedAt: null,
+      payer: { type: 'EPS_CO' as const },
+    };
+    expect(
+      await raw.patientCoverage.count({
+        where: { tenantId, patientId: late[0].patientId, ...epsCo },
+      }),
+    ).toBeGreaterThan(0);
+    const chargeable = await raw.appointment.findMany({
+      where: {
+        tenantId,
+        status: 'NO_SHOW',
+        policyVersionId: policies[0].id,
+        patientId: { not: late[0].patientId },
+      },
+      select: { patientId: true },
+    });
+    expect(chargeable).toHaveLength(1);
+    expect(
+      await raw.patientCoverage.count({
+        where: { tenantId, patientId: chargeable[0].patientId, ...epsCo },
+      }),
+    ).toBe(0);
     // Las cancelaciones del calendario llevan origen y motivo, y no son tardías.
     const cancelled = await raw.appointment.findMany({
       where: { tenantId, status: 'CANCELLED', lateCancellation: false },

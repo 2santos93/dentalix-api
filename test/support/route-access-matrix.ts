@@ -367,6 +367,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // gestiona la agenda (cada uno con sus sedes, DX-089).
   'GET /appointments/:id/cancellation-preview': EVERY_ROLE,
   'GET /patients/:id/attendance-summary': EVERY_ROLE,
+  // Cargo por inasistencia o cancelación tardía (DX-291, loop/informes/
+  // DX-291.md): ADMIN y RECEPTION pasan el guard; RECEPTION solo escribe si
+  // la política vigente de la sede lo permite (403 del caso de uso).
+  'GET /appointments/:id/cancellation-fee': roles('ADMIN', 'RECEPTION'),
+  'POST /appointments/:id/cancellation-fee': roles('ADMIN', 'RECEPTION'),
+  'POST /appointments/:id/cancellation-fee/waive': roles('ADMIN', 'RECEPTION'),
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,
@@ -560,6 +566,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // para leer; guardar crea la versión siguiente.
   'GET /locations/:id/cancellation-policy': ADMIN_ONLY,
   'POST /locations/:id/cancellation-policy': ADMIN_ONLY,
+  // DX-291: vista previa del recordatorio con la política vigente.
+  'GET /locations/:id/cancellation-policy/email-preview': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)

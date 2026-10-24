@@ -88,6 +88,22 @@ export interface AppointmentReminderEmailVars {
   confirmUrl: string | null;
   /** Enlace de baja de los recordatorios (DX-128), si se emitió uno. */
   unsubscribeUrl: string | null;
+  /**
+   * DX-291: la variable `{politica_cancelacion}` del recordatorio: la política
+   * VIGENTE de la sede al enviarlo (horas de aviso, texto de la clínica e
+   * importe del cargo ya formateado). null/ausente = la sede no tiene
+   * política (o el email es anterior a DX-291) y el bloque no sale.
+   */
+  cancellationPolicy?: ReminderCancellationPolicyVars | null;
+}
+
+/** DX-291: el bloque de la política de cancelación del recordatorio. */
+export interface ReminderCancellationPolicyVars {
+  noticeHours: number;
+  /** Texto de la clínica para el paciente (puede ir vacío). */
+  text: string;
+  /** Importe del cargo ya formateado («50.000 COP»), o null si no hay. */
+  feeLabel: string | null;
 }
 
 /**

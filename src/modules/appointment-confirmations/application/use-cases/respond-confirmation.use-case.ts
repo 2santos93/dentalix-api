@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   Inject,
@@ -15,6 +16,19 @@ import {
   PublicConfirmationView,
   toPublicConfirmationView,
 } from '../public-confirmation-view';
+import {
+  LINK_POLICY_MESSAGES,
+  isLateLinkCancellation,
+  linkResponseBlock,
+} from '../../domain/link-cancellation-policy';
+
+/** DX-291: lo que la página manda además de la acción. */
+export interface RespondPolicyInput {
+  /** El paciente marcó «Acepto la política» (cancelar tarde lo exige). */
+  acknowledgePolicy?: boolean;
+  /** Versión de la política que mostró la página (`null` = ninguna). */
+  policyVersionId?: string | null;
+}
 
 const ALREADY_RESPONDED = 'Este enlace ya se usó para responder';
 const EXPIRED = 'Este enlace ya no es válido';
@@ -39,8 +53,9 @@ export class RespondConfirmationUseCase {
   async execute(
     token: string,
     action: ConfirmationAction,
+    policyInput: RespondPolicyInput = {},
   ): Promise<PublicConfirmationView> {
-    const { confirmation, appointment } = await findConfirmationByToken(
+    const { confirmation, appointment, policy } = await findConfirmationByToken(
       this.tenantContext,
       this.repo,
       token,
@@ -49,6 +64,20 @@ export class RespondConfirmationUseCase {
     const status = confirmationState(confirmation, appointment, now);
     if (status === 'RESPONDED') throw new ConflictException(ALREADY_RESPONDED);
     if (status === 'EXPIRED' || !appointment) throw new GoneException(EXPIRED);
+
+    const acknowledgePolicy = policyInput.acknowledgePolicy === true;
+    // Comprobación temprana con la foto leída; el repositorio la repite con
+    // la cita bloqueada y la hora de la respuesta.
+    this.assertPolicy(
+      linkResponseBlock({
+        cancelling: action === 'cancel',
+        late: isLateLinkCancellation(appointment.start, now, policy),
+        acknowledgePolicy,
+        shownPolicyVersionId: policyInput.policyVersionId,
+        currentPolicyId: policy?.id ?? null,
+      }),
+      policy?.noticeHours ?? 0,
+    );
 
     const response = ACTION_TO_RESPONSE[action];
     // El repo vuelve a comprobar todo en la escritura (un solo uso y "la cita
@@ -61,10 +90,21 @@ export class RespondConfirmationUseCase {
       now,
       expectedStart: confirmation.appointmentStart,
       expectedStatus: confirmation.appointmentStatus,
+      acknowledgePolicy,
+      shownPolicyVersionId: policyInput.policyVersionId,
     });
     if (outcome === 'ALREADY_USED')
       throw new ConflictException(ALREADY_RESPONDED);
     if (outcome === 'STALE') throw new GoneException(EXPIRED);
+    if (outcome === 'POLICY_CHANGED' || outcome === 'ACK_REQUIRED') {
+      // La política cambió entre la lectura y la escritura: se relee.
+      const fresh = await findConfirmationByToken(
+        this.tenantContext,
+        this.repo,
+        token,
+      );
+      this.assertPolicy(outcome, fresh.policy?.noticeHours ?? 0);
+    }
 
     const clinic = await this.repo.findClinicBranding();
     return toPublicConfirmationView(
@@ -73,5 +113,17 @@ export class RespondConfirmationUseCase {
       appointment,
       clinic,
     );
+  }
+
+  private assertPolicy(
+    block: 'POLICY_CHANGED' | 'ACK_REQUIRED' | null,
+    noticeHours: number,
+  ): void {
+    if (block === 'POLICY_CHANGED')
+      throw new ConflictException(LINK_POLICY_MESSAGES.policyChanged);
+    if (block === 'ACK_REQUIRED')
+      throw new BadRequestException(
+        LINK_POLICY_MESSAGES.acknowledgeRequired(noticeHours),
+      );
   }
 }

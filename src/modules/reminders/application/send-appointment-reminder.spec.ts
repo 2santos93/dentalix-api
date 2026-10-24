@@ -36,6 +36,7 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     },
     responsibles: [],
     settings: { enabled: true, leadHours: [48, 2] },
+    cancellationPolicy: null,
     ...over,
   };
 }
@@ -136,6 +137,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
         providerName: 'Dra. Gómez',
         confirmUrl: 'https://demo.dentalix.app/confirmar/tok_123',
         unsubscribeUrl: 'https://demo.dentalix.app/baja/opt_tok',
+        cancellationPolicy: null,
       },
     });
     expect(optOutLinks.issue).toHaveBeenCalledWith(PATIENT);
@@ -147,6 +149,44 @@ describe('SendAppointmentReminder (DX-026)', () => {
         sentAt: NOW,
       }),
     ]);
+  });
+
+  it('DX-291: lleva la política vigente de la sede ({politica_cancelacion}) y deja constancia de la versión enviada', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        cancellationPolicy: {
+          id: 'pol-v3',
+          version: 3,
+          noticeHours: 24,
+          patientText: 'Avísanos con tiempo.',
+          suggestedFee: 50000,
+          currency: 'COP',
+        },
+      }),
+    );
+    await handler.handle(payload);
+
+    const call = email.enqueue.mock.calls[0] as [
+      { vars: { cancellationPolicy: unknown } },
+    ];
+    expect(call[0].vars.cancellationPolicy).toEqual({
+      noticeHours: 24,
+      text: 'Avísanos con tiempo.',
+      feeLabel: expect.stringContaining('50.000') as unknown,
+    });
+    expect(repo.reminders[0]).toMatchObject({
+      status: 'SENT',
+      policyVersionId: 'pol-v3',
+    });
+    expect(repo.appointmentPolicyVersions.get(APPT)).toBe('pol-v3');
+  });
+
+  it('DX-291: sin política en la sede no hay bloque ni versión', async () => {
+    repo.contexts.set(APPT, context());
+    await handler.handle(payload);
+    expect(repo.reminders[0].policyVersionId).toBeUndefined();
+    expect(repo.appointmentPolicyVersions.size).toBe(0);
   });
 
   const mother = {
