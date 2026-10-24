@@ -28,7 +28,7 @@ const FEE_SELECT = {
   waiveReason: true,
   policyVersionId: true,
   createdAt: true,
-  planItem: { select: { planId: true } },
+  planItem: { select: { planId: true, deletedAt: true } },
   createdBy: { select: { fullName: true } },
 } as const satisfies Prisma.CancellationFeeSelect;
 
@@ -44,6 +44,7 @@ function toRecord(fee: SelectedFee): CancellationFeeRecord {
     currency: fee.currency,
     planId: fee.planItem?.planId ?? null,
     planItemId: fee.planItemId,
+    planItemRemoved: fee.planItem?.deletedAt != null,
     waiveReason: fee.waiveReason,
     policyVersionId: fee.policyVersionId,
     createdAt: fee.createdAt,

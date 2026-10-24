@@ -17,6 +17,11 @@ export interface CancellationFeeRecord {
   currency: string | null;
   planId: string | null;
   planItemId: string | null;
+  /**
+   * El ítem del cargo se quitó del plan (soft delete): el cargo quedó anulado
+   * y ya no hay nada que cobrar. La decisión de la cita sigue siendo única.
+   */
+  planItemRemoved: boolean;
   waiveReason: string | null;
   policyVersionId: string | null;
   createdAt: Date;

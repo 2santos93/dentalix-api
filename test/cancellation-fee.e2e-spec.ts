@@ -42,6 +42,7 @@ interface FeeView {
     planId: string | null;
     planItemId: string | null;
     waiveReason: string | null;
+    planItemRemoved: boolean;
   } | null;
 }
 
@@ -67,6 +68,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         auth(request(server).post(`/api/v1${path}`)).send(body),
       patch: (path: string, body: object) =>
         auth(request(server).patch(`/api/v1${path}`)).send(body),
+      delete: (path: string) => auth(request(server).delete(`/api/v1${path}`)),
     };
   }
   const admin = () => api(a, a.adminToken);
@@ -336,7 +338,28 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
           .post(`/appointments/${noShow}/cancellation-fee`)
           .expect(201)
       ).body as FeeView;
-      expect(second.fee).toMatchObject({ planId, amount: 50000 });
+      expect(second.fee).toMatchObject({
+        planId,
+        amount: 50000,
+        planItemRemoved: false,
+      });
+
+      // El ítem no admite descuento: para anular un cargo generado por error
+      // se quita del plan («Quitar»). La vista lo dice (ya no hay nada que
+      // cobrar) y la decisión sigue siendo única: ni otro cargo ni condonar.
+      await admin()
+        .delete(`/treatment-plans/${planId}/items/${second.fee!.planItemId}`)
+        .expect(200);
+      const removed = (
+        await admin()
+          .get(`/appointments/${noShow}/cancellation-fee`)
+          .expect(200)
+      ).body as FeeView;
+      expect(removed.status).toBe('CHARGED');
+      expect(removed.fee).toMatchObject({ planItemRemoved: true });
+      await admin()
+        .post(`/appointments/${noShow}/cancellation-fee`)
+        .expect(409);
 
       const events = await raw.auditEvent.findMany({
         where: { tenantId: a.tenantId, resourceId: id },

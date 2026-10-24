@@ -1750,8 +1750,12 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `ADM-CANCELACION` del catálogo de la clínica, sin diente, `completedAt` y
   sede de la cita, sin profesional) con el importe sugerido o menos (más: 400).
   Sale en el estado de cuenta y se cobra con `POST /treatment-plans/:id/payments`
-  y su recibo consecutivo (DX-136). Condonar (antes de cobrar) deja la
-  decisión con su motivo. 409 en español: no es inasistencia ni tardía, «No
+  y su recibo consecutivo (DX-136). Condonar (antes de generar el cargo) deja
+  la decisión con su motivo. El ítem no admite descuento (`allowDiscount =
+  false`, y un plan aceptado no se vuelve a descontar, DX-204): un cargo
+  generado por error se anula quitando el ítem del plan («Quitar», soft
+  delete); la vista lo devuelve con `fee.planItemRemoved = true` y la cita
+  conserva su única decisión. 409 en español: no es inasistencia ni tardía, «No
   consta que el paciente fuera informado de la política» (sin
   `policyVersionId`), la versión comunicada no tiene importe, cobertura
   `EPS_CO` vigente (día civil de la sede) en una sede de Colombia (Ley 1438
@@ -1778,7 +1782,10 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   del recordatorio con la marca de la clínica y la política vigente (paciente
   y profesional de ejemplo). No envía nada.
 - **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
-  Arango tienen la política comunicada: «Generar cargo» funciona como ADMIN.
+  Arango tienen la política comunicada, pero ella tiene EPS_CO (Sura) y su
+  cargo sale bloqueado (Ley 1438): sirve para ver el 409. La inasistencia de
+  Jorge Eduardo Ramírez Ospina (hace 8 días, sin EPS) también tiene la
+  política comunicada: ahí «Generar cargo» funciona como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
 
