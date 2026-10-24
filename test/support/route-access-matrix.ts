@@ -408,6 +408,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/coverages': EVERY_ROLE,
   'PATCH /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
   'DELETE /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
+  // SEC-049 (loop/informes/SEC-049.md): verificar el nº de afiliado, solo ADMIN.
+  'POST /patients/:patientId/coverages/:coverageId/verification': ADMIN_ONLY,
   // «Buscar hueco», bloqueos y pendientes (DX-122, loop/informes/DX-122.md):
   // leer y agendar, quien agenda; los bloqueos los escriben ADMIN, recepción y
   // el odontólogo (solo su agenda: 403 del caso de uso), no la asistente.

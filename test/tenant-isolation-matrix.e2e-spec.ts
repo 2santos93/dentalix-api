@@ -710,6 +710,7 @@ async function seedBExtras(
   });
   const coverage = await create(app, b, `/patients/${patientId}/coverages`, {
     payerId: payer.id,
+    memberNumber: 'EMP-00042',
   });
   const priceList = await create(app, b, '/price-lists', {
     name: 'Lista de B',
@@ -1492,6 +1493,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /patients/:patientId/coverages/:coverageId',
       verb: 'delete',
       path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/coverages/:coverageId/verification',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/coverages/${a.coverageId}/verification`,
+      body: () => ({ checkedMemberNumber: 'AFI-A-0001' }),
       status: 404,
     },
     // --- convenio del paciente (DX-105) ---

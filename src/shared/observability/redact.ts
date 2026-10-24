@@ -4,9 +4,10 @@ export const REDACTED = '[REDACTED]';
  * Claves cuyo valor nunca llega al log (DX-023): credenciales de la petición
  * (Authorization, Cookie, Set-Cookie) y cualquier contraseña, token, secreto o
  * clave de API, se llame como se llame (`refreshToken`, `currentPassword`...).
+ * SEC-049: y el nº de afiliado de una cobertura, que es un dato personal.
  */
 const SENSITIVE_KEY =
-  /^(authorization|proxy-authorization|cookie|set-cookie)$|password|token|secret|api[-_]?key/i;
+  /^(authorization|proxy-authorization|cookie|set-cookie)$|password|token|secret|api[-_]?key|member[-_]?number/i;
 
 /** Copia de `value` con los valores sensibles reemplazados por `[REDACTED]`. */
 export function redactSensitive(value: unknown): unknown {

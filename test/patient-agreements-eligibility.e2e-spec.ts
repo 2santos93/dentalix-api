@@ -135,10 +135,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       case 'viva':
         return post(clinic, `/api/v1/patients/${patientId}/coverages`, {
           payerId,
+          memberNumber: '1020304050',
         });
       case 'vencida':
         return post(clinic, `/api/v1/patients/${patientId}/coverages`, {
           payerId,
+          memberNumber: '1020304050',
           validFrom: dayFromNow(-60),
           validTo: dayFromNow(-5),
         });
@@ -205,7 +207,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     foreignCoverage = await post(
       other,
       `/api/v1/patients/${foreignPatient}/coverages`,
-      { payerId: foreignPayer },
+      { payerId: foreignPayer, memberNumber: '1020304050' },
     );
 
     crown = await post(clinic, '/api/v1/catalog/items', {

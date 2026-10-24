@@ -738,6 +738,137 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     });
   });
 
+  describe('verificación de la cobertura (SEC-049)', () => {
+    const repo = new PrismaPatientCoverageRepository(prisma, tenantContext);
+    const admin = randomUUID();
+    const editor = randomUUID();
+    const inA = <T>(fn: () => Promise<T>) => tenantContext.run(a.tenantId, fn);
+
+    async function seedCoverage(memberNumber: string) {
+      const patientId = (
+        await raw.patient.create({
+          data: {
+            tenantId: a.tenantId,
+            firstName: 'Verifica',
+            lastName: 'Int',
+          },
+        })
+      ).id;
+      // Los bloques del relleno borran lo sembrado: pagador propio.
+      const payerId = (
+        await raw.payer.create({
+          data: {
+            tenantId: a.tenantId,
+            name: `Verifica ${patientId}`,
+            type: 'EMPRESA',
+          },
+        })
+      ).id;
+      const row = await raw.patientCoverage.create({
+        data: coverage(a, patientId, {
+          payerId,
+          memberNumber,
+          isPrimary: true,
+        }),
+      });
+      return { patientId, payerId, id: row.id };
+    }
+
+    it('CHECK: quién verificó y cuándo, los dos o ninguno', async () => {
+      const { id } = await seedCoverage('A1234');
+      await expect(
+        raw.patientCoverage.update({
+          where: { id },
+          data: { verifiedById: admin },
+        }),
+      ).rejects.toThrow(/patient_coverages_verified_check/);
+      await expect(
+        raw.patientCoverage.update({
+          where: { id },
+          data: { verifiedAt: new Date() },
+        }),
+      ).rejects.toThrow(/patient_coverages_verified_check/);
+      await raw.patientCoverage.update({
+        where: { id },
+        data: { verifiedById: admin, verifiedAt: new Date() },
+      });
+    });
+
+    it('otra clínica no la verifica (RLS): null y la fila no cambia', async () => {
+      const { id, payerId } = await seedCoverage('A1234');
+      await expect(
+        tenantContext.run(b.tenantId, () =>
+          repo.verify(id, {
+            checkedMemberNumber: 'A1234',
+            expectedPayerId: payerId,
+            verifiedById: admin,
+          }),
+        ),
+      ).resolves.toBeNull();
+      const row = await raw.patientCoverage.findUniqueOrThrow({
+        where: { id },
+      });
+      expect(row.verifiedAt).toBeNull();
+    });
+
+    it('si el pagador cambió mientras el ADMIN la revisaba: 409 y sin verificar', async () => {
+      const { id, payerId } = await seedCoverage('A1234');
+      const other = (
+        await raw.payer.create({
+          data: { tenantId: a.tenantId, name: `Otro ${id}`, type: 'OTRO' },
+        })
+      ).id;
+      await raw.patientCoverage.update({
+        where: { id },
+        data: { payerId: other },
+      });
+      await expect(
+        inA(() =>
+          repo.verify(id, {
+            checkedMemberNumber: 'A1234',
+            expectedPayerId: payerId,
+            verifiedById: admin,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      const row = await raw.patientCoverage.findUniqueOrThrow({
+        where: { id },
+      });
+      expect(row.verifiedAt).toBeNull();
+    });
+
+    it('verificar a la vez que otro cambia el nº: nunca queda verificado un nº que el ADMIN no vio', async () => {
+      for (let round = 0; round < 8; round++) {
+        const { id, payerId } = await seedCoverage('A1234');
+        const [verified, edited] = await Promise.allSettled([
+          inA(() =>
+            repo.verify(id, {
+              checkedMemberNumber: 'A1234',
+              expectedPayerId: payerId,
+              verifiedById: admin,
+            }),
+          ),
+          inA(() =>
+            repo.update(id, { memberNumber: 'B5678', updatedById: editor }),
+          ),
+        ]);
+        expect(edited.status).toBe('fulfilled');
+        const row = await raw.patientCoverage.findUniqueOrThrow({
+          where: { id },
+        });
+        expect(row).toMatchObject({
+          memberNumber: 'B5678',
+          verifiedAt: null,
+          verifiedById: null,
+          declaredById: editor,
+        });
+        if (verified.status === 'rejected') {
+          expect(verified.reason).toMatchObject({ status: 409 });
+        }
+      }
+    });
+  });
+
   it('los FORCE se restauran tras el relleno', async () => {
     const rows = await raw.$queryRaw<{ relname: string; force: boolean }[]>`
       SELECT relname, relforcerowsecurity AS force FROM pg_class

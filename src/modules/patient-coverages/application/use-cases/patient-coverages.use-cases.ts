@@ -9,10 +9,13 @@ import {
   PAYER_REPOSITORY,
   type PayerRepository,
 } from '../../../payers/domain/ports/payer-repository.port';
+import type { PayerType } from '@prisma/client';
 import {
   COVERAGE_NOT_FOUND_MESSAGE,
   COVERAGE_PAYER_NOT_FOUND_MESSAGE,
   COVERAGE_PRIMARY_REQUIRED_MESSAGE,
+  COVERAGE_VERIFY_INTERNAL_MESSAGE,
+  COVERAGE_VERIFY_NO_NUMBER_MESSAGE,
   PATIENT_NOT_FOUND_MESSAGE,
   PAYER_INACTIVE_MESSAGE,
   coverageStatus,
@@ -21,6 +24,12 @@ import {
   type CoverageStatus,
 } from '../../domain/coverage-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
+import {
+  memberNumberChanged,
+  memberNumberError,
+  normalizeMemberNumber,
+  requiresMemberNumber,
+} from '../../domain/member-number-rules';
 import {
   PATIENT_COVERAGE_REPOSITORY,
   type PatientCoverageRepository,
@@ -95,6 +104,12 @@ function assertDates(from: string | null, to: string | null): void {
   if (error) throw new BadRequestException(error);
 }
 
+/** SEC-049: nº obligatorio y con formato si el pagador es externo (400). */
+function assertMemberNumber(type: PayerType, value: string | null): void {
+  const error = memberNumberError(type, value);
+  if (error) throw new BadRequestException(error);
+}
+
 /** Coberturas vivas del paciente (principal primero) con su estado a hoy. */
 @Injectable()
 export class ListPatientCoveragesUseCase {
@@ -115,8 +130,9 @@ export class ListPatientCoveragesUseCase {
 }
 
 /**
- * Alta de una cobertura: pagador vivo y activo de la clínica, vigencia válida
- * y hasta 5 por paciente. La primera viva es principal aunque no se pida;
+ * Alta de una cobertura: pagador vivo y activo de la clínica, vigencia válida,
+ * nº de afiliado obligatorio con un pagador externo (SEC-049) y hasta 5 por
+ * paciente. Queda declarada por quien la crea y sin verificar. La primera viva es principal aunque no se pida;
  * `isPrimary: true` en otra desmarca la anterior (una transacción).
  */
 @Injectable()
@@ -137,13 +153,15 @@ export class CreatePatientCoverageUseCase {
     const validFrom = input.validFrom ?? null;
     const validTo = input.validTo ?? null;
     assertDates(validFrom, validTo);
-    await resolvePayer(this.payers, input.payerId, true);
+    const payer = await resolvePayer(this.payers, input.payerId, true);
+    const memberNumber = normalizeMemberNumber(input.memberNumber);
+    assertMemberNumber(payer.type, memberNumber);
 
     const created = await this.repo.create({
       patientId,
       payerId: input.payerId,
       planName: normalizeCoverageText(input.planName),
-      memberNumber: normalizeCoverageText(input.memberNumber),
+      memberNumber,
       policyHolderName: normalizeCoverageText(input.policyHolderName),
       validFrom,
       validTo,
@@ -162,6 +180,10 @@ export class CreatePatientCoverageUseCase {
  * pagador ya desactivado no estorba. La vigencia se valida sobre el resultado
  * (lo enviado sobre lo guardado). `isPrimary: true` la hace principal;
  * `false` sobre la principal se rechaza: hay que marcar otra.
+ *
+ * SEC-049: si cambia el pagador o el nº de afiliado, el resultado debe cumplir
+ * el nº obligatorio del pagador (400), y el repositorio borra la verificación.
+ * Una cobertura anterior sin nº se sigue editando en lo demás sin pedirlo.
  */
 @Injectable()
 export class UpdatePatientCoverageUseCase {
@@ -186,11 +208,26 @@ export class UpdatePatientCoverageUseCase {
       input.validTo === undefined ? current.validTo : input.validTo;
     assertDates(nextFrom, nextTo);
 
-    if (input.payerId !== undefined) {
-      await resolvePayer(
-        this.payers,
-        input.payerId,
-        input.payerId !== current.payer.id,
+    const payer =
+      input.payerId === undefined
+        ? current.payer
+        : await resolvePayer(
+            this.payers,
+            input.payerId,
+            input.payerId !== current.payer.id,
+          );
+    const memberNumber =
+      input.memberNumber === undefined
+        ? undefined
+        : normalizeMemberNumber(input.memberNumber);
+    if (
+      payer.id !== current.payer.id ||
+      (memberNumber !== undefined &&
+        memberNumberChanged(current.memberNumber, memberNumber))
+    ) {
+      assertMemberNumber(
+        payer.type,
+        memberNumber === undefined ? current.memberNumber : memberNumber,
       );
     }
     if (input.isPrimary === false && current.isPrimary) {
@@ -203,10 +240,7 @@ export class UpdatePatientCoverageUseCase {
         input.planName === undefined
           ? undefined
           : normalizeCoverageText(input.planName),
-      memberNumber:
-        input.memberNumber === undefined
-          ? undefined
-          : normalizeCoverageText(input.memberNumber),
+      memberNumber,
       policyHolderName:
         input.policyHolderName === undefined
           ? undefined
@@ -222,6 +256,45 @@ export class UpdatePatientCoverageUseCase {
       updatedById,
     });
     const saved = await this.repo.findById(patientId, coverageId);
+    if (!saved) throw new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE);
+    return withStatus(saved, await this.repo.clinicToday(this.clock()));
+  }
+}
+
+/**
+ * SEC-049: un ADMIN verifica la cobertura de un pagador externo (comprobó el
+ * nº de afiliado con el carné o el pagador). Con eso, cualquier rol puede
+ * asignar el convenio de ese pagador con ella. `checkedMemberNumber` es el nº
+ * que el ADMIN tenía delante: si ya no es el guardado, o cambió el pagador
+ * entretanto, 409 y nada cambia.
+ * Volver a verificar actualiza quién y cuándo.
+ */
+@Injectable()
+export class VerifyPatientCoverageUseCase {
+  constructor(
+    @Inject(PATIENT_COVERAGE_REPOSITORY)
+    private readonly repo: PatientCoverageRepository,
+    @Inject(COVERAGES_CLOCK) private readonly clock: () => Date,
+  ) {}
+
+  async execute(
+    patientId: string,
+    coverageId: string,
+    checkedMemberNumber: string,
+    verifiedById: string,
+  ): Promise<PatientCoverageView> {
+    const current = await loadCoverage(this.repo, patientId, coverageId);
+    if (!requiresMemberNumber(current.payer.type)) {
+      throw new BadRequestException(COVERAGE_VERIFY_INTERNAL_MESSAGE);
+    }
+    if (current.memberNumber === null) {
+      throw new BadRequestException(COVERAGE_VERIFY_NO_NUMBER_MESSAGE);
+    }
+    const saved = await this.repo.verify(coverageId, {
+      checkedMemberNumber,
+      expectedPayerId: current.payer.id,
+      verifiedById,
+    });
     if (!saved) throw new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE);
     return withStatus(saved, await this.repo.clinicToday(this.clock()));
   }

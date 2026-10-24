@@ -153,13 +153,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'RESPONSIBLE_PARTY_REMOVED',
   },
   // DX-153: coberturas del paciente; motivo y nombres de campo, nunca el número
-  // de afiliado ni el titular.
+  // de afiliado ni el titular. SEC-049: alta, cambio y verificación llevan el
+  // tipo de pagador, los 4 últimos del nº y si está verificada.
   'POST /patients/:patientId/coverages': {
     action: 'UPDATE',
     resource: 'PATIENT',
     resourceId: P,
     patient: P,
-    reason: 'COVERAGE_ADDED',
+    reason: 'COVERAGE_CREATED',
+    coverage: true,
   },
   'PATCH /patients/:patientId/coverages/:coverageId': {
     action: 'UPDATE',
@@ -167,6 +169,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: P,
     patient: P,
     reason: 'COVERAGE_CHANGED',
+    coverage: true,
+  },
+  'POST /patients/:patientId/coverages/:coverageId/verification': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'COVERAGE_VERIFIED',
+    coverage: true,
   },
   'DELETE /patients/:patientId/coverages/:coverageId': {
     action: 'UPDATE',

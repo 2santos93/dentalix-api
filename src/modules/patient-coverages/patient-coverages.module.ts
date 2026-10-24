@@ -10,6 +10,7 @@ import {
   DeletePatientCoverageUseCase,
   ListPatientCoveragesUseCase,
   UpdatePatientCoverageUseCase,
+  VerifyPatientCoverageUseCase,
 } from './application/use-cases/patient-coverages.use-cases';
 import { PatientCoverageFlags } from './application/patient-coverage-flags';
 import { PATIENT_COVERAGE_REPOSITORY } from './domain/ports/patient-coverage-repository.port';
@@ -29,6 +30,7 @@ import { PrismaPatientCoverageRepository } from './infrastructure/repositories/p
     CreatePatientCoverageUseCase,
     UpdatePatientCoverageUseCase,
     DeletePatientCoverageUseCase,
+    VerifyPatientCoverageUseCase,
     PatientCoverageFlags,
     TokenService,
     TenantContextInterceptor,

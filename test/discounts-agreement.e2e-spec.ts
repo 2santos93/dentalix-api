@@ -179,11 +179,19 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       percent: 100,
     });
 
-    // Recepción asigna el convenio de Sura con la cobertura del paciente.
+    // Recepción registra la cobertura de Sura, el ADMIN la verifica (SEC-049)
+    // y recepción asigna el convenio con ella.
     const suraPatient = await createPatient('Sura');
-    const coverageId = await create(`/patients/${suraPatient}/coverages`, {
-      payerId: sura,
-    });
+    const coverageId = await create(
+      `/patients/${suraPatient}/coverages`,
+      { payerId: sura, memberNumber: '1020304050' },
+      reception.token,
+    );
+    await as(clinicA)
+      .post(`/patients/${suraPatient}/coverages/${coverageId}/verification`, {
+        checkedMemberNumber: '1020304050',
+      })
+      .expect(200);
     await as(clinicA, reception.token)
       .put(`/patients/${suraPatient}/agreement`, {
         agreementId: suraAgreement,

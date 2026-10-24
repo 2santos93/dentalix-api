@@ -28,15 +28,18 @@ import type { PatientAgreement } from '../../domain/entities/patient-agreement.e
 import {
   COVERAGE_NOT_LIVE_MESSAGE,
   COVERAGE_PAYER_MISMATCH_MESSAGE,
+  COVERAGE_SELF_DECLARED_MESSAGE,
   INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE,
   PATIENT_AGREEMENT_NOT_FOUND_MESSAGE,
   coverageRequiredMessage,
+  coverageTrustedFor,
   isExternalPayer,
   patientAgreementStatus,
   type PatientAgreementStatus,
 } from '../../domain/patient-agreement-rules';
 import {
   PATIENT_AGREEMENT_REPOSITORY,
+  type AgreementActor,
   type PatientAgreementRepository,
 } from '../../domain/ports/patient-agreement-repository.port';
 
@@ -59,11 +62,7 @@ export interface AssignAgreementInput {
   notes?: string | null;
 }
 
-/** Quién asigna: usuario y rol del token (SEC-047). */
-export interface AgreementActor {
-  userId: string;
-  role: ClinicRole;
-}
+export type { AgreementActor };
 
 const withStatus = (
   a: PatientAgreement,
@@ -125,6 +124,10 @@ export class GetPatientAgreementUseCase {
  *   cobertura opcional (si viene, se valida igual). Otro rol solo con una
  *   cobertura MIGRADA de `insurerEps` del paciente y de ese pagador (vigente:
  *   si no, 400); sin ella, 403 sin decir nada más de la cobertura.
+ * - SEC-049: quien no es ADMIN no puede usar una cobertura cuyo pagador o nº
+ *   de afiliado registró él mismo, salvo que un ADMIN la haya verificado (403
+ *   que dice qué falta). Va después de comprobar que la cobertura es del
+ *   paciente, así una de otra clínica sigue siendo «no encontrada».
  */
 @Injectable()
 export class AssignPatientAgreementUseCase {
@@ -184,6 +187,9 @@ export class AssignPatientAgreementUseCase {
       if (coverageStatus(coverage, today) !== 'ACTIVE') {
         throw new BadRequestException(COVERAGE_NOT_LIVE_MESSAGE);
       }
+      if (!coverageTrustedFor(coverage, actor)) {
+        throw new ForbiddenException(COVERAGE_SELF_DECLARED_MESSAGE);
+      }
     }
     // El repositorio vuelve a comprobar convenio y cobertura dentro de la
     // transacción, con el candado del paciente tomado.
@@ -196,7 +202,7 @@ export class AssignPatientAgreementUseCase {
         validTo,
         notes: normalizeCoverageText(input.notes),
       },
-      actor.userId,
+      actor,
     );
     return withStatus(saved, today);
   }

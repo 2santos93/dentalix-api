@@ -790,7 +790,8 @@ export const DEMO_AGREEMENTS = [
  * DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su
  * cobertura— y uno con Alfa). SEC-047: el convenio exige una cobertura viva
  * del pagador; `coverage` es la que se le añade si aún no la tiene (la de
- * Alfa, como segunda cobertura, no principal).
+ * Alfa, como segunda cobertura, no principal). SEC-049: la registra
+ * recepción, así que el ADMIN la verifica antes de que recepción asigne.
  */
 export const DEMO_PATIENT_AGREEMENTS = [
   {
