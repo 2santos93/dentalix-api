@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -20,7 +20,7 @@ import {
 // - quien no es ADMIN no asigna con una cobertura cuyo pagador o nº registró
 //   él mismo si un ADMIN no la verificó (403 que dice qué falta);
 // - verificar es solo de ADMIN, queda auditado y editar el nº lo borra.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
