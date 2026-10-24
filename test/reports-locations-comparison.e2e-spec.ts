@@ -377,13 +377,14 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     expect(row(r, sur).metrics.newPatients.value).toBe(0);
   });
 
-  it('ocupación: minutos atendidos ÷ minutos del horario; sin horario, null', async () => {
+  it('ocupación: sin profesionales con horario en la sede, null aunque la sede tenga horario (BE-042)', async () => {
+    // La principal tiene el horario por defecto del registro, pero ningún
+    // profesional con horario allí (DX-233): sin capacidad no hay ocupación.
+    // La capacidad por profesional se prueba en reports-occupancy-capacity.
     const r = await report();
-    // Octubre 2026: 22 días de lunes a viernes (480 min) y 5 sábados (240):
-    // 11.760 minutos abiertos; 9 citas de 30 min.
-    expect(row(r, principal).metrics.occupancy.value).toBe(2.3);
+    expect(row(r, principal).metrics.occupancy.value).toBeNull();
     expect(row(r, norte).metrics.occupancy.value).toBeNull();
-    expect(r.total.metrics.occupancy.value).toBe(2.3);
+    expect(r.total.metrics.occupancy.value).toBeNull();
   });
 
   it('el total da un importe por moneda: nunca suma COP con USD', async () => {

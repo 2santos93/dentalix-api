@@ -64,6 +64,7 @@ function fakeItem(
     performedLocationId: null,
     performedLocationName: null,
     completedAt: null,
+    cancellationFeeAppointmentId: null,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -532,6 +533,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         fakeItem({
           status: TreatmentPlanItemStatus.DONE,
           performedById: 'dentist-2',
+          performedLocationId: 'location-1',
           completedAt: DISCOUNT_NOW,
         }),
         {
@@ -594,6 +596,60 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
 
       expect(calls[0].change.attribution).toEqual({ kind: 'CLEAR' });
       expect(calls[0].change.mirror).toBeUndefined();
+    });
+  });
+
+  describe('ítem de un cargo por inasistencia vigente (SEC-050)', () => {
+    const feeItem = () =>
+      fakeItem({
+        status: TreatmentPlanItemStatus.DONE,
+        price: 50000,
+        cancellationFeeAppointmentId: 'appt-1',
+      });
+    const useCase = (existing: TreatmentPlanItem, written: unknown[]) =>
+      new UpdateTreatmentPlanItemUseCase(
+        makeRepo({
+          findItemById: () => Promise.resolve(existing),
+          updateItem: applying(existing, (patch) => {
+            written.push(patch);
+            return Promise.resolve(existing);
+          }),
+        }),
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
+
+    it.each([
+      ['el precio', { price: 1 }],
+      ['el descuento', { discount: 100 }],
+      ['el motivo del descuento', { discountReason: 'OTHER' as const }],
+      ['el estado', { status: TreatmentPlanItemStatus.ACCEPTED }],
+    ])(
+      'cambiar %s: 409 en español para todo rol, y no se escribe',
+      async (_label, patch) => {
+        for (const actor of [ADMIN_ACTOR, DENTIST_ACTOR, ASSISTANT_ACTOR]) {
+          const written: unknown[] = [];
+          await expect(
+            useCase(feeItem(), written).execute('item1', patch, actor),
+          ).rejects.toThrow(
+            new ConflictException(
+              'Este ítem es el cargo por inasistencia o cancelación tardía de una cita: su precio, descuento y estado no se cambian ni se quita del plan. Para anularlo usa «Anular cargo» en la cita (con motivo).',
+            ),
+          );
+          expect(written).toHaveLength(0);
+        }
+      },
+    );
+
+    it('las notas, o repetir el mismo precio, sí', async () => {
+      const written: unknown[] = [];
+      await useCase(feeItem(), written).execute(
+        'item1',
+        { notes: 'Avisó tarde', price: 50000 },
+        ADMIN_ACTOR,
+      );
+      expect(written).toEqual([{ notes: 'Avisó tarde', price: 50000 }]);
     });
   });
 });

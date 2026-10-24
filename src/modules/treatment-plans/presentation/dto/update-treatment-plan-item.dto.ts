@@ -72,6 +72,15 @@ export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   )
   completedAt?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-305: SOLO para que un ADMIN corrija la sede donde se realizó un ítem ya DONE (403 a otro rol; 403 si no es de sus sedes permitidas, DX-089; 400 si no es de esta clínica). Obligatoria, junto con `performedById` y `completedAt`, al atribuir un ítem «Sin atribuir» (400 si falta alguno). Al pasar a DONE la pone la sede del request (400 si llega). Auditado con el antes y el después',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'performedLocationId debe ser un UUID.' })
+  performedLocationId?: string;
+
   @ApiPropertyOptional({ enum: ToothSurface, isArray: true })
   @IsOptional()
   @IsArray()

@@ -226,4 +226,41 @@ describe('UpdateTreatmentPlanUseCase', () => {
     );
     expect(result.currency).toBe('COP');
   });
+
+  describe('plan con un cargo por inasistencia vigente (SEC-050)', () => {
+    const FEE_PLAN_LOCKED =
+      'Este plan lleva un cargo por inasistencia o cancelación tardía vigente: no se cancela ni cambia de moneda. Anula antes el cargo desde la cita (con motivo).';
+    function feePlan() {
+      const ctx = setup();
+      const plan = ctx.repo.seedPlan({ status: ACCEPTED, currency: 'COP' });
+      ctx.repo.seedItem({
+        planId: plan.id,
+        price: 50000,
+        cancellationFeeAppointmentId: 'appt-1',
+      });
+      return { ...ctx, plan };
+    }
+
+    it('cancelarlo: 409 en español y sigue aceptado', async () => {
+      const { repo, uc, plan } = feePlan();
+      await expect(
+        uc.execute(plan.id, { status: CANCELLED }, DENTIST),
+      ).rejects.toThrow(new ConflictException(FEE_PLAN_LOCKED));
+      expect(repo.stored(plan.id).status).toBe(ACCEPTED);
+    });
+
+    it('cambiarle la moneda: 409', async () => {
+      const { uc, plan } = feePlan();
+      await expect(
+        uc.execute(plan.id, { currency: 'USD' }, DENTIST),
+      ).rejects.toThrow(new ConflictException(FEE_PLAN_LOCKED));
+    });
+
+    it('las notas, o completarlo, sí', async () => {
+      const { uc, plan } = feePlan();
+      await expect(
+        uc.execute(plan.id, { notes: 'Cargos', status: COMPLETED }, DENTIST),
+      ).resolves.toMatchObject({ status: COMPLETED, notes: 'Cargos' });
+    });
+  });
 });

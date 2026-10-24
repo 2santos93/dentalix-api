@@ -1158,7 +1158,7 @@ Módulo `src/modules/reports`. `GET /api/v1/reports/locations-comparison` y
 `GET /api/v1/reports/locations-comparison.csv` (solo ADMIN; DENTIST,
 RECEPTION y ASSISTANT → 403 «Solo la administración ve los reportes de la
 clínica.»), con `from`/`to` (días civiles `AAAA-MM-DD`, ambos inclusive, como
-mucho 366 días), `compare` (`previous` por defecto: los mismos días
+mucho 366 días; las dos fechas entre 2000-01-01 y 2100-12-31, DX-305), `compare` (`previous` por defecto: los mismos días
 inmediatamente antes; `previous_year`: las mismas fechas un año antes, el
 29/02 cae en el 28; `none`) y `currency` opcional (solo los importes en esa
 moneda). Errores 400 en español.
@@ -1181,10 +1181,29 @@ moneda). Errores 400 en español.
   no cuentan); pacientes nuevos =
   primera COMPLETED del paciente en la clínica, en la sede de esa cita; ticket
   medio = cobrado ÷ pacientes distintos atendidos (en el total, cada paciente
-  una vez); ocupación % = minutos COMPLETED ÷ minutos abiertos del horario
-  semanal VIGENTE de la sede menos sus cierres (bloqueos de toda la sede que
-  no admiten citas). Sin horario configurado, ocupación null (y fuera de la
-  del total). Días civiles en la zona de cada sede (DX-097).
+  una vez); ocupación % (DX-305, BE-042) = minutos COMPLETED de los
+  profesionales con horario en la sede ÷ **capacidad**: Σ, profesional a
+  profesional, de los minutos de su horario semanal VIGENTE en la sede
+  (DX-233, con sus excepciones por fecha), menos sus bloqueos que no admiten
+  citas (de esa sede o de todas, DX-122) y los cierres de toda la sede; con
+  tope de 100 %. Dos profesionales en paralelo son el doble de capacidad; uno
+  de media jornada, la mitad. Sin profesionales con horario en la sede,
+  ocupación null (y fuera de la del total). Días civiles en la zona de cada
+  sede (DX-097).
+- **Período comparado sin producción atribuida** (DX-305, BE-045): si
+  empieza (a medianoche de la zona de la sede) antes de que la base registrara
+  la atribución de DX-050 y la clínica tiene realizados vivos «Sin atribuir»,
+  o si tuvo cobros en una moneda sin producción, producción y % de cobro de
+  esas monedas salen con `change`/`trend` null y `previousUnattributed: true`;
+  la fila lleva `previousPeriodUnattributed` (y la respuesta, si alguna fila
+  la lleva). El instante de DX-050 lo da `dx_production_attributed_since()`:
+  la migración `20261024151000_dx305_production_attributed_since` copió en su
+  cuerpo el `finished_at` de la migración de DX-050 de esa base (la app no lee
+  `_prisma_migrations`). El CSV lo dice en la columna «Aviso».
+- **Rango de fechas** (DX-305, BE-044): `checkPeriodDays` en
+  `src/shared/time/civil-day.ts` es la única validación de los días de un
+  período (existen, orden y 2000-01-01…2100-12-31); la usan este reporte, el
+  de descuentos y la caja (`GET /payments`), con 400 en español.
 - **Monedas**: nunca se suman ni se convierten. Cada importe es una lista por
   moneda; en una fila, todas las monedas que tuvo (en el período o en el
   comparado) salen en los cuatro indicadores de dinero. La conversión con tasa
@@ -1662,7 +1681,7 @@ de esquemas propios de una librería).
 Porción 1: la política por sede, quién y cuándo canceló, si fue tardía y el
 resumen de asistencia del paciente. Mostrar la política al paciente (recordatorio
 y enlace con `acknowledgePolicy`), rellenar `policyVersionId` y el cargo o su
-condonación son DX-291.
+condonación son DX-291 (sección siguiente).
 
 - **Tabla `cancellation_policy_versions`** (RLS FORCE, FK compuesta a la sede,
   moneda del catálogo): horas de aviso 0–168, importe sugerido ≥ 0 con su
@@ -1717,6 +1736,110 @@ condonación son DX-291.
   cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
   citas). Las cancelaciones del calendario se registran avisadas por el
   paciente con 2 días.
+
+## Política comunicada y cargo por inasistencia (DX-291)
+
+Porción 2 de DX-279: probar que el paciente fue informado y cobrar (o
+condonar) el cargo con el flujo de plan, abono y recibo de siempre.
+
+- **Recordatorio** (DX-026): el email `appointment-reminder` lleva la variable
+  `{politica_cancelacion}` (`vars.cancellationPolicy`: horas de aviso, texto
+  de la clínica e importe formateado) con la política VIGENTE de la sede al
+  enviarlo; sin política, el bloque no sale. Antes de encolarlo se guarda la
+  versión en `appointment_reminders."policyVersionId"` y en
+  `appointments."policyVersionId"` (la comunicada; FK compuestas).
+- **Enlace público** (DX-005): `GET /public/appointment-confirmations/:token`
+  devuelve además `cancellationPolicy` (`policyVersionId`, `noticeHours`,
+  `text`, `suggestedFee`, `currency`; solo con el enlace PENDING) e `isLate`
+  (cancelar ahora tendría menos aviso que la política). Nada clínico. En el
+  `POST`, cancelar tarde exige `acknowledgePolicy: true` (400 «Cancelación con
+  menos de N h de aviso: para cancelar, acepta la política…»); confirmar y
+  «Quiero que me llamen» no. Si la página manda `policyVersionId` y ya no es
+  la vigente: 409 (la página se recarga). Toda respuesta guarda la versión
+  vigente como comunicada; cancelar guarda `PATIENT_LINK`, el aviso y si fue
+  tardía (DX-279), con la cita bloqueada y en la misma transacción.
+- **Cargo**: `GET /appointments/:id/cancellation-fee` (estado, bloqueo y si
+  el usuario puede decidir), `POST /appointments/:id/cancellation-fee`
+  (`{ amount? }`) y `POST …/cancellation-fee/waive` (`{ reason }`, 3–500).
+  ADMIN y RECEPTION pasan el guard; RECEPTION solo escribe si la política
+  VIGENTE de la sede tiene `receptionCanCharge` (403 en español). Solo una cita
+  NO_SHOW o cancelada tarde. El cargo crea (o reutiliza) el plan ACCEPTED
+  «Cargos administrativos» (`optionLabel`) del paciente en la moneda de la
+  versión COMUNICADA y le añade un ítem DONE (procedimiento inactivo
+  `ADM-CANCELACION` del catálogo de la clínica, sin diente, `completedAt` y
+  sede de la cita, sin profesional) con el importe sugerido o menos (más: 400).
+  Sale en el estado de cuenta y se cobra con `POST /treatment-plans/:id/payments`
+  y su recibo consecutivo (DX-136). Condonar (antes de generar el cargo) deja
+  la decisión con su motivo. El ítem no admite descuento (`allowDiscount =
+  false`, y un plan aceptado no se vuelve a descontar, DX-204); un cargo
+  generado por error se **anula** desde la cita (SEC-050, abajo) y la cita
+  conserva su única decisión. 409 en español: no es inasistencia ni tardía, «No
+  consta que el paciente fuera informado de la política» (sin
+  `policyVersionId`), la versión comunicada no tiene importe, cobertura
+  `EPS_CO` vigente (día civil de la sede) en una sede de Colombia (Ley 1438
+  de 2011, art. 55), ya cobrado o condonado, o la cita cambió.
+- **Anular un cargo generado (SEC-050)**: `POST
+  /appointments/:id/cancellation-fee/void` (`{ reason }`, 3–500), con el mismo
+  permiso que generarlo (ADMIN, o RECEPTION si la política vigente lo permite)
+  y la sede de la cita permitida (DX-089, 403). En una transacción, con la
+  cita y la fila del cargo bloqueadas, guarda en el cargo `voidedAt`,
+  `voidedById` y `voidReason` y DESPUÉS retira el ítem del plan (sale del
+  estado de cuenta). Una vez (409 «ya se anuló»); sin cargo generado, 409; si
+  los abonos vivos del plan ya no caben en lo que queda por cobrar, 409 «Anula
+  antes el abono». La vista pasa a `status: VOIDED` con quién, cuándo y el
+  motivo. Auditoría `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` con
+  `statusChange` CHARGED → VOIDED, sin el texto. Sin Idempotency-Key (como
+  condonar): repetir da 409. **Desde el plan**, el ítem de un cargo vigente
+  (`cancellationFeeAppointmentId` en el ítem) no cambia de precio, descuento
+  (ni su motivo) ni estado, ni se quita, para ningún rol (409 en español), y
+  su plan no se cancela ni cambia de moneda (completarlo sí); las notas sí. La
+  vista del cargo trae `fee.itemAmount` (lo que cobra hoy el ítem) e
+  `itemMismatch` (no cuadra con `amount`: se cambió por fuera de este flujo).
+  Red en la BD (migración `20261024150000_sec050_cancellation_fee_void`):
+  triggers `treatment_plan_items_cancellation_fee_locked` y
+  `treatment_plans_cancellation_fee_locked` (restrict_violation → 409; sin
+  `app.current_tenant` no aplican, como los de DX-109). **Cómo pasa la
+  anulación legítima**: no hay variable de sesión; el trigger del ítem mira
+  en la misma transacción si el cargo sigue vigente (CHARGED y `voidedAt`
+  NULL), y el caso de uso anula el cargo antes de retirar el ítem. En un plan ya
+  completado también: `treatment_plan_items_locked_when_closed` (DX-109) deja
+  retirar solo el ítem de un cargo ya anulado, sin otro cambio (migración
+  `20261024150400_sec050_void_fee_in_closed_plan`). Para tocar
+  el ítem hay que dejar antes la anulación, con autor y motivo. Un cargo con
+  `planItemRemoved = true` y sin `voidedAt` es anterior a SEC-050 (se quitó
+  con «Quitar»).
+- **Tabla `cancellation_fees`**: una fila por cita (único
+  `(tenantId, appointmentId)`), RLS FORCE, append-only para la app (sin
+  DELETE; el único UPDATE es la anulación: GRANT solo de `voidedAt`,
+  `voidedById` y `voidReason`, y trigger `cancellation_fees_append_only`, que
+  impide borrar la fila, vaciar la tabla (`cancellation_fees_no_truncate`)
+  o reescribir cualquier otra columna aunque la app tuviera
+  UPDATE/DELETE/TRUNCATE de más, DB-052; un superusuario sí borra), CHECK
+  `cancellation_fees_void_check` (las tres juntas, solo en CHARGED), FK compuestas a la cita, al ítem (por paciente), a la sede y
+  a la versión, y CHECK `cancellation_fees_status_check` (CHARGED: importe > 0,
+  moneda, ítem y versión; WAIVED: solo el motivo). **Idempotencia**: el cargo
+  bloquea la cita (`FOR UPDATE`) y el paciente (para no crear dos planes) y el
+  índice único es el respaldo: varias peticiones a la vez dejan una sola 201 y
+  las demás 409 (`test/cancellation-fee.int-spec.ts`).
+- **Auditoría**: `@Audit` sobre la cita: `CREATE APPOINTMENT`
+  `CANCELLATION_FEE_CHARGED`, `UPDATE APPOINTMENT` `CANCELLATION_FEE_WAIVED`
+  y `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` (SEC-050), con el paciente;
+  nunca el texto del motivo.
+- **Bloqueo por EPS_CO**: lo fija la plataforma con
+  `CANCELLATION_FEE_BLOCK_EPS_CO` (`true` por defecto, `false` lo apaga); la
+  clínica no puede cambiarlo.
+- **Fecha de cierre (DX-091)**: aún no hay bloqueo contable; el ítem y el
+  abono se fechan con la hora del servidor (hoy), así que nunca caen en un
+  período anterior.
+- **Vista previa** (Ajustes → Sedes, solo ADMIN): `GET
+  /locations/:id/cancellation-policy/email-preview` → `{ subject, html, text }`
+  del recordatorio con la marca de la clínica y la política vigente (paciente
+  y profesional de ejemplo). No envía nada.
+- **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
+  Arango tienen la política comunicada, pero ella tiene EPS_CO (Sura) y su
+  cargo sale bloqueado (Ley 1438): sirve para ver el 409. La inasistencia de
+  Jorge Eduardo Ramírez Ospina (hace 8 días, sin EPS) también tiene la
+  política comunicada: ahí «Generar cargo» funciona como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
 

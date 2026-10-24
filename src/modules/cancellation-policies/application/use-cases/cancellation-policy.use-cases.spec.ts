@@ -8,7 +8,12 @@ import type { CancellationPolicyRepository } from '../../domain/ports/cancellati
 import {
   CreateCancellationPolicyVersionUseCase,
   GetCancellationPolicyUseCase,
+  PreviewReminderEmailUseCase,
 } from './cancellation-policy.use-cases';
+import { renderEmail } from '../../../notifications/email/application/templates/templates';
+import type { EmailOutbox } from '../../../notifications/email/application/email-outbox.service';
+import type { AppointmentReminderEmailVars } from '../../../notifications/email/domain/email-message';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 const LOCATION = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
@@ -50,6 +55,19 @@ class FakeRepo implements CancellationPolicyRepository {
 
   currencyExists(code: string) {
     return Promise.resolve(['COP', 'EUR', 'USD'].includes(code));
+  }
+
+  findPreviewLocation(locationId: string) {
+    return Promise.resolve(
+      this.versions.has(locationId)
+        ? {
+            name: 'Sede Principal',
+            address: 'Calle 1 # 2-3',
+            country: 'CO' as const,
+            timeZone: 'America/Bogota',
+          }
+        : null,
+    );
   }
 }
 
@@ -160,5 +178,73 @@ describe('Política de cancelación por sede (DX-279)', () => {
         USER,
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('vista previa del recordatorio (DX-291)', () => {
+    const TENANT = '33333333-3333-4333-8333-333333333333';
+    const ctx = new TenantContextService();
+    const email = {
+      preview: jest.fn(
+        (
+          _tenant: string,
+          template: 'appointment-reminder',
+          vars: AppointmentReminderEmailVars,
+        ) =>
+          Promise.resolve(
+            renderEmail(template, vars, {
+              clinicName: 'Clínica Sonrisa',
+              logoUrl: null,
+              primaryColor: '#0E7490',
+            }),
+          ),
+      ),
+    };
+    const preview = () =>
+      new PreviewReminderEmailUseCase(
+        repo,
+        email as unknown as EmailOutbox,
+        ctx,
+      );
+
+    it('lleva la política vigente ({politica_cancelacion}) y datos de ejemplo', async () => {
+      await create.execute(
+        LOCATION,
+        {
+          noticeHours: 12,
+          suggestedFee: null,
+          currency: null,
+          patientText: 'Primera versión.',
+        },
+        USER,
+      );
+      await create.execute(
+        LOCATION,
+        {
+          noticeHours: 24,
+          suggestedFee: 50000,
+          currency: 'COP',
+          patientText: 'Avísanos con un día.',
+        },
+        USER,
+      );
+      const rendered = await ctx.run(TENANT, () => preview().execute(LOCATION));
+      expect(rendered.subject).toBe(
+        'Recordatorio de tu cita en Clínica Sonrisa',
+      );
+      expect(rendered.text).toContain('Hola, Ana');
+      expect(rendered.text).toContain(
+        'avísanos con al menos 24 h de antelación. Avísanos con un día.',
+      );
+      expect(rendered.text).toContain('50.000');
+      expect(rendered.text).not.toContain('Primera versión.');
+    });
+
+    it('sin política: el email sale sin el bloque; sede ajena: 404', async () => {
+      const rendered = await ctx.run(TENANT, () => preview().execute(LOCATION));
+      expect(rendered.text).not.toContain('Política de cancelación');
+      await expect(
+        ctx.run(TENANT, () => preview().execute('otra-sede')),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 });

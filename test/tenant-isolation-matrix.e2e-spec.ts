@@ -6,6 +6,7 @@ import {
   PrismaClient,
   Sex,
 } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import request from 'supertest';
@@ -26,6 +27,10 @@ import { CapturingMailer } from './support/capture-mailer';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { CONFIRMATION_LINK_NOT_FOUND_MESSAGE } from '../src/modules/appointment-confirmations/application/find-confirmation-by-token';
+import {
+  LOCATION_BY_REQUEST_MESSAGE,
+  PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+} from '../src/modules/treatment-plans/domain/plan-item-attribution';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
 
@@ -400,10 +405,34 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     leadHours: [48, 2],
   }).expect(200);
   // DX-279: política de cancelación de la sede nueva de A.
-  await create(app, a, `/locations/${location.id}/cancellation-policy`, {
-    noticeHours: 24,
-    patientText: 'Avísanos con 24 horas.',
+  const cancellationPolicy = await create(
+    app,
+    a,
+    `/locations/${location.id}/cancellation-policy`,
+    {
+      noticeHours: 24,
+      suggestedFee: 50000,
+      currency: 'COP',
+      patientText: 'Avísanos con 24 horas.',
+    },
+  );
+  // DX-291: una inasistencia de A con su cargo (fila en cancellation_fees y
+  // plan «Cargos administrativos»).
+  const noShowStart = new Date(Date.now() - 72 * 3_600_000);
+  const noShow = await raw.appointment.create({
+    data: {
+      tenantId: a.tenantId,
+      locationId: location.id,
+      patientId,
+      providerId: randomUUID(),
+      start: noShowStart,
+      end: new Date(noShowStart.getTime() + 30 * 60_000),
+      status: 'NO_SHOW',
+      noShowMarkedAt: new Date(),
+      policyVersionId: cancellationPolicy.id,
+    },
   });
+  await create(app, a, `/appointments/${noShow.id}/cancellation-fee`, {});
   const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
   // DX-089: la dentista de A queda restringida a TODAS las sedes activas de A
   // (deja filas en membership_locations sin cambiar a qué puede acceder).
@@ -1053,6 +1082,42 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}/attendance-summary`,
       status: 404,
     },
+    // --- cargo por inasistencia y vista previa del email (DX-291) ---
+    {
+      name: 'GET /appointments/:id/cancellation-fee',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee`,
+      status: 404,
+    },
+    {
+      name: 'POST /appointments/:id/cancellation-fee',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee`,
+      body: () => ({}),
+      status: 404,
+    },
+    {
+      name: 'POST /appointments/:id/cancellation-fee/waive',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee/waive`,
+      body: () => ({ reason: 'Intento ajeno' }),
+      status: 404,
+    },
+    // SEC-050: anular el cargo de A desde B.
+    {
+      name: 'POST /appointments/:id/cancellation-fee/void',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee/void`,
+      body: () => ({ reason: 'Intento ajeno' }),
+      status: 404,
+    },
+    {
+      name: 'GET /locations/:id/cancellation-policy/email-preview',
+      verb: 'get',
+      path: () =>
+        `/locations/${a.locationId}/cancellation-policy/email-preview`,
+      status: 404,
+    },
     // --- reminders (DX-026) ---
     {
       name: 'PUT /reminder-settings/:locationId',
@@ -1140,6 +1205,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ status: 'DONE', performedById: a.dentistUserId }),
       bodyIds: ['performedById'],
       status: 404,
+    },
+    // DX-305: B intenta registrar SU ítem como realizado en una sede de A. La
+    // sede nunca llega al marcar realizado (400 antes de leer nada); la de un
+    // «Sin atribuir» ya realizado se prueba en «B no puede atribuir…» abajo.
+    {
+      name: 'PATCH /treatment-plans/:id/items/:itemId (DX-305: realizado en una sede de A)',
+      verb: 'patch',
+      path: () => `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      body: () => ({ status: 'DONE', performedLocationId: a.locationId }),
+      bodyIds: ['performedLocationId'],
+      status: 400,
     },
     // DX-204: «Descuento %» en bloque sobre un plan y un ítem de A.
     {
@@ -3016,6 +3092,49 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         where: { sourcePlanItemId: b.planItemId },
       }),
     ).toBe(0);
+  });
+
+  it('DX-305: B no puede atribuir su «Sin atribuir» a una sede de A (400, y el ítem sigue sin atribuir)', async () => {
+    const planItem = await raw.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: b.planItemId },
+      select: { tenantId: true, planId: true, catalogItemId: true },
+    });
+    // Como los DONE de antes de DX-050: realizado, sin quién, dónde ni cuándo.
+    const legacy = await raw.treatmentPlanItem.create({
+      data: { ...planItem, toothNumber: '22', price: 100, status: 'DONE' },
+      select: { id: true },
+    });
+    const res = await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${legacy.id}`,
+      {
+        performedById: clinicB.adminUserId,
+        completedAt: '2026-09-14T15:00:00.000Z',
+        performedLocationId: a.locationId,
+      },
+    ).expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+    );
+    expect(
+      await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: legacy.id },
+      }),
+    ).toMatchObject({ performedById: null, performedLocationId: null });
+    // Y al marcar realizado, la sede no se elige en el cuerpo.
+    const done = await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      { status: 'DONE', performedLocationId: a.locationId },
+    ).expect(400);
+    expect((done.body as { message: string }).message).toBe(
+      LOCATION_BY_REQUEST_MESSAGE,
+    );
+    await raw.treatmentPlanItem.delete({ where: { id: legacy.id } });
   });
 
   it('B sigue operando lo suyo (los 404 no son un "todo prohibido")', async () => {

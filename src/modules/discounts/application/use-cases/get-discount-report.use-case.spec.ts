@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { PERIOD_DAY_OUT_OF_RANGE_MESSAGE } from '../../../../shared/time/civil-day';
 import type {
   DiscountReportQuery,
   DiscountReportRepository,
@@ -161,6 +162,9 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     [{ from: '2026-10-31', to: '2026-10-01' }, INVALID_PERIOD_MESSAGE],
     [{ from: '2026-02-30', to: '2026-03-01' }, INVALID_PERIOD_MESSAGE],
     [{ from: '2025-01-01', to: '2026-01-02' }, PERIOD_TOO_LONG_MESSAGE],
+    // BE-044: fuera del rango admitido, nunca un 500.
+    [{ from: '9999-12-30', to: '9999-12-31' }, PERIOD_DAY_OUT_OF_RANGE_MESSAGE],
+    [{ from: '1999-12-31', to: '2000-01-01' }, PERIOD_DAY_OUT_OF_RANGE_MESSAGE],
     [
       { from: '2026-10-01', to: '2026-10-02', locationId: 'otra' },
       UNKNOWN_LOCATION_MESSAGE,

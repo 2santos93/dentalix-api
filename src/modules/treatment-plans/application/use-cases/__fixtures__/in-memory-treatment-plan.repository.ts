@@ -141,6 +141,8 @@ export class InMemoryTreatmentPlanRepository
       performedLocationId: overrides.performedLocationId ?? null,
       performedLocationName: overrides.performedLocationName ?? null,
       completedAt: overrides.completedAt ?? null,
+      cancellationFeeAppointmentId:
+        overrides.cancellationFeeAppointmentId ?? null,
       notes: overrides.notes ?? null,
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
@@ -201,6 +203,7 @@ export class InMemoryTreatmentPlanRepository
       performedLocationId: row.performedLocationId,
       performedLocationName: row.performedLocationName,
       completedAt: row.completedAt,
+      cancellationFeeAppointmentId: row.cancellationFeeAppointmentId,
       notes: row.notes,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -461,6 +464,7 @@ export class InMemoryTreatmentPlanRepository
       ...this.stampColumns(input.discountStamp ?? null),
       status: TreatmentPlanItemStatus.PROPOSED,
       ...NO_ATTRIBUTION,
+      cancellationFeeAppointmentId: null,
       notes: input.notes ?? null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -519,6 +523,7 @@ export class InMemoryTreatmentPlanRepository
       Object.entries({
         performedById: change.performedById,
         completedAt: change.completedAt,
+        performedLocationId: change.performedLocationId,
       }).filter(([, value]) => value !== undefined),
     );
   }

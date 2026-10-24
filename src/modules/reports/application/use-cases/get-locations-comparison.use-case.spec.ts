@@ -9,7 +9,9 @@ import type {
   ComparisonLocation,
   LocationsComparisonRepository,
   PeriodAggregation,
+  ProductionAttribution,
 } from '../../domain/ports/locations-comparison-repository.port';
+import { PERIOD_DAY_OUT_OF_RANGE_MESSAGE } from '../../../../shared/time/civil-day';
 import {
   GetLocationsComparisonUseCase,
   INVALID_PERIOD_MESSAGE,
@@ -39,6 +41,17 @@ class FakeRepo implements LocationsComparisonRepository {
   byPeriod = new Map<string, PeriodAggregation>();
   calls: { period: CivilPeriod; currency?: string }[] = [];
   lastAllowed: AllowedLocations | null = null;
+  // Por defecto, una clínica sin realizados «Sin atribuir».
+  attribution: ProductionAttribution = {
+    attributedSince: new Date('2026-01-01T00:00:00Z'),
+    hasUnattributed: false,
+  };
+  attributionCalls = 0;
+
+  productionAttribution() {
+    this.attributionCalls++;
+    return Promise.resolve(this.attribution);
+  }
 
   listLocations(allowed: AllowedLocations) {
     this.lastAllowed = allowed;
@@ -91,7 +104,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
             attendedPatients: 3,
             newPatients: 2,
             completedMinutes: 600,
-            openMinutes: 1200,
+            capacityMinutes: 1200,
           }),
         ],
         [
@@ -104,7 +117,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
             attendedPatients: 2,
             newPatients: 1,
             completedMinutes: 300,
-            openMinutes: null,
+            capacityMinutes: null,
           }),
         ],
       ]),
@@ -122,7 +135,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
             attendedPatients: 2,
             newPatients: 2,
             completedMinutes: 480,
-            openMinutes: 1200,
+            capacityMinutes: 1200,
           }),
         ],
       ]),
@@ -337,6 +350,118 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
       new BadRequestException(INVALID_PERIOD_MESSAGE),
     );
   });
+
+  describe('producción sin atribuir en el período comparado (BE-045)', () => {
+    // El 31/08 a medianoche de Bogotá es 05:00 UTC: DX-050 llegó después.
+    const beforePrevious = {
+      attributedSince: new Date('2026-09-15T12:00:00Z'),
+      hasUnattributed: true,
+    };
+
+    it('si empieza antes de DX-050 y hay «Sin atribuir», producción y % de cobro sin variación ni tendencia', async () => {
+      repo.attribution = beforePrevious;
+      const report = await run();
+      const [principal] = report.locations;
+      expect(principal.previousPeriodUnattributed).toBe(true);
+      expect(principal.metrics.production[0]).toEqual({
+        currency: 'COP',
+        value: 12,
+        previous: 10,
+        change: null,
+        trend: null,
+        previousUnattributed: true,
+      });
+      expect(principal.metrics.collectionRate[0]).toMatchObject({
+        currency: 'COP',
+        value: 75,
+        previous: 100,
+        change: null,
+        trend: null,
+        previousUnattributed: true,
+      });
+      // El resto de indicadores sí se comparan.
+      expect(principal.metrics.collected[0]).toMatchObject({
+        change: -10,
+        trend: 'WORSE',
+      });
+      expect(principal.metrics.collected[0]).not.toHaveProperty(
+        'previousUnattributed',
+      );
+      expect(principal.metrics.noShowRate.trend).toBe('WORSE');
+      expect(report.total.previousPeriodUnattributed).toBe(true);
+      expect(report.total.metrics.production[0].trend).toBeNull();
+      expect(report.previousPeriodUnattributed).toBe(true);
+    });
+
+    it('sin realizados «Sin atribuir» en la clínica, la fecha de DX-050 no importa', async () => {
+      repo.attribution = { ...beforePrevious, hasUnattributed: false };
+      const report = await run();
+      expect(report.previousPeriodUnattributed).toBe(false);
+      expect(report.locations[0].metrics.production[0].trend).toBe('BETTER');
+    });
+
+    it('un período comparado posterior a DX-050 compara con normalidad', async () => {
+      repo.attribution = {
+        attributedSince: new Date('2026-08-31T04:59:59Z'),
+        hasUnattributed: true,
+      };
+      const report = await run();
+      expect(report.previousPeriodUnattributed).toBe(false);
+      expect(report.locations[0].metrics.production[0]).toMatchObject({
+        change: 20,
+        trend: 'BETTER',
+      });
+    });
+
+    it('con cobros y sin producción en una moneda, solo esa moneda queda sin tendencia', async () => {
+      // La Norte cobró USD en el anterior sin producir nada: «mejora» frente
+      // a 0 sería falsa.
+      repo.byPeriod.get('2026-08-31..2026-09-30')!.byLocation = new Map([
+        ...repo.byPeriod.get('2026-08-31..2026-09-30')!.byLocation,
+        [NORTE.id, agg({ collected: new Map([['USD', 80]]) })],
+      ]);
+      const report = await run();
+      const [principal, norte] = report.locations;
+      expect(principal.previousPeriodUnattributed).toBe(false);
+      expect(norte.previousPeriodUnattributed).toBe(true);
+      expect(norte.metrics.production).toEqual([
+        {
+          currency: 'USD',
+          value: 200,
+          previous: 0,
+          change: null,
+          trend: null,
+          previousUnattributed: true,
+        },
+      ]);
+      // En el total, USD (cobros sin producción en el anterior) sí; COP no.
+      const total = report.total.metrics.production;
+      expect(total.find((m) => m.currency === 'COP')?.trend).toBe('BETTER');
+      expect(total.find((m) => m.currency === 'USD')?.trend).toBeNull();
+    });
+
+    it('«sin comparación» no consulta la atribución ni marca nada', async () => {
+      repo.attribution = beforePrevious;
+      const report = await run({ compare: 'none' });
+      expect(repo.attributionCalls).toBe(0);
+      expect(report.previousPeriodUnattributed).toBe(false);
+      expect(report.locations[0].previousPeriodUnattributed).toBe(false);
+    });
+  });
+
+  it.each([
+    ['9999-12-30', '9999-12-31'],
+    ['2026-10-01', '9999-12-31'],
+    ['1999-12-31', '2000-01-01'],
+  ])(
+    'fechas fuera de 2000…2100 (%s..%s) → 400 en español (BE-044)',
+    async (from, to) => {
+      await expect(run({ from, to })).rejects.toThrow(
+        new BadRequestException(PERIOD_DAY_OUT_OF_RANGE_MESSAGE),
+      );
+      expect(repo.calls).toHaveLength(0);
+    },
+  );
 
   it('más de 366 días → 400', async () => {
     await expect(run({ from: '2025-01-01', to: '2026-01-02' })).rejects.toThrow(

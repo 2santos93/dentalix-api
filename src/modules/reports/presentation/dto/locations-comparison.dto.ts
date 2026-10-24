@@ -5,6 +5,10 @@ import {
   type CompareMode,
 } from '../../domain/comparison-period';
 import { KPI_KEYS } from '../../domain/kpi-definitions';
+import {
+  PERIOD_DAY_MAX,
+  PERIOD_DAY_MIN,
+} from '../../../../shared/time/civil-day';
 import { LOCATIONS_COMPARISON_MAX_DAYS } from '../../application/use-cases/get-locations-comparison.use-case';
 
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -15,7 +19,7 @@ const TRENDS = ['BETTER', 'WORSE', 'EQUAL'] as const;
 export class LocationsComparisonQueryDto {
   @ApiProperty({
     example: '2026-10-01',
-    description: `Primer día del período (AAAA-MM-DD, en la zona de cada sede). Como mucho ${LOCATIONS_COMPARISON_MAX_DAYS} días.`,
+    description: `Primer día del período (AAAA-MM-DD, en la zona de cada sede). Como mucho ${LOCATIONS_COMPARISON_MAX_DAYS} días; las dos fechas entre ${PERIOD_DAY_MIN} y ${PERIOD_DAY_MAX} (400 si no).`,
   })
   @Matches(CIVIL_DATE, { message: 'from debe ser una fecha AAAA-MM-DD.' })
   from!: string;
@@ -85,7 +89,7 @@ export class MetricDto {
     type: Number,
     nullable: true,
     description:
-      'Valor del período. Porcentajes en % con 2 decimales; null = no se puede calcular (sin base)',
+      'Valor del período. Porcentajes en % con 2 decimales (la ocupación, con tope de 100); null = no se puede calcular (sin base)',
   })
   value!: number | null;
 
@@ -115,6 +119,13 @@ export class MetricDto {
 export class CurrencyMetricDto extends MetricDto {
   @ApiProperty({ example: 'COP' })
   currency!: string;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'BE-045: solo en producción y % de cobro, y solo cuando la producción del período comparado en esta moneda no es base (empieza antes de DX-050 con realizados «Sin atribuir», o tuvo cobros sin producción): `change` y `trend` van a null',
+  })
+  previousUnattributed?: true;
 }
 
 export class ComparisonMetricsDto {
@@ -172,6 +183,12 @@ export class ComparisonRowDto {
   })
   hasActivity!: boolean;
 
+  @ApiProperty({
+    description:
+      'BE-045: el período comparado no tiene toda su producción atribuida: alguna moneda de producción y % de cobro sale sin variación (`previousUnattributed`)',
+  })
+  previousPeriodUnattributed!: boolean;
+
   @ApiProperty({ type: ComparisonMetricsDto })
   metrics!: ComparisonMetricsDto;
 }
@@ -220,4 +237,10 @@ export class LocationsComparisonDto {
 
   @ApiProperty({ description: '¿Alguna sede tuvo actividad en el período?' })
   hasActivity!: boolean;
+
+  @ApiProperty({
+    description:
+      '¿Alguna fila (o el total) tiene `previousPeriodUnattributed`? La pantalla lo explica junto a «Producción» y «% de cobro»',
+  })
+  previousPeriodUnattributed!: boolean;
 }

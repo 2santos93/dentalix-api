@@ -13,8 +13,10 @@ import {
   ATTRIBUTION_ONLY_WHEN_DONE_MESSAGE,
   COMPLETED_AT_BY_SERVER_MESSAGE,
   COMPLETED_AT_FUTURE_MESSAGE,
+  LOCATION_BY_REQUEST_MESSAGE,
   PERFORMER_REQUIRED_MESSAGE,
   REVERT_DONE_FORBIDDEN_MESSAGE,
+  UNATTRIBUTED_CORRECTION_INCOMPLETE_MESSAGE,
   decideAttribution,
   isAttributionCorrection,
   type AttributionState,
@@ -32,6 +34,7 @@ function item(overrides: Partial<AttributionState> = {}): AttributionState {
   return {
     status: ACCEPTED,
     performedById: null,
+    performedLocationId: null,
     completedAt: null,
     ...overrides,
   };
@@ -40,6 +43,7 @@ function item(overrides: Partial<AttributionState> = {}): AttributionState {
 const done = item({
   status: DONE,
   performedById: 'dentist-2',
+  performedLocationId: 'sede-1',
   completedAt: YESTERDAY,
 });
 
@@ -185,15 +189,73 @@ describe('decideAttribution (DX-050)', () => {
       expect(error.message).toBe(COMPLETED_AT_FUTURE_MESSAGE);
     });
 
-    it('un DONE anterior a DX-050 («Sin atribuir») lo atribuye un ADMIN', () => {
+    it('un DONE anterior a DX-050 («Sin atribuir») lo atribuye un ADMIN con quién, cuándo y dónde (DX-305)', () => {
       expect(
         decideAttribution(
           item({ status: DONE }),
-          { performedById: 'dentist-1' },
+          {
+            performedById: 'dentist-1',
+            completedAt: YESTERDAY,
+            performedLocationId: 'sede-2',
+          },
           admin,
           NOW,
         ),
-      ).toEqual({ kind: 'CORRECT', performedById: 'dentist-1' });
+      ).toEqual({
+        kind: 'CORRECT',
+        performedById: 'dentist-1',
+        completedAt: YESTERDAY,
+        performedLocationId: 'sede-2',
+      });
+    });
+
+    it.each([
+      [{ performedById: 'dentist-1' }],
+      [{ performedById: 'dentist-1', completedAt: YESTERDAY }],
+      [{ performedById: 'dentist-1', performedLocationId: 'sede-2' }],
+      [{ completedAt: YESTERDAY, performedLocationId: 'sede-2' }],
+    ])('un «Sin atribuir» sin quién, cuándo o sede → 400 (%j)', (request) => {
+      const error = thrown(() =>
+        decideAttribution(item({ status: DONE }), request, admin, NOW),
+      );
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.message).toBe(UNATTRIBUTED_CORRECTION_INCOMPLETE_MESSAGE);
+    });
+
+    it('un ADMIN corrige solo la sede de uno atribuido; otro rol no (403)', () => {
+      expect(
+        decideAttribution(done, { performedLocationId: 'sede-2' }, admin, NOW),
+      ).toEqual({ kind: 'CORRECT', performedLocationId: 'sede-2' });
+      expect(
+        decideAttribution(
+          done,
+          { performedLocationId: 'sede-1' },
+          dentist,
+          NOW,
+        ),
+      ).toBeUndefined();
+      const error = thrown(() =>
+        decideAttribution(
+          done,
+          { performedLocationId: 'sede-2' },
+          { userId: 'dentist-2', role: ClinicRole.DENTIST },
+          NOW,
+        ),
+      );
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect(error.message).toBe(ATTRIBUTION_ADMIN_ONLY_MESSAGE);
+    });
+
+    it('al pasar a DONE la sede no llega en la petición → 400', () => {
+      const error = thrown(() =>
+        decideAttribution(
+          item(),
+          { status: DONE, performedLocationId: 'sede-2' },
+          admin,
+          NOW,
+        ),
+      );
+      expect(error.message).toBe(LOCATION_BY_REQUEST_MESSAGE);
     });
   });
 

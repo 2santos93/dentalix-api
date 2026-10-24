@@ -24,6 +24,7 @@ import {
 import { normalizeOptionLabel } from '../../domain/plan-options';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { SIGNED_PLAN_HEADER_LOCKED_MESSAGE } from './signed-plan-lock';
+import { FEE_PLAN_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
 
 /** Lo que admite el PATCH del plan. */
 export interface UpdateTreatmentPlanInput {
@@ -103,6 +104,18 @@ export class UpdateTreatmentPlanUseCase {
     // Missing row and another tenant's row are indistinguishable under RLS:
     // the repository answers both with 404.
     return this.repo.updatePlan(id, (existing, facts) => {
+      // SEC-050: el plan que lleva un cargo vigente no se cancela ni cambia de
+      // moneda (dejaría de cobrarse); completarlo sí. El trigger
+      // `treatment_plans_cancellation_fee_locked` es la red.
+      if (
+        existing.items.some((item) => item.cancellationFeeAppointmentId) &&
+        ((status !== undefined &&
+          status !== existing.status &&
+          status !== TreatmentPlanStatus.COMPLETED) ||
+          (currency !== undefined && currency !== existing.currency))
+      ) {
+        throw new ConflictException(FEE_PLAN_LOCKED_MESSAGE);
+      }
       const patch: UpdateTreatmentPlanRepoInput = {};
       if (input.notes !== undefined) patch.notes = input.notes;
       if (input.optionLabel !== undefined) {

@@ -4,6 +4,7 @@ import {
   EmailLocale,
   EmailTemplateName,
   EmailVarsByTemplate,
+  RenderedEmail,
 } from '../domain/email-message';
 import { EMAIL_OUTBOX_REPOSITORY } from '../domain/ports/email-outbox-repository.port';
 import type { EmailOutboxRepository } from '../domain/ports/email-outbox-repository.port';
@@ -100,6 +101,18 @@ export class EmailOutbox {
     const { id } = await this.repo.insert({ ...row, tenantId: input.tenantId });
     this.enqueued(id, input.tenantId, input.template, row.toMasked);
     return { id };
+  }
+
+  /**
+   * DX-291: el email tal como saldría para la clínica (asunto, HTML y texto
+   * con su marca), SIN encolarlo ni registrarlo: la vista previa de Ajustes.
+   */
+  async preview<T extends EmailTemplateName>(
+    tenantId: string,
+    template: T,
+    vars: EmailVarsByTemplate[T],
+  ): Promise<RenderedEmail> {
+    return renderEmail(template, vars, await this.brandOf(tenantId));
   }
 
   /**

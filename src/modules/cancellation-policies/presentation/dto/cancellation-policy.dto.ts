@@ -159,3 +159,18 @@ export class CreateCancellationPolicyDto {
   @IsBoolean({ message: CANCELLATION_POLICY_MESSAGES.receptionCanCharge })
   receptionCanCharge?: boolean;
 }
+
+/** DX-291: el recordatorio tal como saldría (vista previa en Ajustes). */
+export class ReminderEmailPreviewDto {
+  @ApiProperty({ example: 'Recordatorio de tu cita en Clínica Sonrisa' })
+  subject!: string;
+
+  @ApiProperty({
+    description:
+      'HTML completo del email (con la marca de la clínica). Muéstralo en un iframe con sandbox.',
+  })
+  html!: string;
+
+  @ApiProperty({ description: 'Versión en texto plano.' })
+  text!: string;
+}

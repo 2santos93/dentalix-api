@@ -63,6 +63,13 @@ export interface TreatmentPlanItem {
   performedLocationId: string | null;
   performedLocationName: string | null;
   completedAt: Date | null;
+  /**
+   * SEC-050: el ítem es el cargo VIGENTE (generado y sin anular) por
+   * inasistencia o cancelación tardía de esta cita (DX-291). Su precio,
+   * descuento y estado no se cambian ni se quita del plan: se anula desde la
+   * cita, con motivo. `null` en cualquier otro ítem.
+   */
+  cancellationFeeAppointmentId: string | null;
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;

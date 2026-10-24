@@ -38,6 +38,7 @@ import type { AuditRequestContext } from '../../../audit/domain/audit-request-co
 import { effectiveDiscountRises } from '../../../discounts/domain/effective-discount';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
+import { FEE_ITEM_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
 
 export interface UpdateTreatmentPlanItemInput {
   price?: number;
@@ -55,6 +56,11 @@ export interface UpdateTreatmentPlanItemInput {
   performedById?: string;
   /** DX-050: solo un ADMIN corrige la fecha de un ítem ya DONE. */
   completedAt?: Date;
+  /**
+   * DX-305: solo un ADMIN corrige la sede de un ítem ya DONE; obligatoria al
+   * atribuir uno «Sin atribuir» (con quién y cuándo).
+   */
+  performedLocationId?: string;
 }
 
 /** ¿La petición pone otro `discount` o cambia el motivo o su nota? (DX-204) */
@@ -72,6 +78,23 @@ function discountFieldChanges(
         (patch.discountReasonNote?.trim() || null) !==
           existing.discountReasonNote),
   };
+}
+
+/**
+ * SEC-050: ¿la petición cambia el dinero o el estado del ítem? En el de un
+ * cargo vigente eso sería rebajarlo o condonarlo por fuera de su flujo.
+ */
+function touchesFeeItem(
+  item: TreatmentPlanItem,
+  patch: UpdateTreatmentPlanItemInput,
+): boolean {
+  const { discountSet, reasonChanged } = discountFieldChanges(item, patch);
+  return (
+    (patch.price !== undefined && patch.price !== item.price) ||
+    discountSet ||
+    reasonChanged ||
+    (patch.status !== undefined && patch.status !== item.status)
+  );
 }
 
 @Injectable()
@@ -130,9 +153,16 @@ export class UpdateTreatmentPlanItemUseCase {
     return this.repo.updateItem(
       itemId,
       ({ plan, item }) => {
+        // SEC-050: el ítem de un cargo vigente (leído con su fila bloqueada) no
+        // cambia de precio, descuento ni estado, sea cual sea el rol: se anula
+        // desde la cita. El trigger `treatment_plan_items_cancellation_fee_locked`
+        // es la red.
+        if (item.cancellationFeeAppointmentId && touchesFeeItem(item, patch)) {
+          throw new ConflictException(FEE_ITEM_LOCKED_MESSAGE);
+        }
         // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
-        // aceptado en un plan completado, o corregir quién o cuándo realizó un
-        // ítem ya realizado (DX-050).
+        // aceptado en un plan completado, o corregir quién, cuándo o dónde se
+        // realizó un ítem ya realizado (DX-050, DX-305).
         if (
           !isClosedPlanItemChangeAllowed(plan.status, item.status, patch) &&
           !isAttributionCorrection(plan.status, item.status, patch)
@@ -168,6 +198,7 @@ export class UpdateTreatmentPlanItemUseCase {
           discountReasonNote,
           performedById: _performedById,
           completedAt: _completedAt,
+          performedLocationId: _performedLocationId,
           ...rest
         } = patch;
         const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;

@@ -6,7 +6,12 @@ import type {
   CancellationPolicyInput,
   CancellationPolicyVersion,
 } from '../domain/cancellation-policy';
-import type { CancellationPolicyRepository } from '../domain/ports/cancellation-policy-repository.port';
+import type {
+  CancellationPolicyRepository,
+  PreviewLocation,
+} from '../domain/ports/cancellation-policy-repository.port';
+import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
 
 const VERSION_SELECT = {
   id: true,
@@ -55,6 +60,22 @@ export class PrismaCancellationPolicyRepository implements CancellationPolicyRep
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
     return tenantId;
+  }
+
+  findPreviewLocation(locationId: string): Promise<PreviewLocation | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const location = await tx.location.findFirst({
+        where: { id: locationId, deletedAt: null },
+        select: { name: true, address: true, country: true },
+      });
+      if (!location) return null;
+      const zones = await loadLocationTimeZones(tx, tenantId, [locationId]);
+      return {
+        ...location,
+        timeZone: zones.get(locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
+      };
+    });
   }
 
   listVersions(

@@ -33,8 +33,10 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   CreateCancellationPolicyVersionUseCase,
   GetCancellationPolicyUseCase,
+  PreviewReminderEmailUseCase,
   type CancellationPolicyView,
 } from '../application/use-cases/cancellation-policy.use-cases';
+import type { RenderedEmail } from '../../notifications/email/domain/email-message';
 import {
   CANCELLATION_POLICY_MESSAGES,
   type CancellationPolicyVersion,
@@ -43,6 +45,7 @@ import {
   CancellationPolicyDto,
   CancellationPolicyVersionDto,
   CreateCancellationPolicyDto,
+  ReminderEmailPreviewDto,
 } from './dto/cancellation-policy.dto';
 
 const locationIdPipe = new ParseUUIDPipe({
@@ -66,7 +69,27 @@ export class CancellationPolicyController {
   constructor(
     private readonly getPolicy: GetCancellationPolicyUseCase,
     private readonly createVersion: CreateCancellationPolicyVersionUseCase,
+    private readonly previewEmail: PreviewReminderEmailUseCase,
   ) {}
+
+  @Get('email-preview')
+  @ApiOperation({
+    summary:
+      'Vista previa del recordatorio por email con la política vigente (DX-291)',
+    description:
+      'El email `appointment-reminder` tal como saldría desde esta sede, con la marca de la clínica y la política vigente en `{politica_cancelacion}` (horas, texto e importe). Paciente y profesional son de ejemplo. No envía ni registra nada.',
+  })
+  @ApiOkResponse({ type: ReminderEmailPreviewDto })
+  @ApiBadRequestResponse({
+    description: CANCELLATION_POLICY_MESSAGES.invalidLocationId,
+  })
+  @ApiForbiddenResponse({ description: CANCELLATION_POLICY_MESSAGES.forbidden })
+  @ApiNotFoundResponse({ description: 'Sede no encontrada en esta clínica' })
+  emailPreview(
+    @Param('id', locationIdPipe) id: string,
+  ): Promise<RenderedEmail> {
+    return this.previewEmail.execute(id);
+  }
 
   @Get()
   @ApiOperation({

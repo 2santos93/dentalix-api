@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus } from '@prisma/client';
 import { RemoveTreatmentPlanItemUseCase } from './remove-treatment-plan-item.use-case';
 import { GetTreatmentPlanUseCase } from './get-treatment-plan.use-case';
@@ -39,6 +39,7 @@ function fakeItem(
     performedLocationId: null,
     performedLocationName: null,
     completedAt: null,
+    cancellationFeeAppointmentId: null,
     notes: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -123,5 +124,21 @@ describe('RemoveTreatmentPlanItemUseCase', () => {
     const after = await getUc.execute(plan.id);
     expect(after.total).toBe(100);
     expect(after.items.map((i) => i.id)).not.toContain(toRemove.id);
+  });
+
+  it('SEC-050: el ítem de un cargo por inasistencia vigente no se quita (409) y no se toca', async () => {
+    const existing = fakeItem({ cancellationFeeAppointmentId: 'appt-1' });
+    const repo = makeRepo({
+      findItemById: () => Promise.resolve(existing),
+      softDeleteItem: (): Promise<void> =>
+        Promise.reject(new Error('softDeleteItem should not be called')),
+    });
+    await expect(
+      new RemoveTreatmentPlanItemUseCase(repo).execute(existing.id),
+    ).rejects.toThrow(
+      new ConflictException(
+        'Este ítem es el cargo por inasistencia o cancelación tardía de una cita: su precio, descuento y estado no se cambian ni se quita del plan. Para anularlo usa «Anular cargo» en la cita (con motivo).',
+      ),
+    );
   });
 });
