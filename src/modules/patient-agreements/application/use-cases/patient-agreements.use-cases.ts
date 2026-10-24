@@ -121,9 +121,10 @@ export class GetPatientAgreementUseCase {
  * - Convenio de un pagador externo: la cobertura es OBLIGATORIA y debe ser del
  *   paciente, del mismo pagador y estar vigente hoy (400 si no), para
  *   cualquier rol, ADMIN incluido.
- * - Convenio interno (pagador `OTRO`: cortesía, empleados…): solo ADMIN (403
- *   antes de mirar nada más); la cobertura es opcional y, si viene, se valida
- *   igual.
+ * - Convenio interno (pagador `OTRO`: cortesía, empleados…): ADMIN, con la
+ *   cobertura opcional (si viene, se valida igual). Otro rol solo con una
+ *   cobertura MIGRADA de `insurerEps` del paciente y de ese pagador (vigente:
+ *   si no, 400); sin ella, 403 sin decir nada más de la cobertura.
  */
 @Injectable()
 export class AssignPatientAgreementUseCase {
@@ -152,10 +153,19 @@ export class AssignPatientAgreementUseCase {
     if (!agreement) throw new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE);
 
     const external = isExternalPayer(agreement.payer.type);
-    if (!external && actor.role !== ClinicRole.ADMIN) {
-      throw new ForbiddenException(INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE);
-    }
     const coverageId = input.coverageId ?? null;
+    if (!external && actor.role !== ClinicRole.ADMIN) {
+      const migrated =
+        coverageId === null
+          ? null
+          : await this.coverages.findById(patientId, coverageId);
+      if (
+        !migrated?.migratedFromInsurerEps ||
+        migrated.payer.id !== agreement.payer.id
+      ) {
+        throw new ForbiddenException(INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE);
+      }
+    }
     if (external && coverageId === null) {
       throw new BadRequestException(
         coverageRequiredMessage(agreement.payer.name),

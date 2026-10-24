@@ -55,6 +55,7 @@ function toEntity(row: Row): PatientCoverage {
     validTo: row.validTo ? toDateOnly(row.validTo) : null,
     isPrimary: row.isPrimary,
     notes: row.notes,
+    migratedFromInsurerEps: row.migratedFromInsurerEps,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

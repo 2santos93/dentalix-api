@@ -98,6 +98,12 @@ export class PatientCoverageDto {
   notes!: string | null;
 
   @ApiProperty({
+    description:
+      'Copiada de la aseguradora en texto libre de la ficha (DX-153); la API no la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador OTRO.',
+  })
+  migratedFromInsurerEps!: boolean;
+
+  @ApiProperty({
     enum: ['ACTIVE', 'EXPIRED', 'NOT_STARTED'],
     description: 'Calculado a hoy en la zona de la sede.',
   })

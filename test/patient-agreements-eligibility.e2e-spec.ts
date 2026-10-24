@@ -51,7 +51,7 @@ const COVERAGE_NOT_LIVE =
   'La cobertura elegida no está vigente hoy: revisa sus fechas o elige otra.';
 const COVERAGE_NOT_FOUND = 'Cobertura no encontrada.';
 const ADMIN_ONLY =
-  'Este convenio no es de un pagador externo (cortesía, empleados…): solo un administrador puede asignarlo.';
+  'Este convenio no es de un pagador externo (cortesía, empleados…): solo un administrador puede asignarlo. Si es una aseguradora, pide al administrador que reclasifique el pagador.';
 
 /** Lo que debe responder cada combinación. */
 function expected(
@@ -280,6 +280,43 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       }
     },
   );
+
+  it.each([ClinicRole.DENTIST, ClinicRole.ASSISTANT, ClinicRole.RECEPTION])(
+    '%s asigna un convenio OTRO si el paciente trae la cobertura MIGRADA de insurerEps de ese pagador',
+    async (role) => {
+      const patient = await createPatient(clinic, `Migrada ${role}`);
+      const coverageId = (await coverageFor(patient, cortesiaPayer, 'viva'))!;
+      // La API no crea coberturas migradas: solo el relleno de DX-153.
+      await raw.patientCoverage.update({
+        where: { id: coverageId },
+        data: { migratedFromInsurerEps: true },
+      });
+      await as(api().put(url(patient)), tokens[role])
+        .send({ agreementId: agreementOf.interno, coverageId })
+        .expect(200);
+      // La misma cobertura sin la marca no habilita a nadie más que al ADMIN.
+      const other = await createPatient(clinic, `No migrada ${role}`);
+      const plain = (await coverageFor(other, cortesiaPayer, 'viva'))!;
+      const res = await as(api().put(url(other)), tokens[role])
+        .send({ agreementId: agreementOf.interno, coverageId: plain })
+        .expect(403);
+      expect((res.body as { message: string }).message).toBe(ADMIN_ONLY);
+    },
+  );
+
+  it('la cobertura migrada no se puede marcar por la API', async () => {
+    const patient = await createPatient(clinic, 'Marca');
+    const coverageId = (await coverageFor(patient, cortesiaPayer, 'viva'))!;
+    await as(
+      api().patch(`/api/v1/patients/${patient}/coverages/${coverageId}`),
+      tokens.ADMIN,
+    ).send({ migratedFromInsurerEps: true });
+    const row = await raw.patientCoverage.findUniqueOrThrow({
+      where: { id: coverageId },
+      select: { migratedFromInsurerEps: true },
+    });
+    expect(row.migratedFromInsurerEps).toBe(false);
+  });
 
   it('una cobertura viva de OTRO pagador no habilita el convenio: 400', async () => {
     const patient = await createPatient(clinic, 'Otro pagador');

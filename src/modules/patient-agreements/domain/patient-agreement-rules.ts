@@ -20,7 +20,7 @@ export const AGREEMENT_RACE_MESSAGE =
 export const COVERAGE_NOT_LIVE_MESSAGE =
   'La cobertura elegida no está vigente hoy: revisa sus fechas o elige otra.';
 export const INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE =
-  'Este convenio no es de un pagador externo (cortesía, empleados…): solo un administrador puede asignarlo.';
+  'Este convenio no es de un pagador externo (cortesía, empleados…): solo un administrador puede asignarlo. Si es una aseguradora, pide al administrador que reclasifique el pagador.';
 
 /** 400 de un convenio de pagador sin cobertura elegida (SEC-047). */
 export function coverageRequiredMessage(payerName: string): string {
@@ -33,7 +33,10 @@ export function coverageRequiredMessage(payerName: string): string {
  * clasificar») es el que se usa para los convenios internos —cortesía,
  * empleados, socios—, que nadie de fuera respalda. Con uno externo, la
  * asignación exige una cobertura viva del paciente con ese pagador; uno
- * interno solo lo asigna ADMIN.
+ * interno solo lo asigna ADMIN, salvo que el paciente traiga una cobertura
+ * MIGRADA de `insurerEps` (DX-153) de ese pagador: el relleno creó pagadores
+ * OTRO para aseguradoras reales sin clasificar, y esa cobertura sale de la
+ * ficha original (la API no la puede crear), así que habilita a cualquier rol.
  */
 export function isExternalPayer(type: PayerType): boolean {
   return type !== 'OTRO';

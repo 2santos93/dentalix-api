@@ -386,6 +386,65 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         },
       );
 
+      it.each(NON_ADMIN)(
+        '%s: con una cobertura MIGRADA de insurerEps del mismo pagador, el convenio OTRO se asigna',
+        async (role) => {
+          const migrated = coverages.seed({
+            patientId: PATIENT,
+            payerId: cortesiaPayer.id,
+            migratedFromInsurerEps: true,
+          });
+          const out = await assign.execute(
+            PATIENT,
+            { agreementId: cortesia, coverageId: migrated.id },
+            actor(role),
+          );
+          expect(out.coverageId).toBe(migrated.id);
+        },
+      );
+
+      it('la cobertura migrada tiene que ser del mismo pagador, del paciente y estar vigente', async () => {
+        const otherPayer = coverages.seed({
+          patientId: PATIENT,
+          payerId: sanitas.id,
+          migratedFromInsurerEps: true,
+        });
+        const otherPatient = coverages.seed({
+          patientId: 'otro-paciente',
+          payerId: cortesiaPayer.id,
+          migratedFromInsurerEps: true,
+        });
+        for (const coverageId of [
+          otherPayer.id,
+          otherPatient.id,
+          'no-existe',
+        ]) {
+          await expect(
+            assign.execute(
+              PATIENT,
+              { agreementId: cortesia, coverageId },
+              RECEPTION,
+            ),
+          ).rejects.toThrow(
+            new ForbiddenException(INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE),
+          );
+        }
+        const expired = coverages.seed({
+          patientId: PATIENT,
+          payerId: cortesiaPayer.id,
+          migratedFromInsurerEps: true,
+          validTo: '2026-10-19',
+        });
+        await expect(
+          assign.execute(
+            PATIENT,
+            { agreementId: cortesia, coverageId: expired.id },
+            RECEPTION,
+          ),
+        ).rejects.toThrow(new BadRequestException(COVERAGE_NOT_LIVE_MESSAGE));
+        expect(repo.rows).toHaveLength(0);
+      });
+
       it('ADMIN asigna un convenio sin pagador externo sin cobertura (null = omitirla)', async () => {
         const out = await assign.execute(
           PATIENT,
