@@ -301,6 +301,12 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
           .expect(400);
         expect(messageOf(res)).toBe('La sede no es válida.');
       }
+      // PATCH: tampoco se puede mover un gasto sin pagos a una sede ajena.
+      const mine = await createExpense();
+      const moved = await call('patch', `/expenses/${mine.id}`)
+        .send({ locationId: foreignLoc })
+        .expect(400);
+      expect(messageOf(moved)).toBe('La sede no es válida.');
     });
 
     it('valida categoría, importe, moneda, proveedor y fechas', async () => {
@@ -1319,6 +1325,23 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       expect(await storage.stat(pendingKey(ticket.uploadId))).not.toBeNull();
       await call('post', '/expenses', otherToken, other.host)
         .send(body({ attachmentUploadId: ticket.uploadId }))
+        .expect(404);
+      expect(await storage.stat(pendingKey(ticket.uploadId))).not.toBeNull();
+      // Adjuntar después: la subida de otro usuario o de otra clínica es 404.
+      const mine = await createExpense();
+      await call('post', `/expenses/${mine.id}/attachment`)
+        .send({ uploadId: ticket.uploadId })
+        .expect(404);
+      const theirs = await call('post', '/expenses', otherToken, other.host)
+        .send(body())
+        .expect(201);
+      await call(
+        'post',
+        `/expenses/${(theirs.body as ExpenseBody).id}/attachment`,
+        otherToken,
+        other.host,
+      )
+        .send({ uploadId: ticket.uploadId })
         .expect(404);
       expect(await storage.stat(pendingKey(ticket.uploadId))).not.toBeNull();
     });

@@ -301,6 +301,24 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       expect(
         await rowsOf(`from=2026-09-01&to=2026-10-31&locationId=${foreignId}`),
       ).toEqual([]);
+      // Lo mismo en la lista, el CSV de gastos y el CSV del resumen: sin filas.
+      const list = await call(
+        'get',
+        `/expenses?locationId=${foreignId}`,
+      ).expect(200);
+      expect((list.body as { total: number }).total).toBe(0);
+      const expensesCsv = await csv(
+        `/expenses.csv?locationId=${foreignId}`,
+      ).expect(200);
+      expect((expensesCsv.body as string).slice(1).split('\r\n')).toHaveLength(
+        2,
+      );
+      const summaryCsv = await csv(
+        `/expenses/summary.csv?from=2026-09-01&to=2026-10-31&locationId=${foreignId}`,
+      ).expect(200);
+      expect((summaryCsv.body as string).slice(1).split('\r\n')).toHaveLength(
+        2,
+      );
     });
 
     it('con sedes en zonas distintas, cada abono cuenta en el mes de SU sede', async () => {
