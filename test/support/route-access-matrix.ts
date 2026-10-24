@@ -373,6 +373,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointments/:id/cancellation-fee': roles('ADMIN', 'RECEPTION'),
   'POST /appointments/:id/cancellation-fee': roles('ADMIN', 'RECEPTION'),
   'POST /appointments/:id/cancellation-fee/waive': roles('ADMIN', 'RECEPTION'),
+  // SEC-050: anular un cargo generado, con el mismo permiso que generarlo.
+  'POST /appointments/:id/cancellation-fee/void': roles('ADMIN', 'RECEPTION'),
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,

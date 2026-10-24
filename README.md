@@ -1752,25 +1752,60 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   Sale en el estado de cuenta y se cobra con `POST /treatment-plans/:id/payments`
   y su recibo consecutivo (DX-136). Condonar (antes de generar el cargo) deja
   la decisión con su motivo. El ítem no admite descuento (`allowDiscount =
-  false`, y un plan aceptado no se vuelve a descontar, DX-204): un cargo
-  generado por error se anula quitando el ítem del plan («Quitar», soft
-  delete); la vista lo devuelve con `fee.planItemRemoved = true` y la cita
+  false`, y un plan aceptado no se vuelve a descontar, DX-204); un cargo
+  generado por error se **anula** desde la cita (SEC-050, abajo) y la cita
   conserva su única decisión. 409 en español: no es inasistencia ni tardía, «No
   consta que el paciente fuera informado de la política» (sin
   `policyVersionId`), la versión comunicada no tiene importe, cobertura
   `EPS_CO` vigente (día civil de la sede) en una sede de Colombia (Ley 1438
   de 2011, art. 55), ya cobrado o condonado, o la cita cambió.
+- **Anular un cargo generado (SEC-050)**: `POST
+  /appointments/:id/cancellation-fee/void` (`{ reason }`, 3–500), con el mismo
+  permiso que generarlo (ADMIN, o RECEPTION si la política vigente lo permite)
+  y la sede de la cita permitida (DX-089, 403). En una transacción, con la
+  cita y la fila del cargo bloqueadas, guarda en el cargo `voidedAt`,
+  `voidedById` y `voidReason` y DESPUÉS retira el ítem del plan (sale del
+  estado de cuenta). Una vez (409 «ya se anuló»); sin cargo generado, 409; si
+  los abonos vivos del plan ya no caben en lo que queda por cobrar, 409 «Anula
+  antes el abono». La vista pasa a `status: VOIDED` con quién, cuándo y el
+  motivo. Auditoría `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` con
+  `statusChange` CHARGED → VOIDED, sin el texto. Sin Idempotency-Key (como
+  condonar): repetir da 409. **Desde el plan**, el ítem de un cargo vigente
+  (`cancellationFeeAppointmentId` en el ítem) no cambia de precio, descuento
+  (ni su motivo) ni estado, ni se quita, para ningún rol (409 en español), y
+  su plan no se cancela ni cambia de moneda (completarlo sí); las notas sí. La
+  vista del cargo trae `fee.itemAmount` (lo que cobra hoy el ítem) e
+  `itemMismatch` (no cuadra con `amount`: se cambió por fuera de este flujo).
+  Red en la BD (migración `20261024150000_sec050_cancellation_fee_void`):
+  triggers `treatment_plan_items_cancellation_fee_locked` y
+  `treatment_plans_cancellation_fee_locked` (restrict_violation → 409; sin
+  `app.current_tenant` no aplican, como los de DX-109). **Cómo pasa la
+  anulación legítima**: no hay variable de sesión; el trigger del ítem mira
+  en la misma transacción si el cargo sigue vigente (CHARGED y `voidedAt`
+  NULL), y el caso de uso anula el cargo antes de retirar el ítem. En un plan ya
+  completado también: `treatment_plan_items_locked_when_closed` (DX-109) deja
+  retirar solo el ítem de un cargo ya anulado, sin otro cambio (migración
+  `20261024150400_sec050_void_fee_in_closed_plan`). Para tocar
+  el ítem hay que dejar antes la anulación, con autor y motivo. Un cargo con
+  `planItemRemoved = true` y sin `voidedAt` es anterior a SEC-050 (se quitó
+  con «Quitar»).
 - **Tabla `cancellation_fees`**: una fila por cita (único
   `(tenantId, appointmentId)`), RLS FORCE, append-only para la app (sin
-  UPDATE/DELETE), FK compuestas a la cita, al ítem (por paciente), a la sede y
+  DELETE; el único UPDATE es la anulación: GRANT solo de `voidedAt`,
+  `voidedById` y `voidReason`, y trigger `cancellation_fees_append_only`, que
+  impide borrar la fila, vaciar la tabla (`cancellation_fees_no_truncate`)
+  o reescribir cualquier otra columna aunque la app tuviera
+  UPDATE/DELETE/TRUNCATE de más, DB-052; un superusuario sí borra), CHECK
+  `cancellation_fees_void_check` (las tres juntas, solo en CHARGED), FK compuestas a la cita, al ítem (por paciente), a la sede y
   a la versión, y CHECK `cancellation_fees_status_check` (CHARGED: importe > 0,
   moneda, ítem y versión; WAIVED: solo el motivo). **Idempotencia**: el cargo
   bloquea la cita (`FOR UPDATE`) y el paciente (para no crear dos planes) y el
   índice único es el respaldo: varias peticiones a la vez dejan una sola 201 y
   las demás 409 (`test/cancellation-fee.int-spec.ts`).
 - **Auditoría**: `@Audit` sobre la cita: `CREATE APPOINTMENT`
-  `CANCELLATION_FEE_CHARGED` y `UPDATE APPOINTMENT` `CANCELLATION_FEE_WAIVED`,
-  con el paciente; nunca el texto del motivo.
+  `CANCELLATION_FEE_CHARGED`, `UPDATE APPOINTMENT` `CANCELLATION_FEE_WAIVED`
+  y `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` (SEC-050), con el paciente;
+  nunca el texto del motivo.
 - **Bloqueo por EPS_CO**: lo fija la plataforma con
   `CANCELLATION_FEE_BLOCK_EPS_CO` (`true` por defecto, `false` lo apaga); la
   clínica no puede cambiarlo.

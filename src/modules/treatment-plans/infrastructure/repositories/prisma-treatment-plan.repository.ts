@@ -53,6 +53,18 @@ export const ACCEPTANCE_SUMMARY = {
 } satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
 
 /**
+ * SEC-050: el cargo VIGENTE (generado y sin anular) del que es ítem, si lo
+ * es. Va en toda lectura de ítems: el plan lo dice a la web y la edición lo
+ * comprueba con el ítem bloqueado.
+ */
+export const LIVE_FEE_INCLUDE = {
+  cancellationFees: {
+    where: { status: 'CHARGED', voidedAt: null },
+    select: { appointmentId: true },
+  },
+} satisfies Prisma.TreatmentPlanItemInclude;
+
+/**
  * DX-050: nombre de quien realizó el ítem y de la sede, para «Realizado por
  * Dra. X · fecha · sede». Por la membresía (también la de un miembro ya
  * desactivado: su producción sigue siendo suya).
@@ -60,6 +72,7 @@ export const ACCEPTANCE_SUMMARY = {
 export const ITEM_ATTRIBUTION_INCLUDE = {
   performedByMembership: { select: { user: { select: { fullName: true } } } },
   performedLocation: { select: { name: true } },
+  ...LIVE_FEE_INCLUDE,
 } satisfies Prisma.TreatmentPlanItemInclude;
 
 type PrismaItemWithAttribution = PrismaTreatmentPlanItem &
@@ -135,6 +148,8 @@ function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
     performedLocationId: item.performedLocationId,
     performedLocationName: item.performedLocation?.name ?? null,
     completedAt: item.completedAt,
+    cancellationFeeAppointmentId:
+      item.cancellationFees?.[0]?.appointmentId ?? null,
     notes: item.notes,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -257,7 +272,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         ? await tx.treatmentPlan.findFirst({
             where: { id, deletedAt: null },
             include: {
-              items: { where: { deletedAt: null } },
+              items: { where: { deletedAt: null }, include: LIVE_FEE_INCLUDE },
               acceptance: ACCEPTANCE_SUMMARY,
             },
           })
@@ -393,7 +408,10 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       // ya está aquí; una posterior espera a este COMMIT).
       const plan = planId ? await lockedPlan(tx, planId) : null;
       const previous = locked
-        ? await tx.treatmentPlanItem.findUniqueOrThrow({ where: { id } })
+        ? await tx.treatmentPlanItem.findUniqueOrThrow({
+            where: { id },
+            include: LIVE_FEE_INCLUDE,
+          })
         : null;
       if (!plan || !previous) {
         throw new NotFoundException('Treatment plan item not found');

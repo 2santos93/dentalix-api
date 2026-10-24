@@ -81,6 +81,9 @@ const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
 /** DX-109: además de la firma, un plan cerrado congela sus ítems. */
 const ITEMS_LOCKED_CONFLICT = `${SIGNED_PLAN_CONFLICT}; o el plan está cancelado, rechazado o completado (DX-109)`;
+/** SEC-050: el ítem de un cargo por inasistencia vigente. */
+const FEE_ITEM_CONFLICT =
+  'SEC-050: el ítem es el cargo vigente por inasistencia o cancelación tardía de una cita (`cancellationFeeAppointmentId`): su precio, descuento y estado no cambian ni se quita, sea cual sea el rol; se anula con POST /appointments/{id}/cancellation-fee/void';
 /** DX-204: un presupuesto aceptado (con o sin firma) no se vuelve a descontar. */
 const DISCOUNT_LOCKED_CONFLICT = `${ITEMS_LOCKED_CONFLICT}; o el descuento (también una rebaja del precio frente al de catálogo) cambia en un plan ya aceptado (DX-204, SEC-041). El estado del plan se comprueba con su fila bloqueada, dentro de la transacción (BE-036)`;
 const DISCOUNT_FORBIDDEN =
@@ -206,7 +209,7 @@ export class TreatmentPlansController {
       'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor)',
   })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
+    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109). SEC-050: el plan que lleva un cargo vigente por inasistencia no se cancela ni cambia de moneda (completarlo sí). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
   })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -425,7 +428,7 @@ export class TreatmentPlansController {
     description: `${DISCOUNT_FORBIDDEN}. DX-050: cambiar quién o cuándo de un ítem DONE (solo ADMIN); sacarlo de DONE (solo ADMIN o quien lo realizó)`,
   })
   @ApiConflictResponse({
-    description: `${DISCOUNT_LOCKED_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio; cerrado: DX-050 admite además corregir quién o cuándo de un ítem DONE, sin otro cambio`,
+    description: `${DISCOUNT_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio; cerrado: DX-050 admite además corregir quién o cuándo de un ítem DONE, sin otro cambio`,
   })
   @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
   updateItem(
@@ -463,7 +466,9 @@ export class TreatmentPlansController {
   })
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
-  @ApiConflictResponse({ description: ITEMS_LOCKED_CONFLICT })
+  @ApiConflictResponse({
+    description: `${ITEMS_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}`,
+  })
   removeItem(@Param('itemId', ParseUUIDPipe) itemId: string): Promise<void> {
     return this.removeTreatmentPlanItem.execute(itemId);
   }

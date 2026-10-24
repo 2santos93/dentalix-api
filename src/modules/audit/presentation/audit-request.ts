@@ -202,6 +202,7 @@ export function buildAuditDraft(
         : {}),
       params: req.params,
       ...(options.reason ? { reason: options.reason } : {}),
+      ...(options.statusChange ? { statusChange: options.statusChange } : {}),
       ...(options.search && resultCount !== null
         ? {
             search: {

@@ -860,6 +860,16 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: { response: 'patientId' },
     reason: 'CANCELLATION_FEE_WAIVED',
   },
+  // SEC-050: anular un cargo ya generado (con motivo; el texto nunca va a la
+  // metadata, el estado antes y después sí).
+  'POST /appointments/:id/cancellation-fee/void': {
+    action: 'VOID',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'CANCELLATION_FEE_VOIDED',
+    statusChange: { from: 'CHARGED', to: 'VOIDED' },
+  },
   'GET /reports/discounts': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN_ITEM',
