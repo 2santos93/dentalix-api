@@ -3587,6 +3587,13 @@ model PatientCoverage {
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById            String?   @db.Uuid
   updatedById            String?   @db.Uuid
+  /// SEC-049: quién puso por última vez el pagador o el nº de afiliado
+  /// (puntero suave). NULL en las anteriores: vale `createdById`.
+  declaredById           String?   @db.Uuid
+  /// SEC-049: un ADMIN comprobó el nº de afiliado (puntero suave y fecha, los
+  /// dos o ninguno: CHECK). Cambiar el pagador o el número la borra.
+  verifiedById           String?   @db.Uuid
+  verifiedAt             DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   deletedAt              DateTime?
