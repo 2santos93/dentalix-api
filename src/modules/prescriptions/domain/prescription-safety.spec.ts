@@ -162,6 +162,48 @@ describe('prescription-safety (DX-300)', () => {
       expect(codes(result)).toEqual(['INTERACTION_METHOTREXATE_NSAID']);
     });
 
+    it('solo antiagregante (clopidogrel, AAS): el AINE bloquea por sangrado; metronidazol, macrólidos y azoles no', () => {
+      const onAntiplatelet = anamnesis({
+        medications: ['Clopidogrel 75 mg', 'AAS 100 mg'],
+        flags: { anticoagulantes: true },
+      });
+      const result = check(
+        [
+          ibuprofeno,
+          metronidazol,
+          { activeIngredient: 'Claritromicina' },
+          { activeIngredient: 'Fluconazol' },
+        ],
+        onAntiplatelet,
+      );
+      expect(codes(result)).toEqual(['INTERACTION_ANTIPLATELET_NSAID']);
+      expect(result.alerts[0].severity).toBe('BLOCKING');
+      expect(result.alerts[0].message).toContain('Clopidogrel');
+      expect(result.alerts[0].message).not.toContain('INR');
+    });
+
+    it('heparina (HBPM) cuenta como anticoagulante aunque también tome AAS', () => {
+      const result = check(
+        [metronidazol],
+        anamnesis({
+          medications: ['AAS 100 mg', 'Enoxaparina 40 mg'],
+          flags: { anticoagulantes: true },
+        }),
+      );
+      expect(codes(result)).toEqual([
+        'INTERACTION_ANTICOAGULANT_METRONIDAZOLE',
+      ]);
+    });
+
+    it('un ACOD no habla de INR (no se controla con INR)', () => {
+      const result = check(
+        [{ activeIngredient: 'Claritromicina' }],
+        anamnesis({ medications: ['Apixabán 5 mg'] }),
+      );
+      expect(codes(result)).toEqual(['INTERACTION_ANTICOAGULANT_MACROLIDE']);
+      expect(result.alerts[0].message).not.toContain('INR');
+    });
+
     it('falso positivo: paracetamol con warfarina no es una interacción bloqueante', () => {
       const result = check(
         [paracetamol, amoxicilina],
@@ -263,6 +305,53 @@ describe('prescription-safety (DX-300)', () => {
         6,
       );
       expect(result.alerts).toEqual([]);
+    });
+
+    it('amoxicilina/clavulánico: cuenta los mg de amoxicilina, no los del clavulánico', () => {
+      // 875/125 mg: 875 mg de amoxicilina = 43,8 mg/kg/toma para 20 kg.
+      const tablet = check(
+        [
+          {
+            activeIngredient: 'Amoxicilina/Ácido clavulánico',
+            concentration: '875/125 mg',
+            dose: '1 comprimido',
+            frequency: 'Cada 8 horas',
+          },
+        ],
+        child(20),
+        6,
+      );
+      expect(codes(tablet)).toEqual(['PEDIATRIC_DOSE_EXCEEDED']);
+      expect(tablet.alerts[0].message).toContain('875 mg por toma');
+      // 250/62,5 mg/5 ml, 5 ml: 250 mg = 12,5 mg/kg/toma (vale).
+      const syrup = check(
+        [
+          {
+            activeIngredient: 'Amoxicilina/Ácido clavulánico',
+            concentration: '250/62,5 mg/5 ml',
+            dose: '5 ml',
+            frequency: 'Cada 8 horas',
+          },
+        ],
+        child(20),
+        6,
+      );
+      expect(syrup.alerts).toEqual([]);
+      // 12 ml de la misma suspensión: 600 mg = 30 mg/kg/toma (justo el tope).
+      expect(
+        check(
+          [
+            {
+              activeIngredient: 'Amoxicilina/Ácido clavulánico',
+              concentration: '250/62,5 mg/5 ml',
+              dose: '14 ml',
+              frequency: 'Cada 8 horas',
+            },
+          ],
+          child(20),
+          6,
+        ).alerts[0].message,
+      ).toContain('700 mg por toma');
     });
 
     it('supera el tope diario aunque la toma valga (paracetamol cada 4 h)', () => {

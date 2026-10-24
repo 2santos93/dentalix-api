@@ -2933,11 +2933,13 @@ la prescripción: no sustituye el juicio clínico.
   habitual (`medications[].nombre`), `embarazo`/`semanasEmbarazo`,
   `anticoagulantes`, `bifosfonatos` y `vitalSigns.peso`; y la edad por la fecha
   de nacimiento el día de hoy en la zona de la sede.
-- **Reglas**: `ALLERGY`, `INTERACTION` (anticoagulante con AINE, metronidazol,
-  macrólidos o azoles; metotrexato con AINE), `PREGNANCY` (AINE desde la semana
+- **Reglas**: `ALLERGY`, `INTERACTION` (anticoagulante —cumarínicos, ACOD,
+  heparinas o la casilla— con AINE, metronidazol, macrólidos o azoles; solo un
+  antiagregante —clopidogrel, AAS…— con AINE; metotrexato con AINE), `PREGNANCY` (AINE desde la semana
   20 o sin semanas; tetraciclinas; metronidazol en el 1.er trimestre),
   `ANTIRESORPTIVE` (informativo), `PEDIATRIC_DOSE` (< 12 años: amoxicilina,
-  ibuprofeno y paracetamol en mg/kg por toma y por día; sin peso pide el peso)
+  ibuprofeno y paracetamol en mg/kg por toma y por día; en una combinación
+  «875/125 mg» cuenta el primer número; sin peso pide el peso)
   y `NO_ANAMNESIS` (informativo). Cada aviso: `rule`, `code`, `severity`
   (`BLOCKING`/`INFO`), `message` en español y `source`.
 - **Previsualización**: `POST /patients/:patientId/prescriptions/safety-check`

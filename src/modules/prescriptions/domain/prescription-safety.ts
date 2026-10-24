@@ -151,6 +151,33 @@ const ANTICOAGULANT: Patterns = [
   /^rivaroxaban/,
   /^dabigatran/,
   /^edoxaban/,
+  /heparin/,
+  /^enoxaparin/,
+  /^bemiparin/,
+  /^tinzaparin/,
+  /^dalteparin/,
+  /^nadroparin/,
+];
+const VITAMIN_K_ANTAGONIST: Patterns = [
+  /^warfarin/,
+  /^acenocumarol/,
+  /^sintrom/,
+  /^aldocumar/,
+  /^fenprocumon/,
+];
+/**
+ * Antiagregantes: también encienden la casilla `anticoagulantes` de la
+ * anamnesis, pero solo suman riesgo de sangrado con un AINE; metronidazol,
+ * macrólidos y azoles potencian a los cumarínicos, no a ellos.
+ */
+const ANTIPLATELET: Patterns = [
+  /^antiagreg/,
+  /^clopidogrel/,
+  /^prasugrel/,
+  /^ticagrelor/,
+  /^aspirin/,
+  /acetilsalicil/,
+  /^aas$/,
 ];
 const METHOTREXATE: Patterns = [/^metotrexat/, /^methotrexat/];
 
@@ -206,19 +233,25 @@ function plain(value: string | null | undefined): string {
 const NUMBER = String.raw`(\d+(?:[.,]\d+)?)`;
 const toNumber = (raw: string) => Number(raw.replace(',', '.'));
 
-/** «500 mg», «1 g», «1,5 g» → mg. No casa «250 mg/5 ml». */
+/**
+ * Una combinación «875/125 mg» (amoxicilina/clavulánico) vale por su PRIMER
+ * número: el del principio activo que se nombra primero.
+ */
+const COMBO = String.raw`(?:\s*\/\s*\d+(?:[.,]\d+)?)?`;
+
+/** «500 mg», «1 g», «1,5 g», «875/125 mg» → mg. No casa «250 mg/5 ml». */
 function massMg(text: string): number | null {
   const m = new RegExp(
-    String.raw`${NUMBER}\s*(mg|g|gr|gramos?|miligramos?)\b(?!\s*\/)`,
+    String.raw`${NUMBER}${COMBO}\s*(mg|g|gr|gramos?|miligramos?)\b(?!\s*\/)`,
   ).exec(text);
   if (!m) return null;
   return toNumber(m[1]) * (m[2].startsWith('m') ? 1 : 1000);
 }
 
-/** «250 mg/5 ml» → 50 mg/ml; «100 mg/ml» → 100. */
+/** «250 mg/5 ml» → 50 mg/ml; «100 mg/ml» → 100; «250/62,5 mg/5 ml» → 50. */
 function mgPerMl(text: string): number | null {
   const m = new RegExp(
-    String.raw`${NUMBER}\s*(mg|g)\s*\/\s*(?:${NUMBER}\s*)?ml\b`,
+    String.raw`${NUMBER}${COMBO}\s*(mg|g)\s*\/\s*(?:${NUMBER}\s*)?ml\b`,
   ).exec(text);
   if (!m) return null;
   const mg = toNumber(m[1]) * (m[2] === 'g' ? 1000 : 1);
@@ -370,28 +403,31 @@ function interactionAlerts(
   anamnesis: SafetyAnamnesis,
 ): SafetyAlert[] {
   const out: SafetyAlert[] = [];
+  const named = anamnesis.medications.find((m) => matches(m, ANTICOAGULANT));
+  const antiplatelet = anamnesis.medications.find((m) =>
+    matches(m, ANTIPLATELET),
+  );
+  // La casilla sin un anticoagulante con nombre cuenta como anticoagulante,
+  // salvo que la explique un antiagregante de la lista.
   const anticoagulant =
-    anamnesis.medications.find((m) => matches(m, ANTICOAGULANT)) ??
-    (anamnesis.flags.anticoagulantes
-      ? 'anticoagulante/antiagregante marcado en la anamnesis'
+    named ??
+    (anamnesis.flags.anticoagulantes && !antiplatelet
+      ? 'anticoagulante marcado en la anamnesis'
       : null);
   if (anticoagulant) {
+    // Solo los antivitamina K (cumarínicos) se controlan con el INR.
+    const potentiates =
+      named && matches(named, VITAMIN_K_ANTAGONIST)
+        ? 'potencia el anticoagulante (sube el INR) y el riesgo de sangrado'
+        : 'puede potenciar el anticoagulante y el riesgo de sangrado';
     const pairs: [Patterns, string, string][] = [
       [NSAID, 'NSAID', 'un AINE: aumenta el riesgo de sangrado'],
-      [
-        METRONIDAZOLE,
-        'METRONIDAZOLE',
-        'metronidazol: potencia el anticoagulante (INR) y el riesgo de sangrado',
-      ],
-      [
-        MACROLIDE,
-        'MACROLIDE',
-        'un macrólido: potencia el anticoagulante (INR) y el riesgo de sangrado',
-      ],
+      [METRONIDAZOLE, 'METRONIDAZOLE', `metronidazol: ${potentiates}`],
+      [MACROLIDE, 'MACROLIDE', `un macrólido: ${potentiates}`],
       [
         AZOLE,
         'AZOLE',
-        'un azol (también el miconazol oral tópico): potencia el anticoagulante (INR) y el riesgo de sangrado',
+        `un azol (también el miconazol oral tópico): ${potentiates}`,
       ],
     ];
     for (const [patterns, code, what] of pairs) {
@@ -405,6 +441,15 @@ function interactionAlerts(
         source: SDCEP,
       });
     }
+  } else if (antiplatelet && matches(ingredient, NSAID)) {
+    out.push({
+      rule: 'INTERACTION',
+      code: 'INTERACTION_ANTIPLATELET_NSAID',
+      severity: 'BLOCKING',
+      activeIngredient: ingredient,
+      message: `Interacción: el paciente toma ${antiplatelet} (antiagregante) y ${ingredient} es un AINE: aumenta el riesgo de sangrado.`,
+      source: SDCEP,
+    });
   }
   const methotrexate = anamnesis.medications.find((m) =>
     matches(m, METHOTREXATE),
