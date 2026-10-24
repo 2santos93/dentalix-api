@@ -25,6 +25,20 @@ const prisma = new PrismaService(tenantContext);
 const repo = new PrismaEmailOutboxRepository(prisma);
 const cipher = new EmailPayloadCipher(randomBytes(32));
 
+// Solo los casos que requieren un intento inmediato usan este fixture.
+// insert real crea una fila nueva (no hace upsert/dedupe); se vence antes
+// del kick de enqueue, sin adelantar un reintento ni despachar dos veces.
+class DueOnInsertRepository extends PrismaEmailOutboxRepository {
+  override async insert(
+    input: Parameters<PrismaEmailOutboxRepository['insert']>[0],
+  ): Promise<{ id: string }> {
+    const inserted = await repo.insert(input);
+    await makeDue(inserted.id);
+    return inserted;
+  }
+}
+const dueOnInsertRepo = new DueOnInsertRepository(prisma);
+
 const SUBDOMAINS = ['outbox-int-a', 'outbox-int-b'];
 const EMAIL = 'ana.perez@clinica-outbox.co';
 const TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9';
@@ -52,10 +66,14 @@ function config(overrides: Partial<MailConfig> = {}): MailConfig {
   };
 }
 
-function services(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
+function services(
+  mailer: Mailer,
+  overrides: Partial<MailConfig> = {},
+  enqueueRepository = repo,
+) {
   const cfg = config(overrides);
   const dispatcher = new EmailDispatcher(repo, mailer, cipher, cfg);
-  const outbox = new EmailOutbox(repo, cipher, dispatcher, cfg);
+  const outbox = new EmailOutbox(enqueueRepository, cipher, dispatcher, cfg);
   return { dispatcher, outbox };
 }
 
@@ -88,6 +106,15 @@ async function purge(): Promise<void> {
 
 async function row(id: string) {
   return owner.emailOutbox.findUniqueOrThrow({ where: { id } });
+}
+
+// El cliente y PostgreSQL pueden diferir al comparar una emisión recién hecha.
+// Fija con el reloj de la BD la precondición vencida, sin sleeps ni reloj fake.
+function makeDue(id: string) {
+  return owner.$executeRaw`
+    UPDATE "email_outbox"
+       SET "nextAttemptAt" = timezone('utc', clock_timestamp()) - interval '1 second'
+     WHERE "id" = ${id}::uuid`;
 }
 
 describe('DX-088 · email_outbox en la BD (int)', () => {
@@ -125,7 +152,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('crear → exactamente una fila PENDING, sin el email ni el token en claro, y el despachador la deja SENT con ConsoleMailer', async () => {
-    const { outbox, dispatcher } = services(new ConsoleMailer());
+    const { outbox, dispatcher } = services(
+      new ConsoleMailer(),
+      {},
+      dueOnInsertRepo,
+    );
     const { id } = await outbox.enqueue(invitation(tenantA));
     await dispatcher.whenIdle();
 
@@ -215,7 +246,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('reclamar usa FOR UPDATE SKIP LOCKED: salta las filas bloqueadas y dos reclamos nunca comparten fila', async () => {
-    const { outbox, dispatcher } = services(new ConsoleMailer());
+    const { outbox, dispatcher } = services(
+      new ConsoleMailer(),
+      {},
+      dueOnInsertRepo,
+    );
     await dispatcher.onModuleDestroy();
     const ids: string[] = [];
     for (let i = 0; i < 6; i++) {
@@ -268,16 +303,17 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('un SENDING con el arriendo vencido (réplica caída) se puede reclamar otra vez', async () => {
-    const { outbox, dispatcher } = services(new ConsoleMailer());
+    const { outbox, dispatcher } = services(
+      new ConsoleMailer(),
+      {},
+      dueOnInsertRepo,
+    );
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
     const [claimed] = await repo.claimDue(1, 300);
     expect(claimed.id).toBe(id);
     expect(await repo.claimDue(1, 300)).toEqual([]);
-    await owner.emailOutbox.update({
-      where: { id },
-      data: { nextAttemptAt: new Date(Date.now() - 1000) },
-    });
+    await makeDue(id);
     const [again] = await repo.claimDue(1, 300);
     expect(again).toMatchObject({ id, attempts: 2 });
   });
@@ -294,7 +330,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
         );
       },
     };
-    const { outbox, dispatcher } = services(failing, { retryBaseMs: 60_000 });
+    const { outbox, dispatcher } = services(
+      failing,
+      { retryBaseMs: 60_000 },
+      dueOnInsertRepo,
+    );
     const { id } = await outbox.enqueue(invitation(tenantA));
     await dispatcher.whenIdle();
 
@@ -309,10 +349,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     expect(delay1).toBeGreaterThan(50_000);
     expect(delay1).toBeLessThanOrEqual(61_000);
 
-    await owner.emailOutbox.update({
-      where: { id },
-      data: { nextAttemptAt: new Date(Date.now() - 1000) },
-    });
+    await makeDue(id);
     await dispatcher.dispatchBatch();
     current = await row(id);
     expect(current).toMatchObject({ status: 'PENDING', attempts: 2 });
@@ -320,10 +357,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     expect(delay2).toBeGreaterThan(110_000);
     expect(delay2).toBeLessThanOrEqual(121_000);
 
-    await owner.emailOutbox.update({
-      where: { id },
-      data: { nextAttemptAt: new Date(Date.now() - 1000) },
-    });
+    await makeDue(id);
     await dispatcher.dispatchBatch();
     current = await row(id);
     expect(current).toMatchObject({
@@ -377,7 +411,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('el arriendo se acota a 900 s aunque se pida más (revisión D1)', async () => {
-    const { outbox, dispatcher } = services(new ConsoleMailer());
+    const { outbox, dispatcher } = services(
+      new ConsoleMailer(),
+      {},
+      dueOnInsertRepo,
+    );
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
     await repo.claimDue(1, 2_147_483_647);
@@ -390,17 +428,10 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
-    // El caso requiere una fila vencida antes de cada reclamo: enqueue usa
-    // el reloj del cliente, pero claimDue decide con el de PostgreSQL. Fijar esa
-    // precondición con UTC de la BD evita depender del desfase entre ambos.
-    const makeDue = () => owner.$executeRaw`
-      UPDATE "email_outbox"
-         SET "nextAttemptAt" = timezone('utc', clock_timestamp()) - interval '1 second'
-       WHERE "id" = ${id}::uuid`;
-    await makeDue();
+    await makeDue(id);
     const [first] = await repo.claimDue(1, 300);
     expect(first).toMatchObject({ id, attempts: 1 });
-    await makeDue();
+    await makeDue(id);
     const [second] = await repo.claimDue(1, 300);
     expect(second).toMatchObject({ id, attempts: 2 });
 
