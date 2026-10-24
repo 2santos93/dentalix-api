@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -22,7 +22,7 @@ import {
 // clínica sigue operando, deduplicación, «actualizar vacíos», deshacer,
 // informe de errores con fórmulas neutralizadas, autorización Ley 1581
 // pendiente, solo ADMIN, auditoría y aislamiento entre clínicas.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

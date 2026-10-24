@@ -18,7 +18,7 @@ import type { RecordAuditEventUseCase } from '../src/modules/audit/application/r
 // hueco (uno gana, el otro 409) y que `providerIds[]` use índice con volumen.
 // `raw` (DIRECT_URL, owner) siembra y limpia; lo que se prueba va por la MISMA
 // ruta que la app (runWithTenant, rol dentalix_app, sujeto a RLS).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

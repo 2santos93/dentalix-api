@@ -3382,6 +3382,44 @@ dentalix_email_dispatcher`) o repón la política como en
   npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
   de clúster compartido, un segundo owner y un intruso con nombre único.
 
+## Lint en local sin agotar memoria (DX-338)
+
+```bash
+npm run lint:check        # lo mismo que CI: comprueba, no reescribe
+npm run lint              # con --fix
+```
+
+Las reglas son *type-aware* (`projectService`): ESLint carga el programa de
+TypeScript entero de `tsconfig.json` (`src/`, `test/` y `prisma/`; nunca
+`dist/` ni `coverage/`). Con el arreglo de DX-338 el `lint:check` completo
+cabe en un heap de 2 GB (`--max-old-space-size=2048`: 2,2 GB de memoria
+máxima medida con `/usr/bin/time -v`; sin límite Node recoge basura más tarde
+y llega a 3–3,7 GB). Antes pasaba de 4 GB de heap (5,6 GB de memoria) y en CI
+moría con exit 134. El límite por defecto de Node basta en una máquina de
+8 GB o más. Si aun así muere (`Killed`, exit 134,
+`JavaScript heap out of memory`):
+
+```bash
+# subir el heap de Node solo para el lint
+NODE_OPTIONS=--max-old-space-size=4096 npm run lint:check
+# o lintar por partes (cada una carga menos ficheros)
+npx eslint "src/**/*.ts"
+npx eslint "test/**/*.ts"
+# ver la memoria máxima y el tiempo (GNU time)
+/usr/bin/time -v npm run lint:check
+```
+
+La causa que había (y que vigila la propia configuración): un
+`new PrismaClient({ datasources: … })` sin argumento de tipo infiere un
+`PrismaClient<{ datasources: … }>` distinto en cada fichero, y pasarlo donde
+se espera `PrismaClient` (`resetDatabase(raw)`, `seed…(raw)`) obliga a
+TypeScript a comparar el cliente entero, con sus 100+ modelos. Con ~250
+clientes así en `test/` y `prisma/` el programa tenía 3,8 M de tipos y tsc
+usaba 4,2 GB. Por eso se escribe `new PrismaClient<Prisma.PrismaClientOptions>({
+… })`, que es exactamente el `PrismaClient` por defecto; `no-restricted-syntax`
+lo exige en todo el repo (la excepción legítima, inferir `log` por eventos para
+usar `$on`, va con `eslint-disable-next-line` y el motivo).
+
 ## Run tests
 
 ```bash
@@ -3402,7 +3440,11 @@ datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
 hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
 fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
 
-**CI.** `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
+**CI.** `lint` va en su propio job (con `NODE_OPTIONS=--max-old-space-size=4096`,
+su memoria máxima con `/usr/bin/time -v` y las reglas más lentas con
+`TIMING=1` en el log) y tipos, unit y build en otro, con cada paso
+`if: ${{ !cancelled() }}`: un rojo del lint o de tsc ya no deja los demás
+`skipped` (DX-338). `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
 su MinIO): un rojo en `test:int` no oculta la e2e. El MinIO de prueba es
 `cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
 y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);

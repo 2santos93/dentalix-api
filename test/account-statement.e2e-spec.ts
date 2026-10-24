@@ -6,6 +6,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -17,7 +18,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y para
 // limpiar entre tenants — mismo criterio que payment-plans.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

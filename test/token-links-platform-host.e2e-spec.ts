@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
@@ -18,7 +18,7 @@ import { registerVerified } from './support/register-verified';
 // apunta al subdominio de plataforma `<subdominio>.<TENANT_BASE_DOMAINS[0]>`
 // (`.env.test`: dentalix.app). Por un host de plataforma se mantiene ese host.
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

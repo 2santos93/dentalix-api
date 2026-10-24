@@ -17,8 +17,13 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: Lint, tipos, unit y build
+  # DX-338 (TST-039): el lint va en su PROPIO job. En el merge de DX-291 ESLint
+  # se quedó sin heap (exit 134) y, al ir en el mismo job, tsc, unit y build
+  # salieron `skipped`: ahora un rojo del lint no oculta nada más. Además
+  # muestra su duración y su memoria máxima (`/usr/bin/time -v`) y las reglas
+  # más lentas (TIMING), para ver si vuelve a crecer.
+  lint:
+    name: Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -30,23 +35,63 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npx prisma generate
+      # `npm run lint` lleva --fix (reescribiría y "pasaría"); en CI solo se
+      # comprueba. Tras DX-338 cabe en ~2 GB de heap (antes pasaba de 4 GB); el
+      # límite explícito no depende de la RAM del runner y deja margen.
+      - name: lint:check
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          TIMING: '1'
+        run: |
+          if [ -x /usr/bin/time ]; then
+            /usr/bin/time -v npm run lint:check
+          else
+            time npm run lint:check
+          fi
+
+  # Tipos, unit y build: cada paso corre aunque falle el anterior (solo
+  # dependen de `npm ci` y `prisma generate`), así un rojo en uno no deja los
+  # demás `skipped` (DX-338).
+  checks:
+    name: Tipos, unit y build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - name: Generar el cliente de Prisma
+        id: prisma
+        run: npx prisma generate
       # Avisos de seguridad en dependencias de producción (DX-080). Nivel
       # `critical` y no `high` a propósito: quedan 3 altos que sólo se arreglan
       # con un salto mayor (prisma 7: prisma -> @prisma/config -> deepmerge-ts
       # < 8, GHSA-ggr8-5vv4-36mx, que afecta a la carga de config del CLI, no al
       # runtime). Subir a `--audit-level=high` cuando se migre a prisma 7.
       - name: Auditar dependencias de producción
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npm audit --omit=dev --audit-level=critical
-      - run: npx prisma generate
-      # `npm run lint` lleva --fix (reescribiría y "pasaría"); en CI solo se comprueba.
-      - run: npm run lint:check
-      - run: npx tsc --noEmit
-      - run: npm test
-      - run: npm run build
+      - name: tsc --noEmit
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        run: npx tsc --noEmit
+      - name: Unit (npm test)
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        run: npm test
+      - name: Build
+        id: build
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        run: npm run build
       # `start:prod` ejecuta `node dist/main`: el build debe dejar ahí la entrada
       # (tsconfig.build.json compila solo src/; si entrara prisma/ o test/, la
       # salida pasaría a dist/src/ y producción no arrancaría).
       - name: Comprobar la entrada de start:prod
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: test -f dist/main.js
 
   # DX-251 (TST-028): integración y e2e en jobs SEPARADOS, cada uno con su

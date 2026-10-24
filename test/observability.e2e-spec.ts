@@ -20,7 +20,7 @@ import { registerVerified } from './support/register-verified';
 // debug) en vez de en la consola: así el test lee cada línea y la salida de
 // jest queda limpia.
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -365,7 +365,7 @@ describe('Observabilidad (e2e, DX-023)', () => {
 describe('Observabilidad sin base de datos (e2e, DX-023)', () => {
   let app: INestApplication<App>;
   const lines: LogLine[] = [];
-  const unreachable = new PrismaClient({
+  const unreachable = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: {
       db: { url: 'postgresql://dentalix:dentalix@127.0.0.1:1/sin_base' },
     },

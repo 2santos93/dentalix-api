@@ -26,7 +26,7 @@ import type { AuditRequestContext } from '../src/modules/audit/domain/audit-requ
 // hueco (EXCLUDE por profesional) y la misma cita marcada movida dos veces
 // (UPDATE condicional de `wantsEarlier`). `raw` (DIRECT_URL, owner) siembra,
 // inspecciona y limpia; lo probado va por runWithTenant (dentalix_app, RLS).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

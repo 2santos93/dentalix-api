@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -24,7 +24,7 @@ import {
 // texto congelado con la versión de la plantilla, historial en la ficha del
 // paciente y aislamiento entre clínicas. DIRECT_URL (superusuario, sin RLS)
 // solo marca una baja y lee filas, el outbox y la auditoría.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

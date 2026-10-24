@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // DX-036 / DB-003, capa DB: las EXCLUDE constraints se evalúan SALTANDO la RLS.
 // Sin `"tenantId" WITH =`, una cita del tenant B chocaba con la del mismo
 // `providerId` en el tenant A (canal lateral + bloqueo de agenda entre
 // clínicas). Este spec inserta por SQL directo (owner, sin RLS) para probar la
 // constraint en sí, sin el pre-check de la aplicación delante.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

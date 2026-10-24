@@ -6,10 +6,10 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // inalterabilidad (trigger dx_patient_implants_immutable), CHECKs y retención
 // (DX-039). Cada caso escribe POR LA MISMA RUTA que la app (runWithTenant, rol
 // dentalix_app); `raw` (DIRECT_URL, owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 const tenantContext = new TenantContextService();

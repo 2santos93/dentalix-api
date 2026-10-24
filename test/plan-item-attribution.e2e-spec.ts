@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -40,7 +41,7 @@ import {
  * un profesional de otra clínica no existe (404); solo un ADMIN corrige quién
  * o cuándo (auditado); salir de DONE limpia la atribución (auditado).
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

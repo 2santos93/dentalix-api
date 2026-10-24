@@ -17,10 +17,10 @@ function withPool(url: string | undefined, size: number): string {
   return u.toString();
 }
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: withPool(process.env.DATABASE_URL, 12) } },
 });
 

@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { App } from 'supertest/types';
 import { buildXlsx } from '../src/modules/patient-imports/domain/__fixtures__/xlsx-builder';
 import { createE2eApp } from './support/create-e2e-app';
@@ -27,7 +27,7 @@ const describeSlow = SLOW
 const PARALLEL = 20;
 const MAX_RSS_GROWTH_MB = 300;
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

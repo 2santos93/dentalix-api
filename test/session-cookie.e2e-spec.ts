@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { applySecurity } from '../src/shared/security/apply-security';
 import { loadSecuritySettings } from '../src/shared/security/security-settings';
@@ -28,7 +28,7 @@ const ENV: Record<string, string> = {
   CORS_ROOT_DOMAIN: 'localhost',
 };
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

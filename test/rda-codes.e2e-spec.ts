@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -16,7 +16,7 @@ import { civilDateIn } from '../src/shared/time/civil-day';
 // DX-212 · códigos para el RDA de punta a punta: búsqueda CIE-10, evolución con
 // diagnósticos por rol, CUPS y REPS solo ADMIN (auditados), rda-readiness en
 // sede CO y ES y aislamiento entre clínicas. DIRECT_URL solo lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

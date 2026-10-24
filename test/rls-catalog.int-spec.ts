@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 
 /**
@@ -16,7 +16,7 @@ import { clinicTables, TenantTable } from './support/tenant-tables';
  * de la RLS, pero así el spec no depende de los GRANT del rol de la app.
  */
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

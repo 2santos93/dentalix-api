@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../../src/shared/tenancy/tenant-context.service';
 import { PrismaInvitationRepository } from '../../src/modules/invitations/infrastructure/repositories/prisma-invitation.repository';
@@ -18,7 +18,7 @@ import { adminUrlFor, requireOwnerNosuEnv } from './owner-nosu-env';
 describe('DX-143 · membresías en otras clínicas con un owner sin superusuario (owner-nosu)', () => {
   const env = requireOwnerNosuEnv();
   const db = new URL(env.ownerUrl).pathname.slice(1);
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, db) } },
   });
   const tenantContext = new TenantContextService();

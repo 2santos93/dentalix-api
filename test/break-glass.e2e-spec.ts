@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -29,7 +29,7 @@ import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
  * en `platform_access_audit` que el ADMIN de la clínica puede listar.
  */
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const passwordService = new PasswordService();
@@ -430,7 +430,7 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
     });
 
     it('la tabla es append-only también para el rol de la app', async () => {
-      const app = new PrismaClient({
+      const app = new PrismaClient<Prisma.PrismaClientOptions>({
         datasources: { db: { url: process.env.DATABASE_URL } },
       });
       try {

@@ -15,10 +15,10 @@ import {
 // una fila), dos cargos simultáneos del mismo paciente comparten el plan
 // «Cargos administrativos», y `cancellation_fees` tiene RLS FORCE, es
 // append-only para la app, su CHECK de coherencia y su único por cita.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

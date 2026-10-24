@@ -9,7 +9,7 @@ import { PrismaPatientAgreementRepository } from '../src/modules/patient-agreeme
 // COMPUESTAS (cruzar clínicas falla), los únicos parciales y las CHECK. Lo que
 // se prueba va por la MISMA ruta que la app (runWithTenant, rol dentalix_app,
 // sujeto a RLS); `raw` (DIRECT_URL, superusuario) siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

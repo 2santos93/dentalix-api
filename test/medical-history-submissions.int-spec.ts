@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaMedicalHistorySubmissionRepository } from '../src/modules/medical-history-submissions/infrastructure/prisma-medical-history-submission.repository';
@@ -20,7 +20,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 //
 // `owner` (DIRECT_URL) siembra e inspecciona; la app va por PrismaService
 // (rol dentalix_app, sujeto a RLS).
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

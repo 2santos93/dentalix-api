@@ -13,7 +13,7 @@ import { computePrescriptionHash } from '../src/modules/prescriptions/domain/pre
 // DX-300, receta segura con Postgres real: el caso de uso de emisión lee la
 // anamnesis VIGENTE por el repositorio de la app (runWithTenant, rol
 // dentalix_app, RLS); `raw` (owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

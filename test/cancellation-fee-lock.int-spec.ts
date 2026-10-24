@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -18,15 +18,61 @@ import {
 // del cargo, en la misma transacción; esa fila solo admite anularse, una vez.
 // DB-052: aunque la app tenga UPDATE/DELETE de más (un `GRANT … ON ALL
 // TABLES` repetido), el trigger impide reescribir o borrar el cargo.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 
 const HOUR = 3_600_000;
 const LOCKED = /cargo por inasistencia o cancelación tardía vigente/;
+
+// TST-041: cada columna que vigila el trigger del ítem
+// (`treatment_plan_items_cancellation_fee_locked`, migración
+// 20261024150000_sec050_cancellation_fee_void) con un cambio que la toca. El
+// último test compara esta lista con la del trigger (`pg_get_functiondef`): si
+// una migración vigila otra columna o deja de vigilar una, el test lo dice.
+// Los UUID nuevos no existen: el trigger (BEFORE) rechaza antes de las FK.
+const ITEM_LOCKED: ReadonlyArray<readonly [column: string, set: string]> = [
+  ['price', `"price" = 1`],
+  ['discount', `"discount" = 100`],
+  ['discountReason', `"discountReason" = 'LOYALTY'`],
+  ['discountReasonNote', `"discountReasonNote" = 'Paciente frecuente'`],
+  ['status', `"status" = 'ACCEPTED'`],
+  ['deletedAt', `"deletedAt" = now()`],
+  ['planId', `"planId" = gen_random_uuid()`],
+  ['catalogItemId', `"catalogItemId" = gen_random_uuid()`],
+  ['patientId', `"patientId" = gen_random_uuid()`],
+  ['tenantId', `"tenantId" = gen_random_uuid()`],
+];
+
+// Lo mismo para el plan (`treatment_plans_cancellation_fee_locked`); el
+// estado va aparte, porque completarlo sí se permite.
+const PLAN_LOCKED: ReadonlyArray<readonly [column: string, set: string]> = [
+  ['currency', `"currency" = 'USD'`],
+  ['patientId', `"patientId" = gen_random_uuid()`],
+  ['deletedAt', `"deletedAt" = now()`],
+];
+
+// El plan «Cargos administrativos» nace ACCEPTED: cualquier otro estado que
+// no sea COMPLETED (cancelarlo, rechazarlo, devolverlo a DRAFT o PRESENTED)
+// dejaría de cobrar el cargo. Se derivan del enum para que un estado nuevo
+// quede cubierto sin tocar el test.
+const PLAN_REJECTED_STATUSES = Object.values(TreatmentPlanStatus).filter(
+  (s) => s !== 'ACCEPTED' && s !== 'COMPLETED',
+);
+
+/** Columnas `NEW."x" IS NOT DISTINCT FROM OLD."x"` de la función de un trigger. */
+async function watchedColumns(fn: string): Promise<string[]> {
+  const [row] = await raw.$queryRaw<{ def: string }[]>`
+    SELECT pg_get_functiondef(p.oid) AS "def"
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname = ${fn}`;
+  return [
+    ...row.def.matchAll(/NEW\."(\w+)" IS NOT DISTINCT FROM OLD\."\1"/g),
+  ].map((m) => m[1]);
+}
 
 /** SQL como dentalix_app con `app.current_tenant` fijado (como la app). */
 function asApp<T>(
@@ -130,19 +176,29 @@ describe('cargo por inasistencia protegido en la BD (SEC-050, int)', () => {
     await appRole.$disconnect();
   });
 
-  it('rechaza un UPDATE directo del precio, del descuento o del estado del ítem de un cargo vigente', async () => {
-    const { itemId } = await charged();
-    const update = (set: string) =>
-      asApp(a.tenantId, (tx) =>
-        tx.$executeRawUnsafe(
-          `UPDATE "treatment_plan_items" SET ${set} WHERE "id" = $1::uuid`,
-          itemId,
+  it.each(ITEM_LOCKED)(
+    'rechaza un UPDATE directo de %s del ítem de un cargo vigente',
+    async (_column, set) => {
+      const { itemId } = await charged();
+      const before = await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: itemId },
+      });
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          tx.$executeRawUnsafe(
+            `UPDATE "treatment_plan_items" SET ${set} WHERE "id" = $1::uuid`,
+            itemId,
+          ),
         ),
-      );
-    await expect(update(`"price" = 1`)).rejects.toThrow(LOCKED);
-    await expect(update(`"discount" = 100`)).rejects.toThrow(LOCKED);
-    await expect(update(`"status" = 'ACCEPTED'`)).rejects.toThrow(LOCKED);
-    await expect(update(`"deletedAt" = now()`)).rejects.toThrow(LOCKED);
+      ).rejects.toThrow(LOCKED);
+      await expect(
+        raw.treatmentPlanItem.findUniqueOrThrow({ where: { id: itemId } }),
+      ).resolves.toEqual(before);
+    },
+  );
+
+  it('rechaza el DELETE del ítem de un cargo vigente', async () => {
+    const { itemId } = await charged();
     await expect(
       asApp(
         a.tenantId,
@@ -170,20 +226,58 @@ describe('cargo por inasistencia protegido en la BD (SEC-050, int)', () => {
     ).resolves.toBe(1);
   });
 
-  it('el plan del cargo vigente no se cancela ni cambia de moneda; completarlo sí', async () => {
+  /** UPDATE del plan como dentalix_app. */
+  const updatePlan = (planId: string, set: string) =>
+    asApp(a.tenantId, (tx) =>
+      tx.$executeRawUnsafe(
+        `UPDATE "treatment_plans" SET ${set} WHERE "id" = $1::uuid`,
+        planId,
+      ),
+    );
+
+  it.each(PLAN_REJECTED_STATUSES)(
+    'el plan del cargo vigente no pasa de ACCEPTED a %s',
+    async (status) => {
+      const { planId } = await charged();
+      await expect(
+        updatePlan(planId, `"status" = '${status}'`),
+      ).rejects.toThrow(LOCKED);
+      expect(
+        (await raw.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }))
+          .status,
+      ).toBe('ACCEPTED');
+    },
+  );
+
+  it.each(PLAN_LOCKED)(
+    'el plan del cargo vigente no cambia %s',
+    async (_column, set) => {
+      const { planId } = await charged();
+      const before = await raw.treatmentPlan.findUniqueOrThrow({
+        where: { id: planId },
+      });
+      await expect(updatePlan(planId, set)).rejects.toThrow(LOCKED);
+      await expect(
+        raw.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }),
+      ).resolves.toEqual(before);
+    },
+  );
+
+  it('el plan del cargo vigente admite notas y completarse', async () => {
     const { planId } = await charged();
-    const update = (set: string) =>
-      asApp(a.tenantId, (tx) =>
-        tx.$executeRawUnsafe(
-          `UPDATE "treatment_plans" SET ${set} WHERE "id" = $1::uuid`,
-          planId,
-        ),
-      );
-    await expect(update(`"status" = 'CANCELLED'`)).rejects.toThrow(LOCKED);
-    await expect(update(`"currency" = 'USD'`)).rejects.toThrow(LOCKED);
-    await expect(update(`"deletedAt" = now()`)).rejects.toThrow(LOCKED);
-    await expect(update(`"notes" = 'Cargos'`)).resolves.toBe(1);
-    await expect(update(`"status" = 'COMPLETED'`)).resolves.toBe(1);
+    await expect(updatePlan(planId, `"notes" = 'Cargos'`)).resolves.toBe(1);
+    await expect(updatePlan(planId, `"status" = 'COMPLETED'`)).resolves.toBe(1);
+  });
+
+  it('las listas de este test son las columnas que vigilan los triggers (pg_get_functiondef)', async () => {
+    expect(
+      (
+        await watchedColumns('treatment_plan_items_cancellation_fee_locked')
+      ).sort(),
+    ).toEqual(ITEM_LOCKED.map(([column]) => column).sort());
+    expect(
+      (await watchedColumns('treatment_plans_cancellation_fee_locked')).sort(),
+    ).toEqual([...PLAN_LOCKED.map(([column]) => column), 'status'].sort());
   });
 
   it('la anulación legítima (primero el cargo, después el ítem, en una transacción) pasa', async () => {

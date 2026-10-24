@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // DX-102: la migración que convierte audit_events en tabla particionada no
 // pierde filas. Una BD desechable recibe todas las migraciones ANTERIORES,
@@ -69,7 +69,7 @@ interface Scenario {
 }
 
 describe('DX-102 · migración de audit_events con datos (int)', () => {
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: process.env.DIRECT_URL } },
   });
   const scenarios: Scenario[] = [];
@@ -94,7 +94,7 @@ describe('DX-102 · migración de audit_events con datos (int)', () => {
       }
     }
     migrateDeploy(dir, urlFor(db));
-    const target = new PrismaClient({
+    const target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: urlFor(db) } },
     });
     const scenario = { db, dir, target };

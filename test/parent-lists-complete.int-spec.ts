@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaInventoryRepository } from '../src/modules/inventory/infrastructure/repositories/prisma-inventory.repository';
@@ -15,7 +15,7 @@ const MANY = 501;
 // ni aviso, así que un tope ocultaría historia clínica sin que nadie lo sepa.
 // Se comprueba que llegan completos y en orden (más reciente primero). `raw` (DIRECT_URL, owner) siembra y limpia;
 // las lecturas van por los repositorios reales (rol dentalix_app, RLS).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

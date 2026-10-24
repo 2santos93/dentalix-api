@@ -1,5 +1,10 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient, ScheduleBlockKind } from '@prisma/client';
+import {
+  ClinicRole,
+  Prisma,
+  PrismaClient,
+  ScheduleBlockKind,
+} from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -19,7 +24,7 @@ import { blockConflictMessage } from '../src/modules/schedule-blocks/domain/sche
 // existentes), «Pendientes por agendar» (cancelar / no-show / enlace público
 // → una sola entrada, agendar desde ella, descartar, alta manual), «Buscar
 // hueco», auditoría y aislamiento entre clínicas.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

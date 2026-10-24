@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -16,7 +16,7 @@ import {
 // bloqueada; directorio paginado con el precio de la lista; PUT de precios en
 // una transacción (500 filas, `null` quita, una prestación ajena da 400 sin
 // escribir nada); retiro con convenio vivo y aislamiento entre clínicas.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

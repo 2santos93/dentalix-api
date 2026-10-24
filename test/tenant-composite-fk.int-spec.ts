@@ -13,7 +13,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // dentalix_app, sujeto a RLS) en el tenant A, apuntando a un padre del tenant B,
 // y espera P2003 (violación de FK). `raw` (DIRECT_URL, owner) solo siembra el
 // tenant B y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

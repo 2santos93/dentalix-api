@@ -9,10 +9,10 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // del servidor en UTC. Cada caso escribe POR LA MISMA RUTA que la app
 // (runWithTenant, rol dentalix_app); `raw` (DIRECT_URL, superusuario) solo
 // siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 const tenantContext = new TenantContextService();

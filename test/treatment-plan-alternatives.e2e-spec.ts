@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -21,7 +22,7 @@ import {
 // estados (409), los permisos por rol y la lista de presupuestos por seguir
 // (antigüedad, sede, clínica, tope de página). `raw` (DIRECT_URL, owner) solo
 // fecha presentaciones en el pasado y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
