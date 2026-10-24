@@ -126,12 +126,19 @@ describe('CSV (DX-107)', () => {
   });
 
   it('una comilla sin cerrar no se vuelve cuadrática ni guarda celdas enormes', () => {
-    const started = Date.now();
-    const [, record] = [
-      ...parseCsv(csvBytes(`a,b\n"${'x'.repeat(4_000_000)}`)).records,
-    ];
-    expect(Date.now() - started).toBeLessThan(2_000);
-    expect(record.cells[0].length).toBeLessThanOrEqual(10_000);
+    const bytes = csvBytes(`a,b\n"${'x'.repeat(4_000_000)}`);
+    const meter = meterStringCalls();
+    let records: RawRecord[];
+    try {
+      records = [...parseCsv(bytes).records];
+    } finally {
+      meter.restore();
+    }
+    // Lineal: el tramo entre comillas se salta con UNA búsqueda (cursor que
+    // avanza), no se vuelve a recorrer desde el principio por cada carácter.
+    // Se cuenta trabajo, no reloj (TST-034).
+    expect(meter.calls.indexOf).toBeLessThanOrEqual(2);
+    expect(records[1].cells[0].length).toBeLessThanOrEqual(10_000);
   });
 });
 
@@ -255,10 +262,17 @@ describe('XLSX', () => {
   });
 
   it('una etiqueta sin cerrar es un error del fichero, en tiempo lineal', async () => {
-    const started = Date.now();
     const book = rawBook('<sheetData>' + '<row>'.repeat(1_000_000), [], true);
-    await expect(collect(book)).rejects.toThrow(ImportFileError);
-    expect(Date.now() - started).toBeLessThan(2_000);
+    const meter = meterStringCalls();
+    try {
+      await expect(collect(book)).rejects.toThrow(ImportFileError);
+    } finally {
+      meter.restore();
+    }
+    // Lineal: un puñado de búsquedas (el cierre que falta se busca una vez),
+    // no una por cada uno de los 1.000.000 de `<row>` (cuadrático). Se cuenta
+    // trabajo, no reloj (TST-034); hoy son 10.
+    expect(meter.calls.indexOf).toBeLessThanOrEqual(100);
   });
 
   it('número de fila: entero de 1 a 1.048.576 y creciente; si no, el siguiente', async () => {
@@ -450,40 +464,95 @@ describe('readImportFile', () => {
 });
 
 /**
- * Mide un trabajo asíncrono: tiempo total y el MAYOR hueco del event loop
- * (un `setInterval` de 5 ms que deja de latir mientras el hilo está ocupado).
+ * Cuenta llamadas a los métodos de texto con los que se recorre un fichero
+ * (`indexOf` del escáner, `charCodeAt`/`fromCharCode` de una decodificación
+ * a mano) mientras está puesto. Mide TRABAJO, no reloj: el número es el
+ * mismo con la máquina sola que con la CI corriendo 350 suites a la vez
+ * (TST-034: los umbrales en milisegundos daban rojos falsos). Se quita
+ * siempre con `restore()`. Solo toca los objetos del contexto de Jest de
+ * este fichero.
  */
-async function watchLoop<T>(
-  work: () => Promise<T>,
-): Promise<{ outcome: T | Error; maxGap: number; ms: number }> {
-  let maxGap = 0;
-  let last = Date.now();
-  const timer = setInterval(() => {
-    const now = Date.now();
-    maxGap = Math.max(maxGap, now - last);
-    last = now;
-  }, 5);
-  const started = Date.now();
+function meterStringCalls() {
+  const calls = { indexOf: 0, charCodeAt: 0, fromCharCode: 0 };
+  const proto = String.prototype;
+  // Los originales por su descriptor: son métodos que se llaman con `this`.
+  const original = <T>(name: 'indexOf' | 'charCodeAt') =>
+    Object.getOwnPropertyDescriptor(proto, name)?.value as T;
+  const indexOf =
+    original<(this: string, search: string, position?: number) => number>(
+      'indexOf',
+    );
+  const charCodeAt =
+    original<(this: string, index: number) => number>('charCodeAt');
+  const { fromCharCode } = String;
+  proto.indexOf = function (this: string, search: string, position?: number) {
+    calls.indexOf += 1;
+    return indexOf.call(this, search, position);
+  };
+  proto.charCodeAt = function (this: string, index: number) {
+    calls.charCodeAt += 1;
+    return charCodeAt.call(this, index);
+  };
+  String.fromCharCode = (...codes: number[]) => {
+    calls.fromCharCode += 1;
+    return fromCharCode(...codes);
+  };
+  return {
+    calls,
+    restore() {
+      proto.indexOf = indexOf;
+      proto.charCodeAt = charCodeAt;
+      String.fromCharCode = fromCharCode;
+    },
+  };
+}
+
+/**
+ * Corre un trabajo asíncrono y mide cuánto trabaja SIN soltar el hilo: un
+ * `setImmediate` que se reprograma a sí mismo late una vez por vuelta del
+ * event loop y apunta cuántas búsquedas (`indexOf`) hizo el lector desde su
+ * último latido. Si el lector cede el hilo, cada tramo entre latidos está
+ * acotado; si un bucle no cede, todo su recorrido cae en una sola vuelta.
+ * Es determinista: depende del código y de la entrada, no de la CPU libre.
+ */
+async function watchTurns<T>(work: () => Promise<T>): Promise<{
+  outcome: T | Error;
+  maxPerTurn: number;
+  total: number;
+}> {
+  const meter = meterStringCalls();
+  let seen = 0;
+  let maxPerTurn = 0;
+  let running = true;
+  const beat = () => {
+    maxPerTurn = Math.max(maxPerTurn, meter.calls.indexOf - seen);
+    seen = meter.calls.indexOf;
+    if (running) setImmediate(beat);
+  };
+  setImmediate(beat);
   let outcome: T | Error;
   try {
     outcome = await work();
   } catch (err) {
     outcome = err as Error;
   } finally {
-    clearInterval(timer);
+    running = false;
+    meter.restore();
   }
-  maxGap = Math.max(maxGap, Date.now() - last);
-  return { outcome, maxGap, ms: Date.now() - started };
+  maxPerTurn = Math.max(maxPerTurn, meter.calls.indexOf - seen);
+  return { outcome, maxPerTurn, total: meter.calls.indexOf };
 }
 
 /*
- * Umbral de bloqueo en la prueba: holgado frente a los ~150 ms del probe de
- * la revisión porque `npm test` corre en paralelo en una máquina compartida
- * (CPU y recolector de basura de las entradas de 25 MB de los demás casos).
- * El fallo que se busca es de SEGUNDOS: 1,5–5,3 s antes del arreglo; el
- * probe de la revisión mide los 150 ms con el proceso solo.
+ * Búsquedas que el lector puede hacer, como mucho, en una sola vuelta del
+ * event loop. Cede el hilo cada 8.192 pasos del escáner (`YIELD_STEPS` de
+ * xlsx-reader.ts) y cada paso son unas pocas búsquedas (la etiqueta, su
+ * cierre y las de dentro de la celda): un tramo real anda por 16.000–33.000
+ * (medido). Un bucle que no cede las hace todas de una vez: con
+ * `YIELD_STEPS` infinito salen de 128.000 a 8 M en una sola vuelta (los
+ * 1,5–5,3 s de hilo parado de antes del arreglo de la revisión B1).
  */
-const MAX_BLOCK_MS = 1_000;
+const MAX_SEARCHES_PER_TURN = 64 * 1024;
 
 describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', () => {
   jest.setTimeout(60_000);
@@ -498,18 +567,29 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
     data: Buffer.from(xml),
   });
 
-  async function expectRejectedFast(book: Buffer, message: RegExp) {
+  /**
+   * El hilo se suelta: ninguna vuelta del event loop pasa del tope de
+   * búsquedas. Y el contador vio trabajar al lector (si no, la prueba no
+   * diría nada).
+   */
+  function expectYieldsTheThread(m: { maxPerTurn: number; total: number }) {
+    expect(m.maxPerTurn).toBeGreaterThan(0);
+    expect(m.total).toBeGreaterThanOrEqual(m.maxPerTurn);
+    expect(m.maxPerTurn).toBeLessThanOrEqual(MAX_SEARCHES_PER_TURN);
+  }
+
+  async function expectRejectedYielding(book: Buffer, message: RegExp) {
     expect(book.length).toBeLessThan(200 * 1024);
-    const { outcome, maxGap } = await watchLoop(() =>
+    const { outcome, maxPerTurn, total } = await watchTurns(() =>
       readImportFile(book, 'x.xlsx'),
     );
     expect(outcome).toBeInstanceOf(ImportFileError);
     expect((outcome as Error).message).toMatch(message);
-    expect(maxGap).toBeLessThan(MAX_BLOCK_MS);
+    expectYieldsTheThread({ maxPerTurn, total });
   }
 
   it('sharedStrings con 5,5 M de <si/>: 400 sin bloquear el hilo', async () => {
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(sheetWith(''), [
         part('xl/sharedStrings.xml', `<sst>${'<si/>'.repeat(5_500_000)}</sst>`),
       ]),
@@ -518,7 +598,7 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
   });
 
   it('styles.xml con 5,5 M de <xf/>: 400 (más de 64.000 estilos) sin bloquear', async () => {
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(sheetWith(''), [
         part(
           'xl/styles.xml',
@@ -530,7 +610,7 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
   });
 
   it('una fila con 2,5 M de <c r="CW3"/>: 400 (más de 16.384 celdas) sin bloquear', async () => {
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(
         sheetWith(`<row r="3">${'<c r="CW3"/>'.repeat(2_500_000)}</row>`),
       ),
@@ -539,7 +619,7 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
   });
 
   it('una fila con 6 M de <c/> sin referencia: 400 sin bloquear', async () => {
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(sheetWith(`<row r="3">${'<c/>'.repeat(6_000_000)}</row>`)),
       /16\.384 celdas/,
     );
@@ -547,21 +627,21 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
 
   it('muchas filas anchas que respetan el tope por fila: presupuesto global, sin bloquear', async () => {
     const row = `<row>${'<c/>'.repeat(16_000)}</row>`;
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(sheetWith(row.repeat(400))),
       /demasiado complej/,
     );
   });
 
   it('etiquetas que se parecen (<cx/>) también cuentan y ceden el hilo', async () => {
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(sheetWith(`<row r="3">${'<cx/>'.repeat(6_000_000)}</row>`)),
       /demasiado complej/,
     );
   });
 
   it('una cadena con 1 M de tramos <t/>: 400 sin bloquear', async () => {
-    await expectRejectedFast(
+    await expectRejectedYielding(
       rawBook(sheetWith(''), [
         part(
           'xl/sharedStrings.xml',
@@ -584,14 +664,14 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
         '3001234567',
       ]);
     }
-    const { outcome, maxGap } = await watchLoop(() =>
+    const { outcome, maxPerTurn, total } = await watchTurns(() =>
       readImportFile(buildXlsx(rows), 'x.xlsx'),
     );
     expect(outcome).not.toBeInstanceOf(Error);
     expect(
       (outcome as Awaited<ReturnType<typeof readImportFile>>).table.rows,
     ).toHaveLength(10_000);
-    expect(maxGap).toBeLessThan(MAX_BLOCK_MS);
+    expectYieldsTheThread({ maxPerTurn, total });
   });
 });
 
@@ -603,14 +683,29 @@ describe('CSV Windows-1252 (revisión 2026-10-23, I1)', () => {
     expect(decodeWindows1252(bytes)).toBe('€‚“”–—™Ÿ\u0081éñA');
   });
 
-  it('un CSV de 5 MB en Windows-1252 se decodifica en < 150 ms sin bloquear', () => {
+  it('un CSV de 5 MB en Windows-1252 se decodifica en nativo, sin trabajo por carácter', () => {
     const head = Buffer.from('nombres;apellidos\nJosé;Peña\n', 'latin1');
     const body = Buffer.alloc(5 * 1024 * 1024 - head.length, 0xe9);
-    for (let i = 0; i < body.length; i += 97) body[i] = 0x80; // €
+    let high = 0;
+    for (let i = 0; i < body.length; i += 97) {
+      body[i] = 0x80; // €
+      high += 1;
+    }
     const bytes = Buffer.concat([head, body]);
-    const started = Date.now();
-    const decoded = decodeCsv(bytes);
-    expect(Date.now() - started).toBeLessThan(150);
+    const meter = meterStringCalls();
+    let decoded: ReturnType<typeof decodeCsv>;
+    try {
+      decoded = decodeCsv(bytes);
+    } finally {
+      meter.restore();
+    }
+    // Lo decodifica Node (latin1) y en JS solo se corrige el tramo 0x80–0x9F:
+    // como mucho una conversión por byte de ese tramo. A mano, carácter a
+    // carácter, eran 5 M de `fromCharCode` (1,2 s; revisión I1). Se cuenta
+    // trabajo, no reloj (TST-034).
+    expect(
+      meter.calls.charCodeAt + meter.calls.fromCharCode,
+    ).toBeLessThanOrEqual(high);
     expect(decoded.encoding).toBe('windows-1252');
     expect(decoded.text.startsWith('nombres;apellidos\nJosé;Peña\n€')).toBe(
       true,
