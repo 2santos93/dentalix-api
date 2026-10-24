@@ -4,7 +4,6 @@ const MISSING_CODES = [
   'PATIENT_DOCUMENT',
   'PRINCIPAL_DIAGNOSIS',
   'PROCEDURE_CUPS',
-  'LOCATION_REPS',
   'AUTHOR_LICENSE',
 ] as const;
 
@@ -20,7 +19,7 @@ export class RdaMissingItemDto {
     format: 'uuid',
     nullable: true,
     description:
-      'Dónde completarlo: paciente (PATIENT_DOCUMENT), ítem del catálogo (PROCEDURE_CUPS), sede (LOCATION_REPS) o usuario autor (AUTHOR_LICENSE); null si no aplica.',
+      'Dónde completarlo: paciente (PATIENT_DOCUMENT), ítem del catálogo (PROCEDURE_CUPS) o usuario autor (AUTHOR_LICENSE); null si no aplica.',
   })
   resourceId!: string | null;
 }

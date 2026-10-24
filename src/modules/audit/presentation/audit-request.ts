@@ -30,6 +30,12 @@ export interface AuditedRequest {
    * creado): no se registra otro evento.
    */
   skipAudit?: boolean;
+  /**
+   * DX-319: metadata que el handler añade al evento cuando solo él la conoce
+   * (p. ej. el antes y después de un campo). Pasa por `sanitizeAuditMetadata`
+   * como el resto y no pisa lo que pone el interceptor (campos, ruta, código).
+   */
+  auditMetadata?: Record<string, unknown>;
 }
 
 /** Contexto de la petición capturado al entrar al handler. */
@@ -197,6 +203,7 @@ export function buildAuditDraft(
     ip: req.ip ?? null,
     userAgent: header(req, 'user-agent'),
     metadata: sanitizeAuditMetadata({
+      ...req.auditMetadata,
       ...(options.action === 'UPDATE'
         ? { changedFields: bodyFields(req.body) }
         : {}),

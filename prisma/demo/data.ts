@@ -125,9 +125,6 @@ export const DEMO_CUPS: Record<string, string> = {
   'CX-EXO-SIMPLE': '230101',
 };
 
-/** DX-212: código de habilitación REPS (12 dígitos) de la sede principal. */
-export const DEMO_PRINCIPAL_REPS = '110010123401';
-
 /**
  * DX-222: teléfono de la sede principal, el que las indicaciones
  * postoperatorias muestran para urgencias (`{{telefono_sede}}`). Ficticio.
@@ -1109,7 +1106,7 @@ export const DEMO_CLINICAL_ENTRIES: readonly DemoClinicalEntry[] = [
     reason: 'Valoración inicial',
     notes:
       'Paciente refiere sensibilidad al frío en 36. Se observa lesión cariosa oclusal. Se indica resina y profilaxis. Se refuerza técnica de cepillado.',
-    // DX-212: con REPS en la sede principal y registro de la Dra., «RDA: listo».
+    // DX-212: con el registro de la Dra., «RDA: listo».
     diagnoses: [
       { icd10Code: 'K02.1', kind: 'PRINCIPAL', toothFdi: '36' },
       { icd10Code: 'K05.1', kind: 'RELACIONADO' },

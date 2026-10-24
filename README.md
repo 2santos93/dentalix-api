@@ -107,7 +107,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
-   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
+   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 y CUPS en seis procedimientos para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
@@ -1337,7 +1337,7 @@ moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
   y el navegador la guarda como PDF (la API no genera PDF). El envío por email
   al ADMIN queda fuera de esta entrega.
 
-## Códigos para el RDA: CIE-10, CUPS y REPS (DX-212)
+## Códigos para el RDA: CIE-10 y CUPS (DX-212)
 
 Datos que pide el Resumen Digital de Atención (Res. 1888/2025, Colombia) y el
 RIPS. Esta tarea solo los guarda y COMPRUEBA: no genera el Bundle FHIR ni envía
@@ -1362,25 +1362,59 @@ nada al Ministerio.
   Sin diagnóstico la evolución se sigue guardando. Una corrección es una adenda
   en la evolución y una evolución nueva con el diagnóstico. RLS FORCE, FK
   compuesta a la evolución (misma clínica y paciente) y RESTRICT al código.
-- **CUPS** (`dental_catalog_items.cupsCode`, 6 alfanuméricos) y **REPS**
-  (`locations.repsHabilitationCode`, 12 dígitos): en `PATCH /catalog/items/:id`
-  y `PATCH /locations/:id`, solo ADMIN, con CHECK en la BD y 400 que dice el
-  formato. Vacío o `null` lo quita. Altas y cambios del catálogo y cambios de
-  sede quedan en `audit_events` (`DENTAL_CATALOG_ITEM`, `LOCATION`, con los
-  campos cambiados, nunca los valores).
+- **CUPS** (`dental_catalog_items.cupsCode`, 6 alfanuméricos): en
+  `PATCH /catalog/items/:id`, solo ADMIN, con CHECK en la BD y 400 que dice el
+  formato. Vacío o `null` lo quita. Altas y cambios del catálogo quedan en
+  `audit_events` (`DENTAL_CATALOG_ITEM`, con los campos cambiados, nunca los
+  valores). El código REPS de la sede se borró en DX-319 (ver «Nº de registro
+  sanitario de la sede»).
 - **`GET /clinical-entries/:id/rda-readiness`** (roles clínicos; recepción no
   ve diagnósticos) → `{ notApplicable, ready, missing[], pending[] }`. Sede: la
   de la cita ligada o, sin cita, la principal (la evolución no guarda sede).
   Fuera de Colombia, `notApplicable: true`. Comprueba documento del paciente,
   diagnóstico principal, CUPS de los procedimientos hechos en esa atención
   (odontograma: `PROCEDURE` `COMPLETED` de esta clínica, ligados a la evolución
-  o del mismo día civil en la zona de la sede, sin los anulados), REPS de la
-  sede y registro profesional del autor. El NIT va en `pending` («pendiente de
+  o del mismo día civil en la zona de la sede, sin los anulados) y registro
+  profesional del autor. El NIT va en `pending` («pendiente de
   DX-019») y no cuenta para `ready`. Evolución de otra clínica: 404. Queda
   auditado (`VIEW`, `RDA_READINESS`, con el paciente).
 - **Demo**: CUPS en seis procedimientos (ejemplos: verifícalos contra la tabla
-  oficial), REPS en la sede principal (la Norte sin él) y diagnósticos en tres
-  evoluciones; la de Ana (hace 40 días) sale «RDA: listo».
+  oficial) y diagnósticos en tres evoluciones; la de Ana (hace 40 días) sale
+  «RDA: listo».
+
+## Nº de registro sanitario de la sede (DX-319)
+
+Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
+(DX-311: Dentalix es global, ninguna regla depende del país).
+
+- **`locations.healthRegistrationNumber`**: texto libre opcional, sin formato
+  ni validación por país, hasta 64 caracteres (CHECK
+  `locations_health_registration_number_check`: 1–64 y sin espacios a los
+  lados). `PATCH /locations/:id` (solo ADMIN; el resto 403, otra clínica 404)
+  lo recorta; vacío o `null` lo quita y sin el campo no cambia. Va en la
+  respuesta de la sede (`GET /locations`).
+- **`locations.showHealthRegistrationNumber`** (por defecto `false`): si el nº
+  sale en los documentos de la sede. Hoy ningún documento imprimía el REPS, así
+  que ninguno lo imprime aún; DX-306 (justificantes) lo usará como campo
+  opcional, solo con el booleano activo.
+- **Auditoría**: el `UPDATE` de `LOCATION` lleva, además de los campos
+  cambiados, `metadata.healthRegistration` con el nº y el booleano antes y
+  después (solo si cambió alguno). Es la única excepción de texto en la
+  metadata: un dato público de la sede, nunca de un paciente; el saneado admite
+  1–64 caracteres sin caracteres de control. El handler lo deja en
+  `req.auditMetadata`, que el interceptor sanea y no deja pisar sus campos.
+- **`repsHabilitationCode` en el cuerpo → 400** («El código REPS ya no
+  existe…»): la ValidationPipe global solo descartaría el campo y una web
+  antigua mostraría «Guardado» sin guardar nada.
+- **Migraciones**: `20261024174000_dx319_location_health_registration` añade
+  las dos columnas (compatible hacia atrás) y
+  `20261024174100_dx319_drop_location_reps` **copia el REPS existente** al nº
+  de registro sanitario (en Colombia es el registro de la sede; así el ADMIN
+  no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
+  `DROP COLUMN IF EXISTS` (solo lo referenciaba su CHECK; ni vistas, ni
+  funciones, ni índices, ni RLS). Con FORCE quitado durante la copia (owner
+  sin BYPASSRLS) e idempotente. El código de esta rama ya no lee la columna:
+  la migración va con el despliegue del código nuevo.
 
 ## Registro de implantes (DX-191)
 

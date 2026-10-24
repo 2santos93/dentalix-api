@@ -182,6 +182,35 @@ describe('buildAuditDraft (DX-009)', () => {
     expect(JSON.stringify(draft)).not.toMatch(/Penicilina|3001234567/);
   });
 
+  it('DX-319: añade el antes/después que el handler deja en la petición, saneado', () => {
+    const LOCATION = '66666666-6666-4666-8666-666666666666';
+    const healthRegistration = {
+      before: { number: null, shown: false },
+      after: { number: 'NRS-7', shown: true },
+    };
+    const draft = buildAuditDraft(
+      { action: 'UPDATE', resource: 'LOCATION', resourceId: { param: 'id' } },
+      req({
+        params: { id: LOCATION },
+        body: {
+          healthRegistrationNumber: 'NRS-7',
+          showHealthRegistrationNumber: true,
+        },
+        auditMetadata: { healthRegistration, reason: 'free text', params: {} },
+      }),
+      { id: LOCATION },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: [
+        'healthRegistrationNumber',
+        'showHealthRegistrationNumber',
+      ],
+      params: { id: LOCATION },
+      healthRegistration,
+    });
+  });
+
   it('código de la escritura (DX-039): va a metadata.reason; el motivo libre no', () => {
     const draft = buildAuditDraft(
       {

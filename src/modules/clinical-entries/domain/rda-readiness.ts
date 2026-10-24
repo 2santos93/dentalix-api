@@ -9,7 +9,6 @@ export type RdaMissingCode =
   | 'PATIENT_DOCUMENT'
   | 'PRINCIPAL_DIAGNOSIS'
   | 'PROCEDURE_CUPS'
-  | 'LOCATION_REPS'
   | 'AUTHOR_LICENSE';
 
 export interface RdaMissingItem {
@@ -17,7 +16,7 @@ export interface RdaMissingItem {
   /** Qué falta, en español, para la lista de la ficha. */
   label: string;
   /**
-   * Dónde se completa: paciente, ítem del catálogo, sede o usuario autor.
+   * Dónde se completa: paciente, ítem del catálogo o usuario autor.
    * `null` si no hay a quién señalar (diagnóstico; evolución sin autor).
    */
   resourceId: string | null;
@@ -47,7 +46,8 @@ export interface RdaPerformedItem {
 /** Lo que el repositorio reúne de la atención (todo bajo RLS). */
 export interface RdaFacts {
   country: ClinicCountry;
-  location: { id: string; name: string; repsHabilitationCode: string | null };
+  /** Sede de la atención (la de la cita o, sin cita, la principal). */
+  location: { id: string; name: string };
   patient: { id: string; docNumber: string | null };
   hasPrincipalDiagnosis: boolean;
   /** Procedimientos hechos en esa atención (odontograma, sin anulados). */
@@ -95,13 +95,6 @@ export function computeRdaReadiness(facts: RdaFacts): RdaReadiness {
       code: 'PROCEDURE_CUPS',
       label: `Código CUPS de «${item.name}»`,
       resourceId: item.catalogItemId,
-    });
-  }
-  if (blank(facts.location.repsHabilitationCode)) {
-    missing.push({
-      code: 'LOCATION_REPS',
-      label: `Código de habilitación (REPS) de «${facts.location.name}»`,
-      resourceId: facts.location.id,
     });
   }
   if (blank(facts.author.professionalLicense)) {

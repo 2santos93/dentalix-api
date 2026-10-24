@@ -14,7 +14,8 @@ import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd
 import { civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-212 · códigos para el RDA de punta a punta: búsqueda CIE-10, evolución con
-// diagnósticos por rol, CUPS y REPS solo ADMIN (auditados), rda-readiness en
+// diagnósticos por rol, CUPS solo ADMIN (auditado; DX-319: la sede ya no
+// tiene REPS), rda-readiness en
 // sede CO y ES y aislamiento entre clínicas. DIRECT_URL solo lee y limpia.
 const raw = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -45,10 +46,9 @@ interface CatalogItem {
 interface Location {
   id: string;
   country: string;
-  repsHabilitationCode: string | null;
 }
 
-describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
+describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
   let app: INestApplication<App>;
   let a: Clinic;
   let b: Clinic;
@@ -331,8 +331,8 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
     });
   });
 
-  describe('CUPS del catálogo y REPS de la sede (solo ADMIN, auditados)', () => {
-    it('formatos inválidos dan 400 con el formato esperado', async () => {
+  describe('CUPS del catálogo (solo ADMIN, auditado)', () => {
+    it('un formato inválido da 400 con el formato esperado', async () => {
       const cups = await call(
         a,
         'patch',
@@ -344,29 +344,17 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
       expect((cups.body as { message: string }).message).toMatch(
         /6 caracteres alfanuméricos/,
       );
-      const reps = await call(
-        a,
-        'patch',
-        `/locations/${location.id}`,
-        a.adminToken,
-      )
-        .send({ repsHabilitationCode: '123' })
-        .expect(400);
-      expect((reps.body as { message: string }).message).toMatch(/12 dígitos/);
     });
 
-    it('DENTIST y RECEPTION no pueden editarlos (403)', async () => {
+    it('DENTIST y RECEPTION no pueden editarlo (403)', async () => {
       for (const token of [dentist.token, reception]) {
         await call(a, 'patch', `/catalog/items/${procedure.id}`, token)
           .send({ cupsCode: '232101' })
           .expect(403);
-        await call(a, 'patch', `/locations/${location.id}`, token)
-          .send({ repsHabilitationCode: '110010123401' })
-          .expect(403);
       }
     });
 
-    it('ADMIN los guarda; quedan auditados con el campo cambiado', async () => {
+    it('ADMIN lo guarda; queda auditado con el campo cambiado', async () => {
       const item = await call(
         a,
         'patch',
@@ -376,21 +364,12 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
         .send({ cupsCode: '232101' })
         .expect(200);
       expect((item.body as CatalogItem).cupsCode).toBe('232101');
-      const loc = await call(
-        a,
-        'patch',
-        `/locations/${location.id}`,
-        a.adminToken,
-      )
-        .send({ repsHabilitationCode: '110010123401' })
-        .expect(200);
-      expect((loc.body as Location).repsHabilitationCode).toBe('110010123401');
 
       const events = await raw.auditEvent.findMany({
         where: {
           tenantId: a.tenantId,
           action: 'UPDATE',
-          resourceType: { in: ['DENTAL_CATALOG_ITEM', 'LOCATION'] },
+          resourceType: 'DENTAL_CATALOG_ITEM',
         },
       });
       expect(
@@ -399,12 +378,7 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
           e.resourceId,
           (e.metadata as { changedFields?: string[] }).changedFields,
         ]),
-      ).toEqual(
-        expect.arrayContaining([
-          ['DENTAL_CATALOG_ITEM', procedure.id, ['cupsCode']],
-          ['LOCATION', location.id, ['repsHabilitationCode']],
-        ]),
-      );
+      ).toEqual([['DENTAL_CATALOG_ITEM', procedure.id, ['cupsCode']]]);
       // Quitar el CUPS para el bloque de rda-readiness.
       await call(a, 'patch', `/catalog/items/${procedure.id}`, a.adminToken)
         .send({ cupsCode: null })
@@ -654,13 +628,10 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
       ).expect(404);
       await call(b, 'get', endpoint + own, b.adminToken).expect(404);
     });
-    it('sin cita en sedeB guarda B y usa su REPS; la cita prevalece sobre la cabecera', async () => {
+    it('sin cita en sedeB guarda B y usa su país; la cita prevalece sobre la cabecera', async () => {
+      // Sede B en ES: si el RDA usa B (y no la principal, CO), no aplica.
       const second = await raw.location.create({
-        data: {
-          tenantId: a.tenantId,
-          name: 'Sede B DX232',
-          repsHabilitationCode: null,
-        },
+        data: { tenantId: a.tenantId, name: 'Sede B DX232', country: 'ES' },
       });
       const res = await createEntry(dentist.token, {})
         .set('X-Location-Id', second.id)
@@ -671,11 +642,7 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
           .locationId,
       ).toBe(second.id);
       const read = await readiness(a, id, dentist.token).expect(200);
-      expect((read.body as Readiness).missing).toContainEqual({
-        code: 'LOCATION_REPS',
-        label: 'Código de habilitación (REPS) de «Sede B DX232»',
-        resourceId: second.id,
-      });
+      expect((read.body as Readiness).notApplicable).toBe(true);
       const appointment = await raw.appointment.create({
         data: {
           tenantId: a.tenantId,
@@ -728,12 +695,12 @@ describe('Códigos RDA: CIE-10, CUPS y REPS (DX-212, e2e)', () => {
       expect(seen.body).toEqual([]);
     });
 
-    it('B no puede poner el CUPS de un ítem de A ni el REPS de una sede de A (404)', async () => {
+    it('B no puede poner el CUPS de un ítem de A ni editar una sede de A (404)', async () => {
       await call(b, 'patch', `/catalog/items/${procedure.id}`, b.adminToken)
         .send({ cupsCode: '890203' })
         .expect(404);
       await call(b, 'patch', `/locations/${location.id}`, b.adminToken)
-        .send({ repsHabilitationCode: '110010123401' })
+        .send({ name: 'Hackeada' })
         .expect(404);
     });
   });

@@ -209,6 +209,23 @@ export class AuditCancellationDto {
   lateCancellation!: boolean;
 }
 
+/** Un lado del cambio del nº de registro sanitario de una sede (DX-319). */
+export class AuditHealthRegistrationSideDto {
+  @ApiProperty({ type: String, nullable: true, maxLength: 64 })
+  number!: string | null;
+
+  @ApiProperty({ description: 'Si el nº sale en los documentos de la sede.' })
+  shown!: boolean;
+}
+
+export class AuditHealthRegistrationChangeDto {
+  @ApiProperty({ type: AuditHealthRegistrationSideDto })
+  before!: AuditHealthRegistrationSideDto;
+
+  @ApiProperty({ type: AuditHealthRegistrationSideDto })
+  after!: AuditHealthRegistrationSideDto;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -289,6 +306,13 @@ export class AuditMetadataDto {
       'DX-279: cita cancelada desde la agenda, en su único evento (`reason` APPOINTMENT_CANCELLED; PATIENT_FLOW si estaba en la clínica; COMPLETED_EXIT si estaba completada): quién, código del motivo, minutos de aviso y si fue tardía. Nunca el texto libre del motivo.',
   })
   cancellation?: AuditCancellationDto;
+
+  @ApiPropertyOptional({
+    type: AuditHealthRegistrationChangeDto,
+    description:
+      'DX-319: nº de registro sanitario de una sede y si sale en los documentos, antes y después (dato público de la sede, nunca de un paciente).',
+  })
+  healthRegistration?: AuditHealthRegistrationChangeDto;
 }
 
 export class AuditEventDto {

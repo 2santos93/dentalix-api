@@ -296,7 +296,6 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           id: true,
           name: true,
           country: true,
-          repsHabilitationCode: true,
           deletedAt: true,
           isActive: true,
         },
@@ -403,11 +402,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
             entry.id,
             {
               country: location.country,
-              location: {
-                id: location.id,
-                name: location.name,
-                repsHabilitationCode: location.repsHabilitationCode,
-              },
+              location: { id: location.id, name: location.name },
               patient: entry.patient,
               hasPrincipalDiagnosis: entry.diagnoses.length > 0,
               performedItems: itemIds.flatMap((catalogItemId) => {

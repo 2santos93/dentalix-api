@@ -2,11 +2,7 @@ import { computeRdaReadiness, type RdaFacts } from './rda-readiness';
 
 const complete: RdaFacts = {
   country: 'CO',
-  location: {
-    id: 'loc-1',
-    name: 'Sede principal',
-    repsHabilitationCode: '110010123401',
-  },
+  location: { id: 'loc-1', name: 'Sede principal' },
   patient: { id: 'p1', docNumber: '1020304050' },
   hasPrincipalDiagnosis: true,
   performedItems: [
@@ -66,11 +62,7 @@ describe('computeRdaReadiness (DX-212)', () => {
   it('una evolución antigua sin nada: todos los faltantes en orden', () => {
     const result = computeRdaReadiness({
       country: 'CO',
-      location: {
-        id: 'loc-1',
-        name: 'Sede principal',
-        repsHabilitationCode: null,
-      },
+      location: { id: 'loc-1', name: 'Sede principal' },
       patient: { id: 'p1', docNumber: null },
       hasPrincipalDiagnosis: false,
       performedItems: [],
@@ -80,15 +72,9 @@ describe('computeRdaReadiness (DX-212)', () => {
     expect(result.missing.map((m) => m.code)).toEqual([
       'PATIENT_DOCUMENT',
       'PRINCIPAL_DIAGNOSIS',
-      'LOCATION_REPS',
       'AUTHOR_LICENSE',
     ]);
-    expect(result.missing[2]).toEqual({
-      code: 'LOCATION_REPS',
-      label: 'Código de habilitación (REPS) de «Sede principal»',
-      resourceId: 'loc-1',
-    });
-    expect(result.missing[3].label).toBe(
+    expect(result.missing[2].label).toBe(
       'Registro profesional del autor (la evolución no tiene autor)',
     );
   });

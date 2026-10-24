@@ -199,7 +199,6 @@ import {
   DEMO_AGREEMENTS,
   DEMO_PATIENT_AGREEMENTS,
   DEMO_CUPS,
-  DEMO_PRINCIPAL_REPS,
   DEMO_PRINCIPAL_PHONE,
   DEMO_POSTOP,
   DEMO_PRIMARY_COLOR,
@@ -832,8 +831,6 @@ class DemoSeeder {
     );
     await this.use(UpdateLocationUseCase).execute(principal.id, {
       address: DEMO_LOCATIONS.principal.address,
-      // DX-212: la sede principal (CO) tiene REPS; la Norte no, a propósito.
-      repsHabilitationCode: DEMO_PRINCIPAL_REPS,
       // DX-222: el de urgencias en las indicaciones postoperatorias.
       phone: DEMO_PRINCIPAL_PHONE,
     });

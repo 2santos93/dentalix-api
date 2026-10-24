@@ -6,8 +6,8 @@ import type { RdaFacts } from '../../domain/rda-readiness';
 
 const facts: RdaFacts = {
   country: 'CO',
-  location: { id: 'loc', name: 'Sede B', repsHabilitationCode: null },
-  patient: { id: 'p1', docNumber: '123' },
+  location: { id: 'loc', name: 'Sede B' },
+  patient: { id: 'p1', docNumber: null },
   hasPrincipalDiagnosis: true,
   performedItems: [],
   author: { userId: 'u1', name: 'Dra.', professionalLicense: 'TP' },
@@ -27,9 +27,9 @@ describe('GetBatchRdaReadinessUseCase (DX-232)', () => {
     expect(result.map((r) => r.entryId)).toEqual(ids);
     expect(result[0].missing).toEqual([
       {
-        code: 'LOCATION_REPS',
-        label: 'Código de habilitación (REPS) de «Sede B»',
-        resourceId: 'loc',
+        code: 'PATIENT_DOCUMENT',
+        label: 'Documento de identidad del paciente',
+        resourceId: 'p1',
       },
     ]);
   });

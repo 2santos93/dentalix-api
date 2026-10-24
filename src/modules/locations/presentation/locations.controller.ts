@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -32,6 +33,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import type { AuditedRequest } from '../../audit/presentation/audit-request';
 
 /**
  * Sedes de la clínica. LEER lo puede todo el mundo (cualquier rol necesita
@@ -64,8 +66,9 @@ export class LocationsController {
     return this.createLocation.execute(dto);
   }
 
-  // DX-212: la sede lleva el código REPS que reporta el RDA: sus cambios
-  // quedan auditados (campos cambiados, nunca valores).
+  // Los cambios de la sede quedan auditados (campos cambiados, nunca sus
+  // valores). DX-319: el nº de registro sanitario y si se imprime, además,
+  // con su antes y después (es un dato de la sede, no de un paciente).
   @Audit({
     action: 'UPDATE',
     resource: 'LOCATION',
@@ -74,10 +77,16 @@ export class LocationsController {
   @Patch(':id')
   @Roles(ClinicRole.ADMIN)
   @ApiOkResponse({ type: LocationDto })
-  update(
+  async update(
     @Param('id') id: string,
     @Body() dto: UpdateLocationDto,
+    @Req() req: AuditedRequest,
   ): Promise<Location> {
-    return this.updateLocation.execute(id, dto);
+    const { location, healthRegistration } = await this.updateLocation.execute(
+      id,
+      dto,
+    );
+    if (healthRegistration) req.auditMetadata = { healthRegistration };
+    return location;
   }
 }

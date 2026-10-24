@@ -49,7 +49,7 @@ export class ClinicalEntryRdaController {
   @ApiOperation({
     summary: 'Datos del RDA que faltan en la atención de una evolución',
     description:
-      'Comprueba documento del paciente, diagnóstico principal CIE-10, CUPS de los procedimientos realizados ese día (odontograma), REPS de la sede (la de la cita o, sin cita, la principal) y registro profesional del autor. El NIT de la clínica sale en `pending` hasta DX-019. Sede fuera de Colombia: `notApplicable: true`.',
+      'Comprueba documento del paciente, diagnóstico principal CIE-10, CUPS de los procedimientos realizados ese día (odontograma) y registro profesional del autor. La sede de la atención es la de la cita o, sin cita, la principal. El NIT de la clínica sale en `pending` hasta DX-019. Sede fuera de Colombia: `notApplicable: true`.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ type: RdaReadinessDto })

@@ -5,7 +5,7 @@ import type { RdaFacts } from '../../domain/rda-readiness';
 
 const facts: RdaFacts = {
   country: 'CO',
-  location: { id: 'loc', name: 'Sede', repsHabilitationCode: '110010123401' },
+  location: { id: 'loc', name: 'Sede' },
   patient: { id: 'p1', docNumber: '123' },
   hasPrincipalDiagnosis: true,
   performedItems: [{ catalogItemId: 'ci', name: 'Resina', cupsCode: null }],

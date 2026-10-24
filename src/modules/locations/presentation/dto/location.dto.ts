@@ -1,6 +1,12 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ClinicCountry } from '@prisma/client';
 import {
+  ApiHideProperty,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
+import { ClinicCountry } from '@prisma/client';
+import { Transform } from 'class-transformer';
+import {
+  Equals,
   IsBoolean,
   IsEnum,
   IsOptional,
@@ -8,11 +14,22 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { HEALTH_REGISTRATION_NUMBER_MAX } from '../../domain/health-registration';
 
 export const LOCATION_PHONE_MAX = 40;
 const PHONE_MESSAGE = `El teléfono admite hasta ${LOCATION_PHONE_MAX} caracteres.`;
 const PHONE_DOC =
   'DX-222: teléfono de la sede que ven los pacientes en las indicaciones postoperatorias ({{telefono_sede}}). Hasta 40 caracteres.';
+
+const HEALTH_REGISTRATION_DOC =
+  'DX-319: nº de registro sanitario de la sede, texto libre sin formato ni validación por país (hasta 64 caracteres, se recorta). Solo ADMIN; queda auditado con su antes y después.';
+const HEALTH_REGISTRATION_MESSAGE = `El nº de registro sanitario admite hasta ${HEALTH_REGISTRATION_NUMBER_MAX} caracteres.`;
+const SHOW_HEALTH_REGISTRATION_DOC =
+  'DX-319: si el nº de registro sanitario aparece en los documentos de la sede (por defecto no).';
+
+function trim({ value }: { value: unknown }): unknown {
+  return typeof value === 'string' ? value.trim() : value;
+}
 
 const COUNTRY_DOC = {
   enum: ClinicCountry,
@@ -68,13 +85,34 @@ export class UpdateLocationDto {
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    example: '110010123401',
-    description:
-      'DX-212: código de habilitación REPS de la sede (Colombia), 12 dígitos (400 con el formato esperado si no). Vacío o null lo quita. Solo ADMIN; queda auditado.',
+    example: 'NRS 28/1234-AB',
+    maxLength: HEALTH_REGISTRATION_NUMBER_MAX,
+    description: `${HEALTH_REGISTRATION_DOC} Vacío o null lo quita; sin el campo no cambia.`,
   })
   @IsOptional()
-  @IsString()
-  repsHabilitationCode?: string | null;
+  @Transform(trim)
+  @IsString({ message: 'El nº de registro sanitario debe ser un texto.' })
+  @MaxLength(HEALTH_REGISTRATION_NUMBER_MAX, {
+    message: HEALTH_REGISTRATION_MESSAGE,
+  })
+  healthRegistrationNumber?: string | null;
+
+  @ApiPropertyOptional({ description: SHOW_HEALTH_REGISTRATION_DOC })
+  @IsOptional()
+  @IsBoolean({
+    message: '«Mostrar en los documentos» debe ser verdadero o falso.',
+  })
+  showHealthRegistrationNumber?: boolean;
+
+  // DX-319: el código REPS se borró de la sede. La ValidationPipe global solo
+  // DESCARTARÍA el campo y respondería 200, y una web antigua mostraría
+  // «Guardado» sin guardar nada: con él en el cuerpo (aunque sea null) es 400.
+  @ApiHideProperty()
+  @Equals(undefined, {
+    message:
+      'El código REPS ya no existe: usa healthRegistrationNumber (nº de registro sanitario).',
+  })
+  repsHabilitationCode?: never;
 
   @ApiPropertyOptional({
     type: String,
@@ -109,9 +147,12 @@ export class LocationDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'DX-212: código de habilitación REPS (12 dígitos) o null.',
+    maxLength: HEALTH_REGISTRATION_NUMBER_MAX,
+    description: 'DX-319: nº de registro sanitario (texto libre) o null.',
   })
-  repsHabilitationCode!: string | null;
+  healthRegistrationNumber!: string | null;
+  @ApiProperty({ description: SHOW_HEALTH_REGISTRATION_DOC })
+  showHealthRegistrationNumber!: boolean;
   @ApiProperty({
     type: String,
     nullable: true,

@@ -60,7 +60,6 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
         data: {
           tenantId,
           name: 'Principal',
-          repsHabilitationCode: '110010123401',
           createdAt: new Date('2020-01-01'),
         },
       })
@@ -79,7 +78,7 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
     await raw.$disconnect();
   });
 
-  it('persiste sede de contexto, usa su REPS y legacy sin sede usa principal', async () => {
+  it('persiste sede de contexto, la usa en el RDA y legacy sin sede usa principal', async () => {
     const entry = await context.run(tenantId, locationB, () =>
       repo.create({ patientId, notes: 'Control', performedById: authorId }),
     );
@@ -90,10 +89,7 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
     const current = await context.run(tenantId, () =>
       repo.loadRdaFacts(entry.id),
     );
-    expect(current?.location).toMatchObject({
-      id: locationB,
-      repsHabilitationCode: null,
-    });
+    expect(current?.location).toEqual({ id: locationB, name: 'B' });
     const old = await raw.clinicalEntry.create({
       data: {
         tenantId,

@@ -82,6 +82,24 @@ export interface AuditMetadata {
    * del motivo: van sellados en la receta.
    */
   prescriptionSafety?: AuditPrescriptionSafety;
+  /**
+   * DX-319: nº de registro sanitario de una sede y si sale en los documentos,
+   * antes y después. Es la única excepción de texto: un dato público de la
+   * SEDE (el que se imprime para el paciente), nunca de un paciente; hasta 64
+   * caracteres sin saltos de línea ni caracteres de control.
+   */
+  healthRegistration?: AuditHealthRegistrationChange;
+}
+
+/** Un lado del cambio del nº de registro sanitario de la sede (DX-319). */
+export interface AuditHealthRegistrationSide {
+  number: string | null;
+  shown: boolean;
+}
+
+export interface AuditHealthRegistrationChange {
+  before: AuditHealthRegistrationSide;
+  after: AuditHealthRegistrationSide;
 }
 
 export interface AuditPrescriptionSafety {
@@ -219,6 +237,8 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** Lote o REF de un producto sanitario: alfanumérico con . _ - / y espacios. */
 const PRODUCT_CODE = /^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,79}$/;
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** Nº de registro sanitario (DX-319): 1–64 caracteres, sin control ni saltos. */
+const HEALTH_REGISTRATION_NUMBER = /^[^\p{Cc}]{1,64}$/u;
 const MAX_FIELDS = 50;
 /** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
 const MAX_SCHEDULE_ENTRIES = 500;
@@ -501,6 +521,34 @@ function attribution(value: unknown): AuditMetadata['attribution'] | null {
   return before && after ? { before, after } : null;
 }
 
+function healthRegistrationSide(
+  value: unknown,
+): AuditHealthRegistrationSide | null {
+  if (!isRecord(value)) return null;
+  const { number, shown, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof shown !== 'boolean' ||
+    !(
+      number === null ||
+      (typeof number === 'string' && HEALTH_REGISTRATION_NUMBER.test(number))
+    )
+  ) {
+    return null;
+  }
+  return { number, shown };
+}
+
+/** Los dos lados con la forma admitida, o nada (DX-319). */
+function healthRegistration(
+  value: unknown,
+): AuditHealthRegistrationChange | null {
+  if (!isRecord(value)) return null;
+  const before = healthRegistrationSide(value.before);
+  const after = healthRegistrationSide(value.after);
+  return before && after ? { before, after } : null;
+}
+
 /** La cancelación entera con su forma, o nada (DX-279). */
 function cancellation(value: unknown): AuditCancellation | null {
   if (!isRecord(value)) return null;
@@ -589,5 +637,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (cancelled) out.cancellation = cancelled;
   const safety = prescriptionSafety(input.prescriptionSafety);
   if (safety) out.prescriptionSafety = safety;
+  const registration = healthRegistration(input.healthRegistration);
+  if (registration) out.healthRegistration = registration;
   return out;
 }
