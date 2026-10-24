@@ -8,6 +8,11 @@ import {
 import type { AuditRequestContext } from '../../../../audit/domain/audit-request-context';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
 import {
+  heldInClinicToday,
+  PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
+} from '../../../domain/plan-item-reservation';
+import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../../shared/locations/default-business-hours';
+import {
   PATIENT_FLOW_MESSAGES,
   isInClinic,
 } from '../../../domain/patient-flow';
@@ -384,13 +389,33 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       (r) => r.id === appointmentId && r.deletedAt === null,
     );
     if (!row) return Promise.reject(new Error('not found'));
-    this.claims.push({ appointmentId, planItemId, audit });
     const items = this.reservedElsewhere.get(appointmentId) ?? [];
     const moved = items.find((i) => i.planItemId === planItemId);
+    // DX-288: como el repositorio real, no se trae desde una cita de hoy
+    // con el paciente en la clínica (zona por defecto: el fake no tiene
+    // sedes con zona).
+    const holder = moved && this.rows.find((r) => r.id === moved.appointmentId);
+    if (
+      holder &&
+      heldInClinicToday(holder, DEFAULT_BUSINESS_HOURS_TIMEZONE, new Date())
+    )
+      return Promise.reject(
+        new ConflictException(PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE),
+      );
+    this.claims.push({ appointmentId, planItemId, audit });
     this.reservedElsewhere.set(
       appointmentId,
       items.filter((i) => i.planItemId !== planItemId),
     );
+    // Las demás citas con el ítem ven ahora la reserva en esta.
+    for (const [id, list] of this.reservedElsewhere)
+      if (id !== appointmentId)
+        this.reservedElsewhere.set(
+          id,
+          list.map((i) =>
+            i.planItemId === planItemId ? { ...i, appointmentId } : i,
+          ),
+        );
     return Promise.resolve({
       appointment: this.toEntity(row),
       fromAppointmentId: moved?.appointmentId ?? null,

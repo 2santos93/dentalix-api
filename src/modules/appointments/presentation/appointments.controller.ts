@@ -426,7 +426,7 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'La cita no tiene al paciente en la clínica, otra cita lo tomó a la vez (dice cuál), o la cita cambió mientras tanto',
+      'La cita no tiene al paciente en la clínica, el tratamiento ya lo tiene otra cita de hoy con el paciente en la clínica (DX-288: con varias peticiones a la vez solo la primera lo trae; dice su hora y su sede si la sede está permitida), otra cita lo tomó a la vez (dice cuál), o la cita cambió mientras tanto',
   })
   claimPlanItem(
     @Param('id', ParseUUIDPipe) id: string,
