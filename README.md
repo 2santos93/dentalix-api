@@ -1790,8 +1790,9 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `(tenantId, appointmentId)`), RLS FORCE, append-only para la app (sin
   DELETE; el único UPDATE es la anulación: GRANT solo de `voidedAt`,
   `voidedById` y `voidReason`, y trigger `cancellation_fees_append_only`, que
-  impide borrar la fila o reescribir cualquier otra columna aunque la app
-  tuviera UPDATE/DELETE de más, DB-052; un superusuario sí borra), CHECK
+  impide borrar la fila, vaciar la tabla (`cancellation_fees_no_truncate`)
+  o reescribir cualquier otra columna aunque la app tuviera
+  UPDATE/DELETE/TRUNCATE de más, DB-052; un superusuario sí borra), CHECK
   `cancellation_fees_void_check` (las tres juntas, solo en CHARGED), FK compuestas a la cita, al ítem (por paciente), a la sede y
   a la versión, y CHECK `cancellation_fees_status_check` (CHARGED: importe > 0,
   moneda, ítem y versión; WAIVED: solo el motivo). **Idempotencia**: el cargo

@@ -368,4 +368,25 @@ describe('cargo por inasistencia protegido en la BD (SEC-050, int)', () => {
     expect(fee.amount?.toNumber()).toBe(50000);
     expect(fee.appointmentId).toBe(feeAppointment.id);
   });
+
+  it('DB-052: con TRUNCATE concedido de más, la tabla del cargo no se vacía', async () => {
+    const { feeId } = await charged();
+    await raw.$executeRawUnsafe(
+      'GRANT TRUNCATE ON "cancellation_fees" TO dentalix_app',
+    );
+    try {
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          tx.$executeRawUnsafe('TRUNCATE "cancellation_fees"'),
+        ),
+      ).rejects.toThrow(/no se borra/);
+    } finally {
+      await raw.$executeRawUnsafe(
+        'REVOKE TRUNCATE ON "cancellation_fees" FROM dentalix_app',
+      );
+    }
+    await expect(
+      raw.cancellationFee.findUnique({ where: { id: feeId } }),
+    ).resolves.not.toBeNull();
+  });
 });
