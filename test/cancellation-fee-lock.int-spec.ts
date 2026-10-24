@@ -220,6 +220,58 @@ describe('cargo por inasistencia protegido en la BD (SEC-050, int)', () => {
     ).resolves.toBe(1);
   });
 
+  it('el cargo de un plan ya completado también se anula (el ítem sale aunque el plan esté cerrado, DX-109)', async () => {
+    const { appointmentId, feeId, itemId, planId } = await charged();
+    await request(app.getHttpServer())
+      .patch(`/api/v1/treatment-plans/${planId}`)
+      .set('X-Tenant-Host', a.host)
+      .set('Authorization', `Bearer ${a.adminToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/v1/appointments/${appointmentId}/cancellation-fee/void`)
+      .set('X-Tenant-Host', a.host)
+      .set('Authorization', `Bearer ${a.adminToken}`)
+      .send({ reason: 'Cargo generado por error' })
+      .expect(201);
+    expect(
+      (await raw.cancellationFee.findUniqueOrThrow({ where: { id: feeId } }))
+        .voidedAt,
+    ).not.toBeNull();
+    expect(
+      (await raw.treatmentPlanItem.findUniqueOrThrow({ where: { id: itemId } }))
+        .deletedAt,
+    ).not.toBeNull();
+    // El plan cerrado sigue cerrado para todo lo demás (DX-109).
+    const other = await raw.treatmentPlanItem.findFirst({
+      where: { planId, id: { not: itemId } },
+    });
+    expect(other).toBeNull();
+    await expect(
+      asApp(
+        a.tenantId,
+        (tx) =>
+          tx.$executeRaw`UPDATE "treatment_plan_items" SET "notes" = 'x' WHERE "id" = ${itemId}::uuid`,
+      ),
+    ).rejects.toThrow(/el plan está cerrado/);
+  });
+
+  it('en un plan cerrado, retirar el ítem de un cargo sin anular sigue rechazado', async () => {
+    const { itemId, planId } = await charged();
+    await asApp(
+      a.tenantId,
+      (tx) =>
+        tx.$executeRaw`UPDATE "treatment_plans" SET "status" = 'COMPLETED' WHERE "id" = ${planId}::uuid`,
+    );
+    await expect(
+      asApp(
+        a.tenantId,
+        (tx) =>
+          tx.$executeRaw`UPDATE "treatment_plan_items" SET "deletedAt" = now() WHERE "id" = ${itemId}::uuid`,
+      ),
+    ).rejects.toThrow(/cargo por inasistencia|el plan está cerrado/);
+  });
+
   it('la fila del cargo solo admite anularse, una vez y sin tocar lo demás', async () => {
     const { feeId, itemId } = await charged();
     // Columnas sin GRANT de UPDATE para la app.

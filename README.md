@@ -1782,7 +1782,10 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `app.current_tenant` no aplican, como los de DX-109). **Cómo pasa la
   anulación legítima**: no hay variable de sesión; el trigger del ítem mira
   en la misma transacción si el cargo sigue vigente (CHARGED y `voidedAt`
-  NULL), y el caso de uso anula el cargo antes de retirar el ítem. Para tocar
+  NULL), y el caso de uso anula el cargo antes de retirar el ítem. En un plan ya
+  completado también: `treatment_plan_items_locked_when_closed` (DX-109) deja
+  retirar solo el ítem de un cargo ya anulado, sin otro cambio (migración
+  `20261024150400_sec050_void_fee_in_closed_plan`). Para tocar
   el ítem hay que dejar antes la anulación, con autor y motivo. Un cargo con
   `planItemRemoved = true` y sin `voidedAt` es anterior a SEC-050 (se quitó
   con «Quitar»).
