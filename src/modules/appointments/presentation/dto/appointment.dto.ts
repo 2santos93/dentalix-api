@@ -442,13 +442,18 @@ export class LocationAttendanceDto extends PatientIncidentCountsDto {
 
   @ApiProperty({
     example: 6,
-    description: 'Citas de la ventana que ya empezaron (cualquier estado).',
+    description:
+      'Citas de la ventana que ya empezaron (cualquier estado). No es el denominador de las incidencias: una cancelación tardía puede ser de una cita futura.',
   })
   appointments!: number;
 }
 
 export class AttendanceTotalsDto extends PatientIncidentCountsDto {
-  @ApiProperty({ example: 6 })
+  @ApiProperty({
+    example: 6,
+    description:
+      'Citas que ya empezaron. Las cancelaciones tardías pueden incluir citas futuras: no se lea como ratio.',
+  })
   appointments!: number;
 }
 

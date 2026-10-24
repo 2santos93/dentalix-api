@@ -113,6 +113,20 @@ describe('computeCancellationNotice (DX-279)', () => {
   });
 });
 
+describe('computeCancellationNotice · el paciente ya vino (M1)', () => {
+  it('una cita en la clínica o completada nunca es tardía; el aviso se cuenta igual', () => {
+    expect(
+      computeCancellationNotice({
+        start,
+        cancelledAt: before(HOUR),
+        byKind: 'STAFF_FOR_PATIENT',
+        noticeHours: 24,
+        attended: true,
+      }),
+    ).toEqual({ noticeMinutes: 60, lateCancellation: false });
+  });
+});
+
 describe('policyInputError (DX-279)', () => {
   const ok = {
     noticeHours: 24,

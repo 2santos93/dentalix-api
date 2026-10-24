@@ -42,6 +42,7 @@ import {
   type CurrentPolicyRef,
 } from '../../../cancellation-policies/domain/cancellation-policy';
 import { findCurrentPolicyInTx } from '../../../cancellation-policies/infrastructure/current-policy';
+import { cancellationAuditMetadata } from '../../domain/cancellation-audit';
 import {
   AppointmentRepository,
   AppointmentUpdate,
@@ -388,9 +389,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         // estado (la CHECK appointments_cancellation_check se mira por fila).
         const data: Prisma.AppointmentUpdateManyMutationInput = {
           ...rest,
-          ...(cancel
-            ? await this.cancellationData(tx, id, cancel, rest.start)
-            : {}),
+          ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
           ...(clearCancellation ? CLEARED_CANCELLATION : {}),
         };
         // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
@@ -565,15 +564,14 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
 
   /**
    * DX-279: columnas de una cancelación. El aviso se cuenta desde la hora del
-   * servidor hasta el inicio de la cita (el nuevo, si el mismo PATCH la
-   * mueve) y se compara con la política vigente de SU sede, leída en esta
-   * transacción.
+   * servidor hasta el inicio de la cita (cancelar y mover a la vez da 400 en
+   * el caso de uso) y se compara con la política vigente de SU sede, leída en
+   * esta transacción.
    */
   private async cancellationData(
     tx: Prisma.TransactionClient,
     id: string,
     cancel: CancellationWrite,
-    nextStart: Date | undefined,
   ): Promise<Prisma.AppointmentUpdateManyMutationInput> {
     const row = await tx.appointment.findFirstOrThrow({
       where: { id },
@@ -581,10 +579,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     });
     const policy = await findCurrentPolicyInTx(tx, row.locationId);
     const notice = computeCancellationNotice({
-      start: nextStart ?? row.start,
+      start: row.start,
       cancelledAt: cancel.at,
       byKind: cancel.byKind,
       noticeHours: policy?.noticeHours ?? null,
+      attended: cancel.attended,
     });
     return {
       cancelledAt: cancel.at,
@@ -662,7 +661,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
    */
   private async recordCompletedExit(
     tx: Prisma.TransactionClient,
-    appointment: { id: string; patientId: string; status: AppointmentStatus },
+    appointment: Parameters<typeof cancellationAuditMetadata>[0] & {
+      id: string;
+      patientId: string;
+      status: AppointmentStatus;
+    },
     exit: { reason: string; audit: AuditRequestContext },
     before: VisitMinimumSnapshot[],
   ): Promise<CompletedExit> {
@@ -709,6 +712,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         reason: 'COMPLETED_EXIT',
         status: { from: AppointmentStatus.COMPLETED, to: appointment.status },
         params: { reversalId: reversal.id },
+        // B2 (DX-279): sacar de «Completada» a «Cancelada» lleva aquí su
+        // cancelación, sin un segundo evento.
+        ...cancellationAuditMetadata(appointment),
         visitMinimums: visitMinimums.map((v) => ({
           planId: v.planId,
           visit: v.visit,

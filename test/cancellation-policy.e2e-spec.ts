@@ -440,6 +440,100 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         .expect(200);
     });
 
+    it('M1: el paciente que llegó y se fue (ARRIVED → CANCELLED) no es tardío, con un solo evento de auditoría', async () => {
+      const id = await appointment(2);
+      await raw.appointment.update({
+        where: { id },
+        data: {
+          status: 'ARRIVED',
+          arrivedAt: new Date(),
+          preArrivalStatus: 'SCHEDULED',
+        },
+      });
+      const preview = await api(a, tokens.RECEPTION!)
+        .get(`/appointments/${id}/cancellation-preview`)
+        .expect(200);
+      expect(preview.body).toMatchObject({ lateCancellation: false });
+      const res = await cancel(id, {
+        cancelledByKind: 'STAFF_FOR_PATIENT',
+        cancelReasonCode: 'OTHER',
+      }).expect(200);
+      expect(res.body).toMatchObject({
+        status: 'CANCELLED',
+        cancelledByKind: 'STAFF_FOR_PATIENT',
+        lateCancellation: false,
+      });
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          resourceId: id,
+          OR: [
+            { metadata: { path: ['reason'], equals: 'PATIENT_FLOW' } },
+            { metadata: { path: ['reason'], equals: 'APPOINTMENT_CANCELLED' } },
+          ],
+        },
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0].metadata).toMatchObject({
+        reason: 'PATIENT_FLOW',
+        cancellation: { byKind: 'STAFF_FOR_PATIENT', lateCancellation: false },
+      });
+    });
+
+    it('M1: sacar de «Completada» a «Cancelada» no es tardía, con un solo evento (COMPLETED_EXIT)', async () => {
+      const id = await appointment(-3);
+      await raw.appointment.update({
+        where: { id },
+        data: { status: 'COMPLETED' },
+      });
+      const res = await admin()
+        .patch(`/appointments/${id}`, {
+          status: 'CANCELLED',
+          statusReason: 'Se marcó completada por error',
+          cancelledByKind: 'STAFF_FOR_PATIENT',
+          cancelReasonCode: 'OTHER',
+        })
+        .expect(200);
+      expect(res.body).toMatchObject({
+        lateCancellation: false,
+        noticeMinutes: 0,
+      });
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          resourceId: id,
+          OR: [
+            { metadata: { path: ['reason'], equals: 'COMPLETED_EXIT' } },
+            { metadata: { path: ['reason'], equals: 'APPOINTMENT_CANCELLED' } },
+          ],
+        },
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0].metadata).toMatchObject({
+        reason: 'COMPLETED_EXIT',
+        cancellation: { byKind: 'STAFF_FOR_PATIENT', lateCancellation: false },
+      });
+    });
+
+    it('B1: cancelar y mover en el mismo cambio da 400 en español', async () => {
+      const id = await appointment(9, principal, otherPatient);
+      const start = new Date(Date.now() + 10 * HOUR);
+      const res = await cancel(id, {
+        cancelledByKind: 'STAFF_FOR_PATIENT',
+        cancelReasonCode: 'ILLNESS',
+        start: start.toISOString(),
+        end: new Date(start.getTime() + 30 * 60_000).toISOString(),
+      }).expect(400);
+      expect(res.body).toMatchObject({
+        message: CANCELLATION_MESSAGES.cancelAndMove,
+      });
+      expect(
+        await raw.appointment.findUniqueOrThrow({ where: { id } }),
+      ).toMatchObject({
+        status: 'SCHEDULED',
+      });
+    });
+
     it('la vista previa: 404 desde otra clínica y 403 a una sede no permitida (DX-089)', async () => {
       const id = await appointment(6, principal, otherPatient);
       await api(b, b.adminToken)

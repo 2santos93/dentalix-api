@@ -401,6 +401,13 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
             after: null,
           },
         ],
+        // DX-279 (B2): la cancelación va en este mismo evento, nunca tardía.
+        cancellation: {
+          byKind: 'STAFF_FOR_PATIENT',
+          reasonCode: 'ILLNESS',
+          noticeMinutes: 0,
+          lateCancellation: false,
+        },
       });
       // El motivo (texto libre) no va en la auditoría: está en su tabla.
       expect(JSON.stringify(event.metadata)).not.toContain('cirugía');

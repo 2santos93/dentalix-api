@@ -293,3 +293,138 @@ describe('Vista previa del aviso (DX-279)', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
+
+describe('Cancelar desde la agenda · correcciones de la revisión (DX-279)', () => {
+  const adminCtx: AppointmentAuditContext = {
+    ...ctx,
+    actor: { userId: 'u-admin', role: 'ADMIN' },
+  };
+
+  it('M1: el paciente que llegó y se fue (ARRIVED → CANCELLED) nunca es tardío, aunque haya política', async () => {
+    const { repo, uc } = setup();
+    repo.policies.set('loc1', { id: 'pol-1', version: 1, noticeHours: 24 });
+    const start = new Date(Date.now() + HOUR);
+    const a = repo.seed({
+      start,
+      end: new Date(start.getTime() + 30 * 60_000),
+      status: AppointmentStatus.ARRIVED,
+      arrivedAt: new Date(),
+      preArrivalStatus: AppointmentStatus.SCHEDULED,
+    });
+    const result = await uc.execute(
+      a.id,
+      {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'OTHER' },
+      },
+      ctx,
+    );
+    expect(result).toMatchObject({
+      status: 'CANCELLED',
+      cancelledByKind: 'STAFF_FOR_PATIENT',
+      lateCancellation: false,
+    });
+    expect(result.noticeMinutes).not.toBeNull();
+  });
+
+  it('M1: sacar de «Completada» a «Cancelada» nunca es tardía', async () => {
+    const { repo, uc } = setup();
+    repo.policies.set('loc1', { id: 'pol-1', version: 1, noticeHours: 24 });
+    const start = new Date(Date.now() - 2 * HOUR);
+    const a = repo.seed({
+      start,
+      end: new Date(start.getTime() + 30 * 60_000),
+      status: AppointmentStatus.COMPLETED,
+    });
+    const result = await uc.execute(
+      a.id,
+      {
+        status: AppointmentStatus.CANCELLED,
+        statusReason: 'Se marcó completada por error',
+        cancellation: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'OTHER' },
+      },
+      adminCtx,
+    );
+    expect(result).toMatchObject({ lateCancellation: false, noticeMinutes: 0 });
+  });
+
+  it('M1: la vista previa de una cita en la clínica tampoco es tardía', async () => {
+    const { repo, uc } = setup();
+    repo.policies.set('loc1', { id: 'pol-1', version: 1, noticeHours: 24 });
+    const start = new Date(Date.now() + HOUR);
+    const a = repo.seed({
+      start,
+      end: new Date(start.getTime() + 30 * 60_000),
+      status: AppointmentStatus.ARRIVED,
+      arrivedAt: new Date(),
+      preArrivalStatus: AppointmentStatus.SCHEDULED,
+    });
+    await expect(uc.cancellationPreview(a.id)).resolves.toMatchObject({
+      lateCancellation: false,
+    });
+  });
+
+  it('B1: cancelar y mover en el mismo cambio da 400 en español y nada cambia', async () => {
+    const { repo, uc } = setup();
+    const a = inHours(repo, 5);
+    await expect(
+      uc.execute(
+        a.id,
+        {
+          status: AppointmentStatus.CANCELLED,
+          start: new Date(a.start.getTime() + HOUR),
+          end: new Date(a.end.getTime() + HOUR),
+          cancellation: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'ILLNESS' },
+        },
+        ctx,
+      ),
+    ).rejects.toEqual(
+      new BadRequestException(CANCELLATION_MESSAGES.cancelAndMove),
+    );
+    await expect(
+      uc.execute(
+        a.id,
+        {
+          status: AppointmentStatus.CANCELLED,
+          providerId: 'prov2',
+          cancellation: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'ILLNESS' },
+        },
+        ctx,
+      ),
+    ).rejects.toEqual(
+      new BadRequestException(CANCELLATION_MESSAGES.cancelAndMove),
+    );
+    expect((await repo.findById(a.id))!.status).toBe('SCHEDULED');
+  });
+
+  it('B2: una cancelación desde la clínica deja UN solo evento, el del flujo, con la cancelación', async () => {
+    const { repo, uc, drafts } = setup();
+    const start = new Date(Date.now() + HOUR);
+    const a = repo.seed({
+      start,
+      end: new Date(start.getTime() + 30 * 60_000),
+      status: AppointmentStatus.ARRIVED,
+      arrivedAt: new Date(),
+      preArrivalStatus: AppointmentStatus.SCHEDULED,
+    });
+    await uc.execute(
+      a.id,
+      {
+        status: AppointmentStatus.CANCELLED,
+        cancellation: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'OTHER' },
+      },
+      ctx,
+    );
+    const events = drafts.filter((d) => d.resourceType === 'APPOINTMENT');
+    expect(events).toHaveLength(1);
+    expect(events[0].metadata).toMatchObject({
+      reason: 'PATIENT_FLOW',
+      status: { from: 'ARRIVED', to: 'CANCELLED' },
+      cancellation: {
+        byKind: 'STAFF_FOR_PATIENT',
+        reasonCode: 'OTHER',
+        lateCancellation: false,
+      },
+    });
+  });
+});

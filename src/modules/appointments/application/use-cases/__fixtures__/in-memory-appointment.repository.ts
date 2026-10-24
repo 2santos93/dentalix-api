@@ -339,6 +339,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           cancelledAt: patch.cancel.at,
           byKind: patch.cancel.byKind,
           noticeHours: policy?.noticeHours ?? null,
+          attended: patch.cancel.attended,
         }),
       });
     }

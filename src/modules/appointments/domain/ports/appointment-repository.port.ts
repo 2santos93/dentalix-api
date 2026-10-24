@@ -122,6 +122,8 @@ export interface CancellationWrite {
   reasonText: string | null;
   /** Reloj del servidor (UTC). */
   at: Date;
+  /** La cita estaba en la clínica o completada: nunca es tardía (M1). */
+  attended: boolean;
 }
 
 /** La cita actualizada y, si se creó, la entrada de pendientes (DX-122). */

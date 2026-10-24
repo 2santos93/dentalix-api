@@ -113,6 +113,8 @@ export const CANCELLATION_MESSAGES = {
     'Indica quién cancela: el paciente (lo comunica al personal) o la clínica.',
   reasonRequired: 'Indica el motivo de la cancelación.',
   reasonText: `El detalle del motivo admite como mucho ${CANCEL_REASON_TEXT_MAX} caracteres.`,
+  cancelAndMove:
+    'No se puede cancelar y mover la cita a la vez: cancélala o muévela.',
 } as const;
 
 export interface CancellationNotice {
@@ -128,7 +130,9 @@ export interface CancellationNotice {
  * 25 reales). Minutos enteros hacia abajo; nunca negativos (cancelar con la
  * cita empezada es aviso 0). Es tardía si el aviso es MENOR que el de la
  * política (exactamente las horas pedidas no lo es). Sin política en la sede,
- * o si cancela la clínica, nunca es tardía.
+ * si cancela la clínica o si el paciente ya vino (`attended`: la cita estaba
+ * en la clínica o completada), nunca es tardía. Una cita agendada que ya pasó
+ * y se cancela después sí cuenta (aviso 0): el paciente no vino ni avisó.
  */
 export function computeCancellationNotice(input: {
   start: Date;
@@ -136,6 +140,12 @@ export function computeCancellationNotice(input: {
   byKind: CancellationByKind;
   /** Horas de la política vigente de la sede; `null` = sin política. */
   noticeHours: number | null;
+  /**
+   * El paciente ya vino (la cita estaba en la clínica) o la cita estaba
+   * completada: cancelarla corrige el registro, nunca es una cancelación
+   * tardía del paciente.
+   */
+  attended?: boolean;
 }): CancellationNotice {
   const noticeMinutes = Math.max(
     0,
@@ -144,6 +154,7 @@ export function computeCancellationNotice(input: {
   const lateCancellation =
     input.noticeHours !== null &&
     input.byKind !== 'CLINIC' &&
+    !input.attended &&
     noticeMinutes < input.noticeHours * 60;
   return { noticeMinutes, lateCancellation };
 }
