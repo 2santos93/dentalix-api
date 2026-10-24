@@ -24,18 +24,21 @@ export class ExpensePaymentDto {
   method!: PaymentMethod;
   @ApiProperty({ format: 'date', example: '2026-10-23' }) paidOn!: string;
   @ApiProperty({
+    type: String,
     format: 'uuid',
     nullable: true,
     description: 'La caja de la que salió el efectivo (salida de caja).',
   })
   cashSessionId!: string | null;
   @ApiProperty({ format: 'uuid' }) createdById!: string;
-  @ApiProperty({ nullable: true }) createdByName!: string | null;
+  @ApiProperty({ type: String, nullable: true }) createdByName!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;
-  @ApiProperty({ format: 'date-time', nullable: true }) voidedAt!: Date | null;
-  @ApiProperty({ format: 'uuid', nullable: true }) voidedById!: string | null;
-  @ApiProperty({ nullable: true }) voidedByName!: string | null;
-  @ApiProperty({ nullable: true }) voidReason!: string | null;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  voidedAt!: Date | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) voidedById!:
+    string | null;
+  @ApiProperty({ type: String, nullable: true }) voidedByName!: string | null;
+  @ApiProperty({ type: String, nullable: true }) voidReason!: string | null;
 }
 
 export class ExpenseDto {
@@ -46,12 +49,13 @@ export class ExpenseDto {
     description: 'Foto del nombre al crear o editar.',
   })
   category!: string;
-  @ApiProperty({ nullable: true }) supplier!: string | null;
-  @ApiProperty({ nullable: true }) description!: string | null;
+  @ApiProperty({ type: String, nullable: true }) supplier!: string | null;
+  @ApiProperty({ type: String, nullable: true }) description!: string | null;
   @ApiProperty({ example: 150000 }) amount!: number;
   @ApiProperty({ example: 'COP' }) currency!: string;
   @ApiProperty({ format: 'date', example: '2026-10-20' }) invoiceDate!: string;
-  @ApiProperty({ format: 'date', nullable: true }) dueDate!: string | null;
+  @ApiProperty({ type: String, format: 'date', nullable: true }) dueDate!:
+    string | null;
   @ApiProperty({ description: 'Σ de los pagos vivos.' }) paidAmount!: number;
   @ApiProperty({ description: 'Lo que falta por pagar (0 si está anulado).' })
   pendingAmount!: number;
@@ -67,13 +71,15 @@ export class ExpenseDto {
   @ApiProperty({ type: ExpenseAttachmentDto, nullable: true })
   attachment!: ExpenseAttachmentDto | null;
   @ApiProperty({ format: 'uuid' }) createdById!: string;
-  @ApiProperty({ nullable: true }) createdByName!: string | null;
+  @ApiProperty({ type: String, nullable: true }) createdByName!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;
   @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
-  @ApiProperty({ format: 'date-time', nullable: true }) voidedAt!: Date | null;
-  @ApiProperty({ format: 'uuid', nullable: true }) voidedById!: string | null;
-  @ApiProperty({ nullable: true }) voidedByName!: string | null;
-  @ApiProperty({ nullable: true }) voidReason!: string | null;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  voidedAt!: Date | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) voidedById!:
+    string | null;
+  @ApiProperty({ type: String, nullable: true }) voidedByName!: string | null;
+  @ApiProperty({ type: String, nullable: true }) voidReason!: string | null;
 }
 
 export class ExpenseDetailDto extends ExpenseDto {
@@ -126,6 +132,7 @@ export class ExpenseReceiptUrlDto {
 
 export class ExpenseCategoryDto {
   @ApiPropertyOptional({
+    type: String,
     format: 'uuid',
     nullable: true,
     description: 'null en las predefinidas (son constantes, no filas).',

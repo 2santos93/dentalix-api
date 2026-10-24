@@ -109,12 +109,12 @@ export class CreateExpenseDto {
   @IsString({ message: CATEGORY_INVALID_MESSAGE })
   category!: string;
 
-  @ApiPropertyOptional({ maxLength: 200, nullable: true })
+  @ApiPropertyOptional({ type: String, maxLength: 200, nullable: true })
   @IsOptional()
   @IsString({ message: SUPPLIER_MESSAGE })
   supplier?: string | null;
 
-  @ApiPropertyOptional({ maxLength: 500, nullable: true })
+  @ApiPropertyOptional({ type: String, maxLength: 500, nullable: true })
   @IsOptional()
   @IsString({ message: DESCRIPTION_MESSAGE })
   description?: string | null;
@@ -139,6 +139,7 @@ export class CreateExpenseDto {
   invoiceDate!: string;
 
   @ApiPropertyOptional({
+    type: String,
     format: 'date',
     nullable: true,
     description: 'Vencimiento (no anterior a la factura).',
@@ -187,12 +188,12 @@ export class UpdateExpenseDto {
   @IsString({ message: CATEGORY_INVALID_MESSAGE })
   category?: string;
 
-  @ApiPropertyOptional({ maxLength: 200, nullable: true })
+  @ApiPropertyOptional({ type: String, maxLength: 200, nullable: true })
   @IsOptional()
   @IsString({ message: SUPPLIER_MESSAGE })
   supplier?: string | null;
 
-  @ApiPropertyOptional({ maxLength: 500, nullable: true })
+  @ApiPropertyOptional({ type: String, maxLength: 500, nullable: true })
   @IsOptional()
   @IsString({ message: DESCRIPTION_MESSAGE })
   description?: string | null;
@@ -202,7 +203,7 @@ export class UpdateExpenseDto {
   @IsString({ message: INVOICE_DATE_INVALID_MESSAGE })
   invoiceDate?: string;
 
-  @ApiPropertyOptional({ format: 'date', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: DUE_DATE_INVALID_MESSAGE })
   dueDate?: string | null;
