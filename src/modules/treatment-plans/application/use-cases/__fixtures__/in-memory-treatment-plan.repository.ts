@@ -519,6 +519,7 @@ export class InMemoryTreatmentPlanRepository
       Object.entries({
         performedById: change.performedById,
         completedAt: change.completedAt,
+        performedLocationId: change.performedLocationId,
       }).filter(([, value]) => value !== undefined),
     );
   }

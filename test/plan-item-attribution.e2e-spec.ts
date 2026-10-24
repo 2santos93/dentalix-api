@@ -18,9 +18,14 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import { TokenService } from '../src/shared/crypto/token.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../src/shared/tenancy/location-access';
+import type { LocationsComparison } from '../src/modules/reports/application/use-cases/get-locations-comparison.use-case';
 import {
   ATTRIBUTION_ADMIN_ONLY_MESSAGE,
   COMPLETED_AT_BY_SERVER_MESSAGE,
+  PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+  UNATTRIBUTED_CORRECTION_INCOMPLETE_MESSAGE,
   PERFORMER_NOT_AT_LOCATION_MESSAGE,
   PERFORMER_NOT_ATTENDING_MESSAGE,
   PERFORMER_NOT_FOUND_MESSAGE,
@@ -521,6 +526,162 @@ describe('DX-050 · ítem realizado con profesional, sede y hora (e2e)', () => {
       performedLocationId: null,
       performedLocationName: null,
       completedAt: null,
+    });
+  });
+  describe('DX-305 · atribuir un «Sin atribuir» exige la sede', () => {
+    let id: string;
+    const completedAt = '2026-09-14T15:00:00.000Z';
+    const unattributed = () =>
+      raw.treatmentPlanItem.update({
+        where: { id },
+        data: { status: 'DONE' },
+      });
+
+    beforeAll(async () => {
+      id = await newItem('27');
+      await unattributed();
+    });
+
+    it('sin sede (o sin quién o cuándo) → 400 en español y nada cambia', async () => {
+      for (const body of [
+        { performedById: dentistNorte.userId },
+        { performedById: dentistNorte.userId, completedAt },
+        { performedLocationId: norteLocationId, completedAt },
+      ]) {
+        const res = await patchItem(id, a.adminToken, body).expect(400);
+        expect((res.body as { message: string }).message).toBe(
+          UNATTRIBUTED_CORRECTION_INCOMPLETE_MESSAGE,
+        );
+      }
+      expect(
+        await raw.treatmentPlanItem.findUniqueOrThrow({ where: { id } }),
+      ).toMatchObject({ performedById: null, performedLocationId: null });
+    });
+
+    const full = () => ({
+      performedById: dentistNorte.userId,
+      completedAt,
+      performedLocationId: norteLocationId,
+    });
+
+    it('solo un ADMIN lo atribuye → 403 a un DENTIST', async () => {
+      const res = await patchItem(id, dentist.token, full()).expect(403);
+      expect((res.body as { message: string }).message).toBe(
+        ATTRIBUTION_ADMIN_ONLY_MESSAGE,
+      );
+    });
+
+    it('una sede fuera de las permitidas al ADMIN → 403 (DX-089)', async () => {
+      // DX-089 no deja restringir a un ADMIN (409); se firma el token igual
+      // que en «Comparar sedes».
+      const restricted = (
+        await app.get(TokenService).issue({
+          sub: a.adminUserId,
+          tenantId: a.tenantId,
+          role: ClinicRole.ADMIN,
+          loc: [mainLocationId],
+          tv: 0,
+        })
+      ).accessToken;
+      const res = await patchItem(id, restricted, full()).expect(403);
+      expect((res.body as { message: string }).message).toBe(
+        LOCATION_NOT_ALLOWED_MESSAGE,
+      );
+    });
+
+    it('una sede de otra clínica → 400', async () => {
+      const [other] = await raw.location.findMany({
+        where: { tenantId: b.tenantId },
+        select: { id: true },
+      });
+      const res = await patchItem(id, a.adminToken, {
+        ...full(),
+        performedLocationId: other.id,
+      }).expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+      );
+    });
+
+    it('un profesional que no atiende en esa sede → 400', async () => {
+      const res = await patchItem(id, a.adminToken, {
+        ...full(),
+        performedLocationId: mainLocationId,
+      }).expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        PERFORMER_NOT_AT_LOCATION_MESSAGE,
+      );
+    });
+
+    it('un ADMIN lo atribuye con quién, cuándo y sede: auditado y entra en «Comparar sedes»', async () => {
+      const res = await patchItem(id, a.adminToken, full()).expect(200);
+      expect(res.body).toMatchObject({
+        performedById: dentistNorte.userId,
+        performedLocationId: norteLocationId,
+        performedLocationName: 'Sede Norte',
+        completedAt,
+      });
+      const [event] = await raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          resourceId: id,
+          metadata: {
+            path: ['reason'],
+            equals: 'PLAN_ITEM_ATTRIBUTION_CORRECTED',
+          },
+        },
+      });
+      expect(event).toMatchObject({
+        actorUserId: a.adminUserId,
+        metadata: {
+          attribution: {
+            before: {
+              performedById: null,
+              locationId: null,
+              completedAt: null,
+            },
+            after: {
+              performedById: dentistNorte.userId,
+              locationId: norteLocationId,
+              completedAt,
+            },
+          },
+        },
+      });
+      const report = await api(
+        'get',
+        '/reports/locations-comparison?from=2026-09-14&to=2026-09-14&compare=none',
+        a.adminToken,
+      ).expect(200);
+      const norte = (report.body as LocationsComparison).locations.find(
+        (l) => l.locationId === norteLocationId,
+      );
+      expect(norte?.metrics.production).toEqual([
+        {
+          currency: 'USD',
+          value: 100,
+          previous: null,
+          change: null,
+          trend: null,
+        },
+      ]);
+    });
+
+    it('después, un ADMIN corrige solo la sede (y quien lo realizó tiene que atender allí)', async () => {
+      await patchItem(id, a.adminToken, {
+        performedLocationId: mainLocationId,
+      }).expect(400);
+      await patchItem(id, a.adminToken, {
+        performedById: dentist.userId,
+        performedLocationId: mainLocationId,
+      }).expect(200);
+      expect(
+        await raw.treatmentPlanItem.findUniqueOrThrow({ where: { id } }),
+      ).toMatchObject({
+        performedById: dentist.userId,
+        performedLocationId: mainLocationId,
+        completedAt: new Date(completedAt),
+      });
     });
   });
 });

@@ -532,6 +532,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         fakeItem({
           status: TreatmentPlanItemStatus.DONE,
           performedById: 'dentist-2',
+          performedLocationId: 'location-1',
           completedAt: DISCOUNT_NOW,
         }),
         {
