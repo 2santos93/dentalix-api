@@ -21,7 +21,7 @@ import { isInSweepWindow } from '../src/modules/reminders/domain/reminder-window
 // (las funciones *Sql exportadas) como dentalix_app, con la clínica fijada
 // (runWithTenant), sobre miles de filas analizadas, y exige el índice en
 // `Index Cond`. `raw` (DIRECT_URL, owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

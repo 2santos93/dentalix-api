@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -12,7 +12,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // sembrar y limpiar: con RLS aplicado, una conexión sin contexto de tenant no
 // vería ninguna fila y no podría limpiar lo que dejaron otros specs. Mismo
 // patrón que inventory.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

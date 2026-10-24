@@ -1,5 +1,10 @@
 import { INestApplication } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
+import {
+  AppointmentStatus,
+  ClinicRole,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -23,7 +28,7 @@ import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-ite
  *    panel «En clínica».
  *  - «Traer a esta cita»: mueve la reserva con auditoría en las dos citas.
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const MIN = 60000;

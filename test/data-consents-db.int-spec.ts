@@ -18,7 +18,7 @@ const BACKFILL =
   '';
 
 // Owner/superusuario (DIRECT_URL): fixtures y limpieza.
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 // Rol de la app (DATABASE_URL) sujeto a RLS, como la API.

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -23,7 +23,7 @@ import { EmailDispatcher } from '../src/modules/notifications/email/application/
 // tope no es por IP (con TRUST_PROXY=false la API ni siquiera los mira: el
 // balde por IP lo suben los e2e en setup-e2e.ts).
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

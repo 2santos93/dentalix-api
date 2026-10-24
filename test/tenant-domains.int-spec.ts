@@ -25,7 +25,7 @@ import {
 // periódica con el repositorio REAL (rol dentalix_app; tenant_domains no
 // tiene RLS, el aislamiento es el filtro por tenant del repositorio) y el
 // resolver de host real. El DNS y el reloj son simulados.
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

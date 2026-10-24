@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -17,7 +17,7 @@ import { AUDIT_EVENT_REPOSITORY } from '../src/modules/audit/domain/ports/audit-
 // DX-009 · registro de auditoría de punta a punta: qué deja cada acceso, qué
 // NO guarda nunca, quién puede leerlo y que una clínica no ve lo de otra.
 // DIRECT_URL (superusuario, sin RLS) solo para leer la tabla tal cual quedó.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

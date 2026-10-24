@@ -35,6 +35,22 @@ describe('redactSensitive', () => {
     });
   });
 
+  it('oculta el nº de afiliado de una cobertura, con cualquier prefijo (SEC-049)', () => {
+    expect(
+      redactSensitive({
+        memberNumber: '1020304050',
+        checkedMemberNumber: '1020304050',
+        member_number: 'x',
+        planName: 'Plan Oro',
+      }),
+    ).toEqual({
+      memberNumber: REDACTED,
+      checkedMemberNumber: REDACTED,
+      member_number: REDACTED,
+      planName: 'Plan Oro',
+    });
+  });
+
   it('no modifica el objeto original', () => {
     const headers = { authorization: 'Bearer x' };
     redactSensitive(headers);

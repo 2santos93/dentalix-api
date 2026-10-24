@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
@@ -25,7 +25,7 @@ function at(time: string): string {
 
 // Conexión de ADMINISTRACIÓN (DIRECT_URL, owner) solo para sembrar y limpiar:
 // con RLS, el rol de runtime sin tenant en contexto no ve filas.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

@@ -20,6 +20,7 @@ import {
   AGREEMENT_RACE_MESSAGE,
   COVERAGE_NOT_LIVE_MESSAGE,
   COVERAGE_PAYER_MISMATCH_MESSAGE,
+  COVERAGE_SELF_DECLARED_MESSAGE,
   INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE,
   PATIENT_AGREEMENT_NOT_FOUND_MESSAGE,
   coverageRequiredMessage,
@@ -476,6 +477,98 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
             RECEPTION,
           ),
         ).rejects.toThrow(ForbiddenException);
+      });
+    });
+
+    describe('cobertura verificable (SEC-049)', () => {
+      /** Cobertura de Sanitas que registró `declaredById` (SEC-049). */
+      const declared = (declaredById: string, extra: object = {}) =>
+        coverages.seed({
+          patientId: PATIENT,
+          payerId: sanitas.id,
+          memberNumber: '1020304050',
+          declaredById,
+          ...extra,
+        }).id;
+
+      it.each(NON_ADMIN)(
+        '%s: con la cobertura que registró él y nadie verificó, 403 en español y no escribe',
+        async (role) => {
+          const coverageId = declared('u1');
+          await expect(
+            assign.execute(
+              PATIENT,
+              { agreementId: convenioSanitas, coverageId },
+              actor(role),
+            ),
+          ).rejects.toThrow(
+            new ForbiddenException(COVERAGE_SELF_DECLARED_MESSAGE),
+          );
+          expect(repo.rows).toHaveLength(0);
+        },
+      );
+
+      it.each(NON_ADMIN)(
+        '%s: verificada por un ADMIN o registrada por otro usuario, se asigna',
+        async (role) => {
+          const verified = declared('u1', {
+            verifiedAt: new Date('2026-10-19T12:00:00Z'),
+            verifiedById: 'admin-1',
+          });
+          await expect(
+            assign.execute(
+              PATIENT,
+              { agreementId: convenioSanitas, coverageId: verified },
+              actor(role),
+            ),
+          ).resolves.toMatchObject({ coverageId: verified });
+          const byOther = declared('u2');
+          await expect(
+            assign.execute(
+              PATIENT,
+              { agreementId: convenioSanitas, coverageId: byOther },
+              actor(role),
+            ),
+          ).resolves.toMatchObject({ coverageId: byOther });
+        },
+      );
+
+      it('ADMIN asigna con la que registró él sin verificar, como hasta ahora', async () => {
+        const coverageId = declared('u1');
+        await expect(
+          assign.execute(
+            PATIENT,
+            { agreementId: convenioSanitas, coverageId },
+            ADMIN,
+          ),
+        ).resolves.toMatchObject({ coverageId });
+      });
+
+      it('la cobertura de otro paciente o de otra clínica sigue siendo 400 «no encontrada», antes del 403', async () => {
+        const foreign = coverages.seed({
+          patientId: 'otro-paciente',
+          payerId: sanitas.id,
+          declaredById: 'u1',
+        }).id;
+        await expect(
+          assign.execute(
+            PATIENT,
+            { agreementId: convenioSanitas, coverageId: foreign },
+            RECEPTION,
+          ),
+        ).rejects.toThrow(new BadRequestException(COVERAGE_NOT_FOUND_MESSAGE));
+      });
+
+      it('el repositorio recibe quién asigna para repetir la comprobación en la transacción', async () => {
+        await assign.execute(
+          PATIENT,
+          { agreementId: convenioSanitas, coverageId: covSanitas },
+          RECEPTION,
+        );
+        expect(repo.lastReplaceActor).toEqual({
+          userId: 'u1',
+          role: ClinicRole.RECEPTION,
+        });
       });
     });
 

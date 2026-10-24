@@ -8,6 +8,7 @@ import {
   isFeeEligible,
   normalizeWaiveReason,
   resolveChargeAmount,
+  voidBlockMessage,
   waiveBlockReason,
   type FeeChargeFacts,
 } from './cancellation-fee';
@@ -239,5 +240,26 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
     expect(epsCoBlockEnabled(undefined)).toBe(true);
     expect(epsCoBlockEnabled('true')).toBe(true);
     expect(epsCoBlockEnabled(' FALSE ')).toBe(false);
+  });
+
+  describe('voidBlockMessage (SEC-050)', () => {
+    it('solo se anula un cargo generado y sin anular', () => {
+      expect(
+        voidBlockMessage({ status: 'CHARGED', voidedAt: null }),
+      ).toBeNull();
+    });
+
+    it('sin cargo o con una condonación: «no tiene un cargo generado»', () => {
+      expect(voidBlockMessage(null)).toBe(CANCELLATION_FEE_MESSAGES.notCharged);
+      expect(voidBlockMessage({ status: 'WAIVED', voidedAt: null })).toBe(
+        CANCELLATION_FEE_MESSAGES.notCharged,
+      );
+    });
+
+    it('ya anulado: «ya se anuló»', () => {
+      expect(
+        voidBlockMessage({ status: 'CHARGED', voidedAt: new Date() }),
+      ).toBe(CANCELLATION_FEE_MESSAGES.alreadyVoided);
+    });
   });
 });

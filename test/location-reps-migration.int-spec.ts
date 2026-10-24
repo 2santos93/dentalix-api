@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // DX-319: se borra locations."repsHabilitationCode" y se añade el nº de
 // registro sanitario libre. Una BD desechable recibe todas las migraciones
@@ -50,7 +50,7 @@ const SEED = [
 ];
 
 describe('DX-319 · migración del REPS al nº de registro sanitario (int)', () => {
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: process.env.DIRECT_URL } },
   });
   let db: string;
@@ -85,7 +85,9 @@ describe('DX-319 · migración del REPS al nº de registro sanitario (int)', () 
       }
     }
     migrateDeploy(dir, urlFor(db));
-    target = new PrismaClient({ datasources: { db: { url: urlFor(db) } } });
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
+      datasources: { db: { url: urlFor(db) } },
+    });
     for (const sql of SEED) await target.$executeRawUnsafe(sql);
   }, 180_000);
 

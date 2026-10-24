@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -11,7 +11,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup/seed en
 // beforeAll — usa DIRECT_URL (rol owner `dentalix`, superuser), mismo patrón
 // que auth.e2e-spec.ts / tenant-host.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

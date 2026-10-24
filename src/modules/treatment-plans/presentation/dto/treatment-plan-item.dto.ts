@@ -167,6 +167,15 @@ export class TreatmentPlanItemDto {
   })
   completedAt!: Date | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'SEC-050: el ítem es el cargo vigente por inasistencia o cancelación tardía de esta cita (DX-291). Su precio, descuento y estado no cambian ni se quita del plan (409 a todo rol): se anula con `POST /appointments/{id}/cancellation-fee/void`, con motivo. null en cualquier otro ítem.',
+  })
+  cancellationFeeAppointmentId!: string | null;
+
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 

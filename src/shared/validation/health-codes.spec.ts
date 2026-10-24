@@ -1,37 +1,10 @@
 import {
-  CUPS_FORMAT_MESSAGE,
   ICD10_INVALID_MESSAGE,
-  isValidCupsCode,
   isValidIcd10Format,
-  normalizeCupsCode,
   normalizeIcd10Code,
 } from './health-codes';
 
 describe('códigos de salud (DX-212)', () => {
-  describe('CUPS', () => {
-    it.each(['890203', '232101', 'A1B2C3'])('acepta %s', (code) => {
-      expect(isValidCupsCode(code)).toBe(true);
-    });
-
-    it.each(['89020', '8902034', '89-203', '89020 ', '', 'ab12c$'])(
-      'rechaza «%s»',
-      (code) => {
-        expect(isValidCupsCode(code)).toBe(false);
-      },
-    );
-
-    it('normaliza espacios y minúsculas; vacío = quitar el código', () => {
-      expect(normalizeCupsCode(' a1b2c3 ')).toBe('A1B2C3');
-      expect(normalizeCupsCode('   ')).toBeNull();
-      expect(normalizeCupsCode(null)).toBeNull();
-      expect(normalizeCupsCode(undefined)).toBeUndefined();
-    });
-
-    it('el mensaje dice el formato esperado', () => {
-      expect(CUPS_FORMAT_MESSAGE).toMatch(/6 caracteres alfanuméricos/);
-    });
-  });
-
   describe('CIE-10', () => {
     it.each(['K02.1', 'Z01.2', 'K05.10'])('formato válido %s', (code) => {
       expect(isValidIcd10Format(code)).toBe(true);

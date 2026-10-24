@@ -17,8 +17,6 @@ export type AuditPatientRef = {
     | 'payment'
     | 'prescription'
     | 'patientImplant'
-    // DX-212: `GET /clinical-entries/:id/rda-readiness`.
-    | 'clinicalEntry'
     // DX-222: la entrega de indicaciones postoperatorias recién registrada.
     | 'postOpDelivery'
     // DX-262: el saldo migrado al que se abona.

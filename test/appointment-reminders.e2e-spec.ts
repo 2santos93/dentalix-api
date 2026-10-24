@@ -3,7 +3,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
 import { JobQueue } from '../src/modules/jobs/application/job-queue.service';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -27,7 +27,7 @@ import {
 // español), validación en español, sedes de otra clínica, y el estado de los
 // recordatorios de una cita antes y después de que el barrido programado y el
 // envío corran en el worker (email con el enlace de DX-005).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

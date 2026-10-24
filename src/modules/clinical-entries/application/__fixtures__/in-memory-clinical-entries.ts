@@ -5,7 +5,6 @@ import {
   CreateClinicalEntryRepoInput,
   ListClinicalEntriesParams,
 } from '../../domain/ports/clinical-entry-repository.port';
-import type { RdaFacts } from '../../domain/rda-readiness';
 
 /**
  * Repositorio de evoluciones en memoria con estado (append-only): `rows` es lo
@@ -15,9 +14,8 @@ import type { RdaFacts } from '../../domain/rda-readiness';
 export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
   readonly rows: ClinicalEntry[] = [];
   readonly appointments: ClinicalEntryAppointmentRef[] = [];
-  /** DX-212: la tabla CIE-10 de los tests y los datos RDA por evolución. */
+  /** DX-212: la tabla CIE-10 de los tests. */
   readonly icd10 = new Set(['K02.1', 'K05.1', 'K04.0', 'Z01.2']);
-  readonly rdaFacts = new Map<string, RdaFacts>();
   private nextId = 1;
 
   create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
@@ -69,25 +67,5 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
 
   existingIcd10Codes(codes: string[]): Promise<Set<string>> {
     return Promise.resolve(new Set(codes.filter((c) => this.icd10.has(c))));
-  }
-
-  loadRdaFactsBatch(
-    ids: string[],
-    patientId?: string,
-  ): Promise<Map<string, RdaFacts>> {
-    return Promise.resolve(
-      new Map(
-        ids.flatMap((id) => {
-          const facts = this.rdaFacts.get(id);
-          return facts && (!patientId || facts.patient.id === patientId)
-            ? [[id, facts] as const]
-            : [];
-        }),
-      ),
-    );
-  }
-
-  loadRdaFacts(id: string): Promise<RdaFacts | null> {
-    return Promise.resolve(this.rdaFacts.get(id) ?? null);
   }
 }

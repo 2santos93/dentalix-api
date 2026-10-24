@@ -1,4 +1,4 @@
-import { openMinutes } from './open-minutes';
+import { capacityMinutes, openMinutes } from './open-minutes';
 
 // Horario por defecto del registro: lun-vie 9-13 y 15-19, sáb 9-13.
 const DEFAULT_WEEK = [1, 2, 3, 4, 5].flatMap((weekday) => [
@@ -114,5 +114,103 @@ describe('openMinutes (DX-014)', () => {
         closures: [],
       }),
     ).toBe(0);
+  });
+});
+
+describe('capacityMinutes (BE-042, DX-305)', () => {
+  // Lunes 2026-10-19 … viernes 2026-10-23.
+  const WEEKDAYS_9_TO_17 = [1, 2, 3, 4, 5].map((weekday) => ({
+    weekday,
+    startMinute: 9 * 60,
+    endMinute: 17 * 60,
+  }));
+  const MORNINGS_9_TO_13 = [1, 2, 3, 4, 5].map((weekday) => ({
+    weekday,
+    startMinute: 9 * 60,
+    endMinute: 13 * 60,
+  }));
+  const week = { from: '2026-10-19', to: '2026-10-23', timeZone: BOGOTA };
+  const provider = (
+    ranges: typeof WEEKDAYS_9_TO_17,
+    extra: Partial<Parameters<typeof capacityMinutes>[0]['providers'][0]> = {},
+  ) => ({ ranges, overrides: new Map(), blocks: [], ...extra });
+
+  it('sin profesionales con horario en la sede no hay capacidad (null)', () => {
+    expect(
+      capacityMinutes({ ...week, providers: [], closures: [] }),
+    ).toBeNull();
+  });
+
+  it('suma el horario de cada profesional: dos en paralelo, el doble', () => {
+    const one = capacityMinutes({
+      ...week,
+      providers: [provider(WEEKDAYS_9_TO_17)],
+      closures: [],
+    });
+    expect(one).toBe(5 * 480);
+    expect(
+      capacityMinutes({
+        ...week,
+        providers: [provider(WEEKDAYS_9_TO_17), provider(WEEKDAYS_9_TO_17)],
+        closures: [],
+      }),
+    ).toBe(2 * 5 * 480);
+  });
+
+  it('un profesional de media jornada aporta la mitad', () => {
+    expect(
+      capacityMinutes({
+        ...week,
+        providers: [provider(WEEKDAYS_9_TO_17), provider(MORNINGS_9_TO_13)],
+        closures: [],
+      }),
+    ).toBe(5 * 480 + 5 * 240);
+  });
+
+  it('la excepción de un día manda sobre el semanal (sin tramos = no trabaja)', () => {
+    expect(
+      capacityMinutes({
+        ...week,
+        providers: [
+          provider(WEEKDAYS_9_TO_17, {
+            overrides: new Map([
+              ['2026-10-20', []],
+              ['2026-10-21', [{ startMinute: 600, endMinute: 660 }]],
+            ]),
+          }),
+        ],
+        closures: [],
+      }),
+    ).toBe(3 * 480 + 60);
+  });
+
+  it('descuenta sus bloqueos y los cierres de la sede, sin restar dos veces', () => {
+    // Lunes: vacaciones del profesional todo el día; martes: cierre de la
+    // sede 9-11 y un bloqueo suyo 10-12 que se pisan (9-12 = 180 min).
+    expect(
+      capacityMinutes({
+        ...week,
+        providers: [
+          provider(WEEKDAYS_9_TO_17, {
+            blocks: [
+              {
+                start: new Date('2026-10-19T05:00:00Z'),
+                end: new Date('2026-10-20T05:00:00Z'),
+              },
+              {
+                start: new Date('2026-10-20T15:00:00Z'),
+                end: new Date('2026-10-20T17:00:00Z'),
+              },
+            ],
+          }),
+        ],
+        closures: [
+          {
+            start: new Date('2026-10-20T14:00:00Z'),
+            end: new Date('2026-10-20T16:00:00Z'),
+          },
+        ],
+      }),
+    ).toBe(5 * 480 - 480 - 180);
   });
 });

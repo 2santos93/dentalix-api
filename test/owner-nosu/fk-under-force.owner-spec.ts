@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -65,7 +65,7 @@ describe('DX-134 · FK sobre tablas con FORCE y filas huérfanas ocultas al owne
   const env = requireOwnerNosuEnv();
   const db = `dx134_fk_${process.pid}_${Date.now()}`;
   const dir = mkdtempSync(join(tmpdir(), 'dx134-fk-'));
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
   let target: PrismaClient;
@@ -158,10 +158,10 @@ describe('DX-134 · FK sobre tablas con FORCE y filas huérfanas ocultas al owne
       join(ROOT, 'prisma/migrations/migration_lock.toml'),
       join(dir, 'migrations', 'migration_lock.toml'),
     );
-    target = new PrismaClient({
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
-    owner = new PrismaClient({
+    owner = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: ownerUrlFor(env, db) } },
     });
 

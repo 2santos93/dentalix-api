@@ -6,10 +6,10 @@ import { resetDatabase } from './support/e2e-fixtures';
 // RLS FORCE y FK compuestas por tenant. Las escrituras de la app van como
 // dentalix_app (DATABASE_URL, sujeto a RLS) con `app.current_tenant`; `raw`
 // (DIRECT_URL, superusuario) siembra, mira el catálogo y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

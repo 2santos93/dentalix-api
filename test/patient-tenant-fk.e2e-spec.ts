@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { randomUUID } from 'node:crypto';
-import { DocType, PrismaClient, Sex } from '@prisma/client';
+import { DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -19,7 +19,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // `raw` (DIRECT_URL, rol owner) solo se usa para limpiar y para contar filas
 // sin RLS: es la única forma de comprobar que NO se insertó nada en ningún
 // tenant. Mismo patrón que appointments.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

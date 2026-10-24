@@ -3,6 +3,7 @@ import {
   AppointmentStatus,
   CatalogKind,
   ClinicRole,
+  Prisma,
   PrismaClient,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
@@ -27,7 +28,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 // aislamiento entre clínicas, la fila de la cartera y el chip «Saldo vencido»
 // de la agenda y la ficha (sin N+1). Siembra de fechas pasadas por DIRECT_URL;
 // todo lo demás, por la API.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

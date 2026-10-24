@@ -1,8 +1,10 @@
 import {
+  ATTRIBUTION_SENSITIVE_KPIS,
   changeOf,
   changePercent,
   combineAggregates,
   computeKpis,
+  currenciesCollectedWithoutProduction,
   EMPTY_AGGREGATES,
   KPI_DEFINITIONS,
   KPI_KEYS,
@@ -68,7 +70,7 @@ describe('kpi-definitions (DX-014)', () => {
       attendedPatients: 25,
       newPatients: 3,
       completedMinutes: 2_400,
-      openMinutes: 9_600,
+      capacityMinutes: 9_600,
     });
 
     it('producción y cobrado por moneda, sin sumar monedas distintas', () => {
@@ -129,7 +131,10 @@ describe('kpi-definitions (DX-014)', () => {
 
     it('sin citas: no-show y ticket null; sin horario: ocupación null', () => {
       const kpis = computeKpis(
-        aggregates({ collected: new Map([['COP', 10]]), openMinutes: null }),
+        aggregates({
+          collected: new Map([['COP', 10]]),
+          capacityMinutes: null,
+        }),
         ['COP'],
       );
       expect(kpis.noShowRate).toBeNull();
@@ -137,10 +142,26 @@ describe('kpi-definitions (DX-014)', () => {
       expect(kpis.occupancy).toBeNull();
     });
 
+    it('la ocupación nunca pasa del 100 % (BE-042)', () => {
+      // Citas fuera de horario o de un profesional que se quedó de más.
+      expect(
+        computeKpis(
+          aggregates({ completedMinutes: 900, capacityMinutes: 300 }),
+          [],
+        ).occupancy,
+      ).toBe(100);
+      expect(
+        computeKpis(
+          aggregates({ completedMinutes: 300, capacityMinutes: 300 }),
+          [],
+        ).occupancy,
+      ).toBe(100);
+    });
+
     it('con horario pero cerrado todo el período, ocupación null', () => {
-      expect(computeKpis(aggregates({ openMinutes: 0 }), []).occupancy).toBe(
-        null,
-      );
+      expect(
+        computeKpis(aggregates({ capacityMinutes: 0 }), []).occupancy,
+      ).toBe(null);
     });
 
     it('redondea los porcentajes a 2 decimales', () => {
@@ -216,6 +237,42 @@ describe('kpi-definitions (DX-014)', () => {
     });
   });
 
+  describe('producción sin atribuir en el período comparado (BE-045)', () => {
+    it('las monedas con cobros y sin producción atribuida', () => {
+      expect(
+        currenciesCollectedWithoutProduction(
+          aggregates({
+            production: new Map([['COP', 100]]),
+            collected: new Map([
+              ['COP', 50],
+              ['USD', 20],
+              ['EUR', 0],
+            ]),
+          }),
+        ),
+      ).toEqual(new Set(['USD']));
+    });
+
+    it('solo producción y % de cobro dependen de la atribución', () => {
+      expect([...ATTRIBUTION_SENSITIVE_KPIS]).toEqual([
+        'production',
+        'collectionRate',
+      ]);
+      for (const key of ATTRIBUTION_SENSITIVE_KPIS) {
+        expect(KPI_DEFINITIONS[key].howItIsCalculated).toContain(
+          'no se muestra la variación',
+        );
+      }
+    });
+
+    it('«Cómo se calcula» de la ocupación explica la capacidad y el tope', () => {
+      const text = KPI_DEFINITIONS.occupancy.howItIsCalculated;
+      expect(text).toContain('horario de cada uno');
+      expect(text).toContain('Nunca pasa del 100 %');
+      expect(text).toContain('media jornada');
+    });
+  });
+
   describe('combineAggregates (Total clínica)', () => {
     it('suma por moneda, citas y minutos; los pacientes distintos van aparte', () => {
       const a = aggregates({
@@ -227,7 +284,7 @@ describe('kpi-definitions (DX-014)', () => {
         attendedPatients: 8,
         newPatients: 2,
         completedMinutes: 300,
-        openMinutes: 1000,
+        capacityMinutes: 1000,
       });
       const b = aggregates({
         production: new Map([['USD', 20]]),
@@ -241,7 +298,7 @@ describe('kpi-definitions (DX-014)', () => {
         attendedPatients: 5,
         newPatients: 1,
         completedMinutes: 100,
-        openMinutes: 400,
+        capacityMinutes: 400,
       });
       const total = combineAggregates([a, b], 11);
       expect([...total.production]).toEqual([
@@ -259,28 +316,31 @@ describe('kpi-definitions (DX-014)', () => {
         attendedPatients: 11,
         newPatients: 3,
         completedMinutes: 400,
-        openMinutes: 1400,
+        capacityMinutes: 1400,
       });
     });
 
     it('la ocupación del total solo cuenta las sedes con horario', () => {
-      const scheduled = aggregates({ completedMinutes: 300, openMinutes: 600 });
+      const scheduled = aggregates({
+        completedMinutes: 300,
+        capacityMinutes: 600,
+      });
       const unscheduled = aggregates({
         completedMinutes: 900,
-        openMinutes: null,
+        capacityMinutes: null,
       });
       const total = combineAggregates([scheduled, unscheduled], 0);
       expect(total.completedMinutes).toBe(300);
-      expect(total.openMinutes).toBe(600);
+      expect(total.capacityMinutes).toBe(600);
       expect(computeKpis(total, []).occupancy).toBe(50);
     });
 
     it('sin ninguna sede con horario, la ocupación del total es null', () => {
       const total = combineAggregates(
-        [aggregates({ completedMinutes: 30, openMinutes: null })],
+        [aggregates({ completedMinutes: 30, capacityMinutes: null })],
         0,
       );
-      expect(total.openMinutes).toBeNull();
+      expect(total.capacityMinutes).toBeNull();
     });
   });
 });

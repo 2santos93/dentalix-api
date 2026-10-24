@@ -16,8 +16,8 @@ import {
   type VoidActor,
 } from '../../domain/void-window';
 import {
-  civilDaysInclusive,
-  parseCivilDate,
+  checkPeriodDays,
+  PERIOD_DAY_OUT_OF_RANGE_MESSAGE,
 } from '../../../../shared/time/civil-day';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 
@@ -29,6 +29,10 @@ const MAX_PAGE_SIZE = 100;
 // día, semana o mes; un rango mayor ya no es "caja" sino un informe, y sin tope
 // cualquiera podría pedir el agregado de toda la historia de la clínica.
 export const MAX_RANGE_DAYS = 366;
+
+export const INVALID_CASH_PERIOD_MESSAGE =
+  'El período no es válido: usa fechas AAAA-MM-DD con «desde» anterior o igual a «hasta».';
+export const CASH_PERIOD_TOO_LONG_MESSAGE = `El período admite como mucho ${MAX_RANGE_DAYS} días.`;
 
 // Orden de presentación del desglose por método: el del enum (efectivo
 // primero, que es lo que se arquea), y los abonos sin método al final.
@@ -80,21 +84,6 @@ function normalizePageSize(pageSize?: number): number {
     return DEFAULT_PAGE_SIZE;
   }
   return Math.min(Math.floor(pageSize), MAX_PAGE_SIZE);
-}
-
-/**
- * Valida un día civil (YYYY-MM-DD) que exista: `new Date('2026-02-30')` no
- * falla, se va al 2 de marzo. El período se queda en días civiles: cada sede lo
- * traduce a instantes en SU zona (DX-097), en el repositorio.
- */
-function requireCivilDate(value: string, field: 'from' | 'to'): string {
-  const day = parseCivilDate(value);
-  if (day === null) {
-    throw new BadRequestException(
-      `${field} must be a valid calendar date (YYYY-MM-DD)`,
-    );
-  }
-  return day;
 }
 
 // Los montos son Decimal(14,2): sumar en centavos enteros es exacto (14 dígitos
@@ -174,17 +163,21 @@ export class ListCashPaymentsUseCase {
     input: ListCashPaymentsInput,
     actor: VoidActor,
   ): Promise<ListCashPaymentsOutput> {
-    const from = requireCivilDate(input.from, 'from');
-    const to = requireCivilDate(input.to, 'to');
-    const days = civilDaysInclusive(from, to);
-    if (days < 1) {
-      throw new BadRequestException('from must be on or before to');
-    }
-    if (days > MAX_RANGE_DAYS) {
+    // Días que existan (`2026-02-30` no), en el rango admitido y en orden. El
+    // período se queda en días civiles: cada sede lo traduce a instantes en
+    // SU zona (DX-097), en el repositorio.
+    const period = checkPeriodDays(input.from, input.to);
+    if (!period.ok) {
       throw new BadRequestException(
-        `the period cannot exceed ${MAX_RANGE_DAYS} days`,
+        period.problem === 'OUT_OF_RANGE'
+          ? PERIOD_DAY_OUT_OF_RANGE_MESSAGE
+          : INVALID_CASH_PERIOD_MESSAGE,
       );
     }
+    if (period.days > MAX_RANGE_DAYS) {
+      throw new BadRequestException(CASH_PERIOD_TOO_LONG_MESSAGE);
+    }
+    const { from, to } = period;
 
     const page = normalizePage(input.page);
     const pageSize = normalizePageSize(input.pageSize);

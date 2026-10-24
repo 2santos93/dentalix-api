@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -17,7 +17,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 // vigencia). Estado derivado, una sola principal (y su promoción al retirar),
 // tope de 5, pagador de otra clínica, 404 entre clínicas, los 4 roles y la
 // auditoría sin el número de afiliado.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -98,11 +98,16 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     return res.body as Coverage[];
   }
 
+  /** Alta; sin `memberNumber`, uno válido (SEC-049: lo exige el pagador externo). */
   const add = (
     patientId: string,
     body: Record<string, unknown>,
     token = tokens.RECEPTION,
-  ) => as(api().post(coverages(patientId)), token).send(body);
+  ) =>
+    as(api().post(coverages(patientId)), token).send({
+      memberNumber: '1020304050',
+      ...body,
+    });
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -420,7 +425,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       .map((e) => (e.metadata as { reason?: string }).reason)
       .filter(Boolean);
     expect(reasons).toEqual([
-      'COVERAGE_ADDED',
+      'COVERAGE_CREATED',
       'COVERAGE_CHANGED',
       'COVERAGE_REMOVED',
     ]);

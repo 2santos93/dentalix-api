@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -304,7 +304,7 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
   const env = requireOwnerNosuEnv();
   const db = `dx113_mig_${process.pid}_${Date.now()}`;
   const dir = mkdtempSync(join(tmpdir(), 'dx113-'));
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
   let target: PrismaClient;
@@ -394,7 +394,7 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
       join(MIGRATIONS, 'migration_lock.toml'),
       join(dir, 'migrations', 'migration_lock.toml'),
     );
-    target = new PrismaClient({
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
   });

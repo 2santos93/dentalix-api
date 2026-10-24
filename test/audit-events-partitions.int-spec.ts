@@ -10,7 +10,7 @@ import { AUDIT_MIN_RETENTION_MONTHS } from '../src/modules/audit/infrastructure/
 // creación idempotente de particiones, purga por partición completa y
 // append-only por PRIVILEGIO (no solo por trigger).
 
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

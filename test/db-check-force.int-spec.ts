@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 /**
  * DX-134: `npm run db:check-force`, la comprobación tras cada despliegue. Si
@@ -19,7 +19,7 @@ const ROOT = join(__dirname, '..');
 const TABLE = 'dx134_check_force_probe';
 const SCHEMA = 'dx134_check_force_otro';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

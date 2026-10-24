@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAgreementRepository } from '../src/modules/agreements/infrastructure/repositories/prisma-agreement.repository';
@@ -9,7 +9,7 @@ import { PrismaPatientAgreementRepository } from '../src/modules/patient-agreeme
 // COMPUESTAS (cruzar clínicas falla), los únicos parciales y las CHECK. Lo que
 // se prueba va por la MISMA ruta que la app (runWithTenant, rol dentalix_app,
 // sujeto a RLS); `raw` (DIRECT_URL, superusuario) siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
@@ -633,6 +633,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
   describe('escrituras concurrentes sobre el convenio de un paciente', () => {
     const repo = new PrismaPatientAgreementRepository(prisma, tenantContext);
     const by = '00000000-0000-4000-8000-000000000105';
+    const admin = { userId: by, role: ClinicRole.ADMIN };
     const inA = <T>(fn: () => Promise<T>) => tenantContext.run(a.tenantId, fn);
     const input = (agreementId: string) => ({
       agreementId,
@@ -653,7 +654,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
       });
       const results = await Promise.allSettled(
         [one.id, two.id, one.id, two.id].map((id) =>
-          inA(() => repo.replace(a.patientId, input(id), by)),
+          inA(() => repo.replace(a.patientId, input(id), admin)),
         ),
       );
       for (const r of results) {
@@ -682,7 +683,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: percentAgreement(a, { name: 'Convenio 20', percent: 20 }),
       });
       const results = await Promise.allSettled([
-        inA(() => repo.replace(a.patientId, input(two.id), by)),
+        inA(() => repo.replace(a.patientId, input(two.id), admin)),
         inA(() => repo.retireCurrent(a.patientId, by)),
       ]);
       expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
@@ -694,7 +695,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: percentAgreement(a),
       });
       const [assigned, retired] = await Promise.allSettled([
-        inA(() => repo.replace(a.patientId, input(agreement.id), by)),
+        inA(() => repo.replace(a.patientId, input(agreement.id), admin)),
         raw.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT id FROM "agreements" WHERE id = ${agreement.id}::uuid FOR UPDATE`;
           const inUse = await tx.patientAgreement.count({

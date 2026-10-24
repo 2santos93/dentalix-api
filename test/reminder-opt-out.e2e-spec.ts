@@ -6,7 +6,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -34,7 +34,7 @@ import {
 // auditada sin actor y con origen LINK) y el siguiente recordatorio no sale.
 // La respuesta «BAJA» por WhatsApp entra por un adaptador FAKE del webhook de
 // DX-126 (que aún no existe), que llama al mismo caso de uso que usará.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

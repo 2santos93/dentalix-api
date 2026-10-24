@@ -15,7 +15,7 @@ import type { AuditRequestContext } from '../src/modules/audit/domain/audit-requ
 // INSERT el `createdAt` de su propio reloj, y con el reloj inyectado del
 // barrido. Todo como dentalix_app con la clínica fijada; `raw` (DIRECT_URL,
 // superusuario) siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

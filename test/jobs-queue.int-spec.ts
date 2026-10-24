@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { JobRegistry } from '../src/modules/jobs/application/job-registry';
@@ -17,7 +17,7 @@ import { deferred, waitFor } from './support/wait-for';
 // reintentos con backoff hasta FAILED y arriendos vencidos. Sin sleeps: las
 // esperas son barreras (deferred) o polling con tope (waitFor).
 
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

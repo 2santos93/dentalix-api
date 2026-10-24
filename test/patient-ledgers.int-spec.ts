@@ -13,7 +13,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // dentalix_app, sujeto a RLS) salvo las limpiezas; `raw` (DIRECT_URL, owner)
 // siembra, limpia y calcula el ORÁCULO: las entradas de cada paciente leídas
 // de las tablas fuente con Prisma, sin pasar por las funciones de la migración.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

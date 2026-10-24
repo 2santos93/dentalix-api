@@ -11,7 +11,6 @@ import type {
 } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
 import {
-  cupsCodeOrThrow,
   isValidCatalogKind,
   isValidHexColor,
 } from './create-catalog-item.use-case';
@@ -51,9 +50,6 @@ export class UpdateCatalogItemUseCase {
     }
 
     const normalizedPatch: UpdateDentalCatalogItemRepoInput = { ...patch };
-    if (patch.cupsCode !== undefined) {
-      normalizedPatch.cupsCode = cupsCodeOrThrow(patch.cupsCode);
-    }
     if (normalizedPatch.code !== undefined) {
       normalizedPatch.code = normalizedPatch.code.trim();
     }

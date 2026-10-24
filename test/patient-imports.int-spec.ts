@@ -15,7 +15,7 @@ import type { ImportPatientData } from '../src/modules/patient-imports/domain/im
 // con el mismo documento (contra la BD y dentro del lote) y el deshacer.
 // Todo por la ruta de la app (runWithTenant, rol dentalix_app); `raw`
 // (DIRECT_URL) solo siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

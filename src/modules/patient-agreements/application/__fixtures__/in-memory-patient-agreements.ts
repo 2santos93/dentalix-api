@@ -3,6 +3,7 @@ import type { InMemoryAgreementRepository } from '../../../agreements/applicatio
 import type { PatientAgreement } from '../../domain/entities/patient-agreement.entity';
 import { AGREEMENT_RACE_MESSAGE } from '../../domain/patient-agreement-rules';
 import type {
+  AgreementActor,
   CurrentAgreementRow,
   LiveAgreementAssignment,
   PatientAgreementRepository,
@@ -27,6 +28,8 @@ export class InMemoryPatientAgreementRepository implements PatientAgreementRepos
   readonly calls: string[] = [];
   /** Último autor de una escritura. */
   lastBy: string | null = null;
+  /** Quién hizo el último `replace` (SEC-049). */
+  lastReplaceActor: AgreementActor | null = null;
   private nextId = 1;
   private tick = 0;
 
@@ -102,7 +105,7 @@ export class InMemoryPatientAgreementRepository implements PatientAgreementRepos
   replace(
     patientId: string,
     input: ReplaceAgreementRepoInput,
-    by: string,
+    by: AgreementActor,
   ): Promise<PatientAgreement> {
     this.calls.push('replace');
     if (this.failNextReplace) {
@@ -112,7 +115,8 @@ export class InMemoryPatientAgreementRepository implements PatientAgreementRepos
         new UnprocessableEntityException(AGREEMENT_RACE_MESSAGE),
       );
     }
-    this.lastBy = by;
+    this.lastBy = by.userId;
+    this.lastReplaceActor = by;
     for (const r of this.live(patientId)) r.retiredAt = new Date();
     return Promise.resolve(this.view(this.seed({ patientId, ...input })));
   }

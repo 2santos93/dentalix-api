@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
@@ -13,7 +13,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // historia clínica (CLINICAL_ROLES). Recepción crea pacientes, pero sin ese
 // campo: si lo manda, 403 explícito y no se crea nada. DIRECT_URL (sin RLS)
 // solo para sembrar miembros con rol, comprobar filas y limpiar.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

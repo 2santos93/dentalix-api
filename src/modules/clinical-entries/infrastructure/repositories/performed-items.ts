@@ -1,15 +1,19 @@
 import type { Prisma } from '@prisma/client';
 import { civilDayRange } from '../../../../shared/time/civil-day';
-import type { RdaPerformedItem } from '../../domain/rda-readiness';
+
+/** Procedimiento del catálogo hecho en una atención. */
+export interface PerformedItem {
+  catalogItemId: string;
+  name: string;
+}
 
 /**
- * Procedimientos del catálogo hechos en una atención, con su CUPS (DX-212):
+ * Procedimientos del catálogo hechos en una atención:
  * los registros del odontograma PROCEDURE completados en esta clínica, no
  * anulados, ligados a alguna de las evoluciones `entryIds` o registrados el
  * día civil `day` de la sede (zona `timeZone`). Sin repetir y por orden de
- * registro. Lo usan el RDA de una evolución (`loadRdaFacts`) y las
- * sugerencias de indicaciones postoperatorias de una cita (DX-222). Corre en
- * la transacción del llamador, bajo su RLS.
+ * registro. Lo usan las sugerencias de indicaciones postoperatorias de una
+ * cita (DX-222). Corre en la transacción del llamador, bajo su RLS.
  */
 export async function performedItemsOf(
   tx: Prisma.TransactionClient,
@@ -17,7 +21,7 @@ export async function performedItemsOf(
   entryIds: readonly string[],
   day: string,
   timeZone: string,
-): Promise<RdaPerformedItem[]> {
+): Promise<PerformedItem[]> {
   const { start, end } = civilDayRange(day, timeZone);
   const records = await tx.toothRecord.findMany({
     where: {
@@ -49,13 +53,11 @@ export async function performedItemsOf(
   const catalogIds = [...new Set(live.map((r) => r.catalogItemId as string))];
   const items = await tx.dentalCatalogItem.findMany({
     where: { id: { in: catalogIds } },
-    select: { id: true, labelEs: true, cupsCode: true },
+    select: { id: true, labelEs: true },
   });
   const byId = new Map(items.map((i) => [i.id, i]));
   return catalogIds.flatMap((catalogItemId) => {
     const item = byId.get(catalogItemId);
-    return item
-      ? [{ catalogItemId, name: item.labelEs, cupsCode: item.cupsCode }]
-      : [];
+    return item ? [{ catalogItemId, name: item.labelEs }] : [];
   });
 }

@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
+  Prisma,
   PrismaClient,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
@@ -25,7 +26,7 @@ import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/voi
 // reflejan y la reapertura queda auditada sin importes ni textos. Solo
 // ADMIN/RECEPTION anulan; otra clínica no ve el abono. El reloj de la
 // anulación (PAYMENT_CLOCK) se mueve para el caso «después de la fecha».
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

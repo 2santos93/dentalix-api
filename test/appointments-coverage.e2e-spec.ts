@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -14,7 +14,7 @@ import {
 // DX-153 en HTTP real: el resumen `coverage` (cobertura principal del
 // paciente, evaluada a hoy) en la agenda, la ficha y el listado, y el filtro
 // de pacientes por pagador. Nunca lleva el número de afiliado.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -45,7 +45,7 @@ function nextTuesday(): string {
   }
 }
 
-const MEMBER_NUMBER = 'AFIL-777-SECRETO';
+const MEMBER_NUMBER = '7770001234';
 
 describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
   let app: INestApplication<App>;
@@ -82,8 +82,12 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
       docNumber: String(Math.floor(Math.random() * 1e9)),
     });
 
+  /** Sin `memberNumber`, el de la constante (SEC-049: lo exige el pagador externo). */
   const cover = (key: string, body: Record<string, unknown>) =>
-    post(clinic, `/api/v1/patients/${patients[key]}/coverages`, body);
+    post(clinic, `/api/v1/patients/${patients[key]}/coverages`, {
+      memberNumber: MEMBER_NUMBER,
+      ...body,
+    });
 
   beforeAll(async () => {
     app = await createE2eApp();

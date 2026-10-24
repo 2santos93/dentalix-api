@@ -95,6 +95,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'POST /treatment-plans/:id/items body.catalogItemId',
   'POST /treatment-plans/:id/items/bulk-discount body.itemIds[]',
   'PATCH /treatment-plans/:id/items/:itemId body.performedById',
+  'PATCH /treatment-plans/:id/items/:itemId body.performedLocationId',
   // --- reportes, cartera y caja (DX-027, DX-204) ---
   'GET /reports/discounts ?locationId',
   'GET /reports/discounts ?professionalId',
@@ -124,9 +125,6 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // «la clínica B no puede usar la política de A para su propio paciente (409)».
   'POST /patients/:patientId/data-consents body.policyVersionId':
     'data-consents.e2e-spec.ts',
-  // «404 si cualquier id es ajeno»: una evolución de la clínica B en el lote.
-  'GET /patients/:patientId/clinical-entries/rda-readiness ?ids[]':
-    'rda-codes.e2e-spec.ts',
   // «el ítem del plan tiene que ser de un plan del MISMO paciente y clínica».
   'POST /patients/:patientId/implants body.treatmentPlanItemId':
     'implants.e2e-spec.ts',

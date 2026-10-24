@@ -19,6 +19,7 @@ import {
   isFeeEligible,
   normalizeWaiveReason,
   resolveChargeAmount,
+  voidBlockMessage,
   waiveBlockReason,
   type FeeBlockReason,
 } from '../domain/cancellation-fee';
@@ -47,7 +48,8 @@ export interface CancellationFeeView {
   patientId: string;
   /** NO_SHOW o cancelación tardía. */
   eligible: boolean;
-  status: 'NONE' | 'CHARGED' | 'WAIVED';
+  /** SEC-050: VOIDED = el cargo se generó y después se anuló con motivo. */
+  status: 'NONE' | 'CHARGED' | 'WAIVED' | 'VOIDED';
   /** Por qué no se puede generar el cargo ahora (o `null`). */
   chargeBlock: FeeBlockReason | null;
   chargeBlockMessage: string | null;
@@ -101,7 +103,7 @@ function toView(
     appointmentId: ctx.appointment.id,
     patientId: ctx.appointment.patientId,
     eligible: isFeeEligible(ctx.appointment),
-    status: ctx.fee?.status ?? 'NONE',
+    status: ctx.fee?.voidedAt ? 'VOIDED' : (ctx.fee?.status ?? 'NONE'),
     chargeBlock: block,
     chargeBlockMessage: block ? blockMessage(block) : null,
     canManage: canManageFee(actor.role, ctx.receptionCanCharge),
@@ -254,5 +256,58 @@ export class WaiveCancellationFeeUseCase {
         new Date(),
       ),
     );
+  }
+}
+
+/**
+ * `POST /appointments/:id/cancellation-fee/void` (SEC-050): anula un cargo ya
+ * generado, con motivo. Es la ÚNICA forma de dejarlo sin efecto: desde el plan
+ * su ítem no cambia de precio, descuento ni estado ni se quita (409 para todo
+ * rol). Mismo permiso que generarlo (ADMIN, o RECEPTION si la política de la
+ * sede lo permite) y sede permitida (DX-089).
+ */
+@Injectable()
+export class VoidCancellationFeeUseCase {
+  constructor(
+    @Inject(CANCELLATION_FEE_REPOSITORY)
+    private readonly repo: CancellationFeeRepository,
+    private readonly tenantContext: TenantContextService,
+    @Inject(CANCELLATION_FEE_EPS_CO_BLOCK) private readonly epsCoBlock: boolean,
+  ) {}
+
+  async execute(
+    appointmentId: string,
+    rawReason: string | undefined,
+    actor: FeeActor,
+  ): Promise<CancellationFeeView> {
+    const reason = normalizeWaiveReason(rawReason);
+    if (!reason)
+      throw new BadRequestException(CANCELLATION_FEE_MESSAGES.voidReason);
+    const ctx = await loadFor(this.repo, this.tenantContext, appointmentId);
+    assertCanManage(ctx, actor);
+    const blocked = voidBlockMessage(ctx.fee);
+    if (blocked) throw new ConflictException(blocked);
+    const outcome = await this.repo.voidFee({
+      appointmentId,
+      reason,
+      voidedById: actor.userId,
+    });
+    switch (outcome.outcome) {
+      case 'OK':
+        return toView(
+          await loadFor(this.repo, this.tenantContext, appointmentId),
+          actor,
+          this.epsCoBlock,
+          new Date(),
+        );
+      case 'STALE':
+        throw new ConflictException(STALE);
+      case 'NOT_CHARGED':
+        throw new ConflictException(CANCELLATION_FEE_MESSAGES.notCharged);
+      case 'ALREADY_VOIDED':
+        throw new ConflictException(CANCELLATION_FEE_MESSAGES.alreadyVoided);
+      case 'PAID':
+        throw new ConflictException(CANCELLATION_FEE_MESSAGES.voidPaid);
+    }
   }
 }

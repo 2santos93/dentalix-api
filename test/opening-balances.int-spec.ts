@@ -16,7 +16,7 @@ import type { PreparedBalance } from '../src/modules/patient-imports/domain/open
 // retirada, y el resumen de la cartera (patient_ledgers, DX-155) que lo
 // recoge por sus triggers. Las escrituras van por la ruta de la app
 // (runWithTenant, rol dentalix_app); `raw` (DIRECT_URL) siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

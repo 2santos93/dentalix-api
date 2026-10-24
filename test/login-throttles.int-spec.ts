@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLoginThrottleRepository } from '../src/modules/auth/infrastructure/repositories/prisma-login-throttle.repository';
@@ -15,7 +15,7 @@ import {
  * plataforma: sin columna de tenant ni FK a tenants (no entra en el catálogo
  * de RLS, como revoked_tokens).
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

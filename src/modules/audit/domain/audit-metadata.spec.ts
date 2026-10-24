@@ -538,6 +538,64 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
       expect(sanitizeAuditMetadata({ cancellation })).toEqual({});
     }
   });
+
+  it('cobertura (SEC-049): tipo de pagador, 4 últimos del nº y si está verificada; nada más', () => {
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: '4050',
+          verified: true,
+          memberNumber: '1020304050',
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: '4050',
+        verified: true,
+      },
+    });
+    // Más de 4 caracteres, o con separadores, no pasa: sería el número.
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: '1020304050',
+          verified: false,
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: null,
+        verified: false,
+      },
+    });
+    expect(
+      sanitizeAuditMetadata({
+        coverage: { payerType: 'empresa', verified: true },
+      }),
+    ).toEqual({});
+  });
+
+  it('cobertura (SEC-049): los 4 últimos admiten letras de cualquier alfabeto (DX-311)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: 'Ñ123',
+          verified: false,
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: 'Ñ123',
+        verified: false,
+      },
+    });
+  });
 });
 
 describe('sanitizeAuditMetadata — nº de registro sanitario de la sede (DX-319)', () => {

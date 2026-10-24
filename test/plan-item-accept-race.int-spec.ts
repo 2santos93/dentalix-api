@@ -1,5 +1,10 @@
 import { ConflictException } from '@nestjs/common';
-import { ClinicRole, DiscountReason, PrismaClient } from '@prisma/client';
+import {
+  ClinicRole,
+  DiscountReason,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
@@ -21,7 +26,7 @@ import { catalogPricing } from '../src/modules/treatment-plans/application/use-c
 // `updatePlan`) cuando llega la edición; al confirmar, la edición tiene que
 // ver el plan aceptado y no cambiar nada. Repositorio y casos de uso reales
 // sobre Postgres; `raw` (DIRECT_URL, owner) siembra, comprueba y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

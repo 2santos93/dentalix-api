@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -15,7 +15,7 @@ import {
 // banderas médicas del paciente (alerta, premedicación, anamnesis al día /
 // caducada / ausente), nunca la historia; respetan clínica y sede; la ficha
 // las lee por paciente; «Sin cambios hoy» y la vigencia, con sus roles.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

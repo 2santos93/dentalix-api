@@ -17,7 +17,7 @@ import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 // barrido concurrentes se serializan con el candado por paciente: ni
 // transiciones ni eventos duplicados. Todo como dentalix_app (RLS FORCE);
 // `raw` (DIRECT_URL, superusuario) siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

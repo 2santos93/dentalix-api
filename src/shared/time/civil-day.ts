@@ -122,6 +122,49 @@ export function parseCivilDate(value: string): string | null {
   return value;
 }
 
+/**
+ * BE-044 (DX-305): días admitidos en un PERÍODO de consulta (informes, caja).
+ * Fuera de aquí la fecha no tiene sentido para una clínica, y en los bordes del
+ * calendario (`9999-12-31`) el día siguiente que cierra el rango semiabierto ya
+ * no es una fecha `YYYY-MM-DD`. Las fechas de nacimiento o de vigencia no usan
+ * este rango: solo `checkPeriodDays`.
+ */
+export const PERIOD_DAY_MIN = '2000-01-01';
+export const PERIOD_DAY_MAX = '2100-12-31';
+export const PERIOD_DAY_OUT_OF_RANGE_MESSAGE =
+  'Las fechas del período tienen que estar entre el 01/01/2000 y el 31/12/2100.';
+
+/** Por qué no vale un período: forma o día inexistente / fuera del rango. */
+export type PeriodDaysProblem = 'INVALID' | 'OUT_OF_RANGE';
+
+export type PeriodDaysCheck =
+  | { ok: true; from: string; to: string; days: number }
+  | { ok: false; problem: PeriodDaysProblem };
+
+/**
+ * ÚNICA validación de los días de un período `from`..`to` (ambos inclusive):
+ * que existan, que `from <= to` (si no, `INVALID`) y que los dos caigan en
+ * `PERIOD_DAY_MIN`..`PERIOD_DAY_MAX` (si no, `OUT_OF_RANGE`). Cada caso de uso
+ * traduce el problema a su 400 y aplica su tope de días con `days`.
+ */
+export function checkPeriodDays(from: string, to: string): PeriodDaysCheck {
+  const validFrom = parseCivilDate(from);
+  const validTo = parseCivilDate(to);
+  if (!validFrom || !validTo) return { ok: false, problem: 'INVALID' };
+  const inRange = (day: string) =>
+    day >= PERIOD_DAY_MIN && day <= PERIOD_DAY_MAX;
+  if (!inRange(validFrom) || !inRange(validTo)) {
+    return { ok: false, problem: 'OUT_OF_RANGE' };
+  }
+  if (validFrom > validTo) return { ok: false, problem: 'INVALID' };
+  return {
+    ok: true,
+    from: validFrom,
+    to: validTo,
+    days: civilDaysInclusive(validFrom, validTo),
+  };
+}
+
 function requireCivilDate(value: string): [number, number, number] {
   if (parseCivilDate(value) === null) {
     throw new RangeError(`Invalid civil date: ${value}`);

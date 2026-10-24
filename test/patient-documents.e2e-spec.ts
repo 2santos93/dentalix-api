@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
@@ -27,7 +27,7 @@ import {
 // DX-151 · Documentos del paciente: subida con contenido comprobado, listado
 // con filtros, URL firmadas para ver o descargar, anulación y auditoría.
 // Todo por la API; `raw` (DIRECT_URL) solo lee filas y auditoría y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const STORAGE_ROOT = process.env.STORAGE_DIR ?? './storage-test';

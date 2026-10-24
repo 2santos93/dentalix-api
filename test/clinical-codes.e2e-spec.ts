@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -13,11 +14,11 @@ import {
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 import { civilDateIn } from '../src/shared/time/civil-day';
 
-// DX-212 · códigos para el RDA de punta a punta: búsqueda CIE-10, evolución con
-// diagnósticos por rol, CUPS solo ADMIN (auditado; DX-319: la sede ya no
-// tiene REPS), rda-readiness en
-// sede CO y ES y aislamiento entre clínicas. DIRECT_URL solo lee y limpia.
-const raw = new PrismaClient({
+// DX-212 · códigos clínicos de punta a punta: búsqueda CIE-10, evolución con
+// diagnósticos por rol, sede de la evolución (DX-232) y aislamiento entre
+// clínicas. DX-318/DX-320/DX-319: ya no existen la preparación RDA, el código
+// CUPS del catálogo ni el REPS de la sede (ver location-health-registration). DIRECT_URL solo lee y limpia.
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -31,24 +32,18 @@ interface Entry {
   id: string;
   diagnoses: Diagnosis[];
 }
-interface Readiness {
-  notApplicable: boolean;
-  ready: boolean;
-  missing: { code: string; label: string; resourceId: string | null }[];
-  pending: { code: string; reason: string }[];
-}
 interface CatalogItem {
   id: string;
+  code: string;
   labelEs: string;
   kind: string;
-  cupsCode: string | null;
 }
 interface Location {
   id: string;
   country: string;
 }
 
-describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
+describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
   let app: INestApplication<App>;
   let a: Clinic;
   let b: Clinic;
@@ -92,9 +87,6 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
     });
   }
 
-  const readiness = (clinic: Clinic, id: string, token: string) =>
-    call(clinic, 'get', `/clinical-entries/${id}/rda-readiness`, token);
-
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
@@ -118,7 +110,7 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
         data: {
           tenantId: a.tenantId,
           firstName: 'Ana',
-          lastName: 'RDA',
+          lastName: 'Códigos',
           docNumber: '1020304050',
         },
       })
@@ -237,8 +229,7 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
       ]);
     });
 
-    it('DX-236: ficha y preparación RDA conservan el diagnóstico tras cambiar su referencia', async () => {
-      const before = await readiness(a, entry.id, dentist.token).expect(200);
+    it('DX-236: la ficha conserva el diagnóstico tras cambiar su referencia', async () => {
       await raw.icd10Code.update({
         where: { code: 'K02.1' },
         data: { labelEs: 'Referencia corregida posteriormente' },
@@ -252,8 +243,6 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
         ).expect(200);
         const saved = (list.body as Entry[]).find((e) => e.id === entry.id);
         expect(saved?.diagnoses[0].labelEs).toBe('Caries de la dentina');
-        const after = await readiness(a, entry.id, dentist.token).expect(200);
-        expect(after.body).toEqual(before.body);
       } finally {
         await raw.icd10Code.update({
           where: { code: 'K02.1' },
@@ -308,7 +297,6 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
         diagnoses: [{ icd10Code: 'K02.1', kind: 'PRINCIPAL' }],
       }).expect(403);
       await call(a, 'get', entries(patient), reception).expect(403);
-      await readiness(a, entry.id, reception).expect(403);
     });
 
     it('sin diagnóstico sigue permitida', async () => {
@@ -331,307 +319,123 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
     });
   });
 
-  describe('CUPS del catálogo (solo ADMIN, auditado)', () => {
-    it('un formato inválido da 400 con el formato esperado', async () => {
-      const cups = await call(
-        a,
-        'patch',
-        `/catalog/items/${procedure.id}`,
-        a.adminToken,
-      )
-        .send({ cupsCode: '89-20' })
-        .expect(400);
-      expect((cups.body as { message: string }).message).toMatch(
-        /6 caracteres alfanuméricos/,
-      );
-    });
-
-    it('DENTIST y RECEPTION no pueden editarlo (403)', async () => {
-      for (const token of [dentist.token, reception]) {
-        await call(a, 'patch', `/catalog/items/${procedure.id}`, token)
-          .send({ cupsCode: '232101' })
-          .expect(403);
-      }
-    });
-
-    it('ADMIN lo guarda; queda auditado con el campo cambiado', async () => {
-      const item = await call(
-        a,
-        'patch',
-        `/catalog/items/${procedure.id}`,
-        a.adminToken,
-      )
-        .send({ cupsCode: '232101' })
-        .expect(200);
-      expect((item.body as CatalogItem).cupsCode).toBe('232101');
-
-      const events = await raw.auditEvent.findMany({
-        where: {
-          tenantId: a.tenantId,
-          action: 'UPDATE',
-          resourceType: 'DENTAL_CATALOG_ITEM',
-        },
-      });
-      expect(
-        events.map((e) => [
-          e.resourceType,
-          e.resourceId,
-          (e.metadata as { changedFields?: string[] }).changedFields,
-        ]),
-      ).toEqual([['DENTAL_CATALOG_ITEM', procedure.id, ['cupsCode']]]);
-      // Quitar el CUPS para el bloque de rda-readiness.
-      await call(a, 'patch', `/catalog/items/${procedure.id}`, a.adminToken)
-        .send({ cupsCode: null })
-        .expect(200);
-    });
-  });
-
-  describe('GET /clinical-entries/:id/rda-readiness', () => {
-    let entryId: string;
-
-    beforeAll(async () => {
-      await raw.clinicMembership.updateMany({
-        where: { tenantId: a.tenantId, userId: dentist.userId },
-        data: { professionalLicense: 'TP-12345' },
-      });
-      const res = await createEntry(dentist.token, {
-        diagnoses: [{ icd10Code: 'K02.1', kind: 'PRINCIPAL', toothFdi: '36' }],
-      }).expect(201);
-      entryId = (res.body as Entry).id;
-      // Procedimiento hecho en esta clínica hoy (odontograma).
-      await call(a, 'post', `/patients/${patient}/tooth-records`, dentist.token)
-        .send({
-          toothNumber: '36',
-          surfaces: ['OCCLUSAL'],
-          kind: 'PROCEDURE',
-          catalogItemId: procedure.id,
-          status: 'COMPLETED',
-        })
-        .expect(201);
-    });
-
-    it('si falta el CUPS de un ítem realizado, sale con el nombre del ítem', async () => {
-      const res = await readiness(a, entryId, dentist.token).expect(200);
-      const body = res.body as Readiness;
-      expect(body.ready).toBe(false);
-      expect(body.missing).toEqual([
-        {
-          code: 'PROCEDURE_CUPS',
-          label: `Código CUPS de «${procedure.labelEs}»`,
-          resourceId: procedure.id,
-        },
-      ]);
-    });
-
-    it('con el CUPS puesto: ready (el NIT queda pendiente de DX-019)', async () => {
-      await call(a, 'patch', `/catalog/items/${procedure.id}`, a.adminToken)
-        .send({ cupsCode: '232101' })
-        .expect(200);
-      const res = await readiness(a, entryId, assistant).expect(200);
-      expect(res.body).toEqual({
-        notApplicable: false,
-        ready: true,
-        missing: [],
-        pending: [
-          {
-            code: 'CLINIC_TAX_ID',
-            label: 'NIT de la clínica',
-            reason: 'pendiente de DX-019',
-          },
-        ],
-      });
-    });
-
-    it('una evolución antigua sin diagnóstico responde sin error, con el diagnóstico como faltante', async () => {
-      const old = await raw.clinicalEntry.create({
-        data: {
-          tenantId: a.tenantId,
-          patientId: patient,
-          entryDate: new Date('2025-01-10T00:00:00.000Z'),
-          notes: 'Nota anterior a DX-212',
-          performedById: dentist.userId,
-        },
-      });
-      const res = await readiness(a, old.id, dentist.token).expect(200);
-      const body = res.body as Readiness;
-      expect(body.ready).toBe(false);
-      expect(body.missing.map((m) => m.code)).toEqual(['PRINCIPAL_DIAGNOSIS']);
-    });
-
-    it('en una sede ES no aplica', async () => {
-      await call(a, 'patch', `/locations/${location.id}`, a.adminToken)
-        .send({ country: 'ES' })
-        .expect(200);
-      try {
-        const res = await readiness(a, entryId, dentist.token).expect(200);
-        expect(res.body).toEqual({
-          notApplicable: true,
-          ready: false,
-          missing: [],
-          pending: [],
-        });
-      } finally {
-        await call(a, 'patch', `/locations/${location.id}`, a.adminToken)
-          .send({ country: 'CO' })
-          .expect(200);
-      }
-    });
-
-    it('la consulta queda auditada con el paciente', async () => {
-      const event = await raw.auditEvent.findFirst({
-        where: {
-          tenantId: a.tenantId,
-          action: 'VIEW',
-          resourceId: entryId,
-        },
-      });
-      expect(event?.patientId).toBe(patient);
-      expect((event?.metadata as { reason?: string }).reason).toBe(
-        'RDA_READINESS',
-      );
-    });
-  });
-
-  describe('DX-232: readiness por lotes y sede persistida', () => {
-    describe('UUID canónico (regresión de revisión)', () => {
-      const id = 'abcdefab-1234-4abc-8abc-abcdefabcdef';
-      beforeAll(async () => {
-        await raw.clinicalEntry.create({
-          data: {
-            id,
-            tenantId: a.tenantId,
-            patientId: patient,
-            performedById: dentist.userId,
-            entryDate: new Date(),
-            notes: 'UUID de prueba',
-          },
-        });
-      });
-      it('acepta mayúsculas en el endpoint unitario', async () => {
-        const lower = await readiness(a, id, dentist.token).expect(200);
-        const upper = await readiness(
-          a,
-          id.toUpperCase(),
-          dentist.token,
-        ).expect(200);
-        expect(upper.body).toEqual(lower.body);
-      });
-      it('acepta mayúsculas en el lote y devuelve entryId canónico', async () => {
-        const lower = await readiness(a, id, dentist.token).expect(200);
-        const result = await call(
-          a,
-          'get',
-          `${entries(patient)}/rda-readiness?ids=${id.toUpperCase()}`,
-          dentist.token,
-        ).expect(200);
-        expect(result.body).toEqual([
-          { entryId: id, ...(lower.body as Readiness) },
-        ]);
-      });
-      it('deduplica casing mixto pero conserva400 para51 entradas y404 para ids ajenos', async () => {
-        const result = await call(
-          a,
-          'get',
-          `${entries(patient)}/rda-readiness?ids=${id.toUpperCase()},${id}`,
-          dentist.token,
-        ).expect(200);
-        expect(result.body).toHaveLength(1);
-        expect((result.body as { entryId: string }[])[0].entryId).toBe(id);
-        const tooMany = Array.from({ length: 51 }, (_, i) =>
-          i % 2 ? id : id.toUpperCase(),
-        );
-        await call(
-          a,
-          'get',
-          `${entries(patient)}/rda-readiness?ids=${tooMany.join(',')}`,
-          dentist.token,
-        ).expect(400);
-        await call(
-          b,
-          'get',
-          `${entries(patientB)}/rda-readiness?ids=${id.toUpperCase()}`,
-          b.adminToken,
-        ).expect(404);
-      });
-    });
-    it('40 evoluciones: una respuesta equivalente y un único evento de auditoría', async () => {
-      const ids: string[] = [];
-      for (let i = 0; i < 40; i++) {
-        ids.push(
-          ((await createEntry(dentist.token, {}).expect(201)).body as Entry).id,
-        );
-      }
-      const expected = (await readiness(a, ids[0], dentist.token).expect(200))
-        .body as Readiness;
-      const before = await raw.auditEvent.count({
-        where: {
-          tenantId: a.tenantId,
-          action: 'VIEW',
-          metadata: { path: ['reason'], equals: 'RDA_READINESS' },
-        },
-      });
+  // DX-320 (decisión D4): el catálogo no tiene código CUPS ni ningún «código
+  // externo»; basta su código interno. Un cliente antiguo que aún lo mande ve
+  // el campo descartado por la ValidationPipe global (whitelist), como
+  // cualquier campo desconocido: no se guarda ni se devuelve.
+  describe('DX-320: el catálogo no tiene código CUPS', () => {
+    it('el listado no devuelve cupsCode', async () => {
       const res = await call(
         a,
         'get',
-        `${entries(patient)}/rda-readiness?ids=${ids.join(',')}`,
-        dentist.token,
+        '/catalog/items?kind=PROCEDURE',
+        a.adminToken,
       ).expect(200);
-      expect(res.body).toEqual(
-        ids.map((entryId) => ({ entryId, ...expected })),
-      );
-      const events = await raw.auditEvent.findMany({
-        where: {
-          tenantId: a.tenantId,
-          action: 'VIEW',
-          metadata: { path: ['reason'], equals: 'RDA_READINESS' },
-        },
-      });
-      expect(events).toHaveLength(before + 1);
-      const batch = events.find(
-        (e) => e.resourceId === null && e.patientId === patient,
-      );
-      expect(batch?.actorUserId).toBe(dentist.userId);
-      expect(JSON.stringify(batch?.metadata)).not.toContain(ids[0]);
+      for (const item of res.body as Record<string, unknown>[]) {
+        expect(item).not.toHaveProperty('cupsCode');
+      }
     });
-    it('400 por51 IDs, vacío o inválido;403 recepción y404 si cualquier id es ajeno', async () => {
-      const own = (
-        (await createEntry(dentist.token, {}).expect(201)).body as Entry
+
+    it('POST con cupsCode: el campo se descarta (ni se guarda ni se devuelve)', async () => {
+      const res = await call(a, 'post', '/catalog/items', a.adminToken)
+        .send({
+          code: 'DX320-PROC',
+          labelEs: 'Procedimiento DX-320',
+          kind: 'PROCEDURE',
+          color: '#0E7490',
+          cupsCode: '232101',
+        })
+        .expect(201);
+      expect((res.body as CatalogItem).code).toBe('DX320-PROC');
+      expect(res.body).not.toHaveProperty('cupsCode');
+    });
+
+    it('PATCH con cupsCode: el campo se descarta; el resto del cambio se aplica', async () => {
+      const res = await call(
+        a,
+        'patch',
+        `/catalog/items/${procedure.id}`,
+        a.adminToken,
+      )
+        .send({ labelEs: `${procedure.labelEs} (DX-320)`, cupsCode: '232101' })
+        .expect(200);
+      expect((res.body as CatalogItem).labelEs).toBe(
+        `${procedure.labelEs} (DX-320)`,
+      );
+      expect(res.body).not.toHaveProperty('cupsCode');
+      await call(a, 'patch', `/catalog/items/${procedure.id}`, a.adminToken)
+        .send({ labelEs: procedure.labelEs })
+        .expect(200);
+    });
+
+    it('la columna ya no existe en la base de datos', async () => {
+      const columns = await raw.$queryRaw<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'dental_catalog_items' AND column_name = 'cupsCode'`;
+      expect(columns).toEqual([]);
+    });
+  });
+
+  // DX-318: el indicador de preparación para el RDA ya no existe.
+  describe('DX-318: sin preparación RDA', () => {
+    let entryId: string;
+
+    beforeAll(async () => {
+      entryId = (
+        (
+          await createEntry(dentist.token, {
+            diagnoses: [{ icd10Code: 'K02.1', kind: 'PRINCIPAL' }],
+          }).expect(201)
+        ).body as Entry
       ).id;
-      const foreign = (
-        (await createEntry(b.adminToken, {}, b, patientB).expect(201))
-          .body as Entry
-      ).id;
-      const endpoint = `${entries(patient)}/rda-readiness?ids=`;
+    });
+
+    it('GET /clinical-entries/:id/rda-readiness responde 404', async () => {
       await call(
         a,
         'get',
-        endpoint + Array(51).fill(own).join(','),
-        dentist.token,
-      ).expect(400);
-      await call(a, 'get', endpoint, dentist.token).expect(400);
-      await call(a, 'get', endpoint + 'invalid', dentist.token).expect(400);
-      await call(a, 'get', endpoint + own, reception).expect(403);
-      await call(
-        a,
-        'get',
-        endpoint + [own, foreign].join(','),
+        `/clinical-entries/${entryId}/rda-readiness`,
         dentist.token,
       ).expect(404);
-      const other = await raw.patient.create({
-        data: { tenantId: a.tenantId, firstName: 'Otro', lastName: 'Paciente' },
-      });
+    });
+
+    it('GET /patients/:patientId/clinical-entries/rda-readiness responde 404', async () => {
       await call(
         a,
         'get',
-        `${entries(other.id)}/rda-readiness?ids=${own}`,
+        `${entries(patient)}/rda-readiness?ids=${entryId}`,
         dentist.token,
       ).expect(404);
-      await call(b, 'get', endpoint + own, b.adminToken).expect(404);
     });
-    it('sin cita en sedeB guarda B y usa su país; la cita prevalece sobre la cabecera', async () => {
-      // Sede B en ES: si el RDA usa B (y no la principal, CO), no aplica.
+
+    it('el contrato OpenAPI no la describe ni el catálogo lleva cupsCode', () => {
+      const swagger = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      expect(
+        Object.keys(swagger.paths).filter((path) => /rda/i.test(path)),
+      ).toEqual([]);
+      expect(Object.keys(swagger.components?.schemas ?? {})).not.toEqual(
+        expect.arrayContaining([expect.stringMatching(/Rda/)]),
+      );
+      for (const dto of [
+        'DentalCatalogItemDto',
+        'CreateCatalogItemDto',
+        'UpdateCatalogItemDto',
+      ]) {
+        const schema = swagger.components?.schemas?.[dto] as
+          { properties?: Record<string, unknown> } | undefined;
+        expect(schema?.properties).toBeDefined();
+        expect(schema?.properties).not.toHaveProperty('cupsCode');
+      }
+    });
+  });
+
+  describe('DX-232: sede de la evolución', () => {
+    it('sin cita en la sede B guarda B; la cita prevalece sobre la cabecera', async () => {
       const second = await raw.location.create({
-        data: { tenantId: a.tenantId, name: 'Sede B DX232', country: 'ES' },
+        data: { tenantId: a.tenantId, name: 'Sede B DX232' },
       });
       const res = await createEntry(dentist.token, {})
         .set('X-Location-Id', second.id)
@@ -641,8 +445,6 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
         (await raw.clinicalEntry.findUniqueOrThrow({ where: { id } }))
           .locationId,
       ).toBe(second.id);
-      const read = await readiness(a, id, dentist.token).expect(200);
-      expect((read.body as Readiness).notApplicable).toBe(true);
       const appointment = await raw.appointment.create({
         data: {
           tenantId: a.tenantId,
@@ -670,19 +472,6 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
   });
 
   describe('aislamiento entre clínicas', () => {
-    let entryA: string;
-
-    beforeAll(async () => {
-      const res = await createEntry(dentist.token, {
-        diagnoses: [{ icd10Code: 'K02.1', kind: 'PRINCIPAL' }],
-      }).expect(201);
-      entryA = (res.body as Entry).id;
-    });
-
-    it('la clínica B no ve la preparación RDA de una evolución de A (404)', async () => {
-      await readiness(b, entryA, b.adminToken).expect(404);
-    });
-
     it('B no puede registrar una evolución en un paciente de A (404) y A no ve las de B', async () => {
       await createEntry(
         b.adminToken,
@@ -695,9 +484,9 @@ describe('Códigos RDA: CIE-10 y CUPS (DX-212, e2e)', () => {
       expect(seen.body).toEqual([]);
     });
 
-    it('B no puede poner el CUPS de un ítem de A ni editar una sede de A (404)', async () => {
+    it('B no puede editar un ítem del catálogo de A ni editar una sede de A (404)', async () => {
       await call(b, 'patch', `/catalog/items/${procedure.id}`, b.adminToken)
-        .send({ cupsCode: '890203' })
+        .send({ labelEs: 'Ajeno' })
         .expect(404);
       await call(b, 'patch', `/locations/${location.id}`, b.adminToken)
         .send({ name: 'Hackeada' })

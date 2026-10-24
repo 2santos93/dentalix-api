@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppLogger, LogSink } from '../src/shared/observability/app-logger';
@@ -21,7 +21,7 @@ import { registerVerified } from './support/register-verified';
 // días; un proveedor caído nunca es un 500; y ni el log ni email_outbox llevan
 // el email en claro ni el token.
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

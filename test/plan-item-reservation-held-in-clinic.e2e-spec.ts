@@ -1,5 +1,10 @@
 import { INestApplication } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
+import {
+  AppointmentStatus,
+  ClinicRole,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -20,7 +25,7 @@ import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-ite
  * esta cita». Con la sede de esa cita no permitida, sin cita, hora ni sede
  * (DX-089).
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const MIN = 60000;
