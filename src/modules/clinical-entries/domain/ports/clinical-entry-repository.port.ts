@@ -1,7 +1,6 @@
 import type { AppointmentStatus } from '@prisma/client';
 import { ClinicalEntry } from '../entities/clinical-entry.entity';
 import type { ValidDiagnosis } from '../diagnosis-rules';
-import type { RdaFacts } from '../rda-readiness';
 
 // NOTE: deliberately NO `tenantId`/`id`/`createdAt` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -71,17 +70,4 @@ export interface ClinicalEntryRepository {
 
   /** DX-212: de `codes`, los que existen en la tabla CIE-10. */
   existingIcd10Codes(codes: string[]): Promise<Set<string>>;
-
-  /**
-   * DX-212: lo que el RDA necesita saber de la atención de la evolución `id`
-   * (paciente, diagnóstico principal, procedimientos de ese día, sede y
-   * autor). `null` si la evolución no es de esta clínica (RLS) o no existe.
-   */
-  loadRdaFacts(id: string): Promise<RdaFacts | null>;
-
-  /** DX-232: carga en conjunto, restringida al paciente cuando se indica. */
-  loadRdaFactsBatch(
-    ids: string[],
-    patientId?: string,
-  ): Promise<Map<string, RdaFacts>>;
 }

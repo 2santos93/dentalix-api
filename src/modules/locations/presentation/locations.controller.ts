@@ -64,8 +64,8 @@ export class LocationsController {
     return this.createLocation.execute(dto);
   }
 
-  // DX-212: la sede lleva el código REPS que reporta el RDA: sus cambios
-  // quedan auditados (campos cambiados, nunca valores).
+  // DX-212: los cambios de la sede (código REPS incluido) quedan auditados
+  // (campos cambiados, nunca valores).
   @Audit({
     action: 'UPDATE',
     resource: 'LOCATION',

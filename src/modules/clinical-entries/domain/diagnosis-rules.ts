@@ -6,7 +6,7 @@ import {
   normalizeIcd10Code,
 } from '../../../shared/validation/health-codes';
 
-/** Topes del RDA/RIPS (DX-212): 1 principal y hasta 3 relacionados. */
+/** Topes por evolución (DX-212): 1 diagnóstico principal y hasta 3 relacionados. */
 export const MAX_RELATED_DIAGNOSES = 3;
 
 export const SECOND_PRINCIPAL_MESSAGE =

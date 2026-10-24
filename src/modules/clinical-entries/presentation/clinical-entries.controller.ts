@@ -26,14 +26,6 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import {
-  GetBatchRdaReadinessUseCase,
-  type BatchRdaReadiness,
-} from '../application/use-cases/get-batch-rda-readiness.use-case';
-import {
-  BatchRdaReadinessDto,
-  BatchRdaReadinessQueryDto,
-} from './dto/batch-rda-readiness.dto';
 import { CreateClinicalEntryDto } from './dto/create-clinical-entry.dto';
 import { ListClinicalEntriesQueryDto } from './dto/list-clinical-entries-query.dto';
 import { CreateClinicalEntryUseCase } from '../application/use-cases/create-clinical-entry.use-case';
@@ -78,7 +70,6 @@ export class ClinicalEntriesController {
     private readonly listClinicalEntries: ListClinicalEntriesUseCase,
     private readonly createAddendum: CreateClinicalEntryAddendumUseCase,
     private readonly listAddenda: ListClinicalEntryAddendaUseCase,
-    private readonly batchReadiness: GetBatchRdaReadinessUseCase,
   ) {}
 
   @Audit({
@@ -145,31 +136,6 @@ export class ClinicalEntriesController {
       from: query.from ? new Date(query.from) : undefined,
       to: query.to ? new Date(query.to) : undefined,
     });
-  }
-
-  @Audit({
-    action: 'VIEW',
-    resource: 'CLINICAL_ENTRY',
-    patient: { param: 'patientId' },
-    reason: 'RDA_READINESS',
-  })
-  @Get('rda-readiness')
-  @ApiOperation({
-    summary: 'Datos RDA de hasta50 evoluciones del paciente, con una auditoría',
-  })
-  @ApiOkResponse({ type: [BatchRdaReadinessDto] })
-  @ApiBadRequestResponse({
-    description: 'Envía entre1 y50 UUID separados por comas.',
-  })
-  @ApiNotFoundResponse({
-    description:
-      'Paciente o alguna evolución no encontrados en esta clínica y paciente.',
-  })
-  readiness(
-    @Param('patientId', ParseUUIDPipe) patientId: string,
-    @Query() query: BatchRdaReadinessQueryDto,
-  ): Promise<BatchRdaReadiness[]> {
-    return this.batchReadiness.execute(patientId, query.ids);
   }
 
   @Audit({
