@@ -35,6 +35,7 @@ import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module
 import { AccountStatementModule } from './modules/account-statement/account-statement.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
 import { DiscountsModule } from './modules/discounts/discounts.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
 import { DataConsentsModule } from './modules/data-consents/data-consents.module';
@@ -104,6 +105,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AccountStatementModule,
     ReceivablesModule,
     DiscountsModule,
+    ReportsModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,
     // DX-027: caja por turno (apertura, cierre con arqueo, reapertura).

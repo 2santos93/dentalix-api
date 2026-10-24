@@ -323,3 +323,7 @@ export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,
 ];
+// Reportes de gestión (DX-014): «Comparar sedes» y su CSV. Producción, cobros,
+// citas y ocupación de todas las sedes, frente a otro período: la mirada del
+// dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
+export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

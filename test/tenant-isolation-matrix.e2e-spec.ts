@@ -1436,6 +1436,22 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       locationId: () => a.locationId,
       status: 400,
     },
+    {
+      // DX-014: «Comparar sedes» con la sede de A como sede activa.
+      name: 'GET /reports/locations-comparison con X-Location-Id de A',
+      verb: 'get',
+      path: () => '/reports/locations-comparison?from=2026-10-01&to=2026-10-31',
+      locationId: () => a.locationId,
+      status: 400,
+    },
+    {
+      name: 'GET /reports/locations-comparison.csv con X-Location-Id de A',
+      verb: 'get',
+      path: () =>
+        '/reports/locations-comparison.csv?from=2026-10-01&to=2026-10-31',
+      locationId: () => a.locationId,
+      status: 400,
+    },
     // --- data-consents (sobre un paciente de A) ---
     {
       name: 'GET /patients/:patientId/data-consents',

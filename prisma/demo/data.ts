@@ -2546,3 +2546,31 @@ export const DEMO_CANCELLATION = {
     },
   },
 };
+
+/**
+ * DX-014: historia de «Comparar sedes» (ver `planComparisonHistory`). Un día
+ * en cada mes con dos visitas atendidas por sede de la primera dentista (sin
+ * horario propio), cada una con su procedimiento realizado allí y cobrado
+ * entero en la sede (sin saldo: no entra en la cartera). Pacientes sin planes
+ * ni convenios de la demo. Huecos fuera de las plantillas del calendario,
+ * dentro del horario de cada sede (también el sábado).
+ */
+export const DEMO_COMPARISON_HISTORY = {
+  dentistIndex: 0,
+  reason: 'Profilaxis y control',
+  patientIndexes: [14, 15, 17, 18],
+  slots: {
+    principal: [
+      [10 * 60, 30],
+      [12 * 60 + 30, 30],
+    ],
+    norte: [
+      [8 * 60, 30],
+      [9 * 60 + 15, 45],
+    ],
+  },
+  procedures: {
+    previous: ['PREV-PROFILAXIS', 'PREV-PROFILAXIS'],
+    current: ['OP-RESINA-1', 'PREV-PROFILAXIS'],
+  },
+} as const;

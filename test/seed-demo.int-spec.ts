@@ -14,7 +14,7 @@ import {
   assertLocalEnvironment,
   seedDemo,
 } from '../prisma/seed-demo';
-import { DEMO_COVERAGES } from '../prisma/demo/data';
+import { DEMO_COMPARISON_HISTORY, DEMO_COVERAGES } from '../prisma/demo/data';
 import { hostFor } from './support/tenant-host';
 
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
@@ -874,13 +874,21 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(appointments.some((a) => a.start.getTime() > now + 2 * day)).toBe(
       true,
     );
+    // Fuera del calendario de ±15 días solo queda la historia de «Comparar
+    // sedes» (DX-014): citas ATENDIDAS de su día del mes anterior.
+    const outsideCalendar = appointments.filter(
+      (a) =>
+        a.start.getTime() <= now - 15 * day ||
+        a.start.getTime() >= now + 15 * day,
+    );
     expect(
-      appointments.every(
+      outsideCalendar.filter(
         (a) =>
-          a.start.getTime() > now - 15 * day &&
-          a.start.getTime() < now + 15 * day,
+          a.status !== 'COMPLETED' ||
+          a.reason !== DEMO_COMPARISON_HISTORY.reason ||
+          a.start.getTime() < now - 35 * day,
       ),
-    ).toBe(true);
+    ).toEqual([]);
 
     const schedules = await raw.locationSchedule.findMany({
       where: { tenantId, deletedAt: null },
@@ -976,6 +984,65 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(lowStock[0].n).toBeGreaterThanOrEqual(2);
     const items = await raw.inventoryItem.findMany({ where: { tenantId } });
     expect(new Set(items.map((i) => i.locationId)).size).toBe(2);
+  });
+
+  it('DX-014: las dos sedes tienen actividad en el mes anterior y en el actual', async () => {
+    const tenantId = await liveDemoTenantId();
+    const month = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' })
+        .format(d)
+        .slice(0, 7);
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+    }).format(new Date());
+    const [y, m, d] = today.split('-').map(Number);
+    const current = today.slice(0, 7);
+    const previous = month(new Date(Date.UTC(y, m - 2, 15, 12)));
+    // El mes actual solo se siembra si hay un día abierto (lunes a sábado)
+    // antes de hoy en el mes.
+    const openDayBefore = Array.from({ length: d - 1 }, (_, i) =>
+      new Date(Date.UTC(y, m - 1, i + 1)).getUTCDay(),
+    ).some((weekday) => weekday !== 0);
+    const months = openDayBefore ? [previous, current] : [previous];
+
+    const locations = await raw.location.findMany({
+      where: { tenantId },
+      select: { id: true },
+    });
+    const [appointments, payments, items] = await Promise.all([
+      raw.appointment.findMany({
+        where: { tenantId, status: 'COMPLETED', deletedAt: null },
+        select: { locationId: true, start: true },
+      }),
+      raw.payment.findMany({
+        where: { tenantId, deletedAt: null },
+        select: { locationId: true, paidAt: true },
+      }),
+      raw.treatmentPlanItem.findMany({
+        where: { tenantId, status: 'DONE', completedAt: { not: null } },
+        select: { performedLocationId: true, completedAt: true },
+      }),
+    ]);
+    for (const wanted of months) {
+      for (const { id } of locations) {
+        const where = `${wanted} en ${id}`;
+        expect({
+          where,
+          completed: appointments.some(
+            (a) => a.locationId === id && month(a.start) === wanted,
+          ),
+          paid: payments.some(
+            (p) => p.locationId === id && month(p.paidAt) === wanted,
+          ),
+          done: items.some(
+            (i) =>
+              i.performedLocationId === id &&
+              i.completedAt !== null &&
+              month(i.completedAt) === wanted,
+          ),
+        }).toEqual({ where, completed: true, paid: true, done: true });
+      }
+    }
   });
 
   it('DX-012: un presupuesto presentable (borrador con descuento) y otro aceptado con firma', async () => {

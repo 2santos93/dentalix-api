@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AppointmentStatus,
   ClinicRole,
+  PaymentMethod,
   Prisma,
   ScheduleBlockKind,
   TreatmentPlanItemStatus,
@@ -121,6 +122,7 @@ import {
   daysUntilNextWeekday,
   daysUntilRotationCover,
   planAppointments,
+  planComparisonHistory,
   planInClinicToday,
 } from './demo/calendar';
 import { CreateScheduleBlockUseCase } from '../src/modules/schedule-blocks/application/use-cases/schedule-blocks.use-cases';
@@ -174,6 +176,7 @@ import {
   DEMO_PROFESSIONAL_LICENSES,
   demoPerioMeasures,
   DEMO_CURRENCY,
+  DEMO_COMPARISON_HISTORY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
   DEMO_LOCATIONS,
@@ -677,6 +680,15 @@ class DemoSeeder {
       receptionId,
       catalog,
       ownerId,
+    );
+
+    await this.createComparisonHistory(
+      tenantId,
+      locations,
+      patientIds,
+      dentists,
+      receptionId,
+      catalog,
     );
 
     await this.createPlanOptions(
@@ -1904,6 +1916,99 @@ class DemoSeeder {
     await this.prisma.runWithTenant((tx) =>
       tx.treatmentPlanItem.update({ where: { id: itemId }, data }),
     );
+  }
+
+  /**
+   * DX-014: un día con actividad en cada sede en el mes anterior y en el
+   * actual (`planComparisonHistory`), para que «Comparar sedes» compare algo
+   * cualquier día del mes. Cada visita es una cita atendida (ruta histórica,
+   * con las validaciones de horario y solapes), un plan con su procedimiento
+   * realizado allí por la dentista (DX-050, fechado a la hora de la cita) y el
+   * abono del total en la sede al terminar. Sin caja: va antes de los turnos
+   * de hoy, como el resto de abonos históricos.
+   */
+  private async createComparisonHistory(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const dentistId = dentists[DEMO_COMPARISON_HISTORY.dentistIndex];
+    const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
+    for (const visit of planComparisonHistory(
+      this.now,
+      DEMO_COMPARISON_HISTORY,
+    )) {
+      const start = daysAgoAt(this.now, visit.daysAgo, visit.startMinute);
+      const end = daysAgoAt(
+        this.now,
+        visit.daysAgo,
+        visit.startMinute + visit.durationMinutes,
+      );
+      const patientId = patientIds[visit.patientIndex];
+      await this.inTenant(tenantId, locations[visit.location], async () => {
+        const appointment = await this.use(
+          CreateAppointmentUseCase,
+        ).registerHistorical({
+          patientId,
+          providerId: dentistId,
+          start,
+          end,
+          reason: DEMO_COMPARISON_HISTORY.reason,
+          createdById: receptionId,
+        });
+        await this.use(UpdateAppointmentUseCase).execute(appointment.id, {
+          status: AppointmentStatus.COMPLETED,
+        });
+        const plan = await this.use(CreateTreatmentPlanUseCase).execute({
+          patientId,
+          currency: DEMO_CURRENCY,
+          notes: 'Control y procedimiento del día.',
+          createdById: dentistId,
+        });
+        const item = await this.use(AddTreatmentPlanItemUseCase).execute(
+          plan.id,
+          {
+            toothNumber: '16',
+            catalogItemId: catalogId(catalog, visit.procedure),
+          },
+          dentist,
+        );
+        await this.use(UpdateTreatmentPlanItemUseCase).execute(
+          item.id,
+          { status: TreatmentPlanItemStatus.DONE },
+          dentist,
+        );
+        await this.prisma.runWithTenant((tx) =>
+          tx.treatmentPlanItem.update({
+            where: { id: item.id },
+            data: { completedAt: start },
+          }),
+        );
+        for (const status of [
+          TreatmentPlanStatus.ACCEPTED,
+          TreatmentPlanStatus.COMPLETED,
+        ]) {
+          await this.use(UpdateTreatmentPlanUseCase).execute(
+            plan.id,
+            { status },
+            { role: ClinicRole.DENTIST },
+          );
+        }
+        await this.use(RecordPaymentUseCase).execute(
+          plan.id,
+          {
+            amount: Number(item.price) - Number(item.discount),
+            currency: DEMO_CURRENCY,
+            paidAt: new Date(end.getTime() + 10 * 60 * 1000),
+            method: PaymentMethod.CARD,
+          },
+          receptionId,
+        );
+      });
+    }
   }
 
   private async createPlansAndPayments(
