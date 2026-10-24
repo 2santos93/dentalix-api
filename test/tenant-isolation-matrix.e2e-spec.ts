@@ -2925,10 +2925,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/family-account-statement':
       'patient-responsible-parties.e2e-spec.ts',
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
-    // DX-212: B → 404 sobre la evolución de A.
-    'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
-    'GET /patients/:patientId/clinical-entries/rda-readiness':
-      'rda-codes.e2e-spec.ts',
     // DX-099: B → 404 sobre el paciente, el envío y el token de A, sin tocar
     // el envío ni la HC de A.
     'POST /patients/:patientId/medical-history/requests':

@@ -72,7 +72,7 @@ export interface CreateClinicalEntryInput {
   answers?: ClinicalEntryAnswerInput[];
   /**
    * DX-212: diagnósticos CIE-10 (1 principal y hasta 3 relacionados). Sin
-   * ellos la evolución se sigue guardando (el RDA lo marcará como faltante).
+   * ellos la evolución se sigue guardando.
    */
   diagnoses?: DiagnosisInput[];
 }

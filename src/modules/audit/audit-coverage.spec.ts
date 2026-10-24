@@ -18,7 +18,6 @@ import { MedicalHistoryController } from '../medical-history/presentation/medica
 import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
 import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
-import { ClinicalEntryRdaController } from '../clinical-entries/presentation/clinical-entry-rda.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
 import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
 import { AgreementsController } from '../agreements/presentation/agreements.controller';
@@ -302,20 +301,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CLINICAL_ENTRY',
     patient: P,
   },
-  // DX-212: datos del RDA de una atención, y los códigos CUPS y REPS.
-  'GET /clinical-entries/:id/rda-readiness': {
-    action: 'VIEW',
-    resource: 'CLINICAL_ENTRY',
-    resourceId: { param: 'id' },
-    patient: { lookup: 'clinicalEntry', param: 'id' },
-    reason: 'RDA_READINESS',
-  },
-  'GET /patients/:patientId/clinical-entries/rda-readiness': {
-    action: 'VIEW',
-    resource: 'CLINICAL_ENTRY',
-    patient: P,
-    reason: 'RDA_READINESS',
-  },
+  // DX-212: los cambios del catálogo y el código REPS de la sede.
   'POST /catalog/items': {
     action: 'CREATE',
     resource: 'DENTAL_CATALOG_ITEM',
@@ -1087,7 +1073,6 @@ const CONTROLLERS: Type[] = [
   PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
-  ClinicalEntryRdaController,
   DentalCatalogController,
   PriceListsController,
   AgreementsController,

@@ -1,9 +1,9 @@
 /**
  * CIE-10 (OPS/OMS, edición en español) del capítulo de la cavidad bucal,
  * glándulas salivales y maxilares (K00–K14) más Z01.2 «Examen odontológico»
- * (DX-212). Solo subcategorías de 4 caracteres: son las que se codifican en el
- * RIPS y el RDA (una categoría de 3 caracteres con subdivisiones no es un
- * código válido para reportar). Datos de referencia, sin datos personales.
+ * (DX-212). Solo subcategorías de 4 caracteres: son las que se codifican (una
+ * categoría de 3 caracteres con subdivisiones no es un código válido para
+ * reportar). Datos de referencia, sin datos personales.
  *
  * El seed (`prisma db seed`) las inserta o actualiza con un upsert por código:
  * es idempotente y nunca borra (un diagnóstico guardado sigue apuntando a su

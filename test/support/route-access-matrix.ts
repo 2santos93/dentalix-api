@@ -195,9 +195,6 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
-  // DX-212: datos del RDA de una atención (como la historia: sin recepción).
-  'GET /clinical-entries/:id/rda-readiness': CLINICAL,
-  'GET /patients/:patientId/clinical-entries/rda-readiness': CLINICAL,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,

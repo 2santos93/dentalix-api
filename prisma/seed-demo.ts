@@ -199,7 +199,6 @@ import {
   DEMO_PRICE_LISTS,
   DEMO_AGREEMENTS,
   DEMO_PATIENT_AGREEMENTS,
-  DEMO_CUPS,
   DEMO_PRINCIPAL_REPS,
   DEMO_PRINCIPAL_PHONE,
   DEMO_POSTOP,
@@ -1015,13 +1014,6 @@ class DemoSeeder {
         {
           defaultPrice: price,
         },
-      );
-    }
-    // DX-212: CUPS de algunos procedimientos (el resto queda sin código).
-    for (const [code, cupsCode] of Object.entries(DEMO_CUPS)) {
-      await this.use(UpdateCatalogItemUseCase).execute(
-        catalogId(byCode, code),
-        { cupsCode },
       );
     }
     return byCode;
