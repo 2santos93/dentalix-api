@@ -10,7 +10,7 @@ import {
   type CompareMode,
 } from '../../domain/comparison-period';
 import {
-  changePercent,
+  changeOf,
   combineAggregates,
   computeKpis,
   currenciesOf,
@@ -54,8 +54,11 @@ export interface MetricView {
   value: number | null;
   /** Valor del período de comparación; null sin comparación o sin base. */
   previous: number | null;
-  /** Variación % frente a `previous` (1 decimal). */
-  changePercent: number | null;
+  /**
+   * Variación frente a `previous` (1 decimal) en la unidad del indicador
+   * (`changeUnit`): % relativo, o puntos porcentuales en los porcentajes.
+   */
+  change: number | null;
   trend: KpiTrend | null;
 }
 
@@ -116,12 +119,12 @@ function metric(
   previous: number | null | undefined,
 ): MetricView {
   if (previous === undefined) {
-    return { value, previous: null, changePercent: null, trend: null };
+    return { value, previous: null, change: null, trend: null };
   }
   return {
     value,
     previous,
-    changePercent: changePercent(value, previous),
+    change: changeOf(key, value, previous),
     trend: trendOf(key, value, previous),
   };
 }

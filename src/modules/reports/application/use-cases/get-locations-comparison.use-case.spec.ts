@@ -161,7 +161,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
     expect(report.kpis.map((k) => k.key)).toHaveLength(8);
   });
 
-  it('10 → 12 de producción es +20 % y mejora; no-show 8 % → 10 % empeora', async () => {
+  it('10 → 12 de producción es +20 % y mejora; no-show 8 % → 10 % es +2 p.p. y empeora', async () => {
     const [principal] = (await run()).locations;
     // Las monedas de la fila son las mismas en todos los importes: USD sale
     // con 0 de producción porque hubo cobros en USD.
@@ -170,33 +170,33 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         currency: 'COP',
         value: 12,
         previous: 10,
-        changePercent: 20,
+        change: 20,
         trend: 'BETTER',
       },
       {
         currency: 'USD',
         value: 0,
         previous: 0,
-        changePercent: null,
+        change: null,
         trend: 'EQUAL',
       },
     ]);
     expect(principal.metrics.noShowRate).toEqual({
       value: 10,
       previous: 8,
-      changePercent: 25,
+      change: 2,
       trend: 'WORSE',
     });
     expect(principal.metrics.completedAppointments).toEqual({
       value: 45,
       previous: 46,
-      changePercent: -2.2,
+      change: -2.2,
       trend: 'WORSE',
     });
     expect(principal.metrics.occupancy).toEqual({
       value: 50,
       previous: 40,
-      changePercent: 25,
+      change: 10,
       trend: 'BETTER',
     });
   });
@@ -208,14 +208,14 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         currency: 'COP',
         value: 9,
         previous: 10,
-        changePercent: -10,
+        change: -10,
         trend: 'WORSE',
       },
       {
         currency: 'USD',
         value: 50,
         previous: 0,
-        changePercent: null,
+        change: null,
         trend: 'BETTER',
       },
     ]);
@@ -225,14 +225,14 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         currency: 'COP',
         value: 75,
         previous: 100,
-        changePercent: -25,
+        change: -25,
         trend: 'WORSE',
       },
       {
         currency: 'USD',
         value: null,
         previous: null,
-        changePercent: null,
+        change: null,
         trend: null,
       },
     ]);
@@ -272,7 +272,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
     expect(sur.metrics.completedAppointments).toEqual({
       value: 0,
       previous: 0,
-      changePercent: null,
+      change: null,
       trend: 'EQUAL',
     });
   });
@@ -286,14 +286,14 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         currency: 'COP',
         value: 12,
         previous: null,
-        changePercent: null,
+        change: null,
         trend: null,
       },
       {
         currency: 'USD',
         value: 0,
         previous: null,
-        changePercent: null,
+        change: null,
         trend: null,
       },
     ]);

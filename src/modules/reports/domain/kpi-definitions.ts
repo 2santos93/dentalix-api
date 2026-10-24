@@ -27,6 +27,13 @@ export type KpiUnit = 'MONEY' | 'PERCENT' | 'COUNT';
 /** Hacia dónde mejora el indicador: el no-show mejora al bajar. */
 export type KpiDirection = 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER';
 
+/**
+ * En qué se mide la variación frente al período comparado: los indicadores
+ * que ya son un porcentaje (% de cobro, no-show %, ocupación %) varían en
+ * PUNTOS (8 % → 10 % = +2 p.p.); el resto, en % relativo (10 → 12 = +20 %).
+ */
+export type KpiChangeUnit = 'PERCENT' | 'POINTS';
+
 /** Lectura de la variación según la dirección del indicador. */
 export type KpiTrend = 'BETTER' | 'WORSE' | 'EQUAL';
 
@@ -37,6 +44,8 @@ export interface KpiDefinition {
   /** `true` = un valor por moneda (nunca se mezclan monedas). */
   perCurrency: boolean;
   direction: KpiDirection;
+  /** Unidad de la variación: % relativo o puntos porcentuales. */
+  changeUnit: KpiChangeUnit;
   /** Texto del tooltip «Cómo se calcula». */
   howItIsCalculated: string;
 }
@@ -50,6 +59,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'MONEY',
     perCurrency: true,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'PERCENT',
     howItIsCalculated:
       'Suma del precio neto (precio − descuento) de los procedimientos marcados como realizados en el período, en la sede donde se realizaron y en la moneda de su plan. Los realizados antes de registrar quién y dónde («Sin atribuir») no cuentan. ' +
       DAYS,
@@ -60,6 +70,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'MONEY',
     perCurrency: true,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'PERCENT',
     howItIsCalculated:
       'Suma de los abonos no anulados con fecha de pago en el período, en la sede que los recibió y en su moneda (sin convertir). ' +
       DAYS,
@@ -70,6 +81,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'PERCENT',
     perCurrency: true,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'POINTS',
     howItIsCalculated:
       'Cobrado ÷ producción del mismo período y moneda, en %. Sin producción en esa moneda no se calcula. Puede pasar del 100 % si se cobró trabajo de otros períodos.',
   },
@@ -79,6 +91,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'COUNT',
     perCurrency: false,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'PERCENT',
     howItIsCalculated:
       'Citas en estado «Atendida» cuyo inicio cae en el período, en su sede. ' +
       DAYS,
@@ -89,6 +102,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'PERCENT',
     perCurrency: false,
     direction: 'LOWER_IS_BETTER',
+    changeUnit: 'POINTS',
     howItIsCalculated:
       'Citas «No asistió» ÷ (atendidas + no asistió) cuyo inicio cae en el período, en %. Las canceladas no cuentan. Mejora al bajar.',
   },
@@ -98,6 +112,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'COUNT',
     perCurrency: false,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'PERCENT',
     howItIsCalculated:
       'Pacientes cuya PRIMERA cita atendida en la clínica (en cualquier sede) cae en el período. Cuentan en la sede de esa cita.',
   },
@@ -107,6 +122,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'MONEY',
     perCurrency: true,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'PERCENT',
     howItIsCalculated:
       'Cobrado ÷ pacientes distintos con alguna cita atendida en el período, por moneda. En el total, cada paciente cuenta una vez aunque fuera a varias sedes.',
   },
@@ -116,6 +132,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     unit: 'PERCENT',
     perCurrency: false,
     direction: 'HIGHER_IS_BETTER',
+    changeUnit: 'POINTS',
     howItIsCalculated:
       'Minutos de citas atendidas ÷ minutos abiertos según el horario semanal vigente de la sede, descontando los bloqueos de toda la sede que no admiten citas. Una sede sin horario configurado no tiene ocupación (ni cuenta en la del total).',
   },
@@ -277,6 +294,29 @@ export function changePercent(
 ): number | null {
   if (current === null || previous === null || previous === 0) return null;
   return round(((current - previous) / Math.abs(previous)) * 100, 1);
+}
+
+/**
+ * Diferencia en puntos porcentuales, con 1 decimal: actual − anterior. Un
+ * anterior de 0 % sí es base (0 % → 5 % = +5 p.p.).
+ */
+export function changePoints(
+  current: number | null,
+  previous: number | null,
+): number | null {
+  if (current === null || previous === null) return null;
+  return round(current - previous, 1);
+}
+
+/** La variación del indicador en su unidad (`changeUnit`). */
+export function changeOf(
+  key: KpiKey,
+  current: number | null,
+  previous: number | null,
+): number | null {
+  return KPI_DEFINITIONS[key].changeUnit === 'POINTS'
+    ? changePoints(current, previous)
+    : changePercent(current, previous);
 }
 
 /** Mejora / empeora / igual según la dirección del indicador. */

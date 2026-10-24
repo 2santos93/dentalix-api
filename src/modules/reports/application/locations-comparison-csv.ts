@@ -1,6 +1,7 @@
 import {
   KPI_DEFINITIONS,
   KPI_KEYS,
+  type KpiChangeUnit,
   type KpiKey,
   type KpiTrend,
 } from '../domain/kpi-definitions';
@@ -29,7 +30,8 @@ export const LOCATIONS_COMPARISON_CSV_HEADER = [
   'Moneda',
   'Valor',
   'Valor anterior',
-  'Variación (%)',
+  'Variación',
+  'Unidad de la variación',
   'Evolución',
 ] as const;
 
@@ -37,6 +39,12 @@ const TREND_LABELS: Record<KpiTrend, string> = {
   BETTER: 'Mejora',
   WORSE: 'Empeora',
   EQUAL: 'Igual',
+};
+
+/** «%» relativo o «p.p.» (puntos) en los indicadores que son porcentajes. */
+const CHANGE_UNIT_LABELS: Record<KpiChangeUnit, string> = {
+  PERCENT: '%',
+  POINTS: 'p.p.',
 };
 
 const FORMULA_START = /^[\s]*[=+\-@]|^[\t\r]/;
@@ -80,7 +88,8 @@ export function toLocationsComparisonCsv(report: LocationsComparison): string {
             m.currency ?? '',
             num(m.value, decimals),
             num(m.previous, decimals),
-            num(m.changePercent, 1),
+            num(m.change, 1),
+            m.change === null ? '' : CHANGE_UNIT_LABELS[def.changeUnit],
             m.trend ? TREND_LABELS[m.trend] : '',
           ].join(','),
         );

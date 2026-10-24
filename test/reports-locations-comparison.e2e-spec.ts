@@ -283,21 +283,24 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     ]);
   });
 
-  it('producción 100.000 → 120.000 es +20 % y mejora; no-show 8 % → 10 % empeora', async () => {
-    const main = row(await report(), principal);
+  it('producción 100.000 → 120.000 es +20 % y mejora; no-show 8 % → 10 % es +2 p.p. y empeora', async () => {
+    const r = await report();
+    const main = row(r, principal);
     expect(main.metrics.production).toContainEqual({
       currency: 'COP',
       value: 120_000,
       previous: 100_000,
-      changePercent: 20,
+      change: 20,
       trend: 'BETTER',
     });
     expect(main.metrics.noShowRate).toEqual({
       value: 10,
       previous: 8,
-      changePercent: 25,
+      change: 2,
       trend: 'WORSE',
     });
+    const noShowDef = r.kpis.find((k) => k.key === 'noShowRate');
+    expect(noShowDef?.changeUnit).toBe('POINTS');
     expect(main.metrics.completedAppointments).toMatchObject({
       value: 9,
       previous: 23,
@@ -311,14 +314,14 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
         currency: 'COP',
         value: 90_000,
         previous: 75_000,
-        changePercent: 20,
+        change: 20,
         trend: 'BETTER',
       },
       {
         currency: 'USD',
         value: 50,
         previous: 0,
-        changePercent: null,
+        change: null,
         trend: 'BETTER',
       },
     ]);
@@ -379,7 +382,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     expect(row(none, principal).metrics.noShowRate).toEqual({
       value: 10,
       previous: null,
-      changePercent: null,
+      change: null,
       trend: null,
     });
     const lastYear = await report({ ...OCTOBER, compare: 'previous_year' });
@@ -391,7 +394,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       currency: 'COP',
       value: 120_000,
       previous: 0,
-      changePercent: null,
+      change: null,
       trend: 'BETTER',
     });
   });
@@ -441,7 +444,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       expect(res.text).toContain('"Sede Norte"');
       expect(res.text).not.toContain('Sede Sur');
       expect(res.text).toContain(
-        '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Cobrado",COP,90000.00,75000.00,20.0,Mejora',
+        '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Cobrado",COP,90000.00,75000.00,20.0,%,Mejora',
       );
     });
   });
@@ -523,6 +526,21 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
         `2026-10-01 a 2026-10-31,2025-10-01 a 2025-10-31,"${principalName}","No-show %",,10.00,,,`,
       );
       expect(res.text).toContain('"Sede Sur"');
+    });
+
+    it('la variación de los porcentajes va en puntos (p.p.) y la del resto en %', async () => {
+      const res = await get(
+        a,
+        '/reports/locations-comparison.csv',
+        OCTOBER,
+        a.adminToken,
+      ).expect(200);
+      expect(res.text).toContain(
+        `"${principalName}","No-show %",,10.00,8.00,2.0,p.p.,Empeora`,
+      );
+      expect(res.text).toContain(
+        `"${principalName}","Producción",COP,120000.00,100000.00,20.0,%,Mejora`,
+      );
     });
   });
 

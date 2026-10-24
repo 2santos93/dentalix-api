@@ -1,4 +1,5 @@
 import {
+  changeOf,
   changePercent,
   combineAggregates,
   computeKpis,
@@ -145,15 +146,39 @@ describe('kpi-definitions (DX-014)', () => {
   });
 
   describe('variación y tendencia', () => {
+    it('los porcentajes varían en puntos; el resto, en % relativo', () => {
+      expect(
+        KPI_KEYS.filter((k) => KPI_DEFINITIONS[k].changeUnit === 'POINTS'),
+      ).toEqual(['collectionRate', 'noShowRate', 'occupancy']);
+      for (const key of KPI_KEYS) {
+        expect(KPI_DEFINITIONS[key].changeUnit).toBe(
+          KPI_DEFINITIONS[key].unit === 'PERCENT' ? 'POINTS' : 'PERCENT',
+        );
+      }
+    });
+
     it('10 → 12 es +20 % y mejora', () => {
-      expect(changePercent(12, 10)).toBe(20);
+      expect(changeOf('production', 12, 10)).toBe(20);
+      expect(changeOf('completedAppointments', 12, 10)).toBe(20);
       expect(trendOf('production', 12, 10)).toBe('BETTER');
     });
 
-    it('no-show 8 % → 10 % es +25 % y empeora', () => {
-      expect(changePercent(10, 8)).toBe(25);
+    it('no-show 8 % → 10 % es +2 p.p. (no +25 %) y empeora', () => {
+      expect(changeOf('noShowRate', 10, 8)).toBe(2);
       expect(trendOf('noShowRate', 10, 8)).toBe('WORSE');
       expect(trendOf('noShowRate', 8, 10)).toBe('BETTER');
+    });
+
+    it('% de cobro y ocupación también en puntos, con 1 decimal', () => {
+      expect(changeOf('collectionRate', 75, 100)).toBe(-25);
+      expect(changeOf('occupancy', 33.33, 40)).toBe(-6.7);
+      expect(changeOf('occupancy', 40, 40)).toBe(0);
+    });
+
+    it('en puntos, un anterior de 0 % sí tiene variación', () => {
+      expect(changeOf('noShowRate', 5, 0)).toBe(5);
+      expect(changeOf('noShowRate', null, 0)).toBeNull();
+      expect(changeOf('occupancy', 10, null)).toBeNull();
     });
 
     it('bajar en un indicador que sube es peor; igual es igual', () => {
@@ -165,6 +190,7 @@ describe('kpi-definitions (DX-014)', () => {
 
     it('sin valor anterior (o 0) no hay variación %, pero sí tendencia si cambió', () => {
       expect(changePercent(12, 0)).toBeNull();
+      expect(changeOf('production', 12, 0)).toBeNull();
       expect(changePercent(12, null)).toBeNull();
       expect(changePercent(null, 10)).toBeNull();
       expect(trendOf('production', 12, 0)).toBe('BETTER');

@@ -69,6 +69,13 @@ export class KpiDefinitionDto {
   })
   direction!: string;
 
+  @ApiProperty({
+    enum: ['PERCENT', 'POINTS'],
+    description:
+      'Unidad de `change`: PERCENT = % relativo ((valor − anterior) ÷ |anterior|); POINTS = puntos porcentuales (valor − anterior), en los indicadores que ya son un %',
+  })
+  changeUnit!: string;
+
   @ApiProperty({ description: 'Texto de «Cómo se calcula»' })
   howItIsCalculated!: string;
 }
@@ -93,9 +100,9 @@ export class MetricDto {
     type: Number,
     nullable: true,
     description:
-      'Variación % frente al anterior, 1 decimal: (valor − anterior) ÷ |anterior|. null sin anterior o con anterior 0',
+      'Variación frente al anterior, 1 decimal, en la unidad `changeUnit` del indicador: % relativo ((valor − anterior) ÷ |anterior|; null con anterior 0) o puntos porcentuales en % de cobro, no-show % y ocupación % (valor − anterior: 8 % → 10 % = 2). null sin anterior',
   })
-  changePercent!: number | null;
+  change!: number | null;
 
   @ApiProperty({
     enum: TRENDS,

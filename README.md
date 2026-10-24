@@ -1188,8 +1188,10 @@ moneda). Errores 400 en español.
   moneda; en una fila, todas las monedas que tuvo (en el período o en el
   comparado) salen en los cuatro indicadores de dinero. La conversión con tasa
   queda para otra porción.
-- **Comparación**: cada valor trae `previous`, `changePercent` ((valor −
-  anterior) ÷ |anterior|, 1 decimal; null sin anterior o con 0) y `trend`
+- **Comparación**: cada valor trae `previous`, `change` (1 decimal, en la
+  unidad `changeUnit` de su KPI: % relativo, (valor − anterior) ÷ |anterior|,
+  null con anterior 0; o **puntos porcentuales** en % de cobro, no-show % y
+  ocupación %, valor − anterior: 8 % → 10 % = +2 p.p.) y `trend`
   (`BETTER`/`WORSE`/`EQUAL` según la dirección: el no-show mejora al bajar).
 - **CSV**: mismos filtros; formato largo (una línea por sede, indicador y
   moneda, el total al final), UTF-8 con BOM, CRLF, celdas de texto protegidas
