@@ -27,6 +27,10 @@ import { CapturingMailer } from './support/capture-mailer';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { CONFIRMATION_LINK_NOT_FOUND_MESSAGE } from '../src/modules/appointment-confirmations/application/find-confirmation-by-token';
+import {
+  LOCATION_BY_REQUEST_MESSAGE,
+  PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+} from '../src/modules/treatment-plans/domain/plan-item-attribution';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
 
@@ -1201,6 +1205,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ status: 'DONE', performedById: a.dentistUserId }),
       bodyIds: ['performedById'],
       status: 404,
+    },
+    // DX-305: B intenta registrar SU ítem como realizado en una sede de A. La
+    // sede nunca llega al marcar realizado (400 antes de leer nada); la de un
+    // «Sin atribuir» ya realizado se prueba en «B no puede atribuir…» abajo.
+    {
+      name: 'PATCH /treatment-plans/:id/items/:itemId (DX-305: realizado en una sede de A)',
+      verb: 'patch',
+      path: () => `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      body: () => ({ status: 'DONE', performedLocationId: a.locationId }),
+      bodyIds: ['performedLocationId'],
+      status: 400,
     },
     // DX-204: «Descuento %» en bloque sobre un plan y un ítem de A.
     {
@@ -3073,6 +3088,49 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         where: { sourcePlanItemId: b.planItemId },
       }),
     ).toBe(0);
+  });
+
+  it('DX-305: B no puede atribuir su «Sin atribuir» a una sede de A (400, y el ítem sigue sin atribuir)', async () => {
+    const planItem = await raw.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: b.planItemId },
+      select: { tenantId: true, planId: true, catalogItemId: true },
+    });
+    // Como los DONE de antes de DX-050: realizado, sin quién, dónde ni cuándo.
+    const legacy = await raw.treatmentPlanItem.create({
+      data: { ...planItem, toothNumber: '22', price: 100, status: 'DONE' },
+      select: { id: true },
+    });
+    const res = await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${legacy.id}`,
+      {
+        performedById: clinicB.adminUserId,
+        completedAt: '2026-09-14T15:00:00.000Z',
+        performedLocationId: a.locationId,
+      },
+    ).expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+    );
+    expect(
+      await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: legacy.id },
+      }),
+    ).toMatchObject({ performedById: null, performedLocationId: null });
+    // Y al marcar realizado, la sede no se elige en el cuerpo.
+    const done = await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      { status: 'DONE', performedLocationId: a.locationId },
+    ).expect(400);
+    expect((done.body as { message: string }).message).toBe(
+      LOCATION_BY_REQUEST_MESSAGE,
+    );
+    await raw.treatmentPlanItem.delete({ where: { id: legacy.id } });
   });
 
   it('B sigue operando lo suyo (los 404 no son un "todo prohibido")', async () => {

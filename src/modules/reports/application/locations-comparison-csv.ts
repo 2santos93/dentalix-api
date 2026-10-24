@@ -15,7 +15,8 @@ import type {
 /*
  * CSV de «Comparar sedes» (DX-014), con los mismos filtros que la pantalla.
  * Formato largo: una línea por sede (y el «Total clínica» al final),
- * indicador y moneda, así una hoja de cálculo lo filtra y lo tabla sin tener
+ * indicador y moneda (con el aviso de BE-045 cuando no hay variación porque el
+ * período comparado no tiene toda la producción atribuida), así una hoja de cálculo lo filtra y lo tabla sin tener
  * que deshacer columnas por moneda. Mismo formato que el informe de
  * descuentos (DX-204) y la cartera (DX-145): UTF-8 con BOM, CRLF, texto entre
  * comillas y las celdas de texto que empiezan (tras blancos) por = + - @ (o
@@ -33,7 +34,15 @@ export const LOCATIONS_COMPARISON_CSV_HEADER = [
   'Variación',
   'Unidad de la variación',
   'Evolución',
+  'Aviso',
 ] as const;
+
+/**
+ * BE-045: por qué una producción o un % de cobro sale sin variación. Mismo
+ * texto que el aviso de la pantalla.
+ */
+export const UNATTRIBUTED_PREVIOUS_CSV_NOTE =
+  'Sin variación: el período comparado no tiene toda su producción atribuida a una sede';
 
 const TREND_LABELS: Record<KpiTrend, string> = {
   BETTER: 'Mejora',
@@ -62,7 +71,7 @@ function num(value: number | null, decimals: number): string {
 function metricsOf(
   row: ComparisonRow,
   key: KpiKey,
-): (MetricView & { currency?: string })[] {
+): (MetricView & Partial<CurrencyMetricView>)[] {
   const value: MetricView | CurrencyMetricView[] = row.metrics[key];
   return Array.isArray(value) ? value : [value];
 }
@@ -91,6 +100,7 @@ export function toLocationsComparisonCsv(report: LocationsComparison): string {
             num(m.change, 1),
             m.change === null ? '' : CHANGE_UNIT_LABELS[def.changeUnit],
             m.trend ? TREND_LABELS[m.trend] : '',
+            m.previousUnattributed ? text(UNATTRIBUTED_PREVIOUS_CSV_NOTE) : '',
           ].join(','),
         );
       }

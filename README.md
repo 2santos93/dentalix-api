@@ -1158,7 +1158,7 @@ Módulo `src/modules/reports`. `GET /api/v1/reports/locations-comparison` y
 `GET /api/v1/reports/locations-comparison.csv` (solo ADMIN; DENTIST,
 RECEPTION y ASSISTANT → 403 «Solo la administración ve los reportes de la
 clínica.»), con `from`/`to` (días civiles `AAAA-MM-DD`, ambos inclusive, como
-mucho 366 días), `compare` (`previous` por defecto: los mismos días
+mucho 366 días; las dos fechas entre 2000-01-01 y 2100-12-31, DX-305), `compare` (`previous` por defecto: los mismos días
 inmediatamente antes; `previous_year`: las mismas fechas un año antes, el
 29/02 cae en el 28; `none`) y `currency` opcional (solo los importes en esa
 moneda). Errores 400 en español.
@@ -1181,10 +1181,29 @@ moneda). Errores 400 en español.
   no cuentan); pacientes nuevos =
   primera COMPLETED del paciente en la clínica, en la sede de esa cita; ticket
   medio = cobrado ÷ pacientes distintos atendidos (en el total, cada paciente
-  una vez); ocupación % = minutos COMPLETED ÷ minutos abiertos del horario
-  semanal VIGENTE de la sede menos sus cierres (bloqueos de toda la sede que
-  no admiten citas). Sin horario configurado, ocupación null (y fuera de la
-  del total). Días civiles en la zona de cada sede (DX-097).
+  una vez); ocupación % (DX-305, BE-042) = minutos COMPLETED de los
+  profesionales con horario en la sede ÷ **capacidad**: Σ, profesional a
+  profesional, de los minutos de su horario semanal VIGENTE en la sede
+  (DX-233, con sus excepciones por fecha), menos sus bloqueos que no admiten
+  citas (de esa sede o de todas, DX-122) y los cierres de toda la sede; con
+  tope de 100 %. Dos profesionales en paralelo son el doble de capacidad; uno
+  de media jornada, la mitad. Sin profesionales con horario en la sede,
+  ocupación null (y fuera de la del total). Días civiles en la zona de cada
+  sede (DX-097).
+- **Período comparado sin producción atribuida** (DX-305, BE-045): si
+  empieza (a medianoche de la zona de la sede) antes de que la base registrara
+  la atribución de DX-050 y la clínica tiene realizados vivos «Sin atribuir»,
+  o si tuvo cobros en una moneda sin producción, producción y % de cobro de
+  esas monedas salen con `change`/`trend` null y `previousUnattributed: true`;
+  la fila lleva `previousPeriodUnattributed` (y la respuesta, si alguna fila
+  la lleva). El instante de DX-050 lo da `dx_production_attributed_since()`:
+  la migración `20261024151000_dx305_production_attributed_since` copió en su
+  cuerpo el `finished_at` de la migración de DX-050 de esa base (la app no lee
+  `_prisma_migrations`). El CSV lo dice en la columna «Aviso».
+- **Rango de fechas** (DX-305, BE-044): `checkPeriodDays` en
+  `src/shared/time/civil-day.ts` es la única validación de los días de un
+  período (existen, orden y 2000-01-01…2100-12-31); la usan este reporte, el
+  de descuentos y la caja (`GET /payments`), con 400 en español.
 - **Monedas**: nunca se suman ni se convierten. Cada importe es una lista por
   moneda; en una fila, todas las monedas que tuvo (en el período o en el
   comparado) salen en los cuatro indicadores de dinero. La conversión con tasa

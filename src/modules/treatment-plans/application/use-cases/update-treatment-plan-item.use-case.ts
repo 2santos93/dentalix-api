@@ -56,6 +56,11 @@ export interface UpdateTreatmentPlanItemInput {
   performedById?: string;
   /** DX-050: solo un ADMIN corrige la fecha de un ítem ya DONE. */
   completedAt?: Date;
+  /**
+   * DX-305: solo un ADMIN corrige la sede de un ítem ya DONE; obligatoria al
+   * atribuir uno «Sin atribuir» (con quién y cuándo).
+   */
+  performedLocationId?: string;
 }
 
 /** ¿La petición pone otro `discount` o cambia el motivo o su nota? (DX-204) */
@@ -156,8 +161,8 @@ export class UpdateTreatmentPlanItemUseCase {
           throw new ConflictException(FEE_ITEM_LOCKED_MESSAGE);
         }
         // Plan cerrado (DX-109): nada, salvo marcar como realizado lo que quedó
-        // aceptado en un plan completado, o corregir quién o cuándo realizó un
-        // ítem ya realizado (DX-050).
+        // aceptado en un plan completado, o corregir quién, cuándo o dónde se
+        // realizó un ítem ya realizado (DX-050, DX-305).
         if (
           !isClosedPlanItemChangeAllowed(plan.status, item.status, patch) &&
           !isAttributionCorrection(plan.status, item.status, patch)
@@ -193,6 +198,7 @@ export class UpdateTreatmentPlanItemUseCase {
           discountReasonNote,
           performedById: _performedById,
           completedAt: _completedAt,
+          performedLocationId: _performedLocationId,
           ...rest
         } = patch;
         const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;

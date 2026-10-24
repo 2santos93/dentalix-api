@@ -35,6 +35,7 @@ import {
   ItemAttributionChange,
   PERFORMER_NOT_AT_LOCATION_MESSAGE,
   PERFORMER_NOT_ATTENDING_MESSAGE,
+  PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
   PERFORMER_NOT_FOUND_MESSAGE,
   isAttendingRole,
 } from '../../domain/plan-item-attribution';
@@ -509,15 +510,38 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       };
     }
     const data: Prisma.TreatmentPlanItemUncheckedUpdateInput = {};
-    if (change.performedById !== undefined) {
-      // La sede no se corrige: el nuevo profesional tiene que atender en la
-      // que quedó registrada (si la hay).
-      data.performedById = change.performedById;
+    if (change.performedLocationId !== undefined) {
+      // DX-305: la sede corregida, de las permitidas al usuario (DX-089; 403)
+      // y viva en ESTA clínica (bajo RLS la de otra no existe; 400). FOR
+      // SHARE para que no se retire a mitad; la FK compuesta es la red.
+      this.tenantContext.assertLocationAllowed(change.performedLocationId);
+      const [location] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT l."id" FROM "locations" l
+         WHERE l."tenantId" = ${this.requireTenantId()}::uuid
+           AND l."id" = ${change.performedLocationId}::uuid
+           AND l."deletedAt" IS NULL
+           FOR SHARE`;
+      if (!location) {
+        throw new BadRequestException(PERFORMED_LOCATION_NOT_FOUND_MESSAGE);
+      }
+      data.performedLocationId = change.performedLocationId;
+    }
+    const locationId =
+      change.performedLocationId ?? previous.performedLocationId;
+    const performerId = change.performedById ?? previous.performedById;
+    if (
+      performerId !== null &&
+      (change.performedById !== undefined ||
+        change.performedLocationId !== undefined)
+    ) {
+      // Quien lo realizó (el nuevo, o el de antes si cambia la sede) tiene
+      // que atender en la sede que queda registrada.
+      data.performedById = performerId;
       data.performedByMembershipId = await resolvePerformer(
         tx,
         this.requireTenantId(),
-        change.performedById,
-        previous.performedLocationId,
+        performerId,
+        locationId,
       );
     }
     if (change.completedAt !== undefined) {
