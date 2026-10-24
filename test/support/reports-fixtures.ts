@@ -33,7 +33,7 @@ export class ReportSeeder {
   }
 
   /** Profesional que realiza los ítems (DX-050) y atiende las citas. */
-  private async dentist(): Promise<{ id: string; userId: string }> {
+  async dentist(): Promise<{ id: string; userId: string }> {
     if (this.membership) return this.membership;
     const user = await this.raw.user.create({
       data: {
@@ -54,18 +54,141 @@ export class ReportSeeder {
     return this.membership;
   }
 
-  private async catalog(): Promise<string> {
-    if (this.catalogItemId) return this.catalogItemId;
-    const item = await this.raw.dentalCatalogItem.create({
+  /** Otro profesional (DENTIST) de la clínica; devuelve su usuario. */
+  async provider(fullName: string): Promise<string> {
+    const user = await this.raw.user.create({
       data: {
-        tenantId: this.tenantId,
-        code: `dx014-${this.tenantId.slice(0, 8)}`,
-        kind: 'PROCEDURE',
-        labelEs: 'Resina',
-        color: '#123456',
+        email: `${fullName.toLowerCase().replace(/\W+/g, '-')}-${this.tenantId}@example.com`,
+        passwordHash: 'x',
+        fullName,
       },
       select: { id: true },
     });
+    await this.raw.clinicMembership.create({
+      data: {
+        tenantId: this.tenantId,
+        userId: user.id,
+        role: ClinicRole.DENTIST,
+      },
+    });
+    return user.id;
+  }
+
+  /** Horario semanal de un profesional en una sede (DX-233). */
+  async providerSchedule(input: {
+    providerId: string;
+    locationId: string;
+    ranges: { weekday: number; startMinute: number; endMinute: number }[];
+  }): Promise<void> {
+    const schedule = await this.raw.providerSchedule.create({
+      data: {
+        tenantId: this.tenantId,
+        providerId: input.providerId,
+        locationId: input.locationId,
+        timezone: 'America/Bogota',
+      },
+      select: { id: true },
+    });
+    await this.raw.providerScheduleRange.createMany({
+      data: input.ranges.map((r) => ({
+        tenantId: this.tenantId,
+        scheduleId: schedule.id,
+        providerId: input.providerId,
+        ...r,
+      })),
+    });
+  }
+
+  /** Horario semanal de la sede (DX-122). */
+  async locationSchedule(
+    locationId: string,
+    ranges: { weekday: number; startMinute: number; endMinute: number }[],
+  ): Promise<void> {
+    const schedule = await this.raw.locationSchedule.create({
+      data: { tenantId: this.tenantId, locationId, timezone: 'America/Bogota' },
+      select: { id: true },
+    });
+    await this.raw.locationScheduleRange.createMany({
+      data: ranges.map((r) => ({
+        tenantId: this.tenantId,
+        scheduleId: schedule.id,
+        ...r,
+      })),
+    });
+  }
+
+  /** Una cita COMPLETED de `providerId` en `[start, start + minutes)`. */
+  async completedVisit(input: {
+    locationId: string;
+    patientId: string;
+    providerId: string;
+    start: Date;
+    minutes: number;
+  }): Promise<void> {
+    await this.raw.appointment.create({
+      data: {
+        tenantId: this.tenantId,
+        locationId: input.locationId,
+        patientId: input.patientId,
+        providerId: input.providerId,
+        start: input.start,
+        end: new Date(input.start.getTime() + input.minutes * 60_000),
+        status: 'COMPLETED',
+      },
+    });
+  }
+
+  /**
+   * Un plan con un ítem DONE «Sin atribuir» (sin quién, dónde ni cuándo),
+   * como los realizados antes de DX-050. Devuelve el plan y el ítem.
+   */
+  async unattributedDone(input: {
+    patientId: string;
+    currency: string;
+    price: number;
+  }): Promise<{ planId: string; itemId: string }> {
+    const plan = await this.raw.treatmentPlan.create({
+      data: {
+        tenantId: this.tenantId,
+        patientId: input.patientId,
+        currency: input.currency,
+        status: 'ACCEPTED',
+      },
+      select: { id: true },
+    });
+    const item = await this.raw.treatmentPlanItem.create({
+      data: {
+        tenantId: this.tenantId,
+        planId: plan.id,
+        toothNumber: '26',
+        catalogItemId: await this.catalog(),
+        price: input.price,
+        status: 'DONE',
+      },
+      select: { id: true },
+    });
+    return { planId: plan.id, itemId: item.id };
+  }
+
+  private async catalog(): Promise<string> {
+    if (this.catalogItemId) return this.catalogItemId;
+    // Otro sembrador de la misma clínica puede haberlo creado ya.
+    const code = `dx014-${this.tenantId.slice(0, 8)}`;
+    const item =
+      (await this.raw.dentalCatalogItem.findFirst({
+        where: { tenantId: this.tenantId, code },
+        select: { id: true },
+      })) ??
+      (await this.raw.dentalCatalogItem.create({
+        data: {
+          tenantId: this.tenantId,
+          code,
+          kind: 'PROCEDURE',
+          labelEs: 'Resina',
+          color: '#123456',
+        },
+        select: { id: true },
+      }));
     this.catalogItemId = item.id;
     return item.id;
   }

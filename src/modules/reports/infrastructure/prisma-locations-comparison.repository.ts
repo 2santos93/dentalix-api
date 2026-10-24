@@ -12,14 +12,17 @@ import {
 import type { CivilPeriod } from '../domain/comparison-period';
 import type { PeriodAggregates } from '../domain/kpi-definitions';
 import {
-  openMinutes,
+  capacityMinutes,
   type Closure,
+  type DayRange,
+  type ProviderCapacity,
   type WeeklyRange,
 } from '../domain/open-minutes';
 import type {
   ComparisonLocation,
   LocationsComparisonRepository,
   PeriodAggregation,
+  ProductionAttribution,
 } from '../domain/ports/locations-comparison-repository.port';
 
 interface AmountRow {
@@ -44,8 +47,17 @@ interface CountRow {
 }
 
 interface ScheduleRow {
+  providerId: string;
   locationId: string;
   weekday: number | null;
+  startMinute: number | null;
+  endMinute: number | null;
+}
+
+interface OverrideRow {
+  providerId: string;
+  locationId: string;
+  date: string;
   startMinute: number | null;
   endMinute: number | null;
 }
@@ -53,6 +65,16 @@ interface ScheduleRow {
 interface ClosureRow extends Closure {
   locationId: string;
 }
+
+interface ProviderBlockRow extends Closure {
+  providerId: string;
+  /** NULL = el profesional en todas las sedes. */
+  locationId: string | null;
+}
+
+/** `sede|profesional`: clave de un horario de profesional en una sede. */
+const key = (locationId: string, providerId: string) =>
+  `${locationId}|${providerId}`;
 
 /**
  * `(sede IN (…) AND instante en [inicio, fin))`, una rama por ZONA (DX-097):
@@ -87,7 +109,7 @@ function emptyAggregates(): PeriodAggregates & {
     attendedPatients: 0,
     newPatients: 0,
     completedMinutes: 0,
-    openMinutes: null,
+    capacityMinutes: null,
   };
 }
 
@@ -100,13 +122,15 @@ function emptyAggregates(): PeriodAggregates & {
  *    índice `treatment_plan_items_tenant_performed_location_idx`;
  *  - cobrado: abonos no anulados por `paidAt`, sede y moneda;
  *    `payments_tenantId_locationId_paidAt_active_idx`;
- *  - citas atendidas, no-show, cancelaciones tardías (DX-279), minutos y
- *    pacientes distintos (por sede y del
- *    conjunto con GROUPING SETS); `appointments_tenant_location_start_idx`;
+ *  - citas atendidas, no-show, cancelaciones tardías (DX-279), minutos de
+ *    las atendidas por profesionales con horario en la sede y pacientes
+ *    distintos (por sede y del conjunto con GROUPING SETS);
+ *    `appointments_tenant_location_start_idx`;
  *  - pacientes nuevos: citas COMPLETED del período sin otra COMPLETED anterior
  *    del paciente en la clínica; `appointments_tenant_patient_completed_idx`;
- *  - horario semanal vivo de cada sede y sus cierres (bloqueos de toda la sede
- *    que no admiten citas), para los minutos abiertos.
+ *  - capacidad (BE-042): horario semanal vivo de cada profesional en cada sede
+ *    (DX-233), sus excepciones del período, sus bloqueos que no admiten citas
+ *    (DX-122) y los cierres de toda la sede.
  */
 @Injectable()
 export class PrismaLocationsComparisonRepository implements LocationsComparisonRepository {
@@ -209,10 +233,17 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
                  count(*) FILTER (WHERE a."status" = 'NO_SHOW') AS "noShow",
                  count(*) FILTER (WHERE a."status" = 'CANCELLED') AS "lateCancellations",
                  sum(extract(epoch FROM a."end" - a."start") / 60)
-                   FILTER (WHERE a."status" = 'COMPLETED') AS "minutes",
+                   FILTER (WHERE a."status" = 'COMPLETED' AND ps."id" IS NOT NULL) AS "minutes",
                  count(DISTINCT a."patientId")
                    FILTER (WHERE a."status" = 'COMPLETED') AS "patients"
             FROM "appointments" a
+            -- Como mucho un horario vivo por profesional y sede (único
+            -- parcial provider_schedules_live_key): no duplica citas.
+            LEFT JOIN "provider_schedules" ps
+              ON ps."tenantId" = a."tenantId"
+             AND ps."providerId" = a."providerId"
+             AND ps."locationId" = a."locationId"
+             AND ps."deletedAt" IS NULL
            WHERE a."tenantId" = ${tenantId}::uuid
              AND a."deletedAt" IS NULL
              AND (a."status" IN ('COMPLETED', 'NO_SHOW')
@@ -238,17 +269,40 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
              )
            GROUP BY 1`;
 
-        // Una fila por tramo vivo; una sede con horario y sin tramos (cerrada
-        // toda la semana) sale una vez con el tramo a NULL.
+        // Una fila por tramo vivo de cada profesional en cada sede; un
+        // horario sin tramos (no trabaja allí ningún día) sale una vez con el
+        // tramo a NULL y no aporta capacidad.
         const schedules = await tx.$queryRaw<ScheduleRow[]>`
-          SELECT s."locationId", r."weekday", r."startMinute", r."endMinute"
-            FROM "location_schedules" s
-            LEFT JOIN "location_schedule_ranges" r
+          SELECT s."providerId", s."locationId",
+                 r."weekday", r."startMinute", r."endMinute"
+            FROM "provider_schedules" s
+            LEFT JOIN "provider_schedule_ranges" r
               ON r."tenantId" = s."tenantId" AND r."scheduleId" = s."id"
-             AND r."deletedAt" IS NULL
+             AND r."providerId" = s."providerId" AND r."deletedAt" IS NULL
            WHERE s."tenantId" = ${tenantId}::uuid
              AND s."deletedAt" IS NULL
              AND s."locationId" = ANY(${ids}::uuid[])`;
+        const providerIds = [...new Set(schedules.map((r) => r.providerId))];
+
+        // Excepciones del período en esas sedes (DX-233); sin tramos = ese
+        // día no trabaja allí.
+        const overrides =
+          providerIds.length === 0
+            ? []
+            : await tx.$queryRaw<OverrideRow[]>`
+          SELECT o."providerId", o."locationId",
+                 to_char(o."date", 'YYYY-MM-DD') AS "date",
+                 r."startMinute", r."endMinute"
+            FROM "provider_schedule_overrides" o
+            LEFT JOIN "provider_schedule_override_ranges" r
+              ON r."tenantId" = o."tenantId" AND r."overrideId" = o."id"
+             AND r."deletedAt" IS NULL
+           WHERE o."tenantId" = ${tenantId}::uuid
+             AND o."deletedAt" IS NULL
+             AND o."locationId" = ANY(${ids}::uuid[])
+             AND o."providerId" = ANY(${providerIds}::uuid[])
+             AND o."date" >= ${period.from}::date
+             AND o."date" <= ${period.to}::date`;
 
         const closures = await tx.$queryRaw<ClosureRow[]>`
           SELECT b."locationId", b."start", b."end"
@@ -258,6 +312,22 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
              AND b."providerId" IS NULL
              AND b."allowsBooking" = false
              AND b."locationId" = ANY(${ids}::uuid[])
+             AND b."end" > ${windowStart}
+             AND b."start" < ${windowEnd}`;
+
+        // Bloqueos de esos profesionales (en esa sede o en todas) que no
+        // admiten citas: vacaciones, formación… (DX-122).
+        const providerBlocks =
+          providerIds.length === 0
+            ? []
+            : await tx.$queryRaw<ProviderBlockRow[]>`
+          SELECT b."providerId", b."locationId", b."start", b."end"
+            FROM "schedule_blocks" b
+           WHERE b."tenantId" = ${tenantId}::uuid
+             AND b."deletedAt" IS NULL
+             AND b."providerId" = ANY(${providerIds}::uuid[])
+             AND b."allowsBooking" = false
+             AND (b."locationId" IS NULL OR b."locationId" = ANY(${ids}::uuid[]))
              AND b."end" > ${windowStart}
              AND b."start" < ${windowEnd}`;
 
@@ -290,9 +360,12 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
           const a = byLocation.get(r.locationId);
           if (a) a.newPatients = Number(r.count);
         }
+        // Horario de cada profesional en cada sede: tramos semanales y
+        // excepciones por día.
         const weekly = new Map<string, WeeklyRange[]>();
         for (const r of schedules) {
-          const list = weekly.get(r.locationId) ?? [];
+          const k = key(r.locationId, r.providerId);
+          const list = weekly.get(k) ?? [];
           if (
             r.weekday !== null &&
             r.startMinute !== null &&
@@ -304,18 +377,42 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
               endMinute: r.endMinute,
             });
           }
-          weekly.set(r.locationId, list);
+          weekly.set(k, list);
+        }
+        const dayOverrides = new Map<string, Map<string, DayRange[]>>();
+        for (const r of overrides) {
+          const k = key(r.locationId, r.providerId);
+          const byDay = dayOverrides.get(k) ?? new Map<string, DayRange[]>();
+          const ranges = byDay.get(r.date) ?? [];
+          if (r.startMinute !== null && r.endMinute !== null) {
+            ranges.push({ startMinute: r.startMinute, endMinute: r.endMinute });
+          }
+          byDay.set(r.date, ranges);
+          dayOverrides.set(k, byDay);
         }
         for (const location of locations) {
-          const ranges = weekly.get(location.id);
           const a = byLocation.get(location.id);
-          // Sin horario configurado: sin restricción, y sin ocupación.
-          if (!ranges || !a) continue;
-          a.openMinutes = openMinutes({
+          if (!a) continue;
+          const providers: ProviderCapacity[] = [];
+          for (const [k, ranges] of weekly) {
+            const [locationId, providerId] = k.split('|');
+            if (locationId !== location.id) continue;
+            providers.push({
+              ranges,
+              overrides: dayOverrides.get(k) ?? new Map(),
+              blocks: providerBlocks.filter(
+                (b) =>
+                  b.providerId === providerId &&
+                  (b.locationId === null || b.locationId === location.id),
+              ),
+            });
+          }
+          // Sin profesionales con horario en la sede: sin ocupación.
+          a.capacityMinutes = capacityMinutes({
             from: period.from,
             to: period.to,
             timeZone: location.timeZone,
-            ranges,
+            providers,
             closures: closures.filter((c) => c.locationId === location.id),
           });
         }
@@ -323,5 +420,34 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
+  }
+
+  /**
+   * BE-045: el instante desde el que esta base registra la producción
+   * atribuible (lo fija la migración de DX-305 con el fin de la de DX-050) y
+   * si la clínica tiene realizados vivos sin sede o sin fecha («Sin
+   * atribuir»), los que la producción no cuenta. El EXISTS para en el primero; `treatment_plan_items_tenant_done_completed_idx`
+   * (parcial sobre DONE vivos, con la sede en el INCLUDE) lo sirve.
+   */
+  async productionAttribution(): Promise<ProductionAttribution> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const [row] = await tx.$queryRaw<
+        { attributedSince: Date; hasUnattributed: boolean }[]
+      >`
+        SELECT public."dx_production_attributed_since"() AS "attributedSince",
+               EXISTS (
+                 SELECT 1
+                   FROM "treatment_plan_items" i
+                   JOIN "treatment_plans" p
+                     ON p."tenantId" = i."tenantId" AND p."id" = i."planId"
+                  WHERE i."tenantId" = ${tenantId}::uuid
+                    AND i."status" = 'DONE'
+                    AND i."deletedAt" IS NULL
+                    AND p."deletedAt" IS NULL
+                    AND (i."completedAt" IS NULL OR i."performedLocationId" IS NULL)
+               ) AS "hasUnattributed"`;
+      return row;
+    });
   }
 }

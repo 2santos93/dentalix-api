@@ -62,6 +62,7 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     changeUnit: 'PERCENT',
     howItIsCalculated:
       'Suma del precio neto (precio − descuento) de los procedimientos marcados como realizados en el período, en la sede donde se realizaron y en la moneda de su plan. Los realizados antes de registrar quién y dónde («Sin atribuir») no cuentan. ' +
+      'Si el período comparado empieza antes de que se registrara dónde se realiza cada procedimiento (DX-050) y la clínica tiene realizados «Sin atribuir», o si tuvo cobros en esa moneda sin producción atribuida, no se muestra la variación: compararía contra una producción incompleta. ' +
       DAYS,
   },
   collected: {
@@ -83,7 +84,8 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     direction: 'HIGHER_IS_BETTER',
     changeUnit: 'POINTS',
     howItIsCalculated:
-      'Cobrado ÷ producción del mismo período y moneda, en %. Sin producción en esa moneda no se calcula. Puede pasar del 100 % si se cobró trabajo de otros períodos.',
+      'Cobrado ÷ producción del mismo período y moneda, en %. Sin producción en esa moneda no se calcula. Puede pasar del 100 % si se cobró trabajo de otros períodos. ' +
+      'Si el período comparado empieza antes de que se registrara dónde se realiza cada procedimiento (DX-050) y la clínica tiene realizados «Sin atribuir», o si tuvo cobros en esa moneda sin producción atribuida, no se muestra la variación: compararía contra una producción incompleta.',
   },
   completedAppointments: {
     key: 'completedAppointments',
@@ -134,7 +136,8 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiKey, KpiDefinition>> = {
     direction: 'HIGHER_IS_BETTER',
     changeUnit: 'POINTS',
     howItIsCalculated:
-      'Minutos de citas atendidas ÷ minutos abiertos según el horario semanal vigente de la sede, descontando los bloqueos de toda la sede que no admiten citas. Una sede sin horario configurado no tiene ocupación (ni cuenta en la del total).',
+      'Minutos de citas atendidas por los profesionales con horario en la sede ÷ la capacidad de la sede: la suma de los minutos del horario de cada uno de esos profesionales en ella (con sus excepciones por fecha), descontando sus bloqueos y los cierres de toda la sede. Dos profesionales en paralelo son el doble de capacidad que uno; uno de media jornada, la mitad. Nunca pasa del 100 %. Una sede sin profesionales con horario no tiene ocupación (ni cuenta en la del total). ' +
+      DAYS,
   },
 };
 
@@ -154,10 +157,17 @@ export interface PeriodAggregates {
   /** Pacientes distintos con alguna cita COMPLETED. */
   attendedPatients: number;
   newPatients: number;
-  /** Minutos de las citas COMPLETED. */
+  /**
+   * Minutos de las citas COMPLETED de los profesionales con horario en la
+   * sede (DX-233): los mismos cuya capacidad suma `capacityMinutes`.
+   */
   completedMinutes: number;
-  /** Minutos abiertos según el horario; `null` = la sede no tiene horario. */
-  openMinutes: number | null;
+  /**
+   * Capacidad (BE-042): Σ minutos del horario de cada profesional en la sede,
+   * menos sus bloqueos y los cierres de la sede. `null` = nadie tiene horario
+   * en la sede.
+   */
+  capacityMinutes: number | null;
 }
 
 export const EMPTY_AGGREGATES: PeriodAggregates = {
@@ -169,7 +179,7 @@ export const EMPTY_AGGREGATES: PeriodAggregates = {
   attendedPatients: 0,
   newPatients: 0,
   completedMinutes: 0,
-  openMinutes: null,
+  capacityMinutes: null,
 };
 
 export interface CurrencyValue {
@@ -192,6 +202,9 @@ function round(value: number, decimals: number): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
+
+/** Tope de la ocupación: una cita fuera de horario no la lleva más allá. */
+const MAX_OCCUPANCY = 100;
 
 /** `numerator ÷ denominator` en % con 2 decimales; null si no hay base. */
 function percent(numerator: number, denominator: number): number | null {
@@ -233,8 +246,11 @@ export function computeKpis(
           : null,
     })),
     occupancy:
-      a.openMinutes !== null && a.openMinutes > 0
-        ? percent(a.completedMinutes, a.openMinutes)
+      a.capacityMinutes !== null && a.capacityMinutes > 0
+        ? Math.min(
+            MAX_OCCUPANCY,
+            percent(a.completedMinutes, a.capacityMinutes) ?? 0,
+          )
         : null,
   };
 }
@@ -265,13 +281,14 @@ function sumByCurrency(
  * Sumas del «Total clínica»: por moneda (nunca entre monedas), citas, nuevos y
  * minutos. Los pacientes distintos NO se suman (uno que fue a dos sedes contaría
  * dos veces): los da la base de datos para el conjunto. La ocupación solo
- * cuenta las sedes con horario, minutos atendidos y abiertos de las mismas.
+ * cuenta las sedes con profesionales con horario: minutos atendidos y
+ * capacidad de las mismas.
  */
 export function combineAggregates(
   list: readonly PeriodAggregates[],
   attendedPatients: number,
 ): PeriodAggregates {
-  const scheduled = list.filter((a) => a.openMinutes !== null);
+  const scheduled = list.filter((a) => a.capacityMinutes !== null);
   return {
     production: sumByCurrency(list.map((a) => a.production)),
     collected: sumByCurrency(list.map((a) => a.collected)),
@@ -281,9 +298,9 @@ export function combineAggregates(
     attendedPatients,
     newPatients: list.reduce((s, a) => s + a.newPatients, 0),
     completedMinutes: scheduled.reduce((s, a) => s + a.completedMinutes, 0),
-    openMinutes:
+    capacityMinutes:
       scheduled.length > 0
-        ? scheduled.reduce((s, a) => s + (a.openMinutes ?? 0), 0)
+        ? scheduled.reduce((s, a) => s + (a.capacityMinutes ?? 0), 0)
         : null,
   };
 }
@@ -334,4 +351,30 @@ export function trendOf(
   const up = current > previous;
   const higherIsBetter = KPI_DEFINITIONS[key].direction === 'HIGHER_IS_BETTER';
   return up === higherIsBetter ? 'BETTER' : 'WORSE';
+}
+
+/**
+ * Indicadores que dependen de la producción atribuida (DX-050): con un período
+ * comparado sin ella, su variación no se calcula (BE-045).
+ */
+export const ATTRIBUTION_SENSITIVE_KPIS = [
+  'production',
+  'collectionRate',
+] as const satisfies readonly KpiKey[];
+
+/**
+ * Monedas en las que el período tuvo cobros y ninguna producción atribuida:
+ * lo cobrado es trabajo que no cuenta (anterior a DX-050 o de otro período) y
+ * una producción de 0 no es base para comparar.
+ */
+export function currenciesCollectedWithoutProduction(
+  a: PeriodAggregates,
+): Set<string> {
+  const out = new Set<string>();
+  for (const [currency, collected] of a.collected) {
+    if (collected > 0 && (a.production.get(currency) ?? 0) === 0) {
+      out.add(currency);
+    }
+  }
+  return out;
 }
