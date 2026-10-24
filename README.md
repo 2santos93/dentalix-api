@@ -1133,10 +1133,16 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   la asignación de ese convenio al paciente más reciente no posterior al alta
   del ítem) y quién creó el ítem (`createdById`/`Name`, columna nueva de
   `treatment_plan_items`, NULL en los ítems anteriores). La rebaja de convenio
-  va APARTE: no suma en `discount` ni en el bruto; los totales traen
-  `agreementReduction`. Con `professionalId`, una fila entra si esa persona
-  dio el descuento o, si tiene rebaja de convenio, si creó el ítem o asignó el
-  convenio. Migraciones `20261023210000_sec047_plan_item_created_by` y
+  va APARTE: los totales de DX-204 (`totals`: ítems, bruto, descuento y %) se
+  agregan con `FILTER` solo sobre las líneas que cuentan como descuento y no
+  cambian al entrar una línea solo de convenio; las rebajas van en
+  `agreementTotals` (líneas y suma por moneda) y `total` (paginación) cuenta
+  todas las líneas. Con `professionalId`, una línea cuenta como descuento si
+  esa persona lo dio (como en DX-204) y como rebaja si creó el ítem, asignó
+  el convenio o dio su descuento. Una línea solo de convenio de un plan sin
+  presentar toma la sede con la que se resolvió el precio
+  (`pricingLocationId`). En el CSV, su motivo es «Convenio …» y «Dado por» es
+  quien asignó el convenio (o, sin él, quien creó el ítem). Migraciones `20261023210000_sec047_plan_item_created_by` y
   `20261023210100_sec047_plan_item_agreement_reduction_idx` (parcial
   `treatment_plan_items_tenant_agreement_reduction_at_idx`, CONCURRENTLY).
   e2e: `test/discounts-agreement.e2e-spec.ts`.
@@ -1965,12 +1971,39 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   paciente, de ese pagador, sin retirar y **vigente hoy** (día civil de la
   sede), para cualquier rol, ADMIN incluido: si no, 400 en español. Un
   convenio **interno** (pagador de tipo OTRO: cortesía, empleados, socios)
-  solo lo asigna ADMIN (403 en español para el resto, antes de mirar la
-  cobertura); para él la cobertura es opcional y, si viene, se valida igual.
-  `GET /agreements` y la asignación devuelven `payer.type` para que la web
-  sepa qué pedir. Los pagadores creados por el relleno de `insurerEps` son
-  OTRO hasta que el ADMIN los reclasifica. Matriz en
+  lo asigna ADMIN, con la cobertura opcional (si viene, se valida igual). Otro
+  rol solo si manda una cobertura **migrada** (`migratedFromInsurerEps`, que
+  solo crea el relleno de DX-153 y la API no puede marcar) del paciente y de
+  ese pagador, vigente; si no, 403 en español con la pista de pedir al
+  administrador que reclasifique el pagador. `GET /agreements`, la
+  asignación y las coberturas devuelven `payer.type` y
+  `migratedFromInsurerEps` para que la web sepa qué pedir. Matriz en
   `test/patient-agreements-eligibility.e2e-spec.ts`.
+- **Riesgo aceptado (SEC-047)**: cualquier rol puede añadir una cobertura de
+  un pagador sin prueba y luego asignar su convenio; la mitigación es
+  detectiva (el informe de descuentos muestra quién asignó el convenio y
+  quién creó el ítem).
+- **Nota de despliegue (SEC-047)**: antes de publicar, avisa a los ADMIN de
+  las clínicas con convenios vivos de pagador OTRO: desde la versión con
+  SEC-047 solo los asigna un administrador (salvo con una cobertura migrada
+  del paciente). Si el pagador es una aseguradora o una empresa, que lo
+  reclasifiquen en Ajustes → Pagadores. Consulta (como owner, salta la RLS):
+
+  ```sql
+  SELECT t."name" AS clinica, py."name" AS pagador, a."name" AS convenio,
+         count(DISTINCT pa."patientId") FILTER (WHERE pa."deletedAt" IS NULL) AS pacientes_asignados,
+         count(DISTINCT pc."patientId") FILTER (WHERE pc."migratedFromInsurerEps") AS pacientes_con_cobertura_migrada
+    FROM "agreements" a
+    JOIN "payers" py ON py."tenantId" = a."tenantId" AND py."id" = a."payerId"
+    JOIN "tenants" t ON t."id" = a."tenantId"
+    LEFT JOIN "patient_agreements" pa
+      ON pa."tenantId" = a."tenantId" AND pa."agreementId" = a."id"
+    LEFT JOIN "patient_coverages" pc
+      ON pc."tenantId" = a."tenantId" AND pc."payerId" = py."id" AND pc."deletedAt" IS NULL
+   WHERE a."deletedAt" IS NULL AND py."deletedAt" IS NULL AND py."type" = 'OTRO'
+   GROUP BY t."name", py."name", a."name"
+   ORDER BY t."name", py."name", a."name";
+  ```
 - **Auditoría**: recursos `AGREEMENT` y `PRICE_LIST`; la asignación se audita
   como `PATIENT` con `reason` `AGREEMENT_ASSIGNED|AGREEMENT_REMOVED`. La
   metadata lleva nombres de campos, nunca importes ni datos del paciente.
