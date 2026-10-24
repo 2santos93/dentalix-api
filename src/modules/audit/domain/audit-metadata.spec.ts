@@ -597,3 +597,39 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     });
   });
 });
+
+describe('sanitizeAuditMetadata — nº de registro sanitario de la sede (DX-319)', () => {
+  it('conserva el número (o null) y si se imprime, antes y después', () => {
+    const healthRegistration = {
+      before: { number: '110010123401', shown: false },
+      after: { number: 'NRS 28/1234-AB', shown: true },
+    };
+    expect(sanitizeAuditMetadata({ healthRegistration })).toEqual({
+      healthRegistration,
+    });
+    const cleared = {
+      before: { number: 'NRS-1', shown: true },
+      after: { number: null, shown: false },
+    };
+    expect(sanitizeAuditMetadata({ healthRegistration: cleared })).toEqual({
+      healthRegistration: cleared,
+    });
+  });
+
+  it('descarta el cambio entero si un lado no tiene la forma admitida', () => {
+    const ok = { number: 'NRS-1', shown: false };
+    for (const healthRegistration of [
+      { before: ok },
+      { before: ok, after: { number: 'A'.repeat(65), shown: true } },
+      { before: ok, after: { number: 'NRS\n2', shown: true } },
+      { before: ok, after: { number: 'NRS\u202E2', shown: true } },
+      { before: ok, after: { number: 'NRS\u20282', shown: true } },
+      { before: ok, after: { number: '', shown: true } },
+      { before: ok, after: { number: 12, shown: true } },
+      { before: ok, after: { number: 'NRS-2', shown: 'sí' } },
+      { before: ok, after: { number: 'NRS-2', shown: true, extra: 'x' } },
+    ]) {
+      expect(sanitizeAuditMetadata({ healthRegistration })).toEqual({});
+    }
+  });
+});

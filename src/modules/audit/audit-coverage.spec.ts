@@ -301,7 +301,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CLINICAL_ENTRY',
     patient: P,
   },
-  // DX-212: los cambios del catálogo y el código REPS de la sede.
+  // DX-212: los cambios del catálogo y de la sede.
   'POST /catalog/items': {
     action: 'CREATE',
     resource: 'DENTAL_CATALOG_ITEM',

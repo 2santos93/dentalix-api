@@ -109,9 +109,6 @@ export const NORTE_SCHEDULE: ScheduleRange[] = [
   { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 },
 ];
 
-/** DX-212: código de habilitación REPS (12 dígitos) de la sede principal. */
-export const DEMO_PRINCIPAL_REPS = '110010123401';
-
 /**
  * DX-222: teléfono de la sede principal, el que las indicaciones
  * postoperatorias muestran para urgencias (`{{telefono_sede}}`). Ficticio.

@@ -1,36 +1,10 @@
 import {
   ICD10_INVALID_MESSAGE,
-  REPS_FORMAT_MESSAGE,
   isValidIcd10Format,
-  isValidRepsCode,
   normalizeIcd10Code,
-  normalizeRepsCode,
 } from './health-codes';
 
 describe('códigos de salud (DX-212)', () => {
-  describe('REPS', () => {
-    it('acepta 12 dígitos', () => {
-      expect(isValidRepsCode('110010123401')).toBe(true);
-    });
-
-    it.each(['11001012340', '1100101234012', '11001012340A', ''])(
-      'rechaza «%s»',
-      (code) => {
-        expect(isValidRepsCode(code)).toBe(false);
-      },
-    );
-
-    it('normaliza espacios; vacío = quitar el código', () => {
-      expect(normalizeRepsCode(' 110010123401 ')).toBe('110010123401');
-      expect(normalizeRepsCode('')).toBeNull();
-      expect(normalizeRepsCode(undefined)).toBeUndefined();
-    });
-
-    it('el mensaje dice el formato esperado', () => {
-      expect(REPS_FORMAT_MESSAGE).toMatch(/12 dígitos/);
-    });
-  });
-
   describe('CIE-10', () => {
     it.each(['K02.1', 'Z01.2', 'K05.10'])('formato válido %s', (code) => {
       expect(isValidIcd10Format(code)).toBe(true);

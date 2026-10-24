@@ -1779,7 +1779,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'PATCH /locations/:id',
       verb: 'patch',
       path: () => `/locations/${a.locationId}`,
-      body: () => ({ name: 'Hackeada', isActive: false }),
+      // DX-319: también el nº de registro sanitario y si se imprime.
+      body: () => ({
+        name: 'Hackeada',
+        isActive: false,
+        healthRegistrationNumber: 'Hackeada',
+        showHealthRegistrationNumber: true,
+      }),
       status: 404,
     },
     {

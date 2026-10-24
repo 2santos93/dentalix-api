@@ -17,7 +17,8 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     name: 'Sede principal',
     address: null,
     country: 'CO',
-    repsHabilitationCode: null,
+    healthRegistrationNumber: null,
+    showHealthRegistrationNumber: false,
     phone: null,
     isActive: true,
     timeZone: 'America/Bogota',
@@ -87,9 +88,9 @@ describe('UpdateLocationUseCase', () => {
       makeRepo({ countActive: () => Promise.resolve(2) }),
     );
 
-    const updated = await uc.execute('loc-1', { isActive: false });
+    const { location } = await uc.execute('loc-1', { isActive: false });
 
-    expect(updated.isActive).toBe(false);
+    expect(location.isActive).toBe(false);
   });
 
   it('no aplica la protección cuando la sede YA estaba inactiva', async () => {
@@ -125,7 +126,7 @@ describe('país de la sede (DX-013)', () => {
       Promise.resolve(makeLocation({ ...patch })),
     );
     const uc = new UpdateLocationUseCase(makeRepo({ update }));
-    const updated = await uc.execute('loc-1', { country: 'ES' });
+    const { location: updated } = await uc.execute('loc-1', { country: 'ES' });
     expect(update).toHaveBeenCalledWith(
       'loc-1',
       expect.objectContaining({ country: 'ES' }),
@@ -134,44 +135,79 @@ describe('país de la sede (DX-013)', () => {
   });
 });
 
-describe('UpdateLocationUseCase · REPS (DX-212)', () => {
-  it('guarda el código de 12 dígitos sin espacios', async () => {
-    const update = jest.fn((_id: string, patch: object) =>
+describe('UpdateLocationUseCase · nº de registro sanitario (DX-319)', () => {
+  const updateSpy = () =>
+    jest.fn((_id: string, patch: Partial<Location>) =>
       Promise.resolve(makeLocation(patch)),
     );
+
+  it('guarda el texto recortado, sin validar formato ni país', async () => {
+    const update = updateSpy();
     const uc = new UpdateLocationUseCase(makeRepo({ update }));
-    const result = await uc.execute('loc-1', {
-      repsHabilitationCode: ' 110010123401 ',
+    const { location } = await uc.execute('loc-1', {
+      healthRegistrationNumber: '  CS-28/1234 ',
+      showHealthRegistrationNumber: true,
     });
     expect(update).toHaveBeenCalledWith(
       'loc-1',
-      expect.objectContaining({ repsHabilitationCode: '110010123401' }),
+      expect.objectContaining({
+        healthRegistrationNumber: 'CS-28/1234',
+        showHealthRegistrationNumber: true,
+      }),
     );
-    expect(result.repsHabilitationCode).toBe('110010123401');
+    expect(location.healthRegistrationNumber).toBe('CS-28/1234');
+    expect(location.showHealthRegistrationNumber).toBe(true);
   });
 
-  it('vacío lo quita', async () => {
-    const update = jest.fn((_id: string, patch: object) =>
-      Promise.resolve(makeLocation(patch)),
-    );
-    await new UpdateLocationUseCase(makeRepo({ update })).execute('loc-1', {
-      repsHabilitationCode: '',
-    });
-    expect(update).toHaveBeenCalledWith(
-      'loc-1',
-      expect.objectContaining({ repsHabilitationCode: null }),
-    );
-  });
-
-  it('formato inválido: 400 con el formato esperado', async () => {
-    const update = jest.fn();
+  it('vacío o null lo quitan; sin el campo no se toca', async () => {
+    const update = updateSpy();
     const uc = new UpdateLocationUseCase(makeRepo({ update }));
-    await expect(
-      uc.execute('loc-1', { repsHabilitationCode: '12345' }),
-    ).rejects.toThrow(
-      'El código de habilitación REPS debe tener 12 dígitos (p. ej. 110010123401)',
+    await uc.execute('loc-1', { healthRegistrationNumber: '   ' });
+    await uc.execute('loc-1', { healthRegistrationNumber: null });
+    await uc.execute('loc-1', { name: 'Otra' });
+    expect(update.mock.calls.map(([, patch]) => patch)).toEqual([
+      expect.objectContaining({ healthRegistrationNumber: null }),
+      expect.objectContaining({ healthRegistrationNumber: null }),
+      expect.objectContaining({
+        healthRegistrationNumber: undefined,
+        showHealthRegistrationNumber: undefined,
+      }),
+    ]);
+  });
+
+  it('devuelve el antes y el después para la auditoría solo si cambia', async () => {
+    const before = makeLocation({ healthRegistrationNumber: '110010123401' });
+    const uc = new UpdateLocationUseCase(
+      makeRepo({
+        findById: () => Promise.resolve(before),
+        // Como Prisma: un campo undefined no se toca.
+        update: (_id, patch) =>
+          Promise.resolve(
+            makeLocation({
+              ...before,
+              ...Object.fromEntries(
+                Object.entries(patch).filter(([, v]) => v !== undefined),
+              ),
+            }),
+          ),
+      }),
     );
-    expect(update).not.toHaveBeenCalled();
+
+    const changed = await uc.execute('loc-1', {
+      healthRegistrationNumber: 'NRS-7',
+      showHealthRegistrationNumber: true,
+    });
+    expect(changed.healthRegistration).toEqual({
+      before: { number: '110010123401', shown: false },
+      after: { number: 'NRS-7', shown: true },
+    });
+
+    const same = await uc.execute('loc-1', {
+      healthRegistrationNumber: ' 110010123401 ',
+    });
+    expect(same.healthRegistration).toBeNull();
+    const renamed = await uc.execute('loc-1', { name: 'Sede Centro' });
+    expect(renamed.healthRegistration).toBeNull();
   });
 });
 
@@ -225,7 +261,9 @@ describe('teléfono de la sede (DX-222)', () => {
     );
     const uc = new UpdateLocationUseCase(makeRepo({ update }));
 
-    const saved = await uc.execute('loc-1', { phone: ' +57 601 555 0101 ' });
+    const { location: saved } = await uc.execute('loc-1', {
+      phone: ' +57 601 555 0101 ',
+    });
     await uc.execute('loc-1', { phone: '' });
     await uc.execute('loc-1', { phone: null });
     await uc.execute('loc-1', { name: 'Otra' });

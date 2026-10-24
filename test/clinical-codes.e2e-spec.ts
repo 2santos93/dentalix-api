@@ -15,9 +15,9 @@ import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd
 import { civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-212 · códigos clínicos de punta a punta: búsqueda CIE-10, evolución con
-// diagnósticos por rol, REPS solo ADMIN (auditado), sede de la evolución
-// (DX-232) y aislamiento entre clínicas. DX-318/DX-320: ya no existen la
-// preparación RDA ni el código CUPS del catálogo. DIRECT_URL solo lee y limpia.
+// diagnósticos por rol, sede de la evolución (DX-232) y aislamiento entre
+// clínicas. DX-318/DX-320/DX-319: ya no existen la preparación RDA, el código
+// CUPS del catálogo ni el REPS de la sede (ver location-health-registration). DIRECT_URL solo lee y limpia.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -41,10 +41,9 @@ interface CatalogItem {
 interface Location {
   id: string;
   country: string;
-  repsHabilitationCode: string | null;
 }
 
-describe('Códigos clínicos: CIE-10 y REPS (DX-212, e2e)', () => {
+describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
   let app: INestApplication<App>;
   let a: Clinic;
   let b: Clinic;
@@ -320,54 +319,6 @@ describe('Códigos clínicos: CIE-10 y REPS (DX-212, e2e)', () => {
     });
   });
 
-  describe('REPS de la sede (solo ADMIN, auditado)', () => {
-    it('formato inválido da 400 con el formato esperado', async () => {
-      const reps = await call(
-        a,
-        'patch',
-        `/locations/${location.id}`,
-        a.adminToken,
-      )
-        .send({ repsHabilitationCode: '123' })
-        .expect(400);
-      expect((reps.body as { message: string }).message).toMatch(/12 dígitos/);
-    });
-
-    it('DENTIST y RECEPTION no pueden editarlo (403)', async () => {
-      for (const token of [dentist.token, reception]) {
-        await call(a, 'patch', `/locations/${location.id}`, token)
-          .send({ repsHabilitationCode: '110010123401' })
-          .expect(403);
-      }
-    });
-
-    it('ADMIN lo guarda; queda auditado con el campo cambiado', async () => {
-      const loc = await call(
-        a,
-        'patch',
-        `/locations/${location.id}`,
-        a.adminToken,
-      )
-        .send({ repsHabilitationCode: '110010123401' })
-        .expect(200);
-      expect((loc.body as Location).repsHabilitationCode).toBe('110010123401');
-
-      const events = await raw.auditEvent.findMany({
-        where: {
-          tenantId: a.tenantId,
-          action: 'UPDATE',
-          resourceType: 'LOCATION',
-        },
-      });
-      expect(
-        events.map((e) => [
-          e.resourceId,
-          (e.metadata as { changedFields?: string[] }).changedFields,
-        ]),
-      ).toContainEqual([location.id, ['repsHabilitationCode']]);
-    });
-  });
-
   // DX-320 (decisión D4): el catálogo no tiene código CUPS ni ningún «código
   // externo»; basta su código interno. Un cliente antiguo que aún lo mande ve
   // el campo descartado por la ValidationPipe global (whitelist), como
@@ -533,12 +484,12 @@ describe('Códigos clínicos: CIE-10 y REPS (DX-212, e2e)', () => {
       expect(seen.body).toEqual([]);
     });
 
-    it('B no puede editar un ítem del catálogo de A ni poner el REPS de una sede de A (404)', async () => {
+    it('B no puede editar un ítem del catálogo de A ni editar una sede de A (404)', async () => {
       await call(b, 'patch', `/catalog/items/${procedure.id}`, b.adminToken)
         .send({ labelEs: 'Ajeno' })
         .expect(404);
       await call(b, 'patch', `/locations/${location.id}`, b.adminToken)
-        .send({ repsHabilitationCode: '110010123401' })
+        .send({ name: 'Hackeada' })
         .expect(404);
     });
   });
