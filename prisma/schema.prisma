@@ -162,7 +162,9 @@ model User {
   appointmentStatusReversals        AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
   // DX-279: versiones de la política de cancelación que creó.
   cancellationPolicyVersions        CancellationPolicyVersion[]
-  cancellationFees                  CancellationFee[]
+  cancellationFees                  CancellationFee[]           @relation("CancellationFeeCreatedBy")
+  // SEC-050: cargos por inasistencia que anuló (con motivo).
+  cancellationFeesVoided            CancellationFee[]           @relation("CancellationFeeVoidedBy")
 
   @@map("users")
 }
@@ -4387,7 +4389,8 @@ enum CancellationFeeStatus {
 
 /// DX-291: cargo (ítem DONE en el plan «Cargos administrativos») o condonación
 /// de una cita NO_SHOW o cancelada tarde. UNA fila por cita (índice único: el
-/// cargo es idempotente), APPEND-ONLY para la app (sin UPDATE/DELETE), RLS
+/// cargo es idempotente), APPEND-ONLY para la app (sin DELETE; el único UPDATE
+/// es la anulación de SEC-050, una vez y solo de sus tres columnas), RLS
 /// FORCE y FK compuestas. CHECK cancellation_fees_status_check: CHARGED lleva
 /// importe > 0, moneda, ítem y versión comunicada; WAIVED, solo el motivo
 /// (3–500).
@@ -4395,6 +4398,8 @@ enum CancellationFeeStatus {
 ///   cancellation_fees_tenant_policy_version_idx ("tenantId", "policyVersionId")
 ///     WHERE "policyVersionId" IS NOT NULL
 ///   cancellation_fees_currency_idx ("currency") WHERE "currency" IS NOT NULL
+///   cancellation_fees_voided_by_idx ("voidedById") WHERE "voidedById" IS NOT NULL
+///   cancellation_fees_plan_item_idx ("planItemId") WHERE "planItemId" IS NOT NULL
 model CancellationFee {
   id              String                @id @default(uuid(7)) @db.Uuid
   tenantId        String                @db.Uuid
@@ -4409,13 +4414,24 @@ model CancellationFee {
   waiveReason     String?               @db.VarChar(500)
   createdById     String                @db.Uuid
   createdAt       DateTime              @default(dbgenerated("timezone('UTC'::text, now())"))
+  // SEC-050: anulación de un cargo ya generado (solo CHARGED, una vez, con
+  // motivo de 3 a 500). Las tres van juntas (CHECK cancellation_fees_void_check)
+  // y son lo único que la app puede actualizar (GRANT por columna y trigger
+  // cancellation_fees_append_only). El ítem del cargo se retira en la misma
+  // transacción; mientras no se anula, el trigger
+  // treatment_plan_items_cancellation_fee_locked congela su precio, descuento,
+  // estado y retiro.
+  voidedAt        DateTime?
+  voidedById      String?               @db.Uuid
+  voidReason      String?               @db.VarChar(500)
 
   appointment   Appointment                @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_fees_appointment_fkey")
   planItem      TreatmentPlanItem?         @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict, map: "cancellation_fees_plan_item_fkey")
   location      Location                   @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_fees_location_fkey")
   policyVersion CancellationPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_fees_policy_version_fkey")
   currencyRef   Currency?                  @relation(fields: [currency], references: [code], onDelete: Restrict, map: "cancellation_fees_currency_fkey")
-  createdBy     User                       @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "cancellation_fees_created_by_fkey")
+  createdBy     User                       @relation("CancellationFeeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "cancellation_fees_created_by_fkey")
+  voidedBy      User?                      @relation("CancellationFeeVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "cancellation_fees_voided_by_fkey")
 
   @@unique([tenantId, appointmentId], map: "cancellation_fees_tenant_appointment_key")
   @@index([tenantId, patientId, planItemId], map: "cancellation_fees_tenant_patient_item_idx")
