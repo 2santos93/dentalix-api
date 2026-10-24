@@ -1,0 +1,11 @@
+-- DX-287: paciente vivo de la clínica por documento normalizado (alta y
+-- edición manual, importación y hoja de saldos: DX-107/DX-262), por "docKey"
+-- (columna comparada con `=` / `= ANY`, que sí es condición de índice bajo
+-- RLS). Parcial con el mismo predicado que las consultas: solo vivos y con
+-- documento. No es UNIQUE: hay duplicados ambiguos anteriores a DX-107
+-- («1.111» y «1111»); el candado de asesoría sigue siendo quien serializa.
+-- CONCURRENTLY para no bloquear las escrituras de patients; única sentencia
+-- (no puede ir en transacción). Aditivo. Si se corta, deja un índice
+-- INVALID: el IF NOT EXISTS no lo repara; hay que
+-- `DROP INDEX CONCURRENTLY "patients_tenant_doc_key_live_idx"` y repetirla.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "patients_tenant_doc_key_live_idx" ON "patients" ("tenantId", "docKey") WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL;

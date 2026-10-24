@@ -13,6 +13,14 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import { lockPatientDocs } from '../../patients/infrastructure/patient-doc-lock';
 import type { ExistingPatientDoc } from '../domain/dedupe';
 import {
+  balancePatientsByDocSql,
+  existingBalancesByDocSql,
+  existingDocsSql,
+  knownDocsInFileSql,
+  knownDocsPatientsSql,
+  patientsToFillByDocSql,
+} from './patient-doc-queries';
+import {
   fieldsToRevert,
   fillEmpty,
   type FilledValues,
@@ -305,17 +313,8 @@ export class PrismaPatientImportRepository {
   async existingDocs(keys: string[]): Promise<ExistingPatientDoc[]> {
     if (keys.length === 0) return [];
     const tenantId = this.tenantId();
-    return this.prisma.runWithTenant(
-      (tx) =>
-        tx.$queryRaw<ExistingPatientDoc[]>`
-        SELECT "id", "docType",
-               regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey",
-               ("partially_suppressed_at" IS NOT NULL) AS "partiallySuppressed"
-          FROM "patients"
-         WHERE "tenantId" = ${tenantId}::uuid
-           AND "deletedAt" IS NULL
-           AND "docNumber" IS NOT NULL
-           AND regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])`,
+    return this.prisma.runWithTenant((tx) =>
+      tx.$queryRaw<ExistingPatientDoc[]>(existingDocsSql(tenantId, keys)),
     );
   }
 
@@ -558,23 +557,12 @@ export class PrismaPatientImportRepository {
     const [patients, inFile] = await this.prisma.runWithTenant(
       (tx) =>
         Promise.all([
-          tx.$queryRaw<{ docKey: string; n: number }[]>`
-            SELECT regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey",
-                   count(*)::int AS "n"
-              FROM "patients"
-             WHERE "tenantId" = ${tenantId}::uuid
-               AND "deletedAt" IS NULL
-               AND "docNumber" IS NOT NULL
-               AND regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])
-             GROUP BY 1`,
-          tx.$queryRaw<{ docKey: string }[]>`
-            SELECT DISTINCT regexp_replace(upper("data"->>'docNumber'), '[^0-9A-Z]', '', 'g') AS "docKey"
-              FROM "patient_import_rows"
-             WHERE "tenantId" = ${tenantId}::uuid
-               AND "batchId" = ${batchId}::uuid
-               AND "outcome" = 'PENDING'
-               AND "data" IS NOT NULL
-               AND regexp_replace(upper("data"->>'docNumber'), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])`,
+          tx.$queryRaw<{ docKey: string; n: number }[]>(
+            knownDocsPatientsSql(tenantId, keys),
+          ),
+          tx.$queryRaw<{ docKey: string }[]>(
+            knownDocsInFileSql(tenantId, batchId, keys),
+          ),
         ]),
       LONG_TX,
     );
@@ -600,34 +588,17 @@ export class PrismaPatientImportRepository {
     if (keys.length === 0) return out;
     const tenantId = this.tenantId();
     const rows = await this.prisma.runWithTenant(
-      (tx) => tx.$queryRaw<
-        {
-          docKey: string;
-          currency: string;
-          cents: number;
-          asOfDate: Date;
-          fileName: string;
-          importedOn: string;
-        }[]
-      >`
-        SELECT regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey",
-               o."currency",
-               (o."amount" * 100)::bigint::float8 AS "cents",
-               o."asOfDate",
-               b."fileName",
-               to_char(timezone(${timeZone}, o."createdAt" AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS "importedOn"
-          FROM "opening_balances" o
-          JOIN "patients" p
-            ON p."tenantId" = o."tenantId" AND p."id" = o."patientId"
-          JOIN "patient_import_batches" b
-            ON b."tenantId" = o."tenantId" AND b."id" = o."importBatchId"
-         WHERE o."tenantId" = ${tenantId}::uuid
-           AND o."voidedAt" IS NULL
-           AND o."importBatchId" <> ${batchId}::uuid
-           AND p."deletedAt" IS NULL
-           AND p."docNumber" IS NOT NULL
-           AND regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])
-         ORDER BY o."createdAt", o."id"`,
+      (tx) =>
+        tx.$queryRaw<
+          {
+            docKey: string;
+            currency: string;
+            cents: number;
+            asOfDate: Date;
+            fileName: string;
+            importedOn: string;
+          }[]
+        >(existingBalancesByDocSql(tenantId, batchId, keys, timeZone)),
       LONG_TX,
     );
     for (const r of rows) {
@@ -809,14 +780,7 @@ export class PrismaPatientImportRepository {
       // (ambiguo, se cuenta aparte: revisión M7).
       const patients = await tx.$queryRaw<
         { id: string; docKey: string; n: number }[]
-      >`
-        SELECT min(p."id"::text)::uuid AS "id", k."docKey", count(*)::int AS "n"
-          FROM "patients" p
-          JOIN unnest(${keys}::text[]) AS k("docKey")
-            ON regexp_replace(upper(p."docNumber"), '[^0-9A-Z]', '', 'g') = k."docKey"
-         WHERE p."tenantId" = ${tenantId}::uuid AND p."deletedAt" IS NULL
-           AND p."docNumber" IS NOT NULL
-         GROUP BY k."docKey"`;
+      >(balancePatientsByDocSql(tenantId, keys));
       const patientOf = new Map(
         patients.filter((p) => p.n === 1).map((p) => [p.docKey, p.id]),
       );
@@ -1195,16 +1159,7 @@ export class PrismaPatientImportRepository {
     const existing = keys.length
       ? await tx.$queryRaw<
           (FillablePatient & { id: string; docType: string; docKey: string })[]
-        >`
-          SELECT "id", "docType", "birthDate", "sex", "phone", "email", "address",
-                 "occupation", "emergencyContactName", "emergencyContactPhone", "notes",
-                 "partially_suppressed_at" AS "partiallySuppressedAt",
-                 regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') AS "docKey"
-            FROM "patients"
-           WHERE "tenantId" = ${tenantId}::uuid AND "deletedAt" IS NULL AND "docNumber" IS NOT NULL
-             AND regexp_replace(upper("docNumber"), '[^0-9A-Z]', '', 'g') = ANY(${keys}::text[])
-           ORDER BY "id"
-           FOR UPDATE`
+        >(patientsToFillByDocSql(tenantId, keys))
       : [];
     const byKey = new Map(existing.map((p) => [p.docKey, p]));
     const outcomes: {

@@ -436,6 +436,11 @@ model Patient {
   // DX-225: últimos 8 dígitos del teléfono (dx_phone_tail). Lo mantiene el
   // trigger `patients_phone_tail`; la app solo lo lee en SQL (BAJA por móvil).
   phoneTail                    String?               @ignore
+  // DX-287: clave del documento (public.dx_doc_key: solo [0-9A-Z], la regla de
+  // docKey() en patients/domain/doc-key.ts). La mantiene el trigger
+  // `patients_doc_key`; la app solo la lee en SQL (alta, edición e importación
+  // buscan «1.111.111» = «1111111» por el índice, también bajo RLS).
+  docKey                       String?               @ignore
   // DX-107: lote de importación que CREÓ al paciente (NULL si se dio de alta a
   // mano). «Deshacer lote» retira en blando solo los de su lote. FK compuesta
   // por tenant (patients_import_batch_fkey).
@@ -512,6 +517,11 @@ model Patient {
   //   patients_tenant_import_batch_idx ("tenantId", import_batch_id)
   //     WHERE import_batch_id IS NOT NULL
   //     -> pacientes de un lote (deshacer, DX-107) y lado hijo de su FK.
+  //   patients_tenant_doc_key_live_idx ("tenantId", "docKey")
+  //     WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL
+  //     -> paciente vivo por documento normalizado: alta y edición manual,
+  //        importación y hoja de saldos (DX-107, DX-262, DX-287). No único:
+  //        hay duplicados ambiguos anteriores a DX-107 («1.111» y «1111»).
   @@map("patients")
 }
 

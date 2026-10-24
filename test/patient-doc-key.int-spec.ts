@@ -14,6 +14,10 @@ import {
   knownDocsPatientsSql,
   patientsToFillByDocSql,
 } from '../src/modules/patient-imports/infrastructure/patient-doc-queries';
+import {
+  BALANCE_CHUNK_SIZE,
+  IMPORT_CHUNK_SIZE,
+} from '../src/modules/patient-imports/application/patient-import-jobs';
 import { resetDatabase } from './support/e2e-fixtures';
 
 // DX-287 (DB-047): clave de documento normalizada en una columna indexada.
@@ -31,10 +35,12 @@ const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 
 const INDEX = 'patients_tenant_doc_key_live_idx';
-/** Pacientes con documento en la clínica A (con puntos, como en Colombia). */
-const VOLUME = 20_000;
-/** Bloque de la importación (CHUNK de patients-import.process). */
-const IMPORT_CHUNK = 250;
+/**
+ * Pacientes con documento en la clínica A (con puntos, como en Colombia):
+ * el volumen del criterio de DX-287. Con muchos menos, el planificador puede
+ * preferir, con razón, recorrer una tabla pequeña con 250 claves.
+ */
+const VOLUME = 60_000;
 
 interface PlanNode {
   'Node Type': string;
@@ -274,14 +280,14 @@ describe('DX-287 · patients."docKey" indexada (int)', () => {
       expect(hit['Actual Rows']).toBe(1);
     });
 
-    it(`applyRows (bloque de ${IMPORT_CHUNK} con FOR UPDATE): Index Cond con = ANY, sin Seq Scan`, async () => {
+    it(`applyRows (bloque de ${IMPORT_CHUNK_SIZE} con FOR UPDATE): Index Cond con = ANY, sin Seq Scan`, async () => {
       const plan = await explain(
         a,
-        patientsToFillByDocSql(a, keysOf(IMPORT_CHUNK)),
+        patientsToFillByDocSql(a, keysOf(IMPORT_CHUNK_SIZE)),
       );
       const hit = patientsAccess(plan);
       expect((hit['Actual Rows'] ?? 0) * (hit['Actual Loops'] ?? 1)).toBe(
-        IMPORT_CHUNK,
+        IMPORT_CHUNK_SIZE,
       );
       expect(plan.map((n) => n['Node Type'])).toContain('LockRows');
     });
@@ -291,16 +297,21 @@ describe('DX-287 · patients."docKey" indexada (int)', () => {
       ['knownDocs (hoja de saldos)', knownDocsPatientsSql],
       ['processBalanceChunk', balancePatientsByDocSql],
     ])(
-      '%s con 500 claves: Index Cond sobre "docKey", sin Seq Scan',
+      '%s con un bloque de saldos: Index Cond sobre "docKey", sin Seq Scan',
       async (_label, build) => {
-        patientsAccess(await explain(a, build(a, keysOf(500))));
+        patientsAccess(await explain(a, build(a, keysOf(BALANCE_CHUNK_SIZE))));
       },
     );
 
-    it('existingBalances con 500 claves: sin Seq Scan de patients ni la expresión en Filter', async () => {
+    it('existingBalances con un bloque de saldos: sin Seq Scan de patients ni la expresión en Filter', async () => {
       const plan = await explain(
         a,
-        existingBalancesByDocSql(a, a, keysOf(500), 'America/Bogota'),
+        existingBalancesByDocSql(
+          a,
+          a,
+          keysOf(BALANCE_CHUNK_SIZE),
+          'America/Bogota',
+        ),
       );
       const onPatients = plan.filter((n) => n['Relation Name'] === 'patients');
       expect(onPatients.map((n) => n['Node Type'])).not.toContain('Seq Scan');
@@ -313,20 +324,20 @@ describe('DX-287 · patients."docKey" indexada (int)', () => {
   describe('comportamiento', () => {
     it('encuentra el documento escrito distinto, solo vivo, solo en la clínica y sin el propio paciente', async () => {
       const found = await prisma.runWithTenant(a, (tx) =>
-        livePatientWithDoc(tx, a, '10-000-321'),
+        livePatientWithDoc(tx, a, '10-000-123'),
       );
       expect(found).not.toBeNull();
       const [own] = await raw.$queryRaw<{ docNumber: string }[]>`
         SELECT "docNumber" FROM "patients" WHERE "id" = ${found}::uuid`;
-      expect(own.docNumber).toBe(seededDoc(321));
+      expect(own.docNumber).toBe(seededDoc(123));
       expect(
         await prisma.runWithTenant(a, (tx) =>
-          livePatientWithDoc(tx, a, '10.000.321', found as string),
+          livePatientWithDoc(tx, a, '10.000.123', found as string),
         ),
       ).toBeNull();
-      // B tiene «10000321» sin puntos: desde A no se ve y desde B sí.
+      // B tiene «10000123» sin puntos: desde A no se ve y desde B sí.
       const inB = await prisma.runWithTenant(b, (tx) =>
-        livePatientWithDoc(tx, b, '10.000.321'),
+        livePatientWithDoc(tx, b, '10.000.123'),
       );
       expect(inB).not.toBeNull();
       expect(inB).not.toBe(found);
@@ -337,7 +348,7 @@ describe('DX-287 · patients."docKey" indexada (int)', () => {
       });
       expect(
         await prisma.runWithTenant(a, (tx) =>
-          livePatientWithDoc(tx, a, '10000321'),
+          livePatientWithDoc(tx, a, '10000123'),
         ),
       ).toBeNull();
       // Sin letras ni dígitos no busca nada.
