@@ -206,6 +206,31 @@ describe('buildAuditDraft (DX-009)', () => {
     expect(JSON.stringify(draft)).not.toMatch(/Reclamo/);
   });
 
+  it('SEC-050: el estado antes y después fijo del endpoint va a metadata.statusChange; el motivo libre no', () => {
+    const draft = buildAuditDraft(
+      {
+        action: 'VOID',
+        resource: 'APPOINTMENT',
+        resourceId: { param: 'id' },
+        patient: { response: 'patientId' },
+        reason: 'CANCELLATION_FEE_VOIDED',
+        statusChange: { from: 'CHARGED', to: 'VOIDED' },
+      },
+      req({
+        params: { id: ENTRY },
+        body: { reason: 'Cargo generado por error' },
+      }),
+      { patientId: PATIENT },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      params: { id: ENTRY },
+      reason: 'CANCELLATION_FEE_VOIDED',
+      statusChange: { from: 'CHARGED', to: 'VOIDED' },
+    });
+    expect(JSON.stringify(draft)).not.toMatch(/por error/);
+  });
+
   it('el paciente se busca por el recurso cuando la ruta no lo trae', () => {
     const draft = buildAuditDraft(
       {

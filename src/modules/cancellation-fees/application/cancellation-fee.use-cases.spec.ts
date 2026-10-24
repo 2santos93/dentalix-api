@@ -8,14 +8,18 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import {
   ChargeCancellationFeeUseCase,
   GetCancellationFeeUseCase,
+  VoidCancellationFeeUseCase,
   WaiveCancellationFeeUseCase,
   type FeeActor,
 } from './cancellation-fee.use-cases';
 import type {
   CancellationFeeContext,
   CancellationFeeRepository,
+  CancellationFeeRecord,
   ChargeFeeInput,
+  FeeVoidOutcome,
   FeeWriteOutcome,
+  VoidFeeInput,
   WaiveFeeInput,
 } from '../domain/ports/cancellation-fee-repository.port';
 
@@ -23,6 +27,15 @@ const TENANT = '11111111-1111-4111-8111-111111111111';
 const APPT = '22222222-2222-4222-8222-222222222222';
 const ADMIN: FeeActor = { userId: 'u-admin', role: 'ADMIN' };
 const RECEPTION: FeeActor = { userId: 'u-rec', role: 'RECEPTION' };
+
+/** Campos de SEC-050 de un cargo sin anular, con el ítem cobrando lo suyo. */
+const LIVE = {
+  itemAmount: null,
+  itemMismatch: false,
+  voidedAt: null,
+  voidedByName: null,
+  voidReason: null,
+} satisfies Partial<CancellationFeeRecord>;
 
 /** Doble en memoria de UNA cita: el repositorio real lo prueban int y e2e. */
 class FakeFeeRepo implements CancellationFeeRepository {
@@ -72,6 +85,8 @@ class FakeFeeRepo implements CancellationFeeRepository {
       policyVersionId: input.expectedPolicyVersionId,
       createdAt: new Date(),
       createdByName: 'Admin',
+      ...LIVE,
+      itemAmount: input.amount,
     };
     return Promise.resolve({ outcome: 'OK', fee: this.ctx!.fee });
   }
@@ -90,6 +105,25 @@ class FakeFeeRepo implements CancellationFeeRepository {
       policyVersionId: null,
       createdAt: new Date(),
       createdByName: 'Admin',
+      ...LIVE,
+    };
+    return Promise.resolve({ outcome: 'OK', fee: this.ctx!.fee });
+  }
+
+  voids: VoidFeeInput[] = [];
+  nextVoid: FeeVoidOutcome['outcome'] = 'OK';
+
+  voidFee(input: VoidFeeInput): Promise<FeeVoidOutcome> {
+    this.voids.push(input);
+    if (this.nextVoid !== 'OK')
+      return Promise.resolve({ outcome: this.nextVoid });
+    this.ctx!.fee = {
+      ...this.ctx!.fee!,
+      planItemRemoved: true,
+      itemAmount: null,
+      voidedAt: new Date(),
+      voidedByName: 'Admin',
+      voidReason: input.reason,
     };
     return Promise.resolve({ outcome: 'OK', fee: this.ctx!.fee });
   }
@@ -188,6 +222,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       policyVersionId: 'v1',
       createdAt: new Date(),
       createdByName: null,
+      ...LIVE,
     };
     await expect(promise).rejects.toThrow(
       new ConflictException('Esta cita ya tiene su cargo generado.'),
@@ -236,6 +271,95 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       chargeBlock: null,
       canManage: false,
       communicated: { suggestedFee: 50000, currency: 'COP', version: 1 },
+    });
+  });
+
+  describe('anular el cargo (SEC-050)', () => {
+    const voidFee = (reason?: string, actor = ADMIN, allowed?: string[]) =>
+      run(
+        () =>
+          new VoidCancellationFeeUseCase(repo, ctx, true).execute(
+            APPT,
+            reason,
+            actor,
+          ),
+        allowed,
+      );
+
+    it('ADMIN anula con motivo: queda VOIDED con quién y por qué, y el ítem fuera del plan', async () => {
+      await charge();
+      const view = await voidFee('  Cargo generado por error  ');
+      expect(repo.voids).toEqual([
+        {
+          appointmentId: APPT,
+          reason: 'Cargo generado por error',
+          voidedById: 'u-admin',
+        },
+      ]);
+      expect(view).toMatchObject({
+        status: 'VOIDED',
+        fee: {
+          voidReason: 'Cargo generado por error',
+          planItemRemoved: true,
+        },
+      });
+      // Una decisión por cita: ni otro cargo ni condonar.
+      await expect(charge()).rejects.toThrow(ConflictException);
+    });
+
+    it('sin motivo (o de más de 500): 400 y no se escribe', async () => {
+      await charge();
+      await expect(voidFee('  ')).rejects.toThrow(
+        new BadRequestException(
+          'Indica el motivo de la anulación (entre 3 y 500 caracteres).',
+        ),
+      );
+      await expect(voidFee('x'.repeat(501))).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(repo.voids).toHaveLength(0);
+    });
+
+    it('RECEPTION: 403 si la política no lo permite; con permiso, anula', async () => {
+      await charge();
+      await expect(voidFee('Error', RECEPTION)).rejects.toThrow(
+        ForbiddenException,
+      );
+      repo.ctx!.receptionCanCharge = true;
+      await expect(voidFee('Error', RECEPTION)).resolves.toMatchObject({
+        status: 'VOIDED',
+      });
+    });
+
+    it('sede no permitida (DX-089): 403; de otra clínica: 404', async () => {
+      await charge();
+      await expect(voidFee('Error', ADMIN, ['otra-sede'])).rejects.toThrow(
+        ForbiddenException,
+      );
+      repo.ctx = null;
+      await expect(voidFee('Error')).rejects.toThrow(NotFoundException);
+      expect(repo.voids).toHaveLength(0);
+    });
+
+    it('sin cargo, condonado o ya anulado: 409 en español', async () => {
+      await expect(voidFee('Error')).rejects.toThrow(
+        new ConflictException(
+          'Esta cita no tiene un cargo generado que anular.',
+        ),
+      );
+      await charge();
+      await voidFee('Error');
+      await expect(voidFee('Otra vez')).rejects.toThrow(
+        new ConflictException('El cargo de esta cita ya se anuló.'),
+      );
+    });
+
+    it('ya cobrado (PAID) u otra petición ganó (ALREADY_VOIDED): 409', async () => {
+      await charge();
+      repo.nextVoid = 'PAID';
+      await expect(voidFee('Error')).rejects.toThrow(/Anula antes el abono/);
+      repo.nextVoid = 'ALREADY_VOIDED';
+      await expect(voidFee('Error')).rejects.toThrow(/ya se anuló/);
     });
   });
 });

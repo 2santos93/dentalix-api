@@ -1099,6 +1099,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ reason: 'Intento ajeno' }),
       status: 404,
     },
+    // SEC-050: anular el cargo de A desde B.
+    {
+      name: 'POST /appointments/:id/cancellation-fee/void',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee/void`,
+      body: () => ({ reason: 'Intento ajeno' }),
+      status: 404,
+    },
     {
       name: 'GET /locations/:id/cancellation-policy/email-preview',
       verb: 'get',

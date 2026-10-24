@@ -31,7 +31,7 @@ interface FeeView {
   appointmentId: string;
   patientId: string;
   eligible: boolean;
-  status: 'NONE' | 'CHARGED' | 'WAIVED';
+  status: 'NONE' | 'CHARGED' | 'WAIVED' | 'VOIDED';
   chargeBlock: string | null;
   chargeBlockMessage: string | null;
   canManage: boolean;
@@ -344,18 +344,24 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         planItemRemoved: false,
       });
 
-      // El ítem no admite descuento: para anular un cargo generado por error
-      // se quita del plan («Quitar»). La vista lo dice (ya no hay nada que
-      // cobrar) y la decisión sigue siendo única: ni otro cargo ni condonar.
+      // SEC-050: desde el plan el ítem del cargo no se quita (409); un cargo
+      // generado por error se anula desde la cita, con motivo. La vista lo
+      // dice (ya no hay nada que cobrar) y la decisión sigue siendo única:
+      // ni otro cargo ni condonar.
       await admin()
         .delete(`/treatment-plans/${planId}/items/${second.fee!.planItemId}`)
-        .expect(200);
+        .expect(409);
+      await admin()
+        .post(`/appointments/${noShow}/cancellation-fee/void`, {
+          reason: 'Cargo generado por error',
+        })
+        .expect(201);
       const removed = (
         await admin()
           .get(`/appointments/${noShow}/cancellation-fee`)
           .expect(200)
       ).body as FeeView;
-      expect(removed.status).toBe('CHARGED');
+      expect(removed.status).toBe('VOIDED');
       expect(removed.fee).toMatchObject({ planItemRemoved: true });
       await admin()
         .post(`/appointments/${noShow}/cancellation-fee`)
