@@ -1203,7 +1203,7 @@ moneda). Errores 400 en español.
   sede), con el tenant explícito además de la RLS, en una transacción
   REPEATABLE READ; los dos períodos en paralelo. Índice nuevo
   `treatment_plan_items_tenant_done_completed_idx` (parcial, CONCURRENTLY,
-  migración `20261024120000_dx014_plan_items_done_completed_idx`) para la
+  migración `20261024130000_dx014_plan_items_done_completed_idx`) para la
   producción. Benchmark con 5 sedes y 24 meses: medianas de 170 ms (un mes) a
   ~470–650 ms (12 meses frente a los 12 anteriores) con la máquina cargada
   (`docs/perf/DX-014.md`).
