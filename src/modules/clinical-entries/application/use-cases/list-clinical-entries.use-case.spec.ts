@@ -37,8 +37,6 @@ function makeRepo(
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
     findAppointment: () => Promise.resolve(null),
     existingIcd10Codes: () => Promise.resolve(new Set<string>()),
-    loadRdaFactsBatch: () => Promise.resolve(new Map()),
-    loadRdaFacts: () => Promise.resolve(null),
     ...overrides,
   };
 }
@@ -69,13 +67,6 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
 
   existingIcd10Codes(): Promise<Set<string>> {
     return Promise.resolve(new Set());
-  }
-
-  loadRdaFactsBatch() {
-    return Promise.resolve(new Map());
-  }
-  loadRdaFacts(): Promise<null> {
-    return Promise.resolve(null);
   }
 
   listByPatient(

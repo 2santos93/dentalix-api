@@ -538,4 +538,98 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
       expect(sanitizeAuditMetadata({ cancellation })).toEqual({});
     }
   });
+
+  it('cobertura (SEC-049): tipo de pagador, 4 últimos del nº y si está verificada; nada más', () => {
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: '4050',
+          verified: true,
+          memberNumber: '1020304050',
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: '4050',
+        verified: true,
+      },
+    });
+    // Más de 4 caracteres, o con separadores, no pasa: sería el número.
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: '1020304050',
+          verified: false,
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: null,
+        verified: false,
+      },
+    });
+    expect(
+      sanitizeAuditMetadata({
+        coverage: { payerType: 'empresa', verified: true },
+      }),
+    ).toEqual({});
+  });
+
+  it('cobertura (SEC-049): los 4 últimos admiten letras de cualquier alfabeto (DX-311)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        coverage: {
+          payerType: 'EMPRESA',
+          memberNumberLast4: 'Ñ123',
+          verified: false,
+        },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: 'Ñ123',
+        verified: false,
+      },
+    });
+  });
+});
+
+describe('sanitizeAuditMetadata — nº de registro sanitario de la sede (DX-319)', () => {
+  it('conserva el número (o null) y si se imprime, antes y después', () => {
+    const healthRegistration = {
+      before: { number: '110010123401', shown: false },
+      after: { number: 'NRS 28/1234-AB', shown: true },
+    };
+    expect(sanitizeAuditMetadata({ healthRegistration })).toEqual({
+      healthRegistration,
+    });
+    const cleared = {
+      before: { number: 'NRS-1', shown: true },
+      after: { number: null, shown: false },
+    };
+    expect(sanitizeAuditMetadata({ healthRegistration: cleared })).toEqual({
+      healthRegistration: cleared,
+    });
+  });
+
+  it('descarta el cambio entero si un lado no tiene la forma admitida', () => {
+    const ok = { number: 'NRS-1', shown: false };
+    for (const healthRegistration of [
+      { before: ok },
+      { before: ok, after: { number: 'A'.repeat(65), shown: true } },
+      { before: ok, after: { number: 'NRS\n2', shown: true } },
+      { before: ok, after: { number: 'NRS\u202E2', shown: true } },
+      { before: ok, after: { number: 'NRS\u20282', shown: true } },
+      { before: ok, after: { number: '', shown: true } },
+      { before: ok, after: { number: 12, shown: true } },
+      { before: ok, after: { number: 'NRS-2', shown: 'sí' } },
+      { before: ok, after: { number: 'NRS-2', shown: true, extra: 'x' } },
+    ]) {
+      expect(sanitizeAuditMetadata({ healthRegistration })).toEqual({});
+    }
+  });
 });

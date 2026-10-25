@@ -3,7 +3,12 @@ import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
+import {
+  AppointmentStatus,
+  ClinicRole,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
@@ -26,7 +31,7 @@ const DX200 = [
   '20261019195020_dx200_appointments_in_clinic_idx',
 ];
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -74,7 +79,9 @@ describe('DX-200 · migración del flujo en la clínica sobre datos existentes (
       }
     }
     migrateDeploy(dir, urlFor(db));
-    target = new PrismaClient({ datasources: { db: { url: urlFor(db) } } });
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
+      datasources: { db: { url: urlFor(db) } },
+    });
     await target.$executeRawUnsafe(
       `INSERT INTO "tenants" ("id","name","subdomain","updatedAt") VALUES ('${T}','Clínica','dx200-mig',now())`,
     );

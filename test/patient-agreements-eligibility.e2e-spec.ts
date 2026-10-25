@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -25,7 +26,7 @@ import {
 // asigna ADMIN (403 en español). Y la reproducción de la auditoría: sin esa
 // puerta, un ASSISTANT asignaba un convenio del 100 % y un DENTIST con tope del
 // 10 % presupuestaba a 0.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -135,10 +136,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       case 'viva':
         return post(clinic, `/api/v1/patients/${patientId}/coverages`, {
           payerId,
+          memberNumber: '1020304050',
         });
       case 'vencida':
         return post(clinic, `/api/v1/patients/${patientId}/coverages`, {
           payerId,
+          memberNumber: '1020304050',
           validFrom: dayFromNow(-60),
           validTo: dayFromNow(-5),
         });
@@ -205,7 +208,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     foreignCoverage = await post(
       other,
       `/api/v1/patients/${foreignPatient}/coverages`,
-      { payerId: foreignPayer },
+      { payerId: foreignPayer, memberNumber: '1020304050' },
     );
 
     crown = await post(clinic, '/api/v1/catalog/items', {

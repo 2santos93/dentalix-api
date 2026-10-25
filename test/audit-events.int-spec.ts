@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
@@ -9,7 +9,7 @@ import type { AuditEventDraft } from '../src/modules/audit/domain/audit-event';
 // (resolución del paciente bajo RLS y paginación por cursor) contra Postgres.
 
 // Owner/superusuario (DIRECT_URL): fixtures y limpieza.
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 // Rol de la app (DATABASE_URL) sujeto a RLS, como la API.
@@ -190,7 +190,7 @@ describe('DX-009 · audit_events en la BD (int)', () => {
         ),
       ).toBe(1);
       // Conexión nueva del rol de la app, sin `app.current_tenant`: 0 filas.
-      const fresh = new PrismaClient();
+      const fresh = new PrismaClient<Prisma.PrismaClientOptions>();
       try {
         expect(await fresh.auditEvent.count({ where: { id: eventA } })).toBe(0);
       } finally {

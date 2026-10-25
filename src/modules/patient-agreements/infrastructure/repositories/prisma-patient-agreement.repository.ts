@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -15,8 +16,11 @@ import type { PatientAgreement } from '../../domain/entities/patient-agreement.e
 import {
   AGREEMENT_RACE_MESSAGE,
   COVERAGE_PAYER_MISMATCH_MESSAGE,
+  COVERAGE_SELF_DECLARED_MESSAGE,
+  coverageTrustedFor,
 } from '../../domain/patient-agreement-rules';
 import type {
+  AgreementActor,
   CurrentAgreementRow,
   LiveAgreementAssignment,
   PatientAgreementRepository,
@@ -170,8 +174,9 @@ export class PrismaPatientAgreementRepository implements PatientAgreementReposit
   async replace(
     patientId: string,
     input: ReplaceAgreementRepoInput,
-    by: string,
+    actor: AgreementActor,
   ): Promise<PatientAgreement> {
+    const by = actor.userId;
     const tenantId = this.requireTenantId();
     const row = await translateRace(
       this.prisma.runWithTenant(async (tx) => {
@@ -187,8 +192,19 @@ export class PrismaPatientAgreementRepository implements PatientAgreementReposit
           throw new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE);
         }
         if (input.coverageId !== null) {
-          const coverages = await tx.$queryRaw<{ payerId: string }[]>`
-            SELECT "payerId" FROM "patient_coverages"
+          // `FOR SHARE` también frena la edición que borraría la verificación
+          // (SEC-049) hasta que esta asignación termine, o la ve ya hecha.
+          const coverages = await tx.$queryRaw<
+            {
+              payerId: string;
+              verifiedAt: Date | null;
+              declaredById: string | null;
+              migratedFromInsurerEps: boolean;
+            }[]
+          >`
+            SELECT "payerId", "verifiedAt", "migratedFromInsurerEps",
+                   COALESCE("declaredById", "createdById") AS "declaredById"
+            FROM "patient_coverages"
             WHERE id = ${input.coverageId}::uuid
               AND "patientId" = ${patientId}::uuid AND "deletedAt" IS NULL
             FOR SHARE`;
@@ -197,6 +213,9 @@ export class PrismaPatientAgreementRepository implements PatientAgreementReposit
           }
           if (coverages[0].payerId !== agreements[0].payerId) {
             throw new BadRequestException(COVERAGE_PAYER_MISMATCH_MESSAGE);
+          }
+          if (!coverageTrustedFor(coverages[0], actor)) {
+            throw new ForbiddenException(COVERAGE_SELF_DECLARED_MESSAGE);
           }
         }
         await tx.patientAgreement.updateMany({

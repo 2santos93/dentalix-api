@@ -32,6 +32,16 @@ export interface PatientCoverage {
    * OTRO (los pagadores del relleno son OTRO hasta que se reclasifican).
    */
   migratedFromInsurerEps: boolean;
+  /**
+   * SEC-049: quién puso por última vez el pagador o el nº de afiliado (en las
+   * anteriores a SEC-049, quien la creó). Un rol no ADMIN no puede asignar un
+   * convenio con una cobertura que declaró él y nadie verificó.
+   */
+  declaredById: string | null;
+  /** SEC-049: verificación de un ADMIN (los tres, o los tres `null`). */
+  verifiedAt: Date | null;
+  verifiedById: string | null;
+  verifiedByName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

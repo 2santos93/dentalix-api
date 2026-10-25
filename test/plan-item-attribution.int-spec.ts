@@ -10,7 +10,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 // atribuir, y la corrección de la atribución en un plan cerrado. Cada caso
 // escribe POR LA MISMA RUTA que la app (runWithTenant, rol dentalix_app,
 // sujeto a RLS); `raw` (DIRECT_URL, owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

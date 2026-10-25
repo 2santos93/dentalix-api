@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // SEC-009: la migración que sustituye el único de host (todos los vivos) por
 // uno solo de VERIFIED vivos, añade el único (tenantId, host) y la caducidad
@@ -66,7 +66,7 @@ interface Scenario {
 }
 
 describe('SEC-009 · migración de tenant_domains con datos (int)', () => {
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: process.env.DIRECT_URL } },
   });
   const scenarios: Scenario[] = [];
@@ -91,7 +91,7 @@ describe('SEC-009 · migración de tenant_domains con datos (int)', () => {
       }
     }
     migrateDeploy(dir, urlFor(db));
-    const target = new PrismaClient({
+    const target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: urlFor(db) } },
     });
     const scenario = { db, dir, target };

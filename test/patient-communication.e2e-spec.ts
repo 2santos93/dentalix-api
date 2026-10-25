@@ -8,7 +8,7 @@ import { ReminderClock } from '../src/modules/reminders/application/reminder-clo
 import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
 import { deferred } from './support/wait-for';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient, type Prisma } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -24,7 +24,7 @@ import {
 // roles; lo cambian recepción y ADMIN (403 en español para el resto); un
 // móvil inválido no puede ser canal WhatsApp (400 en español); el cambio de
 // canal y de opt-in queda en la auditoría con autor y origen.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

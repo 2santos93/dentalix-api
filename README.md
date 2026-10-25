@@ -107,7 +107,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
    registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
-   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10, CUPS en seis procedimientos y REPS en la sede principal para ver «RDA: listo» — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
+   evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
@@ -1356,11 +1356,19 @@ moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
   y el navegador la guarda como PDF (la API no genera PDF). El envío por email
   al ADMIN queda fuera de esta entrega.
 
-## Códigos para el RDA: CIE-10, CUPS y REPS (DX-212)
+## Códigos clínicos: CIE-10 (DX-212)
 
-Datos que pide el Resumen Digital de Atención (Res. 1888/2025, Colombia) y el
-RIPS. Esta tarea solo los guarda y COMPRUEBA: no genera el Bundle FHIR ni envía
-nada al Ministerio.
+Diagnósticos CIE-10 (estándar internacional) en la evolución y código de
+habilitación REPS de la sede. DX-318 y DX-320 (epic DX-311, producto global)
+retiraron el indicador «listo para RDA» (`GET /clinical-entries/:id/rda-readiness`
+y su variante por lotes `GET /patients/:id/clinical-entries/rda-readiness`,
+ahora 404 y fuera del contrato OpenAPI) y el código CUPS del catálogo
+(columna `dental_catalog_items.cupsCode` borrada en
+`20261024173000_dx320_drop_catalog_cups_code`). El catálogo se identifica solo
+por su código interno: no hay «código externo del procedimiento» (decisión
+D4). Un cliente antiguo que aún mande `cupsCode` en `POST`/`PATCH
+/catalog/items` ve el campo descartado por la `ValidationPipe` global
+(`whitelist`), como cualquier campo desconocido.
 
 - **CIE-10** (`icd10_codes`): tabla de referencia global, sin tenant ni RLS
   (como `currencies`/`cities`), con las subcategorías de 4 caracteres del
@@ -1381,25 +1389,57 @@ nada al Ministerio.
   Sin diagnóstico la evolución se sigue guardando. Una corrección es una adenda
   en la evolución y una evolución nueva con el diagnóstico. RLS FORCE, FK
   compuesta a la evolución (misma clínica y paciente) y RESTRICT al código.
-- **CUPS** (`dental_catalog_items.cupsCode`, 6 alfanuméricos) y **REPS**
-  (`locations.repsHabilitationCode`, 12 dígitos): en `PATCH /catalog/items/:id`
-  y `PATCH /locations/:id`, solo ADMIN, con CHECK en la BD y 400 que dice el
-  formato. Vacío o `null` lo quita. Altas y cambios del catálogo y cambios de
-  sede quedan en `audit_events` (`DENTAL_CATALOG_ITEM`, `LOCATION`, con los
-  campos cambiados, nunca los valores).
-- **`GET /clinical-entries/:id/rda-readiness`** (roles clínicos; recepción no
-  ve diagnósticos) → `{ notApplicable, ready, missing[], pending[] }`. Sede: la
-  de la cita ligada o, sin cita, la principal (la evolución no guarda sede).
-  Fuera de Colombia, `notApplicable: true`. Comprueba documento del paciente,
-  diagnóstico principal, CUPS de los procedimientos hechos en esa atención
-  (odontograma: `PROCEDURE` `COMPLETED` de esta clínica, ligados a la evolución
-  o del mismo día civil en la zona de la sede, sin los anulados), REPS de la
-  sede y registro profesional del autor. El NIT va en `pending` («pendiente de
-  DX-019») y no cuenta para `ready`. Evolución de otra clínica: 404. Queda
-  auditado (`VIEW`, `RDA_READINESS`, con el paciente).
-- **Demo**: CUPS en seis procedimientos (ejemplos: verifícalos contra la tabla
-  oficial), REPS en la sede principal (la Norte sin él) y diagnósticos en tres
-  evoluciones; la de Ana (hace 40 días) sale «RDA: listo».
+- El código REPS de la sede se borró en DX-319 (ver «Nº de registro
+  sanitario de la sede»).
+- **Sede de la evolución** (DX-232, `clinical_entries."locationId"`): la de la
+  cita ligada o, sin cita, la sede activa de la petición (`X-Location-Id`; sin
+  ella, la principal). FK compuesta: siempre una sede de la misma clínica.
+- **Demo**: diagnósticos en tres evoluciones.
+
+## Nº de registro sanitario de la sede (DX-319)
+
+Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
+(DX-311: Dentalix es global, ninguna regla depende del país).
+
+- **`locations.healthRegistrationNumber`**: texto libre opcional, sin formato
+  ni validación por país, hasta 64 caracteres (CHECK
+  `locations_health_registration_number_check`: 1–64 y sin espacios a los
+  lados). `PATCH /locations/:id` (solo ADMIN; el resto 403, otra clínica 404)
+  lo recorta; vacío o `null` lo quita y sin el campo no cambia. Va en la
+  respuesta de la sede (`GET /locations`).
+- **`locations.showHealthRegistrationNumber`** (por defecto `false`): si el nº
+  sale en los documentos de la sede. Hoy ningún documento imprimía el REPS, así
+  que ninguno lo imprime aún; DX-306 (justificantes) lo usará como campo
+  opcional, solo con el booleano activo.
+- **Auditoría**: el `UPDATE` de `LOCATION` lleva, además de los campos
+  cambiados, `metadata.healthRegistration` con el nº y el booleano antes y
+  después (solo si cambió alguno). Es la única excepción de texto en la
+  metadata: un dato público de la sede, nunca de un paciente; el saneado admite
+  1–64 caracteres sin caracteres de control. El handler lo deja en
+  `req.auditMetadata`, que el interceptor sanea y no deja pisar sus campos.
+- **`repsHabilitationCode` en el cuerpo → 400** («El código REPS ya no
+  existe…»): la ValidationPipe global solo descartaría el campo y una web
+  antigua mostraría «Guardado» sin guardar nada.
+- **Migraciones**: `20261024174000_dx319_location_health_registration` añade
+  las dos columnas (compatible hacia atrás) y
+  `20261024174100_dx319_drop_location_reps` **copia el REPS existente** al nº
+  de registro sanitario (en Colombia es el registro de la sede; así el ADMIN
+  no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
+  `DROP COLUMN IF EXISTS` (solo lo referenciaba su CHECK; ni vistas, ni
+  funciones, ni índices, ni RLS). Con FORCE quitado durante la copia (owner
+  sin BYPASSRLS) e idempotente. El nº nuevo no admite saltos de línea ni
+  caracteres de control o de formato (DTO con `\p{Cc}\p{Cf}`, el mismo saneado
+  en la auditoría y CHECK con `[[:cntrl:]]`); `showHealthRegistrationNumber:
+  null` da 400.
+- **Runbook de despliegue (DX-319)**: el `DROP COLUMN` va en el MISMO
+  despliegue que el código que deja de leer la columna. Una instancia con el
+  código anterior que siga viva después de `migrate deploy` da 500 al leer
+  sedes (Prisma selecciona `repsHabilitationCode`). Con más de una instancia,
+  este despliegue exige **parada única** (parar todas, `migrate deploy`,
+  arrancar el código nuevo) o **desplegar primero el código nuevo** en todas
+  las instancias (no lee la columna y funciona con ella o sin ella) y solo
+  entonces correr `migrate deploy` y retirar las viejas. Nunca `migrate deploy`
+  con instancias del código anterior sirviendo tráfico.
 
 ## Registro de implantes (DX-191)
 
@@ -2091,7 +2131,8 @@ coberturas por paciente, una principal. Sustituye al texto libre
   activo admite coberturas nuevas. El estado de cada cobertura (vigente,
   vencida, pendiente) se calcula contra el día civil de la sede.
 - **Endpoints**: `GET|POST /payers`, `PATCH|DELETE /payers/:id` y
-  `GET|POST /patients/:patientId/coverages`, `PATCH|DELETE …/:coverageId`.
+  `GET|POST /patients/:patientId/coverages`, `PATCH|DELETE …/:coverageId` y
+  `POST …/:coverageId/verification` (SEC-049, solo ADMIN).
   `GET /patients/:id`, `GET /patients` y `GET /appointments` traen `coverage`
   (resumen de la principal viva, sin nº de afiliado; un número fijo de
   consultas por página). `GET /patients?payerId=` filtra por pagador.
@@ -2099,8 +2140,10 @@ coberturas por paciente, una principal. Sustituye al texto libre
   editar, desactivar y retirar, ADMIN. Las coberturas las gestionan los 4
   roles, como «Editar» de la ficha (son datos administrativos, no clínicos).
 - **Auditoría**: las coberturas escriben UPDATE de PATIENT con `reason`
-  `COVERAGE_ADDED|CHANGED|REMOVED`; la metadata solo lleva los nombres de los
-  campos, nunca el nº de afiliado ni el titular. El catálogo de pagadores no
+  `COVERAGE_CREATED|CHANGED|VERIFIED|REMOVED` (SEC-049; el alta era
+  `COVERAGE_ADDED`); la metadata lleva los nombres de los campos y, salvo en
+  el retiro, el tipo de pagador, los 4 últimos del nº de afiliado y si está
+  verificada; nunca el nº entero ni el titular. El catálogo de pagadores no
   se audita. El GET de coberturas tampoco (la ficha ya se audita).
 - **Relleno**: la migración `…_insurer_eps_backfill` crea un pagador por
   clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
@@ -2163,10 +2206,44 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   asignación y las coberturas devuelven `payer.type` y
   `migratedFromInsurerEps` para que la web sepa qué pedir. Matriz en
   `test/patient-agreements-eligibility.e2e-spec.ts`.
-- **Riesgo aceptado (SEC-047)**: cualquier rol puede añadir una cobertura de
-  un pagador sin prueba y luego asignar su convenio; la mitigación es
-  detectiva (el informe de descuentos muestra quién asignó el convenio y
-  quién creó el ítem).
+- **Cobertura verificable (SEC-049)**: cierra el riesgo que SEC-047 dejaba
+  aceptado (cualquier rol creaba la cobertura con solo `{ payerId }` y
+  asignaba el convenio en la llamada siguiente, BE-043).
+  - Con un pagador externo, el **nº de afiliado o póliza es obligatorio** al
+    crear la cobertura, con UNA regla igual para todo pagador externo, sin
+    supuestos de país ni de tipo (DX-311; 400 en español que nunca repite el
+    número): tras normalizar (extremos recortados, espacios colapsados), de 4
+    a 40 caracteres, solo letras, dígitos, espacio y `-./`, al menos un dígito
+    y no un mismo carácter repetido. Con OTRO sigue siendo opcional. Las
+    coberturas que ya existían sin nº (migradas o anteriores) se leen y editan
+    igual; solo se pide al cambiar su pagador o su número.
+  - **Verificar** (`POST /patients/:patientId/coverages/:coverageId/verification`,
+    solo ADMIN) guarda quién y cuándo (`verifiedById`, `verifiedAt`,
+    `verifiedByName`). Recibe `checkedMemberNumber`, el nº que el ADMIN tenía
+    delante: si ya no es el guardado, o el pagador cambió entretanto, 409.
+    Cambiar el pagador o el nº de afiliado **borra la verificación** y deja
+    la cobertura declarada por quien la edita (`declaredById`; en las
+    anteriores, `createdById`).
+  - Al asignar, un rol que no es ADMIN no puede usar una cobertura cuyo
+    pagador o nº declaró él mismo si no está verificada (403 en español que
+    dice qué falta). Sí puede si la verificó un ADMIN, si la registró otro
+    usuario o si es migrada. ADMIN asigna como antes. La comprobación se
+    repite en la transacción con la cobertura `FOR SHARE`. Una cobertura de
+    otra clínica sigue siendo 400 «Cobertura no encontrada.».
+  - Auditoría: alta, cambio y verificación son `COVERAGE_CREATED`,
+    `COVERAGE_CHANGED` y `COVERAGE_VERIFIED` (antes del alta era
+    `COVERAGE_ADDED`), con el rol en `actorRole` y en `metadata.coverage` el
+    tipo de pagador, los **4 últimos** caracteres del nº (ninguno si el nº
+    tiene 4 o menos: serían el número entero) y si quedó verificada; nunca el
+    número entero. Los logs redactan cualquier clave `memberNumber`.
+  - Migración `20261024152000_sec049_coverage_verification`: tres columnas
+    NULL sin relleno y un CHECK `NOT VALID` + `VALIDATE` (verificada = quién
+    y cuándo, o ninguno). Matriz rol × verificada × creada por sí mismo en
+    `test/patient-coverages-verification.e2e-spec.ts`.
+  - Riesgo que queda: dos usuarios que no son ADMIN pueden repartirse los
+    pasos (uno registra la cobertura y otro asigna el convenio). El informe de
+    descuentos sigue mostrando quién asignó el convenio y la auditoría, quién
+    registró la cobertura.
 - **Nota de despliegue (SEC-047)**: antes de publicar, avisa a los ADMIN de
   las clínicas con convenios vivos de pagador OTRO: desde la versión con
   SEC-047 solo los asigna un administrador (salvo con una cobertura migrada
@@ -3106,7 +3183,7 @@ arrancar la API; `reference_writes` identifica tabla y privilegio efectivos.
 
 Cada diagnóstico guarda `clinical_entry_diagnoses."labelEs"`, copiada por
 un trigger al insertar aunque el cliente mande otro texto. Ficha y DTO leen
-esa copia; la preparación RDA no consulta etiquetas del catálogo. El backfill
+esa copia. El backfill
 único usa el texto disponible al migrar: no reconstruye etiquetas históricas.
 Se ejecuta en transacción explícita y bajo bloqueo exclusivo, suspende solo
 el trigger de UPDATE y FORCE de esa tabla, y restaura ambos antes del COMMIT;
@@ -3345,6 +3422,44 @@ dentalix_email_dispatcher`) o repón la política como en
   npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
   de clúster compartido, un segundo owner y un intruso con nombre único.
 
+## Lint en local sin agotar memoria (DX-338)
+
+```bash
+npm run lint:check        # lo mismo que CI: comprueba, no reescribe
+npm run lint              # con --fix
+```
+
+Las reglas son *type-aware* (`projectService`): ESLint carga el programa de
+TypeScript entero de `tsconfig.json` (`src/`, `test/` y `prisma/`; nunca
+`dist/` ni `coverage/`). Con el arreglo de DX-338 el `lint:check` completo
+cabe en un heap de 2 GB (`--max-old-space-size=2048`: 2,2 GB de memoria
+máxima medida con `/usr/bin/time -v`; sin límite Node recoge basura más tarde
+y llega a 3–3,7 GB). Antes pasaba de 4 GB de heap (5,6 GB de memoria) y en CI
+moría con exit 134. El límite por defecto de Node basta en una máquina de
+8 GB o más. Si aun así muere (`Killed`, exit 134,
+`JavaScript heap out of memory`):
+
+```bash
+# subir el heap de Node solo para el lint
+NODE_OPTIONS=--max-old-space-size=4096 npm run lint:check
+# o lintar por partes (cada una carga menos ficheros)
+npx eslint "src/**/*.ts"
+npx eslint "test/**/*.ts"
+# ver la memoria máxima y el tiempo (GNU time)
+/usr/bin/time -v npm run lint:check
+```
+
+La causa que había (y que vigila la propia configuración): un
+`new PrismaClient({ datasources: … })` sin argumento de tipo infiere un
+`PrismaClient<{ datasources: … }>` distinto en cada fichero, y pasarlo donde
+se espera `PrismaClient` (`resetDatabase(raw)`, `seed…(raw)`) obliga a
+TypeScript a comparar el cliente entero, con sus 100+ modelos. Con ~250
+clientes así en `test/` y `prisma/` el programa tenía 3,8 M de tipos y tsc
+usaba 4,2 GB. Por eso se escribe `new PrismaClient<Prisma.PrismaClientOptions>({
+… })`, que es exactamente el `PrismaClient` por defecto; `no-restricted-syntax`
+lo exige en todo el repo (la excepción legítima, inferir `log` por eventos para
+usar `$on`, va con `eslint-disable-next-line` y el motivo).
+
 ## Run tests
 
 ```bash
@@ -3365,7 +3480,11 @@ datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
 hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
 fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
 
-**CI.** `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
+**CI.** `lint` va en su propio job (con `NODE_OPTIONS=--max-old-space-size=4096`,
+su memoria máxima con `/usr/bin/time -v` y las reglas más lentas con
+`TIMING=1` en el log) y tipos, unit y build en otro, con cada paso
+`if: ${{ !cancelled() }}`: un rojo del lint o de tsc ya no deja los demás
+`skipped` (DX-338). `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
 su MinIO): un rojo en `test:int` no oculta la e2e. El MinIO de prueba es
 `cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
 y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);

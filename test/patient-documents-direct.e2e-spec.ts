@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { FILE_STORAGE } from '../src/shared/storage/file-storage.port';
@@ -23,7 +23,7 @@ import {
 } from '../src/shared/storage/upload-slots';
 
 const run = promisify(execFile);
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const MB = 1024 * 1024;

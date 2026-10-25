@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -34,7 +34,7 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
   const appRole = `${env.owner}_app134`.slice(0, 63);
   const dir = mkdtempSync(join(tmpdir(), 'dx134-role-'));
   const copy = join(dir, 'create-app-role.sql');
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
 
@@ -125,7 +125,7 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
     ).toBe(0);
     const r = asOwner(['-f', copy]);
     expect(r.status).toBe(0);
-    const target = new PrismaClient({
+    const target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
     try {
@@ -165,7 +165,7 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
   it('el script real, sin app_password, sobre una base nueva con dentalix_app ya en el clúster', async () => {
     const r = asOwner(['-f', SCRIPT]);
     expect(r.status).toBe(0);
-    const target = new PrismaClient({
+    const target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
     try {

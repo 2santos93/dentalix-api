@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DiskFileStorage } from '../src/shared/storage/disk-file-storage';
@@ -17,7 +17,7 @@ import { pdfFixture, pngFixture } from './support/document-fixtures';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
 import { tempFilesCreatedDuring } from './support/temp-dir-watch';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const STORAGE_ROOT = process.env.STORAGE_DIR ?? './storage-test';

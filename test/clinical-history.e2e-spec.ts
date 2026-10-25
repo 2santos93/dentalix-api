@@ -2,7 +2,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { PrismaClient, DocType, Sex, CatalogKind } from '@prisma/client';
+import {
+  Prisma,
+  PrismaClient,
+  DocType,
+  Sex,
+  CatalogKind,
+} from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -14,7 +20,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // dentalix_app vía DATABASE_URL) ve 0 filas y no podría limpiar datos de
 // corridas anteriores. Ver patients.e2e-spec.ts / auth.e2e-spec.ts para el
 // mismo patrón.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

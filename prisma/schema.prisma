@@ -189,13 +189,13 @@ enum ClinicCountry {
 }
 
 model Location {
-  id                   String        @id @default(uuid()) @db.Uuid
-  tenantId             String        @db.Uuid
-  name                 String
-  address              String?
+  id                           String        @id @default(uuid()) @db.Uuid
+  tenantId                     String        @db.Uuid
+  name                         String
+  address                      String?
   // País de la sede (DX-013): la receta se emite con las reglas del país donde
   // se atiende. Por defecto CO, que es lo que eran todas las sedes hasta hoy.
-  country              ClinicCountry @default(CO)
+  country                      ClinicCountry @default(CO)
   // Serie de los recibos de caja de la sede (DX-136), p. ej. "NOR". Si no
   // viene al crearla, el trigger `locations_default_receipt_prefix` la deriva
   // del nombre (3 letras, con número si ya la usa otra sede de la clínica).
@@ -203,19 +203,22 @@ model Location {
   // DX-226: con recibos o contador ya no cambia (trigger
   // `locations_receipt_prefix_guard`, check_violation) y ninguna sede toma
   // una serie que ya numeró recibos en la clínica.
-  receiptPrefix        String?
-  // DX-212: código de habilitación REPS de la sede (12 dígitos, CHECK
-  // locations_reps_habilitation_code_format). Lo pide el RDA (Res. 1888/2025)
-  // en las sedes de Colombia; solo lo edita ADMIN.
-  repsHabilitationCode String?
+  receiptPrefix                String?
+  // DX-319: nº de registro sanitario de la sede, texto libre sin formato por
+  // país (hasta 64 caracteres, CHECK locations_health_registration_number_check).
+  // Sustituye al código REPS (DX-212), que se copió aquí antes de borrarlo.
+  // Solo lo edita ADMIN.
+  healthRegistrationNumber     String?
+  // DX-319: si el nº sale en los documentos de la sede. Por defecto no.
+  showHealthRegistrationNumber Boolean       @default(false)
   // DX-222: teléfono de la sede para las indicaciones postoperatorias
   // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
   // locations_phone_length_check).
-  phone                String?
-  isActive             Boolean       @default(true)
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  deletedAt            DateTime?
+  phone                        String?
+  isActive                     Boolean       @default(true)
+  createdAt                    DateTime      @default(now())
+  updatedAt                    DateTime      @updatedAt
+  deletedAt                    DateTime?
 
   clinicalEntries            ClinicalEntry[]
   appointments               Appointment[]
@@ -785,7 +788,7 @@ model ClinicalEntryAddendum {
   @@map("clinical_entry_addenda")
 }
 
-// DX-212: tipo de diagnóstico del RIPS/RDA: uno principal y hasta 3 relacionados.
+// DX-212: tipo de diagnóstico CIE-10 de la evolución: uno principal y hasta 3 relacionados.
 enum ClinicalDiagnosisKind {
   PRINCIPAL
   RELACIONADO
@@ -854,9 +857,6 @@ model DentalCatalogItem {
   labelPt       String?
   color         String
   defaultPrice  Decimal?    @db.Decimal(12, 2)
-  // DX-212: código CUPS del procedimiento (6 caracteres alfanuméricos, CHECK
-  // dental_catalog_items_cups_code_format). Lo piden el RDA y el RIPS.
-  cupsCode      String?
   // DX-105: false = el procedimiento no recibe convenio ni descuento porcentual.
   allowDiscount Boolean     @default(true)
   active        Boolean     @default(true)
@@ -2642,7 +2642,8 @@ enum AuditResourceType {
   // DX-027: caja por turno (abrir, cerrar, reabrir, ajustar, ver) y los
   // ajustes de caja de la clínica.
   CASH_SESSION
-  // DX-212: cambios del catálogo (CUPS) y de las sedes (código REPS).
+  // DX-212: cambios de las sedes (DX-319: con el nº de registro sanitario
+  // antes y después).
   DENTAL_CATALOG_ITEM
   LOCATION
   // DX-222: plantillas de indicaciones postoperatorias (crear, editar,
@@ -3594,6 +3595,13 @@ model PatientCoverage {
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById            String?   @db.Uuid
   updatedById            String?   @db.Uuid
+  /// SEC-049: quién puso por última vez el pagador o el nº de afiliado
+  /// (puntero suave). NULL en las anteriores: vale `createdById`.
+  declaredById           String?   @db.Uuid
+  /// SEC-049: un ADMIN comprobó el nº de afiliado (puntero suave y fecha, los
+  /// dos o ninguno: CHECK). Cambiar el pagador o el número la borra.
+  verifiedById           String?   @db.Uuid
+  verifiedAt             DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   deletedAt              DateTime?

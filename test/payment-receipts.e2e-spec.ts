@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -17,7 +17,7 @@ import { EmailDispatcher } from '../src/modules/notifications/email/application/
 // DX-136: recibo de caja por abono — emitir, reimprimir, anular y enviar, de
 // punta a punta por HTTP. DIRECT_URL (superusuario, sin RLS) solo siembra un
 // abono anterior a la numeración, cambia datos «después» y lee la auditoría.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

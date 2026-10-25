@@ -30,6 +30,48 @@ function req(overrides: Partial<AuditedRequest> = {}): AuditedRequest {
 }
 
 describe('buildAuditDraft (DX-009)', () => {
+  it('cobertura (SEC-049): de la respuesta, solo el tipo de pagador, los 4 últimos del nº y si está verificada', () => {
+    const options: AuditOptions = {
+      action: 'UPDATE',
+      resource: 'PATIENT',
+      resourceId: { param: 'patientId' },
+      patient: { param: 'patientId' },
+      reason: 'COVERAGE_CREATED',
+      coverage: true,
+    };
+    const draft = buildAuditDraft(
+      options,
+      req({
+        params: { patientId: PATIENT },
+        body: { payerId: PLAN, memberNumber: '1.020.304.050' },
+        user: { sub: USER, tenantId: TENANT, role: 'RECEPTION' },
+      }),
+      {
+        id: ENTRY,
+        payer: { id: PLAN, type: 'EMPRESA' },
+        memberNumber: '1.020.304.050',
+        verifiedAt: null,
+      },
+      scope,
+    );
+    expect(draft?.actor).toEqual({
+      kind: 'user',
+      userId: USER,
+      role: 'RECEPTION',
+    });
+    expect(draft?.metadata).toEqual({
+      changedFields: ['memberNumber', 'payerId'],
+      params: { patientId: PATIENT },
+      reason: 'COVERAGE_CREATED',
+      coverage: {
+        payerType: 'EMPRESA',
+        memberNumberLast4: '4050',
+        verified: false,
+      },
+    });
+    expect(JSON.stringify(draft?.metadata)).not.toMatch(/1020|304/);
+  });
+
   it('receta segura (DX-300): códigos de los avisos y si se confirmaron; ni el texto de los avisos ni el motivo', () => {
     const options: AuditOptions = {
       action: 'CREATE',
@@ -180,6 +222,57 @@ describe('buildAuditDraft (DX-009)', () => {
       params: { id: PATIENT },
     });
     expect(JSON.stringify(draft)).not.toMatch(/Penicilina|3001234567/);
+  });
+
+  it('DX-319: añade el antes/después que el handler deja en la petición, saneado', () => {
+    const LOCATION = '66666666-6666-4666-8666-666666666666';
+    const healthRegistration = {
+      before: { number: null, shown: false },
+      after: { number: 'NRS-7', shown: true },
+    };
+    const draft = buildAuditDraft(
+      { action: 'UPDATE', resource: 'LOCATION', resourceId: { param: 'id' } },
+      req({
+        params: { id: LOCATION },
+        body: {
+          healthRegistrationNumber: 'NRS-7',
+          showHealthRegistrationNumber: true,
+        },
+        auditMetadata: { healthRegistration, reason: 'free text', params: {} },
+      }),
+      { id: LOCATION },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: [
+        'healthRegistrationNumber',
+        'showHealthRegistrationNumber',
+      ],
+      params: { id: LOCATION },
+      healthRegistration,
+    });
+  });
+
+  it('DX-319: el antes/después del nº de registro solo pasa en un evento de LOCATION', () => {
+    const draft = buildAuditDraft(
+      { action: 'UPDATE', resource: 'PATIENT', resourceId: { param: 'id' } },
+      req({
+        params: { id: PATIENT },
+        body: { phone: '3001234567' },
+        auditMetadata: {
+          healthRegistration: {
+            before: { number: null, shown: false },
+            after: { number: 'NRS-7', shown: true },
+          },
+        },
+      }),
+      { id: PATIENT },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: ['phone'],
+      params: { id: PATIENT },
+    });
   });
 
   it('código de la escritura (DX-039): va a metadata.reason; el motivo libre no', () => {

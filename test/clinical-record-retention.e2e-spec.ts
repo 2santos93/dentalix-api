@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -15,7 +15,7 @@ import {
 // CLINICAL_RECORD_RETENTION al archivar, solo ADMIN para retención y
 // supresión parcial (403 al resto), aislamiento entre clínicas y rastro de
 // auditoría (quién y cuándo, sin el motivo libre).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
@@ -6,7 +6,7 @@ import { PrismaAppointmentRepository } from '../src/modules/appointments/infrast
 // DX-043 (DB-006/DB-008): «próximas citas» del dashboard con `take` en BD.
 // `raw` (DIRECT_URL, owner) solo siembra y limpia; las lecturas van por el
 // repositorio real (runWithTenant, rol dentalix_app, sujeto a RLS).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

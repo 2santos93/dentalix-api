@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLocationsComparisonRepository } from '../src/modules/reports/infrastructure/prisma-locations-comparison.repository';
@@ -9,7 +9,7 @@ import { ReportSeeder } from './support/reports-fixtures';
 // DX-014 · las consultas de «Comparar sedes» contra Postgres de verdad, como
 // dentalix_app (DATABASE_URL, sin BYPASSRLS) con la clínica fijada por
 // runWithTenant. `raw` (DIRECT_URL, owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

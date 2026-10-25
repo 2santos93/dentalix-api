@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
@@ -10,7 +10,7 @@ import { assertNotUnderRetention } from '../src/modules/patients/application/ret
 // triggers que mantienen `last_attention_at` (nunca retrocede), RLS FORZADA y
 // append-only de `patient_retention_actions`, y la supresión parcial por la
 // misma ruta que la app (runWithTenant, rol dentalix_app).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

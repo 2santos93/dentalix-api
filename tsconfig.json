@@ -21,5 +21,6 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": true,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  "include": ["src", "test", "prisma"]
 }

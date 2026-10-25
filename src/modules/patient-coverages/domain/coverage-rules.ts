@@ -66,3 +66,13 @@ export function normalizeCoverageText(
 ): string | null {
   return value?.trim() || null;
 }
+
+// SEC-049: verificación de la cobertura por un ADMIN.
+export const COVERAGE_VERIFY_ADMIN_ONLY_MESSAGE =
+  'Solo un administrador puede verificar una cobertura.';
+export const COVERAGE_VERIFY_NO_NUMBER_MESSAGE =
+  'Escribe antes el nº de afiliado: sin él no se puede verificar la cobertura.';
+export const COVERAGE_VERIFY_INTERNAL_MESSAGE =
+  'Esta cobertura es de un pagador interno (cortesía, empleados): no hace falta verificarla.';
+export const COVERAGE_VERIFY_STALE_MESSAGE =
+  'El pagador o el nº de afiliado de esta cobertura cambió mientras lo revisabas: vuelve a abrirla y compruébalo.';

@@ -53,4 +53,10 @@ export interface AuditOptions {
    * sellados en la receta, `resourceId`).
    */
   prescriptionSafety?: true;
+  /**
+   * SEC-049: alta, cambio o verificación de una cobertura. La metadata guarda,
+   * de la respuesta, el tipo de pagador, los 4 últimos caracteres del nº de
+   * afiliado y si quedó verificada; nunca el número completo.
+   */
+  coverage?: true;
 }

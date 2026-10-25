@@ -1,4 +1,4 @@
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaStaffRepository } from '../src/modules/staff/infrastructure/repositories/prisma-staff.repository';
@@ -10,7 +10,7 @@ import { PrismaStaffRepository } from '../src/modules/staff/infrastructure/repos
  * SECURITY DEFINER de DX-143, como dentalix_app y bajo la RLS FORCE de
  * `clinic_memberships` (que, por sí sola, no deja ver las de otra clínica).
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

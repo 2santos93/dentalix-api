@@ -3,6 +3,7 @@ import {
   AppointmentStatus,
   CatalogKind,
   ClinicRole,
+  Prisma,
   PrismaClient,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
@@ -22,7 +23,7 @@ import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 // DX-145 · Cartera por antigüedad. Siembra CONTROLADA por DIRECT_URL (owner,
 // sin RLS) para fijar fechas pasadas que la API no deja escribir (vencimientos,
 // fecha del plan, citas atendidas); las lecturas, siempre por la API.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

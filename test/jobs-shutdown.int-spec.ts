@@ -1,6 +1,6 @@
 import { INestApplicationContext, Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { JobRegistry } from '../src/modules/jobs/application/job-registry';
 import { JobQueue } from '../src/modules/jobs/application/job-queue.service';
@@ -14,7 +14,7 @@ import { deferred, waitFor } from './support/wait-for';
 // proceso APP_ROLE=worker): `close()` (lo que dispara SIGTERM con
 // enableShutdownHooks) no resuelve hasta que el trabajo en curso termina, y
 // ese trabajo aún puede usar la BD (el worker se destruye antes que Prisma).
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const NAME = 'test-shutdown.slow';

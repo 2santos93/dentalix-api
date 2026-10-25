@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -65,7 +66,7 @@ import { pdfFixture } from './support/document-fixtures';
 const SIGNATURE_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -710,6 +711,7 @@ async function seedBExtras(
   });
   const coverage = await create(app, b, `/patients/${patientId}/coverages`, {
     payerId: payer.id,
+    memberNumber: 'EMP-00042',
   });
   const priceList = await create(app, b, '/price-lists', {
     name: 'Lista de B',
@@ -1494,6 +1496,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
       status: 404,
     },
+    {
+      name: 'POST /patients/:patientId/coverages/:coverageId/verification',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/coverages/${a.coverageId}/verification`,
+      body: () => ({ checkedMemberNumber: 'AFI-A-0001' }),
+      status: 404,
+    },
     // --- convenio del paciente (DX-105) ---
     {
       name: 'GET /patients/:patientId/agreement',
@@ -1769,7 +1779,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'PATCH /locations/:id',
       verb: 'patch',
       path: () => `/locations/${a.locationId}`,
-      body: () => ({ name: 'Hackeada', isActive: false }),
+      // DX-319: también el nº de registro sanitario y si se imprime.
+      body: () => ({
+        name: 'Hackeada',
+        isActive: false,
+        healthRegistrationNumber: 'Hackeada',
+        showHealthRegistrationNumber: true,
+      }),
       status: 404,
     },
     {
@@ -2919,10 +2935,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/family-account-statement':
       'patient-responsible-parties.e2e-spec.ts',
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
-    // DX-212: B → 404 sobre la evolución de A.
-    'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
-    'GET /patients/:patientId/clinical-entries/rda-readiness':
-      'rda-codes.e2e-spec.ts',
     // DX-099: B → 404 sobre el paciente, el envío y el token de A, sin tocar
     // el envío ni la HC de A.
     'POST /patients/:patientId/medical-history/requests':

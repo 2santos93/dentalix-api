@@ -1,6 +1,6 @@
 import './s3-avatar-env';
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -12,7 +12,7 @@ import { createS3Client } from '../../src/shared/storage/s3-file-storage';
 import { hostFor } from '../support/tenant-host';
 import { registerVerified } from '../support/register-verified';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

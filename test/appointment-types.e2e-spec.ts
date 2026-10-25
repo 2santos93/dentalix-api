@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -15,7 +15,7 @@ import {
 // con tipo, la agenda por columnas (`providerIds[]`) y mover una cita de hora y
 // de profesional con sus reglas (409 / 422), la anulación del enlace de
 // confirmación y el `audit_event` con el antes y el después.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

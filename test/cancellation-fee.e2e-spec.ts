@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -19,7 +19,7 @@ import { CANCELLATION_FEE_MESSAGES } from '../src/modules/cancellation-fees/doma
 // su condonación, los 409 (sin política comunicada, EPS_CO en Colombia), los
 // 403 por rol, los 404 desde otra clínica y la vista previa del email.
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

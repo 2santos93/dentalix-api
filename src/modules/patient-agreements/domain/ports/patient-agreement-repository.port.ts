@@ -1,8 +1,15 @@
+import type { ClinicRole } from '@prisma/client';
 import type { PatientAgreement } from '../entities/patient-agreement.entity';
 
 export const PATIENT_AGREEMENT_REPOSITORY = Symbol(
   'PATIENT_AGREEMENT_REPOSITORY',
 );
+
+/** Quién asigna: usuario y rol del token (SEC-047, SEC-049). */
+export interface AgreementActor {
+  userId: string;
+  role: ClinicRole;
+}
 
 export interface ReplaceAgreementRepoInput {
   agreementId: string;
@@ -44,12 +51,14 @@ export interface PatientAgreementRepository {
    * Una transacción con candado por paciente: relee el convenio `FOR SHARE`
    * (vivo, activo o no), comprueba la cobertura (del paciente y del pagador del
    * convenio), retira la asignación viva y crea la nueva. Si el índice parcial
-   * salta, 422 y no queda nada escrito.
+   * salta, 422 y no queda nada escrito. SEC-049: relee la cobertura `FOR SHARE`
+   * y repite `coverageTrustedFor` con `by` (403), así una edición que borra la
+   * verificación a la vez no se cuela.
    */
   replace(
     patientId: string,
     input: ReplaceAgreementRepoInput,
-    by: string,
+    by: AgreementActor,
   ): Promise<PatientAgreement>;
   /** Retira la asignación viva. `false` si no había ninguna. */
   retireCurrent(patientId: string, by: string): Promise<boolean>;

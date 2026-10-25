@@ -6,6 +6,7 @@ import {
   ClinicRole,
   DocType,
   PaymentMethod,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -20,7 +21,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // 0 filas. Los abonos se siembran directamente (no por POST) para fijar sede,
 // día y método de cada uno sin depender de cabeceras ni de la fecha de la
 // corrida — esta suite prueba la LECTURA de la caja, no el registro.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -23,7 +24,7 @@ import {
 // informe de descuentos (cuadre, filtros, CSV y aislamiento por clínica).
 // `raw` (DIRECT_URL, owner) solo fecha un descuento en el pasado, lee la
 // auditoría y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

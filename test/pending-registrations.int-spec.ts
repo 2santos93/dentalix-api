@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaRegistrationRepository } from '../src/modules/auth/infrastructure/repositories/prisma-registration.repository';
@@ -14,7 +14,7 @@ import {
  * deja de existir), solo hashes (CHECK) y consumo de un solo uso bajo
  * concurrencia.
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const EMAIL = 'registro.int@dx029.test';

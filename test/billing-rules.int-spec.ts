@@ -6,6 +6,7 @@ import {
 } from './support/postgres-concurrency';
 import {
   ClinicRole,
+  Prisma,
   PrismaClient,
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
@@ -39,7 +40,7 @@ import type { CurrencyWhitelist } from '../src/modules/treatment-plans/domain/po
 //  5. trigger de respaldo de ítems en planes cerrados.
 // `owner` (DIRECT_URL) solo siembra, cambia estados «por detrás» y limpia.
 
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

@@ -199,9 +199,6 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
-  // DX-212: datos del RDA de una atención (como la historia: sin recepción).
-  'GET /clinical-entries/:id/rda-readiness': CLINICAL,
-  'GET /patients/:patientId/clinical-entries/rda-readiness': CLINICAL,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,
@@ -412,6 +409,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/coverages': EVERY_ROLE,
   'PATCH /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
   'DELETE /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
+  // SEC-049 (loop/informes/SEC-049.md): verificar el nº de afiliado, solo ADMIN.
+  'POST /patients/:patientId/coverages/:coverageId/verification': ADMIN_ONLY,
   // «Buscar hueco», bloqueos y pendientes (DX-122, loop/informes/DX-122.md):
   // leer y agendar, quien agenda; los bloqueos los escriben ADMIN, recepción y
   // el odontólogo (solo su agenda: 403 del caso de uso), no la asistente.

@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaEmailOutboxRepository } from '../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
@@ -17,7 +17,7 @@ import type { MailConfig } from '../src/modules/notifications/email/infrastructu
 // el flujo completo encolar → despachar con ConsoleMailer y con un proveedor
 // que falla.
 
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 // SEC-032, search_path fijo en las funciones de trigger y SECURITY DEFINER.
 // Con el search_path por defecto, pg_temp se busca ANTES que pg_catalog y que
@@ -9,10 +9,10 @@ import { PrismaClient } from '@prisma/client';
 // desactiva. Cada caso corre como dentalix_app (DATABASE_URL, sujeto a RLS)
 // con su `app.current_tenant`, igual que la API; `raw` (DIRECT_URL,
 // superusuario) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 
