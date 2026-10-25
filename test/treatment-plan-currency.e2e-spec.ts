@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { DocType, PrismaClient, Sex } from '@prisma/client';
+import { DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -13,7 +13,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // conexión sin contexto de tenant (rol dentalix_app vía DATABASE_URL) ve 0
 // filas y no podría limpiar datos ajenos al tenant. Mismo patrón que
 // payments.e2e-spec.ts / patients-location.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const PASSWORD = 'Sup3rSecret!';

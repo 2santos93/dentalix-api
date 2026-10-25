@@ -13,7 +13,7 @@ import { deferred, waitFor } from './support/wait-for';
 // tocan, y una caja cerrada no gana ni pierde abonos. Lo que se prueba va por
 // la MISMA ruta que la app (runWithTenant, rol dentalix_app, sujeto a RLS);
 // `raw` (DIRECT_URL, superusuario) siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

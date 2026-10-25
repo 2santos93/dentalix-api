@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaInvitationRepository } from '../src/modules/invitations/infrastructure/repositories/prisma-invitation.repository';
@@ -19,7 +19,7 @@ import { AccountClaimBlockedError } from '../src/modules/invitations/domain/port
  * comprobación dentro de `acceptTransactional` y el backfill de
  * `emailVerifiedAt` (20261017231100_dx143_verify_active_accounts).
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

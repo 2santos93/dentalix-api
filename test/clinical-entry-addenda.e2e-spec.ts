@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -15,7 +15,7 @@ import {
 // por rol, IDOR entre clínicas y pacientes, autoría y fecha del servidor,
 // orden cronológico, 405 a cualquier edición/borrado y rastro de auditoría
 // sin el texto clínico. DIRECT_URL (superusuario) solo para leer y limpiar.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

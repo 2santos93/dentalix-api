@@ -15,7 +15,9 @@ import type {
   CancellationFeeRecord,
   CancellationFeeRepository,
   ChargeFeeInput,
+  FeeVoidOutcome,
   FeeWriteOutcome,
+  VoidFeeInput,
   WaiveFeeInput,
 } from '../domain/ports/cancellation-fee-repository.port';
 
@@ -28,8 +30,13 @@ const FEE_SELECT = {
   waiveReason: true,
   policyVersionId: true,
   createdAt: true,
-  planItem: { select: { planId: true, deletedAt: true } },
+  voidedAt: true,
+  voidReason: true,
+  planItem: {
+    select: { planId: true, deletedAt: true, price: true, discount: true },
+  },
   createdBy: { select: { fullName: true } },
+  voidedBy: { select: { fullName: true } },
 } as const satisfies Prisma.CancellationFeeSelect;
 
 type SelectedFee = Prisma.CancellationFeeGetPayload<{
@@ -37,6 +44,10 @@ type SelectedFee = Prisma.CancellationFeeGetPayload<{
 }>;
 
 function toRecord(fee: SelectedFee): CancellationFeeRecord {
+  const item = fee.planItem;
+  // SEC-050: lo que cobra hoy el ítem vivo, para avisar si no cuadra.
+  const itemAmount =
+    item && item.deletedAt === null ? item.price.minus(item.discount) : null;
   return {
     id: fee.id,
     status: fee.status,
@@ -49,6 +60,14 @@ function toRecord(fee: SelectedFee): CancellationFeeRecord {
     policyVersionId: fee.policyVersionId,
     createdAt: fee.createdAt,
     createdByName: fee.createdBy.fullName ?? null,
+    itemAmount: itemAmount === null ? null : itemAmount.toNumber(),
+    itemMismatch:
+      itemAmount !== null &&
+      fee.amount !== null &&
+      !itemAmount.equals(fee.amount),
+    voidedAt: fee.voidedAt,
+    voidedByName: fee.voidedBy?.fullName ?? null,
+    voidReason: fee.voidReason,
   };
 }
 
@@ -361,5 +380,103 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
       if (isUniqueViolation(error)) return { outcome: 'EXISTS' };
       throw error;
     }
+  }
+
+  async voidFee(input: VoidFeeInput): Promise<FeeVoidOutcome> {
+    const tenantId = this.requireTenantId();
+    try {
+      return await this.prisma.runWithTenant(async (tx) => {
+        const appointment = await this.lockAppointment(tx, input.appointmentId);
+        if (!appointment) throw new StaleAppointmentError();
+        // La fila del cargo bloqueada: dos anulaciones a la vez se ponen en
+        // fila y la segunda ve la primera.
+        const [fee] = await tx.$queryRaw<
+          {
+            id: string;
+            status: string;
+            voidedAt: Date | null;
+            planItemId: string | null;
+          }[]
+        >`SELECT "id", "status"::text AS "status", "voidedAt", "planItemId"
+            FROM "cancellation_fees"
+           WHERE "tenantId" = ${tenantId}::uuid
+             AND "appointmentId" = ${input.appointmentId}::uuid
+           FOR UPDATE`;
+        if (!fee || fee.status !== 'CHARGED') return { outcome: 'NOT_CHARGED' };
+        if (fee.voidedAt) return { outcome: 'ALREADY_VOIDED' };
+
+        const item = fee.planItemId
+          ? await tx.treatmentPlanItem.findFirst({
+              where: { id: fee.planItemId, deletedAt: null },
+              select: { id: true, planId: true },
+            })
+          : null;
+        if (item && (await this.paymentsWouldExceed(tx, tenantId, item))) {
+          return { outcome: 'PAID' };
+        }
+
+        // Primero la anulación (autor y motivo) y después el ítem: el trigger
+        // `treatment_plan_items_cancellation_fee_locked` solo deja retirar el
+        // ítem de un cargo que ya no está vigente en esta transacción.
+        await tx.cancellationFee.update({
+          where: { id: fee.id },
+          data: {
+            voidedAt: new Date(),
+            voidedById: input.voidedById,
+            voidReason: input.reason,
+          },
+          select: { id: true },
+        });
+        if (item) {
+          await tx.treatmentPlanItem.update({
+            where: { id: item.id },
+            data: { deletedAt: new Date() },
+            select: { id: true },
+          });
+        }
+        const voided = await tx.cancellationFee.findUniqueOrThrow({
+          where: { id: fee.id },
+          select: FEE_SELECT,
+        });
+        return { outcome: 'OK', fee: toRecord(voided) };
+      });
+    } catch (error) {
+      if (error instanceof StaleAppointmentError) return { outcome: 'STALE' };
+      throw error;
+    }
+  }
+
+  /**
+   * ¿Los abonos vivos del plan superarían lo que queda por cobrar en él sin
+   * este ítem? Bloquea el plan (FOR UPDATE): un abono simultáneo (que lo
+   * bloquea FOR SHARE) espera a la anulación y la ve. Así anular nunca deja
+   * un saldo a favor escondido: si ya se cobró, primero se anula el abono.
+   */
+  private async paymentsWouldExceed(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    item: { id: string; planId: string },
+  ): Promise<boolean> {
+    await tx.$queryRaw`SELECT "id" FROM "treatment_plans"
+      WHERE "id" = ${item.planId}::uuid FOR UPDATE`;
+    const [row] = await tx.$queryRaw<
+      { paid: Prisma.Decimal | null; rest: Prisma.Decimal | null }[]
+    >`
+      SELECT
+        (SELECT sum(pm."amount")
+           FROM "payments" pm
+          WHERE pm."tenantId" = ${tenantId}::uuid
+            AND pm."treatmentPlanId" = ${item.planId}::uuid
+            AND pm."deletedAt" IS NULL
+            AND pm."voidedAt" IS NULL) AS "paid",
+        (SELECT sum(i."price" - i."discount")
+           FROM "treatment_plan_items" i
+          WHERE i."planId" = ${item.planId}::uuid
+            AND i."id" <> ${item.id}::uuid
+            AND i."deletedAt" IS NULL
+            AND i."status" <> 'PROPOSED') AS "rest"`;
+    const paid = row?.paid ?? new Prisma.Decimal(0);
+    const rest = row?.rest ?? new Prisma.Decimal(0);
+    return paid.greaterThan(rest);
   }
 }

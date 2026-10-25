@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -21,7 +21,7 @@ import {
 // calcula el aviso y si es tardía), el enlace público del paciente y el
 // resumen de asistencia de 12 meses (con la restricción por sedes, DX-089).
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

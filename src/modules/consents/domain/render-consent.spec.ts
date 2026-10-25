@@ -61,6 +61,14 @@ describe('findUnknownVariables', () => {
     ).toEqual(['edad', 'firma']);
   });
 
+  it('rechaza nombres con dígitos sin duplicarlos ni confundirlos con paciente', () => {
+    expect(
+      findUnknownVariables(
+        '{{paciente2}} {{ Paciente2 }} {{2paciente}} {{paciente}}',
+      ),
+    ).toEqual(['paciente2', '2paciente']);
+  });
+
   it('acepta un texto sin variables o solo con las conocidas', () => {
     expect(findUnknownVariables('Texto plano')).toEqual([]);
     expect(findUnknownVariables('{{fecha}} {{ clinica }}')).toEqual([]);

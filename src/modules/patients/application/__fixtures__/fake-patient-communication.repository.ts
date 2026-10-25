@@ -1,7 +1,10 @@
+import { effectiveCommunicationChanges } from '../../domain/communication/communication-changes';
 import { NotFoundException } from '@nestjs/common';
 import type { ContactChannel } from '@prisma/client';
 import type {
   PatientCommunicationPatch,
+  PatientCommunicationUpdate,
+  PatientCommunicationUpdateResult,
   PatientCommunicationRepository,
   PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -45,6 +48,10 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
     return Promise.resolve(state ? { ...state } : null);
   }
 
+  optOutWarnings(patientId: string) {
+    return Promise.resolve(this.patients.has(patientId) ? [] : null);
+  }
+
   locationCountry(): Promise<string | null> {
     return Promise.resolve(this.country);
   }
@@ -55,10 +62,15 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
 
   update(
     patientId: string,
-    patch: PatientCommunicationPatch,
-  ): Promise<PatientCommunicationState> {
+    update: PatientCommunicationUpdate,
+    _invalidateOptOutLinksAt?: Date,
+  ): Promise<PatientCommunicationUpdateResult> {
     const current = this.patients.get(patientId);
     if (!current) throw new NotFoundException('Paciente no encontrado');
+    const patch = typeof update === 'function' ? update(current) : update;
+    const changedFields = effectiveCommunicationChanges(current, patch);
+    if (!changedFields.length)
+      return Promise.resolve({ state: { ...current }, changedFields });
     this.updates.push(patch);
     const { whatsappOptInById, ...rest } = patch;
     const next: PatientCommunicationState = { ...current, ...rest };
@@ -71,6 +83,6 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
         : null;
     }
     this.patients.set(patientId, next);
-    return Promise.resolve({ ...next });
+    return Promise.resolve({ state: { ...next }, changedFields });
   }
 }

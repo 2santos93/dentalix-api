@@ -11,6 +11,10 @@ import {
   DISCOUNT_REPORT_MAX_DAYS,
   DISCOUNT_REPORT_MAX_PAGE_SIZE,
 } from '../../application/use-cases/get-discount-report.use-case';
+import {
+  PERIOD_DAY_MAX,
+  PERIOD_DAY_MIN,
+} from '../../../../shared/time/civil-day';
 
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PAGE = 100000;
@@ -19,7 +23,7 @@ const MAX_PAGE = 100000;
 export class DiscountReportFiltersDto {
   @ApiProperty({
     example: '2026-10-01',
-    description: `Primer día del periodo (AAAA-MM-DD, en la zona de cada sede). Como mucho ${DISCOUNT_REPORT_MAX_DAYS} días.`,
+    description: `Primer día del periodo (AAAA-MM-DD, en la zona de cada sede). Como mucho ${DISCOUNT_REPORT_MAX_DAYS} días; las dos fechas entre ${PERIOD_DAY_MIN} y ${PERIOD_DAY_MAX} (400 si no).`,
   })
   @Matches(CIVIL_DATE, { message: 'from debe ser una fecha AAAA-MM-DD.' })
   from!: string;

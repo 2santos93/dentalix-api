@@ -1,3 +1,4 @@
+import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   BadRequestException,
   Body,
@@ -35,10 +36,12 @@ import {
 } from '../../audit/presentation/audit-request-context';
 import {
   GetPatientCommunicationUseCase,
+  GetPatientOptOutWarningsUseCase,
   UpdatePatientCommunicationUseCase,
 } from '../application/use-cases/patient-communication.use-cases';
 import {
   PatientCommunicationDto,
+  PatientOptOutMatchWarningDto,
   UpdatePatientCommunicationDto,
 } from './dto/patient-communication.dto';
 
@@ -66,6 +69,7 @@ const patientIdPipe = new ParseUUIDPipe({
 export class PatientCommunicationController {
   constructor(
     private readonly getCommunication: GetPatientCommunicationUseCase,
+    private readonly getWarnings: GetPatientOptOutWarningsUseCase,
     private readonly updateCommunication: UpdatePatientCommunicationUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
@@ -78,6 +82,27 @@ export class PatientCommunicationController {
     @Param('id', patientIdPipe) id: string,
   ): Promise<PatientCommunicationDto> {
     return this.getCommunication.execute(id);
+  }
+
+  @Get('opt-out-warnings')
+  @Roles(ClinicRole.RECEPTION, ClinicRole.ADMIN)
+  @ApiOperation({
+    summary: 'Últimos20 avisos de baja por móvil compartido (DX-214)',
+  })
+  @ApiOkResponse({ type: PatientOptOutMatchWarningDto, isArray: true })
+  @ApiForbiddenResponse({ description: 'Solo recepción y ADMIN.' })
+  @ApiNotFoundResponse({ description: 'Paciente no encontrado' })
+  @Audit({
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'REMINDER_OPT_OUT_WARNINGS',
+  })
+  warnings(
+    @Param('id', patientIdPipe) id: string,
+  ): Promise<PatientOptOutMatchWarningDto[]> {
+    return this.getWarnings.execute(id);
   }
 
   @Patch()

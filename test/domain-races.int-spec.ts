@@ -3,6 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
+  Prisma,
   PrismaClient,
   TreatmentPlanItemStatus,
 } from '@prisma/client';
@@ -20,7 +21,7 @@ import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/
 // ruta que la app (repositorios reales, rol dentalix_app bajo RLS) y comprueba
 // el estado final. Se repite varias veces: con la versión anterior (comprobar
 // y escribir en transacciones distintas) bastaba una vuelta para romperlo.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

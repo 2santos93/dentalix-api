@@ -44,7 +44,23 @@ export const CANCELLATION_FEE_MESSAGES = {
   amountAboveSuggested: (max: string) =>
     `El importe no puede superar el sugerido por la política comunicada (${max}).`,
   waiveReason: `Indica el motivo de la condonación (entre ${WAIVE_REASON_MIN} y ${WAIVE_REASON_MAX} caracteres).`,
+  voidReason: `Indica el motivo de la anulación (entre ${WAIVE_REASON_MIN} y ${WAIVE_REASON_MAX} caracteres).`,
+  notCharged: 'Esta cita no tiene un cargo generado que anular.',
+  alreadyVoided: 'El cargo de esta cita ya se anuló.',
+  voidPaid:
+    'El cargo ya está cobrado: los abonos de «Cargos administrativos» lo cubren. Anula antes el abono y después el cargo.',
 } as const;
+
+/**
+ * SEC-050: el ítem de un cargo vigente no se toca desde el plan (ni su precio,
+ * descuento o estado, ni «Quitar»), sea cual sea el rol: se anula con su
+ * acción, con motivo y auditada.
+ */
+export const FEE_ITEM_LOCKED_MESSAGE =
+  'Este ítem es el cargo por inasistencia o cancelación tardía de una cita: su precio, descuento y estado no se cambian ni se quita del plan. Para anularlo usa «Anular cargo» en la cita (con motivo).';
+/** SEC-050: el plan que lo lleva no se cancela ni cambia de moneda. */
+export const FEE_PLAN_LOCKED_MESSAGE =
+  'Este plan lleva un cargo por inasistencia o cancelación tardía vigente: no se cancela ni cambia de moneda. Anula antes el cargo desde la cita (con motivo).';
 
 /** Por qué no se puede generar el cargo de una cita (o `null` si se puede). */
 export type FeeBlockReason =
@@ -168,6 +184,19 @@ export function resolveChargeAmount(
     };
   }
   return { ok: true, amount: requested };
+}
+
+/**
+ * Por qué no se puede anular el cargo (SEC-050), o `null`: solo un cargo
+ * generado (CHARGED) y una vez.
+ */
+export function voidBlockMessage(
+  fee: { status: CancellationFeeStatus; voidedAt: Date | null } | null,
+): string | null {
+  if (!fee || fee.status !== 'CHARGED')
+    return CANCELLATION_FEE_MESSAGES.notCharged;
+  if (fee.voidedAt) return CANCELLATION_FEE_MESSAGES.alreadyVoided;
+  return null;
 }
 
 /** Motivo de la condonación ya recortado, o `null` si no vale. */

@@ -8,6 +8,7 @@ import {
   CANCELLATION_FEE_EPS_CO_BLOCK,
   ChargeCancellationFeeUseCase,
   GetCancellationFeeUseCase,
+  VoidCancellationFeeUseCase,
   WaiveCancellationFeeUseCase,
 } from './application/cancellation-fee.use-cases';
 import { CANCELLATION_FEE_REPOSITORY } from './domain/ports/cancellation-fee-repository.port';
@@ -15,7 +16,8 @@ import { PrismaCancellationFeeRepository } from './infrastructure/prisma-cancell
 import { epsCoBlockEnabled } from './domain/cancellation-fee';
 
 /**
- * DX-291: cargo por inasistencia o cancelación tardía y su condonación. El
+ * DX-291: cargo por inasistencia o cancelación tardía y su condonación (y su
+ * anulación con motivo, SEC-050). El
  * cargo es un ítem del plan «Cargos administrativos» y se cobra con el abono
  * y el recibo de siempre (módulo payments). El bloqueo por EPS_CO lo fija la
  * plataforma con `CANCELLATION_FEE_BLOCK_EPS_CO` (activado salvo `false`).
@@ -27,6 +29,7 @@ import { epsCoBlockEnabled } from './domain/cancellation-fee';
     GetCancellationFeeUseCase,
     ChargeCancellationFeeUseCase,
     WaiveCancellationFeeUseCase,
+    VoidCancellationFeeUseCase,
     TokenService,
     TenantContextInterceptor,
     {

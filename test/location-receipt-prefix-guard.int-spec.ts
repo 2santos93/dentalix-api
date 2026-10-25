@@ -14,10 +14,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 //     de serie a la vez espera y, al seguir, ve el recibo y se rechaza.
 // Todo corre como dentalix_app con la clínica fijada (como la API); `raw`
 // (DIRECT_URL, superusuario) siembra, simula el bypass y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

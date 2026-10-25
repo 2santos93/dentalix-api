@@ -70,21 +70,30 @@ describe('UploadSlots / UploadSlotGuard (DX-259, OPS-038)', () => {
   });
 
   it('sin plaza: 503 en español con Retry-After, antes de leer el cuerpo', () => {
-    const guard = new UploadSlotGuard(new UploadSlots(1));
+    const slots = new UploadSlots(1);
+    const guard = new UploadSlotGuard(slots);
     const first = new FakeResponse();
-    expect(guard.canActivate(contextFor(new FakeRequest(), first))).toBe(true);
-    const second = new FakeResponse();
-    let error: unknown;
     try {
-      guard.canActivate(contextFor(new FakeRequest(), second));
-    } catch (e) {
-      error = e;
+      expect(guard.canActivate(contextFor(new FakeRequest(), first))).toBe(
+        true,
+      );
+      const second = new FakeResponse();
+      let error: unknown;
+      try {
+        guard.canActivate(contextFor(new FakeRequest(), second));
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect((error as ServiceUnavailableException).message).toBe(
+        UPLOAD_BUSY_MESSAGE,
+      );
+      expect(second.headers.get('Retry-After')).toBe('5');
+    } finally {
+      // Cierra también la subida admitida: el guard desarma su plazo real.
+      first.emit('close');
     }
-    expect(error).toBeInstanceOf(ServiceUnavailableException);
-    expect((error as ServiceUnavailableException).message).toBe(
-      UPLOAD_BUSY_MESSAGE,
-    );
-    expect(second.headers.get('Retry-After')).toBe('5');
+    expect(slots.active).toBe(0);
   });
 
   it('al cerrarse la respuesta devuelve la plaza y borra el temporal de multer', async () => {

@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
@@ -18,7 +18,7 @@ import {
 // después de los pacientes), estado de cuenta con «Saldo migrado» y su fecha
 // de corte, cartera en el tramo de su fecha, la suma importada = la del
 // archivo por moneda, deshacer, solo ADMIN, auditoría y aislamiento.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

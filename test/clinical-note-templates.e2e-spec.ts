@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -16,7 +16,7 @@ import {
 // escribe, recepción ni las lee), validación en español, plantillas de
 // ejemplo, evolución con plantilla y ligada a la cita (que sigue inalterable y
 // se corrige con adenda), y aislamiento entre clínicas.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

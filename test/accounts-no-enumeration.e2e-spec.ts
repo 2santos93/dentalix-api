@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -15,7 +15,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 // email, una cuenta sin verificar se puede reclamar desde ese enlace y una
 // clínica no puede invitar sin límite.
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const passwords = new PasswordService();

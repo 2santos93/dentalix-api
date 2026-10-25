@@ -5,10 +5,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 // primera apertura del enlace). Las escrituras van como el rol de la app
 // (dentalix_app, sujeto a RLS) con el GUC de tenant como lo fija la app;
 // `raw` (DIRECT_URL, superusuario) solo siembra, consulta el catálogo y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 
@@ -211,6 +211,45 @@ describe('indicaciones postoperatorias: plantillas, vínculos y entregas (DX-222
     await appRole.$disconnect();
   });
 
+  it('las tres FK de entrega tienen índices válidos con las columnas en orden', async () => {
+    const rows = await raw.$queryRaw<
+      { name: string; columns: string[]; valid: boolean; ready: boolean }[]
+    >`
+      SELECT i.relname AS name, x.indisvalid AS valid, x.indisready AS ready,
+             array_agg(a.attname::text ORDER BY k.ordinality) AS columns
+      FROM pg_index x
+      JOIN pg_class t ON t.oid = x.indrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace AND n.nspname = 'public'
+      JOIN pg_class i ON i.oid = x.indexrelid
+      CROSS JOIN LATERAL unnest(x.indkey) WITH ORDINALITY k(attnum, ordinality)
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+      WHERE t.relname = 'post_op_instruction_deliveries'
+        AND i.relname IN ('post_op_instruction_deliveries_template_idx',
+                         'post_op_instruction_deliveries_location_idx',
+                         'post_op_instruction_deliveries_delivered_by_idx')
+      GROUP BY i.relname, x.indisvalid, x.indisready ORDER BY i.relname`;
+    expect(rows).toEqual([
+      {
+        name: 'post_op_instruction_deliveries_delivered_by_idx',
+        columns: ['deliveredById'],
+        valid: true,
+        ready: true,
+      },
+      {
+        name: 'post_op_instruction_deliveries_location_idx',
+        columns: ['tenantId', 'locationId'],
+        valid: true,
+        ready: true,
+      },
+      {
+        name: 'post_op_instruction_deliveries_template_idx',
+        columns: ['tenantId', 'templateId'],
+        valid: true,
+        ready: true,
+      },
+    ]);
+  });
+
   describe('entrega inalterable', () => {
     it('rechaza el UPDATE del texto por SQL como rol de la app', async () => {
       await expect(
@@ -295,7 +334,9 @@ describe('indicaciones postoperatorias: plantillas, vínculos y entregas (DX-222
         appRole.$executeRawUnsafe(
           'TRUNCATE "post_op_instruction_deliveries" CASCADE',
         ),
-      ).rejects.toThrow();
+      ).rejects.toThrow(
+        /permission denied for table post_op_instruction_deliveries|inalterable/i,
+      );
       const rows = await raw.$queryRawUnsafe<{ t: string }[]>(
         `SELECT "renderedText" AS t FROM "post_op_instruction_deliveries"
           WHERE "id" = $1::uuid`,

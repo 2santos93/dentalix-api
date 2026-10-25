@@ -23,7 +23,6 @@ function fakeItemFrom(
     labelPt: input.labelPt ?? null,
     color: input.color,
     defaultPrice: input.defaultPrice ?? null,
-    cupsCode: input.cupsCode ?? null,
     allowDiscount: input.allowDiscount ?? true,
     active: input.active ?? true,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

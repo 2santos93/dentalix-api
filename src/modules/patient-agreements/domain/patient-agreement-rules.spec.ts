@@ -1,4 +1,6 @@
+import { ClinicRole } from '@prisma/client';
 import {
+  coverageTrustedFor,
   isExternalPayer,
   patientAgreementStatus,
 } from './patient-agreement-rules';
@@ -68,5 +70,68 @@ describe('isExternalPayer (SEC-047)', () => {
 
   it('OTRO es un convenio interno (cortesía, empleados)', () => {
     expect(isExternalPayer('OTRO')).toBe(false);
+  });
+});
+
+describe('coverageTrustedFor (SEC-049)', () => {
+  const ME = 'user-me';
+  const OTHER = 'user-other';
+  const coverage = (
+    extra: Partial<{
+      verifiedAt: Date | null;
+      declaredById: string | null;
+      migratedFromInsurerEps: boolean;
+    }> = {},
+  ) => ({
+    verifiedAt: null,
+    declaredById: ME,
+    migratedFromInsurerEps: false,
+    ...extra,
+  });
+  const NON_ADMIN = [
+    ClinicRole.DENTIST,
+    ClinicRole.ASSISTANT,
+    ClinicRole.RECEPTION,
+  ] as const;
+
+  it('ADMIN asigna con cualquier cobertura, aunque la registrara él y sin verificar', () => {
+    expect(
+      coverageTrustedFor(coverage(), { userId: ME, role: ClinicRole.ADMIN }),
+    ).toBe(true);
+  });
+
+  it.each(NON_ADMIN)(
+    '%s: la que registró él mismo, sin verificar, no vale',
+    (role) => {
+      expect(coverageTrustedFor(coverage(), { userId: ME, role })).toBe(false);
+    },
+  );
+
+  it.each(NON_ADMIN)('%s: verificada por un ADMIN, vale', (role) => {
+    expect(
+      coverageTrustedFor(coverage({ verifiedAt: new Date() }), {
+        userId: ME,
+        role,
+      }),
+    ).toBe(true);
+  });
+
+  it.each(NON_ADMIN)('%s: registrada por otro usuario, vale', (role) => {
+    expect(
+      coverageTrustedFor(coverage({ declaredById: OTHER }), {
+        userId: ME,
+        role,
+      }),
+    ).toBe(true);
+  });
+
+  it('migrada de insurerEps o sin autor conocido, vale', () => {
+    const actor = { userId: ME, role: ClinicRole.RECEPTION };
+    expect(
+      coverageTrustedFor(coverage({ migratedFromInsurerEps: true }), actor),
+    ).toBe(true);
+    expect(coverageTrustedFor(coverage({ declaredById: null }), actor)).toBe(
+      true,
+    );
   });
 });

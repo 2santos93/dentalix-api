@@ -1,5 +1,6 @@
 import type { AuditAction, AuditResourceType } from '@prisma/client';
 import type { AuditPatientRef } from '../domain/audit-event';
+import type { AuditStatusChange } from '../domain/audit-metadata';
 
 export const AUDIT_OPTIONS = 'dentalix:audit';
 
@@ -31,6 +32,11 @@ export interface AuditOptions {
    */
   reason?: string;
   /**
+   * Estado antes y después cuando es fijo para el endpoint (SEC-050: anular
+   * un cargo, CHARGED → VOIDED). Va a `metadata.statusChange`.
+   */
+  statusChange?: AuditStatusChange;
+  /**
    * DX-191: búsqueda por lote/REF. La metadata guarda `lot` y `reference` de
    * la query y el nº de filas de la cabecera `X-Result-Count` de la respuesta.
    */
@@ -47,4 +53,10 @@ export interface AuditOptions {
    * sellados en la receta, `resourceId`).
    */
   prescriptionSafety?: true;
+  /**
+   * SEC-049: alta, cambio o verificación de una cobertura. La metadata guarda,
+   * de la respuesta, el tipo de pagador, los 4 últimos caracteres del nº de
+   * afiliado y si quedó verificada; nunca el número completo.
+   */
+  coverage?: true;
 }

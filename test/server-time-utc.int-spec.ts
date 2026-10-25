@@ -8,10 +8,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 // fuera de UTC; la hora grabada tiene que coincidir (< 1 s) con
 // `now() AT TIME ZONE 'UTC'` de la misma transacción. `raw` (DIRECT_URL,
 // superusuario) solo siembra, lee la configuración de roles y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

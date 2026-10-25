@@ -13,6 +13,10 @@ export const PATIENT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+// Coberturas del paciente — verificar el nº de afiliado (SEC-049): solo
+// ADMIN; con eso cualquier rol puede asignar el convenio de ese pagador.
+export const COVERAGE_VERIFY_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Historia clínica / evoluciones / odontograma: todas las rutas (read+write),
 // todos MENOS recepción.
 export const CLINICAL_ROLES: ClinicRole[] = [

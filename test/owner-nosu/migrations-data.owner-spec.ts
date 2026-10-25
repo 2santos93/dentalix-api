@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -228,6 +228,17 @@ interface Step {
   dropped?: string[];
 }
 
+/**
+ * Esquema de 20261024174000 (DX-319): REPS en las sedes «Sede Norte» de las
+ * dos clínicas; la de A ya tiene su nº de registro sanitario, que no se pisa.
+ */
+const FIXTURE_DX319 = [
+  `UPDATE "locations" SET "repsHabilitationCode" = '110010123401'
+    WHERE "name" = 'Sede Norte'`,
+  `UPDATE "locations" SET "healthRegistrationNumber" = 'NRS-A'
+    WHERE "name" = 'Sede Norte' AND "tenantId" = '${T_A}'`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -281,15 +292,19 @@ const STEPS: Step[] = [
     ],
   },
   // dx287: "docKey" con su trigger, relleno por lotes con la clínica fijada
-  // (sin NO FORCE), índice CONCURRENTLY y ANALYZE; y las siguientes.
-  { until: '99999999999999', fixture: FIXTURE_DX287 },
+  // (sin NO FORCE), índice CONCURRENTLY y ANALYZE; y las siguientes hasta
+  // DX-319.
+  { until: '20261024174100', fixture: FIXTURE_DX287 },
+  // dx319_drop_location_reps (FORCE fuera de locations durante la copia del
+  // REPS al nº de registro sanitario) y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_DX319 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
   const env = requireOwnerNosuEnv();
   const db = `dx113_mig_${process.pid}_${Date.now()}`;
   const dir = mkdtempSync(join(tmpdir(), 'dx113-'));
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
   let target: PrismaClient;
@@ -379,7 +394,7 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
       join(MIGRATIONS, 'migration_lock.toml'),
       join(dir, 'migrations', 'migration_lock.toml'),
     );
-    target = new PrismaClient({
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
   });
@@ -725,6 +740,23 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         `SELECT "docKey" AS v FROM "patients" WHERE "docNumber" = 'x-9.9'`,
       ),
     ).toBe('X99');
+  }, 180_000);
+
+  it('nº de registro sanitario (DX-319): el REPS de las dos clínicas se copia donde no hay nº y la columna se borra', async () => {
+    await run(STEPS[17]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("tenantId" || '=' || "healthRegistrationNumber", ','
+                ORDER BY "tenantId") AS v
+           FROM "locations" WHERE "name" = 'Sede Norte'`,
+      ),
+    ).toBe(`${T_A}=NRS-A,${T_B}=110010123401`);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM information_schema.columns
+          WHERE table_name = 'locations' AND column_name = 'repsHabilitationCode'`,
+      ),
+    ).toBe(0);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

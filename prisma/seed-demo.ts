@@ -156,6 +156,7 @@ import {
 import {
   CreatePatientCoverageUseCase,
   ListPatientCoveragesUseCase,
+  VerifyPatientCoverageUseCase,
 } from '../src/modules/patient-coverages/application/use-cases/patient-coverages.use-cases';
 import { UpdatePatientCommunicationUseCase } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
 import {
@@ -202,8 +203,6 @@ import {
   DEMO_PRICE_LISTS,
   DEMO_AGREEMENTS,
   DEMO_PATIENT_AGREEMENTS,
-  DEMO_CUPS,
-  DEMO_PRINCIPAL_REPS,
   DEMO_PRINCIPAL_PHONE,
   DEMO_POSTOP,
   DEMO_PRIMARY_COLOR,
@@ -731,7 +730,13 @@ class DemoSeeder {
     // re-precian los ítems que se añadan después, y los planes de la demo ya
     // están fijados con sus precios de catálogo.
     await this.inTenant(tenantId, undefined, () =>
-      this.createAgreements(locations, patientIds, catalog, receptionId),
+      this.createAgreements(
+        locations,
+        patientIds,
+        catalog,
+        receptionId,
+        ownerId,
+      ),
     );
 
     return this.requestConfirmations(tenantId, receptionId);
@@ -838,8 +843,6 @@ class DemoSeeder {
     );
     await this.use(UpdateLocationUseCase).execute(principal.id, {
       address: DEMO_LOCATIONS.principal.address,
-      // DX-212: la sede principal (CO) tiene REPS; la Norte no, a propósito.
-      repsHabilitationCode: DEMO_PRINCIPAL_REPS,
       // DX-222: el de urgencias en las indicaciones postoperatorias.
       phone: DEMO_PRINCIPAL_PHONE,
     });
@@ -885,6 +888,7 @@ class DemoSeeder {
     patientIds: string[],
     catalog: Map<string, string>,
     receptionId: string,
+    ownerId: string,
   ): Promise<void> {
     const payers = await this.use(ListPayersUseCase).execute({
       includeInactive: true,
@@ -955,7 +959,8 @@ class DemoSeeder {
 
     // SEC-047: un convenio de pagador solo se asigna con una cobertura viva
     // del paciente con ese pagador; si la demo no se la dio (Alfa), recepción
-    // la añade antes, como haría en la ficha.
+    // la añade antes, como haría en la ficha. SEC-049: recepción la registró,
+    // así que el ADMIN la verifica antes de que recepción asigne el convenio.
     for (const a of DEMO_PATIENT_AGREEMENTS) {
       const patientId = patientIds[a.patientIndex];
       const current = await this.use(GetPatientAgreementUseCase).execute(
@@ -968,20 +973,27 @@ class DemoSeeder {
       const coverages = await this.use(ListPatientCoveragesUseCase).execute(
         patientId,
       );
-      const coverageId =
-        coverages.find((c) => c.payer.id === payerId)?.id ??
-        (
-          await this.use(CreatePatientCoverageUseCase).execute(
-            patientId,
-            {
-              payerId,
-              planName: a.coverage.planName,
-              memberNumber: a.coverage.memberNumber,
-              isPrimary: false,
-            },
-            receptionId,
-          )
-        ).id;
+      const coverage =
+        coverages.find((c) => c.payer.id === payerId) ??
+        (await this.use(CreatePatientCoverageUseCase).execute(
+          patientId,
+          {
+            payerId,
+            planName: a.coverage.planName,
+            memberNumber: a.coverage.memberNumber,
+            isPrimary: false,
+          },
+          receptionId,
+        ));
+      const coverageId = coverage.id;
+      if (coverage.verifiedAt === null && coverage.memberNumber !== null) {
+        await this.use(VerifyPatientCoverageUseCase).execute(
+          patientId,
+          coverageId,
+          coverage.memberNumber,
+          ownerId,
+        );
+      }
       await this.use(AssignPatientAgreementUseCase).execute(
         patientId,
         { agreementId: agreementIds.get(a.agreementKey) as string, coverageId },
@@ -1005,13 +1017,6 @@ class DemoSeeder {
         {
           defaultPrice: price,
         },
-      );
-    }
-    // DX-212: CUPS de algunos procedimientos (el resto queda sin código).
-    for (const [code, cupsCode] of Object.entries(DEMO_CUPS)) {
-      await this.use(UpdateCatalogItemUseCase).execute(
-        catalogId(byCode, code),
-        { cupsCode },
       );
     }
     return byCode;

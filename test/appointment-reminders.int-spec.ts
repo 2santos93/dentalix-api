@@ -40,7 +40,7 @@ import { waitFor } from './support/wait-for';
 // handler deja el email en email_outbox (DX-088) con el enlace de DX-005.
 // El tiempo avanza con un reloj de prueba (ReminderClock); los trabajos que
 // esperan a su hora se adelantan en `jobs.runAt`, sin dormir.
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

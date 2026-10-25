@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -28,7 +28,7 @@ const T_A = '00000000-0000-4000-8000-0000002510a1';
 describe('DX-251 · app.current_tenant vacío en la sesión de migrate deploy (owner-nosu, OPS-037)', () => {
   const env = requireOwnerNosuEnv();
   const db = `dx251_guc_${process.pid}_${Date.now()}`;
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
   let target: PrismaClient;
@@ -77,7 +77,7 @@ describe('DX-251 · app.current_tenant vacío en la sesión de migrate deploy (o
         stdio: 'pipe',
       },
     );
-    target = new PrismaClient({
+    target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, db) } },
     });
     await target.$executeRawUnsafe(

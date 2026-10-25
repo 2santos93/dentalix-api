@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
-const app = new PrismaClient({
+const app = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 const tables = ['icd10_codes', 'currencies', 'countries', 'cities'];

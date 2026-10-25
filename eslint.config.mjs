@@ -4,9 +4,24 @@ import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+// DX-338: `new PrismaClient({ datasources… })` sin argumento de tipo infiere
+// un `PrismaClient<{ datasources: … }>` propio de cada fichero, y pasarlo donde
+// se espera `PrismaClient` obliga a TypeScript a comparar, miembro a miembro,
+// el cliente entero (100+ modelos). Con ~250 clientes en test/ y prisma/ eso
+// multiplicaba por 9 los tipos del programa (3,8 M), llevaba tsc a 4 GB y a
+// ESLint (que usa el mismo programa) a quedarse sin heap en CI. Con
+// `<Prisma.PrismaClientOptions>` el tipo es exactamente el `PrismaClient` por
+// defecto y no hay nada que comparar.
+const prismaClientWithoutTypeArgs = {
+  selector: "NewExpression[callee.name='PrismaClient']:not([typeArguments])",
+  message:
+    'Escribe new PrismaClient<Prisma.PrismaClientOptions>({ … }): sin argumento de tipo, cada cliente es un tipo distinto y comparar con PrismaClient dispara la memoria de tsc y ESLint (DX-338). Si necesitas inferir las opciones (p.ej. log por eventos y $on), justifícalo con eslint-disable-next-line.',
+};
+
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    // DX-338: nada generado ni de terceros entra en el lint (ni en su programa).
+    ignores: ['eslint.config.mjs', 'dist/**', 'coverage/**', 'node_modules/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -41,6 +56,7 @@ export default tseslint.config(
         },
       ],
       "prettier/prettier": ["error", { endOfLine: "auto" }],
+      'no-restricted-syntax': ['error', prismaClientWithoutTypeArgs],
     },
   },
   {
@@ -58,8 +74,11 @@ export default tseslint.config(
     files: ['src/**/*.ts'],
     ignores: ['src/**/*.spec.ts'],
     rules: {
+      // Sustituye (no suma) las opciones del bloque general: se repite aquí la
+      // del PrismaClient.
       'no-restricted-syntax': [
         'error',
+        prismaClientWithoutTypeArgs,
         {
           selector: "CallExpression[callee.property.name='delete']",
           message:

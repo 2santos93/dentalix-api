@@ -6,11 +6,11 @@ import { Prisma, PrismaClient } from '@prisma/client';
 // (dentalix_app, sujeto a RLS, con `app.current_tenant` dentro de la
 // transacción); `raw` (DIRECT_URL, owner) solo siembra, inspecciona el
 // catálogo y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 // Conexión directa como el rol de la app.
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 

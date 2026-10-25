@@ -7,10 +7,10 @@ import type { CreatePaymentRepoInput } from '../src/modules/payments/domain/port
 // DX-136: recibo de caja numerado por sede, contra Postgres real. Los
 // abonos se registran con el repositorio de la API (rol dentalix_app, RLS);
 // `raw` (DIRECT_URL, superusuario) solo siembra, lee sin RLS y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const appRole = new PrismaClient({
+const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 const tenantContext = new TenantContextService();

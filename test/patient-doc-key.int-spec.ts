@@ -28,7 +28,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 //     RLS FORCE, entran por patients_tenant_doc_key_live_idx: ni Seq Scan de
 //     patients ni filas descartadas por un Filter.
 // `raw` (DIRECT_URL, owner) solo siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

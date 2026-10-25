@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -37,7 +37,7 @@ describe('reference tables', () => {
 });
 
 describe('reference seed', () => {
-  const seedRaw = new PrismaClient({
+  const seedRaw = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: process.env.DIRECT_URL } },
   });
   afterAll(async () => {

@@ -10,6 +10,7 @@ import type {
   AuditPatientRef,
 } from '../domain/audit-event';
 import { sanitizeAuditMetadata } from '../domain/audit-metadata';
+import { memberNumberLast4 } from '../../patient-coverages/domain/member-number-rules';
 import type { AuditOptions } from './audit-options';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,6 +31,12 @@ export interface AuditedRequest {
    * creado): no se registra otro evento.
    */
   skipAudit?: boolean;
+  /**
+   * DX-319: metadata que el handler añade al evento cuando solo él la conoce
+   * (p. ej. el antes y después de un campo). Pasa por `sanitizeAuditMetadata`
+   * como el resto y no pisa lo que pone el interceptor (campos, ruta, código).
+   */
+  auditMetadata?: Record<string, unknown>;
 }
 
 /** Contexto de la petición capturado al entrar al handler. */
@@ -164,6 +171,38 @@ function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/**
+ * DX-319: lo que el handler añade al evento. El antes/después del nº de
+ * registro sanitario solo vale en un evento de sede (LOCATION).
+ */
+function handlerMetadata(
+  options: AuditOptions,
+  req: AuditedRequest,
+): Record<string, unknown> {
+  const { healthRegistration, ...rest } = req.auditMetadata ?? {};
+  return options.resource === 'LOCATION'
+    ? { ...rest, healthRegistration }
+    : rest;
+}
+
+/** SEC-049: tipo de pagador, 4 últimos del nº y verificación de la cobertura. */
+function coverageOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    payer?: { type?: unknown };
+    memberNumber?: unknown;
+    verifiedAt?: unknown;
+  };
+  return {
+    payerType: b.payer?.type,
+    memberNumberLast4:
+      typeof b.memberNumber === 'string'
+        ? memberNumberLast4(b.memberNumber)
+        : null,
+    verified: b.verifiedAt !== null && b.verifiedAt !== undefined,
+  };
+}
+
 /** Nombres (nunca valores) de los campos de primer nivel del cuerpo. */
 function bodyFields(body: unknown): string[] {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
@@ -197,11 +236,13 @@ export function buildAuditDraft(
     ip: req.ip ?? null,
     userAgent: header(req, 'user-agent'),
     metadata: sanitizeAuditMetadata({
+      ...handlerMetadata(options, req),
       ...(options.action === 'UPDATE'
         ? { changedFields: bodyFields(req.body) }
         : {}),
       params: req.params,
       ...(options.reason ? { reason: options.reason } : {}),
+      ...(options.statusChange ? { statusChange: options.statusChange } : {}),
       ...(options.search && resultCount !== null
         ? {
             search: {
@@ -217,6 +258,7 @@ export function buildAuditDraft(
       ...(options.prescriptionSafety
         ? { prescriptionSafety: prescriptionSafetyOf(responseBody) }
         : {}),
+      ...(options.coverage ? { coverage: coverageOf(responseBody) } : {}),
     }),
   };
 }

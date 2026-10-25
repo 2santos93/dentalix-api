@@ -53,8 +53,8 @@ export class DentalCatalogController {
     private readonly updateCatalogItem: UpdateCatalogItemUseCase,
   ) {}
 
-  // DX-212: el catálogo lleva el código CUPS que reporta el RDA/RIPS: altas y
-  // cambios quedan auditados (campos cambiados, nunca valores).
+  // DX-212: altas y cambios del catálogo quedan auditados (campos cambiados,
+  // nunca valores).
   @Audit({
     action: 'CREATE',
     resource: 'DENTAL_CATALOG_ITEM',

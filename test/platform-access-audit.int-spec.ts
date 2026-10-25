@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaBreakGlassRepository } from '../src/modules/auth/infrastructure/repositories/prisma-break-glass.repository';
@@ -9,7 +9,7 @@ import { PrismaSupportAccessRepository } from '../src/modules/support-accesses/i
 // anti-replay del TOTP es atómico.
 
 // Owner/superusuario (DIRECT_URL): fixtures y limpieza.
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 // Rol de la app (DATABASE_URL) sujeto a RLS, como la API.

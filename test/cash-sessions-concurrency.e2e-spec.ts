@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -17,7 +17,7 @@ import { civilDateIn } from '../src/shared/time/civil-day';
 // anulaciones que se cruzan con el cierre (el arqueo guardado casa siempre
 // con los abonos que quedaron en la caja), abonos en otra moneda (su propia
 // línea) y abonos de otra sede (no entran). Contra Postgres real.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

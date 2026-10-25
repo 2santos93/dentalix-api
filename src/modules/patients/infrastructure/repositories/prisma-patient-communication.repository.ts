@@ -1,10 +1,13 @@
+import { effectiveCommunicationChanges } from '../../domain/communication/communication-changes';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ContactChannel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   PATIENT_NOT_FOUND_MESSAGE,
-  type PatientCommunicationPatch,
+  type PatientCommunicationUpdate,
+  type PatientCommunicationUpdateResult,
+  type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -88,6 +91,29 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     });
   }
 
+  optOutWarnings(
+    patientId: string,
+  ): Promise<PatientOptOutMatchWarningView[] | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const patient = await tx.patient.findFirst({
+        where: { id: patientId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!patient) return null;
+      return tx.reminderOptOutMatchWarning.findMany({
+        where: { patientId },
+        take: 20,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          createdAt: true,
+          matchCount: true,
+          maxMatches: true,
+        },
+      });
+    });
+  }
+
   async locationCountry(): Promise<string | null> {
     const active = this.tenantContext.getLocationId();
     const location = await this.prisma.runWithTenant((tx) =>
@@ -113,19 +139,40 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
 
   update(
     patientId: string,
-    patch: PatientCommunicationPatch,
-  ): Promise<PatientCommunicationState> {
+    update: PatientCommunicationUpdate,
+    invalidateOptOutLinksAt?: Date,
+  ): Promise<PatientCommunicationUpdateResult> {
     return this.prisma.runWithTenant(async (tx) => {
-      const { count } = await tx.patient.updateMany({
-        where: { id: patientId, deletedAt: null },
-        data: patch,
-      });
-      if (count === 0) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+      // El mismo orden que emisión/consumo: paciente, después enlaces.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients" WHERE "id" = ${patientId}::uuid
+          AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!locked.length)
+        throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
       const row = await tx.patient.findFirstOrThrow({
         where: { id: patientId },
         select: SELECT,
       });
-      return this.toState(tx, row);
+      const current = await this.toState(tx, row);
+      const patch = typeof update === 'function' ? update(current) : update;
+      const changedFields = effectiveCommunicationChanges(current, patch);
+      let state = current;
+      if (changedFields.length) {
+        const saved = await tx.patient.update({
+          where: { id: patientId },
+          data: patch,
+          select: SELECT,
+        });
+        state = await this.toState(tx, saved);
+      }
+      // Se invalida incluso con preferencias iguales; no crea una falsa escritura de paciente.
+      if (invalidateOptOutLinksAt) {
+        await tx.reminderOptOutLink.updateMany({
+          where: { patientId, usedAt: null },
+          data: { usedAt: invalidateOptOutLinksAt },
+        });
+      }
+      return { state, changedFields };
     });
   }
 }

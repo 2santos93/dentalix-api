@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPasswordResetRepository } from '../src/modules/auth/infrastructure/repositories/prisma-password-reset.repository';
@@ -12,7 +12,7 @@ import {
  * (DATABASE_URL, RLS en las membresías): solo el hash, un solo uso bajo
  * concurrencia, caducidad, invalidar los anteriores y la membresía activa.
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

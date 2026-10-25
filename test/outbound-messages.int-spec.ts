@@ -8,7 +8,7 @@ import { OutboundMessages } from '../src/modules/notifications/outbound/applicat
 // DX-085, capa de BD: outbound_messages (RLS FORCE por clínica, FK compuesta a
 // la cita del MISMO tenant, solo destinatario enmascarado) y que el log del
 // servicio nunca lleve el destinatario real.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

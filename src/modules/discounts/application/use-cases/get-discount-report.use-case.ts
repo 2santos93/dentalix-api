@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import {
-  civilDaysInclusive,
-  parseCivilDate,
+  checkPeriodDays,
+  PERIOD_DAY_OUT_OF_RANGE_MESSAGE,
 } from '../../../../shared/time/civil-day';
 import { discountPercent } from '../../domain/discount-policy';
 import {
@@ -78,14 +78,18 @@ export class GetDiscountReportUseCase {
     query: DiscountReportQuery;
     location: { id: string; name: string } | null;
   }> {
-    const from = parseCivilDate(input.from);
-    const to = parseCivilDate(input.to);
-    if (!from || !to || civilDaysInclusive(from, to) < 1) {
-      throw new BadRequestException(INVALID_PERIOD_MESSAGE);
+    const period = checkPeriodDays(input.from, input.to);
+    if (!period.ok) {
+      throw new BadRequestException(
+        period.problem === 'OUT_OF_RANGE'
+          ? PERIOD_DAY_OUT_OF_RANGE_MESSAGE
+          : INVALID_PERIOD_MESSAGE,
+      );
     }
-    if (civilDaysInclusive(from, to) > DISCOUNT_REPORT_MAX_DAYS) {
+    if (period.days > DISCOUNT_REPORT_MAX_DAYS) {
       throw new BadRequestException(PERIOD_TOO_LONG_MESSAGE);
     }
+    const { from, to } = period;
     const location = input.locationId
       ? await this.repo.findLocation(input.locationId)
       : null;

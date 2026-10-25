@@ -1,5 +1,14 @@
+import { randomUUID } from 'node:crypto';
+import { PrismaService } from '../src/shared/prisma/prisma.service';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPatientCommunicationRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient-communication.repository';
+import { PATIENT_COMMUNICATION_REPOSITORY } from '../src/modules/patients/domain/ports/patient-communication-repository.port';
+import { COMMUNICATION_CLOCK } from '../src/modules/patients/application/use-cases/patient-communication.use-cases';
+import { ReminderClock } from '../src/modules/reminders/application/reminder-clock';
+import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
+import { deferred } from './support/wait-for';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -15,7 +24,7 @@ import {
 // roles; lo cambian recepción y ADMIN (403 en español para el resto); un
 // móvil inválido no puede ser canal WhatsApp (400 en español); el cambio de
 // canal y de opt-in queda en la auditoría con autor y origen.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -55,6 +64,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
   const tokens = {} as Record<ClinicRole, string>;
   const users = {} as Record<ClinicRole, string>;
   let patientId: string;
+  let communicationNow: Date | null = null;
 
   const api = () => request(app.getHttpServer());
   const as = (req: request.Test, token: string, host = clinic.host) =>
@@ -62,7 +72,12 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
   const comms = (id = patientId) => `/api/v1/patients/${id}/communication`;
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(COMMUNICATION_CLOCK)
+          .useValue(() => communicationNow ?? new Date()),
+    });
     await resetDatabase(raw);
     clinic = await registerClinic(app, 'dx128-comms');
     other = await registerClinic(app, 'dx128-comms-otra');
@@ -333,5 +348,193 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
     expect((bad.body as { message: string }).message).toBe(
       'El identificador del paciente no es válido.',
     );
+  });
+  it('reactivación auditada bajo lock tras bajaLINK concurrente; preserva otros campos y no inventa eventos sin cambio', async () => {
+    const created = await as(api().post('/api/v1/patients'), clinic.adminToken)
+      .send({
+        firstName: 'Fixture',
+        lastName: 'Race',
+        docType: 'CC',
+        docNumber: '214990',
+        sex: 'F',
+        phone: '+573101234567',
+      })
+      .expect(201);
+    const id = (created.body as { id: string }).id;
+    const linkAt = new Date('2026-10-24T10:00:00.000Z');
+    const staffAt = new Date('2026-10-24T10:00:02.000Z');
+    const token = 'H'.repeat(43);
+    const unusedToken = 'J'.repeat(43);
+    for (const value of [token, unusedToken])
+      await raw.reminderOptOutLink.create({
+        data: {
+          tenantId: clinic.tenantId,
+          patientId: id,
+          tokenHash: hashConfirmationToken(value),
+          expiresAt: new Date(linkAt.getTime() + 86400000),
+        },
+      });
+    const reachedTx = deferred();
+    const resumeTx = deferred();
+    const prisma = app.get(PrismaService);
+    const repo = app.get<PrismaPatientCommunicationRepository>(
+      PATIENT_COMMUNICATION_REPOSITORY,
+    );
+    const gatedPrisma = new Proxy(prisma, {
+      get(target, key) {
+        if (key === 'runWithTenant')
+          return (fn: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+            target.runWithTenant(
+              async (tx) => {
+                reachedTx.resolve();
+                await resumeTx.promise;
+                return fn(tx);
+              },
+              { timeout: 15000 },
+            );
+        const value: unknown = Reflect.get(target, key);
+        return value;
+      },
+    });
+    const gatedRepo = new PrismaPatientCommunicationRepository(
+      gatedPrisma,
+      app.get(TenantContextService),
+    );
+    const write = jest
+      .spyOn(repo, 'update')
+      .mockImplementationOnce((...args) => gatedRepo.update(...args));
+    const originalFind = repo.find.bind(repo);
+    let readActive = false;
+    const read = jest
+      .spyOn(repo, 'find')
+      .mockImplementationOnce(async (patient) => {
+        const state = await originalFind(patient);
+        readActive = state?.reminderOptOutAt === null;
+        return state;
+      });
+    const reminderClock = jest
+      .spyOn(app.get(ReminderClock), 'now')
+      .mockReturnValue(linkAt);
+    communicationNow = staffAt;
+    const requestId = randomUUID();
+    const pending = as(api().patch(comms(id)), tokens[ClinicRole.RECEPTION])
+      .set('X-Request-ID', requestId)
+      .send({ reminderOptOut: false })
+      .then((response) => response);
+    try {
+      await reachedTx.promise;
+      expect(readActive).toBe(true);
+      // PATCH ya leyóACTIVE y abrióTX, todavía sin bloquear paciente. POST completa y audita.
+      await api()
+        .post(`/api/v1/public/reminder-opt-outs/${token}`)
+        .set('X-Tenant-Host', clinic.host)
+        .expect(200);
+      expect(
+        (await raw.patient.findUniqueOrThrow({ where: { id } }))
+          .reminderOptOutAt,
+      ).toEqual(linkAt);
+      const edited = await as(
+        api().patch(comms(id)),
+        tokens[ClinicRole.RECEPTION],
+      )
+        .send({
+          phone: '+573209876543',
+          contactChannel: 'WHATSAPP',
+          whatsappOptIn: true,
+          whatsappOptInSource: 'MESSAGE',
+        })
+        .expect(200);
+      expect((edited.body as CommunicationBody).whatsappOptIn?.at).toBe(
+        staffAt.toISOString(),
+      );
+      resumeTx.resolve();
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        reminderOptOut: null,
+        phone: '+573209876543',
+        contactChannel: 'WHATSAPP',
+        whatsappOptIn: { at: staffAt.toISOString(), source: 'MESSAGE' },
+      });
+      const staffEvent = await raw.auditEvent.findFirst({
+        where: {
+          tenantId: clinic.tenantId,
+          patientId: id,
+          requestId,
+          action: 'UPDATE',
+        },
+      });
+      expect(staffEvent).toMatchObject({
+        actorUserId: users[ClinicRole.RECEPTION],
+        actorRole: 'RECEPTION',
+        metadata: {
+          reason: 'COMMUNICATION_PREFERENCES_CHANGED',
+          origin: 'STAFF',
+          changedFields: ['reminderOptOutAt'],
+        },
+      });
+      const linkEvent = await raw.auditEvent.findFirst({
+        where: {
+          patientId: id,
+          metadata: { path: ['origin'], equals: 'LINK' },
+        },
+      });
+      expect(linkEvent).toMatchObject({
+        actorUserId: null,
+        actorRole: null,
+        metadata: { reason: 'REMINDER_OPT_OUT', origin: 'LINK' },
+      });
+      expect(
+        (
+          await raw.reminderOptOutLink.findUniqueOrThrow({
+            where: { tokenHash: hashConfirmationToken(unusedToken) },
+          })
+        ).usedAt,
+      ).toEqual(staffAt);
+      expect(
+        (
+          await raw.reminderOptOutLink.findUniqueOrThrow({
+            where: { tokenHash: hashConfirmationToken(token) },
+          })
+        ).usedAt,
+      ).toEqual(linkAt);
+      const beforeNoop = await raw.patient.findUniqueOrThrow({ where: { id } });
+      const eventCount = await raw.auditEvent.count({
+        where: { patientId: id, action: 'UPDATE' },
+      });
+      await raw.reminderOptOutLink.create({
+        data: {
+          tenantId: clinic.tenantId,
+          patientId: id,
+          tokenHash: hashConfirmationToken('K'.repeat(43)),
+          expiresAt: new Date(linkAt.getTime() + 86400000),
+        },
+      });
+      await as(api().patch(comms(id)), tokens[ClinicRole.RECEPTION])
+        .send({ reminderOptOut: false })
+        .expect(200);
+      expect(
+        await raw.auditEvent.count({
+          where: { patientId: id, action: 'UPDATE' },
+        }),
+      ).toBe(eventCount);
+      expect(await raw.patient.findUniqueOrThrow({ where: { id } })).toEqual(
+        beforeNoop,
+      );
+      expect(
+        (
+          await raw.reminderOptOutLink.findUniqueOrThrow({
+            where: { tokenHash: hashConfirmationToken('K'.repeat(43)) },
+          })
+        ).usedAt,
+      ).toEqual(staffAt);
+    } finally {
+      resumeTx.resolve();
+      await pending;
+      write.mockRestore();
+      read.mockRestore();
+      reminderClock.mockRestore();
+      communicationNow = null;
+    }
   });
 });

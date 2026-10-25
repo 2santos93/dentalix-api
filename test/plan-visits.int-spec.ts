@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-const db = new PrismaClient({
+const db = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 describe('DX-256 estructura Postgres', () => {
@@ -26,7 +26,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { PlanVisitsService } from '../src/modules/treatment-plans/application/plan-visits.service';
 import { resetDatabase } from './support/e2e-fixtures';
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const context = new TenantContextService();
@@ -298,6 +298,9 @@ describe('DX-256 integridad real y concurrencia', () => {
       'treatment_plans_unscheduled_idx',
     );
     let queryCount = 0;
+    // Aquí sí se infieren las opciones: `$on('query')` solo existe si el
+    // tipo conoce el `log` por eventos.
+    // eslint-disable-next-line no-restricted-syntax
     const observed = new PrismaClient({
       log: [{ emit: 'event', level: 'query' }],
     });

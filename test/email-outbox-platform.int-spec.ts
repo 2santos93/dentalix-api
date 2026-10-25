@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaEmailOutboxRepository } from '../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
@@ -12,7 +12,7 @@ import { PrismaEmailOutboxRetentionRepository } from '../src/modules/notificatio
 // dentalix_app gane DELETE sobre email_outbox. La app corre como dentalix_app
 // (DATABASE_URL); `owner` (DIRECT_URL) solo siembra, envejece filas y limpia.
 
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

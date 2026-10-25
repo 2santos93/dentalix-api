@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
@@ -10,7 +10,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol, mirar
 // filas y limpiar — mismo criterio que account-statement.e2e-spec.ts.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

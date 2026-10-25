@@ -17,8 +17,6 @@ export interface DentalCatalogItem {
   labelPt: string | null;
   color: string;
   defaultPrice: number | null;
-  /** DX-212: código CUPS (6 alfanuméricos) o null si no se ha puesto. */
-  cupsCode: string | null;
   /** DX-105: false = la prestación no admite descuentos (ni % de convenio ni discrecionales). */
   allowDiscount: boolean;
   active: boolean;

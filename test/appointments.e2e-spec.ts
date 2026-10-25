@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
@@ -41,7 +41,7 @@ const FAR_TO = `${isoDayIn(41)}T00:00:00.000Z`;
 // conexión sin contexto de tenant (rol dentalix_app vía DATABASE_URL) ve 0
 // filas y no podría sembrar/limpiar datos ajenos al tenant. Ver
 // role-matrix.e2e-spec.ts / odontogram.e2e-spec.ts para el mismo patrón.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

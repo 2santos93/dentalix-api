@@ -25,6 +25,7 @@ import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
   type PatientCommunicationPatch,
+  type PatientOptOutMatchWarningView,
   type PatientCommunicationRepository,
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
@@ -177,72 +178,73 @@ export class UpdatePatientCommunicationUseCase {
   ): Promise<PatientCommunicationView> {
     const state = await this.repo.find(patientId);
     if (!state) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
-    const [country, clinicDefault] = await Promise.all([
-      phoneCountry(this.repo, state),
+    const [locationCountry, clinicDefault] = await Promise.all([
+      this.repo.locationCountry(),
       this.repo.clinicDefaultChannel(),
     ]);
     const now = this.clock();
-    const patch: PatientCommunicationPatch = {};
-    const changed: string[] = [];
-    let origin: AuditOrigin = 'STAFF';
+    const saved = await this.repo.update(
+      patientId,
+      (state) => {
+        const country = locationCountry ?? state.countryCode;
+        const patch: PatientCommunicationPatch = {};
+        let phone = state.phone;
+        if (input.phone !== undefined) {
+          const typed = input.phone?.trim() || null;
+          const mobile = normalizeMobile(typed, country);
+          phone = mobile.e164 ?? typed;
+          if (phone !== state.phone) {
+            patch.phone = phone;
+          }
+        }
+        const mobileValid = normalizeMobile(phone, country).status === 'VALID';
 
-    let phone = state.phone;
-    if (input.phone !== undefined) {
-      const typed = input.phone?.trim() || null;
-      const mobile = normalizeMobile(typed, country);
-      phone = mobile.e164 ?? typed;
-      if (phone !== state.phone) {
-        patch.phone = phone;
-        changed.push('phone');
-      }
-    }
-    const mobileValid = normalizeMobile(phone, country).status === 'VALID';
+        const channel = input.contactChannel ?? state.contactChannel;
+        if (
+          channel === 'WHATSAPP' &&
+          (input.contactChannel !== undefined || input.phone !== undefined) &&
+          !mobileValid
+        ) {
+          throw whatsappMobileRequiredError();
+        }
+        if (channel !== state.contactChannel) {
+          patch.contactChannel = channel;
+        }
 
-    const channel = input.contactChannel ?? state.contactChannel;
-    if (
-      channel === 'WHATSAPP' &&
-      (input.contactChannel !== undefined || input.phone !== undefined) &&
-      !mobileValid
-    ) {
-      throw whatsappMobileRequiredError();
-    }
-    if (channel !== state.contactChannel) {
-      patch.contactChannel = channel;
-      changed.push('contactChannel');
-    }
+        if (input.whatsappOptIn === true && !state.whatsappOptInAt) {
+          if (!input.whatsappOptInSource) {
+            throw new BadRequestException(OPT_IN_SOURCE_REQUIRED);
+          }
+          if (!mobileValid) throw whatsappMobileRequiredError();
+          patch.whatsappOptInAt = now;
+          patch.whatsappOptInSource = input.whatsappOptInSource;
+          patch.whatsappOptInById = ctx.actor.userId;
+        } else if (input.whatsappOptIn === false && state.whatsappOptInAt) {
+          patch.whatsappOptInAt = null;
+          patch.whatsappOptInSource = null;
+          patch.whatsappOptInById = null;
+        }
 
-    if (input.whatsappOptIn === true && !state.whatsappOptInAt) {
-      if (!input.whatsappOptInSource) {
-        throw new BadRequestException(OPT_IN_SOURCE_REQUIRED);
-      }
-      if (!mobileValid) throw whatsappMobileRequiredError();
-      patch.whatsappOptInAt = now;
-      patch.whatsappOptInSource = input.whatsappOptInSource;
-      patch.whatsappOptInById = ctx.actor.userId;
-      origin = input.whatsappOptInSource;
-      changed.push('whatsappOptIn');
-    } else if (input.whatsappOptIn === false && state.whatsappOptInAt) {
-      patch.whatsappOptInAt = null;
-      patch.whatsappOptInSource = null;
-      patch.whatsappOptInById = null;
-      changed.push('whatsappOptIn');
-    }
+        if (input.reminderOptOut === true && !state.reminderOptOutAt) {
+          patch.reminderOptOutAt = now;
+          patch.reminderOptOutSource = 'STAFF';
+        } else if (input.reminderOptOut === false) {
+          patch.reminderOptOutAt = null;
+          patch.reminderOptOutSource = null;
+        }
 
-    if (input.reminderOptOut === true && !state.reminderOptOutAt) {
-      patch.reminderOptOutAt = now;
-      patch.reminderOptOutSource = 'STAFF';
-      changed.push('reminderOptOutAt');
-    } else if (input.reminderOptOut === false && state.reminderOptOutAt) {
-      patch.reminderOptOutAt = null;
-      patch.reminderOptOutSource = null;
-      changed.push('reminderOptOutAt');
-    }
-
-    if (changed.length === 0) {
-      return toView(state, country, clinicDefault, now);
-    }
-
-    const saved = await this.repo.update(patientId, patch);
+        return patch;
+      },
+      input.reminderOptOut === false ? now : undefined,
+    );
+    const country = locationCountry ?? saved.state.countryCode;
+    if (!saved.changedFields.length)
+      return toView(saved.state, country, clinicDefault, now);
+    const origin: AuditOrigin =
+      saved.changedFields.includes('whatsappOptIn') &&
+      input.whatsappOptIn === true
+        ? (saved.state.whatsappOptInSource ?? 'STAFF')
+        : 'STAFF';
     await this.audit.record({
       tenantId: ctx.tenantId,
       locationId: ctx.locationId,
@@ -257,9 +259,22 @@ export class UpdatePatientCommunicationUseCase {
       metadata: {
         reason: 'COMMUNICATION_PREFERENCES_CHANGED',
         origin,
-        changedFields: [...changed].sort(),
+        changedFields: saved.changedFields,
       },
     });
-    return toView(saved, country, clinicDefault, now);
+    return toView(saved.state, country, clinicDefault, now);
+  }
+}
+
+@Injectable()
+export class GetPatientOptOutWarningsUseCase {
+  constructor(
+    @Inject(PATIENT_COMMUNICATION_REPOSITORY)
+    private readonly repo: PatientCommunicationRepository,
+  ) {}
+  async execute(patientId: string): Promise<PatientOptOutMatchWarningView[]> {
+    const warnings = await this.repo.optOutWarnings(patientId);
+    if (!warnings) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    return warnings;
   }
 }

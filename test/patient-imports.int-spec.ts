@@ -1,3 +1,4 @@
+import { PrismaReminderOptOutRepository } from '../src/modules/reminders/infrastructure/prisma-reminder-opt-out.repository';
 import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -15,7 +16,7 @@ import type { ImportPatientData } from '../src/modules/patient-imports/domain/im
 // con el mismo documento (contra la BD y dentro del lote) y el deshacer.
 // Todo por la ruta de la app (runWithTenant, rol dentalix_app); `raw`
 // (DIRECT_URL) solo siembra, lee y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
@@ -37,6 +38,8 @@ async function purge(): Promise<void> {
   const ids = tenants.map((t) => t.id);
   if (ids.length > 0) {
     const where = { tenantId: { in: ids } };
+    // DX-214: aviso append-only; limpieza solo con conexión administrativa.
+    await raw.reminderOptOutMatchWarning.deleteMany({ where });
     await raw.appointment.deleteMany({ where });
     await raw.patientDentitionEvent.deleteMany({ where });
     await raw.patientAgreement.deleteMany({ where });
@@ -482,6 +485,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'post_op_instruction_deliveries.patientId',
       'prescriptions.patientId',
       'reminder_opt_out_links.patientId',
+      // DX-214: el aviso auditable es actividad durable y debe bloquear undo.
+      'reminder_opt_out_match_warnings.patientId',
       'tooth_records.patientId',
       'treatment_plans.patientId',
       'waitlist_offers.patientId',
@@ -504,6 +509,55 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     await expect(
       inTenant(a, () => repo.undo(batch!.id, a.userId)),
     ).rejects.toMatchObject({ patients: 1 });
+  });
+
+  it('DX-214: un aviso durable bloquea deshacer el lote y conserva paciente, filas y avisos bajo RLS', async () => {
+    const batch = await prepared(a, [person('8883', { phone: '3101234567' })]);
+    await runAll(a, batch!.id);
+    const created = await raw.patient.findFirstOrThrow({
+      where: { importBatchId: batch!.id },
+    });
+    const warnings = new PrismaReminderOptOutRepository(prisma, tenantContext);
+    await inTenant(a, () => warnings.recordMatchWarnings([created.id], 6, 5));
+    const snapshot = async () => {
+      const [patient, imported, rows, notices] = await Promise.all([
+        raw.patient.findUniqueOrThrow({ where: { id: created.id } }),
+        raw.patientImportBatch.findUniqueOrThrow({ where: { id: batch!.id } }),
+        raw.patientImportRow.findMany({
+          where: { batchId: batch!.id },
+          orderBy: { rowNumber: 'asc' },
+        }),
+        raw.reminderOptOutMatchWarning.findMany({
+          where: { patientId: created.id },
+          orderBy: { id: 'asc' },
+        }),
+      ]);
+      return { patient, imported, rows, notices };
+    };
+    const before = await snapshot();
+    expect(before.notices).toHaveLength(1);
+    expect(before.patient.deletedAt).toBeNull();
+    expect(before.imported.status).toBe('COMPLETED');
+    expect(before.rows[0]).toMatchObject({
+      patientId: created.id,
+      outcome: 'CREATED',
+    });
+    await expect(
+      inTenant(b, () =>
+        prisma.runWithTenant((tx) =>
+          tx.reminderOptOutMatchWarning.findMany({
+            where: { patientId: created.id },
+          }),
+        ),
+      ),
+    ).resolves.toEqual([]);
+    await expect(
+      inTenant(b, () => repo.undo(batch!.id, b.userId)),
+    ).rejects.toThrow();
+    await expect(
+      inTenant(a, () => repo.undo(batch!.id, a.userId)),
+    ).rejects.toMatchObject({ patients: 1 });
+    expect(await snapshot()).toEqual(before);
   });
 
   it('deshacer se niega si un importado ya tiene un convenio asignado (DX-105)', async () => {

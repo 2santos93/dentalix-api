@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -27,7 +27,7 @@ import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/staff/domain/pr
 // - D  (odontólogo) restringido a A1; E (odontóloga) sin restricción.
 // - U  (recepción) SIN filas: tiene que ver exactamente lo de siempre.
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const passwords = new PasswordService();

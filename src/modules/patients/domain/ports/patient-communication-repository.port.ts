@@ -44,14 +44,36 @@ export interface PatientCommunicationPatch {
   reminderOptOutSource?: ReminderOptOutSource | null;
 }
 
+/** El plan se evalúa dentro de la TX, sobre la fila del paciente bloqueada. */
+export type PatientCommunicationUpdate =
+  | PatientCommunicationPatch
+  | ((current: PatientCommunicationState) => PatientCommunicationPatch);
+
+export interface PatientCommunicationUpdateResult {
+  state: PatientCommunicationState;
+  /** Cambios de preferencias efectivos frente al estado protegido por el lock. */
+  changedFields: string[];
+}
+
 export const PATIENT_COMMUNICATION_REPOSITORY = Symbol(
   'PATIENT_COMMUNICATION_REPOSITORY',
 );
 
 // Sin tenantId: sale del contexto de la petición y todo va bajo RLS.
+export interface PatientOptOutMatchWarningView {
+  id: string;
+  createdAt: Date;
+  matchCount: number;
+  maxMatches: number;
+}
+
 export interface PatientCommunicationRepository {
   /** null si el paciente no existe (o no es de esta clínica, o se retiró). */
   find(patientId: string): Promise<PatientCommunicationState | null>;
+  /** null: paciente ajeno/retirado; últimos20 avisos de comunicaciones. */
+  optOutWarnings(
+    patientId: string,
+  ): Promise<PatientOptOutMatchWarningView[] | null>;
   /**
    * País (ClinicCountry) con el que se valida el móvil: el de la sede activa
    * de la petición (X-Location-Id) o, en la vista consolidada, el de la sede
@@ -60,9 +82,10 @@ export interface PatientCommunicationRepository {
   locationCountry(): Promise<string | null>;
   /** Canal con el que nacen los pacientes de la clínica. */
   clinicDefaultChannel(): Promise<ContactChannel>;
-  /** Aplica el cambio y devuelve el estado nuevo (404 si ya no existe). */
+  /** Aplica bajo lock y devuelve estado/diff efectivos (404 si ya no existe). */
   update(
     patientId: string,
-    patch: PatientCommunicationPatch,
-  ): Promise<PatientCommunicationState>;
+    update: PatientCommunicationUpdate,
+    invalidateOptOutLinksAt?: Date,
+  ): Promise<PatientCommunicationUpdateResult>;
 }

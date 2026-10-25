@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
+  Prisma,
   PrismaClient,
   DocType,
   Sex,
@@ -20,7 +21,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // dentalix_app vía DATABASE_URL) ve 0 filas y no podría limpiar datos de
 // corridas anteriores. Ver clinical-history.e2e-spec.ts / patients.e2e-spec.ts
 // para el mismo patrón.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

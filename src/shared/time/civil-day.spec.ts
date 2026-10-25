@@ -1,5 +1,8 @@
 import {
   addCivilDays,
+  checkPeriodDays,
+  PERIOD_DAY_MAX,
+  PERIOD_DAY_MIN,
   civilDateIn,
   civilDateResolver,
   civilDayRange,
@@ -33,6 +36,52 @@ describe('civil-day (DX-097)', () => {
         '',
       ]) {
         expect(parseCivilDate(bad)).toBeNull();
+      }
+    });
+  });
+
+  describe('checkPeriodDays (BE-044, DX-305)', () => {
+    it('acepta los bordes del rango admitido y cuenta los días', () => {
+      expect(checkPeriodDays(PERIOD_DAY_MIN, PERIOD_DAY_MIN)).toEqual({
+        ok: true,
+        from: '2000-01-01',
+        to: '2000-01-01',
+        days: 1,
+      });
+      expect(checkPeriodDays('2100-12-01', PERIOD_DAY_MAX)).toMatchObject({
+        ok: true,
+        days: 31,
+      });
+    });
+
+    it('una fecha real fuera de 2000-01-01…2100-12-31 es OUT_OF_RANGE', () => {
+      for (const [from, to] of [
+        ['9999-12-30', '9999-12-31'],
+        ['9999-12-31', '9999-12-31'],
+        ['1999-12-31', '2000-01-05'],
+        ['2100-12-31', '2101-01-01'],
+        ['1900-01-01', '1900-01-31'],
+      ]) {
+        expect(checkPeriodDays(from, to)).toEqual({
+          ok: false,
+          problem: 'OUT_OF_RANGE',
+        });
+      }
+    });
+
+    it('días que no existen, formas inválidas o desde > hasta son INVALID', () => {
+      for (const [from, to] of [
+        ['2026-02-30', '2026-03-01'],
+        ['10000-01-01', '10000-01-02'],
+        // `Date.UTC` lleva los años 0–99 a 1900–1999: no es un día real aquí.
+        ['0001-01-01', '2026-01-01'],
+        ['2026-10-31', '2026-10-01'],
+        ['01/10/2026', '2026-10-31'],
+      ]) {
+        expect(checkPeriodDays(from, to)).toEqual({
+          ok: false,
+          problem: 'INVALID',
+        });
       }
     });
   });

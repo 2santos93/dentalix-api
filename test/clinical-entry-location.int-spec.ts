@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaClinicalEntryRepository } from '../src/modules/clinical-entries/infrastructure/repositories/prisma-clinical-entry.repository';
 import { resetDatabase } from './support/e2e-fixtures';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const context = new TenantContextService();
@@ -60,7 +60,6 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
         data: {
           tenantId,
           name: 'Principal',
-          repsHabilitationCode: '110010123401',
           createdAt: new Date('2020-01-01'),
         },
       })
@@ -79,7 +78,7 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
     await raw.$disconnect();
   });
 
-  it('persiste sede de contexto, usa su REPS y legacy sin sede usa principal', async () => {
+  it('persiste la sede del contexto; sin sede activa, la principal', async () => {
     const entry = await context.run(tenantId, locationB, () =>
       repo.create({ patientId, notes: 'Control', performedById: authorId }),
     );
@@ -87,25 +86,15 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
       (await raw.clinicalEntry.findUniqueOrThrow({ where: { id: entry.id } }))
         .locationId,
     ).toBe(locationB);
-    const current = await context.run(tenantId, () =>
-      repo.loadRdaFacts(entry.id),
+    const withoutLocation = await context.run(tenantId, () =>
+      repo.create({ patientId, notes: 'Sin sede', performedById: authorId }),
     );
-    expect(current?.location).toMatchObject({
-      id: locationB,
-      repsHabilitationCode: null,
-    });
-    const old = await raw.clinicalEntry.create({
-      data: {
-        tenantId,
-        patientId,
-        notes: 'Legacy',
-        performedById: authorId,
-        entryDate: new Date(),
-      },
-    });
     expect(
-      (await context.run(tenantId, () => repo.loadRdaFacts(old.id)))?.location
-        .id,
+      (
+        await raw.clinicalEntry.findUniqueOrThrow({
+          where: { id: withoutLocation.id },
+        })
+      ).locationId,
     ).toBe(locationA);
   });
 

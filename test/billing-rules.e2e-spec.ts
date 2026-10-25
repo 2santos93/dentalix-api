@@ -2,7 +2,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { CatalogKind, DocType, PrismaClient, Sex } from '@prisma/client';
+import {
+  CatalogKind,
+  DocType,
+  Prisma,
+  PrismaClient,
+  Sex,
+} from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
@@ -12,7 +18,7 @@ import { resetDatabase } from './support/e2e-fixtures';
 // planes cerrados, saldo coherente con el estado de cuenta, idempotencia con
 // huella. Ninguna respuesta de estas rutas puede ser 5xx.
 // DIRECT_URL (superusuario, sin RLS) solo para inspeccionar y limpiar.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

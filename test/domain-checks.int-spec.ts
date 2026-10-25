@@ -29,7 +29,7 @@ function preflightOf(sql: string): string {
   return /^DO \$\$[\s\S]*?^END \$\$;$/m.exec(sql)?.[0] ?? '';
 }
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
@@ -592,7 +592,7 @@ describe('Reglas de dominio en la BD (DX-042, int)', () => {
     });
 
     it('un rol sujeto a RLS no puede contar de menos en silencio', async () => {
-      const app = new PrismaClient({
+      const app = new PrismaClient<Prisma.PrismaClientOptions>({
         datasources: { db: { url: process.env.DATABASE_URL } },
       });
       try {

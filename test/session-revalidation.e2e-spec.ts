@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
@@ -14,7 +14,7 @@ import { registerVerified } from './support/register-verified';
 //
 // `raw` (DIRECT_URL, superuser) solo siembra y limpia — mismo patrón que
 // staff.e2e-spec.ts. La limpieza es acotada a lo que crea este archivo.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -13,10 +12,10 @@ import type {
   LocationRepository,
 } from '../../domain/ports/location-repository.port';
 import {
-  REPS_FORMAT_MESSAGE,
-  isValidRepsCode,
-  normalizeRepsCode,
-} from '../../../../shared/validation/health-codes';
+  type HealthRegistrationChange,
+  healthRegistrationChange,
+  normalizeHealthRegistrationNumber,
+} from '../../domain/health-registration';
 
 /**
  * DX-222: teléfono recortado; vacío o null = quitarlo (null), ausente = no
@@ -69,6 +68,15 @@ export class CreateLocationUseCase {
   }
 }
 
+/**
+ * La sede editada y, si cambió el nº de registro sanitario o si se imprime
+ * (DX-319), su antes y después para la auditoría.
+ */
+export interface LocationUpdate {
+  location: Location;
+  healthRegistration: HealthRegistrationChange | null;
+}
+
 @Injectable()
 export class UpdateLocationUseCase {
   constructor(
@@ -81,16 +89,12 @@ export class UpdateLocationUseCase {
       name?: string;
       address?: string;
       country?: ClinicCountry;
-      repsHabilitationCode?: string | null;
+      healthRegistrationNumber?: string | null;
+      showHealthRegistrationNumber?: boolean;
       phone?: string | null;
       isActive?: boolean;
     },
-  ): Promise<Location> {
-    // DX-212: código REPS normalizado (vacío = quitarlo) o 400 con el formato.
-    const reps = normalizeRepsCode(patch.repsHabilitationCode);
-    if (reps && !isValidRepsCode(reps)) {
-      throw new BadRequestException(REPS_FORMAT_MESSAGE);
-    }
+  ): Promise<LocationUpdate> {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException('Location not found');
 
@@ -109,11 +113,18 @@ export class UpdateLocationUseCase {
       name: patch.name?.trim(),
       address: patch.address?.trim(),
       country: patch.country,
-      repsHabilitationCode: reps,
+      // DX-319: texto libre, sin formato por país; vacío o null lo quita.
+      healthRegistrationNumber: normalizeHealthRegistrationNumber(
+        patch.healthRegistrationNumber,
+      ),
+      showHealthRegistrationNumber: patch.showHealthRegistrationNumber,
       phone: normalizePhone(patch.phone),
       isActive: patch.isActive,
     });
     if (!updated) throw new NotFoundException('Location not found');
-    return updated;
+    return {
+      location: updated,
+      healthRegistration: healthRegistrationChange(current, updated),
+    };
   }
 }

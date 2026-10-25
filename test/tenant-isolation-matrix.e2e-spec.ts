@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -27,6 +28,10 @@ import { CapturingMailer } from './support/capture-mailer';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { CONFIRMATION_LINK_NOT_FOUND_MESSAGE } from '../src/modules/appointment-confirmations/application/find-confirmation-by-token';
+import {
+  LOCATION_BY_REQUEST_MESSAGE,
+  PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+} from '../src/modules/treatment-plans/domain/plan-item-attribution';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
 
@@ -61,7 +66,7 @@ import { pdfFixture } from './support/document-fixtures';
 const SIGNATURE_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -732,6 +737,7 @@ async function seedBExtras(
   });
   const coverage = await create(app, b, `/patients/${patientId}/coverages`, {
     payerId: payer.id,
+    memberNumber: 'EMP-00042',
   });
   const priceList = await create(app, b, '/price-lists', {
     name: 'Lista de B',
@@ -1129,6 +1135,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ reason: 'Intento ajeno' }),
       status: 404,
     },
+    // SEC-050: anular el cargo de A desde B.
+    {
+      name: 'POST /appointments/:id/cancellation-fee/void',
+      verb: 'post',
+      path: () => `/appointments/${a.appointmentId}/cancellation-fee/void`,
+      body: () => ({ reason: 'Intento ajeno' }),
+      status: 404,
+    },
     {
       name: 'GET /locations/:id/cancellation-policy/email-preview',
       verb: 'get',
@@ -1223,6 +1237,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ status: 'DONE', performedById: a.dentistUserId }),
       bodyIds: ['performedById'],
       status: 404,
+    },
+    // DX-305: B intenta registrar SU ítem como realizado en una sede de A. La
+    // sede nunca llega al marcar realizado (400 antes de leer nada); la de un
+    // «Sin atribuir» ya realizado se prueba en «B no puede atribuir…» abajo.
+    {
+      name: 'PATCH /treatment-plans/:id/items/:itemId (DX-305: realizado en una sede de A)',
+      verb: 'patch',
+      path: () => `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      body: () => ({ status: 'DONE', performedLocationId: a.locationId }),
+      bodyIds: ['performedLocationId'],
+      status: 400,
     },
     // DX-204: «Descuento %» en bloque sobre un plan y un ítem de A.
     {
@@ -1564,6 +1589,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}/coverages/${a.coverageId}`,
       status: 404,
     },
+    {
+      name: 'POST /patients/:patientId/coverages/:coverageId/verification',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/coverages/${a.coverageId}/verification`,
+      body: () => ({ checkedMemberNumber: 'AFI-A-0001' }),
+      status: 404,
+    },
     // --- convenio del paciente (DX-105) ---
     {
       name: 'GET /patients/:patientId/agreement',
@@ -1839,7 +1872,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'PATCH /locations/:id',
       verb: 'patch',
       path: () => `/locations/${a.locationId}`,
-      body: () => ({ name: 'Hackeada', isActive: false }),
+      // DX-319: también el nº de registro sanitario y si se imprime.
+      body: () => ({
+        name: 'Hackeada',
+        isActive: false,
+        healthRegistrationNumber: 'Hackeada',
+        showHealthRegistrationNumber: true,
+      }),
       status: 404,
     },
     {
@@ -2894,6 +2933,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
    */
   const COVERED_ELSEWHERE: Record<string, string> = {
+    // DX-214: recepción consulta avisos de A; administrador de B obtiene 404
+    // y no se añade ningún evento VIEW a la auditoría de A.
+    'GET /patients/:id/communication/opt-out-warnings':
+      'reminder-opt-out.e2e-spec.ts',
     // Contra el paciente de A; los casos de aquí (cita y plantilla de A) van
     // sobre el paciente de B y prueban los ids del cuerpo (DX-207).
     'POST /patients/:patientId/clinical-entries':
@@ -2985,10 +3028,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'GET /patients/:patientId/family-account-statement':
       'patient-responsible-parties.e2e-spec.ts',
     'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
-    // DX-212: B → 404 sobre la evolución de A.
-    'GET /clinical-entries/:id/rda-readiness': 'rda-codes.e2e-spec.ts',
-    'GET /patients/:patientId/clinical-entries/rda-readiness':
-      'rda-codes.e2e-spec.ts',
     // DX-099: B → 404 sobre el paciente, el envío y el token de A, sin tocar
     // el envío ni la HC de A.
     'POST /patients/:patientId/medical-history/requests':
@@ -3158,6 +3197,49 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         where: { sourcePlanItemId: b.planItemId },
       }),
     ).toBe(0);
+  });
+
+  it('DX-305: B no puede atribuir su «Sin atribuir» a una sede de A (400, y el ítem sigue sin atribuir)', async () => {
+    const planItem = await raw.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: b.planItemId },
+      select: { tenantId: true, planId: true, catalogItemId: true },
+    });
+    // Como los DONE de antes de DX-050: realizado, sin quién, dónde ni cuándo.
+    const legacy = await raw.treatmentPlanItem.create({
+      data: { ...planItem, toothNumber: '22', price: 100, status: 'DONE' },
+      select: { id: true },
+    });
+    const res = await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${legacy.id}`,
+      {
+        performedById: clinicB.adminUserId,
+        completedAt: '2026-09-14T15:00:00.000Z',
+        performedLocationId: a.locationId,
+      },
+    ).expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
+    );
+    expect(
+      await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: legacy.id },
+      }),
+    ).toMatchObject({ performedById: null, performedLocationId: null });
+    // Y al marcar realizado, la sede no se elige en el cuerpo.
+    const done = await api(
+      app,
+      clinicB,
+      'patch',
+      `/treatment-plans/${b.planId}/items/${b.planItemId}`,
+      { status: 'DONE', performedLocationId: a.locationId },
+    ).expect(400);
+    expect((done.body as { message: string }).message).toBe(
+      LOCATION_BY_REQUEST_MESSAGE,
+    );
+    await raw.treatmentPlanItem.delete({ where: { id: legacy.id } });
   });
 
   it('B sigue operando lo suyo (los 404 no son un "todo prohibido")', async () => {

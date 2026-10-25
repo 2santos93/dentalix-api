@@ -21,7 +21,10 @@ import { CLOSED_PLAN_STATUSES } from './plan-status-machine';
  *  - Salir de DONE (a aceptado o propuesto): la atribución se limpia y queda
  *    auditada con el antes. Lo hace un ADMIN o quien lo realizó (un «marcado
  *    por error»); otro no, para que nadie se lleve la producción ajena.
- *  - Los DONE anteriores a DX-050 no tienen atribución («Sin atribuir»).
+ *  - Los DONE anteriores a DX-050 no tienen atribución («Sin atribuir»). Un
+ *    ADMIN los atribuye indicando quién, cuándo Y en qué sede (DX-305): sin
+ *    sede o sin fecha no cuentan en la producción de «Comparar sedes». La
+ *    sede tiene que ser de las permitidas al usuario (DX-089).
  */
 export const PERFORMER_REQUIRED_MESSAGE =
   'Indica qué profesional realizó el procedimiento.';
@@ -39,6 +42,12 @@ export const ATTRIBUTION_ONLY_WHEN_DONE_MESSAGE =
   'Quién lo realizó y cuándo solo se indican en un procedimiento realizado.';
 export const ATTRIBUTION_ADMIN_ONLY_MESSAGE =
   'Solo un administrador puede cambiar quién realizó un procedimiento o cuándo.';
+export const UNATTRIBUTED_CORRECTION_INCOMPLETE_MESSAGE =
+  'Para atribuir un procedimiento «Sin atribuir» indica quién lo realizó, cuándo y en qué sede.';
+export const LOCATION_BY_REQUEST_MESSAGE =
+  'La sede donde se realizó es la sede activa al marcarlo como realizado.';
+export const PERFORMED_LOCATION_NOT_FOUND_MESSAGE =
+  'La sede no es de esta clínica.';
 export const REVERT_DONE_FORBIDDEN_MESSAGE =
   'Solo un administrador o quien lo realizó puede quitarle «Realizado» a un procedimiento.';
 
@@ -46,6 +55,7 @@ export const REVERT_DONE_FORBIDDEN_MESSAGE =
 export interface AttributionState {
   status: TreatmentPlanItemStatus;
   performedById: string | null;
+  performedLocationId: string | null;
   completedAt: Date | null;
 }
 
@@ -54,6 +64,8 @@ export interface AttributionRequest {
   status?: TreatmentPlanItemStatus;
   performedById?: string;
   completedAt?: Date;
+  /** Solo al corregir un ítem ya DONE (ADMIN). */
+  performedLocationId?: string;
 }
 
 export interface AttributionActor {
@@ -66,13 +78,20 @@ export interface AttributionActor {
  *  - SET: pasa a DONE; la sede la pone el repositorio (`X-Location-Id` o la
  *    de escritura de la sesión) y comprueba que el profesional sea un miembro
  *    vivo de la clínica, que atienda y que atienda en esa sede;
- *  - CORRECT: un ADMIN cambia quién o cuándo (lo que no venga, se queda);
+ *  - CORRECT: un ADMIN cambia quién, cuándo o dónde (lo que no venga, se
+ *    queda); el repositorio comprueba que la sede sea de la clínica y de las
+ *    permitidas al usuario (DX-089);
  *  - CLEAR: sale de DONE y se limpian los cuatro campos.
  * CORRECT y CLEAR dejan un evento de auditoría con el antes y el después.
  */
 export type ItemAttributionChange =
   | { kind: 'SET'; performedById: string; completedAt: Date }
-  | { kind: 'CORRECT'; performedById?: string; completedAt?: Date }
+  | {
+      kind: 'CORRECT';
+      performedById?: string;
+      completedAt?: Date;
+      performedLocationId?: string;
+    }
   | { kind: 'CLEAR' };
 
 export function isAttendingRole(role: ClinicRole): boolean {
@@ -81,7 +100,9 @@ export function isAttendingRole(role: ClinicRole): boolean {
 
 function hasAttributionFields(request: AttributionRequest): boolean {
   return (
-    request.performedById !== undefined || request.completedAt !== undefined
+    request.performedById !== undefined ||
+    request.completedAt !== undefined ||
+    request.performedLocationId !== undefined
   );
 }
 
@@ -117,6 +138,9 @@ export function decideAttribution(
     if (request.completedAt !== undefined) {
       throw new BadRequestException(COMPLETED_AT_BY_SERVER_MESSAGE);
     }
+    if (request.performedLocationId !== undefined) {
+      throw new BadRequestException(LOCATION_BY_REQUEST_MESSAGE);
+    }
     const performedById =
       request.performedById ??
       (isAttendingRole(actor.role) ? actor.userId : undefined);
@@ -133,23 +157,38 @@ export function decideAttribution(
   const dateChanges =
     requestedAt !== undefined &&
     requestedAt.getTime() !== item.completedAt?.getTime();
-  if (!performerChanges && !dateChanges) return undefined;
+  const locationChanges =
+    request.performedLocationId !== undefined &&
+    request.performedLocationId !== item.performedLocationId;
+  if (!performerChanges && !dateChanges && !locationChanges) return undefined;
   if (actor.role !== ClinicRole.ADMIN) {
     throw new ForbiddenException(ATTRIBUTION_ADMIN_ONLY_MESSAGE);
   }
   if (dateChanges && requestedAt.getTime() > now.getTime()) {
     throw new BadRequestException(COMPLETED_AT_FUTURE_MESSAGE);
   }
+  // DX-305 (BE-045): un «Sin atribuir» se atribuye entero o no cuenta en la
+  // producción por sede; lo que ya tiene se puede no repetir.
+  if (
+    (item.performedById ?? request.performedById) === undefined ||
+    (item.completedAt ?? requestedAt) === undefined ||
+    (item.performedLocationId ?? request.performedLocationId) === undefined
+  ) {
+    throw new BadRequestException(UNATTRIBUTED_CORRECTION_INCOMPLETE_MESSAGE);
+  }
   return {
     kind: 'CORRECT',
     ...(performerChanges ? { performedById: request.performedById } : {}),
     ...(dateChanges ? { completedAt: requestedAt } : {}),
+    ...(locationChanges
+      ? { performedLocationId: request.performedLocationId }
+      : {}),
   };
 }
 
 /**
  * En un plan CERRADO (DX-109) los ítems no cambian, salvo la corrección de la
- * atribución de uno ya REALIZADO (quién o cuándo, nada más): la producción se
+ * atribución de uno ya REALIZADO (quién, cuándo o dónde, nada más): la producción se
  * corrige aunque el plan haya terminado. El trigger
  * `treatment_plan_items_locked_when_closed` aplica la misma excepción.
  */

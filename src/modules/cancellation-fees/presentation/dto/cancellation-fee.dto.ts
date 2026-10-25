@@ -47,6 +47,23 @@ export class WaiveCancellationFeeDto {
   reason?: string;
 }
 
+export class VoidCancellationFeeDto {
+  @ApiProperty({
+    minLength: 3,
+    maxLength: WAIVE_REASON_MAX,
+    example:
+      'Cargo generado por error: el paciente avisó a tiempo por teléfono',
+    description:
+      'Motivo de la anulación (3–500 caracteres). Queda en el cargo con quién y cuándo; la auditoría registra la anulación sin el texto.',
+  })
+  @IsOptional()
+  @IsString({ message: CANCELLATION_FEE_MESSAGES.voidReason })
+  @MaxLength(WAIVE_REASON_MAX, {
+    message: CANCELLATION_FEE_MESSAGES.voidReason,
+  })
+  reason?: string;
+}
+
 export class CommunicatedPolicyDto {
   @ApiProperty({ format: 'uuid' })
   policyVersionId!: string;
@@ -90,9 +107,41 @@ export class CancellationFeeRecordDto {
 
   @ApiProperty({
     description:
-      'El ítem del cargo se quitó del plan («Quitar»): el cargo quedó anulado y no hay nada que cobrar. El ítem no admite descuento; así se anula un cargo generado por error. La cita sigue con su única decisión (otro cargo o condonar: 409).',
+      'El ítem del cargo ya no está en el plan: no hay nada que cobrar. Desde SEC-050 solo pasa al anular el cargo (`voidedAt`); un cargo con el ítem retirado y sin anular es anterior a SEC-050 (se quitó con «Quitar»). La cita sigue con su única decisión (otro cargo o condonar: 409).',
   })
   planItemRemoved!: boolean;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'SEC-050: lo que cobra hoy el ítem del cargo (precio − descuento); null sin ítem o con el ítem retirado.',
+  })
+  itemAmount!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-050: el ítem vivo no cobra lo que dice el cargo (`amount`): se cambió por fuera de este flujo. La vista debe avisarlo.',
+  })
+  itemMismatch!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'SEC-050: cuándo se anuló el cargo (null = sin anular).',
+  })
+  voidedAt!: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  voidedByName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'SEC-050: motivo de la anulación.',
+  })
+  voidReason!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   waiveReason!: string | null;
@@ -117,8 +166,12 @@ export class CancellationFeeViewDto {
   @ApiProperty({ description: 'NO_SHOW o cancelación tardía.' })
   eligible!: boolean;
 
-  @ApiProperty({ enum: ['NONE', 'CHARGED', 'WAIVED'] })
-  status!: 'NONE' | 'CHARGED' | 'WAIVED';
+  @ApiProperty({
+    enum: ['NONE', 'CHARGED', 'WAIVED', 'VOIDED'],
+    description:
+      'VOIDED (SEC-050): el cargo se generó y después se anuló con motivo.',
+  })
+  status!: 'NONE' | 'CHARGED' | 'WAIVED' | 'VOIDED';
 
   @ApiProperty({
     enum: FEE_BLOCK_REASONS,
@@ -133,7 +186,7 @@ export class CancellationFeeViewDto {
 
   @ApiProperty({
     description:
-      'El usuario puede generar o condonar: ADMIN, o RECEPTION si la política vigente de la sede lo permite.',
+      'El usuario puede generar, condonar o anular: ADMIN, o RECEPTION si la política vigente de la sede lo permite.',
   })
   canManage!: boolean;
 

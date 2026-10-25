@@ -6,6 +6,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -19,7 +20,7 @@ import { registerVerified } from './support/register-verified';
 // cerradas en una transacción (espejo DONE → odontograma, último ADMIN,
 // idempotencia del abono). La app se monta como en main.ts (prefijo, pipe y
 // PrismaExceptionFilter global).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const passwordService = new PasswordService();

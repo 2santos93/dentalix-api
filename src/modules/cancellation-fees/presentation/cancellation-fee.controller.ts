@@ -38,6 +38,7 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   ChargeCancellationFeeUseCase,
   GetCancellationFeeUseCase,
+  VoidCancellationFeeUseCase,
   WaiveCancellationFeeUseCase,
   type CancellationFeeView,
   type FeeActor,
@@ -46,6 +47,7 @@ import { CANCELLATION_FEE_MESSAGES } from '../domain/cancellation-fee';
 import {
   CancellationFeeViewDto,
   ChargeCancellationFeeDto,
+  VoidCancellationFeeDto,
   WaiveCancellationFeeDto,
 } from './dto/cancellation-fee.dto';
 
@@ -58,7 +60,8 @@ function actorOf(req: { user: JwtPayload }): FeeActor {
 /**
  * Cargo por inasistencia o cancelación tardía (DX-291). ADMIN siempre;
  * RECEPTION si la política vigente de la sede lo permite (el caso de uso da
- * 403 si no). El resto de roles: 403 del guard.
+ * 403 si no). El resto de roles: 403 del guard. SEC-050: anularlo también va
+ * por aquí (`void`); desde el plan su ítem no se toca.
  */
 @ApiTags('cancellation-fees')
 @ApiBearerAuth()
@@ -72,6 +75,7 @@ export class CancellationFeeController {
     private readonly getFee: GetCancellationFeeUseCase,
     private readonly chargeFee: ChargeCancellationFeeUseCase,
     private readonly waiveFee: WaiveCancellationFeeUseCase,
+    private readonly voidCharge: VoidCancellationFeeUseCase,
   ) {}
 
   @Get()
@@ -160,5 +164,39 @@ export class CancellationFeeController {
     @Req() req: { user: JwtPayload },
   ): Promise<CancellationFeeView> {
     return this.waiveFee.execute(id, dto.reason, actorOf(req));
+  }
+
+  @Audit({
+    action: 'VOID',
+    resource: 'APPOINTMENT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'CANCELLATION_FEE_VOIDED',
+    statusChange: { from: 'CHARGED', to: 'VOIDED' },
+  })
+  @Post('void')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Anular un cargo ya generado, con motivo (SEC-050)',
+    description:
+      'La única forma de dejar sin efecto un cargo generado: desde el plan, su ítem no cambia de precio, descuento ni estado ni se quita (409 a todo rol). En una transacción, con la cita y el cargo bloqueados, guarda en el cargo quién, cuándo y el motivo (3–500) y retira su ítem del plan «Cargos administrativos» (deja de salir en el estado de cuenta). Una vez por cargo. Si los abonos vivos de ese plan ya cubren el cargo, 409: se anula antes el abono. Auditado (VOID APPOINTMENT, CANCELLATION_FEE_VOIDED, estado CHARGED → VOIDED, sin el texto del motivo). Sin Idempotency-Key, como condonar: repetirla da 409 «ya se anuló».',
+  })
+  @ApiCreatedResponse({ type: CancellationFeeViewDto })
+  @ApiBadRequestResponse({ description: 'Motivo vacío o de más de 500' })
+  @ApiForbiddenResponse({
+    description:
+      'Ni ADMIN ni RECEPTION con permiso de la política; o sede no permitida (DX-089)',
+  })
+  @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
+  @ApiConflictResponse({
+    description:
+      'Sin cargo generado (o condonado), ya anulado, ya cobrado (anula antes el abono), o la cita cambió',
+  })
+  voidFee(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VoidCancellationFeeDto,
+    @Req() req: { user: JwtPayload },
+  ): Promise<CancellationFeeView> {
+    return this.voidCharge.execute(id, dto.reason, actorOf(req));
   }
 }

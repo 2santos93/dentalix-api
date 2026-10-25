@@ -21,7 +21,7 @@ import {
 //
 // `owner` (DIRECT_URL) solo siembra e inspecciona; las lecturas y escrituras
 // de la app van por PrismaService (rol dentalix_app, sujeto a RLS).
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();

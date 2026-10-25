@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   adminUrlFor,
   ownerUrlFor,
@@ -16,7 +16,7 @@ describe('DX-232: migración con owner sin superusuario', () => {
   const env = requireOwnerNosuEnv();
   const database = `dx232_owner_${process.pid}_${Date.now()}`;
   const dir = mkdtempSync(join(tmpdir(), 'dx232-owner-'));
-  const admin = new PrismaClient({
+  const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: adminUrlFor(env, 'postgres') } },
   });
   let raw: PrismaClient;
@@ -39,7 +39,7 @@ describe('DX-232: migración con owner sin superusuario', () => {
     await admin.$executeRawUnsafe(
       `CREATE DATABASE "${database}" OWNER "${env.owner}"`,
     );
-    raw = new PrismaClient({
+    raw = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: adminUrlFor(env, database) } },
     });
     cpSync(join(ROOT, 'prisma/schema.prisma'), join(dir, 'schema.prisma'));

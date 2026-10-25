@@ -6,14 +6,23 @@ import {
 import {
   LOCATIONS_COMPARISON_CSV_HEADER,
   toLocationsComparisonCsv,
+  UNATTRIBUTED_PREVIOUS_CSV_NOTE,
 } from './locations-comparison-csv';
 import {
   GetLocationsComparisonUseCase,
   type LocationsComparison,
 } from './use-cases/get-locations-comparison.use-case';
 
-async function report(name: string): Promise<LocationsComparison> {
+async function report(
+  name: string,
+  hasUnattributed = false,
+): Promise<LocationsComparison> {
   const useCase = new GetLocationsComparisonUseCase({
+    productionAttribution: () =>
+      Promise.resolve({
+        attributedSince: new Date('2026-10-01T00:00:00Z'),
+        hasUnattributed,
+      }),
     listLocations: () =>
       Promise.resolve([
         { id: 'l1', name, isActive: true, timeZone: 'America/Bogota' },
@@ -73,10 +82,10 @@ describe('CSV de «Comparar sedes» (DX-014)', () => {
     );
     const production = rows.filter((l) => l.includes('"Producción"'));
     expect(production).toEqual([
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",COP,12.00,10.00,20.0,%,Mejora',
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",EUR,0.00,0.00,,,Igual',
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",COP,12.00,10.00,20.0,%,Mejora',
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",EUR,0.00,0.00,,,Igual',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",COP,12.00,10.00,20.0,%,Mejora,',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",EUR,0.00,0.00,,,Igual,',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",COP,12.00,10.00,20.0,%,Mejora,',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",EUR,0.00,0.00,,,Igual,',
     ]);
     const noShow = rows.find((l) =>
       l.startsWith(
@@ -84,11 +93,11 @@ describe('CSV de «Comparar sedes» (DX-014)', () => {
       ),
     );
     expect(noShow).toBe(
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","No-show %",,10.00,20.00,-10.0,p.p.,Mejora',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","No-show %",,10.00,20.00,-10.0,p.p.,Mejora,',
     );
     // Sin horario: ocupación vacía, sin variación ni evolución.
     expect(rows.find((l) => l.includes('"Sede principal","Ocupación %"'))).toBe(
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Ocupación %",,,,,,',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Ocupación %",,,,,,,',
     );
     // 2 sedes (la sede + el total) × (4 por moneda × 2 monedas + 4 sin moneda).
     expect(rows).toHaveLength(1 + 2 * (4 * 2 + 4));
@@ -108,8 +117,24 @@ describe('CSV de «Comparar sedes» (DX-014)', () => {
     expect(
       rows.find((l) => l.includes('"Sede principal","Citas atendidas"')),
     ).toBe(
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Citas atendidas",,9,8,12.5,%,Mejora',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Citas atendidas",,9,8,12.5,%,Mejora,',
     );
+  });
+
+  it('producción y % de cobro sin variación llevan el aviso de BE-045', async () => {
+    const rows = lines(
+      toLocationsComparisonCsv(await report('Sede principal', true)),
+    );
+    expect(LOCATIONS_COMPARISON_CSV_HEADER.at(-1)).toBe('Aviso');
+    expect(
+      rows.find((l) => l.includes('"Sede principal","Producción",COP')),
+    ).toBe(
+      `2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",COP,12.00,10.00,,,,"${UNATTRIBUTED_PREVIOUS_CSV_NOTE}"`,
+    );
+    // Los indicadores que no dependen de la atribución, sin aviso.
+    expect(
+      rows.find((l) => l.includes('"Sede principal","Citas atendidas"')),
+    ).toMatch(/,Mejora,$/);
   });
 
   it('protege los nombres contra fórmulas en la hoja de cálculo', async () => {

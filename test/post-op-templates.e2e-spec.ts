@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { CatalogKind, ClinicRole, PrismaClient } from '@prisma/client';
+import { CatalogKind, ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { SAMPLE_POSTOP_TEMPLATES } from '../src/modules/post-op-instructions/domain/sample-templates';
@@ -23,7 +23,7 @@ import {
 // procedimientos del catálogo y a tipos de cita validados en la clínica,
 // plantillas de ejemplo idempotentes, aislamiento entre clínicas y el
 // teléfono de la sede que usa la variable {{telefono_sede}}.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

@@ -149,6 +149,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-128: bloque «Comunicaciones». Lo ven todos (el profesional en solo
   // lectura); el canal lo cambian recepción y ADMIN.
   'GET /patients/:id/communication': EVERY_ROLE,
+  'GET /patients/:id/communication/opt-out-warnings': roles(
+    'ADMIN',
+    'RECEPTION',
+  ),
   'PATCH /patients/:id/communication': roles('ADMIN', 'RECEPTION'),
   // DX-203: bloque «Responsable y familia» (dato demográfico y de cobro, no
   // clínico): como «Editar» de la ficha, los 4 roles (loop/informes/DX-203).
@@ -195,9 +199,6 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
-  // DX-212: datos del RDA de una atención (como la historia: sin recepción).
-  'GET /clinical-entries/:id/rda-readiness': CLINICAL,
-  'GET /patients/:patientId/clinical-entries/rda-readiness': CLINICAL,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,
@@ -373,6 +374,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointments/:id/cancellation-fee': roles('ADMIN', 'RECEPTION'),
   'POST /appointments/:id/cancellation-fee': roles('ADMIN', 'RECEPTION'),
   'POST /appointments/:id/cancellation-fee/waive': roles('ADMIN', 'RECEPTION'),
+  // SEC-050: anular un cargo generado, con el mismo permiso que generarlo.
+  'POST /appointments/:id/cancellation-fee/void': roles('ADMIN', 'RECEPTION'),
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,
@@ -406,6 +409,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/coverages': EVERY_ROLE,
   'PATCH /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
   'DELETE /patients/:patientId/coverages/:coverageId': EVERY_ROLE,
+  // SEC-049 (loop/informes/SEC-049.md): verificar el nº de afiliado, solo ADMIN.
+  'POST /patients/:patientId/coverages/:coverageId/verification': ADMIN_ONLY,
   // «Buscar hueco», bloqueos y pendientes (DX-122, loop/informes/DX-122.md):
   // leer y agendar, quien agenda; los bloqueos los escriben ADMIN, recepción y
   // el odontólogo (solo su agenda: 403 del caso de uso), no la asistente.

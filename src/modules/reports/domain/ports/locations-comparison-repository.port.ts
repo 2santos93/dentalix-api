@@ -20,6 +20,21 @@ export interface PeriodAggregation {
   attendedPatients: number;
 }
 
+/**
+ * Desde cuándo la producción es atribuible (DX-050) y si queda producción de
+ * antes sin atribuir (BE-045).
+ */
+export interface ProductionAttribution {
+  /**
+   * Instante en que ESTA base empezó a registrar quién, dónde y cuándo se
+   * realiza cada procedimiento: el fin de la migración de DX-050, fijado en
+   * la BD por la migración de DX-305 (`dx_production_attributed_since()`).
+   */
+  attributedSince: Date;
+  /** ¿La clínica tiene procedimientos realizados «Sin atribuir»? */
+  hasUnattributed: boolean;
+}
+
 export const LOCATIONS_COMPARISON_REPOSITORY = Symbol(
   'LOCATIONS_COMPARISON_REPOSITORY',
 );
@@ -40,4 +55,6 @@ export interface LocationsComparisonRepository {
     locations: readonly ComparisonLocation[],
     currency?: string,
   ): Promise<PeriodAggregation>;
+  /** Lo que hace falta para saber si un período comparado es fiable (BE-045). */
+  productionAttribution(): Promise<ProductionAttribution>;
 }

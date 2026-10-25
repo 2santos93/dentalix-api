@@ -1,3 +1,6 @@
+import { ConfigService } from '@nestjs/config';
+import { ReminderClock } from '../application/reminder-clock';
+import { optOutPositiveInteger } from '../application/opt-out-config';
 import { Injectable } from '@nestjs/common';
 import { Prisma, type ReminderOptOutSource } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
@@ -29,10 +32,19 @@ export function patientsByPhoneTailSql(tail: string): Prisma.Sql {
 
 @Injectable()
 export class PrismaReminderOptOutRepository implements ReminderOptOutRepository {
+  private readonly ttlDays: number;
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
-  ) {}
+    private readonly clock: ReminderClock = new ReminderClock(),
+    private readonly config: ConfigService = new ConfigService(),
+  ) {
+    this.ttlDays = optOutPositiveInteger(
+      this.config,
+      'REMINDER_OPT_OUT_LINK_TTL_DAYS',
+      60,
+    );
+  }
 
   private requireTenantId(): string {
     const tenantId = this.tenantContext.getTenantId();
@@ -42,21 +54,34 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
 
   async issueLink(patientId: string, tokenHash: string): Promise<void> {
     const tenantId = this.requireTenantId();
-    // La FK compuesta exige que el paciente sea de esta clínica.
-    await this.prisma.runWithTenant((tx) =>
-      tx.reminderOptOutLink.create({
-        data: { tenantId, patientId, tokenHash },
+    await this.prisma.runWithTenant(async (tx) => {
+      // Mismo orden de bloqueo que consumo/reactivación: paciente, después enlace.
+      const patient = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients" WHERE "id" = ${patientId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!patient.length) throw new Error('Patient not found');
+      const createdAt = this.clock.now();
+      await tx.reminderOptOutLink.create({
+        data: {
+          tenantId,
+          patientId,
+          tokenHash,
+          createdAt,
+          expiresAt: new Date(createdAt.getTime() + this.ttlDays * 86400000),
+        },
         select: { id: true },
-      }),
-    );
+      });
+    });
   }
 
-  findLinkByTokenHash(tokenHash: string): Promise<OptOutLinkLookup | null> {
+  findLinkByTokenHash(
+    tokenHash: string,
+    at: Date,
+  ): Promise<OptOutLinkLookup | null> {
     return this.prisma.runWithTenant(async (tx) => {
       // RLS: el enlace de otra clínica no aparece. Un paciente retirado
       // tampoco: ya no recibe nada y su ficha no es de nadie a quien mostrar.
       const link = await tx.reminderOptOutLink.findUnique({
-        where: { tokenHash },
+        where: { tokenHash, usedAt: null, expiresAt: { gt: at } },
         select: {
           id: true,
           patient: {
@@ -82,13 +107,23 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
   optOut(
     patientId: string,
     input: { source: ReminderOptOutSource; at: Date; linkId?: string },
-  ): Promise<boolean> {
+  ): Promise<boolean | null> {
     return this.prisma.runWithTenant(async (tx) => {
+      const patient = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients" WHERE "id" = ${patientId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
+      if (!patient.length) return null;
       if (input.linkId) {
-        await tx.reminderOptOutLink.updateMany({
-          where: { id: input.linkId, usedAt: null },
+        const { count } = await tx.reminderOptOutLink.updateMany({
+          where: {
+            id: input.linkId,
+            patientId,
+            usedAt: null,
+            expiresAt: { gt: this.clock.now() },
+          },
           data: { usedAt: input.at },
         });
+        // Revalidación bajo bloqueo: una lectura anterior a reactivar no autoriza nada.
+        if (!count) return null;
       }
       // UPDATE condicional: dos clics (o el enlace y un «BAJA») a la vez no
       // registran dos bajas; el segundo espera al COMMIT y ya no encaja.
@@ -100,6 +135,41 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
         },
       });
       return count > 0;
+    });
+  }
+
+  async recordMatchWarnings(
+    patientIds: string[],
+    matchCount: number,
+    maxMatches: number,
+  ): Promise<void> {
+    const tenantId = this.requireTenantId();
+    await this.prisma.runWithTenant(async (tx) => {
+      // Lotes acotados, una única TX: un fallo no deja avisos parciales.
+      for (let offset = 0; offset < patientIds.length; offset += 500) {
+        await tx.reminderOptOutMatchWarning.createMany({
+          data: patientIds.slice(offset, offset + 500).map((patientId) => ({
+            tenantId,
+            patientId,
+            matchCount,
+            maxMatches,
+          })),
+        });
+      }
+    });
+  }
+
+  async maintenanceTenantIds(): Promise<string[]> {
+    // tenants no tiene RLS. Retirar una clínica no cambia su retención.
+    const rows = await this.prisma.tenant.findMany({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  purgeLinks(before: Date): Promise<number> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Housekeeping TTL: SQL bajo FORCE RLS, sin acceso global a enlaces.
+      return tx.$executeRaw`DELETE FROM "reminder_opt_out_links"
+        WHERE "expiresAt" < ${before} OR "usedAt" < ${before}`;
     });
   }
 

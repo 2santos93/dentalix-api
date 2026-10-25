@@ -1,8 +1,9 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import type { AllowedLocations } from '../../../../shared/tenancy/location-access';
 import {
-  civilDaysInclusive,
-  parseCivilDate,
+  checkPeriodDays,
+  PERIOD_DAY_OUT_OF_RANGE_MESSAGE,
+  zonedStartOfDay,
 } from '../../../../shared/time/civil-day';
 import {
   comparisonPeriod,
@@ -10,9 +11,11 @@ import {
   type CompareMode,
 } from '../../domain/comparison-period';
 import {
+  ATTRIBUTION_SENSITIVE_KPIS,
   changeOf,
   combineAggregates,
   computeKpis,
+  currenciesCollectedWithoutProduction,
   currenciesOf,
   EMPTY_AGGREGATES,
   KPI_DEFINITIONS,
@@ -30,6 +33,7 @@ import {
   type ComparisonLocation,
   type LocationsComparisonRepository,
   type PeriodAggregation,
+  type ProductionAttribution,
 } from '../../domain/ports/locations-comparison-repository.port';
 
 /** Un año (bisiesto incluido), como el informe de descuentos. */
@@ -64,6 +68,12 @@ export interface MetricView {
 
 export interface CurrencyMetricView extends MetricView {
   currency: string;
+  /**
+   * BE-045: solo presente (true) en producción y % de cobro cuando la
+   * producción del período comparado en esa moneda no es base: sin `change`
+   * ni `trend`.
+   */
+  previousUnattributed?: true;
 }
 
 export interface ComparisonMetrics {
@@ -86,6 +96,13 @@ export interface ComparisonRow {
   timeZone: string | null;
   /** ¿Hubo algún cobro, producción o cita (atendida, no-show o cancelada tarde) en el período? */
   hasActivity: boolean;
+  /**
+   * BE-045: el período comparado no tiene toda su producción atribuida (empieza
+   * antes de DX-050 y la clínica tiene realizados «Sin atribuir», o tuvo
+   * cobros en alguna moneda sin producción). Producción y % de cobro de esas
+   * monedas salen sin variación ni tendencia.
+   */
+  previousPeriodUnattributed: boolean;
   metrics: ComparisonMetrics;
 }
 
@@ -100,6 +117,27 @@ export interface LocationsComparison {
   locations: ComparisonRow[];
   total: ComparisonRow;
   hasActivity: boolean;
+  /** ¿Alguna fila (o el total) tiene `previousPeriodUnattributed`? */
+  previousPeriodUnattributed: boolean;
+}
+
+/**
+ * Monedas del período comparado cuya producción no es base (BE-045): todas
+ * (`ALL`) o las de la lista. Sin comparación, ninguna.
+ */
+type UnattributedPrevious = 'ALL' | ReadonlySet<string>;
+
+const NONE: UnattributedPrevious = new Set<string>();
+
+function isUnattributed(
+  unattributed: UnattributedPrevious,
+  currency: string,
+): boolean {
+  return unattributed === 'ALL' || unattributed.has(currency);
+}
+
+function anyUnattributed(unattributed: UnattributedPrevious): boolean {
+  return unattributed === 'ALL' || unattributed.size > 0;
 }
 
 function hasActivity(a: PeriodAggregates): boolean {
@@ -130,26 +168,68 @@ function metric(
   };
 }
 
+const SENSITIVE: ReadonlySet<KpiKey> = new Set(ATTRIBUTION_SENSITIVE_KPIS);
+
 function currencyMetrics(
   key: KpiKey,
   current: CurrencyValue[],
   previous: CurrencyValue[] | undefined,
+  unattributed: UnattributedPrevious = NONE,
 ): CurrencyMetricView[] {
-  return current.map(({ currency, value }) => ({
-    currency,
-    ...metric(
+  return current.map(({ currency, value }) => {
+    const view = metric(
       key,
       value,
       previous &&
         (previous.find((p) => p.currency === currency)?.value ?? null),
-    ),
-  }));
+    );
+    // BE-045: contra una producción incompleta, ni variación ni «mejora».
+    if (SENSITIVE.has(key) && isUnattributed(unattributed, currency)) {
+      return {
+        currency,
+        ...view,
+        change: null,
+        trend: null,
+        previousUnattributed: true,
+      };
+    }
+    return { currency, ...view };
+  });
+}
+
+/**
+ * ¿El período comparado empieza (a la medianoche de la zona de la sede) antes
+ * de que la base registrara la producción atribuida, y quedan realizados «Sin
+ * atribuir» que podrían caer en él? Sin realizados sin atribuir (una clínica
+ * que empezó después de DX-050) no hay nada que falte.
+ */
+function startsBeforeAttribution(
+  previous: CivilPeriod,
+  timeZone: string,
+  attribution: ProductionAttribution,
+): boolean {
+  return (
+    attribution.hasUnattributed &&
+    zonedStartOfDay(previous.from, timeZone).getTime() <
+      attribution.attributedSince.getTime()
+  );
+}
+
+/** Qué monedas del período comparado no son base para la producción. */
+function unattributedOf(
+  previous: PeriodAggregates | undefined,
+  startsUnattributed: boolean,
+): UnattributedPrevious {
+  if (!previous) return NONE;
+  if (startsUnattributed) return 'ALL';
+  return currenciesCollectedWithoutProduction(previous);
 }
 
 /** Las métricas de una fila: el período y, si se compara, el anterior. */
 function metricsOf(
   current: PeriodAggregates,
   previous: PeriodAggregates | undefined,
+  unattributed: UnattributedPrevious,
 ): ComparisonMetrics {
   const currencies = currenciesOf(previous ? [current, previous] : [current]);
   const now = computeKpis(current, currencies);
@@ -161,12 +241,14 @@ function metricsOf(
       'production',
       now.production,
       before?.production,
+      unattributed,
     ),
     collected: currencyMetrics('collected', now.collected, before?.collected),
     collectionRate: currencyMetrics(
       'collectionRate',
       now.collectionRate,
       before?.collectionRate,
+      unattributed,
     ),
     completedAppointments: metric(
       'completedAppointments',
@@ -199,17 +281,18 @@ export class GetLocationsComparisonUseCase {
   ) {}
 
   private validated(from: string, to: string): CivilPeriod {
-    const validFrom = parseCivilDate(from);
-    const validTo = parseCivilDate(to);
-    if (!validFrom || !validTo || validFrom > validTo) {
-      throw new BadRequestException(INVALID_PERIOD_MESSAGE);
+    const period = checkPeriodDays(from, to);
+    if (!period.ok) {
+      throw new BadRequestException(
+        period.problem === 'OUT_OF_RANGE'
+          ? PERIOD_DAY_OUT_OF_RANGE_MESSAGE
+          : INVALID_PERIOD_MESSAGE,
+      );
     }
-    if (
-      civilDaysInclusive(validFrom, validTo) > LOCATIONS_COMPARISON_MAX_DAYS
-    ) {
+    if (period.days > LOCATIONS_COMPARISON_MAX_DAYS) {
       throw new BadRequestException(PERIOD_TOO_LONG_MESSAGE);
     }
-    return { from: validFrom, to: validTo };
+    return { from: period.from, to: period.to };
   }
 
   async execute(input: LocationsComparisonInput): Promise<LocationsComparison> {
@@ -220,25 +303,39 @@ export class GetLocationsComparisonUseCase {
       input.compare,
     );
     const locations = await this.repo.listLocations(input.allowedLocationIds);
-    const [current, previous] = await Promise.all([
+    const [current, previous, attribution] = await Promise.all([
       this.repo.aggregate(period, locations, input.currency),
       previousPeriod
         ? this.repo.aggregate(previousPeriod, locations, input.currency)
         : Promise.resolve(undefined),
+      previousPeriod
+        ? this.repo.productionAttribution()
+        : Promise.resolve(undefined),
     ]);
+    // BE-045: ¿el período comparado empieza, en la zona de la sede, antes de
+    // que hubiera producción atribuible, con realizados «Sin atribuir»?
+    const startsUnattributed = (location: ComparisonLocation): boolean =>
+      previousPeriod !== null &&
+      attribution !== undefined &&
+      startsBeforeAttribution(previousPeriod, location.timeZone, attribution);
 
     const rows = locations.map((location) =>
-      this.row(location, current, previous),
+      this.row(location, current, previous, startsUnattributed(location)),
     );
     const totalNow = this.totalOf(locations, current);
     const totalBefore = previous && this.totalOf(locations, previous);
+    const totalUnattributed = unattributedOf(
+      totalBefore,
+      locations.some(startsUnattributed),
+    );
     const total: ComparisonRow = {
       locationId: null,
       name: TOTAL_ROW_NAME,
       isActive: true,
       timeZone: null,
       hasActivity: hasActivity(totalNow),
-      metrics: metricsOf(totalNow, totalBefore),
+      previousPeriodUnattributed: anyUnattributed(totalUnattributed),
+      metrics: metricsOf(totalNow, totalBefore, totalUnattributed),
     };
     return {
       from: period.from,
@@ -251,6 +348,9 @@ export class GetLocationsComparisonUseCase {
       locations: rows,
       total,
       hasActivity: total.hasActivity,
+      previousPeriodUnattributed:
+        total.previousPeriodUnattributed ||
+        rows.some((r) => r.previousPeriodUnattributed),
     };
   }
 
@@ -258,18 +358,21 @@ export class GetLocationsComparisonUseCase {
     location: ComparisonLocation,
     current: PeriodAggregation,
     previous: PeriodAggregation | undefined,
+    startsUnattributed: boolean,
   ): ComparisonRow {
     const now = current.byLocation.get(location.id) ?? EMPTY_AGGREGATES;
     const before = previous
       ? (previous.byLocation.get(location.id) ?? EMPTY_AGGREGATES)
       : undefined;
+    const unattributed = unattributedOf(before, startsUnattributed);
     return {
       locationId: location.id,
       name: location.name,
       isActive: location.isActive,
       timeZone: location.timeZone,
       hasActivity: hasActivity(now),
-      metrics: metricsOf(now, before),
+      previousPeriodUnattributed: anyUnattributed(unattributed),
+      metrics: metricsOf(now, before, unattributed),
     };
   }
 

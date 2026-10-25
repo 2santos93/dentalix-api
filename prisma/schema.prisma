@@ -54,6 +54,7 @@ model Tenant {
   appointmentReminders      AppointmentReminder[]
   paymentReceipts           PaymentReceipt[]
   paymentReceiptCounters    PaymentReceiptCounter[]
+  reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks       ReminderOptOutLink[]
   clinicalNoteTemplates     ClinicalNoteTemplate[]
   // DX-150: cobranza (notas y compromisos de pago).
@@ -166,7 +167,9 @@ model User {
   appointmentStatusReversals        AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
   // DX-279: versiones de la política de cancelación que creó.
   cancellationPolicyVersions        CancellationPolicyVersion[]
-  cancellationFees                  CancellationFee[]
+  cancellationFees                  CancellationFee[]           @relation("CancellationFeeCreatedBy")
+  // SEC-050: cargos por inasistencia que anuló (con motivo).
+  cancellationFeesVoided            CancellationFee[]           @relation("CancellationFeeVoidedBy")
 
   @@map("users")
 }
@@ -190,13 +193,13 @@ enum ClinicCountry {
 }
 
 model Location {
-  id                   String        @id @default(uuid()) @db.Uuid
-  tenantId             String        @db.Uuid
-  name                 String
-  address              String?
+  id                           String        @id @default(uuid()) @db.Uuid
+  tenantId                     String        @db.Uuid
+  name                         String
+  address                      String?
   // País de la sede (DX-013): la receta se emite con las reglas del país donde
   // se atiende. Por defecto CO, que es lo que eran todas las sedes hasta hoy.
-  country              ClinicCountry @default(CO)
+  country                      ClinicCountry @default(CO)
   // Serie de los recibos de caja de la sede (DX-136), p. ej. "NOR". Si no
   // viene al crearla, el trigger `locations_default_receipt_prefix` la deriva
   // del nombre (3 letras, con número si ya la usa otra sede de la clínica).
@@ -204,19 +207,22 @@ model Location {
   // DX-226: con recibos o contador ya no cambia (trigger
   // `locations_receipt_prefix_guard`, check_violation) y ninguna sede toma
   // una serie que ya numeró recibos en la clínica.
-  receiptPrefix        String?
-  // DX-212: código de habilitación REPS de la sede (12 dígitos, CHECK
-  // locations_reps_habilitation_code_format). Lo pide el RDA (Res. 1888/2025)
-  // en las sedes de Colombia; solo lo edita ADMIN.
-  repsHabilitationCode String?
+  receiptPrefix                String?
+  // DX-319: nº de registro sanitario de la sede, texto libre sin formato por
+  // país (hasta 64 caracteres, CHECK locations_health_registration_number_check).
+  // Sustituye al código REPS (DX-212), que se copió aquí antes de borrarlo.
+  // Solo lo edita ADMIN.
+  healthRegistrationNumber     String?
+  // DX-319: si el nº sale en los documentos de la sede. Por defecto no.
+  showHealthRegistrationNumber Boolean       @default(false)
   // DX-222: teléfono de la sede para las indicaciones postoperatorias
   // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
   // locations_phone_length_check).
-  phone                String?
-  isActive             Boolean       @default(true)
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  deletedAt            DateTime?
+  phone                        String?
+  isActive                     Boolean       @default(true)
+  createdAt                    DateTime      @default(now())
+  updatedAt                    DateTime      @updatedAt
+  deletedAt                    DateTime?
 
   clinicalEntries            ClinicalEntry[]
   appointments               Appointment[]
@@ -491,6 +497,7 @@ model Patient {
   collectionNotes           CollectionNote[]
   paymentPromises           PaymentPromise[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
+  reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks       ReminderOptOutLink[]
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
   responsibleParties        PatientResponsibleParty[]   @relation("PatientResponsibleParties")
@@ -787,7 +794,7 @@ model ClinicalEntryAddendum {
   @@map("clinical_entry_addenda")
 }
 
-// DX-212: tipo de diagnóstico del RIPS/RDA: uno principal y hasta 3 relacionados.
+// DX-212: tipo de diagnóstico CIE-10 de la evolución: uno principal y hasta 3 relacionados.
 enum ClinicalDiagnosisKind {
   PRINCIPAL
   RELACIONADO
@@ -856,9 +863,6 @@ model DentalCatalogItem {
   labelPt       String?
   color         String
   defaultPrice  Decimal?    @db.Decimal(12, 2)
-  // DX-212: código CUPS del procedimiento (6 caracteres alfanuméricos, CHECK
-  // dental_catalog_items_cups_code_format). Lo piden el RDA y el RIPS.
-  cupsCode      String?
   // DX-105: false = el procedimiento no recibe convenio ni descuento porcentual.
   allowDiscount Boolean     @default(true)
   active        Boolean     @default(true)
@@ -2646,7 +2650,8 @@ enum AuditResourceType {
   // DX-027: caja por turno (abrir, cerrar, reabrir, ajustar, ver) y los
   // ajustes de caja de la clínica.
   CASH_SESSION
-  // DX-212: cambios del catálogo (CUPS) y de las sedes (código REPS).
+  // DX-212: cambios de las sedes (DX-319: con el nº de registro sanitario
+  // antes y después).
   DENTAL_CATALOG_ITEM
   LOCATION
   // DX-222: plantillas de indicaciones postoperatorias (crear, editar,
@@ -3201,8 +3206,8 @@ enum ReminderOptOutSource {
 }
 
 /// DX-128: enlace de baja de los recordatorios que viaja en cada email. El
-/// token en claro solo va en el email; aquí su SHA-256. No caduca: darse de
-/// baja tiene que funcionar siempre. `usedAt`: la primera vez que se usó.
+/// token en claro solo va en el email; aquí su SHA-256. DX-214: caduca a los
+///60d por defecto; usedAt registra consumo o invalidación al reactivar.
 model ReminderOptOutLink {
   id        String    @id @default(uuid()) @db.Uuid
   tenantId  String    @db.Uuid
@@ -3210,12 +3215,15 @@ model ReminderOptOutLink {
   tokenHash String    @unique
   createdAt DateTime  @default(now())
   usedAt    DateTime?
+  expiresAt DateTime @default(dbgenerated("(now() + '60 days'::interval)"))
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // FK COMPUESTA (SEC-004): el paciente tiene que ser del MISMO tenant.
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Cascade)
 
   @@index([tenantId, patientId])
+  @@index([tenantId, expiresAt])
+  @@index([tenantId, usedAt])
   @@map("reminder_opt_out_links")
 }
 
@@ -3597,6 +3605,13 @@ model PatientCoverage {
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById            String?   @db.Uuid
   updatedById            String?   @db.Uuid
+  /// SEC-049: quién puso por última vez el pagador o el nº de afiliado
+  /// (puntero suave). NULL en las anteriores: vale `createdById`.
+  declaredById           String?   @db.Uuid
+  /// SEC-049: un ADMIN comprobó el nº de afiliado (puntero suave y fecha, los
+  /// dos o ninguno: CHECK). Cambiar el pagador o el número la borra.
+  verifiedById           String?   @db.Uuid
+  verifiedAt             DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   deletedAt              DateTime?
@@ -4061,6 +4076,9 @@ model PostOpInstructionDelivery {
 
   @@index([tenantId, patientId, deliveredAt(sort: Desc)], map: "post_op_instruction_deliveries_tenant_patient_idx")
   @@index([tenantId, appointmentId], map: "post_op_instruction_deliveries_tenant_appointment_idx")
+  @@index([tenantId, templateId], map: "post_op_instruction_deliveries_template_idx")
+  @@index([tenantId, locationId], map: "post_op_instruction_deliveries_location_idx")
+  @@index([deliveredById], map: "post_op_instruction_deliveries_delivered_by_idx")
   @@map("post_op_instruction_deliveries")
 }
 
@@ -4470,6 +4488,21 @@ model AppointmentStatusReversal {
   @@map("appointment_status_reversals")
 }
 
+/// DX-214: solicitud de baja que excedió el tope, consultable por recepción.
+/// Inalterable y bajo FORCE RLS; solo IDs y contadores, sin móvil ni nombre.
+model ReminderOptOutMatchWarning {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  patientId String @db.Uuid
+  createdAt DateTime @default(now())
+  matchCount Int
+  maxMatches Int
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "opt_out_match_warnings_tenant_patient_recent_idx")
+  @@map("reminder_opt_out_match_warnings")
+}
+
 // DX-279: quién canceló una cita. CLINIC nunca cuenta como tardía.
 enum CancellationByKind {
   PATIENT_LINK
@@ -4530,7 +4563,8 @@ enum CancellationFeeStatus {
 
 /// DX-291: cargo (ítem DONE en el plan «Cargos administrativos») o condonación
 /// de una cita NO_SHOW o cancelada tarde. UNA fila por cita (índice único: el
-/// cargo es idempotente), APPEND-ONLY para la app (sin UPDATE/DELETE), RLS
+/// cargo es idempotente), APPEND-ONLY para la app (sin DELETE; el único UPDATE
+/// es la anulación de SEC-050, una vez y solo de sus tres columnas), RLS
 /// FORCE y FK compuestas. CHECK cancellation_fees_status_check: CHARGED lleva
 /// importe > 0, moneda, ítem y versión comunicada; WAIVED, solo el motivo
 /// (3–500).
@@ -4538,6 +4572,8 @@ enum CancellationFeeStatus {
 ///   cancellation_fees_tenant_policy_version_idx ("tenantId", "policyVersionId")
 ///     WHERE "policyVersionId" IS NOT NULL
 ///   cancellation_fees_currency_idx ("currency") WHERE "currency" IS NOT NULL
+///   cancellation_fees_voided_by_idx ("voidedById") WHERE "voidedById" IS NOT NULL
+///   cancellation_fees_plan_item_idx ("planItemId") WHERE "planItemId" IS NOT NULL
 model CancellationFee {
   id              String                @id @default(uuid(7)) @db.Uuid
   tenantId        String                @db.Uuid
@@ -4552,13 +4588,24 @@ model CancellationFee {
   waiveReason     String?               @db.VarChar(500)
   createdById     String                @db.Uuid
   createdAt       DateTime              @default(dbgenerated("timezone('UTC'::text, now())"))
+  // SEC-050: anulación de un cargo ya generado (solo CHARGED, una vez, con
+  // motivo de 3 a 500). Las tres van juntas (CHECK cancellation_fees_void_check)
+  // y son lo único que la app puede actualizar (GRANT por columna y trigger
+  // cancellation_fees_append_only). El ítem del cargo se retira en la misma
+  // transacción; mientras no se anula, el trigger
+  // treatment_plan_items_cancellation_fee_locked congela su precio, descuento,
+  // estado y retiro.
+  voidedAt        DateTime?
+  voidedById      String?               @db.Uuid
+  voidReason      String?               @db.VarChar(500)
 
   appointment   Appointment                @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_fees_appointment_fkey")
   planItem      TreatmentPlanItem?         @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict, map: "cancellation_fees_plan_item_fkey")
   location      Location                   @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_fees_location_fkey")
   policyVersion CancellationPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "cancellation_fees_policy_version_fkey")
   currencyRef   Currency?                  @relation(fields: [currency], references: [code], onDelete: Restrict, map: "cancellation_fees_currency_fkey")
-  createdBy     User                       @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "cancellation_fees_created_by_fkey")
+  createdBy     User                       @relation("CancellationFeeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "cancellation_fees_created_by_fkey")
+  voidedBy      User?                      @relation("CancellationFeeVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "cancellation_fees_voided_by_fkey")
 
   @@unique([tenantId, appointmentId], map: "cancellation_fees_tenant_appointment_key")
   @@index([tenantId, patientId, planItemId], map: "cancellation_fees_tenant_patient_item_idx")

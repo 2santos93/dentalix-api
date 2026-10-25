@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { performance } from 'node:perf_hooks';
@@ -44,7 +44,7 @@ import { loadSecuritySettings } from '../src/shared/security/security-settings';
  * peticiones en paralelo se esperan TODAS (`settleAll`) para que ninguna
  * escriba un fallo después de que el test acabe.
  */
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 

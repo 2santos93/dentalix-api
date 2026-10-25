@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLocationsComparisonRepository } from '../src/modules/reports/infrastructure/prisma-locations-comparison.repository';
@@ -9,7 +9,7 @@ import { ReportSeeder } from './support/reports-fixtures';
 // DX-014 · las consultas de «Comparar sedes» contra Postgres de verdad, como
 // dentalix_app (DATABASE_URL, sin BYPASSRLS) con la clínica fijada por
 // runWithTenant. `raw` (DIRECT_URL, owner) solo siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -18,8 +18,10 @@ const OCTOBER = { from: '2026-10-01', to: '2026-10-31' };
 /** Las tablas que lee el reporte: todas con RLS FORZADA por clínica. */
 const SOURCE_TABLES = [
   'locations',
-  'location_schedules',
-  'location_schedule_ranges',
+  'provider_schedules',
+  'provider_schedule_ranges',
+  'provider_schedule_overrides',
+  'provider_schedule_override_ranges',
   'treatment_plans',
   'treatment_plan_items',
   'payments',
@@ -41,14 +43,13 @@ async function seedClinic(
   });
   const seed = new ReportSeeder(raw, tenant.id);
   const locationId = await seed.location('Sede principal');
-  // Lunes a viernes de 9 a 13 (240 min), Bogotá.
-  const schedule = await raw.locationSchedule.create({
-    data: { tenantId: tenant.id, locationId, timezone: 'America/Bogota' },
-  });
-  await raw.locationScheduleRange.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({
-      tenantId: tenant.id,
-      scheduleId: schedule.id,
+  // La profesional atiende allí de lunes a viernes de 9 a 13 (240 min),
+  // Bogotá: es la capacidad de la sede (BE-042).
+  const { userId: providerId } = await seed.dentist();
+  await seed.providerSchedule({
+    providerId,
+    locationId,
+    ranges: [1, 2, 3, 4, 5].map((weekday) => ({
       weekday,
       startMinute: 540,
       endMinute: 780,
@@ -154,8 +155,9 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
       attendedPatients: 1,
       newPatients: 1,
       completedMinutes: 90,
-      // 22 días de lunes a viernes × 240 − 120 del cierre del 19/10.
-      openMinutes: 22 * 240 - 120,
+      // 22 días de lunes a viernes × 240 de su horario − 120 del cierre de
+      // la sede del 19/10.
+      capacityMinutes: 22 * 240 - 120,
     });
     expect([...(sums?.production ?? [])]).toEqual([['COP', 100_000]]);
     expect([...(sums?.collected ?? [])]).toEqual([['COP', 50_000]]);
@@ -178,7 +180,7 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
     );
     expect(result.attendedPatients).toBe(0);
     const sums = result.byLocation.get(b.locations[0].id);
-    expect(sums).toMatchObject({ completed: 0, openMinutes: null });
+    expect(sums).toMatchObject({ completed: 0, capacityMinutes: null });
     expect(sums?.production.size).toBe(0);
     expect(sums?.collected.size).toBe(0);
   });
@@ -199,7 +201,7 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
     expect(sums?.production.size).toBe(0);
     expect(sums?.collected.size).toBe(0);
     expect(sums?.completed).toBe(0);
-    expect(sums?.openMinutes).toBeNull();
+    expect(sums?.capacityMinutes).toBeNull();
     // Control: con su propia clínica fijada, B sí ve lo suyo.
     const own = await context.run(b.tenantId, () =>
       repo.aggregate(OCTOBER, b.locations),
@@ -207,6 +209,32 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
     expect([
       ...(own.byLocation.get(b.locations[0].id)?.collected ?? []),
     ]).toEqual([['COP', 3_500_000]]);
+  });
+
+  it('producción atribuible: el instante lo fija la migración y los «Sin atribuir» son de la clínica en contexto', async () => {
+    const [{ finishedAt }] = await raw.$queryRaw<{ finishedAt: Date }[]>`
+      SELECT finished_at AS "finishedAt" FROM "_prisma_migrations"
+       WHERE migration_name = '20261023160000_dx050_plan_item_attribution'`;
+    const before = await context.run(a.tenantId, () =>
+      repo.productionAttribution(),
+    );
+    expect(before).toEqual({
+      attributedSince: finishedAt,
+      hasUnattributed: false,
+    });
+    const seed = new ReportSeeder(raw, b.tenantId);
+    await seed.unattributedDone({
+      patientId: await seed.patient('Sin atribuir'),
+      currency: 'COP',
+      price: 1,
+    });
+    // El de B no cuenta para A (RLS y filtro explícito); para B, sí.
+    await expect(
+      context.run(a.tenantId, () => repo.productionAttribution()),
+    ).resolves.toMatchObject({ hasUnattributed: false });
+    await expect(
+      context.run(b.tenantId, () => repo.productionAttribution()),
+    ).resolves.toMatchObject({ hasUnattributed: true });
   });
 
   it('sin clínica en contexto no consulta', async () => {

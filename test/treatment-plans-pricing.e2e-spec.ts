@@ -3,6 +3,7 @@ import {
   CatalogKind,
   ClinicRole,
   DocType,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -22,7 +23,7 @@ import {
 // precio de catálogo), queda como referencia (`catalogPrice`, R1) con su foto
 // inmutable, las alternativas la copian, las prestaciones sin descuentos no
 // admiten rebajas y `price-quote` da lo mismo que el alta.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -124,7 +125,10 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       (listed.body as { id: string; payer: { id: string } }[]).find(
         (c) => c.payer.id === payer,
       )?.id ??
-      (await create(`/patients/${patientId}/coverages`, { payerId: payer }));
+      (await create(`/patients/${patientId}/coverages`, {
+        payerId: payer,
+        memberNumber: 'AFI-0001',
+      }));
     await as()
       .put(`/patients/${patientId}/agreement`, { coverageId, ...body })
       .expect(200);

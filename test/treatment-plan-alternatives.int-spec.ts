@@ -20,7 +20,7 @@ import {
 // sede, clínica, paginación, monto) y las restricciones de la base (FK
 // compuesta del grupo, CHECK, trigger del plan firmado). Todo por los
 // repositorios reales (rol dentalix_app, RLS); `raw` (owner) siembra y limpia.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
