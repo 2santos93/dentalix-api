@@ -7,7 +7,7 @@ import {
 import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaReminderOptOutRepository } from '../src/modules/reminders/infrastructure/prisma-reminder-opt-out.repository';
@@ -16,7 +16,7 @@ import { waitFor } from './support/wait-for';
 
 const NOW = new Date('2026-10-23T12:00:00Z');
 const DAY = 86400000;
-const owner = new PrismaClient({
+const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const context = new TenantContextService();
