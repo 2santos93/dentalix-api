@@ -36,7 +36,10 @@ function routePlanId(req: DrainRequest): string | undefined {
   return planId && UUID.test(planId) ? planId : undefined;
 }
 
-/** El abono de la ruta `payments/:id` (anulación), si lo es. */
+/**
+ * El abono de la ruta `payments/:id` (anulación), si lo es. No incluye
+ * `payments/:id/allocations` a propósito: el PUT ya reparte su propio plan.
+ */
 function routePaymentId(req: DrainRequest): string | undefined {
   const id = /(^|\/)payments\/:id$/.test(req.route?.path ?? '')
     ? req.params?.id

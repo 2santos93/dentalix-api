@@ -37,7 +37,7 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
 
 function makeUseCase(
   targets: (AllocationTarget | null)[],
-  opts: { rate?: number; rebalanceFails?: boolean } = {},
+  opts: { rate?: number; rebalanceFails?: boolean; voidedAfter?: boolean } = {},
 ) {
   const calls: string[] = [];
   const snapshot: PaymentAllocationsSnapshot = {
@@ -61,7 +61,7 @@ function makeUseCase(
     }),
     readPaymentAllocations: jest.fn().mockImplementation(() => {
       calls.push('read');
-      return Promise.resolve(snapshot);
+      return Promise.resolve(opts.voidedAfter ? null : snapshot);
     }),
   };
   const rebalancer = {
@@ -262,5 +262,39 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
 
     expect(result.previous).toHaveLength(1);
     expect(calls).toEqual(['replace', 'rebalance', 'read']);
+  });
+
+  it('a payment voided after the commit still answers the committed reallocation (so it is audited)', async () => {
+    const { uc, calls } = makeUseCase([target()], { voidedAfter: true });
+
+    const result = await uc.execute(
+      'pay-1',
+      manual([{ treatmentPlanItemId: 'item-a', amount: 40 }]),
+      'admin-1',
+    );
+
+    expect(calls).toEqual(['replace', 'rebalance', 'read']);
+    expect(result).toMatchObject({
+      paymentId: 'pay-1',
+      receiptNumber: 'NOR-000123',
+      planCurrency: 'EUR',
+      planStatus: TreatmentPlanStatus.ACCEPTED,
+      planAmount: 90,
+      manual: true,
+      allocated: 0,
+      unallocated: 90,
+      allocations: [],
+      items: [],
+      previous: [{ treatmentPlanItemId: 'item-b', amount: 90 }],
+    });
+  });
+
+  it('other errors of the re-read still fail', async () => {
+    const { uc, repo } = makeUseCase([target()]);
+    repo.readPaymentAllocations.mockRejectedValueOnce(new Error('BD caída'));
+
+    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+
+    expect(error.message).toBe('BD caída');
   });
 });

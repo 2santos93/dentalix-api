@@ -5,8 +5,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import type { TreatmentPlanStatus } from '@prisma/client';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
+import { allocationVersion } from '../../domain/allocation-rules';
 import {
   ALLOCATION_MIGRATED_BALANCE,
   ALLOCATION_PAYMENT_NOT_FOUND,
@@ -42,7 +44,7 @@ export interface ReplacedPaymentAllocations extends PaymentAllocationsView {
  * (AUTO). Sin base, la conversión va ANTES de la transacción y la base nace
  * con `ensureBase` (abono FOR SHARE, como el barrido). Tras el COMMIT reparte
  * el plan (lo que el abono deja libre lo llenan otros abonos) y la respuesta
- * se lee después del reparto.
+ * se lee después del reparto (o antes, si el reparto falla: queda en la cola).
  */
 @Injectable()
 export class ReplacePaymentAllocationsUseCase {
@@ -79,10 +81,12 @@ export class ReplacePaymentAllocationsUseCase {
       actorId,
     });
 
+    // Si el reparto falla, la respuesta (y el `after` de la auditoría) es la
+    // de antes del reparto: el plan sigue en la cola y lo terminan el
+    // interceptor o el barrido. La reasignación ya está confirmada.
     try {
       await this.rebalancer.rebalancePlan(planId, actorId);
     } catch (error) {
-      // El plan sigue en la cola: lo reparte el interceptor o el barrido.
       this.logger.warn({
         event: 'payments.allocation_rebalance_failed',
         planId,
@@ -90,7 +94,7 @@ export class ReplacePaymentAllocationsUseCase {
       });
     }
 
-    const view = await this.getAllocations.execute(paymentId);
+    const view = await this.readAfter(target, command.mode);
     return {
       ...view,
       previous: previous.map((p) => ({
@@ -98,6 +102,46 @@ export class ReplacePaymentAllocationsUseCase {
         amount: p.cents / 100,
       })),
     };
+  }
+
+  /**
+   * La imputación tras el reparto. Si el abono se anuló entre el COMMIT y
+   * esta lectura, la reasignación sí ocurrió (y se audita: la respuesta es
+   * 200), pero la anulación ya borró sus imputaciones (R12): se responde el
+   * abono sin líneas ni ítems, coherente con lo que queda.
+   */
+  private async readAfter(
+    target: AllocationTarget,
+    mode: 'MANUAL' | 'AUTO',
+  ): Promise<PaymentAllocationsView> {
+    try {
+      return await this.getAllocations.execute(target.paymentId);
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+      this.logger.warn({
+        event: 'payments.allocation_voided_after_reallocation',
+        paymentId: target.paymentId,
+      });
+      const manual = mode === 'MANUAL';
+      const planAmount = target.base?.amount ?? null;
+      return {
+        paymentId: target.paymentId,
+        receiptNumber: target.receiptNumber,
+        treatmentPlanId: target.treatmentPlanId as string,
+        paymentAmount: target.amount,
+        paymentCurrency: target.currency,
+        paidOn: target.paidOn,
+        planCurrency: target.planCurrency as string,
+        planStatus: target.planStatus as TreatmentPlanStatus,
+        planAmount,
+        manual,
+        allocated: 0,
+        unallocated: planAmount,
+        version: allocationVersion({ manual, lines: [] }),
+        allocations: [],
+        items: [],
+      };
+    }
   }
 
   /**
@@ -113,6 +157,8 @@ export class ReplacePaymentAllocationsUseCase {
       planCurrency,
       paidOn: target.paidOn,
     });
+    // Un abono > 0 no convierte a ≤ 0; si pasara (redondeo), sin base
+    // posible (CHECK > 0) es como no tener tasa.
     if (amount === null || amount <= 0) throw noRate(target);
     await this.repo.ensureBase(
       target.paymentId,

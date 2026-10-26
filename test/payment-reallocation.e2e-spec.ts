@@ -39,6 +39,7 @@ interface Allocations {
   paymentCurrency: string;
   paidOn: string;
   planCurrency: string;
+  planStatus: string;
   planAmount: number | null;
   manual: boolean;
   allocated: number;
@@ -252,6 +253,7 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
       paymentId,
       receiptNumber: before.receiptNumber,
       manual: true,
+      planStatus: 'DRAFT',
       planAmount: 100,
       allocated: 100,
       unallocated: 0,
@@ -512,6 +514,12 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
       await api()
         .patch(`/treatment-plans/${cancelledPlan}`, { status: 'CANCELLED' })
         .expect(200);
+      // La lectura sigue: dice el estado y no ofrece ítems (m2).
+      expect(await allocationsOf(cancelledPayment)).toMatchObject({
+        planStatus: 'CANCELLED',
+        items: [],
+        allocations: [],
+      });
 
       const res = await put(
         cancelledPayment,

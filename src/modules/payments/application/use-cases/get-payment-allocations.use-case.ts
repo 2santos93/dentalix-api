@@ -1,3 +1,4 @@
+import type { TreatmentPlanStatus } from '@prisma/client';
 import {
   ConflictException,
   Inject,
@@ -24,6 +25,11 @@ export interface PaymentAllocationsView {
   paymentCurrency: string;
   paidOn: string;
   planCurrency: string;
+  /**
+   * Un plan rechazado o cancelado no admite reasignar (409 en el PUT) y no
+   * tiene ítems imputables: con esto la web lo explica sin intentarlo.
+   */
+  planStatus: TreatmentPlanStatus;
   planAmount: number | null;
   manual: boolean;
   allocated: number;
@@ -68,7 +74,7 @@ export class GetPaymentAllocationsUseCase {
 
 function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
   const { target, lines, items } = snapshot;
-  if (!target.treatmentPlanId || !target.planCurrency) {
+  if (!target.treatmentPlanId || !target.planCurrency || !target.planStatus) {
     throw new ConflictException(ALLOCATION_MIGRATED_BALANCE);
   }
   const manual = target.base?.manual ?? false;
@@ -92,6 +98,7 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
     paymentCurrency: target.currency,
     paidOn: target.paidOn,
     planCurrency: target.planCurrency,
+    planStatus: target.planStatus,
     planAmount: baseCents === null ? null : fromCents(baseCents),
     manual,
     allocated: fromCents(allocatedCents),

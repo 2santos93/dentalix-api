@@ -98,6 +98,7 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
       paymentCurrency: 'USD',
       paidOn: '2026-10-20',
       planCurrency: 'EUR',
+      planStatus: TreatmentPlanStatus.ACCEPTED,
       planAmount: 90,
       manual: false,
       allocated: 70.5,
@@ -166,5 +167,20 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
 
     expect(view.manual).toBe(true);
     expect(view.version).toBe(allocationVersion({ manual: true, lines: [] }));
+  });
+
+  it('a cancelled plan reads with its status and no allocatable items', async () => {
+    const { uc } = makeUseCase({
+      target: target({ planStatus: TreatmentPlanStatus.CANCELLED }),
+      lines: [],
+      items: [],
+    });
+
+    const view = await uc.execute('pay-1');
+
+    expect(view).toMatchObject({
+      planStatus: TreatmentPlanStatus.CANCELLED,
+      items: [],
+    });
   });
 });

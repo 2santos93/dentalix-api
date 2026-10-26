@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { TreatmentPlanStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   Allow,
@@ -96,6 +97,13 @@ export class PaymentAllocationsDto {
 
   @ApiProperty({ example: 'EUR' })
   planCurrency!: string;
+
+  @ApiProperty({
+    enum: TreatmentPlanStatus,
+    description:
+      'Estado del plan: rechazado o cancelado no admite reasignar (409 en el PUT) y sus `items` vienen vacíos',
+  })
+  planStatus!: TreatmentPlanStatus;
 
   @ApiProperty({
     type: Number,
