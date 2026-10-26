@@ -37,7 +37,7 @@ describe('allocation messages (spec §5.3)', () => {
 
   it('over item', () => {
     expect(allocationOverItem(5000, 'USD')).toBe(
-      'Un ítem admite como máximo 50.00 USD: el resto ya lo cubren otros abonos.',
+      'Un ítem admite como máximo 50.00 USD: es lo que le queda por cubrir.',
     );
   });
 
@@ -73,7 +73,7 @@ describe('allocation messages (spec §5.3)', () => {
         9000,
       ),
     ).toBe(
-      'Un ítem admite como máximo 25.00 EUR: el resto ya lo cubren otros abonos.',
+      'Un ítem admite como máximo 25.00 EUR: es lo que le queda por cubrir.',
     );
     expect(
       allocationViolationMessage(

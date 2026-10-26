@@ -7,7 +7,7 @@ import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-mach
 import { PLAN_ALLOCATION_REPOSITORY } from '../../domain/ports/plan-allocation-repository.port';
 import type { PlanAllocationRepository } from '../../domain/ports/plan-allocation-repository.port';
 import { itemBillableCents } from '../../domain/allocation-rules';
-import { paymentInPlanCurrency } from '../payment-in-plan-currency';
+import { errorName, paymentInPlanCurrency } from '../payment-in-plan-currency';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 
 export interface GetPlanBalanceResult {
@@ -222,9 +222,10 @@ export class GetPlanBalanceUseCase {
       // rate-repository layer (NOT the amount-dependent rateUsed) to
       // remove the per-payment lookup without drift.
       // DX-097: el día civil del abono en SU sede, la misma fecha de tasa
-      // que usa el dashboard (GetPaymentsTotalsUseCase). Solo «moneda sin
-      // tasa» se omite; cualquier otro fallo se propaga.
-      const converted = await paymentInPlanCurrency(this.convertAmount, {
+      // que usa el dashboard (GetPaymentsTotalsUseCase). Sin tasa (moneda
+      // sin tasa o proveedor caído sin tasa guardada para esa fecha) el
+      // abono se omite y cuenta como sin convertir, nunca un 500.
+      const converted = await this.convertOrNull({
         amount: payment.amount,
         currency: payment.currency,
         planCurrency: plan.currency,
@@ -232,7 +233,7 @@ export class GetPlanBalanceUseCase {
       });
       if (converted === null) {
         this.logger.warn(
-          `Skipping payment ${payment.id}: unsupported currency ${payment.currency}`,
+          `Skipping payment ${payment.id}: no rate for ${payment.currency}`,
         );
         continue;
       }
@@ -246,5 +247,17 @@ export class GetPlanBalanceUseCase {
       balance: round2(billable - paid),
       paymentsCount: payments.length,
     };
+  }
+
+  /** `paymentInPlanCurrency`, y `null` también si la tasa no se pudo obtener. */
+  private async convertOrNull(
+    payment: Parameters<typeof paymentInPlanCurrency>[1],
+  ): Promise<number | null> {
+    try {
+      return await paymentInPlanCurrency(this.convertAmount, payment);
+    } catch (error) {
+      this.logger.warn(`Rate unavailable: ${errorName(error)}`);
+      return null;
+    }
   }
 }

@@ -49,7 +49,7 @@ export function allocationOverItem(
   freeCents: number,
   currency: string,
 ): string {
-  return `Un ítem admite como máximo ${formatCents(freeCents)} ${currency}: el resto ya lo cubren otros abonos.`;
+  return `Un ítem admite como máximo ${formatCents(freeCents)} ${currency}: es lo que le queda por cubrir.`;
 }
 
 export function allocationOverPayment(

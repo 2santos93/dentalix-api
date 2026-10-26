@@ -471,12 +471,9 @@ describe('GetPlanBalanceUseCase', () => {
     expect(result.paymentsCount).toBe(2);
   });
 
-  // IMP-4b narrowed catch: only the specific "unsupported currency"
-  // BadRequestException from ConvertAmountUseCase is safe to skip. ANY
-  // OTHER error (e.g. an infra/DB failure inside GetRatesForDateUseCase)
-  // must PROPAGATE -- silently swallowing it would corrupt `paid`/`balance`
-  // with no trace that anything went wrong.
-  it('propagates a non-currency conversion error instead of silently skipping the payment', async () => {
+  // DX-051: sin tasa (proveedor caído y nada guardado para esa fecha) el
+  // saldo no falla: el abono se omite igual que el de una moneda sin tasa.
+  it('skips a payment whose rate cannot be fetched instead of failing the balance', async () => {
     const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
     fakeConvert.infraFailingFrom.add('COP');
     fakeGetPlan.plan = makePlan({
@@ -489,9 +486,10 @@ describe('GetPlanBalanceUseCase', () => {
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
 
-    await expect(uc.execute('plan-1')).rejects.toThrow(
-      'simulated infra failure converting COP',
-    );
+    const result = await uc.execute('plan-1');
+
+    expect(result.paid).toBe(0);
+    expect(result.paymentsCount).toBe(1);
   });
 
   it.each([TreatmentPlanStatus.REJECTED, TreatmentPlanStatus.CANCELLED])(

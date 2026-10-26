@@ -298,6 +298,26 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
     expect((await fullBalanceOf(planId)).unconvertedPaymentsCount).toBe(1);
   });
 
+  it('balance counts a payment as unconverted when no rate can be fetched', async () => {
+    const planId = await createPlan('EUR');
+    await addItem(planId, 100, 'DONE');
+    await pay(planId, 100);
+    // Sin tasa guardada para ese día y sin proveedor: el cobro y el saldo no fallan.
+    const paymentId = await pay(planId, 50, {
+      currency: 'USD',
+      paidAt: '2026-05-02',
+    });
+
+    expect(await baseOf(paymentId)).toBeNull();
+    const full = await fullBalanceOf(planId);
+    expect(full).toMatchObject({
+      paid: 100,
+      unconvertedPaymentsCount: 1,
+      unallocated: 0,
+    });
+    expect(full.items.map((i) => i.paid)).toEqual([100]);
+  });
+
   it('idempotent replay does not create a second base', async () => {
     const planId = await createPlan();
     await addItem(planId, 100, 'DONE');

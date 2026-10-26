@@ -666,7 +666,7 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
         400,
       );
       expect(message(res)).toBe(
-        'Un ítem admite como máximo 30.00 EUR: el resto ya lo cubren otros abonos.',
+        'Un ítem admite como máximo 30.00 EUR: es lo que le queda por cubrir.',
       );
     });
 

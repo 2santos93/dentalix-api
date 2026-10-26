@@ -908,7 +908,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
           // Perdió: el reparto llenó antes el ítem; 400 con lo que queda libre.
           expect(put.reason).toBeInstanceOf(BadRequestException);
           expect((put.reason as Error).message).toMatch(
-            /^Un ítem admite como máximo \d+\.\d{2} EUR: el resto ya lo cubren otros abonos\.$/,
+            /^Un ítem admite como máximo \d+\.\d{2} EUR: es lo que le queda por cubrir\.$/,
           );
         } else {
           expect(
