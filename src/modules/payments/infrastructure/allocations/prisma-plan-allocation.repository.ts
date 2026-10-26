@@ -18,7 +18,7 @@ import {
 } from '../../domain/allocation-rules';
 import type {
   PaymentWithoutBase,
-  PlanAllocationFacts,
+  PlanBalanceSnapshot,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
   RebalanceOptions,
@@ -310,11 +310,54 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     }
   }
 
-  async listPlanAllocationFacts(planId: string): Promise<PlanAllocationFacts> {
+  async readPlanBalanceSnapshot(
+    planId: string,
+  ): Promise<PlanBalanceSnapshot | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(
       async (tx) => {
+        const plan = await tx.treatmentPlan.findFirst({
+          where: { id: planId, tenantId, deletedAt: null },
+          select: { status: true, currency: true },
+        });
+        if (!plan) return null;
         const livePayment = { deletedAt: null, treatmentPlanId: planId };
+        const items = await tx.treatmentPlanItem.findMany({
+          where: { tenantId, planId, deletedAt: null },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            toothNumber: true,
+            catalogItemId: true,
+            status: true,
+            price: true,
+            discount: true,
+          },
+        });
+        const catalog = await tx.dentalCatalogItem.findMany({
+          where: {
+            tenantId,
+            id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
+          },
+          select: { id: true, labelEs: true },
+        });
+        const labelOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
+        const payments = await tx.payment.findMany({
+          where: { tenantId, ...livePayment },
+          select: {
+            id: true,
+            amount: true,
+            currency: true,
+            paidAt: true,
+            locationId: true,
+          },
+        });
+        // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
+        const zoneOf = await resolveLocationTimeZones(
+          tx,
+          tenantId,
+          payments.map((p) => p.locationId),
+        );
         const allocations = await tx.paymentAllocation.findMany({
           where: { tenantId, treatmentPlanId: planId, payment: livePayment },
           select: {
@@ -327,19 +370,22 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
           where: { tenantId, treatmentPlanId: planId, payment: livePayment },
           select: { paymentId: true, amount: true, manual: true },
         });
-        const items = await tx.treatmentPlanItem.findMany({
-          where: { tenantId, planId, deletedAt: null },
-          select: { id: true, toothNumber: true, catalogItemId: true },
-        });
-        const catalog = await tx.dentalCatalogItem.findMany({
-          where: {
-            tenantId,
-            id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
-          },
-          select: { id: true, labelEs: true },
-        });
-        const labelOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
         return {
+          plan,
+          items: items.map((i) => ({
+            id: i.id,
+            toothNumber: i.toothNumber,
+            procedureName: labelOf.get(i.catalogItemId) ?? '',
+            status: i.status,
+            price: Number(i.price),
+            discount: Number(i.discount),
+          })),
+          payments: payments.map((p) => ({
+            id: p.id,
+            amount: Number(p.amount),
+            currency: p.currency,
+            paidOn: civilDateIn(p.paidAt, zoneOf(p.locationId)),
+          })),
           allocations: allocations.map((a) => ({
             paymentId: a.paymentId,
             itemId: a.treatmentPlanItemId,
@@ -349,11 +395,6 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             paymentId: b.paymentId,
             amount: Number(b.amount),
             manual: b.manual,
-          })),
-          itemLabels: items.map((i) => ({
-            itemId: i.id,
-            toothNumber: i.toothNumber,
-            procedureName: labelOf.get(i.catalogItemId) ?? '',
           })),
         };
       },

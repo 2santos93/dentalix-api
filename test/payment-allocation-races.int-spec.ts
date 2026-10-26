@@ -389,33 +389,40 @@ const stop = (): Stop => ({ reached: gate<string>(), release: gate<void>() });
 function pauseNextTransaction(stops: Record<string, Stop>): void {
   const original = prisma.runWithTenant.bind(prisma) as (
     fn: (tx: Prisma.TransactionClient) => Promise<unknown>,
+    options?: unknown,
   ) => Promise<unknown>;
   jest.spyOn(prisma, 'runWithTenant').mockImplementationOnce(((
     fn: (tx: Prisma.TransactionClient) => Promise<unknown>,
+    options?: unknown,
   ) =>
-    original((tx) =>
-      fn(
-        new Proxy(tx, {
-          get(target, model) {
-            const delegate: unknown = Reflect.get(target, model);
-            if (typeof model !== 'string' || typeof delegate !== 'object') {
-              return delegate;
-            }
-            return new Proxy(delegate as object, {
-              get(d, method) {
-                const call: unknown = Reflect.get(d, method);
-                const at = stops[`${model}.${String(method)}`];
-                if (!at || typeof call !== 'function') return call;
-                return async (...args: unknown[]) => {
-                  at.reached.open(await transactionId(target));
-                  await at.release.wait;
-                  return (call as (...a: unknown[]) => unknown).apply(d, args);
-                };
-              },
-            });
-          },
-        }),
-      ),
+    original(
+      (tx) =>
+        fn(
+          new Proxy(tx, {
+            get(target, model) {
+              const delegate: unknown = Reflect.get(target, model);
+              if (typeof model !== 'string' || typeof delegate !== 'object') {
+                return delegate;
+              }
+              return new Proxy(delegate as object, {
+                get(d, method) {
+                  const call: unknown = Reflect.get(d, method);
+                  const at = stops[`${model}.${String(method)}`];
+                  if (!at || typeof call !== 'function') return call;
+                  return async (...args: unknown[]) => {
+                    at.reached.open(await transactionId(target));
+                    await at.release.wait;
+                    return (call as (...a: unknown[]) => unknown).apply(
+                      d,
+                      args,
+                    );
+                  };
+                },
+              });
+            },
+          }),
+        ),
+      options,
     )) as never);
 }
 
@@ -763,6 +770,58 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
       await allocationCents({ paymentId: earlier, treatmentPlanItemId: later }),
     ).toBe(7_000);
     await assertInvariants(planId);
+  });
+
+  describe('foto del saldo por ítem (R14)', () => {
+    it('a payment and an item change committed mid-read never reach the snapshot', async () => {
+      const planId = await plan(a);
+      const done = await item(a, planId, 100, 'DONE');
+      const later = await item(a, planId, 60, 'PROPOSED');
+      const first = await pay(a, planId, 100);
+      await inTenant(a, () => rebalancer.rebalancePlan(planId, a.userId));
+
+      // La lectura se para tras leer plan, ítems y abonos y antes de las
+      // imputaciones: lo que otra transacción confirme ahora ya es posterior
+      // a su foto.
+      const beforeAllocations = stop();
+      pauseNextTransaction({ 'paymentAllocation.findMany': beforeAllocations });
+      const reading = inTenant(a, () =>
+        allocationRepo.readPlanBalanceSnapshot(planId),
+      );
+      await beforeAllocations.reached.wait;
+      const second = (await record(a, planId, 50)).id;
+      await updateItem(a, later, { status: TreatmentPlanItemStatus.ACCEPTED });
+      await drain(a, planId);
+      expect(await allocationCents({ paymentId: second })).toBe(5_000);
+      beforeAllocations.release.open();
+
+      const snapshot = await reading;
+
+      expect(snapshot).not.toBeNull();
+      expect(snapshot!.payments.map((p) => p.id)).toEqual([first]);
+      expect(snapshot!.items.find((i) => i.id === later)?.status).toBe(
+        TreatmentPlanItemStatus.PROPOSED,
+      );
+      expect(snapshot!.allocations).toEqual([
+        { paymentId: first, itemId: done, amount: 100 },
+      ]);
+      expect(snapshot!.bases.map((x) => x.paymentId)).toEqual([first]);
+      // Y la siguiente lectura ya ve todo, coherente.
+      const after = await inTenant(a, () =>
+        allocationRepo.readPlanBalanceSnapshot(planId),
+      );
+      expect(after!.payments).toHaveLength(2);
+      expect(after!.allocations).toHaveLength(2);
+      jest.restoreAllMocks();
+    });
+
+    it('returns null for a plan of another clinic', async () => {
+      const planId = await plan(b);
+
+      expect(
+        await inTenant(a, () => allocationRepo.readPlanBalanceSnapshot(planId)),
+      ).toBeNull();
+    });
   });
 
   describe('barrido', () => {

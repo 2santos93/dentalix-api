@@ -38,7 +38,11 @@ export class PlanItemBalanceDto {
   @ApiProperty({ example: '11' })
   toothNumber!: string;
 
-  @ApiProperty({ example: 'Resina' })
+  @ApiProperty({
+    example: 'Resina',
+    description:
+      'Rótulo en español del catálogo (`labelEs`); la selección de idioma es una mejora futura',
+  })
   procedureName!: string;
 
   @ApiProperty({ enum: ['PROPOSED', 'ACCEPTED', 'DONE'] })

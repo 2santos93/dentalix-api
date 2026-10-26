@@ -1,5 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { TreatmentPlanItemStatus } from '@prisma/client';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
@@ -25,6 +25,14 @@ export interface GetPlanBalanceResult {
   balance: number;
   /** Number of active payments for the plan. */
   paymentsCount: number;
+}
+
+/** Lo que la conversión necesita de un abono (el día civil ya resuelto). */
+interface PlanPayment {
+  id: string;
+  amount: number;
+  currency: string;
+  paidOn: string;
 }
 
 /** Cobrado y pendiente de un ítem del plan (DX-051). */
@@ -81,24 +89,25 @@ export class GetPlanBalanceUseCase {
   ) {}
 
   /**
-   * `execute` más el cobrado y pendiente por ítem (DX-051, R14). Una lectura
-   * por plan, sin N+1. Los hechos se leen DESPUÉS del plan: un descuento
-   * posterior solo libera imputaciones, así que el pendiente de un ítem nunca
-   * sale negativo.
+   * `execute` más el cobrado y pendiente por ítem (DX-051, R14). El plan, sus
+   * ítems, los abonos y los hechos de imputación salen de UNA lectura
+   * `RepeatableRead`; la conversión de moneda se hace fuera de ella, sobre
+   * esos datos. Así lo imputado y lo facturable son de la misma foto.
    */
   async executeWithItems(
     treatmentPlanId: string,
   ): Promise<GetPlanBalanceWithItemsResult> {
-    const { result, plan, payments } = await this.compute(treatmentPlanId);
-    const facts =
-      await this.allocations.listPlanAllocationFacts(treatmentPlanId);
+    const snapshot =
+      await this.allocations.readPlanBalanceSnapshot(treatmentPlanId);
+    if (!snapshot) throw new NotFoundException('Treatment plan not found');
+    const { plan, payments } = snapshot;
+    const result = await this.compute(plan, snapshot.items, payments);
     const billablePlan = isPlanBillable(plan.status);
 
-    const labels = new Map(facts.itemLabels.map((l) => [l.itemId, l]));
     const paidByItem = new Map<string, number>();
     const allocatedByPayment = new Map<string, number>();
     let allocatedCents = 0;
-    for (const a of facts.allocations) {
+    for (const a of snapshot.allocations) {
       const cents = Math.round(a.amount * 100);
       paidByItem.set(a.itemId, (paidByItem.get(a.itemId) ?? 0) + cents);
       allocatedByPayment.set(
@@ -108,7 +117,7 @@ export class GetPlanBalanceUseCase {
       allocatedCents += cents;
     }
 
-    const items: PlanItemBalance[] = plan.items.map((item) => {
+    const items: PlanItemBalance[] = snapshot.items.map((item) => {
       const billableCents = itemBillableCents(
         { ...item, deletedAt: null },
         billablePlan,
@@ -116,8 +125,8 @@ export class GetPlanBalanceUseCase {
       const paidCents = paidByItem.get(item.id) ?? 0;
       return {
         itemId: item.id,
-        toothNumber: labels.get(item.id)?.toothNumber ?? item.toothNumber,
-        procedureName: labels.get(item.id)?.procedureName ?? '',
+        toothNumber: item.toothNumber,
+        procedureName: item.procedureName,
         status: item.status,
         billable: billableCents / 100,
         paid: paidCents / 100,
@@ -126,12 +135,12 @@ export class GetPlanBalanceUseCase {
     });
 
     let unallocatedCents = 0;
-    for (const base of facts.bases) {
+    for (const base of snapshot.bases) {
       unallocatedCents +=
         Math.round(base.amount * 100) -
         (allocatedByPayment.get(base.paymentId) ?? 0);
     }
-    const withBase = new Set(facts.bases.map((b) => b.paymentId));
+    const withBase = new Set(snapshot.bases.map((b) => b.paymentId));
     const unconvertedPaymentsCount = payments.filter(
       (p) => !withBase.has(p.id),
     ).length;
@@ -154,7 +163,7 @@ export class GetPlanBalanceUseCase {
       allocated: allocatedCents / 100,
       unallocated: unallocatedCents / 100,
       unconvertedPaymentsCount,
-      manualPaymentIds: facts.bases
+      manualPaymentIds: snapshot.bases
         .filter((b) => b.manual)
         .map((b) => b.paymentId),
       items,
@@ -162,26 +171,32 @@ export class GetPlanBalanceUseCase {
   }
 
   async execute(treatmentPlanId: string): Promise<GetPlanBalanceResult> {
-    return (await this.compute(treatmentPlanId)).result;
-  }
-
-  private async compute(treatmentPlanId: string) {
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant.
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
+    const payments = await this.repo.listByPlan(treatmentPlanId);
+    return this.compute(plan, plan.items, payments);
+  }
 
+  private async compute(
+    plan: { status: TreatmentPlanStatus; currency: string },
+    planItems: {
+      status: TreatmentPlanItemStatus;
+      price: number;
+      discount: number;
+    }[],
+    payments: PlanPayment[],
+  ): Promise<GetPlanBalanceResult> {
     // DX-109 (BE-001): un plan no cobrable (rechazado o cancelado) no debe
     // nada, la misma regla que el estado de cuenta; sus abonos siguen en
     // `paid`.
     const billable = !isPlanBillable(plan.status)
       ? 0
       : round2(
-          plan.items
+          planItems
             .filter((item) => BILLABLE_STATUSES.has(item.status))
             .reduce((sum, item) => sum + item.price - item.discount, 0),
         );
-
-    const payments = await this.repo.listByPlan(treatmentPlanId);
 
     let paid = 0;
 
@@ -224,13 +239,12 @@ export class GetPlanBalanceUseCase {
       paid += converted;
     }
 
-    const result: GetPlanBalanceResult = {
+    return {
       planCurrency: plan.currency,
       billable,
       paid: round2(paid),
       balance: round2(billable - paid),
       paymentsCount: payments.length,
     };
-    return { result, plan, payments };
   }
 }

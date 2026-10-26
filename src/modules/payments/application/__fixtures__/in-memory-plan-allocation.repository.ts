@@ -4,7 +4,7 @@ import type {
 } from '../../domain/allocation-rules';
 import type {
   PaymentWithoutBase,
-  PlanAllocationFacts,
+  PlanBalanceSnapshot,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
   RebalanceOptions,
@@ -168,8 +168,8 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     return Promise.resolve();
   }
 
-  listPlanAllocationFacts(): Promise<PlanAllocationFacts> {
-    return Promise.resolve({ allocations: [], bases: [], itemLabels: [] });
+  readPlanBalanceSnapshot(): Promise<PlanBalanceSnapshot | null> {
+    return Promise.resolve(null);
   }
 
   tenantIds(): Promise<string[]> {

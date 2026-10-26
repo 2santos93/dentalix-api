@@ -499,8 +499,16 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
   it('RECEPTION reads per-item balance', async () => {
     const planId = await createPlan();
     const done = await addItem(planId, 100, 'DONE');
-    await addItem(planId, 50, 'ACCEPTED');
-    const paymentId = await pay(planId, 130);
+    const accepted = await addItem(planId, 50, 'ACCEPTED');
+    await pay(planId, 130);
+    const teeth = Object.fromEntries(
+      (
+        await raw.treatmentPlanItem.findMany({
+          where: { planId },
+          select: { id: true, toothNumber: true },
+        })
+      ).map((i) => [i.id, i.toothNumber]),
+    );
     const reception = await seedMember(raw, clinic, 'RECEPTION');
     const token = await loginAs(app, clinic.host, reception.email);
 
@@ -510,19 +518,37 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const body = res.body as FullBalance;
-    expect(body.items[0]).toEqual({
-      itemId: done,
-      toothNumber: expect.any(String) as string,
-      procedureName: 'Resina',
-      status: 'DONE',
-      billable: 100,
-      paid: 100,
-      balance: 0,
+    expect(res.body).toEqual({
+      planCurrency: 'EUR',
+      billable: 150,
+      paid: 130,
+      balance: 20,
+      paymentsCount: 1,
+      allocated: 130,
+      unallocated: 0,
+      unconvertedPaymentsCount: 0,
+      manualPaymentIds: [],
+      items: [
+        {
+          itemId: done,
+          toothNumber: teeth[done],
+          procedureName: 'Resina',
+          status: 'DONE',
+          billable: 100,
+          paid: 100,
+          balance: 0,
+        },
+        {
+          itemId: accepted,
+          toothNumber: teeth[accepted],
+          procedureName: 'Resina',
+          status: 'ACCEPTED',
+          billable: 50,
+          paid: 30,
+          balance: 20,
+        },
+      ],
     });
-    expect(body.items.map((i) => i.paid)).toEqual([100, 30]);
-    expect(body.manualPaymentIds).toEqual([]);
-    expect(paymentId).toBeDefined();
   });
 
   it.each(['DENTIST', 'ASSISTANT'] as const)(

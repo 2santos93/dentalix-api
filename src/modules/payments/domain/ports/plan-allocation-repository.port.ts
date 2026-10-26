@@ -1,4 +1,8 @@
-import type { Prisma } from '@prisma/client';
+import type {
+  Prisma,
+  TreatmentPlanItemStatus,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import type {
   AllocatableItem,
   AllocationIncrement,
@@ -38,19 +42,25 @@ export interface PaymentWithoutBase {
 }
 
 /**
- * Hechos de imputación de un plan para el saldo por ítem (spec R14), leídos
- * en UNA transacción `RepeatableRead`: solo abonos vivos, importes en la
- * moneda del plan.
+ * Foto del saldo de un plan para el saldo por ítem (spec R14), leída en UNA
+ * transacción `RepeatableRead`: el plan, sus ítems vivos (en orden de alta),
+ * los abonos vivos y los hechos de imputación, todos de la misma foto.
+ * Importes en la moneda del plan salvo `payments` (moneda del abono).
  */
-export interface PlanAllocationFacts {
+export interface PlanBalanceSnapshot {
+  plan: { status: TreatmentPlanStatus; currency: string };
+  items: {
+    id: string;
+    toothNumber: string;
+    /** Rótulo en español del catálogo (`labelEs`). */
+    procedureName: string;
+    status: TreatmentPlanItemStatus;
+    price: number;
+    discount: number;
+  }[];
+  payments: { id: string; amount: number; currency: string; paidOn: string }[];
   allocations: { paymentId: string; itemId: string; amount: number }[];
   bases: { paymentId: string; amount: number; manual: boolean }[];
-  /** Ítems vivos del plan con diente y nombre del procedimiento del catálogo. */
-  itemLabels: {
-    itemId: string;
-    toothNumber: string;
-    procedureName: string;
-  }[];
 }
 
 export const PLAN_ALLOCATION_REPOSITORY = Symbol('PLAN_ALLOCATION_REPOSITORY');
@@ -105,8 +115,8 @@ export interface PlanAllocationRepository {
     planId: string,
   ): Promise<void>;
 
-  /** Imputaciones, bases y rótulos de ítem del plan, en una sola lectura. */
-  listPlanAllocationFacts(planId: string): Promise<PlanAllocationFacts>;
+  /** La foto del plan, o `null` si no existe, está retirado o es de otra clínica. */
+  readPlanBalanceSnapshot(planId: string): Promise<PlanBalanceSnapshot | null>;
 
   /** Clínicas vivas, para el barrido (sin tenant: tabla sin RLS). */
   tenantIds(): Promise<string[]>;
