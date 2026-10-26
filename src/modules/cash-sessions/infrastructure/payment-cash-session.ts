@@ -14,11 +14,6 @@ import { methodBucket } from '../domain/arqueo';
 export const CASH_SESSION_REQUIRED_MESSAGE =
   'Esta clínica exige caja abierta para cobrar en efectivo: abre tu caja en esta sede antes de registrar el abono.';
 
-interface SessionRow {
-  id: string;
-  status: 'OPEN' | 'CLOSED';
-}
-
 /**
  * Serializa la recogida de pendientes de una sede con su compensación VOID.
  * Se toma ANTES de leer el destino o reclamar pendientes: bloquear solamente
@@ -55,6 +50,23 @@ export async function lockOpenSessionOf(
        AND "status" = 'OPEN'
      FOR SHARE`;
   return row?.id ?? null;
+}
+
+/**
+ * Estado de una caja, bloqueada en modo compartido hasta el COMMIT (un cierre
+ * o una reapertura simultáneos esperan). Una caja que no se ve cuenta como
+ * cerrada: nunca se escribe en ella.
+ */
+export async function lockedSessionStatus(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  sessionId: string,
+): Promise<'OPEN' | 'CLOSED'> {
+  const [session] = await tx.$queryRaw<{ status: 'OPEN' | 'CLOSED' }[]>`
+    SELECT "status"::text AS "status" FROM "cash_sessions"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${sessionId}::uuid
+     FOR SHARE`;
+  return session?.status ?? 'CLOSED';
 }
 
 export interface PaymentCashAssignment {
@@ -180,13 +192,8 @@ export async function recordVoidAdjustment(
   });
   if (!payment) return;
 
-  const statusOf = async (sessionId: string) => {
-    const [session] = await tx.$queryRaw<SessionRow[]>`
-      SELECT "id", "status"::text AS "status" FROM "cash_sessions"
-       WHERE "tenantId" = ${input.tenantId}::uuid AND "id" = ${sessionId}::uuid
-       FOR SHARE`;
-    return session?.status ?? 'CLOSED';
-  };
+  const statusOf = (sessionId: string) =>
+    lockedSessionStatus(tx, input.tenantId, sessionId);
   const actorSession = () =>
     lockOpenSessionOf(tx, input.tenantId, payment.locationId, input.voidedById);
 

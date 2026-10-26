@@ -15,6 +15,8 @@ import {
   UpdateCashSettingsUseCase,
 } from './application/use-cases/cash-sessions.use-cases';
 import { CASH_SESSION_REPOSITORY } from './domain/ports/cash-session-repository.port';
+import { EXPENSE_CASH_LINK } from '../expenses/domain/ports/expense-cash-link.port';
+import { ExpenseCashSession } from './infrastructure/expense-cash-session';
 import { PrismaCashSessionRepository } from './infrastructure/prisma-cash-session.repository';
 import { CashSessionsController } from './presentation/cash-sessions.controller';
 
@@ -24,6 +26,9 @@ import { CashSessionsController } from './presentation/cash-sessions.controller'
  * clínica. Lo que pasa dentro de las transacciones de los abonos (asociarlos
  * a la caja abierta y apuntar los ajustes de las cajas cerradas) vive en
  * `infrastructure/payment-cash-session.ts` y lo llama PrismaPaymentRepository.
+ * Las salidas de caja menor (DX-274) entran por el puerto `EXPENSE_CASH_LINK`
+ * que este módulo implementa y exporta (`ExpenseCashSession`); lo importa
+ * `ExpensesModule`, nunca al revés.
  */
 @Module({
   imports: [JwtModule.register({})],
@@ -42,6 +47,8 @@ import { CashSessionsController } from './presentation/cash-sessions.controller'
     TenantContextInterceptor,
     { provide: CASH_SESSION_REPOSITORY, useClass: PrismaCashSessionRepository },
     { provide: CASH_SESSIONS_CLOCK, useValue: () => new Date() },
+    { provide: EXPENSE_CASH_LINK, useClass: ExpenseCashSession },
   ],
+  exports: [EXPENSE_CASH_LINK],
 })
 export class CashSessionsModule {}

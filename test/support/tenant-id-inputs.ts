@@ -134,6 +134,20 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // «un ítem … de otra clínica … dan 400» (procedimiento de otra clínica).
   'POST /post-op-templates body.catalogItemIds[]':
     'post-op-templates.e2e-spec.ts',
+  // DX-274: gastos. «Una sede de otra clínica es 400 (alta y edición)» y «la
+  // subida de otra clínica es 404» (alta y adjuntar después).
+  'POST /expenses body.locationId': 'expenses.e2e-spec.ts',
+  'PATCH /expenses/:id body.locationId': 'expenses.e2e-spec.ts',
+  'POST /expenses body.attachmentUploadId': 'expenses.e2e-spec.ts',
+  'POST /expenses/:id/attachment body.uploadId': 'expenses.e2e-spec.ts',
+  // «una subida de otra clínica no sirve de soporte de una salida (404)».
+  'POST /cash-sessions/current/outflows body.attachmentUploadId':
+    'expense-cash-outflows.e2e-spec.ts',
+  // Una sede ajena en la lista, el resumen y sus CSV no devuelve nada.
+  'GET /expenses ?locationId': 'expenses-reports.e2e-spec.ts',
+  'GET /expenses.csv ?locationId': 'expenses-reports.e2e-spec.ts',
+  'GET /expenses/summary ?locationId': 'expenses-reports.e2e-spec.ts',
+  'GET /expenses/summary.csv ?locationId': 'expenses-reports.e2e-spec.ts',
 };
 
 /** Ids por query/cuerpo de las rutas de clínica (`roles`) dadas. */

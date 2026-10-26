@@ -340,7 +340,19 @@ export class CashExpectedLineDto {
   @ApiProperty({ description: 'Ajustes que entraron en esta caja (con signo)' })
   adjustments!: number;
 
-  @ApiProperty({ description: 'opening + payments + adjustments' })
+  @ApiProperty({
+    description:
+      'Salidas de caja menor del turno (DX-274), en positivo: se restan. Solo en efectivo.',
+  })
+  outflows!: number;
+
+  @ApiProperty()
+  outflowsCount!: number;
+
+  @ApiProperty({
+    description:
+      'opening + payments + adjustments − outflows (puede ser negativo)',
+  })
   expected!: number;
 }
 
@@ -467,6 +479,63 @@ export class CashVoidedPaymentDto extends CashSessionPaymentDto {
   bookedAsAdjustment!: boolean;
 }
 
+export class CashOutflowDto {
+  @ApiProperty({ format: 'uuid', description: 'Id del pago de gasto' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  expenseId!: string;
+
+  @ApiProperty({ example: 'Mensajería' })
+  category!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  supplier!: string | null;
+
+  @ApiProperty()
+  amount!: number;
+
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({ type: CashStaffRefDto })
+  createdBy!: CashStaffRefDto;
+}
+
+export class CashVoidedOutflowDto extends CashOutflowDto {
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  voidedAt!: Date | null;
+
+  @ApiProperty({ type: CashStaffRefDto, nullable: true })
+  voidedBy!: CashStaffRefDto | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  voidReason!: string | null;
+
+  @ApiProperty({
+    description:
+      'Anulada con la caja ya cerrada: sigue restando aquí y la anulación es un ajuste OUTFLOW_VOID en otra caja.',
+  })
+  bookedAsAdjustment!: boolean;
+}
+
+export class CashAdjustmentExpensePaymentDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  expenseId!: string;
+
+  @ApiProperty()
+  category!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  supplier!: string | null;
+}
+
 export class CashAdjustmentPaymentDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -500,7 +569,7 @@ export class CashAdjustmentDto {
     enum: CashAdjustmentKind,
     enumName: 'CashAdjustmentKind',
     description:
-      'VOID: anulación de un abono de una caja cerrada. LATE_PAYMENT: abono con fecha de un día ya cerrado. CORRECTION: corrección de un ADMIN.',
+      'VOID: anulación de un abono de una caja cerrada. LATE_PAYMENT: abono con fecha de un día ya cerrado. CORRECTION: corrección de un ADMIN. OUTFLOW_VOID: anulación (positiva) de una salida de caja de una caja cerrada.',
   })
   kind!: CashAdjustmentKind;
 
@@ -533,6 +602,13 @@ export class CashAdjustmentDto {
 
   @ApiProperty({ type: CashAdjustmentPaymentDto, nullable: true })
   payment!: CashAdjustmentPaymentDto | null;
+
+  @ApiProperty({
+    type: CashAdjustmentExpensePaymentDto,
+    nullable: true,
+    description: 'OUTFLOW_VOID: la salida de caja anulada y su gasto',
+  })
+  expensePayment!: CashAdjustmentExpensePaymentDto | null;
 
   @ApiProperty({
     type: CashSessionRefDto,
@@ -623,6 +699,20 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
       'Anulados (DX-049): no cuentan en el esperado salvo si se anularon con la caja cerrada',
   })
   voidedPayments!: CashVoidedPaymentDto[];
+
+  @ApiProperty({
+    type: [CashOutflowDto],
+    description:
+      'Salidas de caja menor vivas del turno (DX-274). Se ven también con el arqueo ciego.',
+  })
+  outflows!: CashOutflowDto[];
+
+  @ApiProperty({
+    type: [CashVoidedOutflowDto],
+    description:
+      'Salidas anuladas: no restan salvo si se anularon con la caja cerrada',
+  })
+  voidedOutflows!: CashVoidedOutflowDto[];
 
   @ApiProperty({
     type: [CashAdjustmentDto],

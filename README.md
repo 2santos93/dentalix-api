@@ -2380,6 +2380,121 @@ migraciones `20261020200000_dx151_enums`,
 - **Demo**: `seed:demo` no crea documentos (no hay ficheros de ejemplo que
   guardar en el almacén).
 
+## Gastos de la sede y caja menor (DX-274)
+
+Lo que gasta cada sede: factura o cuenta por pagar con categoría, proveedor,
+importe, fechas y soporte, pagada total o parcialmente. Módulo `expenses`;
+migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
+`…150200_dx274_cash_adjustment_outflow`, `…150300_dx274_audit_events_idx`,
+`…150400_dx274_expense_idempotency` y
+`…150500_dx274_idempotency_immutable`. Incluye las salidas de caja menor
+(el dinero del cajón) y el resumen mensual «ingresos − gastos» con CSV.
+
+- **Tablas**: `expense_categories` (propias de la clínica; las predefinidas
+  son constantes de código), `expenses` y `expense_payments`, con RLS FORCE y
+  FK compuestas por clínica. El pago hereda sede y moneda del gasto por una FK
+  de cuatro columnas. Sin DELETE en la BD: anular conserva todo.
+- **Zona horaria explícita**: gastos, salidas y resumen usan la zona IANA
+  guardada en el horario de cada sede. Si falta o no es válida, responden
+  `409 LOCATION_TIMEZONE_REQUIRED` con el mensaje «Configura una zona horaria
+  válida para la sede y vuelve a intentarlo.». No se deduce del país ni del
+  servidor; tras guardar el horario se puede reintentar. Un rango manual del
+  resumen también necesita las zonas para agrupar los ingresos de cada sede.
+- **Estado derivado**: `PENDING`, `PARTIAL`, `PAID` o `VOIDED` salen de la
+  anulación y de la suma de pagos vivos; `overdue` es «no pagado del todo con
+  el vencimiento ya pasado» en el día civil de la sede. La lista lo calcula en
+  una sola consulta por página (filtros `status` y `overdue` incluidos).
+- **Reglas**: la factura no es futura y el vencimiento no es anterior a ella;
+  la categoría es una predefinida o una propia activa (400 `Elige una
+  categoría válida.`) y el gasto guarda una foto del nombre; el proveedor se
+  normaliza (espacios) y admite 200 caracteres. La suma de pagos vivos no
+  pasa del importe (400 con lo pendiente) y se comprueba con el gasto `FOR
+  UPDATE`, así que dos pagos simultáneos no se pasan. El día del pago no es
+  futuro en la sede. Un gasto con cualquier pago (aunque esté anulado) no
+  cambia de sede ni de moneda; su importe sí, nunca por debajo de lo pagado.
+  Con `cashRequireOpenSession`, un pago en efectivo fuera de caja es 409.
+- **Idempotencia**: `POST /expenses` y `POST /expenses/:id/payments` aceptan
+  `Idempotency-Key` (UUID); repetir la misma petición devuelve el original y
+  otro cuerpo con la misma clave es 422 (como los abonos, DX-109).
+- **Soporte** (PDF, JPG o PNG, hasta 20 MB; HEIC se convierte a JPG en el
+  navegador): subida directa al bucket como los documentos del paciente
+  (DX-259). `POST /expenses/attachments/upload-url` devuelve `{ uploadId,
+  target, maxBytes }`; el navegador sube a
+  `expense-receipts/pending/<tenantId>/<uploadId>` y entrega el `uploadId` en
+  `attachmentUploadId` del alta o a `POST /expenses/:id/attachment` (solo si
+  aún no tiene soporte). La API comprueba tamaño, SHA-256 y tipo por
+  contenido, y lo copia a `expense-receipts/<tenantId>/<attemptId>-<sha16>.<ext>`;
+  cada completación genera su UUID exclusivo para que la limpieza de un
+  intento fallido nunca borre el soporte de otra transacción en vuelo;
+  si el contenido no vale borra el objeto y responde 400. Los pendientes que
+  nadie adjunta los borra el ciclo de vida del bucket a las 24 h (ver
+  [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)).
+  `GET /expenses/:id/attachment/url?disposition=inline|attachment` da una URL
+  firmada de 300 s, auditada como VIEW (inline) o EXPORT (descarga).
+- **Caja menor** (R1, R5, R6): un pago puede salir del cajón
+  (`payment.fromCashSession` en el alta, `fromCashSession` en `POST
+  /expenses/:id/payments`): método `CASH`, `paidOn` = hoy en la sede y caja
+  abierta de quien paga en la sede del gasto (409 `Abre tu caja en esta sede
+  para pagar desde el cajón.`); la caja se toma con `FOR SHARE`, así que un
+  cierre simultáneo gana o pierde limpio. `POST /cash-sessions/current/outflows`
+  (ADMIN y recepción, `Idempotency-Key`) crea gasto y pago de una vez en la
+  caja abierta de quien llama, con fecha de hoy y la sede de esa caja. El
+  efectivo esperado del arqueo resta las salidas (`fondo + abonos + ajustes −
+  salidas`, puede quedar negativo). Anular una salida con la caja abierta la
+  saca del cálculo («Salidas anuladas»); con la caja ya cerrada sigue restando
+  ahí y la anulación entra como ajuste `OUTFLOW_VOID` positivo en la caja
+  abierta de quien anula (o pendiente de la siguiente de la sede). Con arqueo
+  ciego, nada de esto devuelve el esperado; la lista de salidas del turno sí.
+- **Resumen mensual**: `GET /expenses/summary?from&to&locationId` (ADMIN,
+  rango de hasta 366 días, 400 en español si no): una fila por mes × sede ×
+  moneda con `income`, `categories` (gasto por categoría, mayor primero),
+  `expensesTotal` y `net` (ingresos − gastos; puede ser negativo). Los gastos
+  no anulados cuentan por **fecha de factura** (devengado, estén pagados o no)
+  y los ingresos son los abonos vivos por el **día civil de su sede** (mes y
+  rango en la zona de cada sede, no en UTC). Las monedas no se convierten.
+  Ambas lecturas salen de una misma foto `REPEATABLE READ`. Sin permiso sobre
+  una sede, ni sus gastos ni sus ingresos entran.
+- **CSV** (ADMIN, `@Audit` EXPORT con `reason` `EXPENSE_LIST` o
+  `EXPENSE_SUMMARY`, `Cache-Control: no-store`, UTF-8 con BOM y CRLF, celdas
+  de texto entre comillas, sin saltos de línea y con prefijo `'` si empiezan
+  por `= + - @`, importes con los decimales de su moneda):
+  `GET /expenses.csv` (mismos filtros que la lista, una línea por gasto, hasta
+  10 000: más es 400 «acota el periodo») y `GET /expenses/summary.csv` (por
+  mes, sede y moneda: `Ingresos`, un `Gasto` por categoría, `Total gastos` y
+  `Neto`). Los comparte `src/shared/csv/csv-cells.ts` con cartera y descuentos.
+- **Endpoints**: `GET|POST /expenses`, `GET|PATCH /expenses/:id`,
+  `POST /expenses/:id/void`, `POST /expenses/:id/payments`,
+  `POST /expenses/:id/payments/:paymentId/void`,
+  `GET /expenses/suppliers?query` (hasta 20 proveedores distintos, el de uso
+  más reciente primero) y `GET|POST /expense-categories`,
+  `DELETE /expense-categories/:id`. Respeta las sedes permitidas del usuario.
+- **Roles**: toda la gestión, el resumen y los CSV, ADMIN. ADMIN y recepción:
+  la autorización de subida del soporte, las sugerencias de proveedor, leer
+  las categorías y la salida de caja menor desde su propia caja.
+- **Auditoría**: recurso `EXPENSE` (CREATE, UPDATE, VOID con `reason`
+  `EXPENSE_VOIDED` o `PAYMENT_VOIDED`, `PAYMENT_ADDED`, VIEW y EXPORT); la
+  metadata solo lleva los nombres de los campos, nunca el proveedor ni la
+  descripción.
+- **Despliegue** (todo aditivo; el código anterior sigue funcionando con las
+  migraciones aplicadas):
+  1. Aplicar las migraciones `20261024150000` … `20261024150500` (`prisma
+     migrate deploy`). `…150300` crea un índice no concurrente sobre
+     `audit_events` (bloquea sus escrituras mientras se construye, como DX-279):
+     mejor en una hora de poco tráfico. `…150200` toma un bloqueo breve sobre
+     `cash_session_adjustments`.
+  2. **Antes o junto al despliegue de la API**, añadir al bucket de producción
+     la regla de ciclo de vida de `expense-receipts/pending/` (24 h): la
+     migración no la aplica y sin ella las subidas que nadie adjunta no se
+     limpian. Es la misma regla que `patient-documents/pending/`; ver
+     [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)
+     (JSON de AWS y, en R2, una regla por prefijo).
+  3. Sin variables de entorno nuevas.
+- **Demo**: `npm run seed:demo` crea tres gastos de la sede principal (uno
+  pagado, uno pagado a medias con el vencimiento pasado y uno pendiente) y una
+  salida de caja menor de recepción en el turno ABIERTO de la tarde; la caja
+  cerrada de la mañana no se toca, así que su arqueo (diferencia de −2.000)
+  sigue igual.
+
 ## Importación de pacientes desde CSV/XLSX (DX-107)
 
 Un ADMIN trae su base de pacientes de Excel o de otro software sin teclearla.
@@ -3078,23 +3193,37 @@ La web reduce en el navegador las fotos de más de 900 KB (el proxy copia 1 MB).
   bucket (`PutBucketCors` da NotImplemented): es de todo el servidor,
   `MINIO_API_CORS_ALLOW_ORIGIN` (en docker-compose, `*`).
 - **Ciclo de vida** de los pendientes: los objetos de
-  `patient-documents/pending/` que no llegaron a `complete` se borran a las
-  24 h. AWS (junto a las reglas de DX-084):
+  `patient-documents/pending/` (documentos del paciente) y de
+  `expense-receipts/pending/` (soporte de gastos, DX-274) que no llegaron a
+  `complete` o al alta del gasto se borran a las 24 h. AWS (junto a las
+  reglas de DX-084); es UNA configuración con una regla por prefijo, porque
+  `put-bucket-lifecycle-configuration` reemplaza las reglas existentes:
 
   ```json
-  {"Rules": [{
-    "ID": "pending-24h",
-    "Status": "Enabled",
-    "Filter": {"Prefix": "patient-documents/pending/"},
-    "Expiration": {"Days": 1},
-    "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
-    "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
-  }]}
+  {"Rules": [
+    {
+      "ID": "pending-24h",
+      "Status": "Enabled",
+      "Filter": {"Prefix": "patient-documents/pending/"},
+      "Expiration": {"Days": 1},
+      "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
+      "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
+    },
+    {
+      "ID": "expense-receipts-pending-24h",
+      "Status": "Enabled",
+      "Filter": {"Prefix": "expense-receipts/pending/"},
+      "Expiration": {"Days": 1},
+      "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
+      "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
+    }
+  ]}
   ```
 
-  En R2, una regla de ciclo de vida con el prefijo `patient-documents/pending/`
-  y «Delete after 1 day». En local, `minio_init` la aplica a `dentalix-local`
-  y `dentalix-test` (`mc ilm import`).
+  En R2, una regla de ciclo de vida por cada prefijo
+  (`patient-documents/pending/` y `expense-receipts/pending/`) y «Delete
+  after 1 day». En local, `minio_init` aplica las dos a `dentalix-local` y
+  `dentalix-test` (`mc ilm import`, un solo JSON con las dos reglas).
 - **Decisión: Cloudflare R2 no está soportado para la subida directa.** R2 no
   implementa el POST de formulario (PostObject), así que con R2 la web no
   puede subir documentos. Hoy la subida directa exige AWS S3 o MinIO. Si se

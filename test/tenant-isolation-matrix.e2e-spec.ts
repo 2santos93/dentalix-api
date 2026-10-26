@@ -202,6 +202,10 @@ interface SeedA {
   prescriptionTemplateId: string;
   appointmentTypeId: string;
   payerId: string;
+  /** DX-274: un gasto de A con un pago, y una categoría propia de A. */
+  expenseId: string;
+  expensePaymentId: string;
+  expenseCategoryId: string;
   /** DX-105: una lista de precios de A con un precio cargado. */
   priceListId: string;
   /** DX-105: un convenio de A por lista de precios. */
@@ -482,6 +486,25 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     type: 'EMPRESA',
   });
 
+  // DX-274: una categoría propia, un gasto de A (con esa categoría) y un pago.
+  const expenseCategory = await create(app, a, '/expense-categories', {
+    name: 'Seguros de A',
+  });
+  const expense = await create(app, a, '/expenses', {
+    category: 'Seguros de A',
+    supplier: 'Proveedor de A',
+    description: 'Póliza anual de A',
+    amount: 100000,
+    currency: 'COP',
+    invoiceDate: '2026-01-15',
+  });
+  const expensePaid = (
+    await api(app, a, 'post', `/expenses/${expense.id}/payments`, {
+      amount: 40000,
+      method: 'TRANSFER',
+    }).expect(201)
+  ).body as { payments: IdBody[] };
+
   // DX-105: una lista de precios de A con un precio (para `price_list_items`).
   const priceList = await create(app, a, '/price-lists', {
     name: 'Lista de A',
@@ -668,6 +691,9 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
     payerId: payer.id,
+    expenseId: expense.id,
+    expensePaymentId: expensePaid.payments[0].id,
+    expenseCategoryId: expenseCategory.id,
     priceListId: priceList.id,
     agreementId: agreement.id,
     scheduleBlockId: scheduleBlock.id,
@@ -933,6 +959,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'post_op_instruction_deliveries',
       // DX-151: un documento del paciente subido por la API.
       'patient_documents',
+      // DX-274: gasto, pago y categoría propia de A.
+      'expenses',
+      'expense_payments',
+      'expense_categories',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -1398,6 +1428,69 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'delete',
       path: () => `/payers/${a.payerId}`,
       status: 404,
+    },
+    // --- gastos (DX-274) ---
+    {
+      name: 'GET /expenses/:id',
+      verb: 'get',
+      path: () => `/expenses/${a.expenseId}`,
+      status: 404,
+    },
+    {
+      name: 'PATCH /expenses/:id',
+      verb: 'patch',
+      path: () => `/expenses/${a.expenseId}`,
+      body: () => ({ description: 'Hackeado', amount: 1 }),
+      status: 404,
+    },
+    {
+      name: 'POST /expenses/:id/void',
+      verb: 'post',
+      path: () => `/expenses/${a.expenseId}/void`,
+      body: () => ({ reason: 'Intento desde otra clínica' }),
+      status: 404,
+    },
+    {
+      name: 'POST /expenses/:id/payments',
+      verb: 'post',
+      path: () => `/expenses/${a.expenseId}/payments`,
+      body: () => ({ amount: 1000, method: 'CARD' }),
+      status: 404,
+    },
+    {
+      name: 'POST /expenses/:id/payments/:paymentId/void',
+      verb: 'post',
+      path: () =>
+        `/expenses/${a.expenseId}/payments/${a.expensePaymentId}/void`,
+      body: () => ({ reason: 'Intento desde otra clínica' }),
+      status: 404,
+    },
+    {
+      name: 'POST /expenses/:id/attachment',
+      verb: 'post',
+      path: () => `/expenses/${a.expenseId}/attachment`,
+      body: () => ({ uploadId: '9b2f9a6e-3f1c-4d2e-8a55-0d3f6a1b7c10' }),
+      status: 404,
+    },
+    {
+      name: 'GET /expenses/:id/attachment/url',
+      verb: 'get',
+      path: () => `/expenses/${a.expenseId}/attachment/url`,
+      status: 404,
+    },
+    {
+      name: 'DELETE /expense-categories/:id',
+      verb: 'delete',
+      path: () => `/expense-categories/${a.expenseCategoryId}`,
+      status: 404,
+    },
+    // La lista de B no trae el gasto de A.
+    {
+      name: 'GET /expenses (lista de B)',
+      verb: 'get',
+      path: () => '/expenses',
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 50 },
     },
     // --- listas de precios (DX-105) ---
     {
@@ -3043,6 +3136,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         : api(app, clinicB, c.verb, c.path(), c.body?.());
       if (c.locationId) req.set('X-Location-Id', c.locationId());
       const res = await req;
+      if (res.status !== c.status) {
+        // Diagnóstico de fallos transitorios: solo campos de error, nunca
+        // cuerpos de petición ni respuestas de éxito con posibles tokens.
+        const error = res.body as {
+          message?: unknown;
+          error?: unknown;
+          code?: unknown;
+        };
+        throw new Error(
+          `${c.name}: HTTP ${res.status} (esperado ${c.status}); ${JSON.stringify({ message: error.message, error: error.error, code: error.code })}`,
+        );
+      }
       expect({ status: res.status }).toEqual({ status: c.status });
       if ('responseBody' in c) {
         expect(res.text === '' ? null : res.body).toEqual(c.responseBody);

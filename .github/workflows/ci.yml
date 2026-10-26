@@ -87,6 +87,7 @@ jobs:
         id: build
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npm run build
+
       # `start:prod` ejecuta `node dist/main`: el build debe dejar ahí la entrada
       # (tsconfig.build.json compila solo src/; si entrara prisma/ o test/, la
       # salida pasaría a dist/src/ y producción no arrancaría).

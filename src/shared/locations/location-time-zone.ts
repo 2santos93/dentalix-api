@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { ClinicCountry, Prisma } from '@prisma/client';
 import { isValidTimeZone } from '../time/civil-day';
 import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from './default-business-hours';
@@ -24,7 +25,23 @@ interface LocationZoneRow {
   timezone: string | null;
 }
 
-function zoneOfRow(row: LocationZoneRow): string {
+export function requireConfiguredLocationTimeZone(
+  zone: string | null | undefined,
+): string {
+  if (!zone || !isValidTimeZone(zone)) {
+    throw new ConflictException({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'LOCATION_TIMEZONE_REQUIRED',
+      message:
+        'Configura una zona horaria válida para la sede y vuelve a intentarlo.',
+    });
+  }
+  return zone;
+}
+
+function zoneOfRow(row: LocationZoneRow, requireConfigured: boolean): string {
+  if (requireConfigured) return requireConfiguredLocationTimeZone(row.timezone);
   return row.timezone && isValidTimeZone(row.timezone)
     ? row.timezone
     : timeZoneForCountry(row.country);
@@ -42,6 +59,8 @@ export async function loadLocationTimeZones(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationIds?: readonly string[],
+  // Los consumidores nuevos pueden exigir configuración sin alterar contratos legacy.
+  requireConfigured = false,
 ): Promise<Map<string, string>> {
   const ids = locationIds ? [...new Set(locationIds)] : undefined;
   if (ids && ids.length === 0) return new Map();
@@ -57,7 +76,9 @@ export async function loadLocationTimeZones(
        AND s."deletedAt" IS NULL
      WHERE l."tenantId" = ${tenantId}::uuid
        ${onlyIds}`;
-  return new Map(rows.map((row) => [row.id, zoneOfRow(row)]));
+  return new Map(
+    rows.map((row) => [row.id, zoneOfRow(row, requireConfigured)]),
+  );
 }
 
 /**
@@ -73,8 +94,17 @@ export async function resolveLocationTimeZones(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationIds: readonly string[],
+  // Los consumidores nuevos pueden exigir configuración sin alterar contratos legacy.
+  requireConfigured = false,
 ): Promise<(locationId: string) => string> {
-  const zones = await loadLocationTimeZones(tx, tenantId, locationIds);
+  const zones = await loadLocationTimeZones(
+    tx,
+    tenantId,
+    locationIds,
+    requireConfigured,
+  );
   return (locationId) =>
-    zones.get(locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE;
+    requireConfigured
+      ? requireConfiguredLocationTimeZone(zones.get(locationId))
+      : (zones.get(locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE);
 }

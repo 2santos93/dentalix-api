@@ -50,6 +50,10 @@ export interface CashExpectedLine {
   payments: number;
   paymentsCount: number;
   adjustments: number;
+  /** Salidas de caja menor (DX-274), en positivo: se restan. */
+  outflows: number;
+  outflowsCount: number;
+  /** opening + payments + adjustments − outflows (puede ser negativo). */
   expected: number;
 }
 
@@ -108,6 +112,33 @@ export interface CashVoidedPayment extends CashSessionPayment {
   bookedAsAdjustment: boolean;
 }
 
+/**
+ * Salida de caja menor (DX-274): un pago de gasto desde el cajón, siempre en
+ * efectivo. Se ve también con el arqueo ciego (la registró quien cuenta).
+ */
+export interface CashOutflow {
+  /** Id del pago de gasto. */
+  id: string;
+  expenseId: string;
+  category: string;
+  supplier: string | null;
+  amount: number;
+  currency: string;
+  createdAt: Date;
+  createdBy: StaffRef;
+}
+
+export interface CashVoidedOutflow extends CashOutflow {
+  voidedAt: Date | null;
+  voidedBy: StaffRef | null;
+  voidReason: string | null;
+  /**
+   * `true` si se anuló con la caja ya cerrada: sigue restando aquí y la
+   * anulación es un ajuste OUTFLOW_VOID (positivo) en otra caja.
+   */
+  bookedAsAdjustment: boolean;
+}
+
 export interface CashSessionRef {
   id: string;
   openedAt: Date;
@@ -130,6 +161,13 @@ export interface CashAdjustmentView {
     patient: { id: string; fullName: string };
     paidOn: string;
     receiptNumber: string | null;
+  } | null;
+  /** OUTFLOW_VOID: la salida de caja anulada y su gasto. */
+  expensePayment: {
+    id: string;
+    expenseId: string;
+    category: string;
+    supplier: string | null;
   } | null;
   /** Caja cerrada de la que viene (el enlace al original). */
   originalSession: CashSessionRef | null;
@@ -159,6 +197,10 @@ export interface CashSessionDetail extends CashSessionSummary {
   expected: CashExpectedLine[] | null;
   payments: CashSessionPayment[] | null;
   voidedPayments: CashVoidedPayment[];
+  /** Salidas de caja vivas del turno (DX-274). */
+  outflows: CashOutflow[];
+  /** Salidas anuladas (las anuladas con la caja cerrada siguen restando). */
+  voidedOutflows: CashVoidedOutflow[];
   adjustments: CashAdjustmentView[];
   /** Ajustes que nacieron de esta caja ya cerrada y cuentan en otra. */
   laterAdjustments: CashAdjustmentView[];

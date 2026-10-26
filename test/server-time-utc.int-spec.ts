@@ -41,6 +41,9 @@ async function cleanup(): Promise<void> {
   await raw.cashSessionClosingLine.deleteMany({ where });
   await raw.cashSessionClosing.deleteMany({ where });
   await raw.cashSessionFloat.deleteMany({ where });
+  await raw.expensePayment.deleteMany({ where });
+  await raw.expense.deleteMany({ where });
+  await raw.expenseCategory.deleteMany({ where });
   await raw.clinicalEntryAddendum.deleteMany({ where });
   await raw.clinicalEntry.deleteMany({ where });
   await raw.patientImplant.deleteMany({ where });
@@ -99,6 +102,20 @@ function txInBogota<T>(
 /** Segundos entre la columna y la hora UTC de la transacción. */
 const drift = (column: string) =>
   `abs(extract(epoch FROM (${column} - (now() AT TIME ZONE 'UTC'))))::float8 AS drift`;
+
+/** Segundos entre una columna de una fila y la hora UTC de la transacción. */
+const utcDrift = async (
+  tx: Prisma.TransactionClient,
+  table: string,
+  column: string,
+  id: string,
+) => {
+  const [row] = await tx.$queryRawUnsafe<{ drift: number }[]>(
+    `SELECT ${drift(`"${column}"`)} FROM "${table}" WHERE "id" = $1::uuid`,
+    id,
+  );
+  return row.drift;
+};
 
 describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', () => {
   beforeAll(async () => {
@@ -284,18 +301,6 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('caja por turno (DX-027): apertura, cierre, reapertura y ajuste con la hora del servidor en UTC', async () => {
-    const utcDrift = async (
-      tx: Prisma.TransactionClient,
-      table: string,
-      column: string,
-      id: string,
-    ) => {
-      const [row] = await tx.$queryRawUnsafe<{ drift: number }[]>(
-        `SELECT ${drift(`"${column}"`)} FROM "${table}" WHERE "id" = $1::uuid`,
-        id,
-      );
-      return row.drift;
-    };
     // Apertura con su fondo (el trigger del fondo compara con la hora de la
     // apertura: si la fuente de hora no fuera la misma, fallaría).
     const session = await txInBogota(async (tx) => {
@@ -405,6 +410,69 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
           'createdAt',
           adjustment.id,
         ),
+      ).toBeLessThan(1);
+    });
+  });
+
+  it('gastos, pagos de gasto y categorías: createdAt y voidedAt en UTC (DX-274)', async () => {
+    await txInBogota(async (tx) => {
+      const category = await tx.expenseCategory.create({
+        data: { tenantId: s.tenantId, name: 'Hora UTC', createdById: s.userId },
+      });
+      expect(
+        await utcDrift(tx, 'expense_categories', 'createdAt', category.id),
+      ).toBeLessThan(1);
+      const expense = await tx.expense.create({
+        data: {
+          tenantId: s.tenantId,
+          locationId: s.locationId,
+          category: 'Otros',
+          amount: 10_000,
+          currency: 'COP',
+          invoiceDate: new Date('2026-10-17T00:00:00.000Z'),
+          createdById: s.userId,
+        },
+      });
+      expect(
+        await utcDrift(tx, 'expenses', 'createdAt', expense.id),
+      ).toBeLessThan(1);
+      const payment = await tx.expensePayment.create({
+        data: {
+          tenantId: s.tenantId,
+          expenseId: expense.id,
+          locationId: s.locationId,
+          amount: 10_000,
+          currency: 'COP',
+          method: 'TRANSFER',
+          paidOn: new Date('2026-10-17T00:00:00.000Z'),
+          createdById: s.userId,
+        },
+      });
+      expect(
+        await utcDrift(tx, 'expense_payments', 'createdAt', payment.id),
+      ).toBeLessThan(1);
+      // La anulación también toma la hora del servidor, no la que mande la API.
+      await tx.expensePayment.update({
+        where: { id: payment.id },
+        data: {
+          voidedAt: new Date('2001-01-01T00:00:00.000Z'),
+          voidedById: s.userId,
+          voidReason: 'Pago duplicado',
+        },
+      });
+      expect(
+        await utcDrift(tx, 'expense_payments', 'voidedAt', payment.id),
+      ).toBeLessThan(1);
+      await tx.expense.update({
+        where: { id: expense.id },
+        data: {
+          voidedAt: new Date('2001-01-01T00:00:00.000Z'),
+          voidedById: s.userId,
+          voidReason: 'Factura duplicada',
+        },
+      });
+      expect(
+        await utcDrift(tx, 'expenses', 'voidedAt', expense.id),
       ).toBeLessThan(1);
     });
   });
