@@ -462,6 +462,83 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
     }
   });
 
+  it('void racing a sweep-created base, a drain and an item edit never deadlocks', async () => {
+    rates.USD = 0.9;
+    try {
+      for (let round = 0; round < REPEAT; round += 1) {
+        const planId = await plan(a);
+        const itemA = await item(a, planId, 100, 'DONE');
+        await item(a, planId, 100, 'ACCEPTED');
+        await pay(a, planId, 50, { paidAt: new Date('2026-10-01T15:00:00Z') });
+        // Cobrado sin tasa: el barrido le crea la base mientras se anula.
+        const voided = await pay(a, planId, 100, {
+          currency: 'USD',
+          base: false,
+        });
+
+        const outcomes = await Promise.all([
+          settle(inTenant(a, () => rebalancer.createMissingBases(50))),
+          settle(drain(a, planId)),
+          settle(voidPayment(a, voided)),
+          settle(updateItem(a, itemA, { discount: 10 })),
+        ]);
+        for (const outcome of outcomes) {
+          if (outcome.status === 'rejected') {
+            expect((outcome.reason as { code?: string }).code).not.toBe(
+              DEADLOCK,
+            );
+            throw outcome.reason;
+          }
+        }
+        expect(outcomes[2]).toEqual({ status: 'fulfilled', value: true });
+        expect(
+          await raw.paymentAllocation.count({ where: { paymentId: voided } }),
+        ).toBe(0);
+        await drain(a, planId);
+        await assertInvariants(planId);
+        expect(await queued(planId)).toBe(0);
+      }
+    } finally {
+      delete rates.USD;
+    }
+  });
+
+  it('dryRun computes against Postgres and leaves no trace', async () => {
+    const planId = await plan(a);
+    await item(a, planId, 100, 'DONE');
+    await item(a, planId, 50, 'ACCEPTED');
+    await pay(a, planId, 120);
+    const before = {
+      allocations: await raw.paymentAllocation.count({
+        where: { treatmentPlanId: planId },
+      }),
+      movements: await raw.paymentAllocationMovement.count({
+        where: { treatmentPlanId: planId },
+      }),
+      queued: await queued(planId),
+    };
+    expect(before.queued).toBeGreaterThan(0);
+
+    const result = await inTenant(a, () =>
+      rebalancer.rebalancePlan(planId, null, { dryRun: true }),
+    );
+
+    expect(result).toEqual({ allocatedCents: 12_000 });
+    expect({
+      allocations: await raw.paymentAllocation.count({
+        where: { treatmentPlanId: planId },
+      }),
+      movements: await raw.paymentAllocationMovement.count({
+        where: { treatmentPlanId: planId },
+      }),
+      queued: await queued(planId),
+    }).toEqual(before);
+    // El reparto de verdad imputa lo mismo que anunció el dry-run.
+    expect(
+      await inTenant(a, () => rebalancer.rebalancePlan(planId, null)),
+    ).toEqual(result);
+  });
+
   it('rebalance and concurrent edits of different items never deadlock', async () => {
     for (let round = 0; round < REPEAT; round += 1) {
       const planId = await plan(a);

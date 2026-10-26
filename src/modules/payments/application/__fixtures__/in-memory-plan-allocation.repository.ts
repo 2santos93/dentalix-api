@@ -137,6 +137,12 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     );
   }
 
+  planOfPayment(paymentId: string): Promise<string | null> {
+    return Promise.resolve(
+      this.payments.find((p) => p.id === paymentId)?.planId ?? null,
+    );
+  }
+
   paymentsWithoutBase(limit: number): Promise<PaymentWithoutBase[]> {
     return Promise.resolve(
       this.withoutBase

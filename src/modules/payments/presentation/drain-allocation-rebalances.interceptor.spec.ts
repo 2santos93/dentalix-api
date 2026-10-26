@@ -81,7 +81,7 @@ describe('DrainAllocationRebalancesInterceptor (DX-051)', () => {
       }),
       next(of(null)),
     );
-    // `payments/:id` y `appointments/:id/...`: el id no es de un plan.
+    // `payments/:id` (anulación): el id es del abono; se drena su plan.
     await run(
       req({
         method: 'DELETE',
@@ -89,11 +89,17 @@ describe('DrainAllocationRebalancesInterceptor (DX-051)', () => {
       }),
       next(of(null)),
     );
+    // `appointments/:id/...`: el id no es de un plan ni de un abono.
+    await run(
+      req({ route: { path: '/api/v1/appointments/:id/cancellation-fee' } }),
+      next(of(null)),
+    );
 
     expect(drainPending.mock.calls).toEqual([
       [{ actorId: USER, preferPlanId: PLAN, limit: 5 }],
       [{ actorId: USER, preferPlanId: PLAN, limit: 5 }],
-      [{ actorId: USER, preferPlanId: undefined, limit: 5 }],
+      [{ actorId: USER, preferPaymentId: PLAN, limit: 5 }],
+      [{ actorId: USER, limit: 5 }],
     ]);
   });
 

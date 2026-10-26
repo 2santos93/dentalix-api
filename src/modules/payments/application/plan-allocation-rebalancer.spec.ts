@@ -171,6 +171,28 @@ describe('PlanAllocationRebalancer', () => {
       expect(repo.requests).toEqual(['b']);
     });
 
+    it('drains first the plan of the route payment (void)', async () => {
+      const { repo, rebalancer } = setup();
+      for (const id of ['a', 'b']) seedPlan(repo, id);
+      repo.payments.push({
+        id: 'voided',
+        planId: 'b',
+        paidAt: DAY(3),
+        createdAt: DAY(3),
+        baseCents: 1_000,
+      });
+      repo.requests.push('a', 'b');
+      const spy = jest.spyOn(repo, 'rebalance');
+
+      await rebalancer.drainPending({
+        actorId: null,
+        preferPaymentId: 'voided',
+        limit: 1,
+      });
+
+      expect(spy.mock.calls.map(([planId]) => planId)).toEqual(['b']);
+    });
+
     it('never throws: a failing plan is logged once and the rest drain', async () => {
       const { repo, rebalancer } = setup();
       for (const id of ['a', 'b']) seedPlan(repo, id);

@@ -12,6 +12,8 @@ export interface DrainOptions {
   actorId: string | null;
   /** El plan de la ruta: se drena primero. */
   preferPlanId?: string;
+  /** El abono de la ruta (anulación): sin `preferPlanId`, se drena primero su plan. */
+  preferPaymentId?: string;
   /** Planes como mucho; sin él, todos los que tenían solicitudes al empezar. */
   limit?: number;
 }
@@ -59,7 +61,12 @@ export class PlanAllocationRebalancer {
   async drainPending(opts: DrainOptions): Promise<number> {
     let planIds: string[];
     try {
-      planIds = await this.repo.pendingPlanIds(opts.preferPlanId, opts.limit);
+      const preferPlanId =
+        opts.preferPlanId ??
+        (opts.preferPaymentId
+          ? ((await this.repo.planOfPayment(opts.preferPaymentId)) ?? undefined)
+          : undefined);
+      planIds = await this.repo.pendingPlanIds(preferPlanId, opts.limit);
     } catch (error) {
       this.logger.warn({
         event: 'payments.allocation_drain_failed',

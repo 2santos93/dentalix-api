@@ -712,8 +712,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
     // goes in the SAME statement, so a voided row never lacks it.
     return this.prisma.runWithTenant(async (tx) => {
       const tenantId = this.requireTenantId();
-      // DX-051 (R12, pre-flight C1): plan FOR SHARE, la base del abono FOR
-      // UPDATE y los ítems de sus imputaciones ANTES de anularlo. Un reparto
+      // DX-051 (R12, pre-flight C1): plan FOR SHARE, la fila del abono, su
+      // base FOR UPDATE y los ítems de sus imputaciones ANTES de anularlo. Un reparto
       // concurrente o espera a esta anulación (y al leer la liveness tras su
       // bloqueo ya lo ve anulado) o termina antes (y el DELETE de abajo borra
       // lo que imputó).
@@ -864,15 +864,19 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
 /**
  * DX-051 (R6, R12): lo que bloquea la anulación ANTES de tocar el abono, en el
- * orden de todo escritor de imputaciones: el plan FOR SHARE (un cambio de
- * estado del plan, que lo bloquea FOR UPDATE y libera las imputaciones de todos
- * sus ítems, no se cruza con ella), la base FOR UPDATE (ningún reparto imputa
- * este abono mientras tanto) y los ítems de sus imputaciones FOR UPDATE ORDER
- * BY id. Los ítems, antes del UPDATE del abono: ese UPDATE bloquea el saldo del
- * paciente (`patient_ledgers`), que una edición del ítem pide después de
- * bloquear el ítem (40P01). Y antes del DELETE: el historial que escribe su
- * trigger toma el ítem FOR KEY SHARE. Devuelve el plan, o `undefined` si el
- * abono no es a un plan (o no existe).
+ * orden de todo escritor de imputaciones:
+ * - el plan FOR SHARE: un cambio de estado del plan, que lo bloquea FOR UPDATE
+ *   y libera las imputaciones de todos sus ítems, no se cruza con ella;
+ * - la fila del abono FOR NO KEY UPDATE: choca con el FOR SHARE con que
+ *   `ensureBase` (barrido) crea una base que falta, así que esa base o ya está
+ *   confirmada y aquí se ve, o no nace (el abono ya está anulado). No choca con
+ *   el FOR KEY SHARE de las FK de imputaciones e historial;
+ * - la base FOR UPDATE: ningún reparto imputa este abono mientras tanto;
+ * - los ítems de sus imputaciones FOR UPDATE ORDER BY id, antes del UPDATE del
+ *   abono (que bloquea el saldo del paciente, `patient_ledgers`, que una
+ *   edición del ítem pide después de bloquear el ítem: 40P01) y antes del
+ *   DELETE (el historial que escribe su trigger toma el ítem FOR KEY SHARE).
+ * Devuelve el plan, o `undefined` si el abono no es a un plan (o no existe).
  */
 async function lockPaymentAllocations(
   tx: Prisma.TransactionClient,
@@ -888,16 +892,10 @@ async function lockPaymentAllocations(
     SELECT "id" FROM "treatment_plans"
      WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${planId}::uuid
        FOR SHARE`;
-  await lockBaseAndItems(tx, tenantId, paymentId);
-  return planId;
-}
-
-/** La base del abono y, en una sentencia posterior, los ítems de sus imputaciones. */
-async function lockBaseAndItems(
-  tx: Prisma.TransactionClient,
-  tenantId: string,
-  paymentId: string,
-): Promise<void> {
+  await tx.$queryRaw`
+    SELECT 1 FROM "payments"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
+       FOR NO KEY UPDATE`;
   await tx.$queryRaw`
     SELECT 1 FROM "payment_plan_amounts"
      WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid
@@ -910,14 +908,15 @@ async function lockBaseAndItems(
                          AND a."paymentId" = ${paymentId}::uuid)
      ORDER BY i."id"
        FOR UPDATE`;
+  return planId;
 }
 
 /**
  * DX-051 (R12): ya anulado, borra sus imputaciones con la causa VOID en el
  * historial y encola el plan (lo liberado lo llenan otros abonos tras el
- * COMMIT). Se vuelve a bloquear (no-op si ya se tenía): si el barrido creó la
- * base después del primer bloqueo, aquí se espera a cualquier reparto que la
- * haya usado y se ven sus filas.
+ * COMMIT). Sin bloqueos nuevos: con la fila del abono y su base tomadas desde
+ * el principio, nadie le crea base ni le imputa entretanto, así que las filas
+ * que borra son las de ítems ya bloqueados.
  */
 async function removeVoidedAllocations(
   tx: Prisma.TransactionClient,
@@ -925,7 +924,6 @@ async function removeVoidedAllocations(
   paymentId: string,
   planId: string,
 ): Promise<void> {
-  await lockBaseAndItems(tx, tenantId, paymentId);
   await tx.$executeRaw`SELECT set_config('app.allocation_cause', 'VOID', true)`;
   await tx.$executeRaw`
     DELETE FROM "payment_allocations"

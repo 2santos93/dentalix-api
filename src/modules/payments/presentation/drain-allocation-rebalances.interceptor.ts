@@ -36,10 +36,18 @@ function routePlanId(req: DrainRequest): string | undefined {
   return planId && UUID.test(planId) ? planId : undefined;
 }
 
+/** El abono de la ruta `payments/:id` (anulación), si lo es. */
+function routePaymentId(req: DrainRequest): string | undefined {
+  const id = /(^|\/)payments\/:id$/.test(req.route?.path ?? '')
+    ? req.params?.id
+    : undefined;
+  return id && UUID.test(id) ? id : undefined;
+}
+
 /**
  * Reparto automático tras el COMMIT de cada escritura (DX-051, spec R9.2): al
  * terminar BIEN una petición que no es GET, drena la cola del tenant (el plan
- * de la ruta primero, como mucho 5 planes) y ESPERA antes de enviar la
+ * de la ruta primero, o el del abono que se anula; como mucho 5 planes) y ESPERA antes de enviar la
  * respuesta, como `AuditInterceptor`, así quien lee justo después ya ve el
  * reparto. Se declara en el MISMO `@UseInterceptors` y DETRÁS de
  * `TenantContextInterceptor`: el tenant se captura al entrar y el drenado corre
@@ -65,9 +73,13 @@ export class DrainAllocationRebalancesInterceptor implements NestInterceptor {
       this.logger.warn({ event: 'payments.allocation_drain_without_tenant' });
       return next.handle();
     }
+    // Primero el plan de la ruta; en una anulación, el del abono.
+    const preferPlanId = routePlanId(req);
+    const preferPaymentId = preferPlanId ? undefined : routePaymentId(req);
     const options = {
       actorId: req.user?.sub ?? null,
-      preferPlanId: routePlanId(req),
+      ...(preferPlanId ? { preferPlanId } : {}),
+      ...(preferPaymentId ? { preferPaymentId } : {}),
       limit: DRAIN_PLANS_PER_REQUEST,
     };
     return next.handle().pipe(

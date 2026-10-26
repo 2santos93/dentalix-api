@@ -326,6 +326,17 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     return rows.map((r) => r.treatmentPlanId);
   }
 
+  async planOfPayment(paymentId: string): Promise<string | null> {
+    const tenantId = this.requireTenantId();
+    const payment = await this.prisma.runWithTenant((tx) =>
+      tx.payment.findFirst({
+        where: { tenantId, id: paymentId },
+        select: { treatmentPlanId: true },
+      }),
+    );
+    return payment?.treatmentPlanId ?? null;
+  }
+
   async paymentsWithoutBase(limit: number): Promise<PaymentWithoutBase[]> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {

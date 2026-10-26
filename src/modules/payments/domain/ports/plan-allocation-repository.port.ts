@@ -65,6 +65,9 @@ export interface PlanAllocationRepository {
    */
   pendingPlanIds(preferPlanId?: string, limit?: number): Promise<string[]>;
 
+  /** El plan del abono (anulado o no), o `null` si no es a un plan o no existe. */
+  planOfPayment(paymentId: string): Promise<string | null>;
+
   /** Hasta `limit` abonos vivos a planes vivos sin base, los más recientes primero. */
   paymentsWithoutBase(limit: number): Promise<PaymentWithoutBase[]>;
 
