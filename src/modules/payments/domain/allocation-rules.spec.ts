@@ -62,9 +62,9 @@ describe('orderItems', () => {
       item({ id: 'a1', status: 'ACCEPTED', createdAt: d(1) }),
       item({ id: 'd2', status: 'DONE', createdAt: d(1), completedAt: d(9) }),
       item({ id: 'd1', status: 'DONE', createdAt: d(5), completedAt: d(3) }),
-      item({ id: 'a0', status: 'ACCEPTED', createdAt: d(0 + 1) }),
+      item({ id: 'a0', status: 'ACCEPTED', createdAt: d(2) }),
     ]);
-    expect(out.map((i) => i.id)).toEqual(['d1', 'd2', 'a0', 'a1']);
+    expect(out.map((i) => i.id)).toEqual(['d1', 'd2', 'a1', 'a0']);
   });
 
   it('DONE without completedAt falls back to createdAt', () => {
@@ -153,6 +153,59 @@ describe('respreadSurplus', () => {
     expect(hasFixedPointViolation(donors, items)).toBe(true);
     const next = apply(donors, items, respreadSurplus(donors, items));
     expect(hasFixedPointViolation(next.donors, next.items)).toBe(false);
+  });
+
+  it('exact fill: surplus equal to free leaves the next item untouched', () => {
+    const donors = [donor({ paymentId: 'P1', baseCents: 50 })];
+    const items = [
+      item({ id: 'A', billableCents: 50 }),
+      item({ id: 'B', createdAt: d(2), billableCents: 40 }),
+    ];
+    expect(respreadSurplus(donors, items)).toEqual([
+      { paymentId: 'P1', itemId: 'A', cents: 50 },
+    ]);
+  });
+
+  it('skips a full item and fills the next one', () => {
+    const donors = [donor({ paymentId: 'P1', baseCents: 30 })];
+    const items = [
+      item({ id: 'A', billableCents: 50, allocatedCents: 50 }),
+      item({ id: 'B', createdAt: d(2), billableCents: 40 }),
+    ];
+    expect(respreadSurplus(donors, items)).toEqual([
+      { paymentId: 'P1', itemId: 'B', cents: 30 },
+    ]);
+  });
+
+  it('donors tied on paidAt and createdAt are served by id', () => {
+    const donors = [
+      donor({ paymentId: 'b', baseCents: 10 }),
+      donor({ paymentId: 'a', baseCents: 10 }),
+    ];
+    expect(
+      respreadSurplus(donors, [item({ id: 'I', billableCents: 10 })]),
+    ).toEqual([{ paymentId: 'a', itemId: 'I', cents: 10 }]);
+  });
+
+  it('is idempotent with several donors and items', () => {
+    const donors = [
+      donor({ paymentId: 'P1', baseCents: 70 }),
+      donor({
+        paymentId: 'P2',
+        paidAt: d(2),
+        baseCents: 45,
+        allocatedCents: 5,
+      }),
+    ];
+    const items = [
+      item({ id: 'A', billableCents: 60 }),
+      item({ id: 'B', createdAt: d(2), billableCents: 30, allocatedCents: 5 }),
+      item({ id: 'C', status: 'DONE', completedAt: d(3), billableCents: 25 }),
+    ];
+    const first = respreadSurplus(donors, items);
+    expect(first.length).toBeGreaterThan(0);
+    const next = apply(donors, items, first);
+    expect(respreadSurplus(next.donors, next.items)).toEqual([]);
   });
 
   it('with no surplus returns []', () => {

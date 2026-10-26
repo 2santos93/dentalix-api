@@ -20,7 +20,29 @@ describe('paymentInPlanCurrency', () => {
       ...payment,
       currency: 'USD',
     });
+    expect(execute).toHaveBeenCalledWith({
+      amount: 100,
+      from: 'USD',
+      to: 'USD',
+      date: '2026-10-20',
+    });
     expect(out).toBe(100);
+  });
+
+  it('rounds each payment to 2 decimals and keeps zero', async () => {
+    const execute = jest.fn().mockResolvedValue({ rateUsed: 0.3333 });
+    expect(
+      await paymentInPlanCurrency(convertMock(execute), {
+        ...payment,
+        amount: 333,
+      }),
+    ).toBe(110.99);
+    expect(
+      await paymentInPlanCurrency(convertMock(execute), {
+        ...payment,
+        amount: 0,
+      }),
+    ).toBe(0);
   });
 
   it('converts with paidOn', async () => {
