@@ -59,13 +59,11 @@ export class PlanAllocationRebalancer {
    * planes repartidos.
    */
   async drainPending(opts: DrainOptions): Promise<number> {
+    const preferPlanId =
+      opts.preferPlanId ??
+      (await this.planOfRoutePayment(opts.preferPaymentId));
     let planIds: string[];
     try {
-      const preferPlanId =
-        opts.preferPlanId ??
-        (opts.preferPaymentId
-          ? ((await this.repo.planOfPayment(opts.preferPaymentId)) ?? undefined)
-          : undefined);
       planIds = await this.repo.pendingPlanIds(preferPlanId, opts.limit);
     } catch (error) {
       this.logger.warn({
@@ -92,6 +90,25 @@ export class PlanAllocationRebalancer {
       }
     }
     return drained;
+  }
+
+  /**
+   * El plan del abono de la ruta (anulación). Si no se puede leer, se drena
+   * igual, sin preferencia: el plan llega en este drenado o en el barrido.
+   */
+  private async planOfRoutePayment(
+    paymentId: string | undefined,
+  ): Promise<string | undefined> {
+    if (!paymentId) return undefined;
+    try {
+      return (await this.repo.planOfPayment(paymentId)) ?? undefined;
+    } catch (error) {
+      this.logger.warn({
+        event: 'payments.allocation_drain_preference_failed',
+        error: errorName(error),
+      });
+      return undefined;
+    }
   }
 
   /**

@@ -22,7 +22,12 @@ import {
   type Donor,
 } from '../src/modules/payments/domain/allocation-rules';
 import { isPlanBillable } from '../src/modules/treatment-plans/domain/plan-status-machine';
-import { settle } from './support/postgres-concurrency';
+import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
 
 // DX-051 Task 3, contra Postgres con conexiones reales (rol dentalix_app vía
 // runWithTenant, RLS FORCE): el reparto automático (R5, R6, R9), el alta con
@@ -369,6 +374,51 @@ async function assertInvariants(planId: string): Promise<Map<string, number>> {
   return byItem;
 }
 
+/** Una pausa dentro de una transacción: `reached` al llegar, sigue con `release`. */
+interface Stop {
+  reached: ReturnType<typeof gate<string>>;
+  release: ReturnType<typeof gate<void>>;
+}
+const stop = (): Stop => ({ reached: gate<string>(), release: gate<void>() });
+
+/**
+ * La PRÓXIMA transacción de `runWithTenant` se para antes de las llamadas
+ * `modelo.método` indicadas (señala su XID y espera a `release`). Así un test
+ * deja una transacción abierta exactamente entre dos sentencias suyas.
+ */
+function pauseNextTransaction(stops: Record<string, Stop>): void {
+  const original = prisma.runWithTenant.bind(prisma) as (
+    fn: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  ) => Promise<unknown>;
+  jest.spyOn(prisma, 'runWithTenant').mockImplementationOnce(((
+    fn: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  ) =>
+    original((tx) =>
+      fn(
+        new Proxy(tx, {
+          get(target, model) {
+            const delegate: unknown = Reflect.get(target, model);
+            if (typeof model !== 'string' || typeof delegate !== 'object') {
+              return delegate;
+            }
+            return new Proxy(delegate as object, {
+              get(d, method) {
+                const call: unknown = Reflect.get(d, method);
+                const at = stops[`${model}.${String(method)}`];
+                if (!at || typeof call !== 'function') return call;
+                return async (...args: unknown[]) => {
+                  at.reached.open(await transactionId(target));
+                  await at.release.wait;
+                  return (call as (...a: unknown[]) => unknown).apply(d, args);
+                };
+              },
+            });
+          },
+        }),
+      ),
+    )) as never);
+}
+
 beforeAll(async () => {
   await cleanup();
   a = await seedClinic(SUBDOMAINS[0]);
@@ -460,6 +510,64 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
       await drain(a, planId);
       await assertInvariants(planId);
     }
+  });
+
+  it('a void in flight never lets a sweep-created base be allocated (deterministic)', async () => {
+    const planId = await plan(a);
+    const done = await item(a, planId, 100, 'DONE');
+    const voided = await pay(a, planId, 100, { currency: 'USD', base: false });
+    // La anulación se para antes de anular y antes de su última sentencia.
+    const beforeUpdate = stop();
+    const beforeCommit = stop();
+    pauseNextTransaction({
+      'payment.updateMany': beforeUpdate,
+      'paymentReceipt.updateMany': beforeCommit,
+    });
+    const voiding = settle(voidPayment(a, voided));
+    const voidXid = await beforeUpdate.reached.wait;
+
+    // El barrido intenta crear la base con la anulación ya en marcha.
+    const ensuring = settle(
+      inTenant(a, () =>
+        allocationRepo.ensureBase(voided, 90, 'EUR', '2026-10-20'),
+      ),
+    );
+    const first = await Promise.race([
+      ensuring.then(() => 'base' as const),
+      waitForTransactionWaiters(raw, voidXid).then(
+        () => 'waiting' as const,
+        () => 'base' as const,
+      ),
+    ]);
+    if (first === 'base') {
+      // Sin el bloqueo de la fila del abono: la base nace y un reparto lee el
+      // abono vivo, se para antes de imputar y termina tras el DELETE vacío.
+      const beforeInsert = stop();
+      pauseNextTransaction({ 'paymentAllocation.create': beforeInsert });
+      const spreading = settle(
+        inTenant(a, () => rebalancer.rebalancePlan(planId, null)),
+      );
+      await beforeInsert.reached.wait;
+      beforeUpdate.release.open();
+      await beforeCommit.reached.wait;
+      beforeInsert.release.open();
+      await spreading;
+    }
+    beforeUpdate.release.open();
+    beforeCommit.release.open();
+
+    expect(await voiding).toEqual({ status: 'fulfilled', value: true });
+    // Lo que importa: nada imputado de un abono anulado.
+    expect(
+      await raw.paymentAllocation.count({ where: { paymentId: voided } }),
+    ).toBe(0);
+    expect(await allocationCents({ treatmentPlanItemId: done })).toBe(0);
+    // Y por qué: la base no llega a nacer (el barrido vio el abono anulado).
+    expect(await ensuring).toEqual({ status: 'fulfilled', value: false });
+    expect(
+      await raw.paymentPlanAmount.count({ where: { paymentId: voided } }),
+    ).toBe(0);
+    jest.restoreAllMocks();
   });
 
   it('void racing a sweep-created base, a drain and an item edit never deadlocks', async () => {

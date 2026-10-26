@@ -193,6 +193,26 @@ describe('PlanAllocationRebalancer', () => {
       expect(spy.mock.calls.map(([planId]) => planId)).toEqual(['b']);
     });
 
+    it('drains without preference when the plan of the payment cannot be read', async () => {
+      const { repo, rebalancer } = setup();
+      for (const id of ['a', 'b']) seedPlan(repo, id);
+      repo.requests.push('a', 'b');
+      jest.spyOn(repo, 'planOfPayment').mockRejectedValue(new Error('caída'));
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+
+      await expect(
+        rebalancer.drainPending({ actorId: null, preferPaymentId: 'voided' }),
+      ).resolves.toBe(2);
+
+      expect(repo.requests).toEqual([]);
+      expect(warn).toHaveBeenCalledWith({
+        event: 'payments.allocation_drain_preference_failed',
+        error: 'Error',
+      });
+    });
+
     it('never throws: a failing plan is logged once and the rest drain', async () => {
       const { repo, rebalancer } = setup();
       for (const id of ['a', 'b']) seedPlan(repo, id);
