@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { paymentInPlanCurrency } from '../payment-in-plan-currency';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
 
 export interface ReceiptPaymentForBalance {
@@ -35,13 +36,17 @@ export class ReceiptPlanBalanceCalculator {
   ): Promise<ReceiptPlanBalance | null> {
     try {
       const before = await this.getPlanBalance.execute(payment.treatmentPlanId);
-      const { rateUsed } = await this.convertAmount.execute({
+      const converted = await paymentInPlanCurrency(this.convertAmount, {
         amount: payment.amount,
-        from: payment.currency,
-        to: before.planCurrency,
-        date: payment.paidOn,
+        currency: payment.currency,
+        planCurrency: before.planCurrency,
+        paidOn: payment.paidOn,
       });
-      const paid = round2(before.paid + round2(payment.amount * rateUsed));
+      // Sin tasa el recibo sale sin saldo (misma ruta que cualquier fallo).
+      if (converted === null) {
+        throw new BadRequestException('unsupported currency');
+      }
+      const paid = round2(before.paid + converted);
       return {
         currency: before.planCurrency,
         billable: before.billable,
