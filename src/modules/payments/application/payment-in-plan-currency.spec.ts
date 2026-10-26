@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
+import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
 import { paymentInPlanCurrency } from './payment-in-plan-currency';
 
 const payment = {
@@ -61,6 +62,15 @@ describe('paymentInPlanCurrency', () => {
     const execute = jest
       .fn()
       .mockRejectedValue(new BadRequestException('unsupported currency: EUR'));
+    expect(
+      await paymentInPlanCurrency(convertMock(execute), payment),
+    ).toBeNull();
+  });
+
+  it('null when the rate provider is unavailable', async () => {
+    const execute = jest
+      .fn()
+      .mockRejectedValue(new ExchangeRateUnavailableError('sin red'));
     expect(
       await paymentInPlanCurrency(convertMock(execute), payment),
     ).toBeNull();

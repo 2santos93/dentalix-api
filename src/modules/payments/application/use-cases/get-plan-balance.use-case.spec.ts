@@ -7,6 +7,7 @@ import type {
 import { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import { ExchangeRateUnavailableError } from '../../../exchange/domain/ports/exchange-rate-provider.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
@@ -59,6 +60,8 @@ class FakeConvertAmountUseCase {
    * generic, non-currency error -- simulates an infra/DB failure that must
    * PROPAGATE rather than be swallowed as a skipped payment. */
   public readonly infraFailingFrom = new Set<string>();
+  /** Currencies (as `from`) whose rates the provider cannot give (DX-051). */
+  public readonly rateUnavailableFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
   private readonly unitsPerTarget: Record<string, number> = { COP: 4000 };
@@ -82,6 +85,9 @@ class FakeConvertAmountUseCase {
       return Promise.reject(
         new Error(`simulated infra failure converting ${input.from}`),
       );
+    }
+    if (this.rateUnavailableFrom.has(input.from)) {
+      return Promise.reject(new ExchangeRateUnavailableError('sin proveedor'));
     }
     if (this.failingFrom.has(input.from)) {
       return Promise.reject(
@@ -471,11 +477,12 @@ describe('GetPlanBalanceUseCase', () => {
     expect(result.paymentsCount).toBe(2);
   });
 
-  // DX-051: sin tasa (proveedor caído y nada guardado para esa fecha) el
-  // saldo no falla: el abono se omite igual que el de una moneda sin tasa.
-  it('skips a payment whose rate cannot be fetched instead of failing the balance', async () => {
+  // DX-051: si el proveedor no puede dar la tasa (y no hay una guardada para
+  // esa fecha) el saldo no falla: el abono se omite como el de una moneda sin
+  // tasa. Solo ese fallo y «moneda sin tasa»; cualquier otro se propaga.
+  it('skips a payment whose rate the provider cannot give instead of failing the balance', async () => {
     const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
-    fakeConvert.infraFailingFrom.add('COP');
+    fakeConvert.rateUnavailableFrom.add('COP');
     fakeGetPlan.plan = makePlan({
       items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
     });
@@ -490,6 +497,24 @@ describe('GetPlanBalanceUseCase', () => {
 
     expect(result.paid).toBe(0);
     expect(result.paymentsCount).toBe(1);
+  });
+
+  it('propagates a generic conversion error instead of silently skipping the payment', async () => {
+    const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+    fakeConvert.infraFailingFrom.add('COP');
+    fakeGetPlan.plan = makePlan({
+      items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 400000,
+      currency: 'COP',
+      paidAt: new Date('2026-03-05T00:00:00.000Z'),
+    });
+
+    await expect(uc.execute('plan-1')).rejects.toThrow(
+      'simulated infra failure converting COP',
+    );
   });
 
   it.each([TreatmentPlanStatus.REJECTED, TreatmentPlanStatus.CANCELLED])(

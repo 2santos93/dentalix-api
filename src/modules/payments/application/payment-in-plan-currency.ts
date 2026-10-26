@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
 import { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
 
 export interface PaymentToConvert {
@@ -11,11 +12,13 @@ export interface PaymentToConvert {
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;
 
-// `ConvertAmountUseCase` lanza esto cuando la moneda del abono no tiene tasa
-// en el snapshot de esa fecha. Es el ÚNICO fallo que se trata como «sin
-// tasa»; cualquier otro (caída de BD o del proveedor, error de programación)
-// se propaga.
-function isUnsupportedCurrencyError(error: unknown): boolean {
+// Se tratan como «sin tasa» SOLO dos fallos: `ConvertAmountUseCase` lanza el
+// primero cuando la moneda del abono no tiene tasa en el snapshot de esa
+// fecha, y el proveedor el segundo cuando no puede dar las tasas del día.
+// Cualquier otro (caída de BD, tiempos de espera, error de programación) se
+// propaga.
+function isNoRateError(error: unknown): boolean {
+  if (error instanceof ExchangeRateUnavailableError) return true;
   return (
     error instanceof BadRequestException &&
     typeof error.message === 'string' &&
@@ -41,7 +44,7 @@ export async function paymentInPlanCurrency(
     });
     return round2(p.amount * rateUsed);
   } catch (error) {
-    if (isUnsupportedCurrencyError(error)) return null;
+    if (isNoRateError(error)) return null;
     throw error;
   }
 }

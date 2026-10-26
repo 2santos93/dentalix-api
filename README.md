@@ -3361,7 +3361,10 @@ además en `plan_allocation_rebalance_requests` y en
 `payment_allocation_movements`, que siguen con FORCE, y la migración fallaría
 con «new row violates row-level security policy». Quitar FORCE de las tres
 tablas (y restaurarlo después, con `npm run db:check-force`) no está probado;
-mejor fijar la clínica.
+mejor fijar la clínica. Esta guía sustituye al comentario antiguo de la
+migración `20261026100300_dx051_payment_allocations` («una migración con NO
+FORCE no se ve afectado»), que quedó incompleto y no se corrige en el fichero
+porque la migración ya está aplicada.
 
 ### Coste conocido del barrido
 

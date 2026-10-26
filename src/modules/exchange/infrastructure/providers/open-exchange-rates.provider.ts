@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ExchangeRateProvider,
+  ExchangeRateUnavailableError,
   ExchangeRatesResult,
 } from '../../domain/ports/exchange-rate-provider.port';
 
@@ -27,7 +28,7 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
   async fetchRates(date: string): Promise<ExchangeRatesResult> {
     const appId = this.config.get<string>('EXCHANGE_APP_ID');
     if (!appId) {
-      throw new Error(
+      throw new ExchangeRateUnavailableError(
         'EXCHANGE_APP_ID is not set — cannot call Open Exchange Rates. ' +
           'Set it in the environment (see .env.example); it is never hardcoded.',
       );
@@ -42,14 +43,14 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
       response = await fetch(url);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
+      throw new ExchangeRateUnavailableError(
         `Failed to reach Open Exchange Rates for date ${date}: ${message}`,
       );
     }
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(
+      throw new ExchangeRateUnavailableError(
         `Open Exchange Rates returned ${response.status} for date ${date}: ${body}`,
       );
     }
@@ -64,7 +65,7 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
       typeof (payload as { rates: unknown }).rates !== 'object' ||
       (payload as { rates: unknown }).rates === null
     ) {
-      throw new Error(
+      throw new ExchangeRateUnavailableError(
         `Unexpected Open Exchange Rates response shape for date ${date}`,
       );
     }
