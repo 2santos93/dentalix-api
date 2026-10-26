@@ -272,7 +272,9 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     // (o contienen) "tenantId" cuestan casi lo mismo y el planificador
     // desempata por el más nuevo (DX-051 añadió payments_tenant_id_plan_key).
     // Se siembran abonos de la clínica en otros días y se analiza, como en
-    // producción, dentro de una transacción que se deshace.
+    // producción, dentro de una transacción que se deshace. Las filas y
+    // pg_statistic se deshacen, pero ANALYZE escribe reltuples/relpages de
+    // pg_class en el sitio: se vuelve a analizar tras el rollback.
     const rollback = new Error('rollback');
     let plan: { 'QUERY PLAN': string }[] = [];
     await owner
@@ -310,6 +312,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       .catch((error: unknown) => {
         if (error !== rollback) throw error;
       });
+    await owner.$executeRawUnsafe('ANALYZE "payments"');
     const text = plan.map((r) => r['QUERY PLAN']).join('\n');
     expect(text).toContain('payments_tenantId_locationId_paidAt_active_idx');
   });

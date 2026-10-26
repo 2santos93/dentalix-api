@@ -19,6 +19,20 @@ import {
 const ROOT = join(__dirname, '..', '..');
 const T_A = '00000000-0000-4000-8000-0000000051a1';
 const GUARD = 'Falta el tenant de la sesión (DX-051)';
+// Como una migración con datos: NO FORCE en las tablas que toca (y en las que
+// leen sus triggers), no en payment_allocations; sin clínica fijada.
+const NO_FORCE_EXCEPT_ALLOCATIONS = `
+  DO $$
+  DECLARE t record;
+  BEGIN
+    FOR t IN SELECT c.relname FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public' AND c.relforcerowsecurity
+               AND c.relname <> 'payment_allocations'
+    LOOP
+      EXECUTE format('ALTER TABLE public.%I NO FORCE ROW LEVEL SECURITY', t.relname);
+    END LOOP;
+  END $$;`;
 
 describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (owner-nosu)', () => {
   const env = requireOwnerNosuEnv();
@@ -28,6 +42,7 @@ describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (own
   });
   let target: PrismaClient;
   let itemId: string;
+  let planId: string;
   let paymentId: string;
 
   /** Un script del owner en UNA sesión psql y UNA transacción. */
@@ -110,7 +125,7 @@ describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (own
       await target.treatmentPlanItem.create({
         data: {
           tenantId: T_A,
-          planId: plan.id,
+          planId: (planId = plan.id),
           toothNumber: '11',
           catalogItemId: catalog.id,
           price: 100,
@@ -162,20 +177,8 @@ describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (own
   });
 
   it('release without the tenant GUC raises instead of deleting nothing', async () => {
-    // Como una migración con datos: NO FORCE en las tablas que toca (y en las
-    // que leen sus triggers), no en payment_allocations; sin clínica fijada.
     const r = ownerTransaction(`
-      DO $$
-      DECLARE t record;
-      BEGIN
-        FOR t IN SELECT c.relname FROM pg_class c
-                  JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE n.nspname = 'public' AND c.relforcerowsecurity
-                   AND c.relname <> 'payment_allocations'
-        LOOP
-          EXECUTE format('ALTER TABLE public.%I NO FORCE ROW LEVEL SECURITY', t.relname);
-        END LOOP;
-      END $$;
+      ${NO_FORCE_EXCEPT_ALLOCATIONS}
       UPDATE public."treatment_plan_items" SET "price" = 50 WHERE "id" = '${itemId}';
     `);
     expect(r.out).toContain(GUARD);
@@ -190,6 +193,20 @@ describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (own
         ).price,
       ),
     ).toBe(100);
+    expect(await allocated()).toBe(100);
+  });
+
+  it('cancelling the plan without the tenant GUC raises too (plan trigger)', async () => {
+    const r = ownerTransaction(`
+      ${NO_FORCE_EXCEPT_ALLOCATIONS}
+      UPDATE public."treatment_plans" SET "status" = 'CANCELLED' WHERE "id" = '${planId}';
+    `);
+    expect(r.out).toContain(GUARD);
+    expect(r.status).not.toBe(0);
+    expect(
+      (await target.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }))
+        .status,
+    ).toBe('ACCEPTED');
     expect(await allocated()).toBe(100);
   });
 

@@ -257,6 +257,18 @@ function updatePlan(planId: string, set: string, clinic: Clinic = a) {
   );
 }
 
+/** Espera a que haya `n` sesiones de esta base esperando un bloqueo. */
+async function waitForLockWaiters(n: number): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    const [{ waiting }] = await raw.$queryRaw<{ waiting: number }[]>`
+      SELECT count(*)::int AS waiting FROM pg_stat_activity
+       WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    if (waiting >= n) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`no llegaron ${n} esperas de bloqueo`);
+}
+
 describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, DX-051)', () => {
   beforeAll(async () => {
     await cleanup();
@@ -602,6 +614,25 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
   });
 
   it('release cuts AUTO allocations before MANUAL ones', async () => {
+    // El AUTO es el MÁS ANTIGUO y el MANUAL el más reciente: solo «primero las
+    // AUTO» (M1) deja el MANUAL entero; «de la más reciente a la más antigua» a
+    // secas recortaría el MANUAL.
+    const planId = await plan(a);
+    const done = await item(a, planId, 100, 'DONE');
+    const older = await pay(a, planId, 60, {
+      paidAt: new Date('2026-10-01T12:00:00.000Z'),
+    });
+    const newer = await pay(a, planId, 40, {
+      paidAt: new Date('2026-10-02T12:00:00.000Z'),
+    });
+    await allocate(planId, older, done, 60, 'AUTO');
+    await allocate(planId, newer, done, 40, 'MANUAL');
+    await updateItem(done, `"discount" = 50`);
+    expect(await allocated(older, done)).toBe(10);
+    expect(await allocated(newer, done)).toBe(40);
+  });
+
+  it('release cuts MANUAL allocations only after every AUTO one, newest first', async () => {
     const planId = await plan(a);
     const done = await item(a, planId, 100, 'DONE');
     const p1 = await pay(a, planId, 60, {
@@ -615,6 +646,107 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
     await updateItem(done, `"discount" = 50`);
     expect(await allocated(p1, done)).toBe(50);
     expect(await allocated(p2, done)).toBe(0);
+  });
+
+  it('release breaks paidAt ties by payment createdAt, then allocation id (newest first)', async () => {
+    const planId = await plan(a);
+    const done = await item(a, planId, 90, 'DONE');
+    const paidAt = new Date('2026-10-03T12:00:00.000Z');
+    // Mismo paidAt; el segundo abono se registra después (createdAt mayor).
+    const first = await pay(a, planId, 30, { paidAt });
+    const second = await pay(a, planId, 30, { paidAt });
+    // Mismo paidAt y mismo createdAt (misma transacción): decide el id de la
+    // imputación (uuid v7: la creada después es mayor).
+    const [third, fourth] = await raw.$transaction(async (tx) => {
+      const ids: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        const p = await tx.payment.create({
+          data: {
+            tenantId: a.tenantId,
+            locationId: a.locationId,
+            treatmentPlanId: planId,
+            patientId: a.patientId,
+            amount: 15,
+            currency: 'EUR',
+            paidAt,
+          },
+        });
+        await tx.paymentPlanAmount.create({
+          data: {
+            paymentId: p.id,
+            tenantId: a.tenantId,
+            treatmentPlanId: planId,
+            amount: 15,
+            currency: 'EUR',
+            rateDate: DAY,
+          },
+        });
+        ids.push(p.id);
+      }
+      return ids;
+    });
+    await allocate(planId, first, done, 30);
+    await allocate(planId, second, done, 30);
+    await allocate(planId, third, done, 15);
+    await allocate(planId, fourth, done, 15);
+    // Sobran 20: todo del último creado (fourth, 15) y 5 del anterior (third).
+    await updateItem(done, `"discount" = 20`);
+    expect(await allocated(fourth, done)).toBe(0);
+    expect(await allocated(third, done)).toBe(10);
+    expect(await allocated(second, done)).toBe(30);
+    expect(await allocated(first, done)).toBe(30);
+    // Sobran 25 más: el resto de third (10) y 15 de second (createdAt mayor).
+    await updateItem(done, `"discount" = 45`);
+    expect(await allocated(third, done)).toBe(0);
+    expect(await allocated(second, done)).toBe(15);
+    expect(await allocated(first, done)).toBe(30);
+  });
+
+  it('a concurrent void of an AUTO row does not make the release cut a MANUAL pin', async () => {
+    // Revisión I1: la liberación bloquea las filas ANTES de calcular lo que
+    // sobra. Si sumara antes, contaría la fila AUTO que la anulación borra a la
+    // vez y recortaría el MANUAL (70 -> 40), que el reparto nunca repone.
+    for (let run = 0; run < 5; run++) {
+      const planId = await plan(a);
+      const done = await item(a, planId, 100, 'DONE');
+      const pinned = await pay(a, planId, 70, {
+        paidAt: new Date('2026-10-01T12:00:00.000Z'),
+      });
+      const voided = await pay(a, planId, 30, {
+        paidAt: new Date('2026-10-02T12:00:00.000Z'),
+      });
+      await allocate(planId, pinned, done, 70, 'MANUAL');
+      await allocate(planId, voided, done, 30, 'AUTO');
+
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let deleted!: () => void;
+      const deletedOpen = new Promise<void>((resolve) => {
+        deleted = resolve;
+      });
+      // A: anulación (R12) con el DELETE hecho y la transacción abierta.
+      const voiding = asApp(a.tenantId, async (tx) => {
+        await tx.$executeRaw`SET LOCAL app.allocation_cause = 'VOID'`;
+        await tx.paymentAllocation.deleteMany({ where: { paymentId: voided } });
+        deleted();
+        await held;
+      });
+      await deletedOpen;
+      // B: descuento de 30 (facturable 70); espera a la fila que A borró.
+      const discount = updateItem(done, `"discount" = 30`);
+      await waitForLockWaiters(1);
+      release();
+      await Promise.all([voiding, discount]);
+
+      expect(await allocated(pinned, done)).toBe(70);
+      expect(await allocated(voided, done)).toBe(0);
+      const causes = await raw.paymentAllocationMovement.findMany({
+        where: { treatmentPlanId: planId, cause: 'RELEASE' },
+      });
+      expect(causes).toEqual([]);
+    }
   });
 
   describe('every path that lowers the billable releases and enqueues', () => {
@@ -649,6 +781,15 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
       await updatePlan(f.planId, `"status" = 'CANCELLED'`);
       expect(await allocated(f.paymentId, f.done)).toBe(0);
       expect(await allocated(f.paymentId, f.accepted)).toBe(0);
+      expect(await queued(f.planId)).toBe(before + 1);
+    });
+
+    it('plan soft delete releases', async () => {
+      const f = await fixture();
+      await allocate(f.planId, f.paymentId, f.done, 70);
+      const before = await queued(f.planId);
+      await updatePlan(f.planId, `"deletedAt" = now()`);
+      expect(await allocated(f.paymentId, f.done)).toBe(0);
       expect(await queued(f.planId)).toBe(before + 1);
     });
 
@@ -854,22 +995,27 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
         where: { paymentId: f.paymentId, treatmentPlanItemId: itemId },
         orderBy: [{ at: 'asc' }, { id: 'asc' }],
       });
+    // `at` es el inicio de la transacción (ms) y el sufijo del id es
+    // aleatorio: dos transacciones en el mismo ms pueden salir en cualquier
+    // orden, así que se comparan como multiconjunto.
+    const byCause = (rows: { cause: string; deltaCents: bigint }[]) =>
+      rows
+        .map((m) => [m.cause, Number(m.deltaCents)] as [string, number])
+        .sort((x, y) => x[0].localeCompare(y[0]) || x[1] - y[1]);
     const live = async (itemId: string) =>
       Math.round((await allocated(f.paymentId, itemId)) * 100);
     const sum = (rows: { deltaCents: bigint }[]) =>
       rows.reduce((acc, r) => acc + Number(r.deltaCents), 0);
 
     let done = await movements(f.done);
-    expect(done.map((m) => [m.cause, Number(m.deltaCents)])).toEqual([
+    expect(byCause(done)).toEqual([
       ['AUTO', 8000],
       ['MANUAL', 2000],
       ['RELEASE', -3000],
     ]);
     expect(sum(done)).toBe(await live(f.done));
     const accepted = await movements(f.accepted);
-    expect(accepted.map((m) => [m.cause, Number(m.deltaCents)])).toEqual([
-      ['AUTO', 2000],
-    ]);
+    expect(byCause(accepted)).toEqual([['AUTO', 2000]]);
     expect(sum(accepted)).toBe(await live(f.accepted));
 
     // Anular el abono (R12): causa VOID y la suma vuelve a 0.
@@ -880,7 +1026,7 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
       });
     });
     done = await movements(f.done);
-    expect(done.at(-1)).toMatchObject({ cause: 'VOID', deltaCents: -7000n });
+    expect(byCause(done)).toContainEqual(['VOID', -7000]);
     expect(sum(done)).toBe(0);
     expect(sum(await movements(f.accepted))).toBe(0);
 
@@ -892,6 +1038,21 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
         }),
       ),
     ).rejects.toThrow(DENIED);
+    // Ni lo escribe a mano: solo el trigger de payment_allocations.
+    await expect(
+      asApp(a.tenantId, (tx) =>
+        tx.paymentAllocationMovement.create({
+          data: {
+            tenantId: a.tenantId,
+            paymentId: f.paymentId,
+            treatmentPlanId: f.planId,
+            treatmentPlanItemId: f.done,
+            deltaCents: 999,
+            cause: 'MANUAL',
+          },
+        }),
+      ),
+    ).rejects.toThrow(/lo escribe solo el trigger de payment_allocations/);
     await expect(
       appRole.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
