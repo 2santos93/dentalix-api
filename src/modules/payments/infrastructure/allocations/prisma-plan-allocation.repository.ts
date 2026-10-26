@@ -493,6 +493,23 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     });
   }
 
+  async planIdsWithBases(): Promise<string[]> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT t."id"
+          FROM "treatment_plans" t
+         WHERE t."tenantId" = ${tenantId}::uuid
+           AND t."deletedAt" IS NULL
+           AND EXISTS (
+                 SELECT 1 FROM "payment_plan_amounts" b
+                  WHERE b."tenantId" = t."tenantId"
+                    AND b."treatmentPlanId" = t."id")
+         ORDER BY t."id"`;
+      return rows.map((r) => r.id);
+    });
+  }
+
   async ensureBase(
     paymentId: string,
     amount: number,

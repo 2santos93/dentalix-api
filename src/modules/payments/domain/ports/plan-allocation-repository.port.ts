@@ -147,6 +147,9 @@ export interface PlanAllocationRepository {
   /** Hasta `limit` abonos vivos a planes vivos sin base, los más recientes primero. */
   paymentsWithoutBase(limit: number): Promise<PaymentWithoutBase[]>;
 
+  /** Planes vivos con al menos una base (backfill R17), por id. */
+  planIdsWithBases(): Promise<string[]>;
+
   /**
    * Inserta la base del abono si falta (con la moneda del plan aún igual a
    * `currency`) y encola su plan en la misma transacción. `true` si la creó.

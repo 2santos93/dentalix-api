@@ -154,6 +154,14 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     );
   }
 
+  planIdsWithBases(): Promise<string[]> {
+    const planIds = this.payments
+      .filter((p) => p.baseCents !== null || this.bases.has(p.id))
+      .map((p) => p.planId)
+      .filter((planId) => !this.retiredPlans.has(planId));
+    return Promise.resolve([...new Set(planIds)].sort());
+  }
+
   ensureBase(
     paymentId: string,
     amount: number,
