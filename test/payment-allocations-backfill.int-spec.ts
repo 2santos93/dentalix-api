@@ -410,4 +410,116 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
     ).toEqual([{ paymentId: other.eurPaymentId }]);
     expect(report.allocatedCents).toBe(6_000);
   }, 120000);
+
+  it('removes allocations an old replica left on a voided payment and re-spreads them', async () => {
+    const { tenantId } = other;
+    const clinic = await raw.treatmentPlan.findUniqueOrThrow({
+      where: { id: other.planId },
+      select: { patientId: true },
+    });
+    const location = await raw.location.findFirstOrThrow({
+      where: { tenantId },
+    });
+    const catalog = await raw.dentalCatalogItem.findFirstOrThrow({
+      where: { tenantId },
+    });
+    const plan = await raw.treatmentPlan.create({
+      data: {
+        tenantId,
+        patientId: clinic.patientId,
+        currency: 'EUR',
+        status: 'ACCEPTED',
+      },
+    });
+    const item = await raw.treatmentPlanItem.create({
+      data: {
+        tenantId,
+        planId: plan.id,
+        toothNumber: '12',
+        catalogItemId: catalog.id,
+        price: 100,
+        status: 'DONE',
+        completedAt: PAID_AT,
+      },
+    });
+    const payWithBase = async (amount: number) => {
+      const payment = await raw.payment.create({
+        data: {
+          tenantId,
+          locationId: location.id,
+          treatmentPlanId: plan.id,
+          patientId: clinic.patientId,
+          amount,
+          currency: 'EUR',
+          paidAt: PAID_AT,
+        },
+      });
+      await raw.paymentPlanAmount.create({
+        data: {
+          paymentId: payment.id,
+          tenantId,
+          treatmentPlanId: plan.id,
+          amount,
+          currency: 'EUR',
+          rateDate: PAID_AT,
+        },
+      });
+      return payment.id;
+    };
+    try {
+      const voided = await payWithBase(100);
+      const live = await payWithBase(60);
+      await raw.paymentAllocation.create({
+        data: {
+          tenantId,
+          paymentId: voided,
+          treatmentPlanId: plan.id,
+          treatmentPlanItemId: item.id,
+          amount: 100,
+          source: 'AUTO',
+        },
+      });
+      // Lo que hacía el código anterior: marcar el abono sin tocar sus imputaciones.
+      await raw.payment.update({
+        where: { id: voided },
+        data: { deletedAt: new Date() },
+      });
+
+      const [report] = await run({ tenantId });
+
+      expect(report.voidedCleaned).toBe(1);
+      const rows = await raw.paymentAllocation.findMany({
+        where: { tenantId, treatmentPlanId: plan.id },
+      });
+      expect(rows.map((r) => [r.paymentId, Number(r.amount)])).toEqual([
+        [live, 60],
+      ]);
+      const voidMovements = await raw.paymentAllocationMovement.findMany({
+        where: { tenantId, paymentId: voided },
+        orderBy: { deltaCents: 'desc' },
+      });
+      // El alta (AUTO) y, al limpiar, la baja con la causa de la anulación.
+      expect(voidMovements.map((m) => [m.cause, Number(m.deltaCents)])).toEqual(
+        [
+          ['AUTO', 10_000],
+          ['VOID', -10_000],
+        ],
+      );
+
+      const again = (await run({ tenantId }))[0];
+      expect(again).toMatchObject({ voidedCleaned: 0, allocatedCents: 0 });
+    } finally {
+      await raw.paymentAllocation.deleteMany({ where: { tenantId } });
+      await raw.paymentAllocationMovement.deleteMany({ where: { tenantId } });
+      await raw.paymentPlanAmount.deleteMany({ where: { tenantId } });
+      await raw.payment.deleteMany({
+        where: { tenantId, treatmentPlanId: plan.id },
+      });
+      await raw.treatmentPlanItem.deleteMany({ where: { planId: plan.id } });
+      await raw.planAllocationRebalanceRequest.deleteMany({
+        where: { tenantId },
+      });
+      await raw.treatmentPlan.delete({ where: { id: plan.id } });
+    }
+  }, 120000);
 });

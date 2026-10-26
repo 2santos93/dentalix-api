@@ -197,6 +197,20 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     return Promise.reject(new Error('no implementado en el fake'));
   }
 
+  purgeVoidedAllocations(): Promise<number> {
+    const voided = new Set(
+      this.payments.filter((p) => p.voided).map((p) => p.id),
+    );
+    const stale = this.allocations.filter((a) => voided.has(a.paymentId));
+    for (const row of stale) {
+      this.allocations.splice(this.allocations.indexOf(row), 1);
+      this.requests.push(
+        this.payments.find((p) => p.id === row.paymentId)?.planId ?? '',
+      );
+    }
+    return Promise.resolve(new Set(stale.map((a) => a.paymentId)).size);
+  }
+
   tenantIds(): Promise<string[]> {
     return Promise.resolve([...this.tenants]);
   }

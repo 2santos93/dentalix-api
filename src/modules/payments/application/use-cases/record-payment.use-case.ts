@@ -29,7 +29,7 @@ import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/curren
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
-import { paymentInPlanCurrency } from '../payment-in-plan-currency';
+import { errorName, paymentBaseAmount } from '../payment-in-plan-currency';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -186,22 +186,25 @@ export class RecordPaymentUseCase {
       throw new ConflictException(notBillableMessage(plan.status));
     }
 
-    // DX-136: fuera de la transacción del abono (la tasa puede pedir un
-    // proveedor externo). Nunca falla: sin saldo, el recibo sale sin él.
+    // DX-136 y DX-051 (R4): fuera de la transacción del abono (la tasa puede
+    // pedir un proveedor externo), una sola conversión para el saldo del recibo
+    // y la base. Nunca falla: sin tasa o con cualquier fallo, el recibo sale sin
+    // saldo y el abono sin imputar hasta que el barrido le cree la base (R9.3).
     const paidOn = await this.repo.resolvePaidOn(paidAt);
-    const receiptPlanBalance = await this.receiptBalance.afterPayment({
-      treatmentPlanId,
-      amount: input.amount,
-      currency,
-      paidOn,
-    });
-    // DX-051 (R4): la base del abono, también fuera de la transacción.
-    const planAmount = await this.planAmount({
+    const converted = await this.convertToPlan({
       amount: input.amount,
       currency,
       planCurrency: plan.currency,
       paidOn,
     });
+    const receiptPlanBalance = await this.receiptBalance.afterPayment(
+      treatmentPlanId,
+      converted,
+    );
+    const planAmount =
+      converted === null
+        ? null
+        : { planCurrency: plan.currency, amount: converted, rateDate: paidOn };
 
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
@@ -222,31 +225,19 @@ export class RecordPaymentUseCase {
     return this.repo.create(repoInput);
   }
 
-  /**
-   * El abono en la moneda del plan con la tasa de su `paidOn` (R3, R4). Nunca
-   * falla el cobro: sin tasa, o con cualquier fallo, `null` y el abono queda
-   * sin imputar hasta que el barrido le cree la base (R9.3).
-   */
-  private async planAmount(payment: {
+  /** El abono en la moneda del plan con la tasa de su `paidOn` (R3), o `null`. */
+  private async convertToPlan(payment: {
     amount: number;
     currency: string;
     planCurrency: string;
     paidOn: string;
-  }): Promise<CreatePaymentRepoInput['planAmount']> {
+  }): Promise<number | null> {
     try {
-      const amount = await paymentInPlanCurrency(this.convertAmount, payment);
-      // Un importe que redondea a 0 no admite base (CHECK > 0).
-      if (amount === null || amount <= 0) return null;
-      return {
-        planCurrency: payment.planCurrency,
-        amount,
-        rateDate: payment.paidOn,
-      };
+      return await paymentBaseAmount(this.convertAmount, payment);
     } catch (error) {
-      // Sin datos del abono ni del paciente: solo el tipo del error.
       this.logger.warn({
         event: 'payments.allocation_base_unavailable',
-        error: error instanceof Error ? error.name : typeof error,
+        error: errorName(error),
       });
       return null;
     }

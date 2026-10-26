@@ -50,6 +50,22 @@ const toCents = (value: Prisma.Decimal | number): number =>
 const fromCents = (cents: number): Prisma.Decimal =>
   new Prisma.Decimal(cents).dividedBy(100);
 
+/** Rótulo en español del catálogo de cada ítem, por id del catálogo. */
+async function procedureLabels(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  items: { catalogItemId: string }[],
+): Promise<Map<string, string>> {
+  const catalog = await tx.dentalCatalogItem.findMany({
+    where: {
+      tenantId,
+      id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
+    },
+    select: { id: true, labelEs: true },
+  });
+  return new Map(catalog.map((c) => [c.id, c.labelEs]));
+}
+
 /**
  * Encola el plan para el reparto (spec §3.3): INSERT simple, sin ON CONFLICT
  * ni esperas; varias filas por plan son normales. Va en la transacción de la
@@ -354,14 +370,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             discount: true,
           },
         });
-        const catalog = await tx.dentalCatalogItem.findMany({
-          where: {
-            tenantId,
-            id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
-          },
-          select: { id: true, labelEs: true },
-        });
-        const labelOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
+        const labelOf = await procedureLabels(tx, tenantId, items);
         const payments = await tx.payment.findMany({
           where: { tenantId, ...livePayment },
           select: {
@@ -681,14 +690,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       },
     });
     if (items.length === 0) return [];
-    const catalog = await tx.dentalCatalogItem.findMany({
-      where: {
-        tenantId,
-        id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
-      },
-      select: { id: true, labelEs: true },
-    });
-    const labelOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
+    const labelOf = await procedureLabels(tx, tenantId, items);
     const others = await tx.paymentAllocation.groupBy({
       by: ['treatmentPlanItemId'],
       where: {
@@ -965,6 +967,37 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     return out;
   }
 
+  async purgeVoidedAllocations(): Promise<number> {
+    const tenantId = this.requireTenantId();
+    const voided = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<{ id: string }[]>`
+        SELECT DISTINCT a."paymentId" AS "id"
+          FROM "payment_allocations" a
+          JOIN "payments" p
+            ON p."tenantId" = a."tenantId" AND p."id" = a."paymentId"
+         WHERE a."tenantId" = ${tenantId}::uuid
+           AND p."deletedAt" IS NOT NULL
+         ORDER BY 1`,
+    );
+    let cleaned = 0;
+    for (const { id } of voided) {
+      // Cada abono en su transacción y con los bloqueos de la anulación (R12).
+      const done = await this.prisma.runWithTenant(async (tx) => {
+        const planId = await lockPaymentAllocations(tx, tenantId, id);
+        if (!planId) return false;
+        const [left] = await tx.$queryRaw<{ n: number }[]>`
+          SELECT count(*)::int AS "n" FROM "payment_allocations"
+           WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${id}::uuid`;
+        if (left.n === 0) return false;
+        await removeVoidedAllocations(tx, tenantId, id, planId);
+        return true;
+      });
+      if (done) cleaned += 1;
+    }
+    return cleaned;
+  }
+
   async tenantIds(): Promise<string[]> {
     const rows = await this.prisma.tenant.findMany({
       where: { deletedAt: null },
@@ -972,4 +1005,74 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     });
     return rows.map((r) => r.id);
   }
+}
+
+/**
+ * DX-051 (R6, R12): lo que bloquea la anulación ANTES de tocar el abono, en el
+ * orden de todo escritor de imputaciones:
+ * - el plan FOR SHARE: un cambio de estado del plan, que lo bloquea FOR UPDATE
+ *   y libera las imputaciones de todos sus ítems, no se cruza con ella;
+ * - la fila del abono FOR NO KEY UPDATE: choca con el FOR SHARE con que
+ *   `ensureBase` (barrido) crea una base que falta, así que esa base o ya está
+ *   confirmada y aquí se ve, o no nace (el abono ya está anulado). No choca con
+ *   el FOR KEY SHARE de las FK de imputaciones e historial;
+ * - la base FOR UPDATE: ningún reparto imputa este abono mientras tanto;
+ * - los ítems de sus imputaciones FOR UPDATE ORDER BY id, antes del UPDATE del
+ *   abono (que bloquea el saldo del paciente, `patient_ledgers`, que una
+ *   edición del ítem pide después de bloquear el ítem: 40P01) y antes del
+ *   DELETE (el historial que escribe su trigger toma el ítem FOR KEY SHARE).
+ * Devuelve el plan, o `undefined` si el abono no es a un plan (o no existe).
+ */
+export async function lockPaymentAllocations(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  paymentId: string,
+): Promise<string | undefined> {
+  const [payment] = await tx.$queryRaw<{ treatmentPlanId: string | null }[]>`
+    SELECT "treatmentPlanId" FROM "payments"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid`;
+  const planId = payment?.treatmentPlanId;
+  if (!planId) return undefined;
+  await tx.$queryRaw`
+    SELECT "id" FROM "treatment_plans"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${planId}::uuid
+       FOR SHARE`;
+  await tx.$queryRaw`
+    SELECT 1 FROM "payments"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
+       FOR NO KEY UPDATE`;
+  await tx.$queryRaw`
+    SELECT 1 FROM "payment_plan_amounts"
+     WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid
+       FOR UPDATE`;
+  await tx.$queryRaw`
+    SELECT i."id" FROM "treatment_plan_items" i
+     WHERE i."tenantId" = ${tenantId}::uuid
+       AND i."id" IN (SELECT a."treatmentPlanItemId" FROM "payment_allocations" a
+                       WHERE a."tenantId" = ${tenantId}::uuid
+                         AND a."paymentId" = ${paymentId}::uuid)
+     ORDER BY i."id"
+       FOR UPDATE`;
+  return planId;
+}
+
+/**
+ * DX-051 (R12): ya anulado, borra sus imputaciones con la causa VOID en el
+ * historial y encola el plan (lo liberado lo llenan otros abonos tras el
+ * COMMIT). Sin bloqueos nuevos: con la fila del abono y su base tomadas desde
+ * el principio, nadie le crea base ni le imputa entretanto, así que las filas
+ * que borra son las de ítems ya bloqueados.
+ */
+export async function removeVoidedAllocations(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  paymentId: string,
+  planId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT set_config('app.allocation_cause', 'VOID', true)`;
+  await tx.$executeRaw`
+    DELETE FROM "payment_allocations"
+     WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid`;
+  await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+  await enqueuePlanRebalance(tx, tenantId, planId);
 }

@@ -5,6 +5,7 @@ import {
   PLAN_ALLOCATION_REPOSITORY,
   type PlanAllocationRepository,
 } from '../domain/ports/plan-allocation-repository.port';
+import { errorName } from './payment-in-plan-currency';
 import { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
 
 export const ALLOCATIONS_SWEEP_JOB = 'payment-allocations.sweep';
@@ -62,7 +63,7 @@ export class PaymentAllocationJobs implements OnModuleInit {
           this.logger.warn({
             event: 'payments.allocation_bases_failed',
             tenantId,
-            error: error instanceof Error ? error.name : typeof error,
+            error: errorName(error),
           });
         }
         // Nunca lanza: cada plan que falla deja su propio aviso.

@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { TreatmentPlanItemStatus } from '@prisma/client';
 
 // Response shape for GET /treatment-plans/:id/balance -- documents
 // GetPlanBalanceResult for Swagger (same convention as PaymentDto: exists
@@ -45,8 +46,11 @@ export class PlanItemBalanceDto {
   })
   procedureName!: string;
 
-  @ApiProperty({ enum: ['PROPOSED', 'ACCEPTED', 'DONE'] })
-  status!: string;
+  @ApiProperty({
+    enum: TreatmentPlanItemStatus,
+    enumName: 'TreatmentPlanItemStatus',
+  })
+  status!: TreatmentPlanItemStatus;
 
   @ApiProperty({
     example: 100,

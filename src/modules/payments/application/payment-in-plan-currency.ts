@@ -45,3 +45,21 @@ export async function paymentInPlanCurrency(
     throw error;
   }
 }
+
+/**
+ * Importe del abono para su base de imputación (spec R15): `paymentInPlanCurrency`
+ * y, como la base exige `amount > 0` (CHECK), un importe que redondea a 0 cuenta
+ * como «sin tasa» (`null`). Los fallos distintos de «sin tasa» se propagan.
+ */
+export async function paymentBaseAmount(
+  convert: ConvertAmountUseCase,
+  p: PaymentToConvert,
+): Promise<number | null> {
+  const amount = await paymentInPlanCurrency(convert, p);
+  return amount !== null && amount > 0 ? amount : null;
+}
+
+/** Solo el tipo del error para los avisos: nunca datos del abono ni del paciente. */
+export function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}

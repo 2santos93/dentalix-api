@@ -4,6 +4,8 @@
  * historia clínica, ni alergias, ni diagnósticos, ni firmas, ni importes: solo
  * nombres de campo, ids de la ruta y códigos.
  */
+import { MAX_ALLOCATION_LINES } from '../../payments/domain/allocation-rules';
+
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
   changedFields?: string[];
@@ -658,9 +660,6 @@ function coverage(value: unknown): AuditCoverage | null {
     verified,
   };
 }
-
-/** Tope de líneas por lado: las de un abono (MAX_ALLOCATION_LINES). */
-const MAX_ALLOCATION_LINES = 200;
 
 /** Una línea con exactamente esa forma, o `null`. */
 function allocationLine(value: unknown): AuditAllocationLine | null {

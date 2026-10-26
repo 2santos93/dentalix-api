@@ -57,7 +57,11 @@ import {
   recordVoidAdjustment,
 } from '../../../cash-sessions/infrastructure/payment-cash-session';
 import { reopenPromiseOnVoid } from '../../../collections/infrastructure/prisma-collections.repository';
-import { enqueuePlanRebalance } from '../allocations/prisma-plan-allocation.repository';
+import {
+  enqueuePlanRebalance,
+  lockPaymentAllocations,
+  removeVoidedAllocations,
+} from '../allocations/prisma-plan-allocation.repository';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -860,74 +864,4 @@ export class PrismaPaymentRepository implements PaymentRepository {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
   }
-}
-
-/**
- * DX-051 (R6, R12): lo que bloquea la anulación ANTES de tocar el abono, en el
- * orden de todo escritor de imputaciones:
- * - el plan FOR SHARE: un cambio de estado del plan, que lo bloquea FOR UPDATE
- *   y libera las imputaciones de todos sus ítems, no se cruza con ella;
- * - la fila del abono FOR NO KEY UPDATE: choca con el FOR SHARE con que
- *   `ensureBase` (barrido) crea una base que falta, así que esa base o ya está
- *   confirmada y aquí se ve, o no nace (el abono ya está anulado). No choca con
- *   el FOR KEY SHARE de las FK de imputaciones e historial;
- * - la base FOR UPDATE: ningún reparto imputa este abono mientras tanto;
- * - los ítems de sus imputaciones FOR UPDATE ORDER BY id, antes del UPDATE del
- *   abono (que bloquea el saldo del paciente, `patient_ledgers`, que una
- *   edición del ítem pide después de bloquear el ítem: 40P01) y antes del
- *   DELETE (el historial que escribe su trigger toma el ítem FOR KEY SHARE).
- * Devuelve el plan, o `undefined` si el abono no es a un plan (o no existe).
- */
-async function lockPaymentAllocations(
-  tx: Prisma.TransactionClient,
-  tenantId: string,
-  paymentId: string,
-): Promise<string | undefined> {
-  const [payment] = await tx.$queryRaw<{ treatmentPlanId: string | null }[]>`
-    SELECT "treatmentPlanId" FROM "payments"
-     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid`;
-  const planId = payment?.treatmentPlanId;
-  if (!planId) return undefined;
-  await tx.$queryRaw`
-    SELECT "id" FROM "treatment_plans"
-     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${planId}::uuid
-       FOR SHARE`;
-  await tx.$queryRaw`
-    SELECT 1 FROM "payments"
-     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
-       FOR NO KEY UPDATE`;
-  await tx.$queryRaw`
-    SELECT 1 FROM "payment_plan_amounts"
-     WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid
-       FOR UPDATE`;
-  await tx.$queryRaw`
-    SELECT i."id" FROM "treatment_plan_items" i
-     WHERE i."tenantId" = ${tenantId}::uuid
-       AND i."id" IN (SELECT a."treatmentPlanItemId" FROM "payment_allocations" a
-                       WHERE a."tenantId" = ${tenantId}::uuid
-                         AND a."paymentId" = ${paymentId}::uuid)
-     ORDER BY i."id"
-       FOR UPDATE`;
-  return planId;
-}
-
-/**
- * DX-051 (R12): ya anulado, borra sus imputaciones con la causa VOID en el
- * historial y encola el plan (lo liberado lo llenan otros abonos tras el
- * COMMIT). Sin bloqueos nuevos: con la fila del abono y su base tomadas desde
- * el principio, nadie le crea base ni le imputa entretanto, así que las filas
- * que borra son las de ítems ya bloqueados.
- */
-async function removeVoidedAllocations(
-  tx: Prisma.TransactionClient,
-  tenantId: string,
-  paymentId: string,
-  planId: string,
-): Promise<void> {
-  await tx.$executeRaw`SELECT set_config('app.allocation_cause', 'VOID', true)`;
-  await tx.$executeRaw`
-    DELETE FROM "payment_allocations"
-     WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid`;
-  await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
-  await enqueuePlanRebalance(tx, tenantId, planId);
 }

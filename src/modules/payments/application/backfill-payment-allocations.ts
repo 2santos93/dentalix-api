@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { PlanAllocationRepository } from '../domain/ports/plan-allocation-repository.port';
-import { paymentInPlanCurrency } from './payment-in-plan-currency';
+import { errorName, paymentBaseAmount } from './payment-in-plan-currency';
 import { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
 
 /** Tope de abonos sin base por clínica y pasada (el `LIMIT` del repositorio es `int`). */
@@ -25,6 +25,8 @@ export interface BackfillOptions {
 /** Solo números (spec R17.4): nunca datos de abonos ni de pacientes. */
 export interface BackfillReport {
   tenantId: string;
+  /** Abonos anulados a los que se quitaron imputaciones colgantes (R12). */
+  voidedCleaned: number;
   /** Abonos con base nueva (en dry-run, los que la tendrían). */
   basesCreated: number;
   /** Abonos que siguen sin base por no haber tasa. */
@@ -36,8 +38,9 @@ export interface BackfillReport {
 
 /**
  * Backfill de imputaciones de abonos anteriores a DX-051 (spec R17, D1),
- * clínica por clínica con su tenant en el contexto (RLS FORCE): crea las bases
- * que faltan y reparte cada plan con la misma regla automática. Idempotente:
+ * clínica por clínica con su tenant en el contexto (RLS FORCE): quita las
+ * imputaciones que una réplica anterior dejó en abonos anulados (R12), crea las
+ * bases que faltan y reparte cada plan con la misma regla automática. Idempotente:
  * no recrea bases ni toca imputaciones (el reparto solo llena sobrantes), así
  * que una segunda pasada no cambia nada. Un abono sin tasa se cuenta y sigue.
  */
@@ -59,11 +62,15 @@ export async function backfillPaymentAllocations(
       await deps.tenantContext.run(tenantId, async () => {
         const report: BackfillReport = {
           tenantId,
+          voidedCleaned: 0,
           basesCreated: 0,
           withoutRate: 0,
           plansRebalanced: 0,
           allocatedCents: 0,
         };
+        // Antes de repartir: lo que libera lo llenan otros abonos en el reparto.
+        if (!dryRun)
+          report.voidedCleaned = await deps.repo.purgeVoidedAllocations();
         await createBases(deps, dryRun, report, logger);
         await rebalancePlans(deps, dryRun, report, logger);
         return report;
@@ -83,7 +90,7 @@ async function createBases(
   for (const payment of payments) {
     let amount: number | null;
     try {
-      amount = await paymentInPlanCurrency(deps.convertAmount, payment);
+      amount = await paymentBaseAmount(deps.convertAmount, payment);
     } catch (error) {
       logger.warn({
         event: 'payments.allocation_backfill_conversion_failed',
@@ -92,8 +99,7 @@ async function createBases(
       });
       amount = null;
     }
-    // Un importe que redondea a 0 no admite base (CHECK > 0): como sin tasa.
-    if (amount === null || amount <= 0) {
+    if (amount === null) {
       report.withoutRate += 1;
       continue;
     }
@@ -137,9 +143,4 @@ async function rebalancePlans(
       });
     }
   }
-}
-
-/** Solo el tipo del error: nunca datos del abono ni del paciente. */
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error;
 }

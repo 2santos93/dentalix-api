@@ -47,8 +47,11 @@
 --     transacción sin tocar sus repositorios.
 --   * Guarda de tenant: con la RLS activa y sin `app.current_tenant` de la
 --     clínica de la fila, liberar o encolar falla en vez de borrar 0 filas en
---     silencio (la RLS escondería las imputaciones). Un superusuario (tests) o
---     una migración con NO FORCE no se ve afectado.
+--     silencio (la RLS escondería las imputaciones). Un superusuario (tests) no se
+--     ve afectado. Una migración del owner que cambie esas columnas debe fijar
+--     `app.current_tenant` por clínica: quitar FORCE solo de esta tabla no
+--     basta, porque los mismos triggers insertan también en la cola y en el
+--     historial, que siguen con FORCE.
 --   * payment_allocation_movements la escribe un trigger AFTER de
 --     payment_allocations con la causa que fija la transacción en el GUC local
 --     `app.allocation_cause` (por defecto AUTO). Sin UPDATE ni DELETE salvo el

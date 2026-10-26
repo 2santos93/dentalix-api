@@ -20,7 +20,7 @@ import {
   type AllocationTarget,
   type PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
-import { paymentInPlanCurrency } from '../payment-in-plan-currency';
+import { errorName, paymentBaseAmount } from '../payment-in-plan-currency';
 import { PlanAllocationRebalancer } from '../plan-allocation-rebalancer';
 import {
   GetPaymentAllocationsUseCase,
@@ -90,7 +90,7 @@ export class ReplacePaymentAllocationsUseCase {
       this.logger.warn({
         event: 'payments.allocation_rebalance_failed',
         planId,
-        error: error instanceof Error ? error.name : typeof error,
+        error: errorName(error),
       });
     }
 
@@ -151,15 +151,13 @@ export class ReplacePaymentAllocationsUseCase {
   private async withBase(target: AllocationTarget): Promise<AllocationTarget> {
     if (target.base) return target;
     const planCurrency = target.planCurrency as string;
-    const amount = await paymentInPlanCurrency(this.convertAmount, {
+    const amount = await paymentBaseAmount(this.convertAmount, {
       amount: target.amount,
       currency: target.currency,
       planCurrency,
       paidOn: target.paidOn,
     });
-    // Un abono > 0 no convierte a ≤ 0; si pasara (redondeo), sin base
-    // posible (CHECK > 0) es como no tener tasa.
-    if (amount === null || amount <= 0) throw noRate(target);
+    if (amount === null) throw noRate(target);
     await this.repo.ensureBase(
       target.paymentId,
       amount,

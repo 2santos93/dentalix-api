@@ -194,6 +194,13 @@ export interface PlanAllocationRepository {
     input: ReplaceAllocationsInput,
   ): Promise<{ previous: { itemId: string; cents: number }[] }>;
 
+  /**
+   * Borra las imputaciones que aún cuelgan de abonos anulados (una réplica
+   * anterior a DX-051 que anuló sin borrarlas), con los bloqueos y la causa
+   * VOID de la anulación, y encola sus planes. Devuelve los abonos limpiados.
+   */
+  purgeVoidedAllocations(): Promise<number>;
+
   /** Clínicas vivas, para el barrido (sin tenant: tabla sin RLS). */
   tenantIds(): Promise<string[]>;
 }

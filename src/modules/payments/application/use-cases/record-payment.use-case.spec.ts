@@ -26,18 +26,14 @@ class FakeReceiptPlanBalance {
   };
   public readonly calls: {
     treatmentPlanId: string;
-    amount: number;
-    currency: string;
-    paidOn: string;
+    convertedAmount: number | null;
   }[] = [];
 
-  afterPayment(payment: {
-    treatmentPlanId: string;
-    amount: number;
-    currency: string;
-    paidOn: string;
-  }): Promise<ReceiptPlanBalance | null> {
-    this.calls.push(payment);
+  afterPayment(
+    treatmentPlanId: string,
+    convertedAmount: number | null,
+  ): Promise<ReceiptPlanBalance | null> {
+    this.calls.push({ treatmentPlanId, convertedAmount });
     return Promise.resolve(this.result);
   }
 }
@@ -188,12 +184,7 @@ describe('RecordPaymentUseCase', () => {
       );
 
       expect(receiptBalance.calls).toEqual([
-        {
-          treatmentPlanId: 'plan-1',
-          amount: 150,
-          currency: 'USD',
-          paidOn: '2026-03-05',
-        },
+        { treatmentPlanId: 'plan-1', convertedAmount: 150 },
       ]);
       expect(repo.lastCreateInput?.receiptPlanBalance).toEqual({
         currency: 'USD',

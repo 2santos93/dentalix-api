@@ -5,7 +5,7 @@ import {
   PLAN_ALLOCATION_REPOSITORY,
   type PlanAllocationRepository,
 } from '../domain/ports/plan-allocation-repository.port';
-import { paymentInPlanCurrency } from './payment-in-plan-currency';
+import { errorName, paymentBaseAmount } from './payment-in-plan-currency';
 
 export interface DrainOptions {
   /** Autor de las filas AUTO; `null` en el barrido. */
@@ -124,7 +124,7 @@ export class PlanAllocationRebalancer {
     for (const payment of await this.repo.paymentsWithoutBase(limit)) {
       let amount: number | null;
       try {
-        amount = await paymentInPlanCurrency(this.convertAmount, payment);
+        amount = await paymentBaseAmount(this.convertAmount, payment);
       } catch (error) {
         this.logger.warn({
           event: 'payments.allocation_base_conversion_failed',
@@ -133,8 +133,7 @@ export class PlanAllocationRebalancer {
         });
         amount = null;
       }
-      // Un importe que redondea a 0 no admite base (CHECK > 0): como sin tasa.
-      if (amount === null || amount <= 0) {
+      if (amount === null) {
         result.withoutRate += 1;
         continue;
       }
@@ -148,9 +147,4 @@ export class PlanAllocationRebalancer {
     }
     return result;
   }
-}
-
-/** Solo el tipo del error: nunca datos del abono ni del paciente. */
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error;
 }

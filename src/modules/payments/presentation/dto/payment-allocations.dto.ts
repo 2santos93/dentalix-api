@@ -100,6 +100,7 @@ export class PaymentAllocationsDto {
 
   @ApiProperty({
     enum: TreatmentPlanStatus,
+    enumName: 'TreatmentPlanStatus',
     description:
       'Estado del plan: rechazado o cancelado no admite reasignar (409 en el PUT) y sus `items` vienen vacíos',
   })

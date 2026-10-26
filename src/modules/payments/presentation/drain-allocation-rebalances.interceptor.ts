@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Observable, concatMap } from 'rxjs';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { errorName } from '../application/payment-in-plan-currency';
 import { PlanAllocationRebalancer } from '../application/plan-allocation-rebalancer';
 
 /** Lo que el interceptor lee de la petición (Express). */
@@ -94,7 +95,7 @@ export class DrainAllocationRebalancesInterceptor implements NestInterceptor {
         } catch (error) {
           this.logger.warn({
             event: 'payments.allocation_drain_failed',
-            error: error instanceof Error ? error.name : typeof error,
+            error: errorName(error),
           });
         }
         return body;

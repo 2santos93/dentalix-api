@@ -120,4 +120,57 @@ describe('backfillPaymentAllocations', () => {
       allocatedCents: 0,
     });
   });
+
+  it('removes allocations left on voided payments and re-spreads what they held', async () => {
+    const { repo, deps } = setup();
+    repo.items.push({
+      id: 'i1',
+      planId: 'plan-1',
+      status: 'DONE',
+      createdAt: DAY(1),
+      completedAt: DAY(2),
+      billableCents: 10_000,
+    });
+    repo.payments.push(
+      {
+        id: 'voided',
+        planId: 'plan-1',
+        paidAt: DAY(3),
+        createdAt: DAY(3),
+        baseCents: 10_000,
+        voided: true,
+      },
+      {
+        id: 'live',
+        planId: 'plan-1',
+        paidAt: DAY(4),
+        createdAt: DAY(4),
+        baseCents: 6_000,
+      },
+    );
+    repo.allocations.push({
+      paymentId: 'voided',
+      itemId: 'i1',
+      cents: 10_000,
+      source: 'AUTO',
+      createdById: null,
+    });
+
+    const dry = await backfillPaymentAllocations(deps, {
+      tenantId: 't1',
+      dryRun: true,
+    });
+    expect(dry[0].voidedCleaned).toBe(0);
+    expect(repo.allocations).toHaveLength(1);
+
+    const [report] = await backfillPaymentAllocations(deps, { tenantId: 't1' });
+    expect(report).toMatchObject({
+      voidedCleaned: 1,
+      plansRebalanced: 1,
+      allocatedCents: 6_000,
+    });
+    expect(repo.allocations.map((a) => [a.paymentId, a.cents])).toEqual([
+      ['live', 6_000],
+    ]);
+  });
 });

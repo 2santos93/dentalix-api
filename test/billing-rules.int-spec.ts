@@ -87,7 +87,7 @@ const recordPayment = new RecordPaymentUseCase(
   paymentRepo,
   getPlan,
   whitelist,
-  new ReceiptPlanBalanceCalculator(balance, identityConvert),
+  new ReceiptPlanBalanceCalculator(balance),
   identityConvert,
 );
 
