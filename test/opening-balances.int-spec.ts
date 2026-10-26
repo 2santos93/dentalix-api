@@ -48,6 +48,11 @@ async function purge(): Promise<void> {
     // Como superusuario: los triggers de recibos y caja dejan borrar.
     await raw.paymentReceipt.deleteMany({ where });
     await raw.paymentReceiptCounter.deleteMany({ where });
+    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+    // (borrar las imputaciones deja su movimiento: van antes).
+    await raw.paymentAllocation.deleteMany({ where });
+    await raw.paymentAllocationMovement.deleteMany({ where });
+    await raw.paymentPlanAmount.deleteMany({ where });
     await raw.payment.deleteMany({ where });
     await raw.appointment.deleteMany({ where });
     await raw.openingBalance.deleteMany({ where });
@@ -711,6 +716,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
         method: 'TRANSFER',
         createdById: a.userId,
         receiptPlanBalance: null,
+        planAmount: null,
       }),
     );
   }

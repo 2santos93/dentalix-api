@@ -633,3 +633,45 @@ describe('sanitizeAuditMetadata — nº de registro sanitario de la sede (DX-319
     }
   });
 });
+
+describe('sanitizeAuditMetadata — reasignación de un abono (DX-051)', () => {
+  const ITEM_A = '0192f0a0-0000-7000-8000-00000000000a';
+  const ITEM_B = '0192f0a0-0000-7000-8000-00000000000b';
+
+  it('conserva moneda, modo e importes por ítem antes y después', () => {
+    const allocation = {
+      currency: 'EUR',
+      mode: 'MANUAL',
+      before: [{ itemId: ITEM_A, amount: 100 }],
+      after: [
+        { itemId: ITEM_A, amount: 40.5 },
+        { itemId: ITEM_B, amount: 59.5 },
+      ],
+    };
+    expect(sanitizeAuditMetadata({ allocation })).toEqual({ allocation });
+  });
+
+  it('descarta lo que no tenga exactamente esa forma', () => {
+    const base = {
+      currency: 'EUR',
+      mode: 'AUTO',
+      before: [],
+      after: [{ itemId: ITEM_A, amount: 10 }],
+    };
+    expect(sanitizeAuditMetadata({ allocation: base })).toEqual({
+      allocation: base,
+    });
+    for (const allocation of [
+      { ...base, currency: 'eur' },
+      { ...base, mode: 'SOMETIMES' },
+      { ...base, before: 'nada' },
+      { ...base, after: [{ itemId: 'no-uuid', amount: 10 }] },
+      { ...base, after: [{ itemId: ITEM_A, amount: 10.005 }] },
+      { ...base, after: [{ itemId: ITEM_A, amount: -1 }] },
+      { ...base, after: [{ itemId: ITEM_A, amount: 10, note: 'Ana' }] },
+      { ...base, patientName: 'Ana' },
+    ]) {
+      expect(sanitizeAuditMetadata({ allocation })).toEqual({});
+    }
+  });
+});

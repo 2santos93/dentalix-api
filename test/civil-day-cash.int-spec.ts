@@ -47,6 +47,11 @@ async function purge(): Promise<void> {
     'DELETE FROM payments_paidat_backfill_dx097 WHERE "tenantId" = ANY($1::uuid[])',
     ids,
   );
+  // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+  // (borrar las imputaciones deja su movimiento: van antes).
+  await owner.paymentAllocation.deleteMany({ where });
+  await owner.paymentAllocationMovement.deleteMany({ where });
+  await owner.paymentPlanAmount.deleteMany({ where });
   await owner.payment.deleteMany({ where });
   await owner.treatmentPlan.deleteMany({ where });
   await owner.patient.deleteMany({ where });
@@ -256,6 +261,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         currency: 'COP',
         paidAt: { civilDate: '2026-12-01' },
         receiptPlanBalance: null,
+        planAmount: null,
       }),
     );
     expect(created.paidAt.toISOString()).toBe('2026-12-01T11:00:00.000Z');
@@ -263,22 +269,51 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
   });
 
   it('las ramas por zona usan el índice (tenantId, locationId, paidAt) de abonos activos', async () => {
-    const plan = await owner.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
-      return tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
-        `EXPLAIN SELECT "id" FROM "payments"
+    // Con un puñado de filas todos los índices de `payments` que empiezan por
+    // (o contienen) "tenantId" cuestan casi lo mismo y el planificador
+    // desempata por el más nuevo (DX-051 añadió payments_tenant_id_plan_key).
+    // Se siembran abonos de la clínica en otros días y se analiza, como en
+    // producción, dentro de una transacción que se deshace. Las filas y
+    // pg_statistic se deshacen, pero ANALYZE escribe reltuples/relpages de
+    // pg_class en el sitio: se vuelve a analizar tras el rollback.
+    const rollback = new Error('rollback');
+    let plan: { 'QUERY PLAN': string }[] = [];
+    await owner
+      .$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId", "amount", "currency", "paidAt", "updatedAt")
+           SELECT gen_random_uuid(), $1::uuid,
+                  CASE WHEN g % 2 = 0 THEN $2::uuid ELSE $3::uuid END,
+                  $4::uuid, $5::uuid, 1, 'COP',
+                  timestamp '2025-01-01 15:00' + g * interval '1 day', now()
+             FROM generate_series(1, 300) AS g`,
+          tenantA,
+          bogota,
+          madrid,
+          planA,
+          patientA,
+        );
+        await tx.$executeRawUnsafe('ANALYZE "payments"');
+        await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
+        plan = await tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
+          `EXPLAIN SELECT "id" FROM "payments"
           WHERE "tenantId" = $1::uuid AND "deletedAt" IS NULL
             AND (("locationId" = ANY($2::uuid[]) AND "paidAt" >= $3 AND "paidAt" < $4)
               OR ("locationId" = ANY($5::uuid[]) AND "paidAt" >= $6 AND "paidAt" < $7))`,
-        tenantA,
-        [bogota],
-        new Date('2026-10-16T05:00:00.000Z'),
-        new Date('2026-10-17T05:00:00.000Z'),
-        [madrid],
-        new Date('2026-10-15T22:00:00.000Z'),
-        new Date('2026-10-16T22:00:00.000Z'),
-      );
-    });
+          tenantA,
+          [bogota],
+          new Date('2026-10-16T05:00:00.000Z'),
+          new Date('2026-10-17T05:00:00.000Z'),
+          [madrid],
+          new Date('2026-10-15T22:00:00.000Z'),
+          new Date('2026-10-16T22:00:00.000Z'),
+        );
+        throw rollback;
+      })
+      .catch((error: unknown) => {
+        if (error !== rollback) throw error;
+      });
+    await owner.$executeRawUnsafe('ANALYZE "payments"');
     const text = plan.map((r) => r['QUERY PLAN']).join('\n');
     expect(text).toContain('payments_tenantId_locationId_paidAt_active_idx');
   });

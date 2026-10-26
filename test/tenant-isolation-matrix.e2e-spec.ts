@@ -261,6 +261,9 @@ interface SeedB {
   noteTemplateId: string;
   /** Segundo paciente de B, fuera de pendientes (el primero ya está). */
   secondPatientId: string;
+  /** DX-051: abono propio de B y la versión de su imputación (PUT de B). */
+  paymentId: string;
+  allocationVersion: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -724,7 +727,13 @@ async function seedBExtras(
 ): Promise<
   Omit<
     SeedB,
-    'patientId' | 'catalogItemId' | 'locationId' | 'planId' | 'planItemId'
+    | 'patientId'
+    | 'catalogItemId'
+    | 'locationId'
+    | 'planId'
+    | 'planItemId'
+    | 'paymentId'
+    | 'allocationVersion'
   >
 > {
   await api(app, b, 'put', '/locations/schedule', {
@@ -861,11 +870,33 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         status: 'ACCEPTED',
       },
     ).expect(200);
+    // DX-051: B cobra en su plan (el reparto lo imputa a su ítem) y lee la
+    // versión de esa imputación, para mandar luego un ítem de A en su PUT.
+    // Cobrado hace 10 días: fuera del período de la caja que B consulta.
+    const paymentB = await create(
+      app,
+      clinicB,
+      `/treatment-plans/${planB.id}/payments`,
+      {
+        amount: 40,
+        currency: 'USD',
+        paidAt: futureAt(-10, 15),
+        method: 'CASH',
+      },
+    );
+    const allocationsB = await api(
+      app,
+      clinicB,
+      'get',
+      `/payments/${paymentB.id}/allocations`,
+    ).expect(200);
     b = {
       ...dataB,
       locationId: (sedesB.body as IdBody[])[0].id,
       planId: planB.id,
       planItemId: itemB.id,
+      paymentId: paymentB.id,
+      allocationVersion: (allocationsB.body as { version: string }).version,
       ...(await seedBExtras(app, clinicB, dataB.patientId)),
     };
     tables = await clinicTables(raw);
@@ -915,6 +946,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'payment_plans',
       'installments',
       'payments',
+      // DX-051: base, imputación e historial del abono de A.
+      'payment_plan_amounts',
+      'payment_allocations',
+      'payment_allocation_movements',
       'consent_templates',
       'locations',
       // DX-233: horario de los profesionales y excepciones.
@@ -1358,6 +1393,23 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'delete',
       path: () => `/payments/${a.paymentId}`,
       body: () => ({ reason: 'Hackeado' }),
+      status: 404,
+    },
+    // DX-051: la imputación del abono de A.
+    {
+      name: 'GET /payments/:id/allocations',
+      verb: 'get',
+      path: () => `/payments/${a.paymentId}/allocations`,
+      status: 404,
+    },
+    {
+      name: 'PUT /payments/:id/allocations',
+      verb: 'put',
+      path: () => `/payments/${a.paymentId}/allocations`,
+      body: () => ({
+        expectedVersion: b.allocationVersion,
+        mode: 'AUTO',
+      }),
       status: 404,
     },
     // DX-136: el recibo de caja del abono de A.
@@ -2444,6 +2496,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       bodyIds: ['locationId'],
       status: 400,
       message: 'Sede no encontrada.',
+    },
+    {
+      name: 'PUT /payments/:id/allocations body.allocations[].treatmentPlanItemId de A',
+      verb: 'put',
+      path: () => `/payments/${b.paymentId}/allocations`,
+      body: () => ({
+        expectedVersion: b.allocationVersion,
+        mode: 'MANUAL',
+        allocations: [{ treatmentPlanItemId: a.planItemId, amount: 1 }],
+      }),
+      bodyIds: ['allocations[].treatmentPlanItemId'],
+      status: 400,
+      message: 'El ítem no es de este plan o ya no existe.',
     },
     {
       name: 'PUT /price-lists/:id/items body.items[].catalogItemId de A',

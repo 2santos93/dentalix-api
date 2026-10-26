@@ -57,6 +57,11 @@ import {
   recordVoidAdjustment,
 } from '../../../cash-sessions/infrastructure/payment-cash-session';
 import { reopenPromiseOnVoid } from '../../../collections/infrastructure/prisma-collections.repository';
+import {
+  enqueuePlanRebalance,
+  lockPaymentAllocations,
+  removeVoidedAllocations,
+} from '../allocations/prisma-plan-allocation.repository';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -376,7 +381,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // rechazarlo o cancelarlo entre esta lectura y el INSERT. COMPLETED sí.
       const targetBalance = input.openingBalanceId
         ? await this.lockOpeningBalance(tx, input)
-        : (await this.lockPlan(tx, input), null);
+        : null;
+      // DX-051: la moneda del plan bloqueado, la de la base del abono.
+      const planCurrency = input.openingBalanceId
+        ? null
+        : await this.lockPlan(tx, input);
       // Sede del request si el cliente la fijó (X-Location-Id, ya validada
       // contra esta clínica); si no, la de escritura de la sesión: la sede por
       // defecto sin restricción (lo de siempre) o la primera permitida
@@ -431,6 +440,30 @@ export class PrismaPaymentRepository implements PaymentRepository {
         );
       }
       const entity = mapToEntity({ ...created, receipt: null }, timeZone);
+      // DX-051 (R4): la base del abono nace con él si se convirtió a la moneda
+      // que el plan tiene con su fila bloqueada y con el día civil con que se
+      // guardó; el plan queda encolado y el reparto corre tras el COMMIT. Si
+      // no, el barrido la crea después (R9.3).
+      const planAmount = input.planAmount;
+      if (
+        planAmount &&
+        created.treatmentPlanId &&
+        planAmount.planCurrency === planCurrency &&
+        planAmount.rateDate === entity.paidOn
+      ) {
+        await tx.paymentPlanAmount.create({
+          data: {
+            paymentId: created.id,
+            tenantId,
+            treatmentPlanId: created.treatmentPlanId,
+            amount: planAmount.amount,
+            currency: planAmount.planCurrency,
+            rateDate: new Date(`${planAmount.rateDate}T00:00:00.000Z`),
+          },
+          select: { paymentId: true },
+        });
+        await enqueuePlanRebalance(tx, tenantId, created.treatmentPlanId);
+      }
       // DX-136: el recibo numerado nace en la MISMA transacción que el abono.
       const receiptNumber = await issuePaymentReceipt(
         tx,
@@ -461,16 +494,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
    * compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
    * comprobación y el alta (la FK compuesta no mira `deletedAt`). En el MISMO
    * SELECT se lee el estado: un plan rechazado o cancelado no admite abonos
-   * (409). COMPLETED sí.
+   * (409). COMPLETED sí. Devuelve la moneda del plan (DX-051: la de la base).
    */
   private async lockPlan(
     tx: Prisma.TransactionClient,
     input: CreatePaymentRepoInput,
-  ): Promise<void> {
+  ): Promise<string> {
     const [plan] = await tx.$queryRaw<
-      { id: string; status: TreatmentPlanStatus }[]
+      { id: string; status: TreatmentPlanStatus; currency: string }[]
     >`
-      SELECT "id", "status" FROM "treatment_plans"
+      SELECT "id", "status", "currency" FROM "treatment_plans"
        WHERE "id" = ${input.treatmentPlanId}::uuid
          AND "patientId" = ${input.patientId}::uuid
          AND "deletedAt" IS NULL
@@ -481,6 +514,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     if (!isPlanBillable(plan.status)) {
       throw new ConflictException(notBillableMessage(plan.status));
     }
+    return plan.currency;
   }
 
   /**
@@ -681,6 +715,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
     // THIS call actually voided the row. The audit (who/when/why, SEC-013)
     // goes in the SAME statement, so a voided row never lacks it.
     return this.prisma.runWithTenant(async (tx) => {
+      const tenantId = this.requireTenantId();
+      // DX-051 (R12, pre-flight C1): plan FOR SHARE, la fila del abono, su
+      // base FOR UPDATE y los ítems de sus imputaciones ANTES de anularlo. Un reparto
+      // concurrente o espera a esta anulación (y al leer la liveness tras su
+      // bloqueo ya lo ve anulado) o termina antes (y el DELETE de abajo borra
+      // lo que imputó).
+      const planId = await lockPaymentAllocations(tx, tenantId, id);
       const result = await tx.payment.updateMany({
         where: { id, deletedAt: null },
         data: {
@@ -691,6 +732,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         },
       });
       if (result.count === 0) return false;
+      if (planId) await removeVoidedAllocations(tx, tenantId, id, planId);
       // DX-027: si contaba en una caja ya cerrada, la anulación es un ajuste
       // en la caja abierta de quien anula (la cerrada no cambia).
       await recordVoidAdjustment(tx, {

@@ -30,6 +30,7 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import {
   isTenantPayload,
   type JwtPayload,
@@ -66,7 +67,8 @@ function actorOf(req: { user: JwtPayload }): FeeActor {
 @ApiTags('cancellation-fees')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantContextInterceptor)
+// DX-051: detrás del tenant, en el MISMO decorador (corre en su contexto).
+@UseInterceptors(TenantContextInterceptor, DrainAllocationRebalancesInterceptor)
 @Roles(ClinicRole.ADMIN, ClinicRole.RECEPTION)
 @RolesDeniedMessage(CANCELLATION_FEE_MESSAGES.forbidden)
 @Controller('appointments/:id/cancellation-fee')

@@ -36,6 +36,7 @@ import { PriceQuoteController } from '../treatment-plans/presentation/price-quot
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
+import { PaymentAllocationsController } from '../payments/presentation/payment-allocations.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
@@ -770,6 +771,21 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
   },
+  // DX-051: ver y reasignar la imputación de un abono a los ítems del plan.
+  'GET /payments/:id/allocations': {
+    action: 'VIEW',
+    resource: 'PAYMENT',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'payment', param: 'id' },
+  },
+  'PUT /payments/:id/allocations': {
+    action: 'UPDATE',
+    resource: 'PAYMENT_ALLOCATION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'payment', param: 'id' },
+    reason: 'PAYMENT_REALLOCATED',
+    allocation: true,
+  },
   // DX-136: ver, reimprimir y enviar el recibo de caja.
   'GET /payments/:id/receipt': {
     action: 'VIEW',
@@ -1178,6 +1194,7 @@ const CONTROLLERS: Type[] = [
   PriceQuoteController,
   PaymentsController,
   PaymentReceiptsController,
+  PaymentAllocationsController,
   PaymentPlansController,
   AccountStatementController,
   ReceivablesController,

@@ -1,3 +1,16 @@
+/**
+ * El proveedor no pudo dar las tasas del día (sin credencial, sin red, HTTP
+ * distinto de 2xx o respuesta con otra forma). Es el único fallo del proveedor
+ * que los llamadores pueden tratar como «sin tasa»; cualquier otro error es un
+ * fallo real y se propaga.
+ */
+export class ExchangeRateUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExchangeRateUnavailableError';
+  }
+}
+
 export const EXCHANGE_RATE_PROVIDER = Symbol('EXCHANGE_RATE_PROVIDER');
 
 /**

@@ -97,6 +97,11 @@ async function cleanup(seeds: Seeded[]): Promise<void> {
   const where = { tenantId: { in: seeds.map((s) => s.tenantId) } };
   await raw.installment.deleteMany({ where });
   await raw.paymentPlan.deleteMany({ where });
+  // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+  // (borrar las imputaciones deja su movimiento: van antes).
+  await raw.paymentAllocation.deleteMany({ where });
+  await raw.paymentAllocationMovement.deleteMany({ where });
+  await raw.paymentPlanAmount.deleteMany({ where });
   await raw.payment.deleteMany({ where });
   await raw.treatmentPlanAcceptance.deleteMany({ where });
   await raw.treatmentPlanItem.deleteMany({ where });

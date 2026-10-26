@@ -88,12 +88,15 @@ import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
+import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
+import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
 } from '../src/modules/collections/application/use-cases/collections.use-cases';
+import { ReplacePaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/replace-payment-allocations.use-case';
 import { VoidPaymentUseCase } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 import {
   CloseCashSessionUseCase,
@@ -738,6 +741,10 @@ class DemoSeeder {
         ownerId,
       ),
     );
+
+    // DX-051 al final: cualquier paso anterior que cobre o cambie ítems deja
+    // su plan en la cola, y la demo termina con la cola vacía.
+    await this.allocatePayments(tenantId, ownerId);
 
     return this.requestConfirmations(tenantId, receptionId);
   }
@@ -2044,6 +2051,48 @@ class DemoSeeder {
         );
       });
     }
+  }
+
+  /**
+   * DX-051: el seed llama a los casos de uso fuera de HTTP, sin el interceptor
+   * que drena la cola; aquí se reparte lo cobrado y un ADMIN fija un abono a
+   * mano (el plan de la rehabilitación del 36), para que la demo enseñe
+   * imputaciones automáticas, una fijada y un plan con importe sin imputar.
+   */
+  private async allocatePayments(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<void> {
+    await this.inTenant(tenantId, undefined, async () => {
+      await this.use(PlanAllocationRebalancer).drainPending({ actorId: null });
+      const pinned = await this.prisma.runWithTenant((tx) =>
+        tx.payment.findFirstOrThrow({
+          where: {
+            deletedAt: null,
+            plan: { notes: DEMO_PLANS[0].notes },
+          },
+          orderBy: { paidAt: 'desc' },
+          select: { id: true },
+        }),
+      );
+      const current = await this.use(GetPaymentAllocationsUseCase).execute(
+        pinned.id,
+      );
+      await this.use(ReplacePaymentAllocationsUseCase).execute(
+        pinned.id,
+        {
+          mode: 'MANUAL',
+          expectedVersion: current.version,
+          allocations: current.allocations.map(
+            ({ treatmentPlanItemId, amount }) => ({
+              treatmentPlanItemId,
+              amount,
+            }),
+          ),
+        },
+        ownerId,
+      );
+    });
   }
 
   private async createPlansAndPayments(

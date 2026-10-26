@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
@@ -27,6 +28,8 @@ import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/us
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
+import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { errorName, paymentBaseAmount } from '../payment-in-plan-currency';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -103,6 +106,8 @@ export const UUID_RE =
 
 @Injectable()
 export class RecordPaymentUseCase {
+  private readonly logger = new Logger('PaymentAllocations');
+
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly repo: PaymentRepository,
@@ -117,6 +122,8 @@ export class RecordPaymentUseCase {
     // DX-136: saldo del plan tras el abono, para la foto del recibo que el
     // repositorio emite en la misma transacción.
     private readonly receiptBalance: ReceiptPlanBalanceCalculator,
+    // DX-051: la base del abono (en la moneda del plan) para la imputación.
+    private readonly convertAmount: ConvertAmountUseCase,
   ) {}
 
   /**
@@ -179,14 +186,25 @@ export class RecordPaymentUseCase {
       throw new ConflictException(notBillableMessage(plan.status));
     }
 
-    // DX-136: fuera de la transacción del abono (la tasa puede pedir un
-    // proveedor externo). Nunca falla: sin saldo, el recibo sale sin él.
-    const receiptPlanBalance = await this.receiptBalance.afterPayment({
-      treatmentPlanId,
+    // DX-136 y DX-051 (R4): fuera de la transacción del abono (la tasa puede
+    // pedir un proveedor externo), una sola conversión para el saldo del recibo
+    // y la base. Nunca falla: sin tasa o con cualquier fallo, el recibo sale sin
+    // saldo y el abono sin imputar hasta que el barrido le cree la base (R9.3).
+    const paidOn = await this.repo.resolvePaidOn(paidAt);
+    const converted = await this.convertToPlan({
       amount: input.amount,
       currency,
-      paidOn: await this.repo.resolvePaidOn(paidAt),
+      planCurrency: plan.currency,
+      paidOn,
     });
+    const receiptPlanBalance = await this.receiptBalance.afterPayment(
+      treatmentPlanId,
+      converted,
+    );
+    const planAmount =
+      converted === null
+        ? null
+        : { planCurrency: plan.currency, amount: converted, rateDate: paidOn };
 
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
@@ -201,8 +219,27 @@ export class RecordPaymentUseCase {
       idempotencyKey: key,
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       receiptPlanBalance,
+      planAmount,
     };
 
     return this.repo.create(repoInput);
+  }
+
+  /** El abono en la moneda del plan con la tasa de su `paidOn` (R3), o `null`. */
+  private async convertToPlan(payment: {
+    amount: number;
+    currency: string;
+    planCurrency: string;
+    paidOn: string;
+  }): Promise<number | null> {
+    try {
+      return await paymentBaseAmount(this.convertAmount, payment);
+    } catch (error) {
+      this.logger.warn({
+        event: 'payments.allocation_base_unavailable',
+        error: errorName(error),
+      });
+      return null;
+    }
   }
 }

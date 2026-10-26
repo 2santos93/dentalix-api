@@ -3285,6 +3285,97 @@ la prescripción: no sustituye el juicio clínico.
   con NULL y su hash se sigue calculando con el formato v1 (test de regresión
   con el valor de DX-013 en `prescription-hash.spec.ts`).
 
+## Imputación de abonos a ítems (DX-051)
+
+Cada abono a un plan se reparte entre los ítems `DONE` y `ACCEPTED` del plan
+(primero los realizados, el abono más antiguo primero; nunca a `PROPOSED`) y
+`GET /treatment-plans/:id/balance` devuelve el cobrado y el pendiente de cada
+ítem. Un ADMIN puede fijar un abono a mano con `PUT /payments/:id/allocations`.
+Los totales (saldo del plan, estado de cuenta, caja, cartera, recibos) **no**
+leen las imputaciones: se calculan como antes.
+
+- **Tablas** (RLS FORCE las cuatro): `payment_plan_amounts` (la base del abono
+  en la moneda del plan, convertida con la tasa de su día), `payment_allocations`
+  (la imputación vigente), `plan_allocation_rebalance_requests` (cola de
+  solo-inserción de planes por repartir) y `payment_allocation_movements`
+  (historial por trigger con su causa: `AUTO`, `MANUAL`, `RELEASE`, `VOID`).
+- **Reparto**: lo encola la escritura que lo provoca (un trigger o el alta del
+  abono) y lo hace `DrainAllocationRebalancesInterceptor` al terminar la
+  petición, o el barrido `payment-allocations.sweep` (cada minuto, clínica por
+  clínica: crea las bases que faltan y drena la cola). Un abono sin tasa no se
+  imputa y cuenta en `unconvertedPaymentsCount` hasta que la haya.
+
+### Despliegue: backfill de los abonos anteriores
+
+Los abonos cobrados antes de esta función no tienen base ni imputación. Tras
+`prisma migrate deploy`, una vez por entorno:
+
+```bash
+npm run allocations:backfill -- --dry-run              # cuenta, no escribe
+npm run allocations:backfill                           # todas las clínicas
+npm run allocations:backfill -- --tenant <uuid>        # una clínica
+```
+
+- **Córrelo solo cuando ya no quede ninguna réplica anterior a DX-051.** Una
+  réplica antigua que anule un abono no borra sus imputaciones (R12 vive en el
+  código nuevo). El backfill las limpia (`voidedCleaned`, con los bloqueos y la
+  causa `VOID` de la anulación) y reparte de nuevo lo liberado, pero solo si se
+  corre después de la última réplica antigua: despliega con parada única o
+  retira las viejas antes. No tiene efecto con `--dry-run`.
+- El barrido de cada minuto también crea bases (hasta 50 abonos por clínica y
+  pasada), así que el backfill solo acelera ese trabajo y lo cubre de una vez.
+- Corre con el rol de la app (`DATABASE_URL`, RLS FORCE), clínica por clínica,
+  nunca como superusuario ni con la conexión del owner.
+- Por clínica crea la base de cada abono vivo a un plan sin base (`manual =
+  false`) y reparte cada plan con la misma regla automática. Un abono sin tasa
+  se cuenta como `withoutRate` y no frena nada: el barrido le crea la base en
+  cuanto la haya.
+- **Idempotente y re-ejecutable**: no recrea bases ni toca imputaciones (el
+  reparto solo llena sobrantes, y respeta los abonos fijados a mano). Una
+  segunda pasada informa `basesCreated: 0` y `allocatedCents: 0`.
+- Imprime una línea JSON por clínica, solo con números: `basesCreated`,
+  `withoutRate`, `plansRebalanced`, `allocatedCents` (y `voidedCleaned`). Con `--dry-run`,
+  `basesCreated` son las que se crearían y el reparto solo se calcula sobre las
+  bases que ya existen (las que aún no existen no se imputan hasta la pasada
+  real).
+- Convertir puede **escribir en la caché `exchange_rate_snapshots`** (una
+  llamada al proveedor por fecha que falte) aun en `--dry-run`. Para abonos de
+  fechas antiguas conviene precargar las tasas antes de la pasada real, o la
+  primera tardará lo que tarde el proveedor.
+- `npm run seed:demo` ya deja la demo imputada (un abono fijado a mano y un
+  plan con importe sin imputar) y con la cola vacía.
+
+### Migraciones de datos futuras
+
+Un trigger de `treatment_plan_items` (`price`, `discount`, `status`,
+`deletedAt`, `completedAt`) y otro de `treatment_plans` (`status`, `deletedAt`)
+liberan imputaciones y encolan el plan. Si fallan sin tenant en la sesión
+(`insufficient_privilege`, «Falta el tenant de la sesión (DX-051)»), es a
+propósito: con RLS FORCE y sin clínica fijada la liberación borraría 0 filas en
+silencio. Una migración del owner que cambie esas columnas debe **fijar la
+clínica** en su transacción, clínica por clínica
+(`SELECT set_config('app.current_tenant', '<uuid>', true)`); es la única
+opción probada (`test/owner-nosu/payment-allocations-guc.owner-spec.ts`). **No
+basta con quitar FORCE de `payment_allocations`**: los mismos triggers insertan
+además en `plan_allocation_rebalance_requests` y en
+`payment_allocation_movements`, que siguen con FORCE, y la migración fallaría
+con «new row violates row-level security policy». Quitar FORCE de las tres
+tablas (y restaurarlo después, con `npm run db:check-force`) no está probado;
+mejor fijar la clínica. Esta guía sustituye al comentario antiguo de la
+migración `20261026100300_dx051_payment_allocations` («una migración con NO
+FORCE no se ve afectado»), que quedó incompleto y no se corrige en el fichero
+porque la migración ya está aplicada.
+
+### Coste conocido del barrido
+
+El barrido busca los abonos sin base con un recorrido secuencial de
+`payments` (unos 13 ms con 20 000 abonos vivos en una clínica). Un índice no
+lo arregla: con pocas bases por crear, la búsqueda recorre igual todas las
+filas. El arreglo real es una lista de trabajo (un marcador de «base
+pendiente» o una cola alimentada al saltar una base). Es un seguimiento
+conocido, no un defecto: abordarlo al llegar a unos **200 000 abonos por
+clínica** o si el p95 del barrido pasa de **1 s**.
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y

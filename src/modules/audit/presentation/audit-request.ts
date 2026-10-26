@@ -203,6 +203,33 @@ function coverageOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/**
+ * DX-051: moneda del plan, modo y líneas antes y después de una reasignación,
+ * de la respuesta del PUT (que se lee tras el reparto).
+ */
+function allocationOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    planCurrency?: unknown;
+    manual?: unknown;
+    allocations?: unknown;
+    previous?: unknown;
+  };
+  const lines = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map((l: { treatmentPlanItemId?: unknown; amount?: unknown }) => ({
+          itemId: l?.treatmentPlanItemId,
+          amount: l?.amount,
+        }))
+      : null;
+  return {
+    currency: b.planCurrency,
+    mode: b.manual === true ? 'MANUAL' : 'AUTO',
+    before: lines(b.previous),
+    after: lines(b.allocations),
+  };
+}
+
 /** Nombres (nunca valores) de los campos de primer nivel del cuerpo. */
 function bodyFields(body: unknown): string[] {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
@@ -259,6 +286,7 @@ export function buildAuditDraft(
         ? { prescriptionSafety: prescriptionSafetyOf(responseBody) }
         : {}),
       ...(options.coverage ? { coverage: coverageOf(responseBody) } : {}),
+      ...(options.allocation ? { allocation: allocationOf(responseBody) } : {}),
     }),
   };
 }

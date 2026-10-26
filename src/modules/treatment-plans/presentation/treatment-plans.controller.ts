@@ -70,6 +70,7 @@ import {
   JwtPayload,
 } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   auditRequestContext,
@@ -118,7 +119,8 @@ function actorRole(req: AuthenticatedRequest) {
 @ApiTags('treatment-plans')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantContextInterceptor)
+// DX-051: detrás del tenant, en el MISMO decorador (corre en su contexto).
+@UseInterceptors(TenantContextInterceptor, DrainAllocationRebalancesInterceptor)
 @Roles(...CLINICAL_ROLES)
 @Controller()
 export class TreatmentPlansController {

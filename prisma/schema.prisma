@@ -95,6 +95,11 @@ model Tenant {
   expenseCategories         ExpenseCategory[]
   expenses                  Expense[]
   expensePayments           ExpensePayment[]
+  // DX-051: imputación de abonos a ítems del plan.
+  paymentPlanAmounts        PaymentPlanAmount[]
+  paymentAllocations        PaymentAllocation[]
+  planAllocationRebalanceRequests PlanAllocationRebalanceRequest[]
+  paymentAllocationMovements PaymentAllocationMovement[]
   // DX-262: hoja de saldos del importador y saldos migrados.
   patientImportBalanceRows  PatientImportBalanceRow[]
   openingBalances           OpeningBalance[]
@@ -1524,6 +1529,9 @@ model TreatmentPlan {
   consents           PatientConsent[]
   // Aceptación firmada del presupuesto (DX-012): como mucho una por plan.
   acceptance         TreatmentPlanAcceptance?
+  // DX-051: imputaciones a sus ítems y cola de repartos pendientes.
+  allocations        PaymentAllocation[]
+  allocationRebalanceRequests PlanAllocationRebalanceRequest[]
 
   // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
   // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
@@ -1619,8 +1627,13 @@ model TreatmentPlanItem {
   agreement             Agreement?        @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
   // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
   pricingLocation       Location?         @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
+  // DX-051: imputaciones de abonos a este ítem y su historial.
+  allocations           PaymentAllocation[]
+  allocationMovements   PaymentAllocationMovement[]
 
   @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
+  // DX-051: destino de las FK de la imputación (el ítem es del plan del abono).
+  @@unique([tenantId, id, planId], map: "treatment_plan_items_tenant_id_plan_key")
   @@index([tenantId, planId])
   @@index([tenantId, agreementId], map: "treatment_plan_items_tenant_agreement_idx")
   @@index([tenantId, pricingLocationId], map: "treatment_plan_items_tenant_pricing_location_idx")
@@ -1802,6 +1815,8 @@ model Currency {
   // DX-279: importe sugerido de la política de cancelación en esa moneda.
   cancellationPolicyVersions CancellationPolicyVersion[]
   cancellationFees           CancellationFee[]
+  // DX-051: bases de los abonos en la moneda del plan.
+  paymentPlanAmounts         PaymentPlanAmount[]
 
   @@map("currencies")
 }
@@ -1939,6 +1954,13 @@ model Payment {
   cashSession     CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "payments_cash_session_fkey")
   cashAdjustments CashSessionAdjustment[]
 
+  // DX-051: base en la moneda del plan (como mucho una, PK "paymentId";
+  // Prisma la ve como lista porque la FK compuesta no apunta a un único de la
+  // base), imputaciones vivas e historial.
+  planAmounts         PaymentPlanAmount[]
+  allocations         PaymentAllocation[]
+  allocationMovements PaymentAllocationMovement[]
+
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
   // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
@@ -1947,6 +1969,9 @@ model Payment {
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
+  // DX-051: destino de las FK de la base y de la imputación (solo abonos a
+  // planes; CONCURRENTLY en 20261026100100).
+  @@unique([tenantId, id, treatmentPlanId], map: "payments_tenant_id_plan_key")
   // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
   //   payments_tenant_opening_balance_idx ("tenantId", "openingBalanceId")
   //     WHERE "openingBalanceId" IS NOT NULL
@@ -2676,6 +2701,8 @@ enum AuditResourceType {
   EXPENSE
   // DX-279: nueva versión de la política de cancelación de una sede.
   CANCELLATION_POLICY
+  // DX-051: reasignación manual de la imputación de un abono (ADMIN).
+  PAYMENT_ALLOCATION
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4612,4 +4639,133 @@ model CancellationFee {
   @@index([tenantId, locationId], map: "cancellation_fees_tenant_location_idx")
   @@index([createdById], map: "cancellation_fees_created_by_idx")
   @@map("cancellation_fees")
+}
+
+/// DX-051: origen de una imputación: el reparto automático o un ADMIN.
+enum PaymentAllocationSource {
+  AUTO
+  MANUAL
+}
+
+/// Base de un abono a un plan (DX-051): el abono convertido UNA vez a la moneda
+/// del plan con la tasa de su `paidOn`. Sin fila = abono aún sin tasa (no se
+/// imputa). La base no cambia; solo `manual` (abono fijado a mano por un
+/// ADMIN: el reparto automático no lo usa como donante). RLS FORCE por tenant.
+///
+/// Solo SQL: CHECK `amount > 0`, triggers `payment_plan_amounts_guard` (solo
+/// `manual` cambia; sin DELETE salvo superusuario) y
+/// `payment_plan_amounts_server_created_at`; GRANT UPDATE solo de `manual`.
+model PaymentPlanAmount {
+  paymentId       String   @id @db.Uuid
+  tenantId        String   @db.Uuid
+  treatmentPlanId String   @db.Uuid
+  /// En la moneda del plan.
+  amount          Decimal  @db.Decimal(14, 2)
+  /// La moneda del plan al crear la base; el guard de imputaciones exige que
+  /// siga siéndolo.
+  currency        String
+  /// El `paidOn` con que se convirtió.
+  rateDate        DateTime @db.Date
+  manual          Boolean  @default(false)
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt       DateTime @default(now())
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment     Payment             @relation(fields: [tenantId, paymentId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "payment_plan_amounts_payment_fkey")
+  currencyRef Currency            @relation(fields: [currency], references: [code], map: "payment_plan_amounts_currency_fkey")
+  allocations PaymentAllocation[]
+
+  /// Destino de la FK de `payment_allocations`.
+  @@unique([tenantId, paymentId], map: "payment_plan_amounts_tenant_payment_key")
+  @@index([tenantId, treatmentPlanId], map: "payment_plan_amounts_tenant_plan_idx")
+  @@index([currency], map: "payment_plan_amounts_currency_idx")
+  @@map("payment_plan_amounts")
+}
+
+/// Imputación VIVA de un abono a un ítem de su plan (DX-051), en la moneda del
+/// plan. Anular, reasignar o liberar borra o reduce filas; el historial queda
+/// en `payment_allocation_movements`. RLS FORCE por tenant.
+///
+/// Solo SQL: CHECK `amount > 0` (payment_allocations_amount_check), triggers
+/// `payment_allocations_guard` (un UPDATE solo cambia `amount`; Σ de un ítem <=
+/// su facturable, Σ de un abono <= su base, abono vivo, moneda vigente del
+/// plan; pone `updatedAt` en UTC), `payment_allocations_movements` y
+/// `payment_allocations_server_created_at`; GRANT UPDATE solo de `amount` y
+/// `updatedAt`. Lo liberan los triggers `treatment_plan_items_allocations` y
+/// `treatment_plans_allocations` (función `dx_release_item_allocations`).
+model PaymentAllocation {
+  id                  String                  @id @default(uuid(7)) @db.Uuid
+  tenantId            String                  @db.Uuid
+  paymentId           String                  @db.Uuid
+  treatmentPlanId     String                  @db.Uuid
+  treatmentPlanItemId String                  @db.Uuid
+  amount              Decimal                 @db.Decimal(14, 2)
+  source              PaymentAllocationSource
+  /// Puntero suave a User: autor del abono o quien dispara el reparto (null en
+  /// el backfill y en el barrido); el ADMIN en MANUAL.
+  createdById         String?                 @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt           DateTime                @default(now())
+  /// La pone el guard de la BD en cada UPDATE, en UTC (sin @updatedAt).
+  updatedAt           DateTime                @default(now())
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  base    PaymentPlanAmount @relation(fields: [tenantId, paymentId], references: [tenantId, paymentId], onDelete: Restrict, onUpdate: Restrict, map: "payment_allocations_base_fkey")
+  payment Payment           @relation(fields: [tenantId, paymentId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "payment_allocations_payment_fkey")
+  item    TreatmentPlanItem @relation(fields: [tenantId, treatmentPlanItemId, treatmentPlanId], references: [tenantId, id, planId], onDelete: Restrict, onUpdate: Restrict, map: "payment_allocations_item_fkey")
+  plan    TreatmentPlan     @relation(fields: [tenantId, treatmentPlanId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "payment_allocations_plan_fkey")
+
+  @@unique([tenantId, paymentId, treatmentPlanItemId], map: "payment_allocations_tenant_payment_item_key")
+  @@index([tenantId, treatmentPlanItemId], map: "payment_allocations_tenant_item_idx")
+  @@index([tenantId, treatmentPlanId], map: "payment_allocations_tenant_plan_idx")
+  @@map("payment_allocations")
+}
+
+/// Plan con reparto de sobrantes pendiente (DX-051). Cola de SOLO-INSERCIÓN:
+/// `INSERT` simple, sin ON CONFLICT; varias filas por plan son normales. El
+/// reparto borra solo los ids que leyó. Cae con su plan (ON DELETE CASCADE).
+/// RLS FORCE por tenant. Solo SQL: trigger
+/// `plan_allocation_rebalance_requests_server_created_at` (UTC).
+model PlanAllocationRebalanceRequest {
+  id              BigInt   @id @default(autoincrement())
+  tenantId        String   @db.Uuid
+  treatmentPlanId String   @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  requestedAt     DateTime @default(now())
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan   TreatmentPlan @relation(fields: [tenantId, treatmentPlanId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "plan_allocation_rebalance_requests_plan_fkey")
+
+  @@index([tenantId, treatmentPlanId], map: "plan_allocation_rebalance_requests_tenant_plan_idx")
+  @@map("plan_allocation_rebalance_requests")
+}
+
+/// Historial de la imputación (DX-051), de SOLO-INSERCIÓN: cada cambio de una
+/// fila de `payment_allocations` deja su delta en céntimos y su causa (`AUTO`,
+/// `MANUAL`, `RELEASE`, `VOID`; GUC local `app.allocation_cause`). Lo escribe
+/// el trigger `payment_allocations_movements`. Permite reconstruir lo imputado
+/// a un ítem en cualquier fecha (DX-018). RLS FORCE por tenant.
+///
+/// Solo SQL: CHECK `deltaCents <> 0` y de `cause`; id por defecto
+/// `dx051_uuid_v7()`; triggers `payment_allocation_movements_append_only`
+/// (DELETE solo superusuario) y `payment_allocation_movements_server_created_at`.
+model PaymentAllocationMovement {
+  id                  String   @id @default(dbgenerated("dx051_uuid_v7()")) @db.Uuid
+  tenantId            String   @db.Uuid
+  paymentId           String   @db.Uuid
+  treatmentPlanId     String   @db.Uuid
+  treatmentPlanItemId String   @db.Uuid
+  deltaCents          BigInt
+  /// AUTO | MANUAL | RELEASE | VOID (CHECK).
+  cause               String
+  /// La pone el servidor de BD (trigger), en UTC.
+  at                  DateTime @default(now())
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment Payment           @relation(fields: [tenantId, paymentId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "payment_allocation_movements_payment_fkey")
+  item    TreatmentPlanItem @relation(fields: [tenantId, treatmentPlanItemId, treatmentPlanId], references: [tenantId, id, planId], onDelete: Restrict, onUpdate: Restrict, map: "payment_allocation_movements_item_fkey")
+
+  @@index([tenantId, paymentId, treatmentPlanId], map: "payment_allocation_movements_tenant_payment_idx")
+  @@index([tenantId, treatmentPlanItemId, treatmentPlanId, at], map: "payment_allocation_movements_tenant_item_at_idx")
+  @@map("payment_allocation_movements")
 }

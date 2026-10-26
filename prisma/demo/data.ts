@@ -1637,6 +1637,9 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     ],
     payments: [
       { daysAgo: 7, amount: 230000, method: CARD, location: 'principal' },
+      // DX-051: el paciente pagó 60000 de más sobre lo facturable (500000):
+      // ese importe queda «sin imputar» en la demo.
+      { daysAgo: 2, amount: 330000, method: CASH, location: 'principal' },
     ],
   },
   {

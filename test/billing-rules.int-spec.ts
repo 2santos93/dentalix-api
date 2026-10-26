@@ -15,6 +15,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { PrismaPlanQuoteRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
+import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
 import { RejectTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/reject-treatment-plan.use-case';
@@ -80,12 +81,14 @@ const balance = new GetPlanBalanceUseCase(
   paymentRepo,
   getPlan,
   identityConvert,
+  new PrismaPlanAllocationRepository(prisma, tenantContext),
 );
 const recordPayment = new RecordPaymentUseCase(
   paymentRepo,
   getPlan,
   whitelist,
-  new ReceiptPlanBalanceCalculator(balance, identityConvert),
+  new ReceiptPlanBalanceCalculator(balance),
+  identityConvert,
 );
 
 const PNG =
@@ -109,6 +112,11 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
       select: { id: true },
     });
     const where = { tenantId: { in: tenants.map((t) => t.id) } };
+    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+    // (borrar las imputaciones deja su movimiento: van antes).
+    await owner.paymentAllocation.deleteMany({ where });
+    await owner.paymentAllocationMovement.deleteMany({ where });
+    await owner.paymentPlanAmount.deleteMany({ where });
     await owner.payment.deleteMany({ where });
     await owner.toothRecord.deleteMany({ where });
     await owner.installment.deleteMany({ where });
@@ -264,6 +272,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
             currency: 'USD',
             paidAt: NOW,
             receiptPlanBalance: null,
+            planAmount: null,
           }),
         ),
       ).rejects.toMatchObject({ status: 409 });

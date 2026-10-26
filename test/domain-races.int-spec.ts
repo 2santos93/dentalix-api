@@ -57,6 +57,11 @@ async function cleanup(tenantId: string): Promise<void> {
     where,
     select: { userId: true },
   });
+  // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+  // (borrar las imputaciones deja su movimiento: van antes).
+  await raw.paymentAllocation.deleteMany({ where });
+  await raw.paymentAllocationMovement.deleteMany({ where });
+  await raw.paymentPlanAmount.deleteMany({ where });
   await raw.payment.deleteMany({ where });
   await raw.treatmentPlanItem.deleteMany({ where });
   await raw.treatmentPlan.deleteMany({ where });
@@ -245,6 +250,7 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
           paidAt: new Date('2026-10-01T00:00:00.000Z'),
           idempotencyKey,
           receiptPlanBalance: null,
+          planAmount: null,
         }),
       );
     }

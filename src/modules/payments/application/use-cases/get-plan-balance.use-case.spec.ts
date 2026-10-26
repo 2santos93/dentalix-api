@@ -1,8 +1,13 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
+import type {
+  PlanBalanceSnapshot,
+  PlanAllocationRepository,
+} from '../../domain/ports/plan-allocation-repository.port';
 import { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import { ExchangeRateUnavailableError } from '../../../exchange/domain/ports/exchange-rate-provider.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
@@ -55,6 +60,8 @@ class FakeConvertAmountUseCase {
    * generic, non-currency error -- simulates an infra/DB failure that must
    * PROPAGATE rather than be swallowed as a skipped payment. */
   public readonly infraFailingFrom = new Set<string>();
+  /** Currencies (as `from`) whose rates the provider cannot give (DX-051). */
+  public readonly rateUnavailableFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
   private readonly unitsPerTarget: Record<string, number> = { COP: 4000 };
@@ -79,6 +86,9 @@ class FakeConvertAmountUseCase {
         new Error(`simulated infra failure converting ${input.from}`),
       );
     }
+    if (this.rateUnavailableFrom.has(input.from)) {
+      return Promise.reject(new ExchangeRateUnavailableError('sin proveedor'));
+    }
     if (this.failingFrom.has(input.from)) {
       return Promise.reject(
         new BadRequestException(`unsupported currency: ${input.from}`),
@@ -98,6 +108,13 @@ class FakeConvertAmountUseCase {
       input.amount !== 0 ? result / input.amount : 1 / unitsPerTo;
     return Promise.resolve({ ...input, result, rateUsed });
   }
+}
+
+class FakeAllocationRepository {
+  public snapshot: PlanBalanceSnapshot | null = null;
+  public readonly readPlanBalanceSnapshot = jest.fn(() =>
+    Promise.resolve(this.snapshot),
+  );
 }
 
 function makeItem(
@@ -165,12 +182,14 @@ describe('GetPlanBalanceUseCase', () => {
     const repo = new InMemoryPaymentRepository(timeZone);
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
     const fakeConvert = new FakeConvertAmountUseCase();
+    const allocations = new FakeAllocationRepository();
     const uc = new GetPlanBalanceUseCase(
       repo,
       fakeGetPlan as unknown as GetTreatmentPlanUseCase,
       fakeConvert as unknown as ConvertAmountUseCase,
+      allocations as unknown as PlanAllocationRepository,
     );
-    return { repo, fakeGetPlan, fakeConvert, uc };
+    return { repo, fakeGetPlan, fakeConvert, allocations, uc };
   }
 
   it('billable counts ONLY ACCEPTED and DONE items, never PROPOSED', async () => {
@@ -458,12 +477,29 @@ describe('GetPlanBalanceUseCase', () => {
     expect(result.paymentsCount).toBe(2);
   });
 
-  // IMP-4b narrowed catch: only the specific "unsupported currency"
-  // BadRequestException from ConvertAmountUseCase is safe to skip. ANY
-  // OTHER error (e.g. an infra/DB failure inside GetRatesForDateUseCase)
-  // must PROPAGATE -- silently swallowing it would corrupt `paid`/`balance`
-  // with no trace that anything went wrong.
-  it('propagates a non-currency conversion error instead of silently skipping the payment', async () => {
+  // DX-051: si el proveedor no puede dar la tasa (y no hay una guardada para
+  // esa fecha) el saldo no falla: el abono se omite como el de una moneda sin
+  // tasa. Solo ese fallo y «moneda sin tasa»; cualquier otro se propaga.
+  it('skips a payment whose rate the provider cannot give instead of failing the balance', async () => {
+    const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+    fakeConvert.rateUnavailableFrom.add('COP');
+    fakeGetPlan.plan = makePlan({
+      items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
+    });
+    repo.seedPayment({
+      treatmentPlanId: 'plan-1',
+      amount: 400000,
+      currency: 'COP',
+      paidAt: new Date('2026-03-05T00:00:00.000Z'),
+    });
+
+    const result = await uc.execute('plan-1');
+
+    expect(result.paid).toBe(0);
+    expect(result.paymentsCount).toBe(1);
+  });
+
+  it('propagates a generic conversion error instead of silently skipping the payment', async () => {
     const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
     fakeConvert.infraFailingFrom.add('COP');
     fakeGetPlan.plan = makePlan({
@@ -511,5 +547,273 @@ describe('GetPlanBalanceUseCase', () => {
       items: [makeItem({ price: 1000, status: TreatmentPlanItemStatus.DONE })],
     });
     expect((await uc.execute('plan-1')).billable).toBe(1000);
+  });
+
+  describe('executeWithItems (DX-051)', () => {
+    type Snap = Partial<PlanBalanceSnapshot>;
+    const item = (
+      id: string,
+      status: TreatmentPlanItemStatus,
+      price: number,
+      extra: Partial<PlanBalanceSnapshot['items'][number]> = {},
+    ) => ({
+      id,
+      toothNumber: '11',
+      procedureName: `Proc ${id}`,
+      status,
+      price,
+      discount: 0,
+      ...extra,
+    });
+    const pay = (id: string, amount: number) => ({
+      id,
+      amount,
+      currency: 'USD',
+      paidOn: '2026-03-05',
+    });
+    function seed(
+      allocations: FakeAllocationRepository,
+      over: Snap = {},
+    ): void {
+      allocations.snapshot = {
+        plan: { status: TreatmentPlanStatus.ACCEPTED, currency: 'USD' },
+        items: [
+          item('i1', TreatmentPlanItemStatus.DONE, 100),
+          item('i2', TreatmentPlanItemStatus.ACCEPTED, 50, { discount: 10 }),
+          item('i3', TreatmentPlanItemStatus.PROPOSED, 70, {
+            toothNumber: '22',
+          }),
+        ],
+        payments: [],
+        allocations: [],
+        bases: [],
+        ...over,
+      };
+    }
+
+    it('returns per-item figures with procedure name in plan order', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        // Ítems fuera de orden alfabético y de id: el orden es el del plan.
+        items: [
+          item('z', TreatmentPlanItemStatus.ACCEPTED, 50, {
+            discount: 10,
+            procedureName: 'Endodoncia',
+          }),
+          item('a', TreatmentPlanItemStatus.DONE, 100, {
+            procedureName: 'Resina',
+          }),
+          item('m', TreatmentPlanItemStatus.PROPOSED, 70, {
+            toothNumber: '22',
+            procedureName: 'Corona',
+          }),
+        ],
+        payments: [pay('p1', 120)],
+        bases: [{ paymentId: 'p1', amount: 120, manual: false }],
+        allocations: [
+          { paymentId: 'p1', itemId: 'a', amount: 100 },
+          { paymentId: 'p1', itemId: 'z', amount: 20 },
+        ],
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.items).toEqual([
+        {
+          itemId: 'z',
+          toothNumber: '11',
+          procedureName: 'Endodoncia',
+          status: 'ACCEPTED',
+          billable: 40,
+          paid: 20,
+          balance: 20,
+        },
+        {
+          itemId: 'a',
+          toothNumber: '11',
+          procedureName: 'Resina',
+          status: 'DONE',
+          billable: 100,
+          paid: 100,
+          balance: 0,
+        },
+        {
+          itemId: 'm',
+          toothNumber: '22',
+          procedureName: 'Corona',
+          status: 'PROPOSED',
+          billable: 0,
+          paid: 0,
+          balance: 0,
+        },
+      ]);
+      expect(result).toMatchObject({ billable: 140, paid: 120, balance: 20 });
+    });
+
+    it('PROPOSED items report zeros', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations);
+
+      const proposed = (await uc.executeWithItems('plan-1')).items[2];
+
+      expect(proposed).toMatchObject({ billable: 0, paid: 0, balance: 0 });
+    });
+
+    it('non-billable plan reports zero billable items and everything unallocated', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        plan: { status: TreatmentPlanStatus.CANCELLED, currency: 'USD' },
+        payments: [pay('p1', 80)],
+        bases: [{ paymentId: 'p1', amount: 80, manual: false }],
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.items.every((i) => i.billable === 0)).toBe(true);
+      expect(result).toMatchObject({ allocated: 0, unallocated: 80 });
+    });
+
+    it('unallocated sums payment surpluses', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        payments: [pay('a', 100), pay('b', 60)],
+        bases: [
+          { paymentId: 'a', amount: 100, manual: false },
+          { paymentId: 'b', amount: 60, manual: false },
+        ],
+        allocations: [
+          { paymentId: 'a', itemId: 'i1', amount: 90 },
+          { paymentId: 'b', itemId: 'i2', amount: 40 },
+        ],
+      });
+
+      expect(await uc.executeWithItems('plan-1')).toMatchObject({
+        allocated: 130,
+        unallocated: 30,
+      });
+    });
+
+    it('invariant: sum of item paid plus unallocated equals paid', async () => {
+      const { allocations, uc, fakeConvert } = makeUseCase();
+      fakeConvert.setRate('COP', 4000);
+      // Abono en COP convertido en vivo: 400000 COP = 100 USD = su base.
+      seed(allocations, {
+        payments: [
+          { id: 'a', amount: 400000, currency: 'COP', paidOn: '2026-03-05' },
+          pay('b', 59.9),
+        ],
+        bases: [
+          { paymentId: 'a', amount: 100, manual: false },
+          { paymentId: 'b', amount: 59.9, manual: false },
+        ],
+        allocations: [
+          { paymentId: 'a', itemId: 'i1', amount: 100 },
+          { paymentId: 'b', itemId: 'i2', amount: 40 },
+        ],
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      const sum = result.items.reduce((s, i) => s + i.paid * 100, 0);
+      expect(Math.round(sum + result.unallocated * 100)).toBe(
+        Math.round(result.paid * 100),
+      );
+      expect(result.paid).toBe(159.9);
+    });
+
+    it('derives paid, items and payments only from the snapshot', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      // El repositorio de abonos y el caso de uso del plan tienen otra foto:
+      // no se consultan.
+      fakeGetPlan.plan = makePlan({ items: [] });
+      repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 999 });
+      seed(allocations, {
+        payments: [pay('p1', 30)],
+        bases: [{ paymentId: 'p1', amount: 30, manual: false }],
+        allocations: [{ paymentId: 'p1', itemId: 'i1', amount: 30 }],
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result).toMatchObject({ paid: 30, paymentsCount: 1 });
+      expect(result.items).toHaveLength(3);
+      expect(result.items[0]).toMatchObject({ paid: 30, balance: 70 });
+      expect(allocations.readPlanBalanceSnapshot).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws NotFound when the snapshot has no plan', async () => {
+      const { uc } = makeUseCase();
+
+      await expect(uc.executeWithItems('plan-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('warns when the invariant does not hold', async () => {
+      const { allocations, uc } = makeUseCase();
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      // La base guardada (99,50) difiere de la conversión en vivo (100).
+      seed(allocations, {
+        payments: [pay('p1', 100)],
+        bases: [{ paymentId: 'p1', amount: 99.5, manual: false }],
+        allocations: [{ paymentId: 'p1', itemId: 'i1', amount: 99.5 }],
+      });
+
+      await expect(uc.executeWithItems('plan-1')).resolves.toBeDefined();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('-50 cents'));
+      warn.mockRestore();
+    });
+
+    it('counts payments without base', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        payments: [pay('p1', 10), pay('p2', 25)],
+        bases: [{ paymentId: 'p1', amount: 10, manual: false }],
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.unconvertedPaymentsCount).toBe(1);
+      expect(result.unallocated).toBe(10);
+    });
+
+    it('lists manual payment ids', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        payments: [pay('a', 10), pay('b', 20)],
+        bases: [
+          { paymentId: 'a', amount: 10, manual: false },
+          { paymentId: 'b', amount: 20, manual: true },
+        ],
+      });
+
+      expect((await uc.executeWithItems('plan-1')).manualPaymentIds).toEqual([
+        'b',
+      ]);
+    });
+
+    it('execute is unchanged and does not read allocations', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({
+        items: [
+          makeItem({ price: 100, status: TreatmentPlanItemStatus.ACCEPTED }),
+        ],
+      });
+      repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 20 });
+
+      const result = await uc.execute('plan-1');
+
+      expect(Object.keys(result).sort()).toEqual([
+        'balance',
+        'billable',
+        'paid',
+        'paymentsCount',
+        'planCurrency',
+      ]);
+      expect(allocations.readPlanBalanceSnapshot).not.toHaveBeenCalled();
+    });
   });
 });

@@ -33,6 +33,7 @@ import { PrismaCurrencyWhitelist } from './infrastructure/adapters/prisma-curren
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
+import { PaymentAllocationsModule } from '../payments/payment-allocations.module';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { ApplyBulkDiscountUseCase } from './application/use-cases/apply-bulk-discount.use-case';
@@ -68,6 +69,8 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     PriceListsModule,
     AgreementsModule,
     PatientAgreementsModule,
+    // DX-051: las escrituras de ítems y planes drenan el reparto de abonos.
+    PaymentAllocationsModule,
   ],
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
