@@ -87,7 +87,7 @@ function baseCte(args: ListQueryArgs): Prisma.Sql {
              (e."voidedAt" IS NULL
               AND p."paidCents" < e."amount" * 100
               AND e."dueDate" IS NOT NULL
-              AND e."dueDate" < COALESCE(t.day, CURRENT_DATE)) AS "overdue"
+              AND e."dueDate" < t.day) AS "overdue"
         FROM "expenses" e
         CROSS JOIN LATERAL (
           SELECT COALESCE(SUM(ROUND(x."amount" * 100)), 0)::bigint AS "paidCents"

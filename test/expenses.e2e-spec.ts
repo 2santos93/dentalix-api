@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { RECEIPT_TYPE_MESSAGE } from '../src/modules/expenses/domain/expense-receipt';
@@ -34,7 +34,7 @@ import {
 // DX-274 (Task 2) en HTTP real: gastos de la sede con sus pagos, categorías,
 // proveedores y soporte. El aislamiento entre clínicas por id lo cubre
 // tenant-isolation-matrix; los roles, role-matrix. Aquí van las reglas.
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const STORAGE_ROOT = process.env.STORAGE_DIR ?? './storage-test';

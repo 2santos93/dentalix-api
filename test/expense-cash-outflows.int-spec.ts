@@ -27,7 +27,7 @@ import {
 // 409 sin dejar nada. Nunca queda una salida en una caja ya cerrada. Contra
 // Postgres real, con los repositorios de la app y la caja tomada con FOR
 // SHARE (salida) frente a FOR UPDATE (cierre).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
@@ -61,6 +61,7 @@ async function cleanup(): Promise<void> {
     await raw.cashSessionClosing.deleteMany({ where });
     await raw.cashSessionFloat.deleteMany({ where });
     await raw.cashSession.deleteMany({ where });
+    await raw.locationSchedule.deleteMany({ where });
     await raw.location.deleteMany({ where });
     await raw.tenant.delete({ where: { id: tenant.id } });
   }
@@ -158,6 +159,9 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
         data: { tenantId, name: 'Sede', country: 'CO' },
       })
     ).id;
+    await raw.locationSchedule.create({
+      data: { tenantId, locationId, timezone: 'Asia/Tokyo' },
+    });
   });
 
   afterAll(async () => {

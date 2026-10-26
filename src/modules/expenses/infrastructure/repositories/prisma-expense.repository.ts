@@ -6,6 +6,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   loadLocationTimeZones,
   resolveLocationTimeZones,
+  requireConfiguredLocationTimeZone,
 } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type {
@@ -138,7 +139,12 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       } else {
         locationId = await this.tenantContext.writeLocationId(tx);
       }
-      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
+      const zoneOf = await resolveLocationTimeZones(
+        tx,
+        tenantId,
+        [locationId],
+        true,
+      );
       return { locationId, today: civilDateIn(now, zoneOf(locationId)) };
     });
   }
@@ -146,7 +152,12 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   locationToday(locationId: string, now: Date): Promise<string> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
+      const zoneOf = await resolveLocationTimeZones(
+        tx,
+        tenantId,
+        [locationId],
+        true,
+      );
       return civilDateIn(now, zoneOf(locationId));
     });
   }
@@ -206,7 +217,12 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       };
     }
     return this.prisma.runWithTenant(async (tx) => {
-      const zones = await loadLocationTimeZones(tx, tenantId);
+      const zones = await loadLocationTimeZones(
+        tx,
+        tenantId,
+        filters.locationId ? [filters.locationId] : scope,
+        true,
+      );
       const ids = [...zones.keys()];
       const days = ids.map((id) => civilDateIn(now, zones.get(id)!));
       const args = { tenantId, filters, scope, todays: { ids, days } };
@@ -215,12 +231,14 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       const [count] = withTotal
         ? await tx.$queryRaw<{ total: number }[]>(countQuery(args))
         : [];
-      const todayOf = new Map(ids.map((id, i) => [id, days[i]]));
       const items = rows.map((row) =>
         mapExpense(
           { ...row, amountCents: Number(row.amountCents) },
           Number(row.paidCents),
-          todayOf.get(row.locationId) ?? civilDateIn(now, 'UTC'),
+          civilDateIn(
+            now,
+            requireConfiguredLocationTimeZone(zones.get(row.locationId)),
+          ),
         ),
       );
       return {
@@ -251,9 +269,12 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       include: { payments: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } },
     });
     if (!row) return null;
-    const zoneOf = await resolveLocationTimeZones(tx, this.requireTenantId(), [
-      row.locationId,
-    ]);
+    const zoneOf = await resolveLocationTimeZones(
+      tx,
+      this.requireTenantId(),
+      [row.locationId],
+      true,
+    );
     return mapDetail(row, civilDateIn(now, zoneOf(row.locationId)));
   }
 

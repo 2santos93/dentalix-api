@@ -3,6 +3,7 @@ import {
   ClinicRole,
   DocType,
   PaymentMethod,
+  Prisma,
   PrismaClient,
   Sex,
 } from '@prisma/client';
@@ -25,7 +26,7 @@ import {
 // DX-274 (Task 4) en HTTP real: resumen mensual ingresos − gastos y CSV. Los
 // abonos se siembran por `raw` para fijar sede, instante y moneda sin depender
 // de la fecha de la corrida (esta suite prueba la LECTURA, no el cobro).
-const raw = new PrismaClient({
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
@@ -238,6 +239,33 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
   });
 
   describe('resumen', () => {
+    it('sin zona explícita de una sede devuelve 409 recuperable y no inventa la del país', async () => {
+      const schedule = await raw.locationSchedule.findFirstOrThrow({
+        where: { tenantId: clinic.tenantId, locationId: loc1, deletedAt: null },
+      });
+      await raw.locationSchedule.update({
+        where: { id: schedule.id },
+        data: { deletedAt: new Date() },
+      });
+      try {
+        const response = await summary('from=2026-10-01&to=2026-10-31').expect(
+          409,
+        );
+        expect(response.body).toMatchObject({
+          code: 'LOCATION_TIMEZONE_REQUIRED',
+          message:
+            'Configura una zona horaria válida para la sede y vuelve a intentarlo.',
+        });
+        await call('get', `/expenses?locationId=${loc1}`).expect(409);
+      } finally {
+        await raw.locationSchedule.update({
+          where: { id: schedule.id },
+          data: { deletedAt: null },
+        });
+      }
+      await summary('from=2026-10-01&to=2026-10-31').expect(200);
+    });
+
     it('agrupa por mes, sede y moneda con ingresos, gastos por categoría y neto', async () => {
       const rows = await rowsOf('from=2026-09-01&to=2026-10-31');
       expect(rows.map((r) => [r.month, r.locationName, r.currency])).toEqual([

@@ -10,7 +10,7 @@ import { PrismaExpenseSummaryRepository } from './prisma-expense-summary.reposit
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const LOCATION = '22222222-2222-4222-8222-222222222222';
 
-function build(timezone: string) {
+function build(timezone: string | null) {
   const tx = {
     location: {
       findMany: jest.fn(() =>
@@ -36,6 +36,19 @@ function build(timezone: string) {
 }
 
 describe('resumen de gastos: zonas horarias (DX-274)', () => {
+  it.each([null, 'Invalid/Zone'])(
+    'sin zona configurada (%s) devuelve un conflicto recuperable sin agrupar ingresos',
+    async (timezone) => {
+      const { tx, summarize } = build(timezone);
+      await expect(summarize('2026-10-01', '2026-10-31')).rejects.toMatchObject(
+        {
+          response: { code: 'LOCATION_TIMEZONE_REQUIRED', statusCode: 409 },
+        },
+      );
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('un día que no existe en la zona de una sede es 400 con el mensaje, no un 500', async () => {
     // Pacific/Apia saltó del 29 al 31 de diciembre de 2011.
     const { summarize } = build('Pacific/Apia');

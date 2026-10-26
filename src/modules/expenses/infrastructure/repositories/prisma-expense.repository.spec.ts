@@ -91,7 +91,9 @@ function build(options: {
           { live: BigInt(options.liveCents ?? 0), total: 0n },
         ]);
       }
-      return Promise.resolve([]); // zonas: la de por defecto
+      return Promise.resolve([
+        { id: LOCATION, country: 'CO', timezone: 'Asia/Tokyo' },
+      ]); // zona explícita de la sede
     }),
     expense: {
       findFirst: jest.fn((args: { where: { idempotencyKey?: string } }) => {

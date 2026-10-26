@@ -58,7 +58,7 @@ export class PrismaExpenseSummaryRepository implements ExpenseSummaryRepository 
           where: { tenantId, ...(scope && { id: { in: scope } }) },
           select: { id: true, name: true },
         });
-        const zones = await loadLocationTimeZones(tx, tenantId, scope);
+        const zones = await loadLocationTimeZones(tx, tenantId, scope, true);
         const income = await this.income(tx, tenantId, query, zones);
         const expenses = await this.expenses(tx, tenantId, query, scope);
         return {

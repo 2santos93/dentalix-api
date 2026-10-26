@@ -2394,6 +2394,12 @@ migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
   son constantes de código), `expenses` y `expense_payments`, con RLS FORCE y
   FK compuestas por clínica. El pago hereda sede y moneda del gasto por una FK
   de cuatro columnas. Sin DELETE en la BD: anular conserva todo.
+- **Zona horaria explícita**: gastos, salidas y resumen usan la zona IANA
+  guardada en el horario de cada sede. Si falta o no es válida, responden
+  `409 LOCATION_TIMEZONE_REQUIRED` con el mensaje «Configura una zona horaria
+  válida para la sede y vuelve a intentarlo.». No se deduce del país ni del
+  servidor; tras guardar el horario se puede reintentar. Un rango manual del
+  resumen también necesita las zonas para agrupar los ingresos de cada sede.
 - **Estado derivado**: `PENDING`, `PARTIAL`, `PAID` o `VOIDED` salen de la
   anulación y de la suma de pagos vivos; `overdue` es «no pagado del todo con
   el vencimiento ya pasado» en el día civil de la sede. La lista lo calcula en
