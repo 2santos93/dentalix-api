@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
@@ -27,6 +28,8 @@ import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/us
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
+import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { paymentInPlanCurrency } from '../payment-in-plan-currency';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -103,6 +106,8 @@ export const UUID_RE =
 
 @Injectable()
 export class RecordPaymentUseCase {
+  private readonly logger = new Logger('PaymentAllocations');
+
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly repo: PaymentRepository,
@@ -117,6 +122,8 @@ export class RecordPaymentUseCase {
     // DX-136: saldo del plan tras el abono, para la foto del recibo que el
     // repositorio emite en la misma transacción.
     private readonly receiptBalance: ReceiptPlanBalanceCalculator,
+    // DX-051: la base del abono (en la moneda del plan) para la imputación.
+    private readonly convertAmount: ConvertAmountUseCase,
   ) {}
 
   /**
@@ -181,11 +188,19 @@ export class RecordPaymentUseCase {
 
     // DX-136: fuera de la transacción del abono (la tasa puede pedir un
     // proveedor externo). Nunca falla: sin saldo, el recibo sale sin él.
+    const paidOn = await this.repo.resolvePaidOn(paidAt);
     const receiptPlanBalance = await this.receiptBalance.afterPayment({
       treatmentPlanId,
       amount: input.amount,
       currency,
-      paidOn: await this.repo.resolvePaidOn(paidAt),
+      paidOn,
+    });
+    // DX-051 (R4): la base del abono, también fuera de la transacción.
+    const planAmount = await this.planAmount({
+      amount: input.amount,
+      currency,
+      planCurrency: plan.currency,
+      paidOn,
     });
 
     const repoInput: CreatePaymentRepoInput = {
@@ -201,8 +216,39 @@ export class RecordPaymentUseCase {
       idempotencyKey: key,
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       receiptPlanBalance,
+      planAmount,
     };
 
     return this.repo.create(repoInput);
+  }
+
+  /**
+   * El abono en la moneda del plan con la tasa de su `paidOn` (R3, R4). Nunca
+   * falla el cobro: sin tasa, o con cualquier fallo, `null` y el abono queda
+   * sin imputar hasta que el barrido le cree la base (R9.3).
+   */
+  private async planAmount(payment: {
+    amount: number;
+    currency: string;
+    planCurrency: string;
+    paidOn: string;
+  }): Promise<CreatePaymentRepoInput['planAmount']> {
+    try {
+      const amount = await paymentInPlanCurrency(this.convertAmount, payment);
+      // Un importe que redondea a 0 no admite base (CHECK > 0).
+      if (amount === null || amount <= 0) return null;
+      return {
+        planCurrency: payment.planCurrency,
+        amount,
+        rateDate: payment.paidOn,
+      };
+    } catch (error) {
+      // Sin datos del abono ni del paciente: solo el tipo del error.
+      this.logger.warn({
+        event: 'payments.allocation_base_unavailable',
+        error: error instanceof Error ? error.name : typeof error,
+      });
+      return null;
+    }
   }
 }

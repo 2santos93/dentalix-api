@@ -31,6 +31,7 @@ import {
 } from '../../auth/presentation/guards/clinic-role-sets';
 import type { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
@@ -72,7 +73,8 @@ function toDto(doc: PlanQuoteDocument): PlanQuoteDocumentDto {
 @ApiTags('treatment-plans')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantContextInterceptor)
+// DX-051: detrás del tenant, en el MISMO decorador (corre en su contexto).
+@UseInterceptors(TenantContextInterceptor, DrainAllocationRebalancesInterceptor)
 @ApiParam({ name: 'patientId', format: 'uuid' })
 @ApiParam({ name: 'planId', format: 'uuid' })
 @ApiHeader(LOCATION_HEADER)

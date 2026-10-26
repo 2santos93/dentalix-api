@@ -250,6 +250,7 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
           paidAt: new Date('2026-10-01T00:00:00.000Z'),
           idempotencyKey,
           receiptPlanBalance: null,
+          planAmount: null,
         }),
       );
     }

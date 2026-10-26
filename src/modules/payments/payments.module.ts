@@ -29,6 +29,7 @@ import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whi
 import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapters/prisma-currency-whitelist.adapter';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { PaymentAllocationsModule } from './payment-allocations.module';
 
 // REST lands here in PAY-T3 (`PAYMENT_ROLES`, controller, DTOs) on top of the
 // use-cases + repo PAY-T2 already built. ExchangeModule is imported (not
@@ -48,6 +49,8 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     EmailModule,
     // DX-150: cerrar el compromiso de pago que cubre un abono.
     CollectionsModule,
+    // DX-051: reparto de abonos entre ítems tras cada escritura.
+    PaymentAllocationsModule,
   ],
   controllers: [PaymentsController, PaymentReceiptsController],
   providers: [

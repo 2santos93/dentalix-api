@@ -716,6 +716,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
         method: 'TRANSFER',
         createdById: a.userId,
         receiptPlanBalance: null,
+        planAmount: null,
       }),
     );
   }

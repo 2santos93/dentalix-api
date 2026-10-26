@@ -86,6 +86,7 @@ const recordPayment = new RecordPaymentUseCase(
   getPlan,
   whitelist,
   new ReceiptPlanBalanceCalculator(balance, identityConvert),
+  identityConvert,
 );
 
 const PNG =
@@ -269,6 +270,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
             currency: 'USD',
             paidAt: NOW,
             receiptPlanBalance: null,
+            planAmount: null,
           }),
         ),
       ).rejects.toMatchObject({ status: 409 });

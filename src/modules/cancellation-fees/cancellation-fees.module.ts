@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { PaymentAllocationsModule } from '../payments/payment-allocations.module';
 import { CancellationFeeController } from './presentation/cancellation-fee.controller';
 import {
   CANCELLATION_FEE_EPS_CO_BLOCK,
@@ -23,7 +24,8 @@ import { epsCoBlockEnabled } from './domain/cancellation-fee';
  * plataforma con `CANCELLATION_FEE_BLOCK_EPS_CO` (activado salvo `false`).
  */
 @Module({
-  imports: [JwtModule.register({})],
+  // DX-051: el cargo y su anulación drenan el reparto de abonos del plan.
+  imports: [JwtModule.register({}), PaymentAllocationsModule],
   controllers: [CancellationFeeController],
   providers: [
     GetCancellationFeeUseCase,

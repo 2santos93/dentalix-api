@@ -92,6 +92,12 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
           cron: '41 3 * * *',
           job: 'jobs.purge-finished',
         },
+        // DX-051: bases que faltan y reparto de abonos pendiente.
+        {
+          name: 'payment-allocations.sweep.every-minute',
+          cron: '* * * * *',
+          job: 'payment-allocations.sweep',
+        },
       ]),
     );
   });

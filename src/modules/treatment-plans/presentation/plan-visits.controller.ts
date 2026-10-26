@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { PlanVisitsService } from '../application/plan-visits.service';
 import {
@@ -26,7 +27,8 @@ import {
 @ApiTags('treatment-plans')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantContextInterceptor)
+// DX-051: detrás del tenant, en el MISMO decorador (corre en su contexto).
+@UseInterceptors(TenantContextInterceptor, DrainAllocationRebalancesInterceptor)
 @Roles(
   ClinicRole.ADMIN,
   ClinicRole.DENTIST,

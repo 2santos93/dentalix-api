@@ -51,6 +51,7 @@ import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { DrainAllocationRebalancesInterceptor } from './drain-allocation-rebalances.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   auditRequestContext,
@@ -76,7 +77,8 @@ interface AuthenticatedRequest extends AuditableRequest {
 @ApiTags('payments')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantContextInterceptor)
+// DX-051: detrás del tenant, en el MISMO decorador (corre en su contexto).
+@UseInterceptors(TenantContextInterceptor, DrainAllocationRebalancesInterceptor)
 @Roles(...PAYMENT_ROLES)
 @Controller()
 export class PaymentsController {

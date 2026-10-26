@@ -13,6 +13,8 @@ import { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currenc
 import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
 import type { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
+import type { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { Logger } from '@nestjs/common';
 
 /** Fake del saldo del recibo (DX-136): devuelve lo que se le diga y anota las llamadas. */
 class FakeReceiptPlanBalance {
@@ -91,19 +93,88 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
   };
 }
 
+/** Fake de la conversión: tasa fija por moneda de origen; anota las llamadas. */
+class FakeConvertAmount {
+  public rates: Record<string, number> = {};
+  public failure: Error | null = null;
+  public readonly calls: {
+    amount: number;
+    from: string;
+    to: string;
+    date: string;
+  }[] = [];
+
+  execute(input: { amount: number; from: string; to: string; date: string }) {
+    this.calls.push(input);
+    if (this.failure) return Promise.reject(this.failure);
+    const rateUsed = input.from === input.to ? 1 : this.rates[input.from];
+    return Promise.resolve({ ...input, result: 0, rateUsed });
+  }
+}
+
 describe('RecordPaymentUseCase', () => {
   function makeUseCase() {
     const repo = new InMemoryPaymentRepository();
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
     const receiptBalance = new FakeReceiptPlanBalance();
+    const convert = new FakeConvertAmount();
     const uc = new RecordPaymentUseCase(
       repo,
       fakeGetPlan as unknown as GetTreatmentPlanUseCase,
       makeWhitelist(),
       receiptBalance as unknown as ReceiptPlanBalanceCalculator,
+      convert as unknown as ConvertAmountUseCase,
     );
-    return { repo, fakeGetPlan, uc, receiptBalance };
+    return { repo, fakeGetPlan, uc, receiptBalance, convert };
   }
+
+  describe('DX-051: base del abono en la moneda del plan', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('passes planAmount converted at paidOn', async () => {
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.rates = { COP: 1 / 4000 };
+
+      await uc.execute(
+        'plan-1',
+        { amount: 401_234, currency: 'cop', paidAt: '2026-03-05' },
+        'user-1',
+      );
+
+      expect(convert.calls).toEqual([
+        { amount: 401_234, from: 'COP', to: 'USD', date: '2026-03-05' },
+      ]);
+      expect(repo.lastCreateInput?.planAmount).toEqual({
+        planCurrency: 'USD',
+        amount: 100.31,
+        rateDate: '2026-03-05',
+      });
+    });
+
+    it('passes null when conversion throws and still records', async () => {
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.failure = new Error('proveedor caído');
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+
+      const payment = await uc.execute(
+        'plan-1',
+        { amount: 50_000, currency: 'COP', paidAt: '2026-03-05' },
+        'user-1',
+      );
+
+      expect(payment.amount).toBe(50_000);
+      expect(repo.lastCreateInput?.planAmount).toBeNull();
+      // Sin datos del abono ni del paciente: solo el tipo del error.
+      expect(warn).toHaveBeenCalledWith({
+        event: 'payments.allocation_base_unavailable',
+        error: 'Error',
+      });
+    });
+  });
 
   describe('DX-136: saldo del plan para el recibo', () => {
     it('pasa al repositorio el saldo tras el abono, calculado con el día civil del abono en su sede', async () => {

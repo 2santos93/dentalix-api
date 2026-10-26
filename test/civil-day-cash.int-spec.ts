@@ -261,6 +261,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         currency: 'COP',
         paidAt: { civilDate: '2026-12-01' },
         receiptPlanBalance: null,
+        planAmount: null,
       }),
     );
     expect(created.paidAt.toISOString()).toBe('2026-12-01T11:00:00.000Z');

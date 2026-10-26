@@ -120,6 +120,7 @@ function pay(
         paid: 100000,
         balance: 800000,
       },
+      planAmount: null,
       ...overrides,
     }),
   );

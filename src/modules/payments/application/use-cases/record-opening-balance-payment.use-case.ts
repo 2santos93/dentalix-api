@@ -117,6 +117,8 @@ export class RecordOpeningBalancePaymentUseCase {
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       // El saldo del recibo lo calcula el repositorio con el saldo bloqueado.
       receiptPlanBalance: null,
+      // DX-051 (R1): un abono a un saldo migrado no se imputa a ítems.
+      planAmount: null,
     });
   }
 }

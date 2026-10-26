@@ -52,6 +52,14 @@ export interface CreatePaymentRepoInput {
    * pudo calcular (p. ej. sin tasa de cambio): el recibo se emite igual.
    */
   receiptPlanBalance: ReceiptPlanBalance | null;
+  /**
+   * DX-051 (R4): el abono convertido a la moneda del plan con la tasa de su
+   * `paidOn`, calculado FUERA de la transacción. Si la moneda que lee el
+   * INSERT con el plan bloqueado sigue siendo `planCurrency`, nace su base y
+   * el plan queda encolado para el reparto. `null`: sin base (sin tasa, un
+   * fallo de la conversión o un abono a un saldo migrado).
+   */
+  planAmount: { planCurrency: string; amount: number; rateDate: string } | null;
 }
 
 /** Un saldo migrado vivo (DX-262) con lo que el abono necesita validar. */
