@@ -724,13 +724,17 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const name = `${PREFIX}.fencing`;
       onBoth(name, () => Promise.resolve());
       const { id } = await a.queue.enqueue(name, {});
+      // Este caso prueba fencing, no la frontera temporal de la inserción.
+      // Fija que el trabajo ya esté vencido usando el mismo reloj que claim.
+      await owner.$executeRaw`
+        UPDATE jobs SET "runAt" = timezone('utc', clock_timestamp()) - interval '1 second'
+         WHERE id = ${id}::uuid`;
       const [claimed] = await a.repo.claim([name], 1, 300, 'int:a:00000000');
       expect(claimed.attempts).toBe(1);
       // Vence el arriendo y B lo retoma y lo termina.
-      await owner.job.update({
-        where: { id },
-        data: { runAt: new Date(Date.now() - 1000) },
-      });
+      await owner.$executeRaw`
+        UPDATE jobs SET "runAt" = timezone('utc', clock_timestamp()) - interval '1 second'
+         WHERE id = ${id}::uuid`;
       await b.worker.runOnce();
       // A cierra su intento (el 1) tarde: no cambia nada.
       expect(await a.repo.reschedule(id, 1, 60_000, 'Error')).toBe(false);
