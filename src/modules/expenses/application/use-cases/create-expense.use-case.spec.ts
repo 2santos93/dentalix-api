@@ -334,9 +334,10 @@ describe('alta de un gasto (DX-274)', () => {
       const stored = [...kit.repo.expenses.values()][0].attachment!;
       expect(stored.key).toMatch(
         new RegExp(
-          `^expense-receipts/[0-9a-f-]+/${uploadId}-[0-9a-f]{16}\\.pdf$`,
+          `^expense-receipts/[0-9a-f-]+/[0-9a-f-]{36}-[0-9a-f]{16}\\.pdf$`,
         ),
       );
+      expect(stored.key).not.toContain(uploadId);
       expect(kit.storage.files.has(stored.key)).toBe(true);
       expect(
         [...kit.storage.files.keys()].some((k) => k.includes('/pending/')),

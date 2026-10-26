@@ -1182,9 +1182,12 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       const row = await raw.expense.findUniqueOrThrow({
         where: { id: created.id },
       });
-      expect(row.attachmentKey).toBe(
-        `expense-receipts/${clinic.tenantId}/${ticket.uploadId}-${hex(bytes).slice(0, 16)}.pdf`,
+      expect(row.attachmentKey).toMatch(
+        new RegExp(
+          `^expense-receipts/${clinic.tenantId}/[0-9a-f-]{36}-${hex(bytes).slice(0, 16)}\\.pdf$`,
+        ),
       );
+      expect(row.attachmentKey).not.toContain(ticket.uploadId);
       expect(await storage.stat(row.attachmentKey!)).not.toBeNull();
       // El borrado del pendiente no espera a la respuesta.
       await eventually(async () =>

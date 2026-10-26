@@ -261,7 +261,14 @@ export class ExpenseReceiptUploads {
       return reject(contentRejected(TYPE_MISMATCH_MESSAGE));
     }
 
-    const key = receiptStorageKey(tenantId, uploadId, detected, declaredSha);
+    // Cada intento posee su propio destino: su cleanup nunca puede borrar
+    // la copia de otra transacción que todavía no haya confirmado su fila.
+    const key = receiptStorageKey(
+      tenantId,
+      randomUUID(),
+      detected,
+      declaredSha,
+    );
     try {
       await this.storage.copyVersion(pendingKey, key, detected, info.etag);
     } catch (error) {

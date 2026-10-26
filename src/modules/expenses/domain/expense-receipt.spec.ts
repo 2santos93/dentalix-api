@@ -59,7 +59,7 @@ describe('soporte del gasto (DX-274, R7)', () => {
   });
 
   describe('claves del almacén', () => {
-    it('definitiva: expense-receipts/<tenant>/<upload>-<sha16>.<ext>', () => {
+    it('definitiva: expense-receipts/<tenant>/<attempt>-<sha16>.<ext>', () => {
       expect(receiptStorageKey(TENANT, UPLOAD, 'application/pdf', SHA)).toBe(
         `expense-receipts/${TENANT}/${UPLOAD}-${SHA.slice(0, 16)}.pdf`,
       );

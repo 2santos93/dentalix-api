@@ -31,6 +31,7 @@ import {
   paymentCapDenial,
   toCents,
   validateDueDate,
+  validateInvoiceDate,
 } from '../../domain/expense-rules';
 import type { ExpenseCashLink } from '../../domain/ports/expense-cash-link.port';
 import type {
@@ -561,6 +562,16 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       // El vencimiento contra la fecha de factura que quedará (el CHECK de la
       // BD es la red).
       const invoiceDate = patch.invoiceDate ?? dayOf(current.invoiceDate);
+      if (patch.locationId !== undefined || patch.invoiceDate !== undefined) {
+        const locationId = patch.locationId ?? current.locationId;
+        const zoneOf = await resolveLocationTimeZones(
+          tx,
+          tenantId,
+          [locationId],
+          true,
+        );
+        validateInvoiceDate(invoiceDate, civilDateIn(now, zoneOf(locationId)));
+      }
       const dueDate =
         patch.dueDate !== undefined
           ? patch.dueDate

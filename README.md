@@ -2423,7 +2423,9 @@ migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
   `expense-receipts/pending/<tenantId>/<uploadId>` y entrega el `uploadId` en
   `attachmentUploadId` del alta o a `POST /expenses/:id/attachment` (solo si
   aún no tiene soporte). La API comprueba tamaño, SHA-256 y tipo por
-  contenido, y lo mueve a `expense-receipts/<tenantId>/<uploadId>-<sha16>.<ext>`;
+  contenido, y lo copia a `expense-receipts/<tenantId>/<attemptId>-<sha16>.<ext>`;
+  cada completación genera su UUID exclusivo para que la limpieza de un
+  intento fallido nunca borre el soporte de otra transacción en vuelo;
   si el contenido no vale borra el objeto y responde 400. Los pendientes que
   nadie adjunta los borra el ciclo de vida del bucket a las 24 h (ver
   [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)).

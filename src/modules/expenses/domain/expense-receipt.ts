@@ -54,21 +54,22 @@ function assertUuids(label: string, tenantId: string, uploadId: string): void {
 }
 
 /**
- * Clave definitiva: `expense-receipts/<tenantId>/<uploadId>-<sha16>.<ext>`.
+ * Clave definitiva: `expense-receipts/<tenantId>/<attemptId>-<sha16>.<ext>`.
  * Solo ids, la huella y la extensión del tipo DETECTADO: nada del nombre
- * original (PII) ni del cliente.
+ * original (PII) ni del cliente. El attemptId es un UUID nuevo generado
+ * por el servidor por completación, independiente del upload pendiente.
  */
 export function receiptStorageKey(
   tenantId: string,
-  uploadId: string,
+  attemptId: string,
   type: ReceiptMimeType,
   sha256: string,
 ): string {
-  assertUuids('receiptStorageKey', tenantId, uploadId);
+  assertUuids('receiptStorageKey', tenantId, attemptId);
   if (!/^[0-9a-f]{64}$/.test(sha256)) {
     throw new Error('receiptStorageKey: sha256 debe ser hex de 64');
   }
-  return `expense-receipts/${tenantId}/${uploadId}-${sha256.slice(0, 16)}.${EXTENSIONS[type]}`;
+  return `expense-receipts/${tenantId}/${attemptId}-${sha256.slice(0, 16)}.${EXTENSIONS[type]}`;
 }
 
 /**
