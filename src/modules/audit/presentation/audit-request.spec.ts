@@ -72,6 +72,52 @@ describe('buildAuditDraft (DX-009)', () => {
     expect(JSON.stringify(draft?.metadata)).not.toMatch(/1020|304/);
   });
 
+  it('reasignación de un abono (DX-051): moneda del plan, modo e importes por ítem antes y después, de la respuesta', () => {
+    const options: AuditOptions = {
+      action: 'UPDATE',
+      resource: 'PAYMENT_ALLOCATION',
+      resourceId: { param: 'id' },
+      patient: { lookup: 'payment', param: 'id' },
+      reason: 'PAYMENT_REALLOCATED',
+      allocation: true,
+    };
+    const draft = buildAuditDraft(
+      options,
+      req({
+        params: { id: ENTRY },
+        body: {
+          expectedVersion: 'a'.repeat(64),
+          mode: 'MANUAL',
+          allocations: [],
+        },
+        user: { sub: USER, tenantId: TENANT, role: 'ADMIN' },
+      }),
+      {
+        paymentId: ENTRY,
+        planCurrency: 'EUR',
+        manual: true,
+        receiptNumber: 'NOR-000123',
+        allocations: [
+          { treatmentPlanItemId: PLAN, amount: 40, source: 'MANUAL' },
+        ],
+        previous: [{ treatmentPlanItemId: PLAN, amount: 100 }],
+      },
+      scope,
+    );
+    expect(draft?.resourceType).toBe('PAYMENT_ALLOCATION');
+    expect(draft?.metadata).toEqual({
+      changedFields: ['allocations', 'expectedVersion', 'mode'],
+      params: { id: ENTRY },
+      reason: 'PAYMENT_REALLOCATED',
+      allocation: {
+        currency: 'EUR',
+        mode: 'MANUAL',
+        before: [{ itemId: PLAN, amount: 100 }],
+        after: [{ itemId: PLAN, amount: 40 }],
+      },
+    });
+  });
+
   it('receta segura (DX-300): códigos de los avisos y si se confirmaron; ni el texto de los avisos ni el motivo', () => {
     const options: AuditOptions = {
       action: 'CREATE',

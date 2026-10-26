@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   PaymentAllocationSource,
   Prisma,
@@ -11,12 +16,27 @@ import { resolveLocationTimeZones } from '../../../../shared/locations/location-
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import {
+  allocationVersion,
   itemBillableCents,
+  validateManualAllocation,
   type AllocatableItem,
   type AllocationIncrement,
   type Donor,
 } from '../../domain/allocation-rules';
+import {
+  ALLOCATION_MIGRATED_BALANCE,
+  ALLOCATION_PAYMENT_NOT_FOUND,
+  ALLOCATION_VERSION_CONFLICT,
+  allocationNoRate,
+  allocationPlanNotBillable,
+  allocationViolationMessage,
+} from '../../domain/allocation-messages';
+import { formatReceiptNumber } from '../../domain/receipt-number';
 import type {
+  AllocationItemOption,
+  AllocationTarget,
+  PaymentAllocationsSnapshot,
+  ReplaceAllocationsInput,
   PaymentWithoutBase,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
@@ -516,6 +536,416 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     planId: string,
   ): Promise<void> {
     return enqueuePlanRebalance(tx, tenantId, planId);
+  }
+
+  async findAllocationTarget(
+    paymentId: string,
+  ): Promise<AllocationTarget | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant((tx) =>
+      this.readTarget(tx, tenantId, paymentId),
+    );
+  }
+
+  async readPaymentAllocations(
+    paymentId: string,
+  ): Promise<PaymentAllocationsSnapshot | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const target = await this.readTarget(tx, tenantId, paymentId);
+        if (!target) return null;
+        const rows = await tx.paymentAllocation.findMany({
+          where: { tenantId, paymentId },
+          select: { treatmentPlanItemId: true, amount: true, source: true },
+        });
+        const lines = rows.map((r) => ({
+          itemId: r.treatmentPlanItemId,
+          cents: toCents(r.amount),
+          source: r.source,
+        }));
+        const items =
+          target.treatmentPlanId &&
+          target.planStatus &&
+          isPlanBillable(target.planStatus)
+            ? await this.readItemOptions(
+                tx,
+                tenantId,
+                target.treatmentPlanId,
+                paymentId,
+              )
+            : [];
+        return { target, lines, items };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /** El abono vivo con su plan (vivo) y su base; `null` si no. */
+  private async readTarget(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    paymentId: string,
+  ): Promise<AllocationTarget | null> {
+    const payment = await tx.payment.findFirst({
+      where: { tenantId, id: paymentId, deletedAt: null },
+      select: {
+        id: true,
+        amount: true,
+        currency: true,
+        paidAt: true,
+        locationId: true,
+        treatmentPlanId: true,
+        receipt: { select: { seriesPrefix: true, number: true } },
+      },
+    });
+    if (!payment) return null;
+    let plan: { status: TreatmentPlanStatus; currency: string } | null = null;
+    if (payment.treatmentPlanId) {
+      plan = await tx.treatmentPlan.findFirst({
+        where: { tenantId, id: payment.treatmentPlanId, deletedAt: null },
+        select: { status: true, currency: true },
+      });
+      if (!plan) return null;
+    }
+    const base = await tx.paymentPlanAmount.findFirst({
+      where: { tenantId, paymentId },
+      select: { amount: true, manual: true },
+    });
+    // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
+    const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
+      payment.locationId,
+    ]);
+    return {
+      paymentId: payment.id,
+      receiptNumber: payment.receipt
+        ? formatReceiptNumber(
+            payment.receipt.seriesPrefix,
+            payment.receipt.number,
+          )
+        : null,
+      treatmentPlanId: payment.treatmentPlanId,
+      amount: Number(payment.amount),
+      currency: payment.currency,
+      paidOn: civilDateIn(payment.paidAt, zoneOf(payment.locationId)),
+      planCurrency: plan?.currency ?? null,
+      planStatus: plan?.status ?? null,
+      base: base ? { amount: Number(base.amount), manual: base.manual } : null,
+    };
+  }
+
+  /**
+   * Ítems imputables del plan (vivos, ACCEPTED/DONE; el plan ya es cobrable)
+   * en el orden del plan, con lo que les imputan los OTROS abonos.
+   */
+  private async readItemOptions(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+    paymentId: string,
+  ): Promise<AllocationItemOption[]> {
+    const items = await tx.treatmentPlanItem.findMany({
+      where: {
+        tenantId,
+        planId,
+        deletedAt: null,
+        status: {
+          in: [TreatmentPlanItemStatus.ACCEPTED, TreatmentPlanItemStatus.DONE],
+        },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        toothNumber: true,
+        catalogItemId: true,
+        status: true,
+        price: true,
+        discount: true,
+      },
+    });
+    if (items.length === 0) return [];
+    const catalog = await tx.dentalCatalogItem.findMany({
+      where: {
+        tenantId,
+        id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
+      },
+      select: { id: true, labelEs: true },
+    });
+    const labelOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
+    const others = await tx.paymentAllocation.groupBy({
+      by: ['treatmentPlanItemId'],
+      where: {
+        tenantId,
+        treatmentPlanId: planId,
+        paymentId: { not: paymentId },
+      },
+      _sum: { amount: true },
+    });
+    const othersOf = new Map(
+      others.map((o) => [o.treatmentPlanItemId, toCents(o._sum.amount ?? 0)]),
+    );
+    return items.map((i) => ({
+      id: i.id,
+      toothNumber: i.toothNumber,
+      procedureName: labelOf.get(i.catalogItemId) ?? '',
+      status: i.status === TreatmentPlanItemStatus.DONE ? 'DONE' : 'ACCEPTED',
+      billableCents: itemBillableCents(
+        {
+          status: i.status,
+          price: Number(i.price),
+          discount: Number(i.discount),
+          deletedAt: null,
+        },
+        true,
+      ),
+      paidByOthersCents: othersOf.get(i.id) ?? 0,
+    }));
+  }
+
+  async replaceAllocations(
+    input: ReplaceAllocationsInput,
+  ): Promise<{ previous: { itemId: string; cents: number }[] }> {
+    const tenantId = this.requireTenantId();
+    const { paymentId } = input;
+    return this.prisma.runWithTenant(async (tx) => {
+      const [payment] = await tx.$queryRaw<
+        {
+          treatmentPlanId: string | null;
+          currency: string;
+          paidAt: Date;
+          locationId: string;
+        }[]
+      >`
+        SELECT "treatmentPlanId", "currency", "paidAt", "locationId"
+          FROM "payments"
+         WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
+           AND "deletedAt" IS NULL`;
+      if (!payment) throw new NotFoundException(ALLOCATION_PAYMENT_NOT_FOUND);
+      const planId = payment.treatmentPlanId;
+      if (!planId) throw new ConflictException(ALLOCATION_MIGRATED_BALANCE);
+
+      // R6: plan FOR SHARE → base de ESTE abono FOR UPDATE → ítems por id.
+      const [plan] = await tx.$queryRaw<
+        {
+          status: TreatmentPlanStatus;
+          currency: string;
+          deletedAt: Date | null;
+        }[]
+      >`
+        SELECT "status", "currency", "deletedAt" FROM "treatment_plans"
+         WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${planId}::uuid
+           FOR SHARE`;
+      if (!plan || plan.deletedAt) {
+        throw new NotFoundException(ALLOCATION_PAYMENT_NOT_FOUND);
+      }
+      if (!isPlanBillable(plan.status)) {
+        throw new ConflictException(allocationPlanNotBillable(plan.status));
+      }
+      const [base] = await tx.$queryRaw<
+        { amount: Prisma.Decimal; manual: boolean }[]
+      >`
+        SELECT "amount", "manual" FROM "payment_plan_amounts"
+         WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid
+           FOR UPDATE`;
+      // Liveness en una sentencia POSTERIOR al bloqueo de la base: una
+      // anulación que se adelantó ya está confirmada aquí.
+      const [live] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "payments"
+         WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
+           AND "deletedAt" IS NULL`;
+      if (!live) throw new NotFoundException(ALLOCATION_PAYMENT_NOT_FOUND);
+      if (!base) {
+        const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
+          payment.locationId,
+        ]);
+        throw new ConflictException(
+          allocationNoRate(
+            payment.currency,
+            plan.currency,
+            civilDateIn(payment.paidAt, zoneOf(payment.locationId)),
+          ),
+        );
+      }
+
+      // Los ítems de las líneas viejas Y nuevas, juntos y por id, ANTES de
+      // tocar filas: borrar o cambiar una imputación toma su ítem FOR KEY
+      // SHARE (FK del historial), y quien tenga ese ítem FOR UPDATE (reparto,
+      // edición, descuento, anulación) puede estar esperando otro de los
+      // nuestros. Con la base tomada nadie añade filas de este abono en un
+      // ítem nuevo, así que las viejas solo pueden menguar desde aquí.
+      const oldItems = await tx.$queryRaw<{ itemId: string }[]>`
+        SELECT DISTINCT "treatmentPlanItemId" AS "itemId"
+          FROM "payment_allocations"
+         WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid`;
+      const itemIds = [
+        ...new Set([
+          ...oldItems.map((r) => r.itemId),
+          ...input.lines.map((l) => l.itemId),
+        ]),
+      ];
+      if (itemIds.length > 0) {
+        await tx.$queryRaw`
+          SELECT "id" FROM "treatment_plan_items"
+           WHERE "tenantId" = ${tenantId}::uuid
+             AND "planId" = ${planId}::uuid
+             AND "id" = ANY(${itemIds}::uuid[])
+           ORDER BY "id"
+             FOR UPDATE`;
+      }
+
+      const current = await tx.$queryRaw<
+        {
+          id: string;
+          itemId: string;
+          amount: Prisma.Decimal;
+          source: PaymentAllocationSource;
+        }[]
+      >`
+        SELECT "id", "treatmentPlanItemId" AS "itemId", "amount", "source"
+          FROM "payment_allocations"
+         WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid
+         ORDER BY "treatmentPlanItemId"`;
+      const previous = current.map((r) => ({
+        itemId: r.itemId,
+        cents: toCents(r.amount),
+      }));
+      if (
+        allocationVersion({ manual: base.manual, lines: previous }) !==
+        input.expectedVersion
+      ) {
+        throw new ConflictException(ALLOCATION_VERSION_CONFLICT);
+      }
+
+      const baseCents = toCents(base.amount);
+      if (input.mode === 'MANUAL') {
+        const violation = validateManualAllocation({
+          baseCents,
+          lines: input.lines,
+          items: await this.readLineItems(
+            tx,
+            tenantId,
+            planId,
+            paymentId,
+            input.lines.map((l) => l.itemId),
+          ),
+        });
+        if (violation) {
+          throw new BadRequestException(
+            allocationViolationMessage(violation, plan.currency, baseCents),
+          );
+        }
+      }
+
+      // MANUAL fija el abono (el reparto ya no lo usa de donante); AUTO lo
+      // devuelve al reparto.
+      await tx.paymentPlanAmount.updateMany({
+        where: { tenantId, paymentId },
+        data: { manual: input.mode === 'MANUAL' },
+      });
+      // Una fila MANUAL que ya tiene el importe pedido se queda; el resto se
+      // borra y las líneas que faltan se insertan MANUAL.
+      const wanted = new Map(
+        (input.mode === 'MANUAL' ? input.lines : []).map((l) => [
+          l.itemId,
+          l.cents,
+        ]),
+      );
+      const kept = current.filter(
+        (r) =>
+          r.source === PaymentAllocationSource.MANUAL &&
+          wanted.get(r.itemId) === toCents(r.amount),
+      );
+      await tx.$executeRaw`SELECT set_config('app.allocation_cause', 'MANUAL', true)`;
+      await tx.$executeRaw`
+        DELETE FROM "payment_allocations"
+         WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid
+           AND NOT ("id" = ANY(${kept.map((r) => r.id)}::uuid[]))`;
+      const keptItems = new Set(kept.map((r) => r.itemId));
+      for (const [itemId, cents] of wanted) {
+        if (keptItems.has(itemId)) continue;
+        await tx.paymentAllocation.create({
+          data: {
+            tenantId,
+            paymentId,
+            treatmentPlanId: planId,
+            treatmentPlanItemId: itemId,
+            amount: fromCents(cents),
+            source: PaymentAllocationSource.MANUAL,
+            createdById: input.actorId,
+          },
+          select: { id: true },
+        });
+      }
+      await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+      // Lo que este abono deja libre lo llenan otros abonos (R9).
+      await enqueuePlanRebalance(tx, tenantId, planId);
+      return { previous };
+    });
+  }
+
+  /**
+   * Ítems de las líneas (ya bloqueados) con su estado y lo libre SIN contar
+   * este abono. Un ítem de otro plan, retirado o inexistente (o de otra
+   * clínica: la RLS lo oculta) es `MISSING`.
+   */
+  private async readLineItems(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+    paymentId: string,
+    itemIds: string[],
+  ): Promise<
+    Map<
+      string,
+      { status: TreatmentPlanItemStatus | 'MISSING'; freeCents: number }
+    >
+  > {
+    const rows =
+      itemIds.length === 0
+        ? []
+        : await tx.$queryRaw<
+            {
+              id: string;
+              status: TreatmentPlanItemStatus;
+              price: Prisma.Decimal;
+              discount: Prisma.Decimal;
+              deletedAt: Date | null;
+              others: Prisma.Decimal;
+            }[]
+          >`
+            SELECT i."id", i."status", i."price", i."discount", i."deletedAt",
+                   COALESCE((SELECT sum(a."amount") FROM "payment_allocations" a
+                              WHERE a."tenantId" = i."tenantId"
+                                AND a."treatmentPlanItemId" = i."id"
+                                AND a."paymentId" <> ${paymentId}::uuid), 0) AS "others"
+              FROM "treatment_plan_items" i
+             WHERE i."tenantId" = ${tenantId}::uuid
+               AND i."planId" = ${planId}::uuid
+               AND i."id" = ANY(${[...new Set(itemIds)]}::uuid[])`;
+    const out = new Map<
+      string,
+      { status: TreatmentPlanItemStatus | 'MISSING'; freeCents: number }
+    >();
+    for (const r of rows) {
+      if (r.deletedAt) continue;
+      const billableCents = itemBillableCents(
+        {
+          status: r.status,
+          price: Number(r.price),
+          discount: Number(r.discount),
+          deletedAt: null,
+        },
+        true,
+      );
+      out.set(r.id, {
+        status: r.status,
+        freeCents: Math.max(0, billableCents - toCents(r.others)),
+      });
+    }
+    for (const id of itemIds) {
+      if (!out.has(id)) out.set(id, { status: 'MISSING', freeCents: 0 });
+    }
+    return out;
   }
 
   async tenantIds(): Promise<string[]> {

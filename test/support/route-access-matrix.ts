@@ -465,6 +465,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /payments/:id/receipt': BILLING,
   'POST /payments/:id/receipt/print': BILLING,
   'POST /payments/:id/receipt/email': BILLING,
+  // DX-051: ver la imputación de un abono (ADMIN y recepción) y reasignarla
+  // (solo ADMIN, spec R10).
+  'GET /payments/:id/allocations': BILLING,
+  'PUT /payments/:id/allocations': ADMIN_ONLY,
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,

@@ -1,6 +1,11 @@
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
+  ALLOCATION_DUPLICATE_ITEM,
+  ALLOCATION_ITEM_NOT_IN_PLAN,
+  ALLOCATION_ITEM_PROPOSED,
   ALLOCATION_MODE_MISMATCH,
+  ALLOCATION_TOO_MANY_LINES,
+  allocationViolationMessage,
   allocationNoRate,
   allocationOverItem,
   allocationOverPayment,
@@ -45,6 +50,39 @@ describe('allocation messages (spec §5.3)', () => {
   it('mode mismatch', () => {
     expect(ALLOCATION_MODE_MISMATCH).toBe(
       'Con el reparto automático no se envían importes; con el manual, sí.',
+    );
+  });
+
+  it('maps each line violation to its §5.3 message', () => {
+    expect(allocationViolationMessage({ code: 'DUPLICATE' }, 'EUR', 9000)).toBe(
+      ALLOCATION_DUPLICATE_ITEM,
+    );
+    expect(allocationViolationMessage({ code: 'TOO_MANY' }, 'EUR', 9000)).toBe(
+      ALLOCATION_TOO_MANY_LINES,
+    );
+    expect(
+      allocationViolationMessage({ code: 'NOT_IN_PLAN' }, 'EUR', 9000),
+    ).toBe(ALLOCATION_ITEM_NOT_IN_PLAN);
+    expect(allocationViolationMessage({ code: 'PROPOSED' }, 'EUR', 9000)).toBe(
+      ALLOCATION_ITEM_PROPOSED,
+    );
+    expect(
+      allocationViolationMessage(
+        { code: 'OVER_ITEM', freeCents: 2500 },
+        'EUR',
+        9000,
+      ),
+    ).toBe(
+      'Un ítem admite como máximo 25.00 EUR: el resto ya lo cubren otros abonos.',
+    );
+    expect(
+      allocationViolationMessage(
+        { code: 'OVER_PAYMENT', sumCents: 9500 },
+        'EUR',
+        9000,
+      ),
+    ).toBe(
+      'La suma imputada (95.00 EUR) supera el abono convertido a la moneda del plan (90.00 EUR).',
     );
   });
 });

@@ -30,6 +30,9 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PaymentAllocationsModule } from './payment-allocations.module';
+import { PaymentAllocationsController } from './presentation/payment-allocations.controller';
+import { GetPaymentAllocationsUseCase } from './application/use-cases/get-payment-allocations.use-case';
+import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replace-payment-allocations.use-case';
 
 // REST lands here in PAY-T3 (`PAYMENT_ROLES`, controller, DTOs) on top of the
 // use-cases + repo PAY-T2 already built. ExchangeModule is imported (not
@@ -52,7 +55,12 @@ import { PaymentAllocationsModule } from './payment-allocations.module';
     // DX-051: reparto de abonos entre ítems tras cada escritura.
     PaymentAllocationsModule,
   ],
-  controllers: [PaymentsController, PaymentReceiptsController],
+  controllers: [
+    PaymentsController,
+    PaymentReceiptsController,
+    // DX-051: ver y reasignar la imputación de un abono.
+    PaymentAllocationsController,
+  ],
   providers: [
     RecordPaymentUseCase,
     // DX-262: abono contra el saldo migrado.
@@ -62,6 +70,9 @@ import { PaymentAllocationsModule } from './payment-allocations.module';
     GetPlanBalanceUseCase,
     GetPaymentsTotalsUseCase,
     ListCashPaymentsUseCase,
+    // DX-051: imputación de un abono a los ítems de su plan.
+    GetPaymentAllocationsUseCase,
+    ReplacePaymentAllocationsUseCase,
     // Recibo de caja numerado (DX-136).
     ReceiptPlanBalanceCalculator,
     GetPaymentReceiptUseCase,

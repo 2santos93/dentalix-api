@@ -92,6 +92,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /treatment-plans/unscheduled ?cursor',
   'GET /treatment-plans/unscheduled ?locationId',
   'PATCH /treatment-plans/:id/visits body.items[].itemId',
+  // DX-051: los ítems de una reasignación manual.
+  'PUT /payments/:id/allocations body.allocations[].treatmentPlanItemId',
   'POST /treatment-plans/:id/items body.catalogItemId',
   'POST /treatment-plans/:id/items/bulk-discount body.itemIds[]',
   'PATCH /treatment-plans/:id/items/:itemId body.performedById',

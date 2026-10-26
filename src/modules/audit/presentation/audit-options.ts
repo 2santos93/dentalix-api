@@ -59,4 +59,10 @@ export interface AuditOptions {
    * afiliado y si quedó verificada; nunca el número completo.
    */
   coverage?: true;
+  /**
+   * DX-051: reasignación de la imputación de un abono. La metadata guarda, de
+   * la respuesta, la moneda del plan, el modo y los importes por ítem antes y
+   * después (ids e importes; nada del paciente).
+   */
+  allocation?: true;
 }

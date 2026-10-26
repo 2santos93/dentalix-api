@@ -117,6 +117,10 @@ export const PAYMENT_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 
+// Reasignar a qué ítems del plan va un abono (DX-051, spec R10): solo
+// gestión. Recepción ve la imputación (PAYMENT_ROLES) pero no la cambia.
+export const PAYMENT_ALLOCATION_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Inventario de insumos: gestión (ADMIN) + quien de hecho maneja el
 // stock del día a día (ASSISTANT), pero NO RECEPTION/DENTIST -- ver
 // docs/plans/2026-07-24-inventory.md "Global Constraints" (asunción v1

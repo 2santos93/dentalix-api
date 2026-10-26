@@ -3,6 +3,8 @@ import type {
   AllocationIncrement,
 } from '../../domain/allocation-rules';
 import type {
+  AllocationTarget,
+  PaymentAllocationsSnapshot,
   PaymentWithoutBase,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
@@ -170,6 +172,21 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
 
   readPlanBalanceSnapshot(): Promise<PlanBalanceSnapshot | null> {
     return Promise.resolve(null);
+  }
+
+  // La reasignación (R10) se prueba con dobles propios y contra Postgres.
+  findAllocationTarget(): Promise<AllocationTarget | null> {
+    return Promise.resolve(null);
+  }
+
+  readPaymentAllocations(): Promise<PaymentAllocationsSnapshot | null> {
+    return Promise.resolve(null);
+  }
+
+  replaceAllocations(): Promise<{
+    previous: { itemId: string; cents: number }[];
+  }> {
+    return Promise.reject(new Error('no implementado en el fake'));
   }
 
   tenantIds(): Promise<string[]> {

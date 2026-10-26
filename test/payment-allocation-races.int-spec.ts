@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   ClinicRole,
   Prisma,
@@ -11,6 +11,8 @@ import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/
 import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
+import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
+import { ReplacePaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/replace-payment-allocations.use-case';
 import { JobRegistry } from '../src/modules/jobs/application/job-registry';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import type { ItemChange } from '../src/modules/treatment-plans/domain/ports/treatment-plan-repository.port';
@@ -61,6 +63,13 @@ const convert = {
   },
 } as unknown as ConvertAmountUseCase;
 const rebalancer = new PlanAllocationRebalancer(allocationRepo, convert);
+const getAllocations = new GetPaymentAllocationsUseCase(allocationRepo);
+const replaceAllocations = new ReplacePaymentAllocationsUseCase(
+  allocationRepo,
+  rebalancer,
+  convert,
+  getAllocations,
+);
 const jobs = new PaymentAllocationJobs(
   new JobRegistry(),
   rebalancer,
@@ -821,6 +830,247 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
       expect(
         await inTenant(a, () => allocationRepo.readPlanBalanceSnapshot(planId)),
       ).toBeNull();
+    });
+  });
+
+  describe('reasignación por ADMIN (R10)', () => {
+    const versionOf = async (paymentId: string): Promise<string> =>
+      (await inTenant(a, () => getAllocations.execute(paymentId))).version;
+
+    /** PUT MANUAL por el caso de uso (base, transacción, reparto y relectura). */
+    const putManual = (
+      paymentId: string,
+      expectedVersion: string,
+      lines: { itemId: string; amount: number }[],
+    ) =>
+      inTenant(a, () =>
+        replaceAllocations.execute(
+          paymentId,
+          {
+            expectedVersion,
+            mode: 'MANUAL',
+            allocations: lines.map((l) => ({
+              treatmentPlanItemId: l.itemId,
+              amount: l.amount,
+            })),
+          },
+          a.userId,
+        ),
+      );
+
+    /**
+     * Un 40P01 suspende (directo, o envuelto por `$queryRaw` como P2010 con
+     * `meta.code`); el resto de rechazos los mira cada test.
+     */
+    function noDeadlock<T>(outcome: {
+      status: 'fulfilled' | 'rejected';
+      value?: T;
+      reason?: unknown;
+    }): void {
+      if (outcome.status === 'rejected') {
+        const reason = outcome.reason as {
+          code?: string;
+          meta?: { code?: string };
+        };
+        expect(reason.code).not.toBe(DEADLOCK);
+        expect(reason.meta?.code).not.toBe(DEADLOCK);
+      }
+    }
+
+    it('reallocation racing a new payment keeps invariants', async () => {
+      for (let round = 0; round < REPEAT; round += 1) {
+        const planId = await plan(a);
+        await item(a, planId, 100, 'DONE');
+        const accepted = await item(a, planId, 100, 'ACCEPTED');
+        const pinned = await pay(a, planId, 100, {
+          paidAt: new Date('2026-10-01T15:00:00Z'),
+        });
+        await drain(a, planId);
+        const version = await versionOf(pinned);
+
+        // El ADMIN mueve los 100 al ítem aceptado mientras entra otro abono
+        // que el reparto quiere llevar al mismo ítem.
+        const [put, newPayment] = await Promise.all([
+          settle(
+            putManual(pinned, version, [{ itemId: accepted, amount: 100 }]),
+          ),
+          settle(
+            (async () => {
+              await record(a, planId, 80);
+              await drain(a, planId);
+            })(),
+          ),
+        ]);
+
+        noDeadlock(put);
+        expect(newPayment.status).toBe('fulfilled');
+        if (put.status === 'rejected') {
+          // Perdió: el reparto llenó antes el ítem; 400 con lo que queda libre.
+          expect(put.reason).toBeInstanceOf(BadRequestException);
+          expect((put.reason as Error).message).toMatch(
+            /^Un ítem admite como máximo \d+\.\d{2} EUR: el resto ya lo cubren otros abonos\.$/,
+          );
+        } else {
+          expect(
+            await allocationCents({
+              paymentId: pinned,
+              treatmentPlanItemId: accepted,
+            }),
+          ).toBe(10_000);
+        }
+        await drain(a, planId);
+        await assertInvariants(planId);
+        expect(await queued(planId)).toBe(0);
+      }
+    });
+
+    it('PUT locks the items of its old and new lines before deleting: a rebalance never deadlocks with it (deterministic)', async () => {
+      const planId = await plan(a);
+      const [w, v] = [
+        await item(a, planId, 100, 'DONE'),
+        await item(a, planId, 100, 'ACCEPTED'),
+      ].sort();
+      const pinned = await pay(a, planId, 50, {
+        paidAt: new Date('2026-10-01T15:00:00Z'),
+      });
+      // Un donante no fijado: con él el reparto bloquea los ítems del plan.
+      const donor = await pay(a, planId, 100);
+      await drain(a, planId);
+      await putManual(pinned, await versionOf(pinned), [
+        { itemId: w, amount: 50 },
+      ]);
+      expect(
+        await allocationCents({ paymentId: pinned, treatmentPlanItemId: w }),
+      ).toBe(5_000);
+
+      // El PUT se para con sus ítems ya bloqueados y antes de borrar la fila
+      // vieja (abono fijado, W). El reparto no bloquea la base de un abono
+      // fijado: llega a los ítems y espera a W. Si el PUT solo hubiera
+      // bloqueado V (su línea nueva), el reparto tendría W y esperaría V, y
+      // el DELETE de (fijado, W) esperaría W por la FK del historial: 40P01.
+      const beforeWrites = stop();
+      const version = await versionOf(pinned);
+      pauseNextTransaction({ 'paymentPlanAmount.updateMany': beforeWrites });
+      const putting = settle(
+        inTenant(a, () =>
+          allocationRepo.replaceAllocations({
+            paymentId: pinned,
+            mode: 'MANUAL',
+            expectedVersion: version,
+            lines: [{ itemId: v, cents: 5_000 }],
+            actorId: a.userId,
+          }),
+        ),
+      );
+      const putXid = await beforeWrites.reached.wait;
+      const spreading = settle(
+        inTenant(a, () => rebalancer.rebalancePlan(planId, null)),
+      );
+      await waitForTransactionWaiters(raw, putXid);
+      beforeWrites.release.open();
+
+      const [put, spread] = await Promise.all([putting, spreading]);
+      jest.restoreAllMocks();
+      noDeadlock(put);
+      noDeadlock(spread);
+      expect(put).toEqual({
+        status: 'fulfilled',
+        value: { previous: [{ itemId: w, cents: 5_000 }] },
+      });
+      expect(spread.status).toBe('fulfilled');
+      expect(
+        await allocationCents({ paymentId: pinned, treatmentPlanItemId: v }),
+      ).toBe(5_000);
+      expect(await allocationCents({ paymentId: pinned })).toBe(5_000);
+      expect(await allocationCents({ paymentId: donor })).toBe(10_000);
+      await drain(a, planId);
+      await assertInvariants(planId);
+    });
+
+    it('an item in the old and the new lines and a concurrent edit of it never deadlock', async () => {
+      for (let round = 0; round < REPEAT; round += 1) {
+        const planId = await plan(a);
+        const x = await item(a, planId, 100, 'DONE');
+        const y = await item(a, planId, 100, 'ACCEPTED');
+        const pinned = await pay(a, planId, 120, {
+          paidAt: new Date('2026-10-01T15:00:00Z'),
+        });
+        await pay(a, planId, 30);
+        await drain(a, planId);
+        const version = await versionOf(pinned);
+
+        // X está en las líneas viejas (100 AUTO) y en las nuevas (60), y otra
+        // transacción le pone un descuento: la liberación bloquea las
+        // imputaciones de X tras bloquear X.
+        const [put, edit] = await Promise.all([
+          settle(
+            putManual(pinned, version, [
+              { itemId: x, amount: 60 },
+              { itemId: y, amount: 60 },
+            ]),
+          ),
+          settle(updateItem(a, x, { discount: 30 })),
+        ]);
+
+        noDeadlock(put);
+        noDeadlock(edit);
+        expect(edit.status).toBe('fulfilled');
+        if (put.status === 'rejected') {
+          // Perdió contra la liberación (versión vieja o X ya sin hueco).
+          expect([BadRequestException, ConflictException]).toContainEqual(
+            (put.reason as object).constructor,
+          );
+        }
+        await drain(a, planId);
+        await assertInvariants(planId);
+      }
+    });
+
+    it('a version read before a concurrent PUT is stale', async () => {
+      const planId = await plan(a);
+      const x = await item(a, planId, 100, 'DONE');
+      const pinned = await pay(a, planId, 50);
+      await drain(a, planId);
+      const version = await versionOf(pinned);
+
+      await putManual(pinned, version, [{ itemId: x, amount: 20 }]);
+      const stale = await settle(
+        putManual(pinned, version, [{ itemId: x, amount: 30 }]),
+      );
+
+      expect(stale.status).toBe('rejected');
+      expect((stale as { reason: Error }).reason).toBeInstanceOf(
+        ConflictException,
+      );
+      expect(await allocationCents({ paymentId: pinned })).toBe(2_000);
+    });
+
+    it('the history records a manual move with the MANUAL cause', async () => {
+      const planId = await plan(a);
+      const x = await item(a, planId, 100, 'DONE');
+      const y = await item(a, planId, 100, 'ACCEPTED');
+      const pinned = await pay(a, planId, 100);
+      await drain(a, planId);
+
+      await putManual(pinned, await versionOf(pinned), [
+        { itemId: y, amount: 100 },
+      ]);
+
+      const movements = await raw.paymentAllocationMovement.findMany({
+        where: { paymentId: pinned, cause: 'MANUAL' },
+      });
+      expect(
+        movements
+          .map((m) => ({
+            item: m.treatmentPlanItemId,
+            delta: Number(m.deltaCents),
+          }))
+          .sort((p, q) => p.delta - q.delta),
+      ).toEqual([
+        { item: x, delta: -10_000 },
+        { item: y, delta: 10_000 },
+      ]);
+      await assertInvariants(planId);
     });
   });
 

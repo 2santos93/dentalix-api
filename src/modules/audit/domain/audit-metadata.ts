@@ -95,6 +95,26 @@ export interface AuditMetadata {
    * caracteres sin saltos de línea ni caracteres de control.
    */
   healthRegistration?: AuditHealthRegistrationChange;
+  /**
+   * DX-051: reasignación de la imputación de un abono por un ADMIN: moneda
+   * del plan, modo (MANUAL/AUTO) y las líneas (uuid del ítem e importe)
+   * antes y después. Importes de la imputación pedidos por la spec (§8);
+   * nada del paciente.
+   */
+  allocation?: AuditAllocation;
+}
+
+/** Una línea de la imputación de un abono (DX-051). */
+export interface AuditAllocationLine {
+  itemId: string;
+  amount: number;
+}
+
+export interface AuditAllocation {
+  currency: string;
+  mode: 'MANUAL' | 'AUTO';
+  before: AuditAllocationLine[];
+  after: AuditAllocationLine[];
 }
 
 export interface AuditCoverage {
@@ -639,6 +659,56 @@ function coverage(value: unknown): AuditCoverage | null {
   };
 }
 
+/** Tope de líneas por lado: las de un abono (MAX_ALLOCATION_LINES). */
+const MAX_ALLOCATION_LINES = 200;
+
+/** Una línea con exactamente esa forma, o `null`. */
+function allocationLine(value: unknown): AuditAllocationLine | null {
+  if (!isRecord(value)) return null;
+  const { itemId, amount, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof itemId !== 'string' ||
+    !UUID.test(itemId) ||
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount) ||
+    amount < 0 ||
+    Math.round(amount * 100) / 100 !== amount
+  ) {
+    return null;
+  }
+  return { itemId: itemId.toLowerCase(), amount };
+}
+
+function allocationSide(value: unknown): AuditAllocationLine[] | null {
+  if (!Array.isArray(value) || value.length > MAX_ALLOCATION_LINES) {
+    return null;
+  }
+  const lines = value.map(allocationLine);
+  return lines.every((l): l is AuditAllocationLine => l !== null)
+    ? lines
+    : null;
+}
+
+/** La reasignación entera con su forma, o nada (DX-051). */
+function allocation(value: unknown): AuditAllocation | null {
+  if (!isRecord(value)) return null;
+  const { currency, mode, before: rawBefore, after: rawAfter, ...rest } = value;
+  const before = allocationSide(rawBefore);
+  const after = allocationSide(rawAfter);
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof currency !== 'string' ||
+    !CURRENCY_CODE.test(currency) ||
+    (mode !== 'MANUAL' && mode !== 'AUTO') ||
+    !before ||
+    !after
+  ) {
+    return null;
+  }
+  return { currency, mode, before, after };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -680,5 +750,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (covered) out.coverage = covered;
   const registration = healthRegistration(input.healthRegistration);
   if (registration) out.healthRegistration = registration;
+  const reallocated = allocation(input.allocation);
+  if (reallocated) out.allocation = reallocated;
   return out;
 }

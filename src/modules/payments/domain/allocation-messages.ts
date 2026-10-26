@@ -1,5 +1,6 @@
 import { TreatmentPlanStatus } from '@prisma/client';
 import { PLAN_STATUS_LABELS } from '../../treatment-plans/domain/plan-status-machine';
+import type { AllocationViolation } from './allocation-rules';
 
 // Mensajes de la imputación de abonos a ítems (DX-051, spec §5.3). Los
 // importes salen con 2 decimales y punto, sin miles ni símbolo: formato neutro
@@ -26,6 +27,11 @@ export const ALLOCATION_ITEM_NOT_IN_PLAN =
   'El ítem no es de este plan o ya no existe.';
 export const ALLOCATION_ITEM_PROPOSED =
   'Solo se imputa a ítems aceptados o realizados.';
+// Fuera de la tabla de §5.3: formato del cuerpo que la web nunca envía mal.
+export const ALLOCATION_VERSION_INVALID =
+  'La versión de la imputación no es válida: vuelve a cargar el abono.';
+export const ALLOCATION_MODE_INVALID =
+  'El modo de la imputación es MANUAL o AUTO.';
 
 export function allocationPlanNotBillable(status: TreatmentPlanStatus): string {
   return `El plan está «${PLAN_STATUS_LABELS[status]}»: sus abonos no se imputan a ítems.`;
@@ -52,4 +58,35 @@ export function allocationOverPayment(
   currency: string,
 ): string {
   return `La suma imputada (${formatCents(sumCents)} ${currency}) supera el abono convertido a la moneda del plan (${formatCents(baseCents)} ${currency}).`;
+}
+
+/**
+ * Mensaje de una violación de las líneas (R10). `NO_RATE` no llega aquí: sin
+ * base, el caso de uso responde 409 antes de validar líneas.
+ */
+export function allocationViolationMessage(
+  violation: AllocationViolation,
+  currency: string,
+  baseCents: number,
+): string {
+  switch (violation.code) {
+    case 'DUPLICATE':
+      return ALLOCATION_DUPLICATE_ITEM;
+    case 'TOO_MANY':
+      return ALLOCATION_TOO_MANY_LINES;
+    case 'NOT_IN_PLAN':
+      return ALLOCATION_ITEM_NOT_IN_PLAN;
+    case 'PROPOSED':
+      return ALLOCATION_ITEM_PROPOSED;
+    case 'OVER_ITEM':
+      return allocationOverItem(violation.freeCents ?? 0, currency);
+    case 'OVER_PAYMENT':
+      return allocationOverPayment(
+        violation.sumCents ?? 0,
+        baseCents,
+        currency,
+      );
+    case 'NO_RATE':
+      throw new Error('NO_RATE se responde antes de validar las líneas');
+  }
 }
