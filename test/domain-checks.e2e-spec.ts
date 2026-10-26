@@ -85,6 +85,11 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
     await raw.inventoryItem.deleteMany({ where });
     await raw.installment.deleteMany({ where });
     await raw.paymentPlan.deleteMany({ where });
+    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+    // (borrar las imputaciones deja su movimiento: van antes).
+    await raw.paymentAllocation.deleteMany({ where });
+    await raw.paymentAllocationMovement.deleteMany({ where });
+    await raw.paymentPlanAmount.deleteMany({ where });
     await raw.payment.deleteMany({ where });
     await raw.toothRecord.deleteMany({ where });
     await raw.treatmentPlanItem.deleteMany({ where });

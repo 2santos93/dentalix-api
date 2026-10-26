@@ -109,6 +109,11 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
       select: { id: true },
     });
     const where = { tenantId: { in: tenants.map((t) => t.id) } };
+    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+    // (borrar las imputaciones deja su movimiento: van antes).
+    await owner.paymentAllocation.deleteMany({ where });
+    await owner.paymentAllocationMovement.deleteMany({ where });
+    await owner.paymentPlanAmount.deleteMany({ where });
     await owner.payment.deleteMany({ where });
     await owner.toothRecord.deleteMany({ where });
     await owner.installment.deleteMany({ where });

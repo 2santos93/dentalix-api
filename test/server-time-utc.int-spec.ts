@@ -52,9 +52,15 @@ async function cleanup(): Promise<void> {
   await raw.paymentPromise.deleteMany({ where });
   await raw.paymentReceipt.deleteMany({ where });
   await raw.paymentReceiptCounter.deleteMany({ where });
+  // DX-051: imputaciones antes que su historial (borrarlas deja movimiento).
+  await raw.paymentAllocation.deleteMany({ where });
+  await raw.paymentAllocationMovement.deleteMany({ where });
+  await raw.paymentPlanAmount.deleteMany({ where });
   await raw.payment.deleteMany({ where });
   await raw.cashSession.deleteMany({ where });
+  await raw.treatmentPlanItem.deleteMany({ where });
   await raw.treatmentPlan.deleteMany({ where });
+  await raw.dentalCatalogItem.deleteMany({ where });
   await raw.patientLedger.deleteMany({ where });
   await raw.patient.deleteMany({ where });
   await raw.location.deleteMany({ where });
@@ -474,6 +480,88 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       expect(
         await utcDrift(tx, 'expenses', 'voidedAt', expense.id),
       ).toBeLessThan(1);
+    });
+  });
+
+  it('imputación de abonos: base, imputación, cola e historial con la hora del servidor en UTC (DX-051)', async () => {
+    const catalog = await raw.dentalCatalogItem.create({
+      data: {
+        tenantId: s.tenantId,
+        code: 'dx051-utc',
+        kind: 'PROCEDURE',
+        labelEs: 'Resina',
+        color: '#123456',
+      },
+    });
+    await txInBogota(async (tx) => {
+      // El alta del ítem encola el plan (requestedAt).
+      const item = await tx.treatmentPlanItem.create({
+        data: {
+          tenantId: s.tenantId,
+          planId: s.planId,
+          toothNumber: '11',
+          catalogItemId: catalog.id,
+          price: 10_000,
+          status: 'ACCEPTED',
+        },
+      });
+      const [request] = await tx.$queryRaw<{ drift: number }[]>`
+        SELECT ${Prisma.raw(drift('"requestedAt"'))}
+          FROM "plan_allocation_rebalance_requests"
+         WHERE "treatmentPlanId" = ${s.planId}::uuid
+         ORDER BY "id" DESC LIMIT 1`;
+      expect(request.drift).toBeLessThan(1);
+      const payment = await tx.payment.create({
+        data: {
+          tenantId: s.tenantId,
+          locationId: s.locationId,
+          treatmentPlanId: s.planId,
+          patientId: s.patientId,
+          amount: 5_000,
+          currency: 'COP',
+          paidAt: new Date(),
+        },
+      });
+      // Lo que mande la API en createdAt/updatedAt no cuenta.
+      const old = new Date('2001-01-01T00:00:00.000Z');
+      await tx.paymentPlanAmount.create({
+        data: {
+          paymentId: payment.id,
+          tenantId: s.tenantId,
+          treatmentPlanId: s.planId,
+          amount: 5_000,
+          currency: 'COP',
+          rateDate: new Date('2026-10-17T00:00:00.000Z'),
+          createdAt: old,
+        },
+      });
+      const [base] = await tx.$queryRaw<{ drift: number }[]>`
+        SELECT ${Prisma.raw(drift('"createdAt"'))}
+          FROM "payment_plan_amounts" WHERE "paymentId" = ${payment.id}::uuid`;
+      expect(base.drift).toBeLessThan(1);
+      const allocation = await tx.paymentAllocation.create({
+        data: {
+          tenantId: s.tenantId,
+          paymentId: payment.id,
+          treatmentPlanId: s.planId,
+          treatmentPlanItemId: item.id,
+          amount: 5_000,
+          source: 'AUTO',
+          createdAt: old,
+          updatedAt: old,
+        },
+      });
+      expect(
+        await utcDrift(tx, 'payment_allocations', 'createdAt', allocation.id),
+      ).toBeLessThan(1);
+      expect(
+        await utcDrift(tx, 'payment_allocations', 'updatedAt', allocation.id),
+      ).toBeLessThan(1);
+      const [movement] = await tx.$queryRaw<{ drift: number }[]>`
+        SELECT ${Prisma.raw(drift('"at"'))}
+          FROM "payment_allocation_movements"
+         WHERE "paymentId" = ${payment.id}::uuid`;
+      expect(movement.drift).toBeLessThan(1);
     });
   });
 });

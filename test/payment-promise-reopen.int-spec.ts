@@ -44,6 +44,11 @@ async function cleanup(): Promise<void> {
   await raw.auditEvent.deleteMany({ where });
   await raw.paymentPromise.deleteMany({ where });
   await raw.paymentReceipt.deleteMany({ where });
+  // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+  // (borrar las imputaciones deja su movimiento: van antes).
+  await raw.paymentAllocation.deleteMany({ where });
+  await raw.paymentAllocationMovement.deleteMany({ where });
+  await raw.paymentPlanAmount.deleteMany({ where });
   await raw.payment.deleteMany({ where });
   await raw.treatmentPlan.deleteMany({ where });
   await raw.patientLedger.deleteMany({ where });

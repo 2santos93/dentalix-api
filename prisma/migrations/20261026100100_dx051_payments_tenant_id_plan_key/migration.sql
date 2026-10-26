@@ -1,0 +1,11 @@
+-- DX-051: destino de las FK compuestas ("tenantId", "paymentId",
+-- "treatmentPlanId") de payment_plan_amounts, payment_allocations y
+-- payment_allocation_movements: la base y las imputaciones son de un abono de
+-- la MISMA clínica y de SU plan (las FK de Postgres se chequean saltando la
+-- RLS). Un abono a un saldo migrado (DX-262, "treatmentPlanId" NULL) no puede
+-- tener base ni imputaciones.
+-- CONCURRENTLY (DB-025): no bloquea las escrituras de los abonos; por eso es
+-- la ÚNICA sentencia del fichero (Prisma la ejecuta fuera de transacción).
+-- Si falla deja un índice INVALID: DROP INDEX CONCURRENTLY,
+-- `prisma migrate resolve --rolled-back` y reintentar.
+CREATE UNIQUE INDEX CONCURRENTLY "payments_tenant_id_plan_key" ON "payments"("tenantId", "id", "treatmentPlanId");

@@ -83,6 +83,13 @@ async function cleanup(): Promise<void> {
   await raw.paymentReceiptCounter.deleteMany({
     where: { tenantId: { in: ids } },
   });
+  // DX-051: los abonos por repositorio dejan base, imputaciones e historial
+  // (borrar las imputaciones deja su movimiento: van antes).
+  await raw.paymentAllocation.deleteMany({ where: { tenantId: { in: ids } } });
+  await raw.paymentAllocationMovement.deleteMany({
+    where: { tenantId: { in: ids } },
+  });
+  await raw.paymentPlanAmount.deleteMany({ where: { tenantId: { in: ids } } });
   await raw.payment.deleteMany({ where: { tenantId: { in: ids } } });
   await raw.treatmentPlan.deleteMany({ where: { tenantId: { in: ids } } });
   await raw.patient.deleteMany({ where: { tenantId: { in: ids } } });

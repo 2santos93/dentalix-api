@@ -85,6 +85,13 @@ const TENANT_TABLES = [
   'consent_templates',
   'installments',
   'payment_plans',
+  // DX-051: imputación de abonos (hijas de payments, de los ítems y de los
+  // planes). Las imputaciones antes que su historial: borrarlas deja su
+  // movimiento.
+  'payment_allocations',
+  'payment_allocation_movements',
+  'payment_plan_amounts',
+  'plan_allocation_rebalance_requests',
   'payments',
   // Después de payments (payments."cashSessionId").
   'cash_sessions',
