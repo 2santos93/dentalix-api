@@ -18,6 +18,7 @@ import {
 } from '../../domain/allocation-rules';
 import type {
   PaymentWithoutBase,
+  PlanAllocationFacts,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
   RebalanceOptions,
@@ -307,6 +308,57 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
       }
     }
+  }
+
+  async listPlanAllocationFacts(planId: string): Promise<PlanAllocationFacts> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const livePayment = { deletedAt: null, treatmentPlanId: planId };
+        const allocations = await tx.paymentAllocation.findMany({
+          where: { tenantId, treatmentPlanId: planId, payment: livePayment },
+          select: {
+            paymentId: true,
+            treatmentPlanItemId: true,
+            amount: true,
+          },
+        });
+        const bases = await tx.paymentPlanAmount.findMany({
+          where: { tenantId, treatmentPlanId: planId, payment: livePayment },
+          select: { paymentId: true, amount: true, manual: true },
+        });
+        const items = await tx.treatmentPlanItem.findMany({
+          where: { tenantId, planId, deletedAt: null },
+          select: { id: true, toothNumber: true, catalogItemId: true },
+        });
+        const catalog = await tx.dentalCatalogItem.findMany({
+          where: {
+            tenantId,
+            id: { in: [...new Set(items.map((i) => i.catalogItemId))] },
+          },
+          select: { id: true, labelEs: true },
+        });
+        const labelOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
+        return {
+          allocations: allocations.map((a) => ({
+            paymentId: a.paymentId,
+            itemId: a.treatmentPlanItemId,
+            amount: Number(a.amount),
+          })),
+          bases: bases.map((b) => ({
+            paymentId: b.paymentId,
+            amount: Number(b.amount),
+            manual: b.manual,
+          })),
+          itemLabels: items.map((i) => ({
+            itemId: i.id,
+            toothNumber: i.toothNumber,
+            procedureName: labelOf.get(i.catalogItemId) ?? '',
+          })),
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   async pendingPlanIds(

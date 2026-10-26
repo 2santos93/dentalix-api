@@ -28,7 +28,7 @@ import {
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { VoidPaymentDto } from './dto/void-payment.dto';
 import { PaymentDto } from './dto/payment.dto';
-import { PlanBalanceDto } from './dto/plan-balance.dto';
+import { PlanBalanceWithItemsDto } from './dto/plan-balance.dto';
 import { ListCashPaymentsQueryDto } from './dto/list-cash-payments-query.dto';
 import { CashPaymentsResponseDto } from './dto/cash-payments-response.dto';
 import { RecordPaymentUseCase } from '../application/use-cases/record-payment.use-case';
@@ -38,7 +38,7 @@ import { ListPaymentsUseCase } from '../application/use-cases/list-payments.use-
 import { VoidPaymentUseCase } from '../application/use-cases/void-payment.use-case';
 import {
   GetPlanBalanceUseCase,
-  GetPlanBalanceResult,
+  GetPlanBalanceWithItemsResult,
 } from '../application/use-cases/get-plan-balance.use-case';
 import {
   ListCashPaymentsUseCase,
@@ -259,12 +259,12 @@ export class PaymentsController {
   })
   @Get('treatment-plans/:id/balance')
   @ApiOkResponse({
-    type: PlanBalanceDto,
+    type: PlanBalanceWithItemsDto,
     description:
-      'Saldo del plan. Un plan rechazado o cancelado tiene `billable` 0 (misma regla que el estado de cuenta, DX-109); sus abonos siguen en `paid`.',
+      'Saldo del plan. Un plan rechazado o cancelado tiene `billable` 0 (misma regla que el estado de cuenta, DX-109); sus abonos siguen en `paid`. Añade, por ítem, lo cobrado y lo pendiente (DX-051), y en el plan lo imputado y lo sin imputar. Solo ADMIN y recepción.',
   })
-  balance(@Param('id') id: string): Promise<GetPlanBalanceResult> {
-    return this.getPlanBalance.execute(id);
+  balance(@Param('id') id: string): Promise<GetPlanBalanceWithItemsResult> {
+    return this.getPlanBalance.executeWithItems(id);
   }
 
   @Audit({

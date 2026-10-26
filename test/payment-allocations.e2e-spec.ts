@@ -6,8 +6,10 @@ import { App } from 'supertest/types';
 import {
   Clinic,
   createE2eApp,
+  loginAs,
   registerClinic,
   resetDatabase,
+  seedMember,
 } from './support/e2e-fixtures';
 
 // DX-051 Task 3 por HTTP: el alta de un abono crea su base y el interceptor
@@ -34,6 +36,24 @@ interface Balance {
   billable: number;
   paid: number;
   balance: number;
+}
+
+interface ItemBalance {
+  itemId: string;
+  toothNumber: string;
+  procedureName: string;
+  status: string;
+  billable: number;
+  paid: number;
+  balance: number;
+}
+
+interface FullBalance extends Balance {
+  allocated: number;
+  unallocated: number;
+  unconvertedPaymentsCount: number;
+  manualPaymentIds: string[];
+  items: ItemBalance[];
 }
 
 interface Statement {
@@ -147,6 +167,13 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
       where: { tenantId: clinic.tenantId },
     });
 
+  async function fullBalanceOf(planId: string): Promise<FullBalance> {
+    const res = await api()
+      .get(`/treatment-plans/${planId}/balance`)
+      .expect(200);
+    return res.body as FullBalance;
+  }
+
   async function balanceOf(planId: string): Promise<Balance> {
     const res = await api()
       .get(`/treatment-plans/${planId}/balance`)
@@ -227,6 +254,9 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
 
     expect(await rowsOf(paymentId)).toEqual({ [done]: 100, [accepted]: 50 });
     expect(await baseOf(paymentId)).toBe(180);
+    const full = await fullBalanceOf(planId);
+    expect(full.items.map((i) => i.paid)).toEqual([100, 50, 0]);
+    expect(full).toMatchObject({ allocated: 150, unallocated: 30 });
     const rows = await raw.paymentAllocation.findMany({ where: { paymentId } });
     expect(rows.every((r) => r.source === 'AUTO')).toBe(true);
     expect(rows.every((r) => r.createdById === clinic.adminUserId)).toBe(true);
@@ -250,6 +280,11 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
     expect(Object.values(rows).reduce((s, v) => s + v, 0)).toBeLessThanOrEqual(
       Number(base.amount),
     );
+    const full = await fullBalanceOf(planId);
+    const itemsPaid = full.items.reduce((s, i) => s + i.paid, 0);
+    expect(Math.round((itemsPaid + full.unallocated) * 100)).toBe(
+      Math.round(full.paid * 100),
+    );
   });
 
   it('payment without rate is recorded unallocated', async () => {
@@ -260,6 +295,7 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
 
     expect(await baseOf(paymentId)).toBeNull();
     expect(await rowsOf(paymentId)).toEqual({});
+    expect((await fullBalanceOf(planId)).unconvertedPaymentsCount).toBe(1);
   });
 
   it('idempotent replay does not create a second base', async () => {
@@ -458,6 +494,75 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
       .post(`/treatment-plans/${rejected}/reject`, { reason: 'PRICE' })
       .expect(200);
     await expectDrained('rechazo del plan');
+  });
+
+  it('RECEPTION reads per-item balance', async () => {
+    const planId = await createPlan();
+    const done = await addItem(planId, 100, 'DONE');
+    await addItem(planId, 50, 'ACCEPTED');
+    const paymentId = await pay(planId, 130);
+    const reception = await seedMember(raw, clinic, 'RECEPTION');
+    const token = await loginAs(app, clinic.host, reception.email);
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/treatment-plans/${planId}/balance`)
+      .set('X-Tenant-Host', clinic.host)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const body = res.body as FullBalance;
+    expect(body.items[0]).toEqual({
+      itemId: done,
+      toothNumber: expect.any(String) as string,
+      procedureName: 'Resina',
+      status: 'DONE',
+      billable: 100,
+      paid: 100,
+      balance: 0,
+    });
+    expect(body.items.map((i) => i.paid)).toEqual([100, 30]);
+    expect(body.manualPaymentIds).toEqual([]);
+    expect(paymentId).toBeDefined();
+  });
+
+  it.each(['DENTIST', 'ASSISTANT'] as const)(
+    '%s gets 403 on balance',
+    async (role) => {
+      const planId = await createPlan();
+      const member = await seedMember(raw, clinic, role);
+      const token = await loginAs(app, clinic.host, member.email);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/treatment-plans/${planId}/balance`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+
+      expect(res.body).not.toHaveProperty('items');
+    },
+  );
+
+  it('item discount after payment moves excess to unallocated', async () => {
+    const planId = await createPlan();
+    const done = await addItem(planId, 100, 'DONE');
+    const paymentId = await pay(planId, 100);
+    expect((await fullBalanceOf(planId)).unallocated).toBe(0);
+
+    await api()
+      .post(`/treatment-plans/${planId}/items/bulk-discount`, {
+        itemIds: [done],
+        percent: 10,
+      })
+      .expect(200);
+
+    const full = await fullBalanceOf(planId);
+    expect(full.items[0]).toMatchObject({
+      billable: 90,
+      paid: 90,
+      balance: 0,
+    });
+    expect(full).toMatchObject({ allocated: 90, unallocated: 10, paid: 100 });
+    expect(await rowsOf(paymentId)).toEqual({ [done]: 90 });
   });
 
   it('opening-balance payments get no base nor allocations', async () => {

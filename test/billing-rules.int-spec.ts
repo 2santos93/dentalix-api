@@ -15,6 +15,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { PrismaPlanQuoteRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
+import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
 import { RejectTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/reject-treatment-plan.use-case';
@@ -80,6 +81,7 @@ const balance = new GetPlanBalanceUseCase(
   paymentRepo,
   getPlan,
   identityConvert,
+  new PrismaPlanAllocationRepository(prisma, tenantContext),
 );
 const recordPayment = new RecordPaymentUseCase(
   paymentRepo,

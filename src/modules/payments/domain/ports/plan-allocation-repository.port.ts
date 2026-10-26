@@ -37,6 +37,22 @@ export interface PaymentWithoutBase {
   paidOn: string;
 }
 
+/**
+ * Hechos de imputación de un plan para el saldo por ítem (spec R14), leídos
+ * en UNA transacción `RepeatableRead`: solo abonos vivos, importes en la
+ * moneda del plan.
+ */
+export interface PlanAllocationFacts {
+  allocations: { paymentId: string; itemId: string; amount: number }[];
+  bases: { paymentId: string; amount: number; manual: boolean }[];
+  /** Ítems vivos del plan con diente y nombre del procedimiento del catálogo. */
+  itemLabels: {
+    itemId: string;
+    toothNumber: string;
+    procedureName: string;
+  }[];
+}
+
 export const PLAN_ALLOCATION_REPOSITORY = Symbol('PLAN_ALLOCATION_REPOSITORY');
 
 /**
@@ -88,6 +104,9 @@ export interface PlanAllocationRepository {
     tenantId: string,
     planId: string,
   ): Promise<void>;
+
+  /** Imputaciones, bases y rótulos de ítem del plan, en una sola lectura. */
+  listPlanAllocationFacts(planId: string): Promise<PlanAllocationFacts>;
 
   /** Clínicas vivas, para el barrido (sin tenant: tabla sin RLS). */
   tenantIds(): Promise<string[]>;

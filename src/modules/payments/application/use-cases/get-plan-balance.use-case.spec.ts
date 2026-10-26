@@ -1,5 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
+import type {
+  PlanAllocationFacts,
+  PlanAllocationRepository,
+} from '../../domain/ports/plan-allocation-repository.port';
 import { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
@@ -100,6 +104,17 @@ class FakeConvertAmountUseCase {
   }
 }
 
+class FakeAllocationRepository {
+  public facts: PlanAllocationFacts = {
+    allocations: [],
+    bases: [],
+    itemLabels: [],
+  };
+  public readonly listPlanAllocationFacts = jest.fn(() =>
+    Promise.resolve(this.facts),
+  );
+}
+
 function makeItem(
   overrides: Partial<TreatmentPlanItem> = {},
 ): TreatmentPlanItem {
@@ -165,12 +180,14 @@ describe('GetPlanBalanceUseCase', () => {
     const repo = new InMemoryPaymentRepository(timeZone);
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
     const fakeConvert = new FakeConvertAmountUseCase();
+    const allocations = new FakeAllocationRepository();
     const uc = new GetPlanBalanceUseCase(
       repo,
       fakeGetPlan as unknown as GetTreatmentPlanUseCase,
       fakeConvert as unknown as ConvertAmountUseCase,
+      allocations as unknown as PlanAllocationRepository,
     );
-    return { repo, fakeGetPlan, fakeConvert, uc };
+    return { repo, fakeGetPlan, fakeConvert, allocations, uc };
   }
 
   it('billable counts ONLY ACCEPTED and DONE items, never PROPOSED', async () => {
@@ -511,5 +528,234 @@ describe('GetPlanBalanceUseCase', () => {
       items: [makeItem({ price: 1000, status: TreatmentPlanItemStatus.DONE })],
     });
     expect((await uc.execute('plan-1')).billable).toBe(1000);
+  });
+
+  describe('executeWithItems (DX-051)', () => {
+    function threeItemPlan(fakeGetPlan: FakeGetTreatmentPlanUseCase) {
+      fakeGetPlan.plan = makePlan({
+        status: TreatmentPlanStatus.ACCEPTED,
+        items: [
+          makeItem({
+            id: 'i1',
+            price: 100,
+            status: TreatmentPlanItemStatus.DONE,
+          }),
+          makeItem({
+            id: 'i2',
+            price: 50,
+            discount: 10,
+            status: TreatmentPlanItemStatus.ACCEPTED,
+          }),
+          makeItem({
+            id: 'i3',
+            toothNumber: '22',
+            price: 70,
+            status: TreatmentPlanItemStatus.PROPOSED,
+          }),
+        ],
+      });
+    }
+    const labels = [
+      { itemId: 'i1', toothNumber: '11', procedureName: 'Resina' },
+      { itemId: 'i2', toothNumber: '11', procedureName: 'Endodoncia' },
+      { itemId: 'i3', toothNumber: '22', procedureName: 'Corona' },
+    ];
+
+    it('returns per-item figures with procedure name in plan order', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      const pay = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 120 });
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [{ paymentId: pay.id, amount: 120, manual: false }],
+        allocations: [
+          { paymentId: pay.id, itemId: 'i1', amount: 100 },
+          { paymentId: pay.id, itemId: 'i2', amount: 20 },
+        ],
+      };
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.items).toEqual([
+        {
+          itemId: 'i1',
+          toothNumber: '11',
+          procedureName: 'Resina',
+          status: 'DONE',
+          billable: 100,
+          paid: 100,
+          balance: 0,
+        },
+        {
+          itemId: 'i2',
+          toothNumber: '11',
+          procedureName: 'Endodoncia',
+          status: 'ACCEPTED',
+          billable: 40,
+          paid: 20,
+          balance: 20,
+        },
+        {
+          itemId: 'i3',
+          toothNumber: '22',
+          procedureName: 'Corona',
+          status: 'PROPOSED',
+          billable: 0,
+          paid: 0,
+          balance: 0,
+        },
+      ]);
+      expect(result).toMatchObject({ billable: 140, paid: 120, balance: 20 });
+    });
+
+    it('PROPOSED items report zeros', async () => {
+      const { fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      allocations.facts = { itemLabels: labels, bases: [], allocations: [] };
+
+      const proposed = (await uc.executeWithItems('plan-1')).items[2];
+
+      expect(proposed).toMatchObject({ billable: 0, paid: 0, balance: 0 });
+    });
+
+    it('non-billable plan reports zero billable items and everything unallocated', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      fakeGetPlan.plan!.status = TreatmentPlanStatus.CANCELLED;
+      const pay = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 80 });
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [{ paymentId: pay.id, amount: 80, manual: false }],
+        allocations: [],
+      };
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.items.every((i) => i.billable === 0)).toBe(true);
+      expect(result).toMatchObject({ allocated: 0, unallocated: 80 });
+    });
+
+    it('unallocated sums payment surpluses', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      const a = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 100 });
+      const b = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 60 });
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [
+          { paymentId: a.id, amount: 100, manual: false },
+          { paymentId: b.id, amount: 60, manual: false },
+        ],
+        allocations: [
+          { paymentId: a.id, itemId: 'i1', amount: 90 },
+          { paymentId: b.id, itemId: 'i2', amount: 40 },
+        ],
+      };
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result).toMatchObject({ allocated: 130, unallocated: 30 });
+    });
+
+    it('invariant: sum of item paid plus unallocated equals paid', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      const a = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 100.1 });
+      const b = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 59.9 });
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [
+          { paymentId: a.id, amount: 100.1, manual: false },
+          { paymentId: b.id, amount: 59.9, manual: false },
+        ],
+        allocations: [
+          { paymentId: a.id, itemId: 'i1', amount: 100 },
+          { paymentId: b.id, itemId: 'i2', amount: 40 },
+        ],
+      };
+
+      const result = await uc.executeWithItems('plan-1');
+
+      const sum = result.items.reduce((s, i) => s + i.paid * 100, 0);
+      expect(Math.round(sum + result.unallocated * 100)).toBe(
+        Math.round(result.paid * 100),
+      );
+    });
+
+    it('warns when the invariant does not hold', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const pay = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 100 });
+      // La base guardada (99,50) difiere de la conversión en vivo (100).
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [{ paymentId: pay.id, amount: 99.5, manual: false }],
+        allocations: [{ paymentId: pay.id, itemId: 'i1', amount: 99.5 }],
+      };
+
+      await expect(uc.executeWithItems('plan-1')).resolves.toBeDefined();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('-50 cents'));
+      warn.mockRestore();
+    });
+
+    it('counts payments without base', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      const withBase = repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        amount: 10,
+      });
+      repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 25 });
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [{ paymentId: withBase.id, amount: 10, manual: false }],
+        allocations: [],
+      };
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.unconvertedPaymentsCount).toBe(1);
+      expect(result.unallocated).toBe(10);
+    });
+
+    it('lists manual payment ids', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      const a = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 10 });
+      const b = repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 20 });
+      allocations.facts = {
+        itemLabels: labels,
+        bases: [
+          { paymentId: a.id, amount: 10, manual: false },
+          { paymentId: b.id, amount: 20, manual: true },
+        ],
+        allocations: [],
+      };
+
+      expect((await uc.executeWithItems('plan-1')).manualPaymentIds).toEqual([
+        b.id,
+      ]);
+    });
+
+    it('execute is unchanged and does not read allocations', async () => {
+      const { repo, fakeGetPlan, allocations, uc } = makeUseCase();
+      threeItemPlan(fakeGetPlan);
+      repo.seedPayment({ treatmentPlanId: 'plan-1', amount: 20 });
+
+      const result = await uc.execute('plan-1');
+
+      expect(Object.keys(result).sort()).toEqual([
+        'balance',
+        'billable',
+        'paid',
+        'paymentsCount',
+        'planCurrency',
+      ]);
+      expect(allocations.listPlanAllocationFacts).not.toHaveBeenCalled();
+    });
   });
 });

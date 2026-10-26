@@ -4,6 +4,9 @@ import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
+import { PLAN_ALLOCATION_REPOSITORY } from '../../domain/ports/plan-allocation-repository.port';
+import type { PlanAllocationRepository } from '../../domain/ports/plan-allocation-repository.port';
+import { itemBillableCents } from '../../domain/allocation-rules';
 import { paymentInPlanCurrency } from '../payment-in-plan-currency';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 
@@ -22,6 +25,30 @@ export interface GetPlanBalanceResult {
   balance: number;
   /** Number of active payments for the plan. */
   paymentsCount: number;
+}
+
+/** Cobrado y pendiente de un ítem del plan (DX-051). */
+export interface PlanItemBalance {
+  itemId: string;
+  toothNumber: string;
+  procedureName: string;
+  status: TreatmentPlanItemStatus;
+  billable: number;
+  paid: number;
+  balance: number;
+}
+
+export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
+  /** Σ de las imputaciones de los abonos vivos del plan. */
+  allocated: number;
+  /** Σ de los sobrantes de los abonos con base: lo cobrado sin ítem. */
+  unallocated: number;
+  /** Abonos vivos sin base (sin tasa o de moneda no soportada). */
+  unconvertedPaymentsCount: number;
+  /** Abonos cuya imputación fijó un ADMIN a mano. */
+  manualPaymentIds: string[];
+  /** En el orden del plan. */
+  items: PlanItemBalance[];
 }
 
 // Same rounding policy as CreateSaleUseCase/ConvertAmountUseCase: monetary
@@ -49,9 +76,96 @@ export class GetPlanBalanceUseCase {
     private readonly repo: PaymentRepository,
     private readonly getTreatmentPlan: GetTreatmentPlanUseCase,
     private readonly convertAmount: ConvertAmountUseCase,
+    @Inject(PLAN_ALLOCATION_REPOSITORY)
+    private readonly allocations: PlanAllocationRepository,
   ) {}
 
+  /**
+   * `execute` más el cobrado y pendiente por ítem (DX-051, R14). Una lectura
+   * por plan, sin N+1. Los hechos se leen DESPUÉS del plan: un descuento
+   * posterior solo libera imputaciones, así que el pendiente de un ítem nunca
+   * sale negativo.
+   */
+  async executeWithItems(
+    treatmentPlanId: string,
+  ): Promise<GetPlanBalanceWithItemsResult> {
+    const { result, plan, payments } = await this.compute(treatmentPlanId);
+    const facts =
+      await this.allocations.listPlanAllocationFacts(treatmentPlanId);
+    const billablePlan = isPlanBillable(plan.status);
+
+    const labels = new Map(facts.itemLabels.map((l) => [l.itemId, l]));
+    const paidByItem = new Map<string, number>();
+    const allocatedByPayment = new Map<string, number>();
+    let allocatedCents = 0;
+    for (const a of facts.allocations) {
+      const cents = Math.round(a.amount * 100);
+      paidByItem.set(a.itemId, (paidByItem.get(a.itemId) ?? 0) + cents);
+      allocatedByPayment.set(
+        a.paymentId,
+        (allocatedByPayment.get(a.paymentId) ?? 0) + cents,
+      );
+      allocatedCents += cents;
+    }
+
+    const items: PlanItemBalance[] = plan.items.map((item) => {
+      const billableCents = itemBillableCents(
+        { ...item, deletedAt: null },
+        billablePlan,
+      );
+      const paidCents = paidByItem.get(item.id) ?? 0;
+      return {
+        itemId: item.id,
+        toothNumber: labels.get(item.id)?.toothNumber ?? item.toothNumber,
+        procedureName: labels.get(item.id)?.procedureName ?? '',
+        status: item.status,
+        billable: billableCents / 100,
+        paid: paidCents / 100,
+        balance: (billableCents - paidCents) / 100,
+      };
+    });
+
+    let unallocatedCents = 0;
+    for (const base of facts.bases) {
+      unallocatedCents +=
+        Math.round(base.amount * 100) -
+        (allocatedByPayment.get(base.paymentId) ?? 0);
+    }
+    const withBase = new Set(facts.bases.map((b) => b.paymentId));
+    const unconvertedPaymentsCount = payments.filter(
+      (p) => !withBase.has(p.id),
+    ).length;
+
+    // Con todos los abonos con base, lo imputado más lo sin imputar es lo
+    // cobrado: si no, la base y la conversión en vivo discrepan (p. ej. una
+    // tasa corregida después). No se rompe la lectura; se deja constancia.
+    if (unconvertedPaymentsCount === 0) {
+      const diff =
+        allocatedCents + unallocatedCents - Math.round(result.paid * 100);
+      if (diff !== 0) {
+        this.logger.warn(
+          `Plan ${treatmentPlanId}: allocated + unallocated differs from paid by ${diff} cents`,
+        );
+      }
+    }
+
+    return {
+      ...result,
+      allocated: allocatedCents / 100,
+      unallocated: unallocatedCents / 100,
+      unconvertedPaymentsCount,
+      manualPaymentIds: facts.bases
+        .filter((b) => b.manual)
+        .map((b) => b.paymentId),
+      items,
+    };
+  }
+
   async execute(treatmentPlanId: string): Promise<GetPlanBalanceResult> {
+    return (await this.compute(treatmentPlanId)).result;
+  }
+
+  private async compute(treatmentPlanId: string) {
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant.
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
@@ -110,12 +224,13 @@ export class GetPlanBalanceUseCase {
       paid += converted;
     }
 
-    return {
+    const result: GetPlanBalanceResult = {
       planCurrency: plan.currency,
       billable,
       paid: round2(paid),
       balance: round2(billable - paid),
       paymentsCount: payments.length,
     };
+    return { result, plan, payments };
   }
 }

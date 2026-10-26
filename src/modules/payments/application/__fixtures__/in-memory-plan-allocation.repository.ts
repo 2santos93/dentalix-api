@@ -4,6 +4,7 @@ import type {
 } from '../../domain/allocation-rules';
 import type {
   PaymentWithoutBase,
+  PlanAllocationFacts,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
   RebalanceOptions,
@@ -165,6 +166,10 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
   enqueuePlan(_tx: unknown, _tenantId: string, planId: string): Promise<void> {
     this.requests.push(planId);
     return Promise.resolve();
+  }
+
+  listPlanAllocationFacts(): Promise<PlanAllocationFacts> {
+    return Promise.resolve({ allocations: [], bases: [], itemLabels: [] });
   }
 
   tenantIds(): Promise<string[]> {
