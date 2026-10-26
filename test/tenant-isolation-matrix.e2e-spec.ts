@@ -3136,6 +3136,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         : api(app, clinicB, c.verb, c.path(), c.body?.());
       if (c.locationId) req.set('X-Location-Id', c.locationId());
       const res = await req;
+      if (res.status !== c.status) {
+        // Diagnóstico de fallos transitorios: solo campos de error, nunca
+        // cuerpos de petición ni respuestas de éxito con posibles tokens.
+        const error = res.body as {
+          message?: unknown;
+          error?: unknown;
+          code?: unknown;
+        };
+        throw new Error(
+          `${c.name}: HTTP ${res.status} (esperado ${c.status}); ${JSON.stringify({ message: error.message, error: error.error, code: error.code })}`,
+        );
+      }
       expect({ status: res.status }).toEqual({ status: c.status });
       if ('responseBody' in c) {
         expect(res.text === '' ? null : res.body).toEqual(c.responseBody);
