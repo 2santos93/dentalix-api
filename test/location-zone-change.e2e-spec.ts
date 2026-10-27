@@ -298,4 +298,124 @@ describe('Locations / cambio regional (e2e)', () => {
     });
     expect(stored.paidAt.toISOString()).toBe(paidAt.toISOString());
   });
+
+  it('a cash session opening during the change is seen: the PATCH waits for it and is 409', async () => {
+    const id = await newLocation();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let inserted!: () => void;
+    const insertedSignal = new Promise<void>((r) => (inserted = r));
+    // Una caja que se abre (INSERT sin commit): toma KEY SHARE en la sede por
+    // la FK compuesta, que choca con el FOR UPDATE del PATCH.
+    const opening = raw.$transaction(
+      async (tx) => {
+        await tx.cashSession.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId: id,
+            openedById: adminId,
+            status: 'OPEN',
+          },
+        });
+        inserted();
+        await gate;
+      },
+      { timeout: 30_000 },
+    );
+    await insertedSignal;
+
+    const pending = patch(id, {
+      currency: 'EUR',
+      confirmRegionalChange: true,
+    }).then((res) => res);
+
+    // Determinista: esperamos a que el PATCH esté BLOQUEADO en el FOR UPDATE
+    // (no a un sleep fijo) antes de confirmar la caja.
+    let blocked = false;
+    for (let i = 0; i < 100 && !blocked; i++) {
+      const rows = await raw.$queryRaw<{ n: bigint }[]>`
+        SELECT count(*) AS n FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND state = 'active'
+          AND query LIKE '%FROM "locations"%FOR UPDATE%'`;
+      blocked = Number(rows[0].n) > 0;
+      if (!blocked) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(blocked).toBe(true);
+
+    release();
+    await opening;
+    const res = await pending;
+    expect(res.status).toBe(409);
+    expect((res.body as ErrorBody).code).toBe('LOCATION_REGIONAL_CASH_OPEN');
+    const after = await raw.location.findUniqueOrThrow({ where: { id } });
+    expect(after.currency).toBe('COP');
+  });
+
+  it('both currency and zone unconfirmed: the 409 carries both warnings', async () => {
+    const id = await newLocation();
+    await addExpense(id);
+    const res = await patch(id, {
+      currency: 'EUR',
+      timeZone: 'Asia/Tokyo',
+    }).expect(409);
+    const body = res.body as ErrorBody;
+    expect(body.code).toBe('LOCATION_REGIONAL_CHANGE_UNCONFIRMED');
+    expect(body.message).toContain('movimientos en COP');
+    expect(body.message).toContain('Las citas conservan su hora');
+  });
+
+  it('every history probe makes a currency change need confirmation', async () => {
+    const seeds: Record<string, (locationId: string) => Promise<unknown>> = {
+      payment: async (locationId) => {
+        const patient = await raw.patient.create({
+          data: { tenantId: clinic.tenantId, firstName: 'P', lastName: 'Q' },
+        });
+        const plan = await raw.treatmentPlan.create({
+          data: {
+            tenantId: clinic.tenantId,
+            patientId: patient.id,
+            currency: 'COP',
+          },
+        });
+        return raw.payment.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId,
+            treatmentPlanId: plan.id,
+            patientId: patient.id,
+            amount: 1,
+            currency: 'COP',
+            paidAt: new Date('2026-10-01T15:00:00Z'),
+          },
+        });
+      },
+      priceList: async (locationId) =>
+        raw.priceList.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId,
+            name: `L ${locationId}`,
+            currency: 'COP',
+          },
+        }),
+      inventoryItem: async (locationId) =>
+        raw.inventoryItem.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId,
+            name: 'Guantes',
+            unit: 'u',
+          },
+        }),
+    };
+    for (const [name, seed] of Object.entries(seeds)) {
+      const id = await newLocation();
+      await seed(id);
+      const res = await patch(id, { currency: 'EUR' });
+      expect([name, res.status]).toEqual([name, 409]);
+      expect((res.body as ErrorBody).code).toBe(
+        'LOCATION_REGIONAL_CHANGE_UNCONFIRMED',
+      );
+    }
+  });
 });

@@ -275,9 +275,13 @@ export class UpdateLocationUseCase {
           ) {
             throw regionalConflict(
               'LOCATION_REGIONAL_CHANGE_UNCONFIRMED',
-              moved('currency')
-                ? REGIONAL_CHANGE_MESSAGES.currency(cur.currency ?? '')
-                : REGIONAL_CHANGE_MESSAGES.timeZone,
+              [
+                moved('currency') &&
+                  REGIONAL_CHANGE_MESSAGES.currency(cur.currency ?? ''),
+                moved('timeZone') && REGIONAL_CHANGE_MESSAGES.timeZone,
+              ]
+                .filter(Boolean)
+                .join(' '),
             );
           }
         }

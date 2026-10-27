@@ -448,6 +448,19 @@ describe('teléfono de la sede (DX-222)', () => {
       });
     });
 
+    it('moneda y zona sin confirmar: un solo 409 con los dos avisos', async () => {
+      const uc = updateUseCase(regionalRepo({ history: true }));
+      await expect(
+        uc.execute('loc-1', { currency: 'EUR', timeZone: 'Asia/Tokyo' }),
+      ).rejects.toMatchObject({
+        response: {
+          message: expect.stringMatching(
+            /movimientos en COP.*Las citas conservan su hora/,
+          ) as string,
+        },
+      });
+    });
+
     it('confirmado cambia la moneda, marca revisada y devuelve antes y después', async () => {
       const written: object[] = [];
       const uc = updateUseCase(regionalRepo({ history: true, written }));
