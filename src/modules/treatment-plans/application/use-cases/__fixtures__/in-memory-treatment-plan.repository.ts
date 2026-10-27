@@ -33,6 +33,10 @@ import {
   optionSiblingsToReject,
   siblingRejectionBlockedMessage,
 } from '../../../domain/plan-options';
+import type {
+  PlanCurrencyContext,
+  PlanCurrencySource,
+} from '../../../domain/ports/plan-currency-source.port';
 import type { ItemAttributionChange } from '../../../domain/plan-item-attribution';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
@@ -598,3 +602,10 @@ export const PLAN_WITHOUT_OPTIONS = {
   rejectionReason: null,
   rejectionNote: null,
 } as const;
+
+/** `PlanCurrencySource` de las specs: una sede activa o las de la clínica. */
+export function planCurrencySource(
+  context: PlanCurrencyContext,
+): PlanCurrencySource {
+  return { context: () => Promise.resolve(context) };
+}

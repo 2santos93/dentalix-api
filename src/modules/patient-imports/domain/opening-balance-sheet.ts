@@ -145,14 +145,17 @@ export function resolveBalanceColumns(
   return out as BalanceColumns;
 }
 
-/** Plantilla CSV de la hoja de saldos (BOM, CRLF, una fila de ejemplo). */
-export function balanceTemplateCsv(): string {
+/**
+ * Plantilla CSV de la hoja de saldos (BOM, CRLF, una fila de ejemplo) con la
+ * moneda de la sede del lote.
+ */
+export function balanceTemplateCsv(currency: string): string {
   return csv([
     [...BALANCE_TEMPLATE_HEADERS],
     [
       '1000000001',
       '150000',
-      'COP',
+      currency,
       '15/03/2026',
       'Fila de ejemplo: bórrala antes de importar',
     ],

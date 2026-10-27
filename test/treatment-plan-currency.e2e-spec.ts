@@ -109,14 +109,14 @@ describe('treatment plan currency whitelist (e2e)', () => {
       .expect(400);
   });
 
-  it('defaults to USD when currency is omitted', async () => {
+  it("defaults to the location's currency (COP), not USD, when currency is omitted", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientId}/treatment-plans`)
       .set('X-Tenant-Host', hostFor(sub))
       .set('Authorization', `Bearer ${token}`)
       .send({})
       .expect(201);
-    expect((res.body as { currency: string }).currency).toBe('USD');
+    expect((res.body as { currency: string }).currency).toBe('COP');
   });
 
   it('accepts a lowercase currency (normalized to uppercase)', async () => {

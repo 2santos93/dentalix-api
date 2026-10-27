@@ -259,12 +259,12 @@ describe('Payments (e2e)', () => {
         .expect(201);
       const catalogItem = createCatalogItem.body as CatalogItemResponseBody;
 
-      // --- 1. Create a treatment plan (currency defaults to USD).
+      // --- 1. Create a treatment plan (explicit USD; the clinic's location is COP).
       const createPlan = await request(app.getHttpServer())
         .post(`/api/v1/patients/${patientA.id}/treatment-plans`)
         .set('X-Tenant-Host', hostFor(clinicA.subdomain))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
-        .send({ notes: 'Plan de pagos' })
+        .send({ notes: 'Plan de pagos', currency: 'USD' })
         .expect(201);
       const plan = createPlan.body as TreatmentPlanResponseBody;
       expect(plan.currency).toBe('USD');

@@ -142,11 +142,12 @@ export class BatchStateError extends Error {
   }
 }
 
-/** La sede de un lote nuevo: su país y su zona. */
+/** La sede de un lote nuevo: su país, su zona y su moneda (null: sin configurar). */
 export interface BatchLocation {
   id: string;
   country: ClinicCountry;
   timeZone: string;
+  currency: string | null;
 }
 
 /** La sede del lote no existe o está inactiva. */
@@ -323,13 +324,14 @@ export class PrismaPatientImportRepository {
           deletedAt: null,
           isActive: true,
         },
-        select: { id: true, country: true, timeZone: true },
+        select: { id: true, country: true, timeZone: true, currency: true },
       });
       if (!location) throw new BatchLocationError();
       return {
         id: location.id,
         country: location.country,
         timeZone: requireLocationTimeZone(location),
+        currency: location.currency,
       };
     });
   }

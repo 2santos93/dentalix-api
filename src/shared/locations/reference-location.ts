@@ -18,6 +18,23 @@ export function locationRequired(): ConflictException {
 }
 
 /**
+ * 409 `LOCATION_CURRENCY_REQUIRED`: la sede no tiene moneda (fila sin barrer,
+ * «sede sin configurar»). Nunca se sustituye por otra moneda.
+ */
+export function locationCurrencyRequired(
+  locationId?: string,
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: 'LOCATION_CURRENCY_REQUIRED',
+    message:
+      'La sede no tiene moneda configurada. Configúrala en Ajustes → Sedes.',
+    ...(locationId ? { locationId } : {}),
+  });
+}
+
+/**
  * Sede de referencia y sus datos regionales. `currency` y `locale` pueden ser
  * null en fase 1 (fila de una réplica antigua aún sin barrer): quien los
  * necesite responde su propio 409 (`LOCATION_CURRENCY_REQUIRED`), nunca otro

@@ -43,6 +43,7 @@ import {
   YIELD_EVERY,
   yieldToEventLoop,
 } from '../domain/tabular-file';
+import { locationCurrencyRequired } from '../../../shared/locations/reference-location';
 import {
   BatchLocationError,
   BatchStateError,
@@ -538,8 +539,19 @@ export class PatientImportsService {
   // Hoja de saldos «Saldo migrado» (DX-262)
   // -------------------------------------------------------------------------
 
-  balanceTemplate(): string {
-    return balanceTemplateCsv();
+  /** La fila de ejemplo lleva la moneda de la sede en contexto (nunca otra). */
+  async balanceTemplate(): Promise<string> {
+    let location: BatchLocation;
+    try {
+      location = await this.repo.batchLocation();
+    } catch (err) {
+      if (err instanceof BatchLocationError) {
+        throw new BadRequestException(LOCATION_MESSAGE);
+      }
+      throw err;
+    }
+    if (!location.currency) throw locationCurrencyRequired(location.id);
+    return balanceTemplateCsv(location.currency);
   }
 
   /**

@@ -134,9 +134,15 @@ describe('columnas de la hoja de saldos (DX-262)', () => {
   });
 
   it('la plantilla trae BOM, las cabeceras y una fila de ejemplo ficticia', () => {
-    const csv = balanceTemplateCsv();
+    const csv = balanceTemplateCsv('COP');
     expect(csv.startsWith('﻿"numero_documento","importe","moneda"')).toBe(true);
     expect(csv).toContain('Fila de ejemplo: bórrala antes de importar');
+  });
+
+  it('balance template uses the location currency', () => {
+    const csv = balanceTemplateCsv('JPY');
+    expect(csv).toContain('"JPY"');
+    expect(csv).not.toContain('COP');
   });
 });
 
