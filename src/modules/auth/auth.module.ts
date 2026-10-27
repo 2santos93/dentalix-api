@@ -32,6 +32,8 @@ import { BreakGlassService } from './application/break-glass.service';
 import { BREAK_GLASS_REPOSITORY } from './domain/ports/break-glass-repository.port';
 import { PrismaBreakGlassRepository } from './infrastructure/repositories/prisma-break-glass.repository';
 import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
+import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whitelist.port';
+import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapters/prisma-currency-whitelist.adapter';
 
 @Module({
   // LoginLockoutModule: bloqueo del login por fallos (DX-048).
@@ -62,6 +64,8 @@ import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
       useClass: PrismaRegistrationRepository,
     },
     { provide: REGISTRATION_NOTIFIER, useClass: EmailRegistrationNotifier },
+    // G1: la moneda de la primera sede tiene que estar en `currencies`.
+    { provide: CURRENCY_WHITELIST, useClass: PrismaCurrencyWhitelist },
     // Recuperar la contraseña por email (DX-010).
     RequestPasswordResetUseCase,
     ResetPasswordUseCase,

@@ -1,11 +1,18 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ClinicCountry } from '@prisma/client';
 import {
   IsEmail,
+  IsEnum,
+  IsOptional,
   IsString,
   Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
+import {
+  COUNTRY_MISSING,
+  REGIONAL_MESSAGES,
+} from '../../../locations/domain/regional-settings';
 
 /**
  * DX-144 (SEC-034): tope de lo que escribe quien pide el alta, como en las
@@ -47,4 +54,44 @@ export class RegisterDto {
     message: `Tu nombre admite como mucho ${REGISTER_TEXT_MAX_LENGTH} caracteres`,
   })
   fullName!: string;
+
+  // G1 (spec §3.5): la primera sede se registra con país, moneda, zona y
+  // formato regional, con las mismas reglas que el alta de sede. Fase 1: se
+  // acepta también la forma LEGADA (los cuatro ausentes, una web antigua); un
+  // subconjunto es 400 con el mensaje del primero que falta. Presencia y
+  // mensajes exactos los comprueba el caso de uso (la moneda se valida contra
+  // `currencies`). Fase 2 los hace obligatorios.
+  @ApiPropertyOptional({
+    enum: ClinicCountry,
+    enumName: 'ClinicCountry',
+    description:
+      'País de la primera sede. Obligatorio junto con los otros tres campos location*; sin los cuatro es la forma legada (fase 1).',
+  })
+  @IsOptional()
+  @IsEnum(ClinicCountry, { message: COUNTRY_MISSING })
+  locationCountry?: ClinicCountry;
+
+  @ApiPropertyOptional({
+    example: 'COP',
+    description: 'Moneda ISO 4217 de la primera sede (GET /public/currencies).',
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.currencyMissing })
+  locationCurrency?: string;
+
+  @ApiPropertyOptional({
+    example: 'America/Bogota',
+    description: 'Zona horaria IANA de la primera sede.',
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.timeZoneMissing })
+  locationTimeZone?: string;
+
+  @ApiPropertyOptional({
+    example: 'es-CO',
+    description: 'Formato regional BCP 47 de la primera sede.',
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.localeMissing })
+  locationLocale?: string;
 }

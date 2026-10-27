@@ -1,57 +1,50 @@
 import { ConflictException } from '@nestjs/common';
-import { ClinicCountry, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { isValidTimeZone } from '../time/civil-day';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from './default-business-hours';
 
 /**
- * Zona con la que se interpreta una sede que no tiene horario propio (o cuyo
- * horario guarda una zona que este runtime no reconoce): la de su país. Es
- * también la zona con la que nace el horario de una sede nueva.
+ * 409 `LOCATION_TIMEZONE_REQUIRED` de la sede `locationId`: su zona falta (fila
+ * de una réplica anterior a G1 aún sin barrer), este runtime no la reconoce, o
+ * la sede no existe. Es un error recuperable: el ADMIN configura la zona en
+ * Ajustes → Sedes. Nunca se sustituye por otra zona (G1, R5/R19).
  */
-export function timeZoneForCountry(country: ClinicCountry | null): string {
-  switch (country) {
-    case ClinicCountry.ES:
-      return 'Europe/Madrid';
-    case ClinicCountry.CO:
-      return 'America/Bogota';
-    default:
-      return DEFAULT_BUSINESS_HOURS_TIMEZONE;
-  }
+export function locationTimeZoneRequired(
+  locationId: string,
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: 'LOCATION_TIMEZONE_REQUIRED',
+    message:
+      'Configura una zona horaria válida para la sede y vuelve a intentarlo.',
+    locationId,
+  });
 }
 
-interface LocationZoneRow {
+/** La zona de la sede si es válida; si no, el 409 de arriba. */
+export function requireLocationTimeZone(location: {
   id: string;
-  country: ClinicCountry;
-  timezone: string | null;
-}
-
-export function requireConfiguredLocationTimeZone(
-  zone: string | null | undefined,
-): string {
+  timeZone: string | null;
+}): string {
+  const zone = location.timeZone;
   if (!zone || !isValidTimeZone(zone)) {
-    throw new ConflictException({
-      statusCode: 409,
-      error: 'Conflict',
-      code: 'LOCATION_TIMEZONE_REQUIRED',
-      message:
-        'Configura una zona horaria válida para la sede y vuelve a intentarlo.',
-    });
+    throw locationTimeZoneRequired(location.id);
   }
   return zone;
 }
 
-function zoneOfRow(row: LocationZoneRow, requireConfigured: boolean): string {
-  if (requireConfigured) return requireConfiguredLocationTimeZone(row.timezone);
-  return row.timezone && isValidTimeZone(row.timezone)
-    ? row.timezone
-    : timeZoneForCountry(row.country);
+interface LocationZoneRow {
+  id: string;
+  timeZone: string | null;
 }
 
 /**
- * Zona IANA de cada sede del tenant, en UNA consulta (sede + su horario vivo).
- * La zona sale SIEMPRE de la BD: la del horario (`LocationSchedule.timezone`,
- * validada al guardarse) o, sin horario, la del país de la sede. Incluye las
- * sedes retiradas: sus abonos siguen contando en los períodos pasados.
+ * Zona IANA de cada sede del tenant, en UNA consulta. La única fuente es
+ * `Location.timeZone` (G1, R4): ni el horario ni el país. Incluye las sedes
+ * retiradas: sus abonos siguen contando en los períodos pasados.
+ *
+ * Estricto: una sede leída con la zona NULL o inválida lanza
+ * `LOCATION_TIMEZONE_REQUIRED` con su id.
  *
  * `tenantId` va explícito además de RLS. Con `locationIds`, solo esas sedes.
  */
@@ -59,8 +52,6 @@ export async function loadLocationTimeZones(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationIds?: readonly string[],
-  // Los consumidores nuevos pueden exigir configuración sin alterar contratos legacy.
-  requireConfigured = false,
 ): Promise<Map<string, string>> {
   const ids = locationIds ? [...new Set(locationIds)] : undefined;
   if (ids && ids.length === 0) return new Map();
@@ -68,23 +59,17 @@ export async function loadLocationTimeZones(
     ? Prisma.sql`AND l."id" = ANY(${ids}::uuid[])`
     : Prisma.empty;
   const rows = await tx.$queryRaw<LocationZoneRow[]>`
-    SELECT l."id", l."country", s."timezone"
+    SELECT l."id", l."timeZone"
       FROM "locations" l
-      LEFT JOIN "location_schedules" s
-        ON s."tenantId" = l."tenantId"
-       AND s."locationId" = l."id"
-       AND s."deletedAt" IS NULL
      WHERE l."tenantId" = ${tenantId}::uuid
        ${onlyIds}`;
-  return new Map(
-    rows.map((row) => [row.id, zoneOfRow(row, requireConfigured)]),
-  );
+  return new Map(rows.map((row) => [row.id, requireLocationTimeZone(row)]));
 }
 
 /**
- * Lo mismo que `loadLocationTimeZones` como función de búsqueda: una sede que
- * no aparezca (no debería: los abonos tienen FK a su sede) usa la zona por
- * defecto, así "hoy" nunca cae en el UTC del servidor.
+ * Lo mismo que `loadLocationTimeZones` como función de búsqueda. Una sede que
+ * no aparezca (no es del tenant o no existe) lanza `LOCATION_TIMEZONE_REQUIRED`:
+ * "hoy" nunca se calcula con otra zona.
  *
  * La usan la regla de anulación de abonos (SEC-013), el `canVoid` de la caja y
  * del estado de cuenta (DX-057) y los períodos de caja y dashboard (DX-097):
@@ -94,17 +79,11 @@ export async function resolveLocationTimeZones(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationIds: readonly string[],
-  // Los consumidores nuevos pueden exigir configuración sin alterar contratos legacy.
-  requireConfigured = false,
 ): Promise<(locationId: string) => string> {
-  const zones = await loadLocationTimeZones(
-    tx,
-    tenantId,
-    locationIds,
-    requireConfigured,
-  );
-  return (locationId) =>
-    requireConfigured
-      ? requireConfiguredLocationTimeZone(zones.get(locationId))
-      : (zones.get(locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE);
+  const zones = await loadLocationTimeZones(tx, tenantId, locationIds);
+  return (locationId) => {
+    const zone = zones.get(locationId);
+    if (zone === undefined) throw locationTimeZoneRequired(locationId);
+    return zone;
+  };
 }

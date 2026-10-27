@@ -13,6 +13,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 import { ListInClinicUseCase } from '../src/modules/appointments/application/use-cases/list-in-clinic.use-case';
 import { overlapExclusionScope } from '../src/modules/appointments/application/appointment-overlap-error';
 
@@ -232,10 +236,16 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
       data: { name: subdomain, subdomain },
     });
     const main = await raw.location.create({
-      data: { tenantId: tenant.id, name: 'Principal', country: 'CO' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: tenant.id,
+        name: 'Principal',
+      }),
     });
     const north = await raw.location.create({
-      data: { tenantId: tenant.id, name: 'Norte', country: 'CO' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: tenant.id,
+        name: 'Norte',
+      }),
     });
     const patient = await raw.patient.create({
       data: { tenantId: tenant.id, firstName: 'Paz', lastName: subdomain },

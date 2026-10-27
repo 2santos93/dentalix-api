@@ -158,7 +158,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       else assistant = token;
     }
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
     const settings = await as(
       api().get('/api/v1/reminder-settings'),

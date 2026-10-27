@@ -588,7 +588,7 @@ describe('Caja — GET /payments (e2e)', () => {
     let sedeMadrid: string;
 
     beforeAll(async () => {
-      // Sede en España: nace con el horario en la zona de su país.
+      // Sede en España: su zona (G1) es la que se elige al darla de alta.
       const madrid = await authA(
         request(app.getHttpServer())
           .post('/api/v1/locations')
@@ -596,6 +596,9 @@ describe('Caja — GET /payments (e2e)', () => {
             locationBody(REGIONAL_BOGOTA_FIXTURE, {
               name: 'Sede Madrid',
               country: 'ES',
+              currency: 'EUR',
+              timeZone: 'Europe/Madrid',
+              locale: 'es-ES',
             }),
           ),
       ).expect(201);

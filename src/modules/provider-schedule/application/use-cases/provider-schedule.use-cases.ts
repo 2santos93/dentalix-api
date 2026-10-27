@@ -48,6 +48,7 @@ import {
   type WeeklyLocationInput,
   type WeeklyProviderRange,
 } from '../../domain/provider-availability';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 
 /** Reloj del horario (qué día es hoy en la sede); los tests lo fijan. */
 export const PROVIDER_SCHEDULE_CLOCK = Symbol('PROVIDER_SCHEDULE_CLOCK');
@@ -341,7 +342,7 @@ export class ReplaceProviderScheduleUseCase {
       overridesFrom,
       locations: kept.map((l) => ({
         locationId: l.locationId,
-        timezone: byId.get(l.locationId)!.timeZone,
+        timezone: requireLocationTimeZone(byId.get(l.locationId)!),
         ranges: l.ranges,
       })),
       validate: (current) => {
@@ -511,7 +512,7 @@ export class SetProviderOverrideUseCase {
     if (!location) throw new BadRequestException('Sede no encontrada');
     assertProviderAttendsAt(member, location);
     const date = requireCivilDate(input.date);
-    const today = civilDateIn(this.clock(), location.timeZone);
+    const today = civilDateIn(this.clock(), requireLocationTimeZone(location));
     if (date < today) {
       throw new BadRequestException(
         'La excepción no puede ser de un día que ya pasó en la sede',
@@ -696,7 +697,7 @@ export class GetScheduleRosterUseCase {
       locations: shown.map((l) => ({
         id: l.id,
         name: l.name,
-        timeZone: l.timeZone,
+        timeZone: requireLocationTimeZone(l),
       })),
       providers: providers.map((p) => {
         const snapshot = snapshots.get(p.userId)!;

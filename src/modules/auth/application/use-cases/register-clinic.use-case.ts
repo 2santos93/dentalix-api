@@ -17,6 +17,13 @@ import {
   DUMMY_PASSWORD_HASH,
   PasswordService,
 } from '../../../../shared/crypto/password.service';
+import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import type { ClinicLocationSettings } from '../../domain/ports/auth-repository.port';
+import {
+  type RegistrationLocationInput,
+  registrationLocation,
+} from '../registration-location';
 import {
   REGISTRATION_NOTICE_PATH,
   REGISTRATION_TTL_HOURS,
@@ -27,7 +34,7 @@ import {
   registrationExpiresAt,
 } from '../registration-token';
 
-export interface RegisterClinicInput {
+export interface RegisterClinicInput extends RegistrationLocationInput {
   clinicName: string;
   subdomain: string;
   email: string;
@@ -95,6 +102,8 @@ export class RegisterClinicUseCase {
     @Inject(REGISTRATION_NOTIFIER)
     private readonly notifier: RegistrationNotifier,
     private readonly password: PasswordService,
+    @Inject(CURRENCY_WHITELIST)
+    private readonly currencies: CurrencyWhitelist,
   ) {}
 
   /**
@@ -103,12 +112,15 @@ export class RegisterClinicUseCase {
    * email.
    */
   async accept(input: RegisterClinicInput): Promise<void> {
+    // G1: la sede se valida antes que nada (es un 400 de los datos enviados,
+    // igual para todos; no dice nada del email).
+    const location = await registrationLocation(input, this.currencies);
     const subdomain = input.subdomain.trim().toLowerCase();
     if (await this.repo.findTenantBySubdomain(subdomain)) {
       throw new ConflictException(SUBDOMAIN_TAKEN);
     }
     const passwordHash = await this.password.hash(input.password);
-    this.process({ ...input, subdomain }, passwordHash).catch(
+    this.process({ ...input, subdomain }, passwordHash, location).catch(
       (err: unknown) => {
         // Solo el tipo de error: el mensaje de Prisma puede llevar el email.
         this.logger.warn({
@@ -121,17 +133,19 @@ export class RegisterClinicUseCase {
 
   /** Todo el registro esperando el resultado (lo usan los tests). */
   async execute(input: RegisterClinicInput): Promise<RegisterOutcome> {
+    const location = await registrationLocation(input, this.currencies);
     const subdomain = input.subdomain.trim().toLowerCase();
     if (await this.repo.findTenantBySubdomain(subdomain)) {
       throw new ConflictException(SUBDOMAIN_TAKEN);
     }
     const passwordHash = await this.password.hash(input.password);
-    return this.process({ ...input, subdomain }, passwordHash);
+    return this.process({ ...input, subdomain }, passwordHash, location);
   }
 
   private async process(
     input: RegisterClinicInput,
     passwordHash: string,
+    location: ClinicLocationSettings | null,
   ): Promise<RegisterOutcome> {
     const email = input.email.trim().toLowerCase();
     // Antes de guardar nada: con el tope alcanzado, ni siquiera se reemplaza
@@ -161,6 +175,7 @@ export class RegisterClinicUseCase {
       passwordHash,
       tokenHash: hashRegistrationToken(token),
       expiresAt: registrationExpiresAt(now),
+      location,
       replaceCreatedBefore: new Date(
         now.getTime() - this.notifier.recipientCooldownSeconds * 1000,
       ),
@@ -175,8 +190,10 @@ export class RegisterClinicUseCase {
   }
 
   /**
-   * Abre el enlace del email: crea la clínica, su sede y su dueño (ADMIN) con
-   * el email ya verificado. Exige ADEMÁS la contraseña elegida al registrarse:
+   * Abre el enlace del email: crea la clínica, su sede (con la moneda, la zona
+   * y el formato del registro, G1) y su dueño (ADMIN) con el email ya
+   * verificado. Un enlace de una réplica anterior a G1 (pendiente sin sede)
+   * sigue valiendo (fase 1, spec §3.5). Exige ADEMÁS la contraseña elegida al registrarse:
    * quien abre el enlace controla el buzón y quien la conoce es quien pidió
    * el alta, así nadie convierte en suya una cuenta con un email ajeno porque
    * la víctima pulse «Confirmar» en un correo que no pidió (pre-secuestro por
@@ -221,6 +238,9 @@ export class RegisterClinicUseCase {
         passwordHash: record.passwordHash,
         fullName: record.fullName,
         emailVerifiedAt: new Date(),
+        // G1: null = pendiente legado (fase 1); la sede la rellena la
+        // función D5 y queda por revisar.
+        location: record.location,
       });
       this.logger.log({
         event: 'registration.completed',

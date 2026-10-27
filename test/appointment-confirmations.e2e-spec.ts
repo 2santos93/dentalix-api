@@ -81,7 +81,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       .put('/api/v1/locations/schedule')
       .set('X-Tenant-Host', host)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
     const body = reg.body as { tenantId: string; userId: string };
     return { tenantId: body.tenantId, userId: body.userId, accessToken, host };

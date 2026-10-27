@@ -165,9 +165,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
     }
     // Sin horario de atención: la cita de prueba se agenda a cualquier hora
     // (mismo criterio que tenant-isolation-matrix.e2e-spec.ts).
-    await as(clinicA)
-      .put('/locations/schedule', { timezone: 'America/Bogota', ranges: [] })
-      .expect(200);
+    await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     catalogA = await catalogItem(clinicA, 'IMPL-A');
     patientA = await patient(clinicA, 'Ana', '+57 300 111 2222');
     const locations = await as(clinicA).get('/locations').expect(200);

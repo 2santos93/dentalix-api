@@ -107,9 +107,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
     const dentist = await seedMember(raw, clinicA, ClinicRole.DENTIST);
 
     // Sin horario de atención: la cita se puede agendar a cualquier hora.
-    await as(clinicA)
-      .put('/locations/schedule', { timezone: 'America/Bogota', ranges: [] })
-      .expect(200);
+    await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     const location = await raw.location.findFirstOrThrow({
       where: { tenantId: clinicA.tenantId },
     });

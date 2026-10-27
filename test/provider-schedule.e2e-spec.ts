@@ -173,7 +173,6 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
         .set('X-Location-Id', loc)
         .send({
-          timezone: 'America/Bogota',
           ranges: [1, 2, 3, 4, 5].map((weekday) => ({
             weekday,
             startMinute: H(7),

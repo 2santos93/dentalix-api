@@ -156,7 +156,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
     // Sede sin restricción de horario: las citas de abajo no dependen de la
     // hora de la corrida.
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
     await as(api().post('/api/v1/locations'), clinic.adminToken)
       .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))

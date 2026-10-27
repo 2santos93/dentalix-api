@@ -25,6 +25,7 @@ import {
 } from '../../domain/patient-flow';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { PlanItemReservedElsewhere } from '../../domain/entities/appointment.entity';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 
 export const IN_CLINIC_NO_LOCATION_MESSAGE =
   'Elige una sede para ver quién está en la clínica.';
@@ -156,7 +157,7 @@ export class ListInClinicUseCase {
     }
     const location = await this.locations.findById(input.locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
-    const timeZone = location.timeZone;
+    const timeZone = requireLocationTimeZone(location);
     const date = day ?? civilDateIn(now, timeZone);
     const range = civilDayRange(date, timeZone);
     const mine = input.role === ClinicRole.DENTIST;

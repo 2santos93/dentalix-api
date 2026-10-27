@@ -107,4 +107,10 @@ describe('normalizeLocale', () => {
     expect(normalizeLocale('x')).toBeNull();
     expect(normalizeLocale('')).toBeNull();
   });
+
+  it('rechaza un formato de más de 35 caracteres (el CHECK de la BD)', () => {
+    const long = 'es-ES-u-ca-gregory-co-standard-nu-latn-fw-mon';
+    expect(Intl.getCanonicalLocales(long)[0].length).toBeGreaterThan(35);
+    expect(normalizeLocale(long)).toBeNull();
+  });
 });

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
@@ -10,6 +10,7 @@ import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-denta
 import {
   AuthRepository,
   AuthUserRecord,
+  ClinicLocationSettings,
   CreateClinicWithOwnerInput,
   MembershipRecord,
   SessionState,
@@ -17,6 +18,8 @@ import {
 
 @Injectable()
 export class PrismaAuthRepository implements AuthRepository {
+  private readonly logger = new Logger('Auth');
+
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserByEmail(
@@ -83,13 +86,19 @@ export class PrismaAuthRepository implements AuthRepository {
       // "Sede principal" de las clínicas que YA existían; esto cubre las
       // nuevas, y va en la MISMA transacción para que no pueda existir una
       // clínica sin sede (citas, pagos e inventario la exigen).
-      const location = await tx.location.create({
-        data: { tenantId: tenant.id, name: 'Sede principal' },
-        select: { id: true },
-      });
+      const location = await this.createMainLocation(
+        tx,
+        tenant.id,
+        input.location,
+      );
       // La sede nace con un horario de atención por defecto (editable en
       // /settings/horarios). En la misma tx para que no pueda quedar a medias.
-      await seedDefaultBusinessHours(tx, tenant.id, location.id);
+      await seedDefaultBusinessHours(
+        tx,
+        tenant.id,
+        location.id,
+        location.timeZone,
+      );
       // La clínica arranca con el catálogo semilla de procedimientos y
       // diagnósticos. Va DENTRO de la misma tx (tras setear el GUC de tenant)
       // para que el WITH CHECK de RLS acepte las filas del tenant recién creado.
@@ -101,6 +110,52 @@ export class PrismaAuthRepository implements AuthRepository {
       });
       return { tenantId: tenant.id, userId: user.id };
     });
+  }
+
+  /**
+   * G1: la «Sede principal» con país, moneda, zona y formato del registro, ya
+   * revisada (R11). Un pendiente LEGADO (`settings` null, fase 1 §3.5) la crea
+   * como lo hacía la API anterior (país por defecto de la BD) y la rellena la
+   * función D5 en esta misma transacción, sin revisar: el ADMIN verá el aviso
+   * D5. Es el único camino de código que deja al país decidir esos valores, y
+   * lo hace a través de esa función (R19). Desaparece en fase 2.
+   */
+  private async createMainLocation(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    settings: ClinicLocationSettings | null,
+  ): Promise<{ id: string; timeZone: string }> {
+    if (settings) {
+      const location = await tx.location.create({
+        data: {
+          tenantId,
+          name: 'Sede principal',
+          ...settings,
+          regionalSettingsReviewedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      return { id: location.id, timeZone: settings.timeZone };
+    }
+    const { id } = await tx.location.create({
+      data: { tenantId, name: 'Sede principal' },
+      select: { id: true },
+    });
+    await tx.$queryRaw`SELECT public.dx_g1_backfill_location_regional(${tenantId}::uuid)`;
+    const filled = await tx.location.findUniqueOrThrow({
+      where: { id },
+      select: { timeZone: true },
+    });
+    if (!filled.timeZone) {
+      // No debería ocurrir: la función cubre todos los países del enum.
+      throw new Error('Legacy registration location left without a zone');
+    }
+    this.logger.log({
+      event: 'registration.legacy_location_backfilled',
+      tenantId,
+      locationId: id,
+    });
+    return { id, timeZone: filled.timeZone };
   }
 
   async findMembership(

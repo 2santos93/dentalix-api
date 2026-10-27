@@ -1,13 +1,13 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsInt,
+  IsOptional,
   IsString,
   Max,
   Min,
-  MinLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -36,13 +36,14 @@ export class ScheduleRangeDto {
 }
 
 export class ReplaceLocationScheduleDto {
-  @ApiProperty({
-    example: 'America/Bogota',
-    description: 'Zona IANA de la sede',
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'Obsoleto (G1): la zona es un dato de la sede (PATCH /locations/:id) y nunca se guarda desde aquí. Solo se acepta, para una web antigua, si es igual a la zona de la sede; distinta (o sede sin zona) es 400.',
   })
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  timezone!: string;
+  timezone?: string;
 
   @ApiProperty({
     type: [ScheduleRangeDto],

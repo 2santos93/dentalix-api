@@ -186,7 +186,6 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
         locationId,
       })
         .send({
-          timezone: 'America/Bogota',
           ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
             weekday,
             startMinute: 0,

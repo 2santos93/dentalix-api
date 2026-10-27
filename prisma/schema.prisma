@@ -2189,8 +2189,10 @@ model LocationSchedule {
   /// ToothRecord.sourcePlanItemId): evita añadir la back-relation al modelo
   /// Location mientras otro flujo lo edita. FK a nivel DB queda como follow-up.
   locationId String    @db.Uuid
-  /// IANA (ej. "America/Bogota"). Los tramos son hora de PARED; las citas se
-  /// guardan como instante, así que hace falta la zona para compararlos.
+  /// G1 fase 1: columna LEGADA. Solo la leen las réplicas anteriores a G1; el
+  /// código nuevo no la lee nunca (la zona es `Location.timeZone`, R4) y la
+  /// mantiene igual a `Location.timeZone` (doble escritura, R20). Fase 2 la
+  /// borra.
   timezone   String    @default("America/Bogota")
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt

@@ -19,7 +19,6 @@ const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaLocationScheduleRepository(prisma, tenantContext);
 
-const TZ = 'America/Bogota';
 const MORNING = { weekday: 1, startMinute: 9 * 60, endMinute: 13 * 60 };
 const AFTERNOON = { weekday: 1, startMinute: 15 * 60, endMinute: 19 * 60 };
 const SATURDAY = { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 };
@@ -60,10 +59,7 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
 
   it('guarda el horario, lo reemplaza, y el reemplazo NO borra los tramos viejos', async () => {
     await asClinic(() =>
-      repo.replaceForCurrentLocation({
-        timezone: TZ,
-        ranges: [MORNING, AFTERNOON],
-      }),
+      repo.replaceForCurrentLocation({ ranges: [MORNING, AFTERNOON] }),
     );
 
     const primeros = await raw.locationScheduleRange.findMany({
@@ -74,7 +70,7 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
 
     // Segundo guardado: la clínica cambia a "sólo sábados por la mañana".
     const despues = await asClinic(() =>
-      repo.replaceForCurrentLocation({ timezone: TZ, ranges: [SATURDAY] }),
+      repo.replaceForCurrentLocation({ ranges: [SATURDAY] }),
     );
 
     // Lo que ve la aplicación: sólo el horario NUEVO.

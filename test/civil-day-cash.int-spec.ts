@@ -100,30 +100,35 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     tenantA = a.id;
     tenantB = b.id;
 
+    // G1: la zona es de la sede (`Location.timeZone`). El horario, si lo hay,
+    // lleva la misma zona en su columna legada (R20): la lee la migración de
+    // DX-097 que se prueba abajo.
     const sede = async (
       tenantId: string,
       name: string,
       country: 'CO' | 'ES',
-      timezone: string | null,
+      timeZone: string,
+      withSchedule: boolean,
     ) => {
       const loc = await owner.location.create({
         data: locationData(REGIONAL_BOGOTA_FIXTURE, {
           tenantId,
           name,
           country,
+          timeZone,
         }),
       });
-      if (timezone) {
+      if (withSchedule) {
         await owner.locationSchedule.create({
-          data: { tenantId, locationId: loc.id, timezone },
+          data: { tenantId, locationId: loc.id, timezone: timeZone },
         });
       }
       return loc.id;
     };
-    bogota = await sede(tenantA, 'Bogotá', 'CO', 'America/Bogota');
-    // Sede de España SIN horario: la zona sale de su país (Europe/Madrid).
-    madrid = await sede(tenantA, 'Madrid', 'ES', null);
-    bogotaB = await sede(tenantB, 'Bogotá B', 'CO', 'America/Bogota');
+    bogota = await sede(tenantA, 'Bogotá', 'CO', 'America/Bogota', true);
+    // Sede de España SIN horario: su zona es la de la sede (Europe/Madrid).
+    madrid = await sede(tenantA, 'Madrid', 'ES', 'Europe/Madrid', false);
+    bogotaB = await sede(tenantB, 'Bogotá B', 'CO', 'America/Bogota', true);
 
     patientA = (
       await owner.patient.create({
@@ -367,14 +372,16 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         '2026-10-18T00:00:00.000Z',
         new Date(),
       );
-      // Sede retirada con horario en una zona que Postgres no conoce: cae a
-      // la zona de su país (ES), sin abortar el despliegue.
+      // Sede retirada con horario en una zona que Postgres no conoce: la
+      // migración de DX-097 (anterior a G1, lee el horario legado) cae a la
+      // zona de su país (ES), sin abortar el despliegue.
       const retired = (
         await owner.location.create({
           data: locationData(REGIONAL_BOGOTA_FIXTURE, {
             tenantId: tenantA,
             name: 'Retirada',
             country: 'ES',
+            timeZone: 'Europe/Madrid',
             deletedAt: new Date(),
           }),
         })

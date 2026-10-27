@@ -210,7 +210,6 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
 
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
       .send({
-        timezone: 'America/Bogota',
         ranges: [1, 2, 3, 4, 5].flatMap((weekday) => [
           { weekday, startMinute: 540, endMinute: 780 },
           { weekday, startMinute: 900, endMinute: 1140 },

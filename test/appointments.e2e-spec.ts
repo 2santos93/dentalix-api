@@ -127,7 +127,7 @@ async function registerAndLogin(
     .put('/api/v1/locations/schedule')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
     .set('Authorization', `Bearer ${loginBody.accessToken}`)
-    .send({ timezone: 'America/Bogota', ranges: [] })
+    .send({ ranges: [] })
     .expect(200);
 
   return {

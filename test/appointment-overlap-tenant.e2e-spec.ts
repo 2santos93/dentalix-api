@@ -80,7 +80,7 @@ async function registerClinic(
     .put('/api/v1/locations/schedule')
     .set('X-Tenant-Host', hostFor(subdomain))
     .set('Authorization', `Bearer ${token}`)
-    .send({ timezone: 'America/Bogota', ranges: [] })
+    .send({ ranges: [] })
     .expect(200);
   return { tenantId: body.tenantId, ownerId: body.userId, subdomain, token };
 }
@@ -235,7 +235,7 @@ describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.token}`)
       .set('X-Location-Id', sedeNorte)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
 
     // La cita de 10:00 está en la sede principal; reservar a la misma

@@ -20,6 +20,7 @@ import {
   weekdayName,
   type MinuteRange,
 } from '../domain/provider-availability';
+import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 
 /** Código del aviso de una cita fuera del horario del profesional. */
 export const PROVIDER_OFF_SCHEDULE = 'PROVIDER_OFF_SCHEDULE';
@@ -81,19 +82,12 @@ export class ProviderAvailabilityService {
       slot.locationId ?? (await this.repo.resolveCurrentLocationId());
     const location = await this.locations.findById(locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
-    const day = civilDateIn(slot.start, location.timeZone);
+    const timeZone = requireLocationTimeZone(location);
+    const day = civilDateIn(slot.start, timeZone);
     const snapshot = (
       await this.repo.findSnapshots([slot.providerId], { from: day, to: day })
     ).get(slot.providerId)!;
-    if (
-      providerWorksAt(
-        snapshot,
-        locationId,
-        slot.start,
-        slot.end,
-        location.timeZone,
-      )
-    ) {
+    if (providerWorksAt(snapshot, locationId, slot.start, slot.end, timeZone)) {
       return null;
     }
     const ranges = providerRangesOn(snapshot, locationId, day) ?? [];

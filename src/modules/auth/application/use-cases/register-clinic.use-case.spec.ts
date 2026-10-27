@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   NotFoundException,
@@ -108,7 +109,46 @@ function makeNotifier(cooldownSeconds = 0) {
   } satisfies RegistrationNotifier;
 }
 
+/** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
+const CURRENCIES = {
+  has: (code: string) => Promise.resolve(['COP', 'JPY'].includes(code)),
+};
+
+function newUseCase(
+  repo: AuthRepository,
+  pending: RegistrationRepository,
+  notifier: RegistrationNotifier,
+  password: PasswordService,
+): RegisterClinicUseCase {
+  return new RegisterClinicUseCase(
+    repo,
+    pending,
+    notifier,
+    password,
+    CURRENCIES,
+  );
+}
+
+// G1: la primera sede con sus cuatro valores (datos de test, no defaults).
+const TOKYO_LOCATION = {
+  locationCountry: 'CO' as const,
+  locationCurrency: 'JPY',
+  locationTimeZone: 'Asia/Tokyo',
+  locationLocale: 'ja-JP',
+};
+
 const INPUT = {
+  clinicName: 'Sonrisa',
+  subdomain: 'Sonrisa',
+  email: '  Owner@Clinic.COM ',
+  password: 'S3cret!!x',
+  fullName: 'Dr. Owner',
+  linkBase: 'http://localhost:3001',
+  ...TOKYO_LOCATION,
+};
+
+/** Forma legada (fase 1): una web anterior a G1 no envía la sede. */
+const LEGACY_INPUT = {
   clinicName: 'Sonrisa',
   subdomain: 'Sonrisa',
   email: '  Owner@Clinic.COM ',
@@ -128,7 +168,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     const repo = makeRepo();
     const pending = new InMemoryPending();
     const notifier = makeNotifier();
-    const uc = new RegisterClinicUseCase(repo, pending, notifier, realPassword);
+    const uc = newUseCase(repo, pending, notifier, realPassword);
 
     const outcome = await uc.execute(INPUT);
 
@@ -160,7 +200,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       hash: jest.fn().mockResolvedValue('H'),
       verify: jest.fn(),
     };
-    const uc = new RegisterClinicUseCase(repo, pending, notifier, password);
+    const uc = newUseCase(repo, pending, notifier, password);
 
     const outcome = await uc.execute(INPUT);
 
@@ -185,7 +225,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       verify: jest.fn(),
     };
     for (const repo of [existing, fresh]) {
-      const uc = new RegisterClinicUseCase(
+      const uc = newUseCase(
         repo,
         new InMemoryPending(),
         makeNotifier(),
@@ -199,7 +239,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
   describe('tope por destinatario y pendiente vigente (DX-144, SEC-034)', () => {
     it('el email de verificación no lleva nada escrito por el solicitante', async () => {
       const notifier = makeNotifier();
-      const uc = new RegisterClinicUseCase(
+      const uc = newUseCase(
         makeRepo(),
         new InMemoryPending(),
         notifier,
@@ -223,12 +263,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       const pending = new InMemoryPending();
       const notifier = makeNotifier();
       notifier.withinRecipientQuota.mockResolvedValue(false);
-      const uc = new RegisterClinicUseCase(
-        makeRepo(),
-        pending,
-        notifier,
-        realPassword,
-      );
+      const uc = newUseCase(makeRepo(), pending, notifier, realPassword);
 
       expect(await uc.execute(INPUT)).toBe('RECIPIENT_QUOTA_REACHED');
       expect(notifier.withinRecipientQuota).toHaveBeenCalledWith(
@@ -241,7 +276,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('tope alcanzado con un email ya registrado: tampoco le llega otro aviso', async () => {
       const notifier = makeNotifier();
       notifier.withinRecipientQuota.mockResolvedValue(false);
-      const uc = new RegisterClinicUseCase(
+      const uc = newUseCase(
         makeRepo({
           findUserByEmail: () =>
             Promise.resolve({ id: 'u0', fullName: 'Dra. Titular' }),
@@ -257,12 +292,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('un segundo registro dentro del enfriamiento no reemplaza el pendiente: el primer enlace sigue valiendo', async () => {
       const pending = new InMemoryPending();
       const notifier = makeNotifier(600);
-      const uc = new RegisterClinicUseCase(
-        makeRepo(),
-        pending,
-        notifier,
-        realPassword,
-      );
+      const uc = newUseCase(makeRepo(), pending, notifier, realPassword);
 
       expect(await uc.execute(INPUT)).toBe('VERIFICATION_SENT');
       const firstToken = tokenFrom(
@@ -287,12 +317,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('pasado el enfriamiento, un registro nuevo sí reemplaza al anterior', async () => {
       const pending = new InMemoryPending();
       const notifier = makeNotifier(600);
-      const uc = new RegisterClinicUseCase(
-        makeRepo(),
-        pending,
-        notifier,
-        realPassword,
-      );
+      const uc = newUseCase(makeRepo(), pending, notifier, realPassword);
       await uc.execute(INPUT);
       pending.rows[0].createdAt = new Date(Date.now() - 601_000);
 
@@ -307,7 +332,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('si el tope lo frena al encolar (carrera entre réplicas), el resultado lo dice', async () => {
       const notifier = makeNotifier();
       notifier.sendVerification.mockResolvedValue(false);
-      const uc = new RegisterClinicUseCase(
+      const uc = newUseCase(
         makeRepo(),
         new InMemoryPending(),
         notifier,
@@ -323,7 +348,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         hash: jest.fn().mockResolvedValue('H'),
         verify: jest.fn(),
       };
-      const uc = new RegisterClinicUseCase(
+      const uc = newUseCase(
         makeRepo(),
         new InMemoryPending(),
         notifier,
@@ -338,7 +363,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     const repo = makeRepo({
       findTenantBySubdomain: () => Promise.resolve({ id: 't0' }),
     });
-    const uc = new RegisterClinicUseCase(
+    const uc = newUseCase(
       repo,
       new InMemoryPending(),
       makeNotifier(),
@@ -354,12 +379,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       const repo = makeRepo();
       const pending = new InMemoryPending();
       const notifier = makeNotifier();
-      const uc = new RegisterClinicUseCase(
-        repo,
-        pending,
-        notifier,
-        realPassword,
-      );
+      const uc = newUseCase(repo, pending, notifier, realPassword);
       await uc.execute(INPUT);
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
       return { repo, pending, uc, token: tokenFrom(verifyUrl) };
@@ -421,7 +441,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         hash: jest.fn(),
         verify: jest.fn().mockResolvedValue(false),
       };
-      const uc = new RegisterClinicUseCase(
+      const uc = newUseCase(
         makeRepo(),
         new InMemoryPending(),
         makeNotifier(),
@@ -471,6 +491,116 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+  });
+
+  describe('primera sede (G1, spec §3.5)', () => {
+    it('guarda la sede canónica en el pendiente y verify crea la clínica con ella', async () => {
+      const repo = makeRepo();
+      const pending = new InMemoryPending();
+      const notifier = makeNotifier();
+      const uc = newUseCase(repo, pending, notifier, realPassword);
+
+      await uc.execute({
+        ...INPUT,
+        locationCurrency: ' jpy ',
+        locationLocale: 'JA-jp',
+      });
+      expect(pending.rows[0].location).toEqual({
+        country: 'CO',
+        currency: 'JPY',
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+      });
+
+      const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
+      await uc.verify(tokenFrom(verifyUrl), INPUT.password);
+      expect(createClinic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          location: {
+            country: 'CO',
+            currency: 'JPY',
+            timeZone: 'Asia/Tokyo',
+            locale: 'ja-JP',
+          },
+        }),
+      );
+    });
+
+    it('forma legada (sin los cuatro): se acepta y verify crea la clínica sin sede configurada', async () => {
+      const repo = makeRepo();
+      const pending = new InMemoryPending();
+      const notifier = makeNotifier();
+      const uc = newUseCase(repo, pending, notifier, realPassword);
+
+      expect(await uc.execute(LEGACY_INPUT)).toBe('VERIFICATION_SENT');
+      expect(pending.rows[0].location).toBeNull();
+      const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
+      await uc.verify(tokenFrom(verifyUrl), INPUT.password);
+      expect(createClinic).toHaveBeenCalledWith(
+        expect.objectContaining({ location: null }),
+      );
+    });
+
+    it.each([
+      ['locationCountry', 'Elige el país de la sede.'],
+      ['locationCurrency', 'Elige la moneda de la sede.'],
+      ['locationTimeZone', 'Elige la zona horaria de la sede.'],
+      ['locationLocale', 'Elige el formato regional de la sede.'],
+    ] as const)(
+      'un subconjunto (falta %s) es 400 con su mensaje y no guarda nada',
+      async (field, message) => {
+        const pending = new InMemoryPending();
+        const notifier = makeNotifier();
+        const uc = newUseCase(makeRepo(), pending, notifier, realPassword);
+        for (const call of [uc.execute.bind(uc), uc.accept.bind(uc)]) {
+          const error = await call({ ...INPUT, [field]: undefined }).catch(
+            (e: unknown) => e,
+          );
+          expect(error).toBeInstanceOf(BadRequestException);
+          expect((error as BadRequestException).getResponse()).toMatchObject({
+            message,
+            field,
+          });
+        }
+        expect(pending.rows).toHaveLength(0);
+        expect(notifier.withinRecipientQuota).not.toHaveBeenCalled();
+      },
+    );
+
+    it('moneda que no está en la lista, zona inexistente o formato inválido: 400', async () => {
+      const uc = newUseCase(
+        makeRepo(),
+        new InMemoryPending(),
+        makeNotifier(),
+        realPassword,
+      );
+      const cases = [
+        [
+          { locationCurrency: 'XYZ' },
+          'locationCurrency',
+          'La moneda XYZ no está en la lista de monedas admitidas.',
+        ],
+        [
+          { locationTimeZone: 'Mars/Olympus' },
+          'locationTimeZone',
+          'La zona horaria «Mars/Olympus» no existe.',
+        ],
+        [
+          { locationLocale: 'not a locale' },
+          'locationLocale',
+          'El formato regional «not a locale» no es válido.',
+        ],
+      ] as const;
+      for (const [patch, field, message] of cases) {
+        const error = await uc
+          .execute({ ...INPUT, ...patch })
+          .catch((e: unknown) => e);
+        expect((error as BadRequestException).getResponse()).toMatchObject({
+          field,
+          message,
+        });
+      }
     });
   });
 });

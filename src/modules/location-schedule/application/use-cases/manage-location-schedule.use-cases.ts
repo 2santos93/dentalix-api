@@ -19,16 +19,6 @@ export class GetLocationScheduleUseCase {
   }
 }
 
-/** Una zona IANA válida según el runtime (no una lista hardcodeada). */
-function isValidTimezone(timezone: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 @Injectable()
 export class ReplaceLocationScheduleUseCase {
   constructor(
@@ -36,12 +26,11 @@ export class ReplaceLocationScheduleUseCase {
     private readonly repo: LocationScheduleRepository,
   ) {}
 
+  /**
+   * La zona ya no se edita aquí: es un dato de la sede (G1, R4). Una web
+   * antigua que aún la envía la pasa como `legacyTimeZone` (R15).
+   */
   async execute(input: ReplaceScheduleInput): Promise<BusinessHours> {
-    const timezone = input.timezone.trim();
-    if (!isValidTimezone(timezone)) {
-      throw new BadRequestException(`Zona horaria inválida: ${timezone}`);
-    }
-
     for (const range of input.ranges) {
       if (
         !Number.isInteger(range.weekday) ||
@@ -79,8 +68,8 @@ export class ReplaceLocationScheduleUseCase {
     }
 
     return this.repo.replaceForCurrentLocation({
-      timezone,
       ranges: input.ranges,
+      legacyTimeZone: input.legacyTimeZone,
     });
   }
 }

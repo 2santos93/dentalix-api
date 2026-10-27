@@ -312,7 +312,6 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   // Sin horario de atención: el spec no prueba el horario y así la cita se
   // puede agendar a cualquier hora (ver appointments.e2e-spec.ts).
   await api(app, a, 'put', '/locations/schedule', {
-    timezone: 'America/Bogota',
     ranges: [],
   }).expect(200);
 
@@ -746,7 +745,6 @@ async function seedBExtras(
   >
 > {
   await api(app, b, 'put', '/locations/schedule', {
-    timezone: 'America/Bogota',
     ranges: [],
   }).expect(200);
   const payer = await create(app, b, '/payers', {
@@ -1948,7 +1946,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'put',
       path: () => '/locations/schedule',
       body: () => ({
-        timezone: 'America/Bogota',
         ranges: [{ weekday: 1, startMinute: 0, endMinute: 60 }],
       }),
       locationId: () => a.locationId,

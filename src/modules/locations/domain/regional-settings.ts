@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import { isValidTimeZone } from '../../../shared/time/civil-day';
 
@@ -38,6 +39,28 @@ export const REGIONAL_MESSAGES = {
     `El formato regional «${locale}» no es válido.`,
 } as const;
 
+/** País de la sede: obligatorio en el alta y el registro (decisión 1). */
+export const COUNTRY_MISSING = 'Elige el país de la sede.';
+
+/**
+ * 400 con el mensaje exacto y el campo del cuerpo al que se refiere, para que
+ * la web lo muestre junto a ese campo.
+ */
+export function regionalBadRequest(
+  field: string,
+  message: string,
+): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    message,
+    field,
+  });
+}
+
+/** El CHECK de `locations.locale` admite de 2 a 35 caracteres. */
+const LOCALE_MAX_LENGTH = 35;
+
 export function isRegionalError(
   value: RegionalSettings | RegionalError,
 ): value is RegionalError {
@@ -57,7 +80,7 @@ export function normalizeLocale(raw: string): string | null {
   } catch {
     return null;
   }
-  if (!canonical) return null;
+  if (!canonical || canonical.length > LOCALE_MAX_LENGTH) return null;
   if (
     Intl.DateTimeFormat.supportedLocalesOf([canonical]).length === 0 ||
     Intl.NumberFormat.supportedLocalesOf([canonical]).length === 0

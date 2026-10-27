@@ -7,6 +7,11 @@ import {
   hashRegistrationToken,
   registrationExpiresAt,
 } from '../src/modules/auth/application/registration-token';
+import type { ClinicLocationSettings } from '../src/modules/auth/domain/ports/auth-repository.port';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+} from './support/location-fixtures';
 
 /**
  * DX-029: `pending_registrations` contra Postgres real con el rol de la app
@@ -18,6 +23,19 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const EMAIL = 'registro.int@dx029.test';
+// G1: la primera sede del pendiente; datos de test con nombre, no defaults.
+const BOGOTA_LOCATION: ClinicLocationSettings = {
+  country: REGIONAL_BOGOTA_FIXTURE.country,
+  currency: REGIONAL_BOGOTA_FIXTURE.currency,
+  timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
+  locale: REGIONAL_BOGOTA_FIXTURE.locale,
+};
+const TOKYO_LOCATION: ClinicLocationSettings = {
+  country: REGIONAL_TOKYO_FIXTURE.country,
+  currency: REGIONAL_TOKYO_FIXTURE.currency,
+  timeZone: REGIONAL_TOKYO_FIXTURE.timeZone,
+  locale: REGIONAL_TOKYO_FIXTURE.locale,
+};
 const EXPIRED_EMAIL = 'caducado.int@dx029.test';
 
 describe('PrismaRegistrationRepository (int, DX-029)', () => {
@@ -30,6 +48,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     token: string,
     subdomain = 'reg-int',
     replaceCreatedBefore = new Date(Date.now() + 60_000),
+    location: ClinicLocationSettings | null = BOGOTA_LOCATION,
   ) =>
     repo.savePending({
       replaceCreatedBefore,
@@ -40,6 +59,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
       passwordHash: '$argon2id$v=19$fake',
       tokenHash: hashRegistrationToken(token),
       expiresAt: registrationExpiresAt(new Date()),
+      location,
     });
 
   beforeAll(() => {
@@ -76,6 +96,45 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     expect(
       await repo.findPendingByTokenHash(hashRegistrationToken(second)),
     ).toMatchObject({ email: EMAIL, subdomain: 'reg-int-2' });
+  });
+
+  it('re-registering overwrites the pending location fields (G1: también en la rama updateMany)', async () => {
+    const first = generateRegistrationToken();
+    const second = generateRegistrationToken();
+    const legacy = generateRegistrationToken();
+    expect(await save(first, 'reg-int-1')).toBe(true);
+    expect(await save(second, 'reg-int-2', undefined, TOKYO_LOCATION)).toBe(
+      true,
+    );
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(second)),
+    ).toMatchObject({ location: TOKYO_LOCATION });
+    expect(
+      await raw.pendingRegistration.findUniqueOrThrow({
+        where: { email: EMAIL },
+      }),
+    ).toMatchObject({
+      locationCountry: 'CO',
+      locationCurrency: 'JPY',
+      locationTimeZone: 'Asia/Tokyo',
+      locationLocale: 'ja-JP',
+    });
+
+    // Forma legada (web antigua): el reemplazo deja la sede en NULL.
+    expect(await save(legacy, 'reg-int-3', undefined, null)).toBe(true);
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(legacy)),
+    ).toMatchObject({ location: null });
+    expect(
+      await raw.pendingRegistration.findUniqueOrThrow({
+        where: { email: EMAIL },
+      }),
+    ).toMatchObject({
+      locationCountry: null,
+      locationCurrency: null,
+      locationTimeZone: null,
+      locationLocale: null,
+    });
   });
 
   it('DX-144: dentro del enfriamiento NO reemplaza el pendiente vigente: el primer enlace sigue valiendo', async () => {

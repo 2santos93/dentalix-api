@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CreateLocationUseCase,
   ListLocationsUseCase,
@@ -21,7 +25,10 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     showHealthRegistrationNumber: false,
     phone: null,
     isActive: true,
+    currency: 'COP',
     timeZone: 'America/Bogota',
+    locale: 'es-CO',
+    regionalSettingsReviewedAt: new Date('2026-01-01'),
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     ...overrides,
@@ -43,10 +50,27 @@ function makeRepo(over: Partial<LocationRepository> = {}): LocationRepository {
   };
 }
 
+/** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
+const CURRENCIES = {
+  has: (code: string) => Promise.resolve(['COP', 'EUR', 'JPY'].includes(code)),
+};
+
+/** Los cuatro valores regionales del alta: datos de test, no defaults. */
+const TOKYO = {
+  country: 'CO' as const,
+  currency: 'JPY',
+  timeZone: 'Asia/Tokyo',
+  locale: 'ja-JP',
+};
+
+function createUseCase(repo: LocationRepository): CreateLocationUseCase {
+  return new CreateLocationUseCase(repo, CURRENCIES);
+}
+
 describe('CreateLocationUseCase', () => {
   it('recorta el nombre y descarta una dirección vacía', async () => {
-    const created: { name: string; address?: string }[] = [];
-    const uc = new CreateLocationUseCase(
+    const created: object[] = [];
+    const uc = createUseCase(
       makeRepo({
         create: (input) => {
           created.push(input);
@@ -55,9 +79,65 @@ describe('CreateLocationUseCase', () => {
       }),
     );
 
-    await uc.execute({ name: '  Sede Norte  ', address: '   ' });
+    await uc.execute({ name: '  Sede Norte  ', address: '   ', ...TOKYO });
 
-    expect(created).toEqual([{ name: 'Sede Norte', address: undefined }]);
+    expect(created).toEqual([
+      { name: 'Sede Norte', address: undefined, phone: undefined, ...TOKYO },
+    ]);
+  });
+
+  it('G1: crea con los cuatro valores canónicos (moneda en mayúsculas, locale canónico)', async () => {
+    const create = jest.fn((input: Partial<Location>) =>
+      Promise.resolve(makeLocation(input)),
+    );
+    await createUseCase(makeRepo({ create })).execute({
+      name: 'Tokio',
+      country: 'CO',
+      currency: 'jpy',
+      timeZone: 'Asia/Tokyo',
+      locale: 'JA-jp',
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        country: 'CO',
+        currency: 'JPY',
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+      }),
+    );
+  });
+
+  it.each([
+    ['country', 'Elige el país de la sede.'],
+    ['currency', 'Elige la moneda de la sede.'],
+    ['timeZone', 'Elige la zona horaria de la sede.'],
+    ['locale', 'Elige el formato regional de la sede.'],
+  ] as const)(
+    'G1: sin %s es 400 con su mensaje y su campo, y no crea nada',
+    async (field, message) => {
+      const create = jest.fn();
+      const input = { name: 'Sede', ...TOKYO, [field]: undefined };
+      const error = await createUseCase(makeRepo({ create }))
+        .execute(input)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        statusCode: 400,
+        message,
+        field,
+      });
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('G1: una moneda que no está en la lista es 400', async () => {
+    const error = await createUseCase(makeRepo())
+      .execute({ name: 'Sede', ...TOKYO, currency: 'XYZ' })
+      .catch((e: unknown) => e);
+    expect((error as BadRequestException).getResponse()).toMatchObject({
+      message: 'La moneda XYZ no está en la lista de monedas admitidas.',
+      field: 'currency',
+    });
   });
 });
 
@@ -110,12 +190,18 @@ describe('UpdateLocationUseCase', () => {
 });
 
 describe('país de la sede (DX-013)', () => {
-  it('se crea con el país pedido y por defecto CO', async () => {
-    const create = jest.fn((input: { country?: 'CO' | 'ES' }) =>
-      Promise.resolve(makeLocation({ country: input.country ?? 'CO' })),
+  it('se crea con el país pedido', async () => {
+    const create = jest.fn((input: { country: 'CO' | 'ES' }) =>
+      Promise.resolve(makeLocation({ country: input.country })),
     );
-    const uc = new CreateLocationUseCase(makeRepo({ create }));
-    await uc.execute({ name: 'Madrid', country: 'ES' });
+    const uc = createUseCase(makeRepo({ create }));
+    await uc.execute({
+      name: 'Madrid',
+      country: 'ES',
+      currency: 'EUR',
+      timeZone: 'Europe/Madrid',
+      locale: 'es-ES',
+    });
     expect(create).toHaveBeenLastCalledWith(
       expect.objectContaining({ country: 'ES' }),
     );
@@ -243,10 +329,10 @@ describe('teléfono de la sede (DX-222)', () => {
     const create = jest.fn((input: { name: string; phone?: string }) =>
       Promise.resolve(makeLocation({ name: input.name, phone: input.phone })),
     );
-    const uc = new CreateLocationUseCase(makeRepo({ create }));
+    const uc = createUseCase(makeRepo({ create }));
 
-    await uc.execute({ name: 'Sede Sur', phone: ' 601 222 3333 ' });
-    await uc.execute({ name: 'Sede Este', phone: '   ' });
+    await uc.execute({ name: 'Sede Sur', phone: ' 601 222 3333 ', ...TOKYO });
+    await uc.execute({ name: 'Sede Este', phone: '   ', ...TOKYO });
 
     expect(create).toHaveBeenNthCalledWith(
       1,

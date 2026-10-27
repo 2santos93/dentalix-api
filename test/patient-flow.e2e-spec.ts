@@ -187,7 +187,6 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
         locationId,
       )
         .send({
-          timezone: TZ,
           ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
             weekday,
             startMinute: 0,

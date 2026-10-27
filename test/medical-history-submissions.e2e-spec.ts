@@ -195,9 +195,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
     assistantToken = await loginAs(app, clinicA.host, assistant.email);
 
     // Sin horario: la cita se puede agendar a cualquier hora.
-    await as(clinicA)
-      .put('/locations/schedule', { timezone: 'America/Bogota', ranges: [] })
-      .expect(200);
+    await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     locationId = (
       await raw.location.findFirstOrThrow({
         where: { tenantId: clinicA.tenantId },

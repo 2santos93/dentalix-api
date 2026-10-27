@@ -29,6 +29,7 @@ import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repos
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { DEFAULT_BUSINESS_HOURS } from '../../../../shared/locations/default-business-hours';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
   civilDaysInclusive,
   civilRangeInZone,
@@ -120,7 +121,8 @@ export class FindOpeningsUseCase {
     // Sin horario configurado la agenda no se restringe, pero proponer huecos
     // a las 3 de la mañana no ayuda: se usa el horario por defecto del alta.
     const hours = await this.schedule.findByLocation(input.locationId);
-    const timeZone = hours?.timezone ?? location.timeZone;
+    // G1 (R4): la zona es la de la sede, tenga o no horario.
+    const timeZone = requireLocationTimeZone(location);
     const ranges =
       hours && hours.ranges.length > 0 ? hours.ranges : DEFAULT_BUSINESS_HOURS;
     const range = civilRangeInZone(input.from, input.to, timeZone);

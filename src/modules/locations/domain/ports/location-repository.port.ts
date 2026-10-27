@@ -15,10 +15,16 @@ export interface Location {
   phone: string | null;
   isActive: boolean;
   /**
-   * Zona IANA de la sede (DX-097): la de su horario, o la de su país si no
-   * tiene. Con ella la web decide qué es «hoy» en la caja y el dashboard.
+   * G1: moneda ISO 4217, zona IANA y locale BCP 47 de la sede. La zona es la
+   * única fuente de sus días civiles (DX-097, R4). `null` solo en fase 1, en
+   * una fila de una réplica anterior a G1 aún sin barrer: «sede sin
+   * configurar», nunca se rellena con un valor del país (R19).
    */
-  timeZone: string;
+  currency: string | null;
+  timeZone: string | null;
+  locale: string | null;
+  /** D5: null = valores asignados por la migración o el barrido, sin revisar. */
+  regionalSettingsReviewedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,7 +34,11 @@ export interface Location {
 export interface CreateLocationRepoInput {
   name: string;
   address?: string;
-  country?: ClinicCountry;
+  /** G1 (R1, R10): los cuatro, explícitos y ya validados. */
+  country: ClinicCountry;
+  currency: string;
+  timeZone: string;
+  locale: string;
   phone?: string;
 }
 

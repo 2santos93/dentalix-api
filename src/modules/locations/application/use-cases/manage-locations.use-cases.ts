@@ -16,6 +16,14 @@ import {
   healthRegistrationChange,
   normalizeHealthRegistrationNumber,
 } from '../../domain/health-registration';
+import {
+  COUNTRY_MISSING,
+  isRegionalError,
+  regionalBadRequest,
+  validateRegionalSettings,
+} from '../../domain/regional-settings';
+import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 
 /**
  * DX-222: teléfono recortado; vacío o null = quitarlo (null), ausente = no
@@ -48,21 +56,39 @@ export class ListLocationsUseCase {
   }
 }
 
+/**
+ * Alta de sede (G1, spec §3.1): país, moneda, zona y formato regional son
+ * obligatorios y explícitos (R1, R10); nada se deduce del país (R2). La sede
+ * nace revisada (R11). 400 con el mensaje y el campo del primero que falta o
+ * no vale, en el orden país, moneda, zona, formato.
+ */
 @Injectable()
 export class CreateLocationUseCase {
   constructor(
     @Inject(LOCATION_REPOSITORY) private readonly repo: LocationRepository,
+    @Inject(CURRENCY_WHITELIST) private readonly currencies: CurrencyWhitelist,
   ) {}
-  execute(input: {
+  async execute(input: {
     name: string;
     address?: string;
     country?: ClinicCountry;
+    currency?: string;
+    timeZone?: string;
+    locale?: string;
     phone?: string;
   }): Promise<Location> {
+    if (!input.country) {
+      throw regionalBadRequest('country', COUNTRY_MISSING);
+    }
+    const regional = await validateRegionalSettings(input, this.currencies);
+    if (isRegionalError(regional)) {
+      throw regionalBadRequest(regional.field, regional.message);
+    }
     return this.repo.create({
       name: input.name.trim(),
       address: input.address?.trim() || undefined,
       country: input.country,
+      ...regional,
       phone: input.phone?.trim() || undefined,
     });
   }

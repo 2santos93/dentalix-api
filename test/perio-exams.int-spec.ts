@@ -233,18 +233,14 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
   });
 
   it('el repositorio toma la zona horaria de la sede activa', async () => {
+    // G1: la zona es de la sede (`Location.timeZone`), no de su horario.
     const location = await raw.location.create({
       data: locationData(REGIONAL_BOGOTA_FIXTURE, {
         tenantId: a.tenantId,
         name: 'Sede Madrid',
+        country: 'ES',
+        timeZone: 'Europe/Madrid',
       }),
-    });
-    await raw.locationSchedule.create({
-      data: {
-        tenantId: a.tenantId,
-        locationId: location.id,
-        timezone: 'Europe/Madrid',
-      },
     });
     const repo = new PrismaPerioExamRepository(prisma, tenantContext);
     await expect(

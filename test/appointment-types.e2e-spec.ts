@@ -126,7 +126,7 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
     // Sede sin restricción de horario: los casos de abajo no dependen del día
     // de la corrida (el de 422 fija su propio horario).
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-      .send({ timezone: 'UTC', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
     patientId = await createPatient(clinic, '121001');
     secondPatientId = await createPatient(clinic, '121002');
@@ -495,7 +495,6 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       const appt = await book({ start: at('10:00'), end: at('10:30') });
       await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
         .send({
-          timezone: 'UTC',
           ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
             weekday,
             startMinute: 9 * 60,
@@ -515,7 +514,7 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         );
       } finally {
         await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-          .send({ timezone: 'UTC', ranges: [] })
+          .send({ ranges: [] })
           .expect(200);
       }
     });

@@ -699,6 +699,9 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
             name: 'Sede Madrid',
             address: 'Calle Mayor 1, Madrid',
             country: 'ES',
+            currency: 'EUR',
+            timeZone: 'Europe/Madrid',
+            locale: 'es-ES',
           }),
         )
         .expect(201);
