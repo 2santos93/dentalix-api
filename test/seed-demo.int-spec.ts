@@ -320,8 +320,14 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       expect(location.timeZone).toBe('America/Bogota');
       expect(location.locale).toBe('es-CO');
       expect(location.country).toBe('CO');
-      expect(location.regionalSettingsReviewedAt).not.toBeNull();
+      // El backfill D5 deja esto en NULL: la demo lo fija ella misma.
+      expect(location.regionalSettingsReviewedAt).toBeInstanceOf(Date);
     }
+    // La demo no depende del barrido por país: no queda ninguna fila que el
+    // backfill tuviera que rellenar.
+    const [swept] = await raw.$queryRaw<{ n: number }[]>`
+      SELECT dx_g1_backfill_location_regional(${tenantId}::uuid)::int AS n`;
+    expect(swept.n).toBe(0);
     const schedules = await raw.locationSchedule.findMany({
       where: { tenantId },
     });

@@ -986,17 +986,25 @@ siguen admitiendo NULL hasta la fase 2.
    npm run g1:backfill-locations
    ```
 
-   y la consulta de comprobación (como owner, con `SET LOCAL row_security =
-   off`); tiene que dar 0:
+   y la comprobación, **como el owner** de la base (las dos cifras tienen que
+   ser 0):
 
-   ```sql
-   SELECT count(*) FROM locations
-    WHERE currency IS NULL OR "timeZone" IS NULL OR locale IS NULL;
+   ```bash
+   psql "${DIRECT_URL%%\?*}" -X -tA -v ON_ERROR_STOP=1 -f prisma/scripts/g1-check-null-regional.sql
    ```
 
-   Mientras tanto, el job `location-regional-backfill` (cada 5 minutos) barre
-   las sedes que una réplica antigua haya creado sin esos valores. Es
-   idempotente. Una sede en NULL se trata como «sin configurar» (error
+   Imprime `locations_sin_configurar=N` y `pendientes_legados_vigentes=N`.
+   **No sustituyas el script por un `SELECT count(*)` suelto**: `locations`
+   tiene FORCE RLS y el owner (sin superusuario ni BYPASSRLS) lee 0 filas sin
+   clínica fijada, es decir, un falso 0. El script quita FORCE dentro de una
+   transacción que termina en `ROLLBACK` (FORCE vuelve solo) y, si algo falla,
+   sale con error en lugar de un 0. Contraste: una segunda pasada de
+   `npm run g1:backfill-locations` debe imprimir `"filled":0`.
+
+   Mientras tanto, el job `locations.regional-backfill` (programa
+   `locations.regional-backfill.every-5-min`, cada 5 minutos; registra
+   `locations.regional_backfilled` por clínica) barre las sedes que una
+   réplica antigua haya creado sin esos valores. Es idempotente. Una sede en NULL se trata como «sin configurar» (error
    recuperable), nunca con un valor por país.
 
 **Compatibilidad durante la convivencia:**
@@ -1017,8 +1025,10 @@ el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 
 «G1 · Fase 2: cerrar las columnas regionales de la sede» (bajo DX-311; ticket
 por crear). Va en un release **posterior**, cuando no quede ninguna réplica
-anterior a la fase 1. Precondición: ambas consultas dan 0 (si no, correr
-`npm run g1:backfill-locations` y repetir):
+anterior a la fase 1. Precondición: las dos cifras de
+`prisma/scripts/g1-check-null-regional.sql` (como owner, ver arriba) dan 0; si
+no, correr `npm run g1:backfill-locations` y repetir. Las consultas que
+comprueba son:
 
 ```sql
 SELECT count(*) FROM locations
@@ -1027,10 +1037,21 @@ SELECT count(*) FROM pending_registrations
  WHERE "locationCurrency" IS NULL AND "expiresAt" > now();
 ```
 
-Entonces: `SET NOT NULL` en las tres columnas, quitar el default de `country`,
-borrar `location_schedules.timezone`, NOT NULL en los `location*` de
-`pending_registrations` y borrar la función de barrido, el job, el script y la
-rama legada de `verify`.
+Contenido del ticket:
+
+- Migración (mismo bracket RLS que la de la fase 1): `SET NOT NULL` en
+  `locations.currency/"timeZone"/locale`; `ALTER COLUMN country DROP DEFAULT`;
+  `ALTER TABLE location_schedules DROP COLUMN timezone`; borrar los pendientes
+  legados caducados y poner NOT NULL en los cuatro `location*` de
+  `pending_registrations`; `DROP FUNCTION dx_g1_backfill_location_regional`.
+- Código: borrar el job `locations.regional-backfill`, el script
+  `g1:backfill-locations` y la rama legada de `verify`; `RegisterDto` con los
+  cuatro campos obligatorios; `PUT /locations/schedule` con `timezone` siempre
+  400; quitar la doble escritura (R20); `LocationDto` sin `| null` (regenerar
+  los tipos de la web); la web mantiene `SedeConfigError` solo para zona
+  inválida.
+- Tests: los de fase 1 (réplica antigua, NULL, barrido) pasan a comprobar el
+  NOT NULL y la ausencia de defaults.
 
 ## Cambiar la zona de una sede (G1, DX-313, DX-314)
 
