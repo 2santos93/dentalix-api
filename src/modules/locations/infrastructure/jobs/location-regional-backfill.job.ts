@@ -12,6 +12,8 @@ export interface LocationRegionalBackfillReport {
   tenantId: string;
   /** Sedes con algún campo regional NULL que la pasada rellenó. */
   filled: number;
+  /** G1-B: sedes con el reloj NULL que la pasada rellenó (h23). */
+  hourCycleFilled: number;
 }
 
 /**
@@ -23,18 +25,26 @@ export interface LocationRegionalBackfillReport {
  * marca la sede como revisada (el ADMIN ve el aviso D5) e, idempotente, sin
  * filas NULL no escribe nada. Lo comparten el job y `npm run
  * g1:backfill-locations`. Desaparece en fase 2.
+ *
+ * G1-B fase 1 (DX-350, spec §3.1): en la misma tx, también
+ * `dx_g1b_backfill_location_hour_cycle(tenantId)`, el único sitio que rellena
+ * un reloj NULL (R5), para las sedes que una réplica de G1 crea con moneda,
+ * zona y formato pero sin reloj. Después de la D5, así una sede anterior a G1
+ * queda completa en una pasada.
  */
 export async function backfillLocationRegional(
   prisma: PrismaService,
 ): Promise<LocationRegionalBackfillReport[]> {
   const reports: LocationRegionalBackfillReport[] = [];
   for (const tenantId of await allTenantIds(prisma)) {
-    const filled = await prisma.runWithTenant(tenantId, async (tx) => {
-      const [row] = await tx.$queryRaw<{ filled: number }[]>`
+    const report = await prisma.runWithTenant(tenantId, async (tx) => {
+      const [regional] = await tx.$queryRaw<{ filled: number }[]>`
         SELECT public.dx_g1_backfill_location_regional(${tenantId}::uuid) AS "filled"`;
-      return row.filled;
+      const [clock] = await tx.$queryRaw<{ filled: number }[]>`
+        SELECT public.dx_g1b_backfill_location_hour_cycle(${tenantId}::uuid) AS "filled"`;
+      return { filled: regional.filled, hourCycleFilled: clock.filled };
     });
-    reports.push({ tenantId, filled });
+    reports.push({ tenantId, ...report });
   }
   return reports;
 }
@@ -53,17 +63,23 @@ async function allTenantIds(prisma: PrismaService): Promise<string[]> {
 
 /** Lo que queda sin configurar en toda la base. */
 export interface LocationRegionalCheck {
-  /** Sedes con moneda, zona o locale NULL. */
+  /** Sedes con moneda, zona, locale o reloj (G1-B) NULL. */
   locations: number;
   /** Registros pendientes y vigentes sin los datos de la sede (forma legada). */
   legacyPending: number;
+  /**
+   * G1-B: registros pendientes y vigentes sin reloj (los de una web de G1 y
+   * los legados). La fase 2 solo pone NOT NULL cuando es 0 (pre-flight I2).
+   */
+  pendingWithoutClock: number;
 }
 
 /**
  * Comprobación del runbook (paso 3) y precondición de la fase 2: cuenta, con
  * el rol de la app y clínica por clínica bajo su RLS (como escribe el
- * barrido), las sedes con algún campo regional NULL, y los registros legados
- * vigentes (`pending_registrations` no tiene RLS). Solo lecturas: ni DDL ni
+ * barrido), las sedes con algún campo regional NULL (reloj incluido), los
+ * registros legados vigentes y los vigentes sin reloj (`pending_registrations`
+ * no tiene RLS). Solo lecturas: ni DDL ni
  * más bloqueo que el de un SELECT, así que se puede correr con tráfico. No da
  * un falso 0: cada clínica se lee con su tenant fijado.
  */
@@ -76,15 +92,24 @@ export async function checkLocationRegional(
       tx.location.count({
         where: {
           tenantId,
-          OR: [{ currency: null }, { timeZone: null }, { locale: null }],
+          OR: [
+            { currency: null },
+            { timeZone: null },
+            { locale: null },
+            { hourCycle: null },
+          ],
         },
       }),
     );
   }
+  const now = new Date();
   const legacyPending = await prisma.pendingRegistration.count({
-    where: { locationCurrency: null, expiresAt: { gt: new Date() } },
+    where: { locationCurrency: null, expiresAt: { gt: now } },
   });
-  return { locations, legacyPending };
+  const pendingWithoutClock = await prisma.pendingRegistration.count({
+    where: { locationHourCycle: null, expiresAt: { gt: now } },
+  });
+  return { locations, legacyPending, pendingWithoutClock };
 }
 
 /** El barrido cada 5 minutos en la cola de DX-085 (un ejecutor por tick). */
@@ -115,7 +140,9 @@ export class LocationRegionalBackfillJob implements OnModuleInit {
 
   async sweep(): Promise<LocationRegionalBackfillReport[]> {
     const reports = await backfillLocationRegional(this.prisma);
-    const filled = reports.filter((report) => report.filled > 0);
+    const filled = reports.filter(
+      (report) => report.filled > 0 || report.hourCycleFilled > 0,
+    );
     for (const report of filled) {
       this.logger.log({ event: 'locations.regional_backfilled', ...report });
     }

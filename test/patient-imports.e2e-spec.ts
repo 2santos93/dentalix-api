@@ -638,6 +638,46 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect((pdf.body as { message: string }).message).toMatch(/\.csv o \.xlsx/);
   });
 
+  it('import row limit message at an en-US location reads 10,000 (G1-B)', async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { locale: true, hourCycle: true },
+    });
+    await raw.location.update({
+      where: { id: mainLocationId },
+      data: { locale: 'en-US', hourCycle: 'h12' },
+    });
+    try {
+      const tooMany = await upload(
+        '',
+        bulkCsv(10_001, '6'),
+        'muchas.csv',
+      ).expect(400);
+      expect((tooMany.body as { message: string }).message).toBe(
+        'El archivo tiene más de 10,000 filas de pacientes. Divídelo en varios archivos.',
+      );
+      // Sin reloj: 409 solo porque este texto lleva cifras (I4).
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { hourCycle: null },
+      });
+      const unclocked = await upload(
+        '',
+        bulkCsv(10_001, '6'),
+        'muchas.csv',
+      ).expect(409);
+      expect(unclocked.body).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: mainLocationId,
+      });
+    } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
+
   it('10.000 filas: el dry-run tarda menos de 60 s', async () => {
     const started = Date.now();
     const res = await upload('', bulkCsv(10_000, '5'), 'diez-mil.csv').expect(

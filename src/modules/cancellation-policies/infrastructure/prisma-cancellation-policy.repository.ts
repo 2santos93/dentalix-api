@@ -70,16 +70,19 @@ export class PrismaCancellationPolicyRepository implements CancellationPolicyRep
           id: true,
           name: true,
           address: true,
-          country: true,
           timeZone: true,
+          locale: true,
+          hourCycle: true,
         },
       });
       if (!location) return null;
       return {
+        id: location.id,
         name: location.name,
         address: location.address,
-        country: location.country,
         timeZone: requireLocationTimeZone(location),
+        locale: location.locale,
+        hourCycle: location.hourCycle,
       };
     });
   }

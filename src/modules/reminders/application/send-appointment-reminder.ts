@@ -217,7 +217,7 @@ export class SendAppointmentReminder {
         startsAtLabel: startsAtLabel(
           ctx.appointment.start,
           ctx.locationTimeZone,
-          ctx.locationCountry,
+          ctx.locationFormat,
         ),
         locationName: link.appointment.locationName,
         locationAddress: link.appointment.locationAddress,
@@ -229,7 +229,10 @@ export class SendAppointmentReminder {
           linkBase && optOutToken
             ? `${linkBase}${OPT_OUT_PATH}/${optOutToken}`
             : null,
-        cancellationPolicy: reminderPolicyVars(ctx.cancellationPolicy),
+        cancellationPolicy: reminderPolicyVars(
+          ctx.cancellationPolicy,
+          ctx.locationFormat,
+        ),
       },
     });
     await this.finish(claim.id, outboundId, appointmentId, leadHours);

@@ -59,6 +59,8 @@ class FakeFeeRepo implements CancellationFeeRepository {
     receptionCanCharge: false,
     locationCountry: 'CO',
     locationTimeZone: 'America/Bogota',
+    locationLocale: 'es-CO',
+    locationHourCycle: 'h23',
     coverages: [],
     fee: null,
   };
@@ -170,6 +172,36 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
 
   it('editable a la baja; por encima del sugerido: 400 y no se escribe', async () => {
     await expect(charge(60000)).rejects.toThrow(BadRequestException);
+    expect(repo.charges).toHaveLength(0);
+    await charge(20000);
+    expect(repo.charges[0].amount).toBe(20000);
+  });
+
+  it('cancellation fee 400 uses the location format', async () => {
+    repo.ctx!.locationLocale = 'en-US';
+    repo.ctx!.locationHourCycle = 'h12';
+    repo.ctx!.communicated!.currency = 'JPY';
+    await expect(charge(60000)).rejects.toThrow(
+      new BadRequestException(
+        'El importe no puede superar el sugerido por la política comunicada (¥50,000).',
+      ),
+    );
+    repo.ctx!.locationLocale = 'de-DE';
+    repo.ctx!.locationHourCycle = 'h23';
+    repo.ctx!.communicated!.currency = 'EUR';
+    await expect(charge(60000)).rejects.toThrow(
+      new BadRequestException(
+        'El importe no puede superar el sugerido por la política comunicada (50.000,00\u00a0€).',
+      ),
+    );
+    // Sin reloj: el 409 solo al pintar el importe; un cargo válido se cobra.
+    repo.ctx!.locationHourCycle = null;
+    const err = await charge(60000).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_LOCALE_REQUIRED',
+      locationId: 'loc-1',
+    });
     expect(repo.charges).toHaveLength(0);
     await charge(20000);
     expect(repo.charges[0].amount).toBe(20000);

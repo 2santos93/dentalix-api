@@ -4,6 +4,7 @@ import {
   CancellationReasonCode,
 } from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
+import type { HourCycle } from '../../../../shared/format/regional-format';
 
 /**
  * API-facing shape of an Appointment. Deliberately NOT the raw Prisma model:
@@ -130,6 +131,13 @@ export interface PlanItemReservedElsewhere {
   locationId: string | null;
   locationName: string | null;
   timeZone: string | null;
+  /**
+   * G1-B (spec §4.4, pre-flight I4): formato y reloj de esa sede EN CRUDO,
+   * como la columna: `null` si la sede no está permitida y también si no
+   * tiene el dato. La API no formatea con ellos y la lectura no falla.
+   */
+  locale: string | null;
+  hourCycle: HourCycle | null;
 }
 
 /**

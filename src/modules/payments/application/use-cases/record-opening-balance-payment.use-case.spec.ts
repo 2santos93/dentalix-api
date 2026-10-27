@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -58,7 +59,8 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
         paidAt: '2026-10-20',
       }),
     ).rejects.toThrow(
-      /^El abono supera lo pendiente del saldo migrado: quedan 50\.000,00\sCOP\.$/,
+      // La sede del fake: es-CO/h23.
+      /^El abono supera lo pendiente del saldo migrado: quedan \$\s50\.000,00\.$/,
     );
     await uc.execute('ob-1', {
       amount: 50000,
@@ -70,6 +72,58 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     ).rejects.toThrow(
       'Este saldo migrado ya está pagado: no admite más abonos.',
     );
+  });
+
+  it('the overpaid 400 uses the balance location format, not the write location', async () => {
+    const { repo, uc } = setup();
+    // El saldo es de la sede A (en-US, 12 h); se cobra desde otra (de-DE).
+    repo.locations.set('loc-a', { locale: 'en-US', hourCycle: 'h12' });
+    repo.openingBalances.get('ob-1')!.locationId = 'loc-a';
+    // La de escritura (loc-1), con otro formato y sin reloj: no se usa.
+    repo.locations.set('loc-1', { locale: 'de-DE', hourCycle: null });
+    await expect(
+      uc.execute('ob-1', {
+        amount: 150001,
+        currency: 'COP',
+        paidAt: '2026-10-20',
+      }),
+    ).rejects.toThrow(
+      'El abono supera lo pendiente del saldo migrado: quedan COP\u00a0150,000.00.',
+    );
+  });
+
+  it('the overpaid 400 uses the format of the balance location; without clock, 409 only there', async () => {
+    const { repo, uc } = setup();
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });
+    await expect(
+      uc.execute('ob-1', {
+        amount: 150001,
+        currency: 'COP',
+        paidAt: '2026-10-20',
+      }),
+    ).rejects.toThrow(
+      'El abono supera lo pendiente del saldo migrado: quedan COP\u00a0150,000.00.',
+    );
+    // Sin reloj: 409 solo al pintar; un abono válido se registra.
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: null });
+    const err = await uc
+      .execute('ob-1', {
+        amount: 150001,
+        currency: 'COP',
+        paidAt: '2026-10-20',
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_LOCALE_REQUIRED',
+    });
+    await expect(
+      uc.execute('ob-1', {
+        amount: 1000,
+        currency: 'COP',
+        paidAt: '2026-10-20',
+      }),
+    ).resolves.toMatchObject({ amount: 1000 });
   });
 
   it('otra moneda que la del saldo: 400; saldo inexistente o retirado: 404', async () => {

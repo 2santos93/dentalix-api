@@ -1,5 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { ClinicCountry, Prisma } from '@prisma/client';
+import type { HourCycle } from '../format/regional-format';
+import { isHourCycle } from './location-regional';
 import {
   loadLocationZones,
   locationTimeZoneRequired,
@@ -34,10 +36,11 @@ export function locationCurrencyRequired(
 }
 
 /**
- * Sede de referencia y sus datos regionales. `currency` y `locale` pueden ser
- * null en fase 1 (fila de una réplica antigua aún sin barrer): quien los
- * necesite responde su propio 409 (`LOCATION_CURRENCY_REQUIRED`), nunca otro
- * valor.
+ * Sede de referencia y sus datos regionales. `currency`, `locale` y
+ * `hourCycle` pueden ser null en fase 1 (fila de una réplica antigua aún sin
+ * barrer): quien los necesite responde su propio 409
+ * (`LOCATION_CURRENCY_REQUIRED`; `requireLocationFormat(ref)` solo quien
+ * formatea, G1-B I4), nunca otro valor.
  */
 export interface ReferenceLocation {
   id: string;
@@ -45,6 +48,7 @@ export interface ReferenceLocation {
   timeZone: string;
   currency: string | null;
   locale: string | null;
+  hourCycle: HourCycle | null;
 }
 
 /** La sede principal (R6): la activa más antigua del tenant. */
@@ -77,6 +81,7 @@ export async function resolveReferenceLocation(
     timeZone: true,
     currency: true,
     locale: true,
+    hourCycle: true,
   } as const;
   const location = locationId
     ? await tx.location.findFirst({
@@ -97,6 +102,7 @@ export async function resolveReferenceLocation(
     timeZone: requireLocationTimeZone(location),
     currency: location.currency,
     locale: location.locale,
+    hourCycle: isHourCycle(location.hourCycle) ? location.hourCycle : null,
   };
 }
 

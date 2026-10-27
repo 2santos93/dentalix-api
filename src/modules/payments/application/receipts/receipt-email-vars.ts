@@ -2,7 +2,7 @@ import type { DocType, PaymentMethod } from '@prisma/client';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import type { PaymentReceiptEmailVars } from '../../../notifications/email/domain/email-message';
 import { civilDateIn } from '../../../../shared/time/civil-day';
-import { formatMoney as money } from '../../../../shared/money/format-money';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Efectivo',
@@ -19,24 +19,21 @@ const DOC_TYPE_LABELS: Record<DocType, string> = {
   OTHER: 'Documento',
 };
 
-/** `YYYY-MM-DD` → `DD/MM/YYYY` (día civil, sin zona). */
-const civilLabel = (day: string): string => {
-  const [y, m, d] = day.split('-');
-  return `${d}/${m}/${y}`;
-};
-
 /** «Plan del …» o, en un abono contra el saldo migrado (DX-262), su concepto. */
 function targetLabel(
   plan: PaymentReceiptView['snapshot']['plan'],
   opening: PaymentReceiptView['snapshot']['openingBalance'] | null,
   timeZone: string,
+  fmt: RegionalFormat,
 ): string {
   if (!plan) {
     return opening
-      ? `Saldo migrado · ${opening.concept} · corte ${civilLabel(opening.asOfDate)}`
+      ? `Saldo migrado · ${opening.concept} · corte ${fmt.civilDate(opening.asOfDate)}`
       : 'Saldo migrado';
   }
-  const planDay = civilLabel(civilDateIn(new Date(plan.createdAt), timeZone));
+  const planDay = fmt.civilDate(
+    civilDateIn(new Date(plan.createdAt), timeZone),
+  );
   return plan.optionLabel
     ? `Plan del ${planDay} · ${plan.optionLabel}`
     : `Plan del ${planDay}`;
@@ -48,11 +45,13 @@ function targetLabel(
  * enmascarado (la foto nunca lo tiene en claro) y nada clínico: ni notas, ni
  * tratamientos, solo el nombre del plan. `timeZone` es la de la sede del
  * recibo: el día del plan y el de la anulación son días civiles de esa sede
- * (una sede de España no puede decir «anulado el 18» si allí aún es el 17).
+ * (no puede decir «anulado el 18» si allí aún es el 17). `fmt` es su formato
+ * (G1-B): fechas e importes como los escribe esa sede.
  */
 export function receiptEmailVars(
   receipt: PaymentReceiptView,
   timeZone: string,
+  fmt: RegionalFormat,
 ): PaymentReceiptEmailVars {
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;
@@ -68,21 +67,26 @@ export function receiptEmailVars(
     patientDocLabel: patient.docNumberMasked
       ? `${DOC_TYPE_LABELS[patient.docType]} ${patient.docNumberMasked}`
       : null,
-    amountLabel: money(payment.amount, payment.currency),
-    paidOnLabel: civilLabel(payment.paidOn),
+    amountLabel: fmt.money(payment.amount, payment.currency),
+    paidOnLabel: fmt.civilDate(payment.paidOn),
     methodLabel: payment.method
       ? METHOD_LABELS[payment.method]
       : 'Sin especificar',
-    planLabel: targetLabel(plan, snapshot.openingBalance ?? null, timeZone),
+    planLabel: targetLabel(
+      plan,
+      snapshot.openingBalance ?? null,
+      timeZone,
+      fmt,
+    ),
     toOpeningBalance: Boolean(snapshot.openingBalance),
     balanceLabel: planBalance
-      ? money(planBalance.balance, planBalance.currency)
+      ? fmt.money(planBalance.balance, planBalance.currency)
       : null,
     cashierName: snapshot.cashier?.fullName ?? null,
     voided:
       receipt.voidedAt && receipt.voidReason
         ? {
-            dateLabel: civilLabel(civilDateIn(receipt.voidedAt, timeZone)),
+            dateLabel: fmt.civilDate(civilDateIn(receipt.voidedAt, timeZone)),
             reason: receipt.voidReason,
           }
         : null,

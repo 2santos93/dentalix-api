@@ -221,6 +221,10 @@ model Location {
   // (dx_g1_backfill_location_regional) y aún sin confirmar por un ADMIN. Se
   // rellena al crear la sede o al confirmarla.
   regionalSettingsReviewedAt   DateTime?     @db.Timestamptz(3)
+  // G1-B (DX-350): reloj de la sede, 'h12' | 'h23' (CHECK en BD). NULL solo
+  // en una fila de una réplica anterior a G1-B aún sin barrer
+  // (dx_g1b_backfill_location_hour_cycle). Fase 2: NOT NULL.
+  hourCycle                    String?
   // Serie de los recibos de caja de la sede (DX-136), p. ej. "NOR". Si no
   // viene al crearla, el trigger `locations_default_receipt_prefix` la deriva
   // del nombre (3 letras, con número si ya la usa otra sede de la clínica).
@@ -2918,6 +2922,9 @@ model PendingRegistration {
   locationCurrency String?        @db.Char(3)
   locationTimeZone String?
   locationLocale   String?
+  // G1-B (DX-350): reloj de la primera sede. NULL en los pendientes creados
+  // por una web o una réplica anteriores a G1-B.
+  locationHourCycle String?
 
   @@index([expiresAt])
   @@map("pending_registrations")

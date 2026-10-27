@@ -11,7 +11,11 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
+  REGIONAL_BERLIN_FIXTURE,
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  g1LocationInsert,
+  legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
 
@@ -51,6 +55,8 @@ interface AppointmentBody {
 interface InClinicBody {
   date: string;
   timeZone: string;
+  locale: string;
+  hourCycle: string;
   scope: string;
   waiting: Record<string, unknown>[];
   inChair: Record<string, unknown>[];
@@ -417,5 +423,54 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       api().delete(`/api/v1/patients/${patientId}`),
       clinic.adminToken,
     ).expect(409);
+  });
+  // G1-B (DX-350, spec §4.4/§10): el panel pinta horas con el formato y el
+  // reloj de SU sede, que van en la respuesta; sin ellos, 409.
+  it('in-clinic view includes locale and hourCycle', async () => {
+    const main = await panel(reception.token, mainId).expect(200);
+    expect(main.body).toMatchObject({
+      timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
+      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      hourCycle: 'h23',
+    });
+    const newYork = await as(api().post('/api/v1/locations'), clinic.adminToken)
+      .send(locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }))
+      .expect(201);
+    const view = await panel(
+      clinic.adminToken,
+      (newYork.body as { id: string }).id,
+    ).expect(200);
+    expect(view.body).toMatchObject({
+      timeZone: 'America/New_York',
+      locale: 'en-US',
+      hourCycle: 'h12',
+    });
+  });
+
+  it('in-clinic for a location without hourCycle is 409 LOCATION_LOCALE_REQUIRED', async () => {
+    const g1 = await g1LocationInsert(
+      raw,
+      clinic.tenantId,
+      'Réplica G1 sin reloj',
+      REGIONAL_BERLIN_FIXTURE,
+    );
+    const res = await panel(clinic.adminToken, g1).expect(409);
+    expect(res.body).toMatchObject({
+      code: 'LOCATION_LOCALE_REQUIRED',
+      message:
+        'Configura el formato regional y el reloj de la sede y vuelve a intentarlo.',
+      locationId: g1,
+    });
+    // Sin zona tampoco: gana el 409 de zona.
+    const legacy = await legacyLocationInsert(
+      raw,
+      clinic.tenantId,
+      'Réplica antigua',
+    );
+    const noZone = await panel(clinic.adminToken, legacy).expect(409);
+    expect(noZone.body).toMatchObject({
+      code: 'LOCATION_TIMEZONE_REQUIRED',
+      locationId: legacy,
+    });
   });
 });

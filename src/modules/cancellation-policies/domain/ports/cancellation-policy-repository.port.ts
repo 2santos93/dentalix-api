@@ -1,4 +1,3 @@
-import type { ClinicCountry } from '@prisma/client';
 import type {
   CancellationPolicyInput,
   CancellationPolicyVersion,
@@ -6,10 +5,13 @@ import type {
 
 /** DX-291: lo que la vista previa del recordatorio muestra de la sede. */
 export interface PreviewLocation {
+  id: string;
   name: string;
   address: string | null;
-  country: ClinicCountry;
   timeZone: string;
+  /** G1-B: en crudo; los exige (409) quien pinta la vista previa. */
+  locale: string | null;
+  hourCycle: string | null;
 }
 
 export const CANCELLATION_POLICY_REPOSITORY = Symbol(

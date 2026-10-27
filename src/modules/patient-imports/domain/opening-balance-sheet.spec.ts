@@ -10,6 +10,10 @@ import {
   type BalanceRowContext,
 } from './opening-balance-sheet';
 import { ImportFileError } from './tabular-file';
+import { regionalFormat } from '../../../shared/format/regional-format';
+
+/** La sede del lote de las pruebas de siempre (lo que mostraba). */
+const FMT = () => regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
 
 const CTX: BalanceRowContext = {
   today: '2026-10-23',
@@ -224,6 +228,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         ['222', 'FOUND'],
       ]),
       'numero_documento',
+      FMT,
     );
     expect(result.prepared).toEqual([
       {
@@ -282,6 +287,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       ],
       new Map([['111', 'FOUND']]),
       'numero_documento',
+      FMT,
     );
     expect(result.prepared.map((p) => [p.currency, p.cents])).toEqual([
       ['COP', big - 100],
@@ -347,6 +353,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         rows,
         docs,
         'numero_documento',
+        FMT,
         existing,
       );
       // Otra moneda del mismo paciente y otro paciente: sí.
@@ -362,7 +369,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene un saldo migrado vivo de 1\.500\.000,00\sCOP \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+            /^Este paciente ya tiene un saldo migrado vivo de \$\s1\.500\.000,00 \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
           ) as string,
           value: '111',
         },
@@ -372,7 +379,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene 2 saldos migrados vivos en COP por 3000,00\sCOP \(el último, 1000,00\sCOP del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
+            /^Este paciente ya tiene 2 saldos migrados vivos en COP por \$\s3\.000,00 \(el último, \$\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
           ) as string,
           value: '222',
         },
@@ -383,11 +390,34 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       ]);
     });
 
+    it('opening balance duplicate message uses fmt.money', () => {
+      const result = aggregateBalances(
+        rows,
+        docs,
+        'numero_documento',
+        () => regionalFormat({ locale: 'en-US', hourCycle: 'h12' }),
+        existing,
+      );
+      expect(result.issues[0].message).toMatch(
+        /^Este paciente ya tiene un saldo migrado vivo de COP\s1,500,000\.00 \(lote/,
+      );
+      expect(result.issues[2].message).toMatch(
+        /por COP\s3,000\.00 \(el último, COP\s1,000\.00 del lote/,
+      );
+      // Sin saldos vivos que describir no se pide el formato (G1-B, I4).
+      expect(() =>
+        aggregateBalances(rows, docs, 'numero_documento', () => {
+          throw new Error('no debe pedirse');
+        }),
+      ).not.toThrow();
+    });
+
     it('con «Añadir aunque ya tenga saldo migrado» lo crea y avisa una vez por saldo', () => {
       const result = aggregateBalances(
         rows,
         docs,
         'numero_documento',
+        FMT,
         existing,
         true,
       );
@@ -423,6 +453,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         ['777', 'AMBIGUOUS'],
       ]),
       'numero_documento',
+      FMT,
     );
     expect(result.prepared.map((p) => p.docKey)).toEqual(['111']);
     expect(result.errorRows).toBe(2);

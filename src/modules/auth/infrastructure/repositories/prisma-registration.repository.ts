@@ -6,6 +6,7 @@ import type {
   RegistrationRepository,
 } from '../../domain/ports/registration-repository.port';
 import type { ClinicLocationSettings } from '../../domain/ports/auth-repository.port';
+import { isHourCycle } from '../../../locations/domain/regional-settings';
 
 const SELECT = {
   id: true,
@@ -19,22 +20,32 @@ const SELECT = {
   locationCurrency: true,
   locationTimeZone: true,
   locationLocale: true,
+  locationHourCycle: true,
 } as const;
 
 type PendingRow = Prisma.PendingRegistrationGetPayload<{
   select: typeof SELECT;
 }>;
 
-/** G1: un pendiente legado (sin los cuatro campos) no trae sede. */
-function locationOf(row: PendingRow): ClinicLocationSettings | null {
+/**
+ * G1: un pendiente legado (sin los cuatro campos) no trae sede. G1-B
+ * (pre-flight I3): el reloj NO entra en esa comprobación. Un pendiente de la
+ * web o de una réplica de G1 trae los cuatro y no el reloj: si fuera legado,
+ * la función D5 de G1 pisaría la moneda, la zona y el formato elegidos. Sale
+ * con `hourCycle: null` y el alta lo rellena con la función de G1-B.
+ */
+export function locationOf(row: PendingRow): ClinicLocationSettings | null {
   const {
     locationCountry: country,
     locationCurrency: currency,
     locationTimeZone: timeZone,
     locationLocale: locale,
+    locationHourCycle,
   } = row;
   if (!country || !currency || !timeZone || !locale) return null;
-  return { country, currency, timeZone, locale };
+  // El CHECK de la columna solo admite NULL, 'h12' o 'h23'.
+  const hourCycle = isHourCycle(locationHourCycle) ? locationHourCycle : null;
+  return { country, currency, timeZone, locale, hourCycle };
 }
 
 function toRecord(row: PendingRow): PendingRegistrationRecord {
@@ -81,6 +92,8 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
       locationCurrency: input.location?.currency ?? null,
       locationTimeZone: input.location?.timeZone ?? null,
       locationLocale: input.location?.locale ?? null,
+      // G1-B: también en las dos ramas de replaceOrCreate.
+      locationHourCycle: input.location?.hourCycle ?? null,
     };
     const saved = await this.replaceOrCreate(input.email, data, {
       replaceCreatedBefore: input.replaceCreatedBefore,

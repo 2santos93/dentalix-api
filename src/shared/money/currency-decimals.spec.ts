@@ -1,16 +1,40 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ISO4217_CURRENCIES } from '../../../prisma/reference/iso4217';
-import { ZERO_DECIMAL_CURRENCIES, currencyDecimals } from './currency-decimals';
+import {
+  ISO_ZERO_DECIMAL_CURRENCIES,
+  ZERO_DECIMAL_CURRENCIES,
+  currencyDecimals,
+} from './currency-decimals';
 
 const PREVIOUS_SET = ['COP', 'CLP', 'JPY', 'KRW', 'PYG'];
 
-describe('ZERO_DECIMAL_CURRENCIES', () => {
-  it('equals current set ∪ minorUnits=0 of ISO4217_CURRENCIES', () => {
-    const expected = new Set([
-      ...PREVIOUS_SET,
-      ...ISO4217_CURRENCIES.filter((c) => c.minorUnits === 0).map(
-        (c) => c.code,
+const minorUnitsZero = ISO4217_CURRENCIES.filter((c) => c.minorUnits === 0).map(
+  (c) => c.code,
+);
+
+describe('zero-decimal currencies', () => {
+  it('zero-decimal JSON equals the derivation from ISO4217_CURRENCIES', () => {
+    const json: unknown = JSON.parse(
+      readFileSync(
+        join(__dirname, '../../../prisma/reference/iso4217-zero-decimal.json'),
+        'utf8',
       ),
-    ]);
+    );
+    expect(json).toEqual({
+      minorUnitsZero,
+      previousSet: PREVIOUS_SET,
+    });
+  });
+
+  it('ISO_ZERO_DECIMAL_CURRENCIES equals minorUnitsZero', () => {
+    expect([...ISO_ZERO_DECIMAL_CURRENCIES].sort()).toEqual(
+      [...minorUnitsZero].sort(),
+    );
+  });
+
+  it('ZERO_DECIMAL_CURRENCIES equals the union', () => {
+    const expected = new Set([...PREVIOUS_SET, ...minorUnitsZero]);
     expect([...ZERO_DECIMAL_CURRENCIES].sort()).toEqual([...expected].sort());
   });
 

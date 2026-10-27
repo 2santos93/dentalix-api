@@ -108,6 +108,7 @@ export interface AuditMetadata {
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
+   * G1-B: y el reloj (`h12`/`h23`); los eventos de G1 no lo traen.
    */
   regionalSettings?: AuditRegionalSettingsChange;
 }
@@ -116,6 +117,8 @@ export interface AuditRegionalSettingsSide {
   currency: string | null;
   timeZone: string | null;
   locale: string | null;
+  /** G1-B; ausente en los eventos guardados antes de G1-B. */
+  hourCycle?: 'h12' | 'h23' | null;
 }
 
 export interface AuditRegionalSettingsChange {
@@ -605,6 +608,7 @@ function healthRegistration(
 }
 
 const TIME_ZONE_ID = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
+const AUDIT_HOUR_CYCLES = ['h12', 'h23'] as const;
 const LOCALE_TAG = /^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
 
 function nullableCode(value: unknown, pattern: RegExp, max: number) {
@@ -619,19 +623,32 @@ function regionalSettingsSide(
   value: unknown,
 ): AuditRegionalSettingsSide | null {
   if (!isRecord(value)) return null;
-  const { currency, timeZone, locale, ...rest } = value;
+  const { currency, timeZone, locale, hourCycle, ...rest } = value;
   const c = nullableCode(currency, CURRENCY_CODE, 3);
   const z = nullableCode(timeZone, TIME_ZONE_ID, 64);
   const l = nullableCode(locale, LOCALE_TAG, 35);
+  // G1-B: un evento de G1 no trae reloj y se sigue leyendo igual.
+  const hasClock = 'hourCycle' in value;
+  const h =
+    hourCycle === null
+      ? null
+      : AUDIT_HOUR_CYCLES.find((cycle) => cycle === hourCycle);
   if (
     Object.keys(rest).length > 0 ||
     c === undefined ||
     z === undefined ||
-    l === undefined
+    l === undefined ||
+    (hasClock && h === undefined)
   ) {
     return null;
   }
-  return { currency: c, timeZone: z, locale: l };
+  const side: AuditRegionalSettingsSide = {
+    currency: c,
+    timeZone: z,
+    locale: l,
+  };
+  if (hasClock) side.hourCycle = h;
+  return side;
 }
 
 /** Los dos lados y la marca de revisión, o nada (G1). */

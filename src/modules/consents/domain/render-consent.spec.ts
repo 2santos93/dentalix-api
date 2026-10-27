@@ -5,6 +5,7 @@ import {
   renderConsent,
   type ConsentVariables,
 } from './render-consent';
+import { regionalFormat } from '../../../shared/format/regional-format';
 
 const values: ConsentVariables = {
   paciente: 'Ana Pérez',
@@ -77,9 +78,31 @@ describe('findUnknownVariables', () => {
 
 describe('formatConsentDate', () => {
   it('formatea la fecha larga en español en la zona horaria dada', () => {
-    // 03:00 UTC del 17 es todavía el 16 en Bogotá (UTC-5).
+    // 03:00 UTC del 17 es todavía el 16 en UTC-5.
     expect(
-      formatConsentDate(new Date('2026-10-17T03:00:00.000Z'), 'America/Bogota'),
+      formatConsentDate(
+        new Date('2026-10-17T03:00:00.000Z'),
+        'America/Bogota',
+        regionalFormat({ locale: 'es-CO', hourCycle: 'h23' }),
+      ),
     ).toBe('16 de octubre de 2026');
+  });
+
+  it('consent date is Spanish words for any locale', () => {
+    const date = new Date('2026-10-17T03:00:00.000Z');
+    for (const [locale, hourCycle] of [
+      ['en-US', 'h12'],
+      ['ja-JP', 'h23'],
+      ['de-DE', 'h23'],
+    ] as const) {
+      // Sin día de la semana: el documento firmado dice solo la fecha.
+      expect(
+        formatConsentDate(
+          date,
+          'Asia/Tokyo',
+          regionalFormat({ locale, hourCycle }),
+        ),
+      ).toBe('17 de octubre de 2026');
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { DocType } from '@prisma/client';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 
 /**
  * Campos de la ficha que admite la importación de pacientes (DX-107), en el
@@ -164,7 +165,9 @@ export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 export const FILE_TOO_LARGE_MESSAGE =
   'El archivo pesa más de 5 MB. Divídelo en varios archivos más pequeños.';
-export const TOO_MANY_ROWS_MESSAGE = `El archivo tiene más de ${MAX_IMPORT_ROWS.toLocaleString('es-CO')} filas de pacientes. Divídelo en varios archivos.`;
+/** Con el número en el formato de la sede del lote (G1-B). */
+export const TOO_MANY_ROWS_MESSAGE = (fmt: RegionalFormat) =>
+  `El archivo tiene más de ${fmt.number(MAX_IMPORT_ROWS)} filas de pacientes. Divídelo en varios archivos.`;
 
 /** Valores normalizados de una fila válida (lo que se guarda en la ficha). */
 export interface ImportPatientData {

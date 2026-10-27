@@ -3,7 +3,7 @@ import { EmailOutbox } from '../../../notifications/email/application/email-outb
 import { EmailQuotaExceededError } from '../../../notifications/email/domain/email-quota-exceeded.error';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { resolveLocationRegional } from '../../../../shared/locations/location-regional';
 import type { ReceiptEmailSender } from '../../domain/ports/receipt-email-sender.port';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import { receiptEmailVars } from '../../application/receipts/receipt-email-vars';
@@ -46,17 +46,19 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
       }
       throw err;
     }
-    // Las fechas del email, en días civiles de la sede del recibo (DX-097).
+    // Las fechas del email, en días civiles de la sede del recibo (DX-097),
+    // y fechas e importes con su formato ACTUAL, como la zona (G1-B).
     const locationId = receipt.snapshot.location.id;
-    const zoneOf = await this.prisma.runWithTenant((tx) =>
-      resolveLocationTimeZones(tx, tenantId, [locationId]),
+    const regionalOf = await this.prisma.runWithTenant((tx) =>
+      resolveLocationRegional(tx, tenantId, [locationId]),
     );
+    const { timeZone, fmt } = regionalOf(locationId);
     await this.outbox.enqueue({
       tenantId,
       to,
       template: 'payment-receipt',
       vars: {
-        ...receiptEmailVars(receipt, zoneOf(locationId)),
+        ...receiptEmailVars(receipt, timeZone, fmt),
         responsibleName,
       },
       referenceId: receipt.paymentId,

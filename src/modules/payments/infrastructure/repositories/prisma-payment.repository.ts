@@ -19,6 +19,7 @@ import {
 import {
   OPENING_BALANCE_NOT_FOUND_MESSAGE,
   openingBalanceCurrencyMessage,
+  OPENING_BALANCE_PAID_MESSAGE,
   openingBalanceOverpaidMessage,
 } from '../../domain/opening-balance-payment';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -33,6 +34,8 @@ import {
   civilPeriodByZone,
 } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   CashRegisterPage,
   CashRegisterRow,
@@ -530,9 +533,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
   ): Promise<ReceiptPlanBalance> {
     const tenantId = this.requireTenantId();
     const [balance] = await tx.$queryRaw<
-      { amount: Prisma.Decimal; currency: string }[]
+      { amount: Prisma.Decimal; currency: string; locationId: string }[]
     >`
-      SELECT "amount", "currency" FROM "opening_balances"
+      SELECT "amount", "currency", "locationId" FROM "opening_balances"
        WHERE "tenantId" = ${tenantId}::uuid
          AND "id" = ${input.openingBalanceId}::uuid
          AND "patientId" = ${input.patientId}::uuid
@@ -558,7 +561,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const thisCents = Math.round(input.amount * 100);
     if (thisCents > pendingCents) {
       throw new BadRequestException(
-        openingBalanceOverpaidMessage(pendingCents / 100, balance.currency),
+        pendingCents <= 0
+          ? OPENING_BALANCE_PAID_MESSAGE
+          : openingBalanceOverpaidMessage(
+              pendingCents / 100,
+              balance.currency,
+              await this.locationFormatIn(tx, balance.locationId),
+            ),
       );
     }
     return {
@@ -567,6 +576,28 @@ export class PrismaPaymentRepository implements PaymentRepository {
       paid: (paidCents + thisCents) / 100,
       balance: (pendingCents - thisCents) / 100,
     };
+  }
+
+  locationFormat(locationId: string): Promise<RegionalFormat> {
+    return this.prisma.runWithTenant((tx) =>
+      this.locationFormatIn(tx, locationId),
+    );
+  }
+
+  /** G1-B: formato de una sede (la del dato, R12), solo para pintar (I4). */
+  private async locationFormatIn(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<RegionalFormat> {
+    const location = await tx.location.findFirst({
+      where: { id, tenantId: this.requireTenantId() },
+      select: { locale: true, hourCycle: true },
+    });
+    return requireLocationFormat({
+      id,
+      locale: location?.locale ?? null,
+      hourCycle: location?.hourCycle ?? null,
+    });
   }
 
   async resolvePaidOn(paidAt: Date | { civilDate: string }): Promise<string> {
@@ -632,7 +663,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const balance = await tx.openingBalance.findFirst({
         where: { id, tenantId, voidedAt: null },
-        select: { id: true, patientId: true, currency: true, amount: true },
+        select: {
+          id: true,
+          patientId: true,
+          currency: true,
+          amount: true,
+          locationId: true,
+        },
       });
       if (!balance) return null;
       const paid = await tx.payment.aggregate({
@@ -650,6 +687,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         currency: balance.currency,
         amount: balance.amount.toNumber(),
         paid: paid._sum.amount?.toNumber() ?? 0,
+        locationId: balance.locationId,
       };
     });
   }

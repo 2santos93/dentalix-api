@@ -52,10 +52,17 @@ export interface AffectingBlocksQuery {
   locationId?: string;
 }
 
-/** Bloqueos que tocan una cita, con la zona de su sede para redactar mensajes. */
+/**
+ * Bloqueos que tocan una cita, con la zona, el formato y el reloj de su sede
+ * para redactar mensajes. Formato y reloj en crudo (G1-B, I4): solo quien
+ * pinta un mensaje pide el formato, así que una sede sin reloj no bloquea
+ * agendar donde no hay ningún bloqueo.
+ */
 export interface AffectingBlocks {
   locationId: string;
   timeZone: string;
+  locale: string | null;
+  hourCycle: string | null;
   blocks: ScheduleBlock[];
 }
 

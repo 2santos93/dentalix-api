@@ -5,6 +5,7 @@ import type {
   ClinicCountry,
   Prisma,
 } from '@prisma/client';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import type { ReminderSettingsInput } from '../reminder-lead-hours';
 import type { ReminderRecord } from '../reminder-timeline';
 import type { ReminderContact } from '../reminder-eligibility';
@@ -41,8 +42,11 @@ export interface ReminderSendContext {
     status: AppointmentStatus;
     deleted: boolean;
   };
+  /** Solo para la regla de menores (DX-203); nunca para el formato. */
   locationCountry: ClinicCountry;
   locationTimeZone: string;
+  /** G1-B: formato y reloj de la sede de la cita, con los que se pinta el email. */
+  locationFormat: RegionalFormat;
   patientId: string;
   /** Canal, baja y email VIGENTES del paciente (DX-128). */
   contact: ReminderContact;

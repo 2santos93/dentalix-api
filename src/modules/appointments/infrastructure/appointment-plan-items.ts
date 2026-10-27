@@ -11,6 +11,10 @@ import { PATIENT_FLOW_MESSAGES } from '../domain/patient-flow';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import {
+  isHourCycle,
+  requireLocationFormat,
+} from '../../../shared/locations/location-regional';
+import {
   AllowedLocations,
   isLocationAllowed,
 } from '../../../shared/tenancy/location-access';
@@ -198,19 +202,26 @@ export async function planItemConflictMessage(
           },
           orderBy: { appointment: { start: 'asc' } },
           select: {
-            appointment: { select: { start: true, locationId: true } },
+            appointment: {
+              select: {
+                start: true,
+                locationId: true,
+                location: { select: { locale: true, hourCycle: true } },
+              },
+            },
           },
         });
-  if (!holder) return reservedElsewhereMessage(null, 'UTC');
-  if (!isLocationAllowed(allowedLocations, holder.appointment.locationId))
+  if (!holder) return reservedElsewhereMessage(null);
+  const { start, locationId, location } = holder.appointment;
+  if (!isLocationAllowed(allowedLocations, locationId))
     return PLAN_ITEM_RESERVED_OTHER_LOCATION_MESSAGE;
-  const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
-    holder.appointment.locationId,
-  ]);
-  return reservedElsewhereMessage(
-    holder.appointment.start,
-    zoneOf(holder.appointment.locationId),
-  );
+  const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
+  // El formato, en crudo: lo pide el mensaje al pintar (G1-B, I4).
+  return reservedElsewhereMessage({
+    start,
+    timeZone: zoneOf(locationId),
+    location: { id: locationId, ...location },
+  });
 }
 
 /** Reserva viva (mismo predicado que `dx256_link_reservation`). */
@@ -266,7 +277,7 @@ export async function findPlanItemsReservedElsewhere(
           status: true,
           start: true,
           locationId: true,
-          location: { select: { name: true } },
+          location: { select: { name: true, locale: true, hourCycle: true } },
         },
       },
       planItem: { select: { toothNumber: true, catalogItemId: true } },
@@ -296,6 +307,11 @@ export async function findPlanItemsReservedElsewhere(
         start: holder.appointment.start,
         locationId: holder.appointment.locationId,
         locationName: holder.appointment.location.name,
+        // En crudo (I4): sin formato o sin reloj, null; no se formatea aquí.
+        locationLocale: holder.appointment.location.locale,
+        locationHourCycle: isHourCycle(holder.appointment.location.hourCycle)
+          ? holder.appointment.location.hourCycle
+          : null,
       },
       {
         timeZone: zoneOf(holder.appointment.locationId),
@@ -381,7 +397,9 @@ export async function claimPlanItemInTx(
             status: true,
             start: true,
             locationId: true,
-            location: { select: { name: true } },
+            location: {
+              select: { name: true, locale: true, hourCycle: true },
+            },
           },
         },
       },
@@ -432,6 +450,8 @@ export async function claimPlanItemInTx(
     held && zoneOf
       ? heldInClinicToday(held, zoneOf(held.locationId), new Date())
       : false;
+  // G1-B (I4): el formato de su sede se pide aquí, al pintar el 409; la
+  // decisión de arriba solo usa la zona.
   const heldConflict = () =>
     new ConflictException(
       heldInClinicMessage(
@@ -442,6 +462,10 @@ export async function claimPlanItemInTx(
               start: held.start,
               timeZone: zoneOf(held.locationId),
               locationName: held.location.name,
+              fmt: requireLocationFormat({
+                id: held.locationId,
+                ...held.location,
+              }),
             }
           : null,
       ),

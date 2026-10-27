@@ -227,6 +227,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',
+      hourCycle: 'h23',
     });
     // Sin sede en contexto: la activa más antigua (la retirada no cuenta).
     await expect(
@@ -237,6 +238,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',
+      hourCycle: 'h23',
     });
   });
 

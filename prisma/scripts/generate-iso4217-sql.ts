@@ -7,7 +7,8 @@
  *   npx ts-node --transpile-only prisma/scripts/generate-iso4217-sql.ts
  *
  * Escribe `prisma/reference/iso4217.ts` (lo leen `prisma/seed.ts` y los tests)
- * e imprime por stdout el `INSERT … ON CONFLICT (code) DO NOTHING` que se pega
+ * y `prisma/reference/iso4217-zero-decimal.json` (G1-B: lo copia la web) e
+ * imprime por stdout el `INSERT … ON CONFLICT (code) DO NOTHING` que se pega
  * en la migración `…_g1_location_regional_settings`.
  *
  * Reglas (spec GLOBAL-G1 §2.2.1 y R7):
@@ -27,6 +28,9 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { format as prettier, resolveConfig } from 'prettier';
+
+/** Las que se cobraban sin decimales antes de G1: solo cuentan para redondear. */
+const PREVIOUS_ZERO_DECIMAL_SET = ['COP', 'CLP', 'JPY', 'KRW', 'PYG'];
 
 /** Monedas en circulación con código `X**` (las demás son fondos o metales). */
 const X_CURRENCIES_IN_CIRCULATION = new Set([
@@ -111,6 +115,23 @@ function build(): Iso4217Currency[] {
 
 const sqlText = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
+/** Mismo formato que el JSON de la web: filas de 10 códigos, lista previa en línea. */
+function zeroDecimalJson(currencies: Iso4217Currency[]): string {
+  const zero = currencies.filter((c) => c.minorUnits === 0).map((c) => c.code);
+  const rows: string[] = [];
+  for (let i = 0; i < zero.length; i += 10) {
+    rows.push(
+      '    ' +
+        zero
+          .slice(i, i + 10)
+          .map((code) => JSON.stringify(code))
+          .join(', '),
+    );
+  }
+  const previous = PREVIOUS_ZERO_DECIMAL_SET.map((c) => JSON.stringify(c));
+  return `{\n  "minorUnitsZero": [\n${rows.join(',\n')}\n  ],\n  "previousSet": [${previous.join(', ')}]\n}\n`;
+}
+
 async function main(): Promise<void> {
   const currencies = build();
   const target = join(__dirname, '..', 'reference', 'iso4217.ts');
@@ -145,6 +166,10 @@ ${body}
       ...(await resolveConfig(target)),
       filepath: target,
     }),
+  );
+  writeFileSync(
+    join(__dirname, '..', 'reference', 'iso4217-zero-decimal.json'),
+    zeroDecimalJson(currencies),
   );
   const values = currencies
     .map(

@@ -182,6 +182,7 @@ import {
   DEMO_PROFESSIONAL_LICENSES,
   demoPerioMeasures,
   DEMO_CURRENCY,
+  DEMO_HOUR_CYCLE,
   DEMO_COMPARISON_HISTORY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
@@ -539,12 +540,14 @@ class DemoSeeder {
       fullName: owner.fullName,
       emailVerifiedAt: new Date(),
       // G1: la demo es dato de prueba con país, moneda, zona y formato
-      // EXPLÍCITOS (nada se deduce); nace revisada, sin aviso D5.
+      // EXPLÍCITOS (nada se deduce); nace revisada, sin aviso D5. G1-B: y
+      // su reloj, sin pasar por la función de backfill (spec G1-B §4.5).
       location: {
         country: 'CO',
         currency: DEMO_CURRENCY,
         timeZone: DEMO_TIMEZONE,
         locale: 'es-CO',
+        hourCycle: DEMO_HOUR_CYCLE,
       },
     });
 
@@ -869,6 +872,7 @@ class DemoSeeder {
       currency: DEMO_CURRENCY,
       timeZone: DEMO_TIMEZONE,
       locale: 'es-CO',
+      hourCycle: DEMO_HOUR_CYCLE,
     });
     await this.inTenant(tenantId, norte.id, () =>
       this.use(ReplaceLocationScheduleUseCase).execute({
