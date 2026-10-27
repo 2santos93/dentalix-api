@@ -1,7 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { locationRequired } from '../../../../shared/locations/reference-location';
 import type {
   PlanCurrencyContext,
   PlanCurrencySource,
@@ -22,14 +21,30 @@ export class PrismaPlanCurrencySource implements PlanCurrencySource {
       async (tx): Promise<PlanCurrencyContext> => {
         if (locationId) {
           const location = await tx.location.findFirst({
-            where: { id: locationId, tenantId, deletedAt: null },
+            where: {
+              id: locationId,
+              tenantId,
+              deletedAt: null,
+              isActive: true,
+            },
             select: { currency: true },
           });
-          if (!location) throw locationRequired();
+          if (!location) {
+            throw new BadRequestException(
+              'La sede indicada no existe o está inactiva.',
+            );
+          }
           return { kind: 'location', locationId, currency: location.currency };
         }
+        // Solo las sedes que el miembro puede usar (DX-089).
+        const allowed = this.tenantContext.getAllowedLocationIds();
         const locations = await tx.location.findMany({
-          where: { tenantId, deletedAt: null, isActive: true },
+          where: {
+            tenantId,
+            deletedAt: null,
+            isActive: true,
+            ...(allowed === 'ALL' ? {} : { id: { in: [...allowed] } }),
+          },
           select: { currency: true },
         });
         const currencies = new Set<string>();

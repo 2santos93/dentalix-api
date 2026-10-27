@@ -257,6 +257,23 @@ describe('CreateTreatmentPlanUseCase', () => {
     );
   });
 
+  it('no location and no active sede is 409 LOCATION_REQUIRED', async () => {
+    const { uc } = makeUc(
+      planCurrencySource({
+        kind: 'clinic',
+        currencies: [],
+        unconfigured: false,
+      }),
+    );
+
+    const err = await uc.execute({ patientId: 'p1' }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_REQUIRED',
+    });
+  });
+
   it('an explicit currency never consults the location', async () => {
     const context = jest.fn();
     const { uc, captured } = makeUc({ context });

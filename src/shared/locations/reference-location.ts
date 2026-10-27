@@ -28,8 +28,7 @@ export function locationCurrencyRequired(
     statusCode: 409,
     error: 'Conflict',
     code: 'LOCATION_CURRENCY_REQUIRED',
-    message:
-      'La sede no tiene moneda configurada. Configúrala en Ajustes → Sedes.',
+    message: 'Configura la moneda de la sede y vuelve a intentarlo.',
     ...(locationId ? { locationId } : {}),
   });
 }
