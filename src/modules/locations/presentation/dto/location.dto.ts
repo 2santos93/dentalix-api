@@ -74,17 +74,21 @@ export class CreateLocationDto {
   @IsEnum(ClinicCountry, { message: COUNTRY_MISSING })
   country?: ClinicCountry;
 
-  @ApiProperty({ example: 'COP', description: CURRENCY_DOC })
+  @ApiProperty({ type: String, example: 'EUR', description: CURRENCY_DOC })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.currencyMissing })
   currency?: string;
 
-  @ApiProperty({ example: 'America/Bogota', description: TIME_ZONE_DOC })
+  @ApiProperty({
+    type: String,
+    example: 'Europe/Madrid',
+    description: TIME_ZONE_DOC,
+  })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.timeZoneMissing })
   timeZone?: string;
 
-  @ApiProperty({ example: 'es-CO', description: LOCALE_DOC })
+  @ApiProperty({ type: String, example: 'es-ES', description: LOCALE_DOC })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.localeMissing })
   locale?: string;
@@ -173,7 +177,7 @@ export class UpdateLocationDto {
   // OpenAPI. `null` no es válido (400), así que el contrato es `string`.
   @ApiPropertyOptional({
     type: String,
-    example: 'COP',
+    example: 'EUR',
     description: CURRENCY_DOC,
   })
   // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
@@ -183,7 +187,7 @@ export class UpdateLocationDto {
 
   @ApiPropertyOptional({
     type: String,
-    example: 'America/Bogota',
+    example: 'Europe/Madrid',
     description: TIME_ZONE_DOC,
   })
   @IsOptional()
@@ -192,7 +196,7 @@ export class UpdateLocationDto {
 
   @ApiPropertyOptional({
     type: String,
-    example: 'es-CO',
+    example: 'es-ES',
     description: LOCALE_DOC,
   })
   @IsOptional()
@@ -251,21 +255,21 @@ export class LocationDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'COP',
+    example: 'EUR',
     description: `${CURRENCY_DOC} null = sede sin configurar (fase 1).`,
   })
   currency!: string | null;
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'America/Bogota',
+    example: 'Europe/Madrid',
     description: `${TIME_ZONE_DOC} null = sede sin configurar (fase 1).`,
   })
   timeZone!: string | null;
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'es-CO',
+    example: 'es-ES',
     description: `${LOCALE_DOC} null = sede sin configurar (fase 1).`,
   })
   locale!: string | null;

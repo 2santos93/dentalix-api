@@ -72,7 +72,8 @@ export class RegisterDto {
   locationCountry?: ClinicCountry;
 
   @ApiPropertyOptional({
-    example: 'COP',
+    type: String,
+    example: 'EUR',
     description: 'Moneda ISO 4217 de la primera sede (GET /public/currencies).',
   })
   @IsOptional()
@@ -80,7 +81,8 @@ export class RegisterDto {
   locationCurrency?: string;
 
   @ApiPropertyOptional({
-    example: 'America/Bogota',
+    type: String,
+    example: 'Europe/Madrid',
     description: 'Zona horaria IANA de la primera sede.',
   })
   @IsOptional()
@@ -88,7 +90,8 @@ export class RegisterDto {
   locationTimeZone?: string;
 
   @ApiPropertyOptional({
-    example: 'es-CO',
+    type: String,
+    example: 'es-ES',
     description: 'Formato regional BCP 47 de la primera sede.',
   })
   @IsOptional()

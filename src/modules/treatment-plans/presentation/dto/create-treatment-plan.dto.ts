@@ -11,7 +11,8 @@ import { IsOptional, IsString } from 'class-validator';
 // `@IsString` only rules out non-string input).
 export class CreateTreatmentPlanDto {
   @ApiPropertyOptional({
-    example: 'USD',
+    type: String,
+    example: 'EUR',
     description:
       'ISO 4217 (si se omite, la moneda de la sede activa o la común de la clínica)',
   })

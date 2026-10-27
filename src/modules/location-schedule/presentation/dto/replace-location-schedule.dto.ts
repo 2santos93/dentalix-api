@@ -37,6 +37,8 @@ export class ScheduleRangeDto {
 
 export class ReplaceLocationScheduleDto {
   @ApiPropertyOptional({
+    type: String,
+    example: 'Europe/Madrid',
     deprecated: true,
     description:
       'Obsoleto (G1): la zona es un dato de la sede (PATCH /locations/:id) y nunca se guarda desde aquí. Solo se acepta, para una web antigua, si es igual a la zona de la sede; distinta (o sede sin zona) es 400.',

@@ -104,7 +104,7 @@ export class ProviderLocationScheduleDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'America/Bogota',
+    example: 'Europe/Madrid',
     description:
       'Zona IANA de la sede; null si la sede aún no tiene zona configurada (fase 1) o ya no existe.',
   })
