@@ -205,6 +205,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     server = app.getHttpServer();
     await cleanup();
 

@@ -245,6 +245,7 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     clinicA = await register('planes-cobrables-a');

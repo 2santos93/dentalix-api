@@ -239,6 +239,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     );
     applyBodyLimits(app);
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     clinicA = await register('rx-a');

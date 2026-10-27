@@ -232,6 +232,7 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
     );
     applyBodyLimits(app);
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     clinicA = await register('consentimientos-a');

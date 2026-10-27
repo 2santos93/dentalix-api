@@ -31,5 +31,7 @@ export async function createE2eApp(
   const app = moduleRef.createNestApplication<INestApplication<App>>();
   configureApp(app, options);
   await app.init();
+  // Reserve IPv4 before Supertest can bind :: and target a different listener.
+  await app.listen(0, '127.0.0.1');
   return app;
 }

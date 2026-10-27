@@ -147,6 +147,7 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
 
     await cleanup();
     await register(SUB_A, `owner-a${DOMAIN}`);

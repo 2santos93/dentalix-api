@@ -27,6 +27,7 @@ describe('Files (e2e)', () => {
     applySecurity(app);
     app.setGlobalPrefix('api/v1');
     await app.init();
+    await app.listen(0, '127.0.0.1');
     storage = app.get<FileStoragePort>(FILE_STORAGE);
     await fs.mkdir(path.join(root, 'avatars'), { recursive: true });
     await fs.writeFile(

@@ -102,6 +102,7 @@ describe('Alta de paciente con anamnesis inicial según rol — POST /patients (
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     const email = `owner@${SUBDOMAIN}.com`;
