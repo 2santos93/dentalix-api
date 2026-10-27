@@ -498,4 +498,89 @@ describe('Locations / cambio regional (e2e)', () => {
       );
     }
   });
+  // G1-B (DX-350, spec §7): la zona se guarda con su mayúscula canónica, y
+  // una zona igual a la guardada salvo mayúsculas no es un cambio.
+  it('POST /locations with asia/kolkata stores Asia/Kolkata', async () => {
+    const res = await api('post', '/locations')
+      .send(
+        locationBody(REGIONAL_TOKYO_FIXTURE, {
+          name: 'Sede Kolkata',
+          timeZone: 'asia/kolkata',
+        }),
+      )
+      .expect(201);
+    const body = res.body as LocationBody;
+    expect(body.timeZone).toBe('Asia/Kolkata');
+    const row = await raw.location.findUniqueOrThrow({
+      where: { id: body.id },
+    });
+    expect(row.timeZone).toBe('Asia/Kolkata');
+  });
+
+  it('PATCH timeZone differing only in case is not a change even with an open cash session', async () => {
+    const id = await newLocation();
+    await addExpense(id);
+    await openCash(id);
+    const res = await patch(id, { timeZone: 'AMERICA/BOGOTA' }).expect(200);
+    expect((res.body as LocationBody).timeZone).toBe('America/Bogota');
+  });
+
+  it('case-only zone rewrite is not reviewed nor audited as a regional change', async () => {
+    // M5: una zona guardada antes de canonicalizar (en minúsculas), con
+    // historial y caja abierta.
+    const id = await newLocation();
+    await addExpense(id);
+    await openCash(id);
+    await raw.$executeRawUnsafe(
+      `UPDATE "locations" SET "timeZone" = 'asia/kolkata', "regionalSettingsReviewedAt" = NULL WHERE "id" = $1::uuid`,
+      id,
+    );
+    await raw.$executeRawUnsafe(
+      `UPDATE "location_schedules" SET "timezone" = 'asia/kolkata' WHERE "locationId" = $1::uuid`,
+      id,
+    );
+    const res = await patch(id, { timeZone: 'Asia/Kolkata' }).expect(200);
+    const body = res.body as LocationBody;
+    expect(body.timeZone).toBe('Asia/Kolkata');
+    expect(body.regionalSettingsReviewedAt).toBeNull();
+    // Se guarda canónica, con la doble escritura de R20.
+    const schedule = await raw.locationSchedule.findFirstOrThrow({
+      where: { locationId: id },
+    });
+    expect(schedule.timezone).toBe('Asia/Kolkata');
+    const events = await raw.auditEvent.findMany({
+      where: { resourceType: 'LOCATION', resourceId: id, action: 'UPDATE' },
+    });
+    for (const event of events) {
+      expect(event.metadata ?? {}).not.toHaveProperty('regionalSettings');
+    }
+  });
+
+  // G1-B (pre-flight I4): una sede sin reloj solo falla donde se formatea;
+  // las lecturas que solo usan la zona de la principal siguen.
+  it('odontogram and audit still load when the principal location has no clock', async () => {
+    const principal = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, deletedAt: null, isActive: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    const patient = await raw.patient.create({
+      data: { tenantId: clinic.tenantId, firstName: 'Iris', lastName: 'I' },
+    });
+    await raw.location.update({
+      where: { id: principal.id },
+      data: { hourCycle: null },
+    });
+    try {
+      await api(
+        'get',
+        `/patients/${patient.id}/odontogram?asOf=2026-10-20`,
+      ).expect(200);
+      await api('get', '/audit-events').expect(200);
+    } finally {
+      await raw.location.update({
+        where: { id: principal.id },
+        data: { hourCycle: principal.hourCycle },
+      });
+    }
+  });
 });

@@ -102,6 +102,19 @@ export class InClinicViewDto {
   timeZone!: string;
 
   @ApiProperty({
+    example: 'en-US',
+    description:
+      'G1-B: formato regional (BCP 47) de la sede: las horas se pintan con él.',
+  })
+  locale!: string;
+
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    description: 'G1-B: reloj de la sede (12 h o 24 h).',
+  })
+  hourCycle!: 'h12' | 'h23';
+
+  @ApiProperty({
     format: 'date-time',
     description: 'Reloj del servidor con el que se calcularon los minutos.',
   })

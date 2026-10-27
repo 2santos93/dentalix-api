@@ -67,6 +67,8 @@ interface ReservedElsewhere {
   locationId: string;
   locationName: string;
   timeZone: string;
+  locale: string | null;
+  hourCycle: string | null;
 }
 
 describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
@@ -510,6 +512,8 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
         locationId,
         locationName,
         timeZone: ZONE,
+        locale: REGIONAL_BOGOTA_FIXTURE.locale,
+        hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
       };
       expect(
         (arrived.body as { planItemsReservedElsewhere: ReservedElsewhere[] })

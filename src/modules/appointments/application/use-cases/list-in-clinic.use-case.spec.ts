@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AppointmentStatus, ClinicRole } from '@prisma/client';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { ListInClinicUseCase } from './list-in-clinic.use-case';
@@ -8,12 +12,27 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 // DX-200: panel «En clínica» de la sede: tres grupos, minutos con el reloj del
 // servidor, puntualidad por color y el día civil en la zona de la sede.
 
-function locationsWith(zones: Record<string, string>): LocationRepository {
+interface RegionalRow {
+  timeZone: string | null;
+  locale: string | null;
+  hourCycle: string | null;
+}
+
+function locationsWith(rows: Record<string, RegionalRow>): LocationRepository {
   return {
     findById: (id: string) =>
-      Promise.resolve(zones[id] ? { id, timeZone: zones[id] } : null),
+      Promise.resolve(rows[id] ? { id, ...rows[id] } : null),
   } as unknown as LocationRepository;
 }
+
+const LOCATIONS: Record<string, RegionalRow> = {
+  bog: { timeZone: 'America/Bogota', locale: 'es-CO', hourCycle: 'h23' },
+  mad: { timeZone: 'Europe/Madrid', locale: 'es-ES', hourCycle: 'h23' },
+  ny: { timeZone: 'America/New_York', locale: 'en-US', hourCycle: 'h12' },
+  // Réplica de G1 sin reloj, y réplica anterior a G1 sin nada.
+  g1: { timeZone: 'Europe/Berlin', locale: 'de-DE', hourCycle: null },
+  legacy: { timeZone: null, locale: null, hourCycle: null },
+};
 
 const at = (iso: string) => new Date(iso);
 
@@ -26,7 +45,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
     repo.providerNames.set('dent-1', 'Dra. Uno');
     const uc = new ListInClinicUseCase(
       repo,
-      locationsWith({ bog: 'America/Bogota', mad: 'Europe/Madrid' }),
+      locationsWith(LOCATIONS),
       new TenantContextService(),
     );
     return { repo, uc };
@@ -215,6 +234,8 @@ describe('ListInClinicUseCase (DX-200)', () => {
       locationId: 'bog',
       locationName: 'Sede Principal',
       timeZone: 'America/Bogota',
+      locale: 'es-CO',
+      hourCycle: 'h23' as const,
     };
     repo.reservedElsewhere.set(waiting.id, [reserved]);
     const view = await uc.execute(
@@ -286,5 +307,39 @@ describe('ListInClinicUseCase (DX-200)', () => {
         NOW,
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+  // G1-B (DX-350, spec §4.4/§10): el panel lleva el formato y el reloj de su
+  // sede; sin ellos es 409, y sin zona gana el 409 de zona.
+  it('in-clinic view includes locale and hourCycle', async () => {
+    const { uc } = setup();
+    const ny = await uc.execute(
+      { locationId: 'ny', role: ClinicRole.ADMIN, userId: 'a' },
+      NOW,
+    );
+    expect(ny).toMatchObject({
+      timeZone: 'America/New_York',
+      locale: 'en-US',
+      hourCycle: 'h12',
+    });
+    const bog = await uc.execute(
+      { locationId: 'bog', role: ClinicRole.ADMIN, userId: 'a' },
+      NOW,
+    );
+    expect(bog).toMatchObject({ locale: 'es-CO', hourCycle: 'h23' });
+  });
+
+  it.each([
+    ['g1', 'LOCATION_LOCALE_REQUIRED'],
+    ['legacy', 'LOCATION_TIMEZONE_REQUIRED'],
+  ])('location %s is 409 %s', async (locationId, code) => {
+    const { uc } = setup();
+    const error = await uc
+      .execute({ locationId, role: ClinicRole.ADMIN, userId: 'a' }, NOW)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code,
+      locationId,
+    });
   });
 });

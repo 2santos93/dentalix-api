@@ -10,6 +10,7 @@ import type { PlanItemReservedElsewhere } from '../domain/entities/appointment.e
 import { PATIENT_FLOW_MESSAGES } from '../domain/patient-flow';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import { isHourCycle } from '../../../shared/locations/location-regional';
 import {
   AllowedLocations,
   isLocationAllowed,
@@ -266,7 +267,7 @@ export async function findPlanItemsReservedElsewhere(
           status: true,
           start: true,
           locationId: true,
-          location: { select: { name: true } },
+          location: { select: { name: true, locale: true, hourCycle: true } },
         },
       },
       planItem: { select: { toothNumber: true, catalogItemId: true } },
@@ -296,6 +297,11 @@ export async function findPlanItemsReservedElsewhere(
         start: holder.appointment.start,
         locationId: holder.appointment.locationId,
         locationName: holder.appointment.location.name,
+        // En crudo (I4): sin formato o sin reloj, null; no se formatea aquí.
+        locationLocale: holder.appointment.location.locale,
+        locationHourCycle: isHourCycle(holder.appointment.location.hourCycle)
+          ? holder.appointment.location.hourCycle
+          : null,
       },
       {
         timeZone: zoneOf(holder.appointment.locationId),

@@ -206,6 +206,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
     start: new Date(start),
     locationId: 'loc-norte',
     locationName: 'Sede Norte',
+    locationLocale: 'en-US',
+    locationHourCycle: 'h12' as const,
   });
 
   it.each([
@@ -228,6 +230,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
         locationId: 'loc-norte',
         locationName: 'Sede Norte',
         timeZone: TZ,
+        locale: 'en-US',
+        hourCycle: 'h12',
       });
     },
   );
@@ -269,6 +273,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
       locationId: 'loc-norte',
       locationName: 'Sede Norte',
       timeZone: TZ,
+      locale: 'en-US',
+      hourCycle: 'h12',
     });
   });
 
@@ -280,6 +286,28 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
         { timeZone: 'Europe/Madrid', locationAllowed: true, now },
       )?.heldInClinic,
     ).toBe(false);
+  });
+
+  it('sede permitida sin formato ni reloj: locale y hourCycle null en crudo, el resto igual (I4)', () => {
+    expect(
+      reservationHolderView(
+        {
+          ...holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
+          locationLocale: null,
+          locationHourCycle: null,
+        },
+        { timeZone: TZ, locationAllowed: true, now },
+      ),
+    ).toEqual({
+      heldInClinic: false,
+      appointmentId: 'b1',
+      start: new Date('2026-10-30T14:00:00.000Z'),
+      locationId: 'loc-norte',
+      locationName: 'Sede Norte',
+      timeZone: TZ,
+      locale: null,
+      hourCycle: null,
+    });
   });
 
   it('sede no permitida y titular de hoy en la clínica: heldInClinic sin cita, hora ni sede (DX-089)', () => {
@@ -295,6 +323,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
       locationId: null,
       locationName: null,
       timeZone: null,
+      locale: null,
+      hourCycle: null,
     });
   });
 

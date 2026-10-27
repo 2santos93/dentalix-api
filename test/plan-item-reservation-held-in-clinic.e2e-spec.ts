@@ -46,6 +46,8 @@ interface ReservedElsewhere {
   locationId: string | null;
   locationName: string | null;
   timeZone: string | null;
+  locale: string | null;
+  hourCycle: string | null;
 }
 
 interface InClinicPanel {
@@ -258,6 +260,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
         locationId,
         locationName,
         timeZone: ZONE,
+        locale: REGIONAL_BOGOTA_FIXTURE.locale,
+        hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
       };
       expect(await arrive(today.id)).toEqual([expected]);
       expect(await panelNotice(today.id)).toEqual([expected]);
@@ -311,6 +315,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId,
       locationName,
       timeZone: ZONE,
+      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
     };
     expect(await arrive(today.id)).toEqual([expected]);
     expect(await panelNotice(today.id)).toEqual([expected]);
@@ -355,6 +361,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId: null,
       locationName: null,
       timeZone: null,
+      locale: null,
+      hourCycle: null,
     };
     const arrived = await call(
       'patch',
@@ -402,6 +410,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId: north.id,
       locationName: 'Sede Norte DX293',
       timeZone: ZONE,
+      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
     });
   });
 });

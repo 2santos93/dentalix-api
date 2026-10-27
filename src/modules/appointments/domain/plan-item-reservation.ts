@@ -2,6 +2,7 @@ import { AppointmentStatus } from '@prisma/client';
 import { isInClinic } from './patient-flow';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import type { PlanItemReservedElsewhere } from './entities/appointment.entity';
+import type { HourCycle } from '../../../shared/format/regional-format';
 
 /**
  * DX-271 (BE-039): los ítems del plan de una cita cerrada o pasada no se
@@ -60,6 +61,9 @@ export interface ReservationHolder {
   start: Date;
   locationId: string;
   locationName: string;
+  /** Formato y reloj de su sede, en crudo (G1-B, I4). */
+  locationLocale: string | null;
+  locationHourCycle: HourCycle | null;
 }
 
 export type ReservationHolderView = Pick<
@@ -70,6 +74,8 @@ export type ReservationHolderView = Pick<
   | 'locationId'
   | 'locationName'
   | 'timeZone'
+  | 'locale'
+  | 'hourCycle'
 >;
 
 /**
@@ -92,6 +98,8 @@ export function reservationHolderView(
       locationId: holder.locationId,
       locationName: holder.locationName,
       timeZone: context.timeZone,
+      locale: holder.locationLocale,
+      hourCycle: holder.locationHourCycle,
     };
   if (!heldInClinic) return null;
   return {
@@ -101,6 +109,8 @@ export function reservationHolderView(
     locationId: null,
     locationName: null,
     timeZone: null,
+    locale: null,
+    hourCycle: null,
   };
 }
 

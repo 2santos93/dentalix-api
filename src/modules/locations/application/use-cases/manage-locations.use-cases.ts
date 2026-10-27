@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { ClinicCountry } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { canonicalTimeZoneName } from '../../../../shared/time/canonical-time-zone';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
 import type {
   Location,
@@ -269,9 +270,15 @@ export class UpdateLocationUseCase {
       async (ctx): Promise<RegionalWrite> => {
         const cur = ctx.current;
         before = regionalSide(cur);
-        // Rellenar un NULL (réplica antigua sin barrer) no es un «cambio».
+        // Rellenar un NULL (réplica antigua sin barrer) no es un «cambio», ni
+        // una zona igual a la guardada salvo mayúsculas (spec §7, M5): se
+        // compara con la guardada canónica.
+        const stored = (field: RegionalField): string | null =>
+          field === 'timeZone'
+            ? (canonicalTimeZoneName(cur.timeZone) ?? cur.timeZone)
+            : cur[field];
         const differs = (field: RegionalField): boolean =>
-          regional[field] !== undefined && regional[field] !== cur[field];
+          regional[field] !== undefined && regional[field] !== stored(field);
         const moved = (field: RegionalField): boolean =>
           differs(field) && cur[field] !== null;
 
@@ -322,7 +329,13 @@ export class UpdateLocationUseCase {
         }
         return {
           currency: differs('currency') ? regional.currency : undefined,
-          timeZone: differs('timeZone') ? regional.timeZone : undefined,
+          // La zona se reescribe canónica aunque solo cambien las mayúsculas
+          // (con la doble escritura de R20), sin ser un cambio.
+          timeZone:
+            regional.timeZone !== undefined &&
+            regional.timeZone !== cur.timeZone
+              ? regional.timeZone
+              : undefined,
           locale: differs('locale') ? regional.locale : undefined,
           hourCycle:
             differs('hourCycle') && isHourCycle(regional.hourCycle)
@@ -336,7 +349,11 @@ export class UpdateLocationUseCase {
     return {
       location: updated,
       healthRegistration: healthRegistrationChange(current, updated),
-      regionalSettings: { before, after: regionalSide(updated), reviewed },
+      // Sin cambio regional (ni confirmación) no hay antes/después que
+      // auditar: p. ej. una zona reescrita solo en mayúsculas (M5).
+      regionalSettings: reviewed
+        ? { before, after: regionalSide(updated), reviewed }
+        : null,
     };
   }
 }

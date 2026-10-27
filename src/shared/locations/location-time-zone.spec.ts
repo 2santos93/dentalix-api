@@ -19,6 +19,7 @@ interface Row {
   timeZone: string | null;
   currency?: string | null;
   locale?: string | null;
+  hourCycle?: string | null;
 }
 
 /** `tx` mínima: `$queryRaw` devuelve las filas y `location.findFirst` busca en ellas. */
@@ -212,6 +213,7 @@ describe('resolveReferenceLocation (R6)', () => {
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',
+      hourCycle: 'h12',
     },
     {
       id: 'tokio',
@@ -219,6 +221,7 @@ describe('resolveReferenceLocation (R6)', () => {
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',
+      hourCycle: 'h23',
     },
   ];
 
@@ -232,6 +235,7 @@ describe('resolveReferenceLocation (R6)', () => {
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',
+      hourCycle: 'h23',
     });
     await expect(resolveReferenceLocation(tx, TENANT, null)).resolves.toEqual({
       id: 'principal',
@@ -239,6 +243,7 @@ describe('resolveReferenceLocation (R6)', () => {
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',
+      hourCycle: 'h12',
     });
     // Sin sede en contexto: la activa más antigua del tenant.
     const findFirst = (tx.location as unknown as { findFirst: jest.Mock })
@@ -249,6 +254,23 @@ describe('resolveReferenceLocation (R6)', () => {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
     );
+  });
+
+  it('a reference location without clock still resolves: only who formats asks for it (I4)', async () => {
+    await expect(
+      resolveReferenceLocation(
+        txWith([
+          {
+            id: 'g1',
+            timeZone: 'Europe/Berlin',
+            locale: 'de-DE',
+            hourCycle: null,
+          },
+        ]),
+        TENANT,
+        null,
+      ),
+    ).resolves.toMatchObject({ id: 'g1', locale: 'de-DE', hourCycle: null });
   });
 
   it('clinic without active locations raises LOCATION_REQUIRED', async () => {

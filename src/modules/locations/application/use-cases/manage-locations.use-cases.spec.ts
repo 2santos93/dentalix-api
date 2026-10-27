@@ -682,6 +682,24 @@ describe('teléfono de la sede (DX-222)', () => {
       ]);
     });
 
+    it('case-only zone rewrite is not reviewed nor audited as a regional change', async () => {
+      // M5 (spec §7): una zona guardada antes de canonicalizar, en minúsculas.
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({
+          current: { timeZone: 'asia/kolkata' },
+          openCash: true,
+          history: true,
+          written,
+        }),
+      );
+      const out = await uc.execute('loc-1', { timeZone: 'ASIA/KOLKATA' });
+      expect(written).toEqual([
+        expect.objectContaining({ timeZone: 'Asia/Kolkata', reviewed: false }),
+      ]);
+      expect(out.regionalSettings).toBeNull();
+    });
+
     it('rellenar un reloj NULL no pide confirmación y queda revisada', async () => {
       const written: object[] = [];
       const uc = updateUseCase(
