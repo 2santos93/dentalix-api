@@ -4,6 +4,7 @@ import {
   normalizeLocale,
   validateHourCycle,
   validateRegionalSettings,
+  validateTimeZone,
 } from './regional-settings';
 
 const KNOWN = new Set(['COP', 'EUR', 'JPY']);
@@ -113,6 +114,10 @@ describe('validateRegionalSettings (G1)', () => {
       field: 'timeZone',
       message: `La zona horaria «${timeZone}» no existe.`,
     });
+  });
+
+  it("validateTimeZone('asia/kolkata') is Asia/Kolkata", () => {
+    expect(validateTimeZone('asia/kolkata')).toBe('Asia/Kolkata');
   });
 
   it('ES-mx canonicalizes to es-MX', async () => {

@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
-import { isValidTimeZone } from '../../../shared/time/civil-day';
+import { canonicalTimeZoneName } from '../../../shared/time/canonical-time-zone';
 
 /**
  * G1 (DX-313/314/315): moneda, zona horaria y formato regional de la sede;
@@ -189,11 +189,11 @@ export function validateTimeZone(
   if (blank(raw)) {
     return { field: 'timeZone', message: REGIONAL_MESSAGES.timeZoneMissing };
   }
-  const timeZone = raw.trim();
-  if (!isValidTimeZone(timeZone)) {
+  const timeZone = canonicalTimeZoneName(raw);
+  if (!timeZone) {
     return {
       field: 'timeZone',
-      message: REGIONAL_MESSAGES.timeZoneUnknown(timeZone),
+      message: REGIONAL_MESSAGES.timeZoneUnknown(raw.trim()),
     };
   }
   return timeZone;
