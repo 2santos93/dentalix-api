@@ -538,6 +538,14 @@ class DemoSeeder {
       passwordHash: await this.use(PasswordService).hash(DEMO_PASSWORD),
       fullName: owner.fullName,
       emailVerifiedAt: new Date(),
+      // G1: la demo es dato de prueba con país, moneda, zona y formato
+      // EXPLÍCITOS (nada se deduce); nace revisada, sin aviso D5.
+      location: {
+        country: 'CO',
+        currency: DEMO_CURRENCY,
+        timeZone: DEMO_TIMEZONE,
+        locale: 'es-CO',
+      },
     });
 
     let confirmationUrl: string | undefined;
@@ -855,12 +863,15 @@ class DemoSeeder {
     });
     // Nace con el horario por defecto (como cualquier sede nueva) y luego se
     // le pone el suyo con el caso de uso de /settings/horarios.
-    const norte = await this.use(CreateLocationUseCase).execute(
-      DEMO_LOCATIONS.norte,
-    );
+    const norte = await this.use(CreateLocationUseCase).execute({
+      ...DEMO_LOCATIONS.norte,
+      country: 'CO',
+      currency: DEMO_CURRENCY,
+      timeZone: DEMO_TIMEZONE,
+      locale: 'es-CO',
+    });
     await this.inTenant(tenantId, norte.id, () =>
       this.use(ReplaceLocationScheduleUseCase).execute({
-        timezone: DEMO_TIMEZONE,
         ranges: NORTE_SCHEDULE,
       }),
     );

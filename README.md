@@ -966,6 +966,72 @@ cuenta en su día.
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
 
+## Despliegue GLOBAL-G1 (fase 1)
+
+Moneda, zona y formato pasan a ser de cada sede (`locations.currency`,
+`"timeZone"`, `locale`; el país se pide siempre). El despliegue es **sin
+parada**, en dos fases (expand/contract): esta es la fase 1; las columnas
+siguen admitiendo NULL hasta la fase 2.
+
+**Runbook (en este orden):**
+
+1. `prisma migrate deploy` **con las réplicas antiguas sirviendo**. La
+   migración solo añade columnas NULL, rellena las sedes existentes y añade
+   restricciones que admiten NULL, así que el código anterior sigue
+   funcionando. Las filas rellenadas quedan «por revisar» (aviso D5 al ADMIN).
+2. Despliegue *rolling* de la API nueva. Después, la web nueva.
+3. Cuando ya no quede ninguna réplica antigua:
+
+   ```bash
+   npm run g1:backfill-locations
+   ```
+
+   y la consulta de comprobación (como owner, con `SET LOCAL row_security =
+   off`); tiene que dar 0:
+
+   ```sql
+   SELECT count(*) FROM locations
+    WHERE currency IS NULL OR "timeZone" IS NULL OR locale IS NULL;
+   ```
+
+   Mientras tanto, el job `location-regional-backfill` (cada 5 minutos) barre
+   las sedes que una réplica antigua haya creado sin esos valores. Es
+   idempotente. Una sede en NULL se trata como «sin configurar» (error
+   recuperable), nunca con un valor por país.
+
+**Compatibilidad durante la convivencia:**
+
+| Quién | Contra | Qué pasa |
+|---|---|---|
+| API antigua | BD de fase 1 | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido; lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20) |
+| Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; registro sin campos de sede se acepta en la forma legada; `LocationDto` solo gana campos |
+| Web nueva | API antigua | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP |
+| Enlace de registro de una réplica antigua | API nueva | `verify` lo acepta |
+
+La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
+el proveedor de tasas puede no tener alguna y esos abonos cuentan en
+`unconvertedPaymentsCount`. La demo (`npm run seed:demo`) crea sus sedes con
+`COP`, `America/Bogota`, `es-CO` y `CO` explícitos y ya revisadas.
+
+### Fase 2 (ticket aparte)
+
+«G1 · Fase 2: cerrar las columnas regionales de la sede» (bajo DX-311; ticket
+por crear). Va en un release **posterior**, cuando no quede ninguna réplica
+anterior a la fase 1. Precondición: ambas consultas dan 0 (si no, correr
+`npm run g1:backfill-locations` y repetir):
+
+```sql
+SELECT count(*) FROM locations
+ WHERE currency IS NULL OR "timeZone" IS NULL OR locale IS NULL;
+SELECT count(*) FROM pending_registrations
+ WHERE "locationCurrency" IS NULL AND "expiresAt" > now();
+```
+
+Entonces: `SET NOT NULL` en las tres columnas, quitar el default de `country`,
+borrar `location_schedules.timezone`, NOT NULL en los `location*` de
+`pending_registrations` y borrar la función de barrido, el job, el script y la
+rama legada de `verify`.
+
 ## Cambiar la zona de una sede (G1, DX-313, DX-314)
 
 `PATCH /locations/:id` (ADMIN, auditado) edita `currency`, `timeZone` y
