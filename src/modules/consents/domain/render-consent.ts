@@ -1,3 +1,5 @@
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+
 /**
  * Variables que admite el texto de una plantilla de consentimiento (DX-006).
  * Se escriben `{{nombre}}`; dentro de las llaves se toleran espacios y
@@ -45,12 +47,14 @@ export function findUnknownVariables(body: string): string[] {
   return [...unknown];
 }
 
-/** «16 de octubre de 2026», en la zona horaria de la clínica. */
-export function formatConsentDate(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('es-CO', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone,
-  }).format(date);
+/**
+ * «16 de octubre de 2026», en la zona horaria de la sede, sin día de la
+ * semana. Las palabras son siempre en español, sea cual sea el locale.
+ */
+export function formatConsentDate(
+  date: Date,
+  timeZone: string,
+  fmt: RegionalFormat,
+): string {
+  return fmt.longDate(date, timeZone, { weekday: false });
 }

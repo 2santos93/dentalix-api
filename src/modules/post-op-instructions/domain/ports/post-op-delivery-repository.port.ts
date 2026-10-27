@@ -37,8 +37,11 @@ export interface PostOpAppointmentContext {
     name: string;
     phone: string | null;
     country: ClinicCountry;
-    /** Zona IANA de la sede (la de su horario, o la de su país). */
+    /** Zona IANA de la sede. */
     timeZone: string;
+    /** G1-B: formato y reloj en crudo; los exige (409) quien pinta `{{fecha}}`. */
+    locale: string | null;
+    hourCycle: string | null;
   };
   clinicName: string;
 }

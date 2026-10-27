@@ -159,6 +159,11 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
           clinicName: tenant?.name ?? '',
           professionalName: user?.fullName ?? UNKNOWN_PROFESSIONAL,
           timeZone: location.timeZone,
+          location: {
+            id: location.id,
+            locale: location.locale,
+            hourCycle: location.hourCycle,
+          },
           plan,
         };
       },

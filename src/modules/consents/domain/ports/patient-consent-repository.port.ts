@@ -18,6 +18,11 @@ export interface ConsentSigningContext {
   /** Zona de la sede activa o, sin ella, de la principal (R6): da la fecha. */
   timeZone: string;
   /**
+   * Esa misma sede, con su formato y su reloj en crudo (G1-B): solo quien
+   * pinta la fecha los exige (`requireLocationFormat`, 409 si faltan).
+   */
+  location: { id: string; locale: string | null; hourCycle: string | null };
+  /**
    * `undefined` si no se pidió plan; `null` si se pidió y no es de este
    * paciente en esta clínica.
    */

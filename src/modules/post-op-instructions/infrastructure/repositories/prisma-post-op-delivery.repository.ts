@@ -98,6 +98,8 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
               phone: true,
               country: true,
               timeZone: true,
+              locale: true,
+              hourCycle: true,
             },
           },
         },
@@ -144,6 +146,8 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           phone: location.phone,
           country: location.country,
           timeZone: requireLocationTimeZone(location),
+          locale: location.locale,
+          hourCycle: location.hourCycle,
         },
         clinicName: tenant.name,
       };

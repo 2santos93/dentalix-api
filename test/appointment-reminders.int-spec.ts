@@ -36,8 +36,14 @@ import { CapturingMailer } from './support/capture-mailer';
 import { waitFor } from './support/wait-for';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+  g1LocationInsert,
   locationData,
+  type RegionalFixture,
 } from './support/location-fixtures';
+import { regionalFormat } from '../src/shared/format/regional-format';
+import { startsAtLabel } from '../src/modules/reminders/domain/starts-at-label';
+import { PreviewReminderEmailUseCase } from '../src/modules/cancellation-policies/application/use-cases/cancellation-policy.use-cases';
 
 // DX-026, capa de BD con la app REAL (AppModule) y DOS workers (dos apps, dos
 // pools), como dos réplicas: el barrido programado de DX-085 encola, el
@@ -304,19 +310,21 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       outbound.map((m) => m.id).sort(),
     );
 
-    // El email: fecha y hora en la zona de la sede (Bogotá), sede, profesional
+    // El email: fecha y hora en la zona de la sede, sede, profesional
     // y el enlace de confirmación de DX-005; nada clínico.
     await waitFor(() => mailer.sent.length === 2, 'el despachador entrega 2');
     const text = mailer.sent[1].text;
     expect(mailer.sent[1].subject).toBe(
       `Recordatorio de tu cita en Clínica ${SUBDOMAINS[0]}`,
     );
-    const label = new Intl.DateTimeFormat('es-CO', {
-      timeZone: 'America/Bogota',
-      day: 'numeric',
-      month: 'long',
-    }).format(start);
-    expect(text).toContain(label);
+    // Con el formato y el reloj explícitos de la sede (DX-350).
+    expect(text).toContain(
+      `Fecha y hora: ${startsAtLabel(
+        start,
+        REGIONAL_BOGOTA_FIXTURE.timeZone,
+        regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+      )} (hora de la sede)`,
+    );
     expect(text).toContain('Sede: Sede Centro (Calle 1 # 2-3)');
     expect(text).toContain('Profesional: Dra. Laura Gómez');
     // Sin petición: el host de plataforma de la clínica (SEC-033), con el
@@ -1215,6 +1223,134 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       }),
     ).toBe(0);
     expect(mailer.sent).toEqual([]);
+  });
+
+  describe('DX-350 · formato y reloj de la sede', () => {
+    /** 06:05 UTC = 15:05 en UTC+9 (sin horario de verano), miércoles. */
+    const START = new Date('2027-03-10T06:05:00.000Z');
+
+    async function siteWith(
+      regional: RegionalFixture,
+      name: string,
+    ): Promise<Clinic> {
+      const location = await owner.location.create({
+        data: locationData(regional, { tenantId: clinicA.tenantId, name }),
+      });
+      return { ...clinicA, locationId: location.id };
+    }
+
+    /** Sede creada por una réplica de G1 (sin reloj), como la deja la migración antes del relleno. */
+    async function g1Site(name: string, backfill: boolean): Promise<Clinic> {
+      const locationId = await g1LocationInsert(
+        owner,
+        clinicA.tenantId,
+        name,
+        REGIONAL_TOKYO_FIXTURE,
+      );
+      if (backfill) {
+        // La función que llama la migración (y el barrido): el único relleno.
+        await owner.$queryRaw`
+          SELECT dx_g1b_backfill_location_hour_cycle(${clinicA.tenantId}::uuid)`;
+      }
+      return { ...clinicA, locationId };
+    }
+
+    /** El envío del trabajo, bajo la clínica de la cita (sin la cola: sin barridos en medio). */
+    async function send(site: Clinic, email: string): Promise<string> {
+      await configure(site, [2]);
+      const id = await appointment(site, await patient(site, email), START);
+      await a.get(TenantContextService).run(site.tenantId, () =>
+        a.get(SendAppointmentReminder).handle({
+          appointmentId: id,
+          leadHours: 2,
+          start: START.toISOString(),
+        }),
+      );
+      return id;
+    }
+
+    const mailTo = async (to: string) => {
+      await waitFor(
+        () => mailer.sent.some((m) => m.to === to),
+        `el despachador entrega a ${to}`,
+      );
+      return mailer.sent.find((m) => m.to === to)!.text;
+    };
+
+    it('reminder for a ja-JP Asia/Tokyo JPY h12 location: 12 h, Spanish words, no decimals', async () => {
+      const site = await siteWith(
+        { ...REGIONAL_TOKYO_FIXTURE, hourCycle: 'h12' },
+        'Sede 12 h',
+      );
+      await owner.cancellationPolicyVersion.create({
+        data: {
+          tenantId: site.tenantId,
+          locationId: site.locationId,
+          version: 1,
+          noticeHours: 24,
+          suggestedFee: 3000,
+          currency: 'JPY',
+          patientText: 'Avísanos con 24 horas.',
+          createdById: site.providerId,
+        },
+      });
+      await send(site, 'reloj12@example.com');
+
+      const text = await mailTo('reloj12@example.com');
+      expect(text).toContain(
+        'Fecha y hora: miércoles 10 de marzo de 2027 a las 3:05 p. m. (hora de la sede)',
+      );
+      expect(text).toContain('un cargo de ￥3,000.');
+    });
+
+    it('reminder for a location without hourCycle is not sent', async () => {
+      const site = await g1Site('Sin reloj', false);
+      const error = await send(site, 'sinreloj@example.com').catch(
+        (e: unknown) => e,
+      );
+      // Mismo camino que una zona NULL: falla el intento (la cola reintenta)
+      // y no se reclama ni se encola nada; nunca sale con otro reloj.
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: site.locationId,
+      });
+      expect(
+        await owner.appointmentReminder.count({
+          where: { tenantId: site.tenantId },
+        }),
+      ).toBe(0);
+      expect(await reminderEmails(site.tenantId)).toBe(0);
+    });
+
+    it('a location backfilled by the migration renders reminder times in 24 h (ruled change, DX-350)', async () => {
+      const site = await g1Site('Rellenada', true);
+      expect(
+        await owner.location.findUniqueOrThrow({
+          where: { id: site.locationId },
+          select: { hourCycle: true },
+        }),
+      ).toEqual({ hourCycle: 'h23' });
+      await send(site, 'rellenada@example.com');
+
+      const text = await mailTo('rellenada@example.com');
+      expect(text).toContain('a las 15:05 (hora de la sede)');
+      expect(text).not.toContain('3:05 p. m.');
+    });
+
+    it('policy email preview of a backfilled location is 24 h', async () => {
+      const site = await g1Site('Vista previa', true);
+      // La vista previa pinta la cita de ejemplo 24 h después de `now`.
+      const now = new Date(START.getTime() - 24 * HOUR);
+      const rendered = await a
+        .get(TenantContextService)
+        .run(site.tenantId, () =>
+          a.get(PreviewReminderEmailUseCase).execute(site.locationId, now),
+        );
+      expect(rendered.text).toContain(
+        'miércoles 10 de marzo de 2027 a las 15:05',
+      );
+    });
   });
 
   describe('DX-128 · canal de contacto y baja', () => {

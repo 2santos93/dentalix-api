@@ -23,6 +23,7 @@ import {
 } from '../../domain/ports/patient-consent-repository.port';
 import { formatConsentDate, renderConsent } from '../../domain/render-consent';
 import { computeConsentHash } from '../../domain/consent-hash';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   parseSignaturePng,
   SignatureImageError,
@@ -137,7 +138,11 @@ async function prepare(
     documento: documentOf(context.patient) ?? NO_DOCUMENT,
     profesional: context.professionalName,
     clinica: context.clinicName,
-    fecha: formatConsentDate(now, context.timeZone),
+    fecha: formatConsentDate(
+      now,
+      context.timeZone,
+      requireLocationFormat(context.location),
+    ),
     tratamiento: treatmentOf(context.plan),
   });
   return { template, context, title: template.title, body };

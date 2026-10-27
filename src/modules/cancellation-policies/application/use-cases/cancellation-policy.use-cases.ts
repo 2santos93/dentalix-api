@@ -19,6 +19,7 @@ import { EmailOutbox } from '../../../notifications/email/application/email-outb
 import type { RenderedEmail } from '../../../notifications/email/domain/email-message';
 import { startsAtLabel } from '../../../reminders/domain/starts-at-label';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 
 /** La política de una sede: la vigente y el historial (más nueva primero). */
 export interface CancellationPolicyView {
@@ -126,20 +127,22 @@ export class PreviewReminderEmailUseCase {
         CANCELLATION_POLICY_MESSAGES.locationNotFound,
       );
     }
+    // El formato y el reloj de la sede, como en el envío real (409 si faltan).
+    const fmt = requireLocationFormat(location);
     return this.email.preview(tenantId, 'appointment-reminder', {
       patientName: PREVIEW_SAMPLE.patientName,
       guardianName: null,
       startsAtLabel: startsAtLabel(
         new Date(now.getTime() + 24 * 3_600_000),
         location.timeZone,
-        location.country,
+        fmt,
       ),
       locationName: location.name,
       locationAddress: location.address,
       providerName: PREVIEW_SAMPLE.providerName,
       confirmUrl: PREVIEW_SAMPLE.confirmUrl,
       unsubscribeUrl: null,
-      cancellationPolicy: reminderPolicyVars(versions[0] ?? null),
+      cancellationPolicy: reminderPolicyVars(versions[0] ?? null, fmt),
     });
   }
 }

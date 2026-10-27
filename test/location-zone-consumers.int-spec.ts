@@ -190,7 +190,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       startsAtLabel(
         ctx!.appointment.start,
         ctx!.locationTimeZone,
-        locationCountry,
+        ctx!.locationFormat,
       ),
     ).toMatch(/^miércoles 21 de octubre de 2026 a las 10:00/);
   });

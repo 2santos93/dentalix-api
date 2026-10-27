@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CANCELLATION_POLICY_MESSAGES,
   type CancellationPolicyInput,
@@ -57,14 +61,21 @@ class FakeRepo implements CancellationPolicyRepository {
     return Promise.resolve(['COP', 'EUR', 'USD'].includes(code));
   }
 
+  /** Formato y reloj de la sede de la vista previa (ajustes explícitos). */
+  previewRegional: { locale: string | null; hourCycle: string | null } = {
+    locale: 'es-CO',
+    hourCycle: 'h23',
+  };
+
   findPreviewLocation(locationId: string) {
     return Promise.resolve(
       this.versions.has(locationId)
         ? {
+            id: locationId,
             name: 'Sede Principal',
             address: 'Calle 1 # 2-3',
-            country: 'CO' as const,
             timeZone: 'America/Bogota',
+            ...this.previewRegional,
           }
         : null,
     );
@@ -237,6 +248,41 @@ describe('Política de cancelación por sede (DX-279)', () => {
       );
       expect(rendered.text).toContain('50.000');
       expect(rendered.text).not.toContain('Primera versión.');
+    });
+
+    it('DX-350: hora y cargo con el formato y el reloj de la sede', async () => {
+      repo.previewRegional = { locale: 'en-US', hourCycle: 'h12' };
+      await create.execute(
+        LOCATION,
+        {
+          noticeHours: 24,
+          suggestedFee: 25,
+          currency: 'USD',
+          patientText: 'Avísanos con un día.',
+        },
+        USER,
+      );
+      // Mañana a las 15:05 en la zona de la sede (UTC-5 en octubre).
+      const now = new Date('2026-10-20T20:05:00.000Z');
+      const rendered = await ctx.run(TENANT, () =>
+        preview().execute(LOCATION, now),
+      );
+      expect(rendered.text).toContain(
+        'miércoles 21 de octubre de 2026 a las 3:05 p. m.',
+      );
+      expect(rendered.text).toContain('$25.00');
+    });
+
+    it('DX-350: una sede sin reloj da 409 LOCATION_LOCALE_REQUIRED', async () => {
+      repo.previewRegional = { locale: 'es-CO', hourCycle: null };
+      const error = await ctx
+        .run(TENANT, () => preview().execute(LOCATION))
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: LOCATION,
+      });
     });
 
     it('sin política: el email sale sin el bloque; sede ajena: 404', async () => {
