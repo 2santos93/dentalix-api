@@ -1,0 +1,634 @@
+[
+  {
+    "file": "test/account-statement.e2e-spec.ts",
+    "create": [
+      254
+    ],
+    "init": [
+      259
+    ],
+    "listen": [
+      260
+    ],
+    "close": [
+      317
+    ]
+  },
+  {
+    "file": "test/app.e2e-spec.ts",
+    "create": [
+      15
+    ],
+    "init": [
+      16
+    ],
+    "listen": [
+      17
+    ],
+    "close": [
+      28
+    ]
+  },
+  {
+    "file": "test/appointment-confirmations.e2e-spec.ts",
+    "create": [
+      195
+    ],
+    "init": [
+      200
+    ],
+    "listen": [
+      201
+    ],
+    "close": [
+      213
+    ]
+  },
+  {
+    "file": "test/appointment-overlap-tenant.e2e-spec.ts",
+    "create": [
+      133
+    ],
+    "init": [
+      138
+    ],
+    "listen": [
+      139
+    ],
+    "close": [
+      178
+    ]
+  },
+  {
+    "file": "test/appointments.e2e-spec.ts",
+    "create": [
+      203
+    ],
+    "init": [
+      208
+    ],
+    "listen": [
+      209
+    ],
+    "close": [
+      215
+    ]
+  },
+  {
+    "file": "test/auth.e2e-spec.ts",
+    "create": [
+      37
+    ],
+    "init": [
+      42
+    ],
+    "listen": [
+      43
+    ],
+    "close": [
+      48
+    ]
+  },
+  {
+    "file": "test/billable-plans.e2e-spec.ts",
+    "create": [
+      235
+    ],
+    "init": [
+      240
+    ],
+    "listen": [
+      241
+    ],
+    "close": [
+      301
+    ]
+  },
+  {
+    "file": "test/billing-rules.e2e-spec.ts",
+    "create": [
+      170
+    ],
+    "init": [
+      175
+    ],
+    "listen": [
+      176
+    ],
+    "close": [
+      204
+    ]
+  },
+  {
+    "file": "test/cash-register.e2e-spec.ts",
+    "create": [
+      151
+    ],
+    "init": [
+      156
+    ],
+    "listen": [
+      157
+    ],
+    "close": [
+      349
+    ]
+  },
+  {
+    "file": "test/catalog-directory.e2e-spec.ts",
+    "create": [
+      59
+    ],
+    "init": [
+      64
+    ],
+    "listen": [
+      65
+    ],
+    "close": [
+      121
+    ]
+  },
+  {
+    "file": "test/clinical-history.e2e-spec.ts",
+    "create": [
+      135
+    ],
+    "init": [
+      140
+    ],
+    "listen": [
+      141
+    ],
+    "close": [
+      147
+    ]
+  },
+  {
+    "file": "test/dashboard.e2e-spec.ts",
+    "create": [
+      190
+    ],
+    "init": [
+      195
+    ],
+    "listen": [
+      196
+    ],
+    "close": [
+      212
+    ]
+  },
+  {
+    "file": "test/domains.e2e-spec.ts",
+    "create": [
+      112
+    ],
+    "init": [
+      117
+    ],
+    "listen": [
+      118
+    ],
+    "close": [
+      128
+    ]
+  },
+  {
+    "file": "test/exchange.e2e-spec.ts",
+    "create": [
+      54
+    ],
+    "init": [
+      59
+    ],
+    "listen": [
+      60
+    ],
+    "close": [
+      101
+    ]
+  },
+  {
+    "file": "test/inventory.e2e-spec.ts",
+    "create": [
+      151
+    ],
+    "init": [
+      156
+    ],
+    "listen": [
+      157
+    ],
+    "close": [
+      164
+    ]
+  },
+  {
+    "file": "test/invitations.e2e-spec.ts",
+    "create": [
+      150
+    ],
+    "init": [
+      155
+    ],
+    "listen": [
+      156
+    ],
+    "close": [
+      162
+    ]
+  },
+  {
+    "file": "test/locations.e2e-spec.ts",
+    "create": [
+      74
+    ],
+    "init": [
+      79
+    ],
+    "listen": [
+      80
+    ],
+    "close": [
+      86
+    ]
+  },
+  {
+    "file": "test/me.e2e-spec.ts",
+    "create": [
+      46
+    ],
+    "init": [
+      51
+    ],
+    "listen": [
+      52
+    ],
+    "close": [
+      75
+    ]
+  },
+  {
+    "file": "test/odontogram.e2e-spec.ts",
+    "create": [
+      117
+    ],
+    "init": [
+      122
+    ],
+    "listen": [
+      123
+    ],
+    "close": [
+      129
+    ]
+  },
+  {
+    "file": "test/patient-consents.e2e-spec.ts",
+    "create": [
+      221
+    ],
+    "init": [
+      227
+    ],
+    "listen": [
+      228
+    ],
+    "close": [
+      265
+    ]
+  },
+  {
+    "file": "test/patient-initial-history-role.e2e-spec.ts",
+    "create": [
+      95
+    ],
+    "init": [
+      100
+    ],
+    "listen": [
+      101
+    ],
+    "close": [
+      120
+    ]
+  },
+  {
+    "file": "test/patient-tenant-fk.e2e-spec.ts",
+    "create": [
+      147
+    ],
+    "init": [
+      152
+    ],
+    "listen": [
+      153
+    ],
+    "close": [
+      164
+    ]
+  },
+  {
+    "file": "test/patients-location.e2e-spec.ts",
+    "create": [
+      26
+    ],
+    "init": [
+      31
+    ],
+    "listen": [
+      32
+    ],
+    "close": [
+      59
+    ]
+  },
+  {
+    "file": "test/patients.e2e-spec.ts",
+    "create": [
+      89
+    ],
+    "init": [
+      94
+    ],
+    "listen": [
+      95
+    ],
+    "close": [
+      101
+    ]
+  },
+  {
+    "file": "test/payment-can-void.e2e-spec.ts",
+    "create": [
+      140
+    ],
+    "init": [
+      145
+    ],
+    "listen": [
+      146
+    ],
+    "close": [
+      178
+    ]
+  },
+  {
+    "file": "test/payment-plans.e2e-spec.ts",
+    "create": [
+      202
+    ],
+    "init": [
+      207
+    ],
+    "listen": [
+      208
+    ],
+    "close": [
+      215
+    ]
+  },
+  {
+    "file": "test/payment-void-audit.e2e-spec.ts",
+    "create": [
+      137
+    ],
+    "init": [
+      142
+    ],
+    "listen": [
+      143
+    ],
+    "close": [
+      174
+    ]
+  },
+  {
+    "file": "test/payments.e2e-spec.ts",
+    "create": [
+      198
+    ],
+    "init": [
+      203
+    ],
+    "listen": [
+      204
+    ],
+    "close": [
+      220
+    ]
+  },
+  {
+    "file": "test/perio-exams.e2e-spec.ts",
+    "create": [
+      161
+    ],
+    "init": [
+      167
+    ],
+    "listen": [
+      168
+    ],
+    "close": [
+      185
+    ]
+  },
+  {
+    "file": "test/prescriptions.e2e-spec.ts",
+    "create": [
+      227
+    ],
+    "init": [
+      233
+    ],
+    "listen": [
+      234
+    ],
+    "close": [
+      285
+    ]
+  },
+  {
+    "file": "test/public-branding.e2e-spec.ts",
+    "create": [
+      37
+    ],
+    "init": [
+      42
+    ],
+    "listen": [
+      43
+    ],
+    "close": [
+      66
+    ]
+  },
+  {
+    "file": "test/rate-limit.e2e-spec.ts",
+    "create": [
+      55
+    ],
+    "init": [
+      62
+    ],
+    "listen": [
+      63
+    ],
+    "close": [
+      98,
+      314,
+      350
+    ]
+  },
+  {
+    "file": "test/reference.e2e-spec.ts",
+    "create": [
+      42
+    ],
+    "init": [
+      47
+    ],
+    "listen": [
+      48
+    ],
+    "close": [
+      58
+    ]
+  },
+  {
+    "file": "test/security-headers.e2e-spec.ts",
+    "create": [
+      24
+    ],
+    "init": [
+      31
+    ],
+    "listen": [
+      32
+    ],
+    "close": [
+      36
+    ]
+  },
+  {
+    "file": "test/session-cookie.e2e-spec.ts",
+    "create": [
+      136
+    ],
+    "init": [
+      142
+    ],
+    "listen": [
+      143
+    ],
+    "close": [
+      152
+    ]
+  },
+  {
+    "file": "test/session-revalidation.e2e-spec.ts",
+    "create": [
+      94
+    ],
+    "init": [
+      99
+    ],
+    "listen": [
+      100
+    ],
+    "close": [
+      116
+    ]
+  },
+  {
+    "file": "test/staff.e2e-spec.ts",
+    "create": [
+      128
+    ],
+    "init": [
+      133
+    ],
+    "listen": [
+      134
+    ],
+    "close": [
+      140
+    ]
+  },
+  {
+    "file": "test/storage/files.e2e-spec.ts",
+    "create": [
+      24
+    ],
+    "init": [
+      29
+    ],
+    "listen": [
+      30
+    ],
+    "close": [
+      40
+    ]
+  },
+  {
+    "file": "test/tenant-host.e2e-spec.ts",
+    "create": [
+      46
+    ],
+    "init": [
+      51
+    ],
+    "listen": [
+      52
+    ],
+    "close": [
+      60
+    ]
+  },
+  {
+    "file": "test/treatment-plan-currency.e2e-spec.ts",
+    "create": [
+      43
+    ],
+    "init": [
+      48
+    ],
+    "listen": [
+      49
+    ],
+    "close": [
+      85
+    ]
+  },
+  {
+    "file": "test/treatment-plan-quote.e2e-spec.ts",
+    "create": [
+      245
+    ],
+    "init": [
+      251
+    ],
+    "listen": [
+      252
+    ],
+    "close": [
+      305
+    ]
+  },
+  {
+    "file": "test/treatment-plans.e2e-spec.ts",
+    "create": [
+      180
+    ],
+    "init": [
+      185
+    ],
+    "listen": [
+      186
+    ],
+    "close": [
+      192
+    ]
+  }
+]

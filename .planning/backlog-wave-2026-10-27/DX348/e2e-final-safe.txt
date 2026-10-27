@@ -1,0 +1,14 @@
+SEC-046 carga: {"statuses":{"200":1,"503":19},"durationMs":22102,"rssBaseMb":276,"rssPeakMb":412,"rssGrowthMb":135,"victimP50Ms":1828,"victimMaxMs":2309}
+SEC-046 carga: {"statuses":{"200":2,"503":18},"durationMs":32485,"rssBaseMb":317,"rssPeakMb":1292,"rssGrowthMb":975,"victimP50Ms":2873,"victimMaxMs":3187}
+FAIL test/patient-imports-load.e2e-spec.ts (85.278 s)
+  ● Console
+  ● Importación: 20 lecturas en paralelo (SEC-046, carga) › 20 clínicas con una lectura cada una a la vez: el pico de RSS crece menos de 300 MB
+    Expected: < 300
+    Received:   975
+FAIL test/patient-imports-load.e2e-spec.ts (85.278 s)
+  ● Importación: 20 lecturas en paralelo (SEC-046, carga) › 20 clínicas con una lectura cada una a la vez: el pico de RSS crece menos de 300 MB
+    Expected: < 300
+    Received:   975
+Test Suites: 1 failed, 124 passed, 125 total
+Tests:       1 failed, 3372 passed, 3373 total
+Time:        1000.42 s

@@ -1,0 +1,550 @@
+[
+  {
+    "file": "test/account-statement.e2e-spec.ts",
+    "create": [
+      254
+    ],
+    "init": [
+      259
+    ],
+    "listen": [],
+    "close": [
+      316
+    ]
+  },
+  {
+    "file": "test/app.e2e-spec.ts",
+    "create": [
+      15
+    ],
+    "init": [
+      16
+    ],
+    "listen": [],
+    "close": [
+      27
+    ]
+  },
+  {
+    "file": "test/appointment-confirmations.e2e-spec.ts",
+    "create": [
+      195
+    ],
+    "init": [
+      200
+    ],
+    "listen": [],
+    "close": [
+      212
+    ]
+  },
+  {
+    "file": "test/appointment-overlap-tenant.e2e-spec.ts",
+    "create": [
+      133
+    ],
+    "init": [
+      138
+    ],
+    "listen": [],
+    "close": [
+      177
+    ]
+  },
+  {
+    "file": "test/appointments.e2e-spec.ts",
+    "create": [
+      203
+    ],
+    "init": [
+      208
+    ],
+    "listen": [],
+    "close": [
+      214
+    ]
+  },
+  {
+    "file": "test/auth.e2e-spec.ts",
+    "create": [
+      37
+    ],
+    "init": [
+      42
+    ],
+    "listen": [],
+    "close": [
+      47
+    ]
+  },
+  {
+    "file": "test/billable-plans.e2e-spec.ts",
+    "create": [
+      235
+    ],
+    "init": [
+      240
+    ],
+    "listen": [],
+    "close": [
+      300
+    ]
+  },
+  {
+    "file": "test/billing-rules.e2e-spec.ts",
+    "create": [
+      170
+    ],
+    "init": [
+      175
+    ],
+    "listen": [],
+    "close": [
+      203
+    ]
+  },
+  {
+    "file": "test/cash-register.e2e-spec.ts",
+    "create": [
+      151
+    ],
+    "init": [
+      156
+    ],
+    "listen": [],
+    "close": [
+      348
+    ]
+  },
+  {
+    "file": "test/catalog-directory.e2e-spec.ts",
+    "create": [
+      59
+    ],
+    "init": [
+      64
+    ],
+    "listen": [],
+    "close": [
+      120
+    ]
+  },
+  {
+    "file": "test/clinical-history.e2e-spec.ts",
+    "create": [
+      135
+    ],
+    "init": [
+      140
+    ],
+    "listen": [],
+    "close": [
+      146
+    ]
+  },
+  {
+    "file": "test/dashboard.e2e-spec.ts",
+    "create": [
+      190
+    ],
+    "init": [
+      195
+    ],
+    "listen": [],
+    "close": [
+      211
+    ]
+  },
+  {
+    "file": "test/domains.e2e-spec.ts",
+    "create": [
+      112
+    ],
+    "init": [
+      117
+    ],
+    "listen": [],
+    "close": [
+      127
+    ]
+  },
+  {
+    "file": "test/exchange.e2e-spec.ts",
+    "create": [
+      54
+    ],
+    "init": [
+      59
+    ],
+    "listen": [],
+    "close": [
+      100
+    ]
+  },
+  {
+    "file": "test/inventory.e2e-spec.ts",
+    "create": [
+      151
+    ],
+    "init": [
+      156
+    ],
+    "listen": [],
+    "close": [
+      163
+    ]
+  },
+  {
+    "file": "test/invitations.e2e-spec.ts",
+    "create": [
+      150
+    ],
+    "init": [
+      155
+    ],
+    "listen": [],
+    "close": [
+      161
+    ]
+  },
+  {
+    "file": "test/locations.e2e-spec.ts",
+    "create": [
+      74
+    ],
+    "init": [
+      79
+    ],
+    "listen": [],
+    "close": [
+      85
+    ]
+  },
+  {
+    "file": "test/me.e2e-spec.ts",
+    "create": [
+      46
+    ],
+    "init": [
+      51
+    ],
+    "listen": [],
+    "close": [
+      74
+    ]
+  },
+  {
+    "file": "test/odontogram.e2e-spec.ts",
+    "create": [
+      117
+    ],
+    "init": [
+      122
+    ],
+    "listen": [],
+    "close": [
+      128
+    ]
+  },
+  {
+    "file": "test/patient-consents.e2e-spec.ts",
+    "create": [
+      221
+    ],
+    "init": [
+      227
+    ],
+    "listen": [],
+    "close": [
+      264
+    ]
+  },
+  {
+    "file": "test/patient-initial-history-role.e2e-spec.ts",
+    "create": [
+      95
+    ],
+    "init": [
+      100
+    ],
+    "listen": [],
+    "close": [
+      119
+    ]
+  },
+  {
+    "file": "test/patient-tenant-fk.e2e-spec.ts",
+    "create": [
+      147
+    ],
+    "init": [
+      152
+    ],
+    "listen": [],
+    "close": [
+      163
+    ]
+  },
+  {
+    "file": "test/patients-location.e2e-spec.ts",
+    "create": [
+      26
+    ],
+    "init": [
+      31
+    ],
+    "listen": [],
+    "close": [
+      58
+    ]
+  },
+  {
+    "file": "test/patients.e2e-spec.ts",
+    "create": [
+      89
+    ],
+    "init": [
+      94
+    ],
+    "listen": [],
+    "close": [
+      100
+    ]
+  },
+  {
+    "file": "test/payment-can-void.e2e-spec.ts",
+    "create": [
+      140
+    ],
+    "init": [
+      145
+    ],
+    "listen": [],
+    "close": [
+      177
+    ]
+  },
+  {
+    "file": "test/payment-plans.e2e-spec.ts",
+    "create": [
+      202
+    ],
+    "init": [
+      207
+    ],
+    "listen": [],
+    "close": [
+      214
+    ]
+  },
+  {
+    "file": "test/payment-void-audit.e2e-spec.ts",
+    "create": [
+      137
+    ],
+    "init": [
+      142
+    ],
+    "listen": [],
+    "close": [
+      173
+    ]
+  },
+  {
+    "file": "test/payments.e2e-spec.ts",
+    "create": [
+      198
+    ],
+    "init": [
+      203
+    ],
+    "listen": [],
+    "close": [
+      219
+    ]
+  },
+  {
+    "file": "test/perio-exams.e2e-spec.ts",
+    "create": [
+      161
+    ],
+    "init": [
+      167
+    ],
+    "listen": [],
+    "close": [
+      184
+    ]
+  },
+  {
+    "file": "test/prescriptions.e2e-spec.ts",
+    "create": [
+      227
+    ],
+    "init": [
+      233
+    ],
+    "listen": [],
+    "close": [
+      284
+    ]
+  },
+  {
+    "file": "test/public-branding.e2e-spec.ts",
+    "create": [
+      37
+    ],
+    "init": [
+      42
+    ],
+    "listen": [],
+    "close": [
+      65
+    ]
+  },
+  {
+    "file": "test/rate-limit.e2e-spec.ts",
+    "create": [
+      55
+    ],
+    "init": [
+      62
+    ],
+    "listen": [],
+    "close": [
+      97,
+      313,
+      349
+    ]
+  },
+  {
+    "file": "test/reference.e2e-spec.ts",
+    "create": [
+      42
+    ],
+    "init": [
+      47
+    ],
+    "listen": [],
+    "close": [
+      57
+    ]
+  },
+  {
+    "file": "test/security-headers.e2e-spec.ts",
+    "create": [
+      24
+    ],
+    "init": [
+      31
+    ],
+    "listen": [],
+    "close": [
+      35
+    ]
+  },
+  {
+    "file": "test/session-cookie.e2e-spec.ts",
+    "create": [
+      136
+    ],
+    "init": [
+      142
+    ],
+    "listen": [],
+    "close": [
+      151
+    ]
+  },
+  {
+    "file": "test/session-revalidation.e2e-spec.ts",
+    "create": [
+      94
+    ],
+    "init": [
+      99
+    ],
+    "listen": [],
+    "close": [
+      115
+    ]
+  },
+  {
+    "file": "test/staff.e2e-spec.ts",
+    "create": [
+      128
+    ],
+    "init": [
+      133
+    ],
+    "listen": [],
+    "close": [
+      139
+    ]
+  },
+  {
+    "file": "test/storage/files.e2e-spec.ts",
+    "create": [
+      24
+    ],
+    "init": [
+      29
+    ],
+    "listen": [],
+    "close": [
+      39
+    ]
+  },
+  {
+    "file": "test/tenant-host.e2e-spec.ts",
+    "create": [
+      46
+    ],
+    "init": [
+      51
+    ],
+    "listen": [],
+    "close": [
+      59
+    ]
+  },
+  {
+    "file": "test/treatment-plan-currency.e2e-spec.ts",
+    "create": [
+      43
+    ],
+    "init": [
+      48
+    ],
+    "listen": [],
+    "close": [
+      84
+    ]
+  },
+  {
+    "file": "test/treatment-plan-quote.e2e-spec.ts",
+    "create": [
+      245
+    ],
+    "init": [
+      251
+    ],
+    "listen": [],
+    "close": [
+      304
+    ]
+  },
+  {
+    "file": "test/treatment-plans.e2e-spec.ts",
+    "create": [
+      180
+    ],
+    "init": [
+      185
+    ],
+    "listen": [],
+    "close": [
+      191
+    ]
+  }
+]

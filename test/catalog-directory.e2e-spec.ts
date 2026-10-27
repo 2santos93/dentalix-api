@@ -62,6 +62,7 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     await registerVerified(app, {

@@ -148,7 +148,6 @@ describe('Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e)'
           'patient-import': { limit: 10, ttlMs: 60_000 },
         }),
     });
-    await app.listen(0, '127.0.0.1');
     port = ((app.getHttpServer() as Server).address() as AddressInfo).port;
     readSlots = app.get<UploadSlots>(IMPORT_READ_SLOTS);
     uploadSlots = app.get<UploadSlots>(IMPORT_UPLOAD_SLOTS);

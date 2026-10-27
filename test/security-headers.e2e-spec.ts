@@ -29,6 +29,7 @@ describe('Cabeceras de seguridad (e2e)', () => {
     );
     setupSwagger(app);
     await app.init();
+    await app.listen(0, '127.0.0.1');
   });
 
   afterAll(async () => {

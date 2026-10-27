@@ -1,0 +1,173 @@
+
+dx348-red.log
+FAIL test/http-listener.e2e-spec.ts (5.337 s)
+  ● HTTP listener (configureApp) › reserves its IPv4 port before Supertest and releases it on Nest close
+    Expected: true
+    Received: false
+  ● HTTP listener (fixtures) › reserves its IPv4 port before Supertest and releases it on Nest close
+    Expected: true
+    Received: false
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 2 total
+Time:        5.497 s
+
+dx348-green.log
+Test Suites: 1 passed, 1 total
+Tests:       2 passed, 2 total
+Time:        1.877 s, estimated 6 s
+
+dx348-agent-red.log
+FAIL test/http-listener.e2e-spec.ts
+  ● HTTP listener (configureApp) › reuses the listener through the bounded HTTP agent helper
+    Listen method has been called more than once without closing.
+  ● HTTP listener (fixtures) › reuses the listener through the bounded HTTP agent helper
+    Listen method has been called more than once without closing.
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 2 passed, 4 total
+Time:        1.97 s, estimated 2 s
+
+dx348-diagnostic-22.log
+Test Suites: 3 passed, 3 total
+Tests:       39 passed, 39 total
+Time:        14.279 s
+
+dx348-e2e-full-1.log
+FAIL test/login-lockout.e2e-spec.ts
+  ● Console
+  ● Bloqueo del login por fallos (DX-048, e2e) › 10 logins correctos seguidos del mismo usuario desde la misma IP nunca dan 429
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › tras 5 fallos el siguiente intento espera (429 + Retry-After), aunque traiga la contraseña buena
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › el backoff crece (1, 2, 4… min) y nunca pasa de 15 min
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › intentos simultáneos al acabar la espera no esquivan el backoff: solo uno llega a probar la contraseña
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › sin enumeración: mismo 401 y mismo 429 (cuerpo y Retry-After) exista o no el email, sin diferencia de tiempo apreciable
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › un login correcto reinicia el contador de fallos (fuera de la espera)
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › un atacante que falla con el email de la doctora desde varias IPs no la deja fuera más allá del backoff
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › el contador es por cuenta: el mismo email con otra capitalización comparte espera
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › el perfil muestra el bloqueo, el ADMIN lo quita, queda auditado y la doctora entra
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › el perfil muestra el bloqueo, el ADMIN lo quita, queda auditado y la doctora entra
+    TypeError: Cannot read properties of undefined (reading 'adminToken')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › es idempotente: desbloquear a quien no está bloqueado da 204
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › es idempotente: desbloquear a quien no está bloqueado da 204
+    TypeError: Cannot read properties of undefined (reading 'adminToken')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › un ADMIN de otra clínica no puede desbloquear (404) y la doctora sigue en espera
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › un ADMIN de otra clínica no puede desbloquear (404) y la doctora sigue en espera
+    TypeError: Cannot read properties of undefined (reading 'adminToken')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › un usuario que no es ADMIN recibe 403
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › un usuario que no es ADMIN recibe 403
+    TypeError: Cannot read properties of undefined (reading 'adminToken')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › un userId que no es UUID da 400
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo por un ADMIN › un userId que no es UUID da 400
+    TypeError: Cannot read properties of undefined (reading 'adminToken')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213) › miembro DESACTIVADO en esta clínica: 404 y el contador sigue igual; el perfil no muestra la espera
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213) › miembro DESACTIVADO en esta clínica: 404 y el contador sigue igual; el perfil no muestra la espera
+    TypeError: Cannot read properties of undefined (reading 'tenantId')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213) › miembro activo con membresía ACTIVA en otra clínica: 409 en español, sin decir cuál ni cuántas, y el contador sigue igual
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213) › miembro activo con membresía ACTIVA en otra clínica: 409 en español, sin decir cuál ni cuántas, y el contador sigue igual
+    TypeError: Cannot read properties of undefined (reading 'tenantId')
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213) › miembro activo que solo pertenece a esta clínica: 204, el contador desaparece y queda auditado como LOGIN_UNLOCKED
+    Listen method has been called more than once without closing.
+  ● Bloqueo del login por fallos (DX-048, e2e) › desbloqueo solo para miembros activos sin acceso a otra clínica (DX-213) › miembro activo que solo pertenece a esta clínica: 204, el contador desaparece y queda auditado como LOGIN_UNLOCKED
+    TypeError: Cannot read properties of undefined (reading 'tenantId')
+  ● Balde por IP del login (DX-048, e2e) › solo cuenta los fallos: los aciertos desde la IP de la clínica no la bloquean
+    Listen method has been called more than once without closing.
+  ● Balde por IP del login (DX-048, e2e) › muchos emails desde una IP ("spraying") acaban en 429 para esa IP, no para las demás
+    Listen method has been called more than once without closing.
+FAIL test/patient-consents.e2e-spec.ts
+  ● Console
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › plantillas › ADMIN crea plantillas; las variables desconocidas dan 400 y el título repetido 409
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › plantillas › los clínicos leen pero no escriben; recepción ni lee
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › plantillas › una clínica no ve ni edita las plantillas de otra
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › la vista previa resuelve las variables
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › un dentista firma: guarda texto, firmas, hora del servidor, autor y hash
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › un asistente también firma; un tutor necesita nombre y documento
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › 400 sin firma del paciente, con una firma que no es PNG o de más de 200 KB
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › 400 rápido con una bomba de descompresión en cualquiera de las dos firmas (SEC-026)
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › la firma se valida después del paciente: una bomba sobre un paciente ajeno da 404 (SEC-026)
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › el tope ampliado de cuerpo es solo para la firma: el resto sigue en 100 KB
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › recepción no puede firmar ni leer consentimientos (403)
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › el plan tiene que ser de ESE paciente
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › editar la plantilla NO cambia lo firmado; firmar con la versión vieja da 409
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › una plantilla desactivada no se ofrece ni se firma
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › lista los del paciente, sin firmas, más reciente primero
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › firma › no existe endpoint para modificar ni borrar un consentimiento firmado
+    socket hang up
+  ● Consentimientos informados — /consent-templates y /patients/:id/consents (e2e) › aislamiento entre clínicas › la clínica B no ve ni crea consentimientos sobre pacientes de A
+    socket hang up
+INTERRUPTED/INVALID: SIGINT exit0 without Jest summary; not a green run.
+
+dx348-e2e-final-22.log
+FAIL test/prescriptions.e2e-spec.ts
+  ● Console
+  ● Recetas — /patients/:id/prescriptions, /prescriptions, /prescription-templates (e2e) › receta segura (DX-300) › niño de 6 años y 20 kg: amoxicilina 1 g/8 h supera el tope; sin peso pide el peso; un adulto no tiene aviso de dosis
+    expected 200 "OK", got 401 "Unauthorized"
+FAIL test/rate-limit.e2e-spec.ts (7.092 s)
+  ● Console
+  ● Rate limiting (e2e) › límite global › health y health/ready quedan fuera incluso del límite global (DX-023)
+    expected 200 "OK", got 404 "Not Found"
+FAIL test/patient-imports-limits.e2e-spec.ts
+  ● Console
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › por defecto: 2 plazas de lectura por réplica y 1 por clínica
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › por defecto: 2 plazas de lectura por réplica y 1 por clínica
+    TypeError: Cannot read properties of undefined (reading 'active')
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › una subida lenta en curso no retiene plaza de lectura: lecturas completas de otra clínica y de la misma dan 200; al abortar, plaza de subida y temporal vuelven
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › una subida lenta en curso no retiene plaza de lectura: lecturas completas de otra clínica y de la misma dan 200; al abortar, plaza de subida y temporal vuelven
+    TypeError: Cannot read properties of undefined (reading 'active')
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › revisión rev1: las importaciones no gastan las plazas de subida de avatar y documentos, ni al revés
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › revisión rev1: las importaciones no gastan las plazas de subida de avatar y documentos, ni al revés
+    TypeError: Cannot read properties of undefined (reading 'active')
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › plaza de lectura ocupada → la segunda lectura de la clínica y la de otra clínica con la réplica llena dan 503 con Retry-After, ya recibido el fichero, y su temporal se borra
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › plaza de lectura ocupada → la segunda lectura de la clínica y la de otra clínica con la réplica llena dan 503 con Retry-After, ya recibido el fichero, y su temporal se borra
+    TypeError: Cannot read properties of undefined (reading 'active')
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › un anónimo o un no-ADMIN no ocupa plaza: con las plazas llenas reciben 401/403, no 503
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › un anónimo o un no-ADMIN no ocupa plaza: con las plazas llenas reciben 401/403, no 503
+    TypeError: Cannot read properties of undefined (reading 'active')
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › el fichero se lee desde un temporal en disco del directorio de subidas, que se borra al terminar, bien o con 400
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › el fichero se lee desde un temporal en disco del directorio de subidas, que se borra al terminar, bien o con 400
+    TypeError: Cannot read properties of undefined (reading 'active')
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › 11.ª lectura en un minuto (inspect y dry-run comparten balde) → 429 en español; otro usuario de la clínica sigue
+    Listen method has been called more than once without closing.
+  ● Importación de pacientes: tope de lecturas y throttle (SEC-046, e2e) › 11.ª lectura en un minuto (inspect y dry-run comparten balde) → 429 en español; otro usuario de la clínica sigue
+    TypeError: Cannot read properties of undefined (reading 'active')
+INTERRUPTED/INVALID: SIGINT exit0 without Jest summary; not a green run.
+
+dx348-unit.log
+Test Suites: 401 passed, 401 total
+Tests:       4805 passed, 4805 total
+Time:        58.391 s
+
+dx348-lint-frozen.log

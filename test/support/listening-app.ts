@@ -27,8 +27,10 @@ export async function listenOnEphemeralPort(
   app: INestApplication<App>,
   maxSockets = 10,
 ): Promise<ListeningApp> {
-  await app.listen(0, '127.0.0.1');
   const server = app.getHttpServer() as Server;
+  if (!server.listening) {
+    await app.listen(0, '127.0.0.1');
+  }
   const { port } = server.address() as AddressInfo;
   const base = request(`http://127.0.0.1:${port}`);
   const agent = new Agent({ keepAlive: false, maxSockets });

@@ -136,6 +136,7 @@ describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     clinicA = await registerClinic(app, 'solape-a');

@@ -150,6 +150,7 @@ describe('Pertenencia del paciente al tenant en endpoints clínicos (SEC-004, e2
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     clinicA = await registerAndLogin(app, SUBDOMAINS[0]);

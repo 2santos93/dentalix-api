@@ -143,6 +143,7 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
 
     clinicA = await register('puede-anular-a');
