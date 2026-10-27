@@ -713,8 +713,40 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
         reviewed: true,
       },
       { before: side('COP'), reviewed: false },
+      {
+        before: { ...side('COP'), hourCycle: 'h23' },
+        after: { ...side('COP'), hourCycle: 'h24' },
+        reviewed: true,
+      },
+      {
+        before: { ...side('COP'), hourCycle: 'h23' },
+        after: { ...side('COP'), hourCycle: 12 },
+        reviewed: true,
+      },
     ]) {
       expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({});
     }
+  });
+
+  it('G1-B: conserva el reloj de cada lado (null en una sede sin reloj)', () => {
+    const regionalSettings = {
+      before: { ...side('COP'), hourCycle: null },
+      after: { ...side('COP'), hourCycle: 'h12' },
+      reviewed: true,
+    };
+    expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
+      regionalSettings,
+    });
+  });
+
+  it('G1-B: un evento de G1 sin reloj se sigue leyendo igual', () => {
+    const regionalSettings = {
+      before: side('COP'),
+      after: side('EUR'),
+      reviewed: true,
+    };
+    expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
+      regionalSettings,
+    });
   });
 });

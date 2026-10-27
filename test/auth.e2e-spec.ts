@@ -8,7 +8,9 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
+  REGIONAL_BERLIN_FIXTURE,
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
@@ -282,6 +284,7 @@ describe('Auth (e2e)', () => {
         currency: 'COP',
         timeZone: 'America/Bogota',
         locale: 'es-CO',
+        hourCycle: 'h23',
         regionalSettingsReviewedAt: null,
       });
     });
@@ -310,6 +313,7 @@ describe('Auth (e2e)', () => {
         currency: 'COP',
         timeZone: 'America/Bogota',
         locale: 'es-CO',
+        hourCycle: 'h23',
         // Por revisar: el ADMIN verá el aviso D5.
         regionalSettingsReviewedAt: null,
       });
@@ -323,6 +327,139 @@ describe('Auth (e2e)', () => {
         .set('X-Tenant-Host', hostFor(old.subdomain))
         .send({ email: old.email, password: PASSWORD })
         .expect(201);
+    });
+
+    // G1-B (DX-350, spec §4.3): el reloj de la primera sede.
+    it('registration with the five fields creates the location with them', async () => {
+      const { body } = await registerVerified(
+        app,
+        clinicRegisterBody(REGIONAL_NEW_YORK_FIXTURE, base('g1b-cinco')),
+      );
+      const location = await mainLocation(body.tenantId);
+      expect(location).toMatchObject({
+        currency: 'USD',
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+      expect(location.regionalSettingsReviewedAt).not.toBeNull();
+    });
+
+    it('G1-shape registration verify creates the location with the backfilled clock', async () => {
+      // La web de G1 envía los cuatro y no el reloj: se acepta, y verify crea
+      // la sede con lo elegido y el reloj de la función (pre-flight I3).
+      const g1 = clinicRegisterBody(
+        REGIONAL_BERLIN_FIXTURE,
+        base('g1b-web-g1'),
+      );
+      const { locationHourCycle: _omitted, ...g1Body } = g1;
+      await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send(g1Body)
+        .expect(202);
+      await waitForPending(g1.email);
+      const pending = await raw.pendingRegistration.findFirstOrThrow({
+        where: { email: g1.email },
+      });
+      expect(pending.locationHourCycle).toBeNull();
+      const res = await verifyPending(g1.email);
+      expect(res.status).toBe(201);
+      const location = await mainLocation(
+        (res.body as { tenantId: string }).tenantId,
+      );
+      expect(location).toMatchObject({
+        currency: 'EUR',
+        timeZone: 'Europe/Berlin',
+        locale: 'de-DE',
+        hourCycle: 'h23',
+      });
+      expect(location.regionalSettingsReviewedAt).not.toBeNull();
+    });
+
+    it('G1-shape registration verify keeps the chosen currency, zone and format', async () => {
+      // Lo que deja una réplica de G1: un pendiente con los cuatro y sin
+      // reloj. No es legado: la función D5 de G1 no debe pisar lo elegido.
+      const g1 = base('g1b-replica-g1');
+      await raw.pendingRegistration.create({
+        data: {
+          email: g1.email,
+          clinicName: g1.clinicName,
+          subdomain: g1.subdomain,
+          fullName: g1.fullName,
+          passwordHash: await new PasswordService().hash(PASSWORD),
+          tokenHash: hashRegistrationToken(generateRegistrationToken()),
+          expiresAt: registrationExpiresAt(new Date()),
+          locationCountry: REGIONAL_TOKYO_FIXTURE.country,
+          locationCurrency: REGIONAL_TOKYO_FIXTURE.currency,
+          locationTimeZone: REGIONAL_TOKYO_FIXTURE.timeZone,
+          locationLocale: REGIONAL_TOKYO_FIXTURE.locale,
+        },
+      });
+      const res = await verifyPending(g1.email);
+      expect(res.status).toBe(201);
+      const location = await mainLocation(
+        (res.body as { tenantId: string }).tenantId,
+      );
+      expect(location).toMatchObject({
+        currency: 'JPY',
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+        hourCycle: 'h23',
+      });
+      expect(location.regionalSettingsReviewedAt).not.toBeNull();
+      expect(await legacyScheduleZone(location.id)).toBe('Asia/Tokyo');
+    });
+
+    it('legacy registration verify also fills the clock', async () => {
+      const legacy = base('g1b-legado');
+      await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send(legacy)
+        .expect(202);
+      await waitForPending(legacy.email);
+      const res = await verifyPending(legacy.email);
+      expect(res.status).toBe(201);
+      const location = await mainLocation(
+        (res.body as { tenantId: string }).tenantId,
+      );
+      // Primero la función de G1 (moneda, zona, formato) y luego la de G1-B.
+      expect(location.currency).not.toBeNull();
+      expect(location.timeZone).not.toBeNull();
+      expect(location.locale).not.toBeNull();
+      expect(location.hourCycle).toBe('h23');
+      expect(location.regionalSettingsReviewedAt).toBeNull();
+    });
+
+    it('locationHourCycle alone is 400', async () => {
+      const alone = base('g1b-solo-reloj');
+      const res = await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send({ ...alone, locationHourCycle: 'h12' })
+        .expect(400);
+      expect(res.body).toMatchObject({
+        message: 'Elige el país de la sede.',
+        field: 'locationCountry',
+      });
+      const invalid = await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send(
+          clinicRegisterBody(REGIONAL_NEW_YORK_FIXTURE, {
+            ...alone,
+            locationHourCycle: 'h24',
+          }),
+        )
+        .expect(400);
+      expect(invalid.body).toMatchObject({
+        message: 'El reloj «h24» no es válido: elige 12 h o 24 h.',
+        field: 'locationHourCycle',
+      });
+      expect(
+        await raw.pendingRegistration.count({ where: { email: alone.email } }),
+      ).toBe(0);
     });
 
     it('anonymous GET /public/currencies is 200', async () => {

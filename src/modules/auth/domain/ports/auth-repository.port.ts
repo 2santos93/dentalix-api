@@ -1,4 +1,5 @@
 import { ClinicCountry, ClinicRole } from '@prisma/client';
+import type { HourCycle } from '../../../locations/domain/regional-settings';
 
 /** G1: país, moneda, zona y formato regional de la primera sede, ya validados. */
 export interface ClinicLocationSettings {
@@ -6,6 +7,12 @@ export interface ClinicLocationSettings {
   currency: string;
   timeZone: string;
   locale: string;
+  /**
+   * G1-B fase 1: null = registro de la web de G1 (los cuatro, sin reloj): la
+   * sede lo recibe de `dx_g1b_backfill_location_hour_cycle` en la misma
+   * transacción del alta.
+   */
+  hourCycle: HourCycle | null;
 }
 
 export interface CreateClinicWithOwnerInput {

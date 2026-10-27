@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import {
   COUNTRY_MISSING,
+  HOUR_CYCLES,
   REGIONAL_MESSAGES,
 } from '../../../locations/domain/regional-settings';
 
@@ -97,4 +98,18 @@ export class RegisterDto {
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.localeMissing })
   locationLocale?: string;
+
+  // G1-B (DX-350, spec §4.3): reloj de la primera sede, validado por el caso
+  // de uso con los mensajes del alta de sede. Fase 1: opcional, porque la web
+  // de G1 envía los cuatro sin él; solo, sin los otros cuatro, es 400.
+  @ApiPropertyOptional({
+    type: String,
+    enum: [...HOUR_CYCLES],
+    example: 'h23',
+    description:
+      'Reloj de la primera sede: h12 (12 h) o h23 (24 h). Fase 1: sin él, con los otros cuatro location*, la sede recibe el reloj de la función de backfill; fase 2: obligatorio.',
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.hourCycleMissing })
+  locationHourCycle?: string;
 }

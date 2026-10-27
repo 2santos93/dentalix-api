@@ -119,6 +119,11 @@ export class PrismaAuthRepository implements AuthRepository {
    * función D5 en esta misma transacción, sin revisar: el ADMIN verá el aviso
    * D5. Es el único camino de código que deja al país decidir esos valores, y
    * lo hace a través de esa función (R19). Desaparece en fase 2.
+   *
+   * G1-B fase 1 (spec §4.3): el reloj del registro se escribe si viene. Sin él
+   * (web o réplica de G1, y la rama legada) lo pone
+   * `dx_g1b_backfill_location_hour_cycle` en esta misma transacción, después
+   * de la función de G1.
    */
   private async createMainLocation(
     tx: Prisma.TransactionClient,
@@ -135,6 +140,9 @@ export class PrismaAuthRepository implements AuthRepository {
         },
         select: { id: true },
       });
+      if (settings.hourCycle === null) {
+        await this.backfillHourCycle(tx, tenantId, location.id);
+      }
       return { id: location.id, timeZone: settings.timeZone };
     }
     const { id } = await tx.location.create({
@@ -142,6 +150,7 @@ export class PrismaAuthRepository implements AuthRepository {
       select: { id: true },
     });
     await tx.$queryRaw`SELECT public.dx_g1_backfill_location_regional(${tenantId}::uuid)`;
+    await this.backfillHourCycle(tx, tenantId, id);
     const filled = await tx.location.findUniqueOrThrow({
       where: { id },
       select: { timeZone: true },
@@ -165,6 +174,20 @@ export class PrismaAuthRepository implements AuthRepository {
       locationId: id,
     });
     return { id, timeZone: filled.timeZone };
+  }
+
+  /** G1-B fase 1: el único que rellena un reloj NULL (R5). Desaparece en fase 2. */
+  private async backfillHourCycle(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    locationId: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT public.dx_g1b_backfill_location_hour_cycle(${tenantId}::uuid)`;
+    this.logger.log({
+      event: 'registration.location_hour_cycle_backfilled',
+      tenantId,
+      locationId,
+    });
   }
 
   async findMembership(

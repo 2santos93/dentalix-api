@@ -22,6 +22,7 @@ import {
 } from '../../domain/health-registration';
 import {
   COUNTRY_MISSING,
+  HOUR_CYCLES,
   REGIONAL_MESSAGES,
   REGIONAL_NULL_MESSAGE,
 } from '../../domain/regional-settings';
@@ -56,7 +57,11 @@ const CURRENCY_DOC =
 const TIME_ZONE_DOC =
   'G1: zona horaria IANA de la sede. Define sus días civiles («hoy» en caja, informes y agenda) y cómo se leen sus horarios.';
 const LOCALE_DOC =
-  'G1: formato regional BCP 47 de la sede (fechas y números); se guarda canonicalizado (es-mx → es-MX).';
+  'G1: formato regional BCP 47 de la sede (fechas y números); se guarda canonicalizado (es-mx → es-MX) y sin la palabra clave -u-hc- (el reloj es su propio campo).';
+// G1-B (DX-350, spec §4.1): el valor lo valida el caso de uso (400 con
+// `message` y `field`), en el orden moneda, zona, formato y reloj.
+const HOUR_CYCLE_DOC =
+  'G1-B: reloj de la sede, h12 (12 h) o h23 (24 h), en toda hora que se pinte para ella. Nunca se deduce del formato ni del país.';
 
 export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
@@ -92,6 +97,18 @@ export class CreateLocationDto {
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.localeMissing })
   locale?: string;
+
+  // Opcional SOLO en fase 1: la web de G1 no lo envía y la sede se crea con
+  // el reloj de la función de backfill. La web de G1-B lo envía siempre.
+  @ApiPropertyOptional({
+    type: String,
+    enum: [...HOUR_CYCLES],
+    example: 'h23',
+    description: `${HOUR_CYCLE_DOC} Fase 1: sin él (forma de la web anterior) la sede se crea con el reloj que rellena la función de backfill; fase 2: obligatorio.`,
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.hourCycleMissing })
+  hourCycle?: string;
 
   @ApiPropertyOptional({
     example: '+57 601 555 0101',
@@ -204,6 +221,17 @@ export class UpdateLocationDto {
   locale?: string | null;
 
   @ApiPropertyOptional({
+    type: String,
+    enum: [...HOUR_CYCLES],
+    example: 'h12',
+    description: `${HOUR_CYCLE_DOC} No pide confirmación ni mira la caja; cambiarlo marca la sede revisada. null es 400.`,
+  })
+  // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  hourCycle?: string | null;
+
+  @ApiPropertyOptional({
     enum: [true],
     description:
       'G1: marca la sede como revisada (moneda, zona y formato confirmados) aunque no cambie nada.',
@@ -275,10 +303,18 @@ export class LocationDto {
   locale!: string | null;
   @ApiProperty({
     type: String,
+    enum: [...HOUR_CYCLES],
+    nullable: true,
+    example: 'h23',
+    description: `${HOUR_CYCLE_DOC} null = sede sin reloj (fase 1, réplica anterior aún sin barrer).`,
+  })
+  hourCycle!: 'h12' | 'h23' | null;
+  @ApiProperty({
+    type: String,
     format: 'date-time',
     nullable: true,
     description:
-      'D5: cuándo un ADMIN confirmó moneda, zona y formato; null = asignados al actualizar Dentalix, por revisar.',
+      'D5: cuándo un ADMIN confirmó moneda, zona y formato (o cambió el reloj); null = asignados al actualizar Dentalix, por revisar.',
   })
   regionalSettingsReviewedAt!: Date | null;
   @ApiProperty({ type: String, format: 'date-time' }) createdAt!: Date;

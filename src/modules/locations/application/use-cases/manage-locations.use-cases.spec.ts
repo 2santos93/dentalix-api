@@ -28,6 +28,7 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     currency: 'COP',
     timeZone: 'America/Bogota',
     locale: 'es-CO',
+    hourCycle: 'h23',
     regionalSettingsReviewedAt: new Date('2026-01-01'),
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
@@ -56,12 +57,20 @@ const CURRENCIES = {
   has: (code: string) => Promise.resolve(['COP', 'EUR', 'JPY'].includes(code)),
 };
 
-/** Los cuatro valores regionales del alta: datos de test, no defaults. */
+/** Los valores regionales del alta: datos de test, no defaults. */
 const TOKYO = {
   country: 'CO' as const,
   currency: 'JPY',
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
+  hourCycle: 'h23',
+};
+const NEW_YORK = {
+  country: 'CO' as const,
+  currency: 'USD',
+  timeZone: 'America/New_York',
+  locale: 'en-US',
+  hourCycle: 'h12',
 };
 
 function updateUseCase(repo: LocationRepository): UpdateLocationUseCase {
@@ -94,6 +103,7 @@ function regionalRepo(opts: {
         ...(write.currency ? { currency: write.currency } : {}),
         ...(write.timeZone ? { timeZone: write.timeZone } : {}),
         ...(write.locale ? { locale: write.locale } : {}),
+        ...(write.hourCycle ? { hourCycle: write.hourCycle } : {}),
       });
     },
   });
@@ -165,6 +175,49 @@ describe('CreateLocationUseCase', () => {
       expect(create).not.toHaveBeenCalled();
     },
   );
+
+  it('G1-B: crea con el reloj pedido (12 h y 24 h)', async () => {
+    for (const regional of [NEW_YORK, TOKYO]) {
+      const create = jest.fn((input: Partial<Location>) =>
+        Promise.resolve(makeLocation(input)),
+      );
+      await createUseCase(
+        makeRepo({
+          create,
+        }),
+      ).execute({ name: 'Sede', ...regional, currency: 'EUR' });
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ hourCycle: regional.hourCycle }),
+      );
+    }
+  });
+
+  it('G1-B fase 1: sin reloj y con los otros tres (web de G1) pasa hourCycle null al repositorio, nunca un valor inventado', async () => {
+    const create = jest.fn((input: Partial<Location>) =>
+      Promise.resolve(makeLocation(input)),
+    );
+    const { hourCycle: _omitted, ...g1Body } = NEW_YORK;
+    await createUseCase(makeRepo({ create })).execute({
+      name: 'Web G1',
+      ...g1Body,
+      currency: 'EUR',
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: 'en-US', hourCycle: null }),
+    );
+  });
+
+  it('G1-B: un reloj inválido es 400 con su mensaje y su campo, y no crea nada', async () => {
+    const create = jest.fn();
+    const error = await createUseCase(makeRepo({ create }))
+      .execute({ name: 'Sede', ...TOKYO, hourCycle: 'h24' })
+      .catch((e: unknown) => e);
+    expect((error as BadRequestException).getResponse()).toMatchObject({
+      message: 'El reloj «h24» no es válido: elige 12 h o 24 h.',
+      field: 'hourCycle',
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
 
   it('G1: una moneda que no está en la lista es 400', async () => {
     const error = await createUseCase(makeRepo())
@@ -479,11 +532,13 @@ describe('teléfono de la sede (DX-222)', () => {
           currency: 'COP',
           timeZone: 'America/Bogota',
           locale: 'es-CO',
+          hourCycle: 'h23',
         },
         after: {
           currency: 'JPY',
           timeZone: 'America/Bogota',
           locale: 'es-CO',
+          hourCycle: 'h23',
         },
         reviewed: true,
       });
@@ -559,7 +614,7 @@ describe('teléfono de la sede (DX-222)', () => {
         response: {
           field: 'timeZone',
           message:
-            'La sede tiene que tener moneda, zona horaria y formato regional.',
+            'La sede tiene que tener moneda, zona horaria, formato regional y reloj.',
         },
       });
       // Rellenando lo que falta sí se confirma.
@@ -581,7 +636,98 @@ describe('teléfono de la sede (DX-222)', () => {
         response: {
           field: 'currency',
           message:
-            'La sede tiene que tener moneda, zona horaria y formato regional.',
+            'La sede tiene que tener moneda, zona horaria, formato regional y reloj.',
+        },
+      });
+    });
+
+    it('PATCH hourCycle needs no confirmation and is audited before/after', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({ openCash: true, history: true, written }),
+      );
+      const out = await uc.execute('loc-1', { hourCycle: 'h12' });
+      expect(written).toEqual([
+        {
+          currency: undefined,
+          timeZone: undefined,
+          locale: undefined,
+          hourCycle: 'h12',
+          reviewed: true,
+        },
+      ]);
+      expect(out.regionalSettings).toEqual({
+        before: {
+          currency: 'COP',
+          timeZone: 'America/Bogota',
+          locale: 'es-CO',
+          hourCycle: 'h23',
+        },
+        after: {
+          currency: 'COP',
+          timeZone: 'America/Bogota',
+          locale: 'es-CO',
+          hourCycle: 'h12',
+        },
+        reviewed: true,
+      });
+    });
+
+    it('el mismo reloj no es un cambio: no marca revisada ni lo escribe', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(regionalRepo({ written }));
+      await uc.execute('loc-1', { hourCycle: 'h23' });
+      expect(written).toEqual([
+        expect.objectContaining({ hourCycle: undefined, reviewed: false }),
+      ]);
+    });
+
+    it('rellenar un reloj NULL no pide confirmación y queda revisada', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({
+          current: { hourCycle: null },
+          openCash: true,
+          history: true,
+          written,
+        }),
+      );
+      await uc.execute('loc-1', { hourCycle: 'h12' });
+      expect(written).toEqual([
+        expect.objectContaining({ hourCycle: 'h12', reviewed: true }),
+      ]);
+    });
+
+    it('G1 web confirming D5 on a location without clock is 200', async () => {
+      // M6: en fase 1 el reloj no entra en «revisar exige campos completos»;
+      // una web de G1 no puede enviarlo y la función lo rellena.
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({ current: { hourCycle: null }, written }),
+      );
+      await uc.execute('loc-1', { confirmRegionalSettings: true });
+      expect(written).toEqual([
+        expect.objectContaining({ hourCycle: undefined, reviewed: true }),
+      ]);
+    });
+
+    it('null o inválido en el reloj es 400 con su campo', async () => {
+      const uc = updateUseCase(regionalRepo({}));
+      await expect(
+        uc.execute('loc-1', { hourCycle: null }),
+      ).rejects.toMatchObject({
+        response: {
+          field: 'hourCycle',
+          message:
+            'La sede tiene que tener moneda, zona horaria, formato regional y reloj.',
+        },
+      });
+      await expect(
+        uc.execute('loc-1', { hourCycle: 'h24' }),
+      ).rejects.toMatchObject({
+        response: {
+          field: 'hourCycle',
+          message: 'El reloj «h24» no es válido: elige 12 h o 24 h.',
         },
       });
     });

@@ -1,4 +1,5 @@
 import type { ClinicCountry } from '@prisma/client';
+import type { HourCycle } from '../regional-settings';
 
 export interface Location {
   id: string;
@@ -23,6 +24,12 @@ export interface Location {
   currency: string | null;
   timeZone: string | null;
   locale: string | null;
+  /**
+   * G1-B: reloj de la sede, `'h12'` | `'h23'` (CHECK de la BD). `null` solo en
+   * fase 1, en una fila de una réplica de G1 aún sin barrer; solo lo rellena
+   * `dx_g1b_backfill_location_hour_cycle`.
+   */
+  hourCycle: string | null;
   /** D5: null = valores asignados por la migración o el barrido, sin revisar. */
   regionalSettingsReviewedAt: Date | null;
   createdAt: Date;
@@ -39,6 +46,11 @@ export interface CreateLocationRepoInput {
   currency: string;
   timeZone: string;
   locale: string;
+  /**
+   * G1-B fase 1: null = alta de la web de G1 sin reloj; el repositorio llama a
+   * la función de backfill en la misma transacción.
+   */
+  hourCycle: HourCycle | null;
   phone?: string;
 }
 
@@ -71,6 +83,7 @@ export interface RegionalWrite {
   currency?: string;
   timeZone?: string;
   locale?: string;
+  hourCycle?: HourCycle;
   reviewed: boolean;
 }
 

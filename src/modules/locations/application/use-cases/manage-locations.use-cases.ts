@@ -24,9 +24,11 @@ import {
   REGIONAL_NULL_MESSAGE,
   type RegionalError,
   type RegionalField,
+  isHourCycle,
   isRegionalError,
   regionalBadRequest,
   validateCurrency,
+  validateHourCycle,
   validateLocale,
   validateRegionalSettings,
   validateTimeZone,
@@ -69,7 +71,11 @@ export class ListLocationsUseCase {
  * Alta de sede (G1, spec §3.1): país, moneda, zona y formato regional son
  * obligatorios y explícitos (R1, R10); nada se deduce del país (R2). La sede
  * nace revisada (R11). 400 con el mensaje y el campo del primero que falta o
- * no vale, en el orden país, moneda, zona, formato.
+ * no vale, en el orden país, moneda, zona, formato y reloj.
+ *
+ * G1-B fase 1 (spec §4.1): sin reloj y con los otros tres (web de G1) se
+ * acepta; el repositorio lo rellena con la función de backfill en la misma
+ * transacción.
  */
 @Injectable()
 export class CreateLocationUseCase {
@@ -84,6 +90,7 @@ export class CreateLocationUseCase {
     currency?: string;
     timeZone?: string;
     locale?: string;
+    hourCycle?: string;
     phone?: string;
   }): Promise<Location> {
     if (!input.country) {
@@ -103,11 +110,12 @@ export class CreateLocationUseCase {
   }
 }
 
-/** Moneda, zona y formato de una sede en la auditoría (G1, R13). */
+/** Moneda, zona, formato y reloj de una sede en la auditoría (G1, R13; G1-B). */
 export interface AuditRegionalSide {
   currency: string | null;
   timeZone: string | null;
   locale: string | null;
+  hourCycle: string | null;
 }
 
 export interface RegionalSettingsChange {
@@ -141,6 +149,7 @@ const regionalSide = (l: Location): AuditRegionalSide => ({
   currency: l.currency,
   timeZone: l.timeZone,
   locale: l.locale,
+  hourCycle: l.hourCycle,
 });
 
 @Injectable()
@@ -158,6 +167,7 @@ export class UpdateLocationUseCase {
     currency?: string | null;
     timeZone?: string | null;
     locale?: string | null;
+    hourCycle?: string | null;
   }): Promise<Partial<Record<RegionalField, string>>> {
     const out: Partial<Record<RegionalField, string>> = {};
     const checks: [
@@ -172,9 +182,11 @@ export class UpdateLocationUseCase {
       ],
       ['timeZone', patch.timeZone, () => validateTimeZone(patch.timeZone)],
       ['locale', patch.locale, () => validateLocale(patch.locale)],
+      ['hourCycle', patch.hourCycle, () => validateHourCycle(patch.hourCycle)],
     ];
     for (const [field, raw, validate] of checks) {
       if (raw === undefined) continue;
+      // `null` se mira en crudo: `@IsOptional()` del DTO lo deja pasar.
       if (raw === null) throw regionalBadRequest(field, REGIONAL_NULL_MESSAGE);
       const result = await validate();
       if (typeof result !== 'string') {
@@ -198,6 +210,7 @@ export class UpdateLocationUseCase {
       currency?: string | null;
       timeZone?: string | null;
       locale?: string | null;
+      hourCycle?: string | null;
       confirmRegionalSettings?: true;
       confirmRegionalChange?: true;
     },
@@ -222,6 +235,7 @@ export class UpdateLocationUseCase {
       patch.currency !== undefined ||
       patch.timeZone !== undefined ||
       patch.locale !== undefined ||
+      patch.hourCycle !== undefined ||
       patch.confirmRegionalSettings === true;
 
     const base = {
@@ -287,14 +301,19 @@ export class UpdateLocationUseCase {
           }
         }
 
+        // G1-B: el reloj, como el formato, no pide confirmación ni mira la
+        // caja (spec §4.2), pero cambiarlo sí marca la sede revisada.
         reviewed =
           patch.confirmRegionalSettings === true ||
           differs('currency') ||
           differs('timeZone') ||
-          differs('locale');
-        // Una sede revisada tiene los tres valores: confirmar una fila de
-        // réplica antigua con algún NULL dejaría que el barrido pusiera
-        // después valores que el ADMIN no vio (y el aviso D5 no saldría).
+          differs('locale') ||
+          differs('hourCycle');
+        // Una sede revisada tiene los tres valores de G1: confirmar una fila
+        // de réplica antigua con algún NULL dejaría que el barrido pusiera
+        // después valores que el ADMIN no vio (y el aviso D5 no saldría). El
+        // reloj no entra en fase 1 (M6): la web de G1 no puede enviarlo y su
+        // NULL solo lo rellena la función de backfill, sin cambio visible.
         const missing = REGIONAL_FIELDS.find(
           (field) => (regional[field] ?? cur[field]) === null,
         );
@@ -305,6 +324,10 @@ export class UpdateLocationUseCase {
           currency: differs('currency') ? regional.currency : undefined,
           timeZone: differs('timeZone') ? regional.timeZone : undefined,
           locale: differs('locale') ? regional.locale : undefined,
+          hourCycle:
+            differs('hourCycle') && isHourCycle(regional.hourCycle)
+              ? regional.hourCycle
+              : undefined,
           reviewed,
         };
       },
