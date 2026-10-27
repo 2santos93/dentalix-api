@@ -7,6 +7,7 @@ import type {
   RegionalFormat,
 } from '../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { endSentence } from '../../../shared/format/end-sentence';
 
 /**
  * DX-271 (BE-039): los ítems del plan de una cita cerrada o pasada no se
@@ -211,5 +212,5 @@ export function reservedElsewhereMessage(
   const { start, timeZone } = holder;
   const where = `Este tratamiento ya está reservado en otra cita, la del ${fmt.date(start, timeZone)} a las ${fmt.time(start, timeZone)}`;
   // En 12 h la hora ya acaba en punto («p. m.»): no se dobla.
-  return `${where.endsWith('.') ? where : `${where}.`} ${advice}`;
+  return `${endSentence(where)} ${advice}`;
 }

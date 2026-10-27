@@ -533,9 +533,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
   ): Promise<ReceiptPlanBalance> {
     const tenantId = this.requireTenantId();
     const [balance] = await tx.$queryRaw<
-      { amount: Prisma.Decimal; currency: string }[]
+      { amount: Prisma.Decimal; currency: string; locationId: string }[]
     >`
-      SELECT "amount", "currency" FROM "opening_balances"
+      SELECT "amount", "currency", "locationId" FROM "opening_balances"
        WHERE "tenantId" = ${tenantId}::uuid
          AND "id" = ${input.openingBalanceId}::uuid
          AND "patientId" = ${input.patientId}::uuid
@@ -566,7 +566,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           : openingBalanceOverpaidMessage(
               pendingCents / 100,
               balance.currency,
-              await this.writeLocationFormatIn(tx),
+              await this.locationFormatIn(tx, balance.locationId),
             ),
       );
     }
@@ -578,15 +578,17 @@ export class PrismaPaymentRepository implements PaymentRepository {
     };
   }
 
-  writeLocationFormat(): Promise<RegionalFormat> {
-    return this.prisma.runWithTenant((tx) => this.writeLocationFormatIn(tx));
+  locationFormat(locationId: string): Promise<RegionalFormat> {
+    return this.prisma.runWithTenant((tx) =>
+      this.locationFormatIn(tx, locationId),
+    );
   }
 
-  /** G1-B: formato de la sede que usará `insert`, solo para pintar (I4). */
-  private async writeLocationFormatIn(
+  /** G1-B: formato de una sede (la del dato, R12), solo para pintar (I4). */
+  private async locationFormatIn(
     tx: Prisma.TransactionClient,
+    id: string,
   ): Promise<RegionalFormat> {
-    const id = await this.tenantContext.writeLocationId(tx);
     const location = await tx.location.findFirst({
       where: { id, tenantId: this.requireTenantId() },
       select: { locale: true, hourCycle: true },
@@ -661,7 +663,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const balance = await tx.openingBalance.findFirst({
         where: { id, tenantId, voidedAt: null },
-        select: { id: true, patientId: true, currency: true, amount: true },
+        select: {
+          id: true,
+          patientId: true,
+          currency: true,
+          amount: true,
+          locationId: true,
+        },
       });
       if (!balance) return null;
       const paid = await tx.payment.aggregate({
@@ -679,6 +687,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         currency: balance.currency,
         amount: balance.amount.toNumber(),
         paid: paid._sum.amount?.toNumber() ?? 0,
+        locationId: balance.locationId,
       };
     });
   }

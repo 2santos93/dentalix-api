@@ -74,10 +74,27 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     );
   });
 
-  it('the overpaid 400 uses the format of the location where it is recorded', async () => {
+  it('the overpaid 400 uses the balance location format, not the write location', async () => {
     const { repo, uc } = setup();
-    repo.locale = 'en-US';
-    repo.hourCycle = 'h12';
+    // El saldo es de la sede A (en-US, 12 h); se cobra desde otra (de-DE).
+    repo.locations.set('loc-a', { locale: 'en-US', hourCycle: 'h12' });
+    repo.openingBalances.get('ob-1')!.locationId = 'loc-a';
+    // La de escritura (loc-1), con otro formato y sin reloj: no se usa.
+    repo.locations.set('loc-1', { locale: 'de-DE', hourCycle: null });
+    await expect(
+      uc.execute('ob-1', {
+        amount: 150001,
+        currency: 'COP',
+        paidAt: '2026-10-20',
+      }),
+    ).rejects.toThrow(
+      'El abono supera lo pendiente del saldo migrado: quedan COP\u00a0150,000.00.',
+    );
+  });
+
+  it('the overpaid 400 uses the format of the balance location; without clock, 409 only there', async () => {
+    const { repo, uc } = setup();
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });
     await expect(
       uc.execute('ob-1', {
         amount: 150001,
@@ -88,7 +105,7 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
       'El abono supera lo pendiente del saldo migrado: quedan COP\u00a0150,000.00.',
     );
     // Sin reloj: 409 solo al pintar; un abono válido se registra.
-    repo.hourCycle = null;
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: null });
     const err = await uc
       .execute('ob-1', {
         amount: 150001,

@@ -1,6 +1,7 @@
 import { EmailBrand } from '../../domain/email-message';
 import { escapeHtml, safeUrl, singleLine } from './escape';
 import { renderEmail } from './templates';
+import { regionalFormat } from '../../../../../shared/format/regional-format';
 
 const brand: EmailBrand = {
   clinicName: 'Sonrisas del Norte',
@@ -234,6 +235,30 @@ describe('plantillas reservadas para otras tareas', () => {
 
     const without = renderEmail('appointment-reminder', base, brand);
     expect(without.text).not.toContain('Política de cancelación');
+  });
+
+  it('policy fee whose currency symbol ends in a period is not followed by a second one (G1-B)', () => {
+    const feeLabel = regionalFormat({
+      locale: 'ar-EG',
+      hourCycle: 'h12',
+    }).money(50, 'EGP');
+    expect(feeLabel.endsWith('.')).toBe(true);
+    const email = renderEmail(
+      'appointment-reminder',
+      {
+        patientName: 'Carolina',
+        startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+        locationName: 'Sede Norte',
+        locationAddress: null,
+        providerName: null,
+        confirmUrl: null,
+        unsubscribeUrl: null,
+        cancellationPolicy: { noticeHours: 24, text: '', feeLabel },
+      },
+      brand,
+    );
+    // El texto plano normaliza los espacios: se compara con `\s`.
+    expect(email.text).toMatch(/puede tener un cargo de 50\.00\sج\.م\.(?!\.)/);
   });
 
   it('appointment-reminder de un menor saluda a su tutor y nombra al paciente (DX-128)', () => {

@@ -71,6 +71,8 @@ export interface OpeningBalanceTarget {
   amount: number;
   /** Abonado vivo en su moneda. */
   paid: number;
+  /** Sede del saldo (la de su lote): la de su formato (G1-B, R12). */
+  locationId: string;
 }
 
 /**
@@ -181,11 +183,11 @@ export interface PaymentRepository {
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string>;
 
   /**
-   * G1-B: el formato de la sede donde se va a registrar el abono (la misma
-   * que `resolvePaidOn`), para pintar un importe en un mensaje. Sin formato o
-   * sin reloj, 409 `LOCATION_LOCALE_REQUIRED`: se pide solo al pintar (I4).
+   * G1-B: el formato de una sede de la clínica (la del dato, R12), para
+   * pintar un importe en un mensaje. Sin formato o sin reloj, 409
+   * `LOCATION_LOCALE_REQUIRED`: se pide solo al pintar (I4).
    */
-  writeLocationFormat(): Promise<RegionalFormat>;
+  locationFormat(locationId: string): Promise<RegionalFormat>;
 
   /**
    * The payment, or `null` if it is absent, soft-deleted (voided), or

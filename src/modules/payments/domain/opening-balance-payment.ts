@@ -4,6 +4,7 @@
  * moneda del saldo y sin pasarse de lo pendiente.
  */
 import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { endSentence } from '../../../shared/format/end-sentence';
 
 export const OPENING_BALANCE_NOT_FOUND_MESSAGE =
   'Saldo migrado no encontrado en esta clínica (o ya retirado).';
@@ -17,13 +18,16 @@ export const OPENING_BALANCE_PAID_MESSAGE =
 
 /**
  * El abono supera lo pendiente (`pending` > 0; con 0, `OPENING_BALANCE_PAID_MESSAGE`).
- * `fmt`: el formato de la sede donde se registra el abono (G1-B), pedido
- * solo para pintar este 400 (I4).
+ * `fmt`: el formato de la sede del saldo migrado (la de su lote, R12), pedido
+ * solo para pintar este 400 (G1-B, I4). Algunos símbolos de moneda ya acaban
+ * en punto («ج.م.»): no se dobla.
  */
 export function openingBalanceOverpaidMessage(
   pending: number,
   currency: string,
   fmt: RegionalFormat,
 ): string {
-  return `El abono supera lo pendiente del saldo migrado: quedan ${fmt.money(pending, currency)}.`;
+  return endSentence(
+    `El abono supera lo pendiente del saldo migrado: quedan ${fmt.money(pending, currency)}`,
+  );
 }

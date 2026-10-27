@@ -40,10 +40,6 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
 export class InMemoryPaymentRepository implements PaymentRepository {
   private readonly payments: StoredPayment[] = [];
 
-  /** Formato y reloj de la sede de escritura (G1-B); `null` = sin configurar. */
-  locale: string | null = 'es-CO';
-  hourCycle: string | null = 'h23';
-
   /** Test helper: lo último que recibió `create` (DX-136: el saldo del recibo). */
   lastCreateInput: CreatePaymentRepoInput | null = null;
 
@@ -117,16 +113,6 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     );
   }
 
-  writeLocationFormat(): Promise<RegionalFormat> {
-    return Promise.resolve().then(() =>
-      requireLocationFormat({
-        id: 'loc-1',
-        locale: this.locale,
-        hourCycle: this.hourCycle,
-      }),
-    );
-  }
-
   create(input: CreatePaymentRepoInput): Promise<Payment> {
     this.lastCreateInput = input;
     const row: StoredPayment = {
@@ -158,8 +144,31 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   /** Test helper: saldos migrados que conoce el fake (DX-262). */
   readonly openingBalances = new Map<
     string,
-    { id: string; patientId: string; currency: string; amount: number }
+    {
+      id: string;
+      patientId: string;
+      currency: string;
+      amount: number;
+      /** Sede del saldo (la del lote); por defecto `loc-1`. */
+      locationId?: string;
+    }
   >();
+
+  /** Formato y reloj de cada sede (G1-B); `null` = sin configurar. */
+  readonly locations = new Map<
+    string,
+    { locale: string | null; hourCycle: string | null }
+  >([['loc-1', { locale: 'es-CO', hourCycle: 'h23' }]]);
+
+  locationFormat(locationId: string): Promise<RegionalFormat> {
+    return Promise.resolve().then(() =>
+      requireLocationFormat({
+        id: locationId,
+        locale: this.locations.get(locationId)?.locale ?? null,
+        hourCycle: this.locations.get(locationId)?.hourCycle ?? null,
+      }),
+    );
+  }
 
   findOpeningBalance(id: string): Promise<OpeningBalanceTarget | null> {
     const balance = this.openingBalances.get(id);
@@ -172,7 +181,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
           p.currency === balance.currency,
       )
       .reduce((sum, p) => sum + Math.round(p.amount * 100), 0);
-    return Promise.resolve({ ...balance, paid: paid / 100 });
+    return Promise.resolve({
+      ...balance,
+      locationId: balance.locationId ?? 'loc-1',
+      paid: paid / 100,
+    });
   }
 
   listByOpeningBalance(openingBalanceId: string): Promise<Payment[]> {

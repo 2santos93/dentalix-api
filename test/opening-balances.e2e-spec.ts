@@ -5,6 +5,10 @@ import { App } from 'supertest/types';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { createE2eApp } from './support/create-e2e-app';
 import {
+  REGIONAL_BERLIN_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
+import {
   Clinic,
   loginAs,
   registerClinic,
@@ -556,6 +560,25 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       .expect(400);
     expect((over.body as { message: string }).message).toMatch(
       /^El abono supera lo pendiente del saldo migrado: quedan \$\s150\.000,00\.$/,
+    );
+    // G1-B (R12): el importe va en el formato de la sede del saldo, no en el
+    // de la sede donde se cobra (otra, de-DE y sin reloj: no se le pide).
+    const berlin = await raw.location.create({
+      data: locationData(REGIONAL_BERLIN_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Berlín DX350',
+        hourCycle: null,
+      }),
+    });
+    const elsewhere = await as(
+      api().post(`/api/v1/opening-balances/${ob.id}/payments`),
+      a.adminToken,
+    )
+      .set('X-Location-Id', berlin.id)
+      .send({ ...body, amount: 150000.01 })
+      .expect(400);
+    expect((elsewhere.body as { message: string }).message).toBe(
+      (over.body as { message: string }).message,
     );
     await as(
       api().post(`/api/v1/opening-balances/${ob.id}/payments`),

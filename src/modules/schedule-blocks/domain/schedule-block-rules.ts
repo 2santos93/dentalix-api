@@ -5,6 +5,7 @@ import type {
   RegionalFormat,
   WallParts,
 } from '../../../shared/format/regional-format';
+import { endSentence } from '../../../shared/format/end-sentence';
 
 /** Un bloqueo dura como mucho un año (una baja larga cabe; un error de año, no). */
 export const MAX_BLOCK_DAYS = 366;
@@ -127,10 +128,6 @@ function describeRange(
     return `${time(block.start)}–${time(block.end)}`;
   return `del ${day(block.start)} ${time(block.start)} al ${day(block.end)} ${time(block.end)}`;
 }
-
-/** Cierra la frase sin doblar el punto de «p. m.» (12 h). */
-const endSentence = (text: string): string =>
-  text.endsWith('.') ? text : `${text}.`;
 
 /** 409 al agendar o mover encima de un bloqueo que no lo permite. */
 export function blockConflictMessage(

@@ -105,7 +105,7 @@ export class RecordOpeningBalancePaymentUseCase {
           : openingBalanceOverpaidMessage(
               pendingCents / 100,
               currency,
-              await this.repo.writeLocationFormat(),
+              await this.repo.locationFormat(balance.locationId),
             ),
       );
     }
