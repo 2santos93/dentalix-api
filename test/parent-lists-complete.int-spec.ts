@@ -5,6 +5,10 @@ import { PrismaInventoryRepository } from '../src/modules/inventory/infrastructu
 import { PrismaClinicalEntryRepository } from '../src/modules/clinical-entries/infrastructure/repositories/prisma-clinical-entry.repository';
 import { PrismaToothRecordRepository } from '../src/modules/odontogram/infrastructure/repositories/prisma-tooth-record.repository';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // Por encima de cualquier tope «razonable» que se pudiera volver a poner sin
 // paginación: estos listados tienen que llegar COMPLETOS.
@@ -37,7 +41,9 @@ describe('Listados por padre completos, sin topes silenciosos (DX-043, int)', ()
     });
     tenantId = tenant.id;
     locationId = (
-      await raw.location.create({ data: { tenantId, name: 'Sede' } })
+      await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+      })
     ).id;
     patientId = (
       await raw.patient.create({
@@ -133,6 +139,7 @@ describe('Listados por padre completos, sin topes silenciosos (DX-043, int)', ()
       data: Array.from({ length: n }, (_, i) => ({
         tenantId,
         patientId,
+        currency: 'USD',
         createdAt: minutes(i),
       })),
     });

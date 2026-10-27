@@ -10,6 +10,10 @@ import { registerVerified } from './support/register-verified';
 import { CapturingMailer } from './support/capture-mailer';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody as clinicRegisterBody,
+} from './support/location-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -66,13 +70,16 @@ async function registerAndLogin(
   accessToken: string;
   subdomain: string;
 }> {
-  const register = await registerVerified(app, {
-    clinicName: opts.clinicName,
-    subdomain: opts.subdomain,
-    email: opts.email,
-    password: SEEDED_PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: opts.clinicName,
+      subdomain: opts.subdomain,
+      email: opts.email,
+      password: SEEDED_PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())

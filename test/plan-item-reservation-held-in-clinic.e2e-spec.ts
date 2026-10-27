@@ -16,6 +16,10 @@ import {
   loginAs,
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 /**
  * DX-293 (seguimiento de DX-288, revisión M2): el aviso de reserva en otra
@@ -317,7 +321,10 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
   // Al final: restringe a recepción a la sede principal.
   it('titular de hoy en la clínica de una sede no permitida: heldInClinic sin cita, hora ni sede (DX-089); quien ve las dos sedes, sí', async () => {
     const north = await raw.location.create({
-      data: { tenantId: a.tenantId, name: 'Sede Norte DX293' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Norte DX293',
+      }),
     });
     const { itemId, startedToday } = await freshScenario();
     const holder = await startedToday(north.id);

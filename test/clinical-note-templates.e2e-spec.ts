@@ -11,6 +11,7 @@ import {
   seedMember,
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
+import { setLocationZone } from './support/location-fixtures';
 
 // DX-170 en HTTP real: CRUD de plantillas de evolución por rol (solo ADMIN
 // escribe, recepción ni las lee), validación en español, plantillas de
@@ -173,8 +174,15 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     const s = await seedMember(raw, clinic, ClinicRole.ASSISTANT);
     assistant = await loginAs(app, clinic.host, s.email);
     for (const c of [clinic, other]) {
+      // G1: la zona es de la sede (el horario ya no la guarda).
+      for (const { id } of await raw.location.findMany({
+        where: { tenantId: c.tenantId },
+        select: { id: true },
+      })) {
+        await setLocationZone(raw, c.tenantId, id, 'UTC');
+      }
       await as(api().put('/api/v1/locations/schedule'), c.adminToken, c.host)
-        .send({ timezone: 'UTC', ranges: [] })
+        .send({ ranges: [] })
         .expect(200);
     }
     patientId = await createPatient(clinic, '170001');

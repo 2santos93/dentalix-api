@@ -5,6 +5,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaClinicalEntryRepository } from '../src/modules/clinical-entries/infrastructure/repositories/prisma-clinical-entry.repository';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -57,18 +61,24 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
     ).id;
     locationA = (
       await raw.location.create({
-        data: {
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
           tenantId,
           name: 'Principal',
           createdAt: new Date('2020-01-01'),
-        },
+        }),
       })
     ).id;
-    locationB = (await raw.location.create({ data: { tenantId, name: 'B' } }))
-      .id;
+    locationB = (
+      await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'B' }),
+      })
+    ).id;
     foreignLocation = (
       await raw.location.create({
-        data: { tenantId: foreignTenantId, name: 'Ajena' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: foreignTenantId,
+          name: 'Ajena',
+        }),
       })
     ).id;
   });

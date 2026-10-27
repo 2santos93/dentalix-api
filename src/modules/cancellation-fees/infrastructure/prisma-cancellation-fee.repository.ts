@@ -2,8 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
+import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import {
   ADMIN_FEES_PLAN_LABEL,
   FEE_CATALOG_CODE,
@@ -104,7 +103,7 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
     return this.prisma.runWithTenant(
       async (tx) => {
         const appointment = await tx.appointment.findFirst({
-          where: { id: appointmentId, deletedAt: null },
+          where: { id: appointmentId, tenantId, deletedAt: null },
           select: {
             id: true,
             patientId: true,
@@ -113,7 +112,7 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
             status: true,
             lateCancellation: true,
             policyVersionId: true,
-            location: { select: { country: true } },
+            location: { select: { id: true, country: true, timeZone: true } },
             policyVersion: {
               select: {
                 id: true,
@@ -127,13 +126,12 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
           },
         });
         if (!appointment) return null;
-        const [current, zones, coverages] = await Promise.all([
+        const [current, coverages] = await Promise.all([
           tx.cancellationPolicyVersion.findFirst({
             where: { locationId: appointment.locationId },
             orderBy: { version: 'desc' },
             select: { receptionCanCharge: true },
           }),
-          loadLocationTimeZones(tx, tenantId, [appointment.locationId]),
           tx.patientCoverage.findMany({
             where: { patientId: appointment.patientId, deletedAt: null },
             select: {
@@ -168,9 +166,7 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
             : null,
           receptionCanCharge: current?.receptionCanCharge ?? false,
           locationCountry: appointment.location.country,
-          locationTimeZone:
-            zones.get(appointment.locationId) ??
-            DEFAULT_BUSINESS_HOURS_TIMEZONE,
+          locationTimeZone: requireLocationTimeZone(appointment.location),
           coverages: coverages.map((c) => ({
             payerType: c.payer.type,
             validFrom: civil(c.validFrom),

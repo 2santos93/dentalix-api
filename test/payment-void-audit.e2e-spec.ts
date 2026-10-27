@@ -8,6 +8,11 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+  setLocationZone,
+} from './support/location-fixtures';
 
 // SEC-013 — DELETE /payments/:id exige motivo, guarda quién/cuándo/por qué y
 // limita a recepción a sus propios abonos del día. DIRECT_URL (superusuario,
@@ -76,13 +81,16 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dra. Admin',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dra. Admin',
+      }),
+    );
     const body = reg.body as { tenantId: string; userId: string };
     return {
       tenantId: body.tenantId,
@@ -247,7 +255,7 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     await as(clinicA).void(paymentId, { reason: REASON }).expect(200);
   });
 
-  it('el "hoy" de recepción es el del horario de la SEDE del abono (LocationSchedule.timezone)', async () => {
+  it('el "hoy" de recepción es el de la zona de la SEDE del abono (Location.timeZone)', async () => {
     // Registrado hace 2 h. Entre las zonas de offset entero (-12..+14) hay
     // siempre alguna cuya medianoche cae en esa ventana (otro día) y otra en
     // la que no (mismo día): se eligen con el reloj real del momento.
@@ -265,32 +273,28 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     )!;
     expect(otherDayZone).toBeDefined();
     expect(sameDayZone).toBeDefined();
-    const original = await raw.locationSchedule.findFirst({
-      where: { tenantId: clinicA.tenantId },
-      select: { id: true, timezone: true, deletedAt: true },
-    });
+    // G1: la zona es de la sede (`Location.timeZone`, R4); `setLocationZone`
+    // mantiene igual la columna legada del horario (R20).
+    let locationId: string | undefined;
+    let originalZone: string | null = null;
 
-    async function payInZone(timezone: string): Promise<string> {
+    async function payInZone(zone: string): Promise<string> {
       const paymentId = await pay(reception);
       const row = await raw.payment.update({
         where: { id: paymentId },
         data: { createdAt },
         select: { locationId: true },
       });
-      await raw.locationSchedule.upsert({
-        where: {
-          tenantId_locationId: {
-            tenantId: clinicA.tenantId,
-            locationId: row.locationId,
-          },
-        },
-        create: {
-          tenantId: clinicA.tenantId,
-          locationId: row.locationId,
-          timezone,
-        },
-        update: { timezone, deletedAt: null },
-      });
+      if (locationId === undefined) {
+        locationId = row.locationId;
+        originalZone = (
+          await raw.location.findUniqueOrThrow({
+            where: { id: locationId },
+            select: { timeZone: true },
+          })
+        ).timeZone;
+      }
+      await setLocationZone(raw, clinicA.tenantId, row.locationId, zone);
       return paymentId;
     }
 
@@ -305,17 +309,8 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     const sameDay = await payInZone(sameDayZone);
     await as(reception).void(sameDay, { reason: REASON }).expect(200);
 
-    // Deja la sede como estaba (el alta de la clínica ya le crea horario).
-    if (original) {
-      await raw.locationSchedule.update({
-        where: { id: original.id },
-        data: { timezone: original.timezone, deletedAt: original.deletedAt },
-      });
-    } else {
-      await raw.locationSchedule.deleteMany({
-        where: { tenantId: clinicA.tenantId },
-      });
-    }
+    // Deja la sede como estaba.
+    await setLocationZone(raw, clinicA.tenantId, locationId!, originalZone!);
   });
 
   it('aísla por clínica: el ADMIN de otra clínica recibe 404 y el abono no cambia', async () => {

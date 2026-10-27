@@ -159,7 +159,6 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     await as(api().put('/api/v1/locations/schedule'), a.adminToken)
       .set('X-Location-Id', mainLocationId)
       .send({
-        timezone: 'America/Bogota',
         ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
           weekday,
           startMinute: 0,

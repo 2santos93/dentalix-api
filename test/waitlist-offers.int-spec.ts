@@ -19,6 +19,10 @@ import type { StaffRepository } from '../src/modules/staff/domain/ports/staff-re
 import type { PatientRepository } from '../src/modules/patients/domain/ports/patient-repository.port';
 import type { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-210, capa DB: `waitlist_offers` (RLS FORCE, FK compuestas, CHECK), el
 // tope de ofertas por paciente y día con dos ofertas a la vez, y las dos
@@ -52,7 +56,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const patientIds: string[] = [];
   for (let i = 0; i < 3; i++) {

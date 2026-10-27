@@ -17,6 +17,10 @@ import {
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 /**
  * DX-273 (revisión DX-271, I1 e I2):
@@ -1095,7 +1099,10 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       } = await acceptedItems(1);
       await accept(planId);
       const north = await raw.location.create({
-        data: { tenantId: a.tenantId, name: 'Sede Norte DX273' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: a.tenantId,
+          name: 'Sede Norte DX273',
+        }),
       });
       const today = await todayAppointment();
       await rawLink(today.id, itemId);

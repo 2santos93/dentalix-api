@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { locationZonesOf } from '../../../../shared/locations/location-time-zone';
 import type {
   DebtorCollections,
   DebtorDetails,
@@ -67,8 +68,10 @@ class InMemoryReceivablesRepository implements ReceivablesRepository {
     return Promise.resolve(id === NORTE.id ? NORTE : null);
   }
 
-  locationTimeZones(): Promise<Map<string, string>> {
-    return Promise.resolve(new Map([[NORTE.id, NORTE.timeZone]]));
+  /** Una sola sede, que es también la principal. */
+  locationTimeZones(): Promise<(locationId: string | null) => string> {
+    const zones = locationZonesOf([NORTE]);
+    return Promise.resolve((id) => zones.zoneOf(id ?? NORTE.id));
   }
 
   loadLedgers(query: LedgersQuery): Promise<PatientLedger[]> {

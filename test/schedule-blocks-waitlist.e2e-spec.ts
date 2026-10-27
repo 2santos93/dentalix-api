@@ -209,7 +209,6 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     // Horario conocido de la sede: lun–vie 9–13 y 15–19, Bogotá.
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
       .send({
-        timezone: 'America/Bogota',
         ranges: [1, 2, 3, 4, 5].flatMap((weekday) => [
           { weekday, startMinute: 540, endMinute: 780 },
           { weekday, startMinute: 900, endMinute: 1140 },

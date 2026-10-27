@@ -50,11 +50,14 @@ export class LocationScheduleController {
 
   @Put()
   @Roles(ClinicRole.ADMIN)
-  @ApiOkResponse({ description: 'Horario reemplazado' })
+  @ApiOkResponse({
+    description:
+      'Horario reemplazado; `timezone` en la respuesta es la zona de la sede',
+  })
   replace(@Body() dto: ReplaceLocationScheduleDto): Promise<BusinessHours> {
     return this.replaceSchedule.execute({
-      timezone: dto.timezone,
       ranges: dto.ranges,
+      legacyTimeZone: dto.timezone,
     });
   }
 }

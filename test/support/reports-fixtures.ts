@@ -1,4 +1,5 @@
 import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
+import { REGIONAL_BOGOTA_FIXTURE, locationData } from './location-fixtures';
 
 /**
  * DX-014: actividad fija de una clínica para los reportes, sembrada por `raw`
@@ -18,7 +19,10 @@ export class ReportSeeder {
 
   async location(name: string): Promise<string> {
     const location = await this.raw.location.create({
-      data: { tenantId: this.tenantId, name },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: this.tenantId,
+        name,
+      }),
       select: { id: true },
     });
     return location.id;

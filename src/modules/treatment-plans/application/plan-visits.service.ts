@@ -4,7 +4,10 @@ import {
   addCivilDays,
   civilDayRange,
 } from '../../../shared/time/civil-day';
-import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import {
+  loadPeriodLocationZones,
+  resolveLocationTimeZones,
+} from '../../../shared/locations/location-time-zone';
 import {
   BadRequestException,
   Injectable,
@@ -224,24 +227,34 @@ export class PlanVisitsService {
       : this.context.scopeLocationIds();
     return this.prisma.runWithTenant(
       async (tx) => {
+        const tenantId = this.context.getTenantId()!;
         const locations = await tx.location.findMany({
-          where: { ...(scopes ? { id: { in: scopes } } : {}) },
+          where: { tenantId, ...(scopes ? { id: { in: scopes } } : {}) },
           select: { id: true },
         });
-        const zoneOf = await resolveLocationTimeZones(
+        // Una sede sin zona solo falla si tiene planes aceptados en ella (G1).
+        const zones = await loadPeriodLocationZones(
           tx,
-          this.context.getTenantId()!,
+          tenantId,
           locations.map((l) => l.id),
+          async (ids) =>
+            (
+              await tx.treatmentPlan.findFirst({
+                where: { tenantId, acceptedLocationId: { in: ids } },
+                select: { acceptedLocationId: true },
+              })
+            )?.acceptedLocationId,
         );
-        const ageScope = locations.map((l) => ({
-          acceptedLocationId: l.id,
+        const zoneOf = (locationId: string) => zones.zoneOf(locationId);
+        const ageScope = [...zones.configured].map(([id, zone]) => ({
+          acceptedLocationId: id,
           acceptedAt: {
             lt: civilDayRange(
               addCivilDays(
-                civilDateIn(now, zoneOf(l.id)),
+                civilDateIn(now, zone),
                 1 - (input.olderThanDays ?? 0),
               ),
-              zoneOf(l.id),
+              zone,
             ).start,
           },
         }));

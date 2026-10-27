@@ -15,6 +15,10 @@ import {
   CANCELLATION_MESSAGES,
   CANCELLATION_POLICY_MESSAGES,
 } from '../src/modules/cancellation-policies/domain/cancellation-policy';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-279 (porción 1): política de cancelación por sede (solo ADMIN, versiones
 // append-only), cancelar desde la agenda con origen y motivo (el servidor
@@ -130,8 +134,14 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
       (await admin().get('/locations').expect(200)).body as { id: string }[]
     )[0].id;
     norte = (
-      (await admin().post('/locations', { name: 'Sede Norte' }).expect(201))
-        .body as { id: string }
+      (
+        await admin()
+          .post(
+            '/locations',
+            locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+          )
+          .expect(201)
+      ).body as { id: string }
     ).id;
     for (const role of [
       ClinicRole.RECEPTION,

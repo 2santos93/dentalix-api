@@ -13,6 +13,10 @@ import {
 } from './support/e2e-fixtures';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-212 · códigos clínicos de punta a punta: búsqueda CIE-10, evolución con
 // diagnósticos por rol, sede de la evolución (DX-232) y aislamiento entre
@@ -435,7 +439,10 @@ describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
   describe('DX-232: sede de la evolución', () => {
     it('sin cita en la sede B guarda B; la cita prevalece sobre la cabecera', async () => {
       const second = await raw.location.create({
-        data: { tenantId: a.tenantId, name: 'Sede B DX232' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: a.tenantId,
+          name: 'Sede B DX232',
+        }),
       });
       const res = await createEntry(dentist.token, {})
         .set('X-Location-Id', second.id)

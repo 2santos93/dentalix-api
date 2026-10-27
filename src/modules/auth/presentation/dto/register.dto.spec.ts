@@ -62,3 +62,49 @@ describe('RegisterDto (DX-144)', () => {
     ]);
   });
 });
+
+// G1 (spec §3.5): los cuatro campos de la primera sede. El DTO solo comprueba
+// tipos; presencia, subconjuntos y la lista de monedas son del caso de uso.
+describe('RegisterDto · primera sede (G1)', () => {
+  const base = {
+    clinicName: 'Clínica Sonrisa',
+    subdomain: 'sonrisa',
+    email: 'duena@sonrisa.co',
+    password: 'Clave-Segura-2026!',
+    fullName: 'Dra. Ana Pérez',
+  };
+
+  async function messages(extra: object): Promise<string[]> {
+    const errors = await validate(
+      plainToInstance(RegisterDto, { ...base, ...extra }),
+    );
+    return errors.flatMap((e) => Object.values(e.constraints ?? {}));
+  }
+
+  it('acepta los cuatro campos y también la forma legada sin ninguno', async () => {
+    expect(
+      await messages({
+        locationCountry: 'CO',
+        locationCurrency: 'JPY',
+        locationTimeZone: 'Asia/Tokyo',
+        locationLocale: 'ja-JP',
+      }),
+    ).toEqual([]);
+    expect(await messages({})).toEqual([]);
+  });
+
+  it('un país fuera del enum o un valor que no es texto: 400 con el mensaje del campo', async () => {
+    expect(await messages({ locationCountry: 'FR' })).toEqual([
+      'Elige el país de la sede.',
+    ]);
+    expect(await messages({ locationCurrency: 840 })).toEqual([
+      'Elige la moneda de la sede.',
+    ]);
+    expect(await messages({ locationTimeZone: 5 })).toEqual([
+      'Elige la zona horaria de la sede.',
+    ]);
+    expect(await messages({ locationLocale: true })).toEqual([
+      'Elige el formato regional de la sede.',
+    ]);
+  });
+});

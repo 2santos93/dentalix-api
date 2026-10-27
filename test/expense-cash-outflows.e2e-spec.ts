@@ -13,6 +13,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-274 · Salidas de caja menor en el arqueo: recepción paga algo con el
 // dinero del cajón → el efectivo esperado baja → el cierre cuadra. Una salida
@@ -191,8 +195,11 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
       })
     ).id;
     sedeNorte = (
-      (await api('post', '/locations').send({ name: 'Sede Norte' }).expect(201))
-        .body as { id: string }
+      (
+        await api('post', '/locations')
+          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+          .expect(201)
+      ).body as { id: string }
     ).id;
   });
 

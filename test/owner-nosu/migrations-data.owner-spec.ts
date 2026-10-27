@@ -239,6 +239,24 @@ const FIXTURE_DX319 = [
     WHERE "name" = 'Sede Norte' AND "tenantId" = '${T_A}'`,
 ];
 
+/** GLOBAL-G1 fase 1: moneda, zona y locale por sede (backfill D5). */
+const G1 = '20261027120000_g1_location_regional_settings';
+const L_POLANCO = '00000000-0000-4000-8000-0000000000a6';
+
+/**
+ * Esquema de 20261027120000 (GLOBAL-G1): una sede ES, una CO cuyo horario
+ * vivo está en México (conserva esa zona) y una ES retirada. Las «Sede
+ * principal» y «Sede Norte» previas son CO sin horario.
+ */
+const FIXTURE_G1 = [
+  `INSERT INTO "locations" ("id","tenantId","name","country","deletedAt","updatedAt") VALUES
+     (gen_random_uuid(),'${T_B}','Sede Madrid','ES',NULL,now()),
+     ('${L_POLANCO}','${T_A}','Sede Polanco','CO',NULL,now()),
+     (gen_random_uuid(),'${T_B}','Sede Cerrada','ES',now(),now())`,
+  `INSERT INTO "location_schedules" ("id","tenantId","locationId","timezone","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','${L_POLANCO}','America/Mexico_City',now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -296,8 +314,11 @@ const STEPS: Step[] = [
   // DX-319.
   { until: '20261024174100', fixture: FIXTURE_DX287 },
   // dx319_drop_location_reps (FORCE fuera de locations durante la copia del
-  // REPS al nº de registro sanitario) y las siguientes.
-  { until: '99999999999999', fixture: FIXTURE_DX319 },
+  // REPS al nº de registro sanitario) y las siguientes hasta GLOBAL-G1.
+  { until: G1, fixture: FIXTURE_DX319 },
+  // g1_location_regional_settings (FORCE fuera de locations y de
+  // location_schedules durante el backfill D5) y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_G1 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -757,6 +778,38 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE table_name = 'locations' AND column_name = 'repsHabilitationCode'`,
       ),
     ).toBe(0);
+  }, 180_000);
+
+  it('owner-nosu backfill fills every location and restores FORCE', async () => {
+    await run(STEPS[18]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(
+                  "name" || ':' || coalesce("currency", '-') || ':' ||
+                  coalesce("timeZone", '-') || ':' || coalesce("locale", '-') || ':' ||
+                  ("regionalSettingsReviewedAt" IS NULL)::text,
+                  ',' ORDER BY "tenantId", "name" COLLATE "C") AS v
+           FROM "locations"`,
+      ),
+    ).toBe(
+      [
+        'Sede Norte:COP:America/Bogota:es-CO:true',
+        'Sede Nórte:COP:America/Bogota:es-CO:true',
+        'Sede Polanco:COP:America/Mexico_City:es-CO:true',
+        'Sede principal:COP:America/Bogota:es-CO:true',
+        'Sede Cerrada:EUR:Europe/Madrid:es-ES:true',
+        'Sede Madrid:EUR:Europe/Madrid:es-ES:true',
+        'Sede Norte:COP:America/Bogota:es-CO:true',
+        'Sede principal:COP:America/Bogota:es-CO:true',
+      ].join(','),
+    );
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(relname || '=' || relforcerowsecurity::text, ',' ORDER BY relname) AS v
+           FROM pg_class
+          WHERE oid IN ('public.locations'::regclass, 'public.location_schedules'::regclass)`,
+      ),
+    ).toBe('location_schedules=true,locations=true');
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

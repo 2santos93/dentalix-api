@@ -23,10 +23,10 @@ import {
 } from '../../domain/opening-balance-payment';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
-  loadLocationTimeZones,
+  firstLocationWithRows,
+  loadPeriodLocationZones,
   resolveLocationTimeZones,
 } from '../../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 import {
   civilDateIn,
   civilNoonIn,
@@ -256,17 +256,18 @@ export class PrismaPaymentRepository implements PaymentRepository {
   ): Promise<PeriodScope> {
     // DX-089: la sede del request o, sin ella, las permitidas al miembro
     // (`undefined` = sin restricción: todas las sedes de la clínica).
+    const tenantId = this.requireTenantId();
     const scopeIds = this.tenantContext.scopeLocationIds();
-    const zones = await loadLocationTimeZones(
+    const zones = await loadPeriodLocationZones(
       tx,
-      this.requireTenantId(),
+      tenantId,
       scopeIds,
+      firstLocationWithRows(tx.payment, tenantId),
     );
-    const timeZoneOf = (id: string) =>
-      zones.get(id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE;
+    const timeZoneOf = (id: string) => zones.zoneOf(id);
     let branches: ReturnType<typeof civilPeriodByZone>;
     try {
-      branches = civilPeriodByZone(period.from, period.to, zones);
+      branches = civilPeriodByZone(period.from, period.to, zones.configured);
     } catch (error) {
       // Un día que no existe en la zona de alguna sede (p. ej. 2011-12-30 en
       // Pacific/Apia): es la petición la que no vale, no un fallo del servidor.

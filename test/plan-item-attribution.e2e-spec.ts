@@ -33,6 +33,10 @@ import {
   PERFORMER_REQUIRED_MESSAGE,
   REVERT_DONE_FORBIDDEN_MESSAGE,
 } from '../src/modules/treatment-plans/domain/plan-item-attribution';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 /**
  * DX-050 · Producción atribuible: quién realizó cada ítem del plan, dónde y
@@ -161,9 +165,14 @@ describe('DX-050 · ítem realizado con profesional, sede y hora (e2e)', () => {
 
     const locations = await api('get', '/locations', a.adminToken).expect(200);
     mainLocationId = (locations.body as { id: string }[])[0].id;
-    const norte = await api('post', '/locations', a.adminToken, {
-      name: 'Sede Norte',
-    }).expect(201);
+    const norte = await api(
+      'post',
+      '/locations',
+      a.adminToken,
+      locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        name: 'Sede Norte',
+      }),
+    ).expect(201);
     norteLocationId = (norte.body as { id: string }).id;
     await api('put', `/staff/${dentistNorte.userId}/locations`, a.adminToken, {
       locationIds: [norteLocationId],

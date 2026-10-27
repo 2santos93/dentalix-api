@@ -77,6 +77,10 @@ export interface CollectionsRepository {
   /** Resumen financiero de estos pacientes con deuda (una consulta). */
   ledgersOf(patientIds: readonly string[]): Promise<PatientLedger[]>;
 
-  /** Zona de cada sede de la clínica (una consulta). */
-  locationTimeZones(): Promise<Map<string, string>>;
+  /**
+   * Zona de cada sede de la clínica y, para lo que no tiene sede, la de la
+   * principal (R6), en un número fijo de consultas. Una sede sin zona solo
+   * falla (409) si se busca su zona.
+   */
+  locationTimeZones(): Promise<(locationId: string | null) => string>;
 }

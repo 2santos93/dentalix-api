@@ -5,6 +5,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 /**
  * DX-288: «Traer a esta cita» (DX-273) es atómico. Con varias peticiones de
@@ -221,7 +225,12 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
       })
     ).id;
     locationId = (
-      await owner.location.create({ data: { tenantId, name: 'Principal' } })
+      await owner.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Principal',
+        }),
+      })
     ).id;
     providerId = (
       await owner.user.create({
@@ -360,7 +369,12 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
 
   it('la que gana es de una sede no permitida a quien llega después: 409 general, sin su hora ni su sede (DX-089, revisión B2)', async () => {
     const norte = (
-      await owner.location.create({ data: { tenantId, name: 'Sede Norte' } })
+      await owner.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Sede Norte',
+        }),
+      })
     ).id;
     const { itemId, startedToday, future } = await scenario();
     const mine = await startedToday();

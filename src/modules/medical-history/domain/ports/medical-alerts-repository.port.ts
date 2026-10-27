@@ -42,6 +42,17 @@ export interface MedicalAlertsRepository {
     patientIds: readonly string[],
   ): Promise<Map<string, AnamnesisReviewState>>;
 
+  /**
+   * Zona de cada una de esas sedes (incluidas las retiradas), en UNA
+   * consulta. 409 `LOCATION_TIMEZONE_REQUIRED` si alguna no tiene una válida.
+   */
+  locationTimeZones(
+    locationIds: readonly string[],
+  ): Promise<(locationId: string) => string>;
+
+  /** Zona de `locationId` o, sin sede en contexto, de la sede principal (R6). */
+  referenceTimeZone(locationId: string | null): Promise<string>;
+
   /** `tenants.anamnesisValidityMonths` de la clínica del contexto. */
   getValidityMonths(): Promise<number>;
   /**

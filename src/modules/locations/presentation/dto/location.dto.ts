@@ -20,6 +20,11 @@ import {
   HEALTH_REGISTRATION_NUMBER_CHARS,
   HEALTH_REGISTRATION_NUMBER_MAX,
 } from '../../domain/health-registration';
+import {
+  COUNTRY_MISSING,
+  REGIONAL_MESSAGES,
+  REGIONAL_NULL_MESSAGE,
+} from '../../domain/regional-settings';
 
 export const LOCATION_PHONE_MAX = 40;
 const PHONE_MESSAGE = `El teléfono admite hasta ${LOCATION_PHONE_MAX} caracteres.`;
@@ -40,8 +45,18 @@ const COUNTRY_DOC = {
   enum: ClinicCountry,
   enumName: 'ClinicCountry',
   description:
-    'País de la sede: decide los campos legales obligatorios de la receta (CO o ES). Por defecto CO.',
+    'País de la sede: decide los campos legales obligatorios de la receta (CO o ES).',
 };
+
+// G1 (spec §3.1): los cuatro son obligatorios en el alta. La presencia y los
+// mensajes exactos los comprueba el caso de uso (400 con `message` y `field`),
+// porque la moneda se valida contra la tabla `currencies`.
+const CURRENCY_DOC =
+  'G1: moneda ISO 4217 de la sede (3 letras; se pasa a mayúsculas). Tiene que estar en GET /currencies.';
+const TIME_ZONE_DOC =
+  'G1: zona horaria IANA de la sede. Define sus días civiles («hoy» en caja, informes y agenda) y cómo se leen sus horarios.';
+const LOCALE_DOC =
+  'G1: formato regional BCP 47 de la sede (fechas y números); se guarda canonicalizado (es-mx → es-MX).';
 
 export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
@@ -54,10 +69,29 @@ export class CreateLocationDto {
   @IsString()
   address?: string;
 
-  @ApiPropertyOptional(COUNTRY_DOC)
+  @ApiProperty(COUNTRY_DOC)
   @IsOptional()
-  @IsEnum(ClinicCountry)
+  @IsEnum(ClinicCountry, { message: COUNTRY_MISSING })
   country?: ClinicCountry;
+
+  @ApiProperty({ type: String, example: 'EUR', description: CURRENCY_DOC })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.currencyMissing })
+  currency?: string;
+
+  @ApiProperty({
+    type: String,
+    example: 'Europe/Madrid',
+    description: TIME_ZONE_DOC,
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.timeZoneMissing })
+  timeZone?: string;
+
+  @ApiProperty({ type: String, example: 'es-ES', description: LOCALE_DOC })
+  @IsOptional()
+  @IsString({ message: REGIONAL_MESSAGES.localeMissing })
+  locale?: string;
 
   @ApiPropertyOptional({
     example: '+57 601 555 0101',
@@ -139,6 +173,54 @@ export class UpdateLocationDto {
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string | null;
 
+  // `type: String`: sin él, el tipo `string | null` sale como objeto en
+  // OpenAPI. `null` no es válido (400), así que el contrato es `string`.
+  @ApiPropertyOptional({
+    type: String,
+    example: 'EUR',
+    description: CURRENCY_DOC,
+  })
+  // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  currency?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    example: 'Europe/Madrid',
+    description: TIME_ZONE_DOC,
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  timeZone?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    example: 'es-ES',
+    description: LOCALE_DOC,
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  locale?: string | null;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'G1: marca la sede como revisada (moneda, zona y formato confirmados) aunque no cambie nada.',
+  })
+  @IsOptional()
+  @Equals(true, { message: 'confirmRegionalSettings solo admite true.' })
+  confirmRegionalSettings?: true;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'G1: confirma un cambio de moneda o zona en una sede con historial (los importes guardados no se convierten). No salta el bloqueo por caja abierta.',
+  })
+  @IsOptional()
+  @Equals(true, { message: 'confirmRegionalChange solo admite true.' })
+  confirmRegionalChange?: true;
+
   @ApiPropertyOptional({
     description:
       'Desactivar una sede la oculta para operar; no se puede desactivar la última activa.',
@@ -171,11 +253,33 @@ export class LocationDto {
   phone!: string | null;
   @ApiProperty() isActive!: boolean;
   @ApiProperty({
-    example: 'America/Bogota',
-    description:
-      'Zona horaria IANA de la sede (la de su horario; sin horario, la de su ' +
-      'país). Define sus días civiles: «hoy» en la caja y el dashboard (DX-097).',
+    type: String,
+    nullable: true,
+    example: 'EUR',
+    description: `${CURRENCY_DOC} null = sede sin configurar (fase 1).`,
   })
-  timeZone!: string;
+  currency!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Europe/Madrid',
+    description: `${TIME_ZONE_DOC} null = sede sin configurar (fase 1).`,
+  })
+  timeZone!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'es-ES',
+    description: `${LOCALE_DOC} null = sede sin configurar (fase 1).`,
+  })
+  locale!: string | null;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'D5: cuándo un ADMIN confirmó moneda, zona y formato; null = asignados al actualizar Dentalix, por revisar.',
+  })
+  regionalSettingsReviewedAt!: Date | null;
   @ApiProperty({ type: String, format: 'date-time' }) createdAt!: Date;
 }

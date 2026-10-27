@@ -228,7 +228,7 @@ export class PatientImportsController {
   })
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="plantilla-saldos.csv"')
-  balanceTemplate(): string {
+  balanceTemplate(): Promise<string> {
     return this.imports.balanceTemplate();
   }
 

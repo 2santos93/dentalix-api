@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner, superuser). Ver
@@ -75,13 +79,16 @@ describe('Exchange (e2e)', () => {
     // Auth only: exchange is not tenant-scoped, but the controller still
     // requires a valid bearer token (JwtAuthGuard) — register+login once for
     // the whole suite, same flow as patients.e2e-spec.ts.
-    await registerVerified(app, {
-      clinicName: 'Clinica Exchange',
-      subdomain: 'clinica-exchange',
-      email: 'owner@clinica-exchange.com',
-      password: 'S3cret!!',
-      fullName: 'Dr. Owner',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clinica Exchange',
+        subdomain: 'clinica-exchange',
+        email: 'owner@clinica-exchange.com',
+        password: 'S3cret!!',
+        fullName: 'Dr. Owner',
+      }),
+    );
 
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')

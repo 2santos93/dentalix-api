@@ -174,9 +174,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     dentistUserId = doctor.userId;
 
     // Sin horario de atención: la cita se puede agendar a cualquier hora.
-    await as(clinicA)
-      .put('/locations/schedule', { timezone: 'America/Bogota', ranges: [] })
-      .expect(200);
+    await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     const location = await raw.location.findFirstOrThrow({
       where: { tenantId: clinicA.tenantId },
     });

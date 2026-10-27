@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -7,6 +8,13 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+  legacyLocationInsert,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -33,11 +41,14 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ) {
-  const register = await registerVerified(app, {
-    ...opts,
-    password: PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      ...opts,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
@@ -51,7 +62,7 @@ async function registerAndLogin(
     .put('/api/v1/locations/schedule')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
     .set('Authorization', `Bearer ${accessToken}`)
-    .send({ timezone: 'America/Bogota', ranges: [] })
+    .send({ ranges: [] })
     .expect(200);
   return {
     tenantId: (register.body as RegisterBody).tenantId,
@@ -86,6 +97,45 @@ describe('Locations / multi-sede (e2e)', () => {
     await raw.$disconnect();
   });
 
+  it('G1 DTOs type every regional field in OpenAPI (never an empty object)', () => {
+    // Sin `type: String`, un `string | null` sale como `type: object` y la web
+    // genera `Record<string, never>` para ese campo.
+    const swagger = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const schemas = swagger.components?.schemas ?? {};
+    const untyped: string[] = [];
+    for (const dto of [
+      'LocationDto',
+      'CreateLocationDto',
+      'UpdateLocationDto',
+      'RegisterDto',
+      'CurrencyDto',
+      'CreateTreatmentPlanDto',
+      'ReplaceLocationScheduleDto',
+      'ProviderLocationScheduleDto',
+    ]) {
+      const schema = schemas[dto] as
+        { properties?: Record<string, Record<string, unknown>> } | undefined;
+      expect(schema?.properties).toBeDefined();
+      for (const [name, property] of Object.entries(schema!.properties!)) {
+        if (property.type === 'object' && !property.properties) {
+          untyped.push(`${dto}.${name}`);
+        }
+      }
+    }
+    expect(untyped).toEqual([]);
+    const update = (
+      schemas.UpdateLocationDto as {
+        properties: Record<string, { type?: string }>;
+      }
+    ).properties;
+    expect(
+      ['currency', 'timeZone', 'locale'].map((f) => update[f].type),
+    ).toEqual(['string', 'string', 'string']);
+  });
+
   it(
     'crea sedes, filtra la agenda por X-Location-Id, deja la vista consolidada ' +
       'sin cabecera, rechaza una sede ajena y protege la última sede activa',
@@ -114,7 +164,12 @@ describe('Locations / multi-sede (e2e)', () => {
       const created = await auth(
         request(app.getHttpServer())
           .post('/api/v1/locations')
-          .send({ name: 'Sede Norte', address: 'Cra 15' }),
+          .send(
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede Norte',
+              address: 'Cra 15',
+            }),
+          ),
       ).expect(201);
       const sedeB = (created.body as LocationBody).id;
       expect(sedeB).not.toBe(sedeA);
@@ -129,7 +184,7 @@ describe('Locations / multi-sede (e2e)', () => {
         request(app.getHttpServer())
           .put('/api/v1/locations/schedule')
           .set('X-Location-Id', sedeB)
-          .send({ timezone: 'America/Bogota', ranges: [] }),
+          .send({ ranges: [] }),
       ).expect(200);
 
       // --- 3. Una cita creada CON la cabecera queda en esa sede.
@@ -319,5 +374,154 @@ describe('Locations / multi-sede (e2e)', () => {
       'El teléfono admite hasta 40 caracteres.',
     );
     await patch(sede.id, { phone: 601 }).expect(400);
+  });
+
+  describe('alta de sede con moneda, zona y formato (G1, spec §3.1)', () => {
+    let auth: (r: request.Test) => request.Test;
+    let tenantId: string;
+    const post = (body: object) =>
+      auth(request(app.getHttpServer()).post('/api/v1/locations')).send(body);
+
+    beforeAll(async () => {
+      const clinic = await registerAndLogin(app, {
+        clinicName: 'Clinica Regional',
+        subdomain: 'regional-sede',
+        email: 'owner@regional-sede.com',
+      });
+      tenantId = clinic.tenantId;
+      const host = hostFor(clinic.subdomain);
+      auth = (r) =>
+        r
+          .set('X-Tenant-Host', host)
+          .set('Authorization', `Bearer ${clinic.accessToken}`);
+    });
+
+    it.each([
+      ['country', 'Elige el país de la sede.'],
+      ['currency', 'Elige la moneda de la sede.'],
+      ['timeZone', 'Elige la zona horaria de la sede.'],
+      ['locale', 'Elige el formato regional de la sede.'],
+    ])(
+      'POST /locations without each regional field is 400 (%s)',
+      async (field, message) => {
+        const body: Record<string, unknown> = {
+          ...locationBody(REGIONAL_TOKYO_FIXTURE, { name: `Sin ${field}` }),
+        };
+        delete body[field];
+        const res = await post(body).expect(400);
+        expect(res.body).toMatchObject({ message, field });
+        expect(
+          await raw.location.count({
+            where: { tenantId, name: `Sin ${field}` },
+          }),
+        ).toBe(0);
+      },
+    );
+
+    it('moneda que no está en la lista, zona inexistente y formato inválido: 400 con su mensaje', async () => {
+      const cases: [object, string, string][] = [
+        [
+          { currency: 'XYZ' },
+          'currency',
+          'La moneda XYZ no está en la lista de monedas admitidas.',
+        ],
+        [
+          { timeZone: 'Mars/Olympus' },
+          'timeZone',
+          'La zona horaria «Mars/Olympus» no existe.',
+        ],
+        [
+          { locale: 'not a locale' },
+          'locale',
+          'El formato regional «not a locale» no es válido.',
+        ],
+      ];
+      for (const [patch, field, message] of cases) {
+        const res = await post(
+          locationBody(REGIONAL_TOKYO_FIXTURE, { name: 'Mala', ...patch }),
+        ).expect(400);
+        expect(res.body).toMatchObject({ message, field });
+      }
+    });
+
+    it('POST /locations JPY/Asia/Tokyo/ja-JP is 201 and reviewed', async () => {
+      const before = Date.now();
+      const res = await post(
+        locationBody(REGIONAL_TOKYO_FIXTURE, {
+          name: 'Tokio',
+          currency: 'jpy',
+          locale: 'JA-jp',
+        }),
+      ).expect(201);
+      expect(res.body).toMatchObject({
+        name: 'Tokio',
+        country: 'CO',
+        currency: 'JPY',
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+      });
+      const reviewedAt = (res.body as { regionalSettingsReviewedAt: string })
+        .regionalSettingsReviewedAt;
+      expect(new Date(reviewedAt).getTime()).toBeGreaterThanOrEqual(
+        before - 1000,
+      );
+      const row = await raw.location.findUniqueOrThrow({
+        where: { id: (res.body as { id: string }).id },
+      });
+      expect(row).toMatchObject({
+        currency: 'JPY',
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+      });
+      expect(row.regionalSettingsReviewedAt).not.toBeNull();
+    });
+
+    it('GET /locations returns null regional fields for an old-replica row, never country values', async () => {
+      const legacyId = await legacyLocationInsert(raw, tenantId, 'Antigua');
+      const res = await auth(
+        request(app.getHttpServer()).get('/api/v1/locations'),
+      ).expect(200);
+      const legacy = (res.body as Array<Record<string, unknown>>).find(
+        (l) => l.id === legacyId,
+      );
+      expect(legacy).toMatchObject({
+        country: 'CO',
+        currency: null,
+        timeZone: null,
+        locale: null,
+        regionalSettingsReviewedAt: null,
+      });
+    });
+
+    it('DENTIST no puede crear sedes (403)', async () => {
+      const dentist = await raw.user.create({
+        data: {
+          email: 'dentist@regional-sede.com',
+          passwordHash: (
+            await raw.user.findFirstOrThrow({
+              where: { email: 'owner@regional-sede.com' },
+              select: { passwordHash: true },
+            })
+          ).passwordHash,
+          fullName: 'Dra. Dentista',
+          emailVerifiedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      await raw.clinicMembership.create({
+        data: { tenantId, userId: dentist.id, role: 'DENTIST' },
+      });
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .set('X-Tenant-Host', hostFor('regional-sede'))
+        .send({ email: 'dentist@regional-sede.com', password: PASSWORD })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/api/v1/locations')
+        .set('X-Tenant-Host', hostFor('regional-sede'))
+        .set('Authorization', `Bearer ${(login.body as LoginBody).accessToken}`)
+        .send(locationBody(REGIONAL_TOKYO_FIXTURE, { name: 'No' }))
+        .expect(403);
+    });
   });
 });

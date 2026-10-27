@@ -17,6 +17,10 @@ import type { DentalCatalogRepository } from '../src/modules/dental-catalog/doma
 import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/entities/dental-catalog-item.entity';
 import type { PricingSource } from '../src/modules/treatment-plans/domain/ports/pricing-source.port';
 import { catalogPricing } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/catalog-pricing-source';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // BE-036 (SEC-041): el estado del plan se comprueba DENTRO de la transacción
 // que escribe el ítem, después de bloquear la fila del plan. Antes se leía
@@ -75,7 +79,10 @@ async function seed(): Promise<Seeded> {
     },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede principal',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: 'Carrera' },

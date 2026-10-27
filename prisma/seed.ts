@@ -1,40 +1,32 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Country, State, City } from 'country-state-city';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
+import { ISO4217_CURRENCIES } from './reference/iso4217';
 
 // Corre con el rol owner (DIRECT_URL): estas tablas son globales, sin RLS.
 const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// Whitelist curada de monedas (ISO 4217). Cubre el contexto LATAM + majors;
-// alineada con lo que soporta el proveedor de exchange (base USD) e incluye COP.
-// Nota: estas mismas 10 monedas también se siembran vía la migración
-// 20260727130000_seed_currencies, así que la whitelist existe con solo
-// `prisma migrate deploy` (sin necesidad de correr este seed). El upsert de
-// abajo se mantiene para poder actualizar name/symbol sin una migración nueva.
-const CURRENCIES: { code: string; name: string; symbol: string }[] = [
-  { code: 'USD', name: 'Dólar estadounidense', symbol: '$' },
-  { code: 'COP', name: 'Peso colombiano', symbol: '$' },
-  { code: 'EUR', name: 'Euro', symbol: '€' },
-  { code: 'MXN', name: 'Peso mexicano', symbol: '$' },
-  { code: 'ARS', name: 'Peso argentino', symbol: '$' },
-  { code: 'PEN', name: 'Sol peruano', symbol: 'S/' },
-  { code: 'CLP', name: 'Peso chileno', symbol: '$' },
-  { code: 'BRL', name: 'Real brasileño', symbol: 'R$' },
-  { code: 'GBP', name: 'Libra esterlina', symbol: '£' },
-  { code: 'CAD', name: 'Dólar canadiense', symbol: '$' },
-];
-
+// GLOBAL-G1 (DX-313): lista ISO 4217 vigente (sin fondos, metales, monedas
+// de 3 decimales ni códigos retirados), generada por
+// prisma/scripts/generate-iso4217-sql.ts. La misma lista se siembra en la
+// migración 20261027120000_g1_location_regional_settings, así que existe con
+// solo `prisma migrate deploy`; el upsert de abajo permite actualizar
+// name/symbol sin una migración nueva. A propósito: la migración inserta con
+// `ON CONFLICT DO NOTHING`, así que en una base solo migrada las 10 monedas de
+// 2026-07 (USD, COP, EUR…) conservan su nombre y símbolo de entonces, y el
+// seed los cambia por los de `Intl`. Solo es texto de presentación: el código
+// y los decimales no cambian.
 async function seedCurrencies(): Promise<void> {
-  for (const c of CURRENCIES) {
+  for (const { code, name, symbol } of ISO4217_CURRENCIES) {
     await prisma.currency.upsert({
-      where: { code: c.code },
-      update: { name: c.name, symbol: c.symbol },
-      create: c,
+      where: { code },
+      update: { name, symbol },
+      create: { code, name, symbol },
     });
   }
-  console.log(`Seeded ${CURRENCIES.length} currencies`);
+  console.log(`Seeded ${ISO4217_CURRENCIES.length} currencies`);
 }
 
 async function seedCountries(): Promise<void> {

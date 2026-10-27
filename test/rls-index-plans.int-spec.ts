@@ -15,6 +15,10 @@ import {
   PrismaReminderOptOutRepository,
 } from '../src/modules/reminders/infrastructure/prisma-reminder-opt-out.repository';
 import { isInSweepWindow } from '../src/modules/reminders/domain/reminder-window';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-225 (DB-035, DB-036): tres consultas que decían usar un índice y, bajo
 // RLS FORCE, no lo usaban. Cada caso explica la consulta REAL del repositorio
@@ -85,13 +89,23 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede Centro' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede Centro',
+    }),
   });
   const other = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede Norte' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede Norte',
+    }),
   });
   const retired = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede Cerrada', deletedAt: new Date() },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede Cerrada',
+      deletedAt: new Date(),
+    }),
   });
   const user = await raw.user.create({
     data: {

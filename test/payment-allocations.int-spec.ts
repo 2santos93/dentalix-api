@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-051, capa DB: bases de los abonos, imputaciones, cola de repartos e
 // historial. RLS FORCE en las cuatro tablas, FK compuestas (el ítem es del
@@ -61,7 +65,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Imputada' },

@@ -34,6 +34,10 @@ import {
 } from '../src/modules/treatment-plans/domain/plan-item-attribution';
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 /**
  * DX-068 (TST-002): matriz de aislamiento entre clínicas en las rutas por id.
@@ -308,7 +312,6 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   // Sin horario de atención: el spec no prueba el horario y así la cita se
   // puede agendar a cualquier hora (ver appointments.e2e-spec.ts).
   await api(app, a, 'put', '/locations/schedule', {
-    timezone: 'America/Bogota',
     ranges: [],
   }).expect(200);
 
@@ -406,7 +409,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     title: 'Consentimiento de A',
     body: 'Yo, {{paciente}}, autorizo el procedimiento.',
   });
-  const location = await create(app, a, '/locations', { name: 'Sede Norte A' });
+  const location = await create(
+    app,
+    a,
+    '/locations',
+    locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte A' }),
+  );
   // Recordatorios por sede (DX-026): A los activa en su sede nueva.
   await api(app, a, 'put', `/reminder-settings/${location.id}`, {
     enabled: true,
@@ -737,7 +745,6 @@ async function seedBExtras(
   >
 > {
   await api(app, b, 'put', '/locations/schedule', {
-    timezone: 'America/Bogota',
     ranges: [],
   }).expect(200);
   const payer = await create(app, b, '/payers', {
@@ -1939,7 +1946,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'put',
       path: () => '/locations/schedule',
       body: () => ({
-        timezone: 'America/Bogota',
         ranges: [{ weekday: 1, startMinute: 0, endMinute: 60 }],
       }),
       locationId: () => a.locationId,

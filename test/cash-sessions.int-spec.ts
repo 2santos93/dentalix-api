@@ -5,6 +5,10 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { recordVoidAdjustment } from '../src/modules/cash-sessions/infrastructure/payment-cash-session';
 import { PrismaCashSessionRepository } from '../src/modules/cash-sessions/infrastructure/prisma-cash-session.repository';
 import { deferred, waitFor } from './support/wait-for';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-027, capa DB: caja por turno. RLS FORCE en las seis tablas, FK compuestas
 // por clínica, una caja abierta por (sede, usuario), importes con CHECK y la
@@ -49,10 +53,18 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede', country: 'CO' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede',
+      country: 'CO',
+    }),
   });
   const other = await raw.location.create({
-    data: { tenantId, name: 'Sede Norte', country: 'CO' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede Norte',
+      country: 'CO',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: subdomain },
@@ -611,7 +623,10 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
   });
   it('abrir mientras se anula un abono tardío pendiente recoge juntos el positivo y su compensación', async () => {
     const location = await raw.location.create({
-      data: { tenantId: a.tenantId, name: 'Sede carrera de ajustes' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede carrera de ajustes',
+      }),
     });
     const paid = await raw.payment.create({
       data: payment(a, { locationId: location.id }),

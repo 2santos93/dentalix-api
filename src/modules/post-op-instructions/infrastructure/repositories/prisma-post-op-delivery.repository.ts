@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { PostOpInstructionDelivery, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import {
-  loadLocationTimeZones,
-  timeZoneForCountry,
-} from '../../../../shared/locations/location-time-zone';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import { loadNoticeResponsibles } from '../../../patients/infrastructure/notices/notice-context';
 import { performedItemsOf } from '../../../clinical-entries/infrastructure/repositories/performed-items';
 import type { PostOpDelivery } from '../../domain/entities/post-op-delivery.entity';
@@ -73,7 +70,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const appointment = await tx.appointment.findFirst({
-        where: { id: appointmentId, deletedAt: null },
+        where: { id: appointmentId, tenantId, deletedAt: null },
         select: {
           id: true,
           patientId: true,
@@ -95,14 +92,20 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
             },
           },
           location: {
-            select: { id: true, name: true, phone: true, country: true },
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              country: true,
+              timeZone: true,
+            },
           },
         },
       });
       if (!appointment || appointment.patient.deletedAt) return null;
       const { patient, location } = appointment;
 
-      const [provider, tenant, responsibles, zones] = await Promise.all([
+      const [provider, tenant, responsibles] = await Promise.all([
         tx.clinicMembership.findFirst({
           where: { userId: appointment.providerId },
           orderBy: { createdAt: 'desc' },
@@ -113,7 +116,6 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           select: { name: true },
         }),
         loadNoticeResponsibles(tx, appointment.patientId),
-        loadLocationTimeZones(tx, tenantId, [location.id]),
       ]);
 
       return {
@@ -141,8 +143,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           name: location.name,
           phone: location.phone,
           country: location.country,
-          timeZone:
-            zones.get(location.id) ?? timeZoneForCountry(location.country),
+          timeZone: requireLocationTimeZone(location),
         },
         clinicName: tenant.name,
       };

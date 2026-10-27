@@ -32,6 +32,10 @@ import { RecordPaymentUseCase } from '../src/modules/payments/application/use-ca
 import { GetPlanBalanceUseCase } from '../src/modules/payments/application/use-cases/get-plan-balance.use-case';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import type { CurrencyWhitelist } from '../src/modules/treatment-plans/domain/ports/currency-whitelist.port';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-109, contra Postgres y bajo RLS (rol dentalix_app vía runWithTenant):
 //  1. abono sobre plan no cobrable → 409, con el estado leído en el SELECT
@@ -208,7 +212,9 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
       data: { tenantId, userId, role: ClinicRole.ADMIN },
     });
     locationId = (
-      await owner.location.create({ data: { tenantId, name: 'Sede' } })
+      await owner.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+      })
     ).id;
     patientId = (
       await owner.patient.create({

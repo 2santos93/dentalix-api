@@ -15,6 +15,8 @@ export interface ConsentSigningContext {
   };
   clinicName: string;
   professionalName: string;
+  /** Zona de la sede activa o, sin ella, de la principal (R6): da la fecha. */
+  timeZone: string;
   /**
    * `undefined` si no se pidió plan; `null` si se pidió y no es de este
    * paciente en esta clínica.

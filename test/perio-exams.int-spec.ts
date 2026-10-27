@@ -2,6 +2,11 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPerioExamRepository } from '../src/modules/periodontal/infrastructure/repositories/prisma-perio-exam.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-007, capa DB de perio_exams / perio_site_measures / perio_tooth_measures.
 // Cada caso escribe POR LA MISMA RUTA que la app (runWithTenant, rol
@@ -229,24 +234,34 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
   });
 
   it('el repositorio toma la zona horaria de la sede activa', async () => {
-    const location = await raw.location.create({
-      data: { tenantId: a.tenantId, name: 'Sede Madrid' },
-    });
-    await raw.locationSchedule.create({
-      data: {
-        tenantId: a.tenantId,
-        locationId: location.id,
-        timezone: 'Europe/Madrid',
-      },
-    });
+    // G1: la zona es de la sede (`Location.timeZone`), no de su horario.
     const repo = new PrismaPerioExamRepository(prisma, tenantContext);
+    // Sin sedes activas no hay zona de referencia: 409, nunca Bogotá.
+    await expect(
+      tenantContext.run(b.tenantId, undefined, () => repo.clinicTimeZone()),
+    ).rejects.toMatchObject({ response: { code: 'LOCATION_REQUIRED' } });
+    await raw.location.create({
+      data: locationData(REGIONAL_TOKYO_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede principal',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    });
+    const location = await raw.location.create({
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Madrid',
+        country: 'ES',
+        timeZone: 'Europe/Madrid',
+      }),
+    });
     await expect(
       tenantContext.run(a.tenantId, location.id, () => repo.clinicTimeZone()),
     ).resolves.toBe('Europe/Madrid');
-    // Sin sede activa: la zona por defecto.
+    // Sin sede activa: la de la sede principal (la activa más antigua, R6).
     await expect(
       tenantContext.run(a.tenantId, undefined, () => repo.clinicTimeZone()),
-    ).resolves.toBe('America/Bogota');
+    ).resolves.toBe('Asia/Tokyo');
   });
 
   it('un DRAFT sí admite medidas y se puede finalizar', async () => {

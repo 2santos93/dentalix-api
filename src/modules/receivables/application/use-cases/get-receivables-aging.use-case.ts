@@ -20,7 +20,6 @@ import {
   summarizeCurrencies,
 } from '../compute-patient-aging';
 import { civilDateIn } from '../../../../shared/time/civil-day';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
 
 export const RECEIVABLES_DEFAULT_PAGE_SIZE = 20;
@@ -204,7 +203,7 @@ export class GetReceivablesAgingUseCase {
   ) {}
 
   async execute(input: ReceivablesAgingInput): Promise<ReceivablesAgingPage> {
-    const { rows, location, now } = await this.scopedRows(input);
+    const { rows, location, now, zoneOf } = await this.scopedRows(input);
     const page = wholeOrDefault(input.page, 1, 1);
     const pageSize = Math.min(
       wholeOrDefault(input.pageSize, RECEIVABLES_DEFAULT_PAGE_SIZE, 1),
@@ -212,10 +211,7 @@ export class GetReceivablesAgingUseCase {
     );
     const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
     return {
-      asOf: civilDateIn(
-        now,
-        location?.timeZone ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
-      ),
+      asOf: civilDateIn(now, location?.timeZone ?? zoneOf(null)),
       scope: {
         location: location ? { id: location.id, name: location.name } : null,
       },
@@ -229,15 +225,11 @@ export class GetReceivablesAgingUseCase {
 
   /** Todas las filas filtradas, en el mismo orden (para el CSV). */
   async exportRows(filters: ReceivablesAgingFilters): Promise<AgingCsvRow[]> {
-    const { rows, zones } = await this.scopedRows(filters);
+    const { rows, zoneOf } = await this.scopedRows(filters);
     return (await this.withDetails(rows)).map((row) => ({
       ...row,
       lastNoteOn: row.lastNote
-        ? civilDateIn(
-            row.lastNote.createdAt,
-            (row.locationId && zones.get(row.locationId)) ||
-              DEFAULT_BUSINESS_HOURS_TIMEZONE,
-          )
+        ? civilDateIn(row.lastNote.createdAt, zoneOf(row.locationId))
         : null,
     }));
   }
@@ -249,7 +241,7 @@ export class GetReceivablesAgingUseCase {
     if (filters.locationId && !location) {
       throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
     }
-    const [ledgers, zones] = await Promise.all([
+    const [ledgers, zoneOf] = await Promise.all([
       this.repo.loadLedgers({ locationId: location?.id }),
       this.repo.locationTimeZones(),
     ]);
@@ -260,9 +252,7 @@ export class GetReceivablesAgingUseCase {
 
     const rows: ScopedRow[] = [];
     for (const ledger of ledgers) {
-      const timeZone =
-        (ledger.locationId && zones.get(ledger.locationId)) ||
-        DEFAULT_BUSINESS_HOURS_TIMEZONE;
+      const timeZone = zoneOf(ledger.locationId);
       const full = computePatientAging(ledger, { now, timeZone });
       const aging = filters.currency
         ? summarizeCurrencies(
@@ -295,7 +285,7 @@ export class GetReceivablesAgingUseCase {
       rows: await this.byCollections(rows, filters),
       location,
       now,
-      zones,
+      zoneOf,
     };
   }
 

@@ -22,6 +22,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-274 (Task 4) en HTTP real: resumen mensual ingresos − gastos y CSV. Los
 // abonos se siembran por `raw` para fijar sede, instante y moneda sin depender
@@ -115,7 +119,12 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     loc2 = (
       (
         await call('post', '/locations')
-          .send({ name: 'Sede Norte' })
+          .send(
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede Norte',
+              timeZone: 'Europe/Madrid',
+            }),
+          )
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -134,7 +143,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       ).body as { id: string }
     ).id;
     const plan = await raw.treatmentPlan.create({
-      data: { tenantId: clinic.tenantId, patientId: patient },
+      data: { tenantId: clinic.tenantId, patientId: patient, currency: 'USD' },
     });
     const income = (
       locationId: string,
@@ -167,23 +176,20 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     await income(loc2, 50.25, 'USD', '2026-10-10T17:00:00Z');
     // Sede Norte en Madrid: 23:30Z del 31 oct ya es 1 nov allí (UTC+1) y aún
     // 31 oct en Bogotá, donde está la sede principal: dos zonas en una petición.
-    const schedule = await raw.locationSchedule.findFirst({
-      where: { locationId: loc2, deletedAt: null },
-    });
-    if (schedule) {
-      await raw.locationSchedule.update({
-        where: { id: schedule.id },
-        data: { timezone: 'Europe/Madrid' },
-      });
-    } else {
-      await raw.locationSchedule.create({
-        data: {
-          tenantId: clinic.tenantId,
-          locationId: loc2,
-          timezone: 'Europe/Madrid',
-        },
-      });
-    }
+    // G1: la zona es un campo real del alta: la propia sede queda en Madrid
+    // (y su horario legado igual, R20), sin tocar el horario a mano.
+    expect(
+      await raw.location.findUniqueOrThrow({
+        where: { id: loc2 },
+        select: { timeZone: true },
+      }),
+    ).toEqual({ timeZone: 'Europe/Madrid' });
+    expect(
+      await raw.locationSchedule.findFirstOrThrow({
+        where: { locationId: loc2, deletedAt: null },
+        select: { timezone: true },
+      }),
+    ).toEqual({ timezone: 'Europe/Madrid' });
     await income(loc2, 10, 'USD', '2026-10-31T23:30:00Z');
 
     await expense({
@@ -240,12 +246,11 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
 
   describe('resumen', () => {
     it('sin zona explícita de una sede devuelve 409 recuperable y no inventa la del país', async () => {
-      const schedule = await raw.locationSchedule.findFirstOrThrow({
-        where: { tenantId: clinic.tenantId, locationId: loc1, deletedAt: null },
-      });
-      await raw.locationSchedule.update({
-        where: { id: schedule.id },
-        data: { deletedAt: new Date() },
+      // G1: la zona es de la sede; NULL = fila de una réplica antigua sin
+      // barrer (fase 1). Nunca se sustituye por la del país.
+      await raw.location.update({
+        where: { id: loc1 },
+        data: { timeZone: null },
       });
       try {
         const response = await summary('from=2026-10-01&to=2026-10-31').expect(
@@ -258,9 +263,9 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
         });
         await call('get', `/expenses?locationId=${loc1}`).expect(409);
       } finally {
-        await raw.locationSchedule.update({
-          where: { id: schedule.id },
-          data: { deletedAt: null },
+        await raw.location.update({
+          where: { id: loc1 },
+          data: { timeZone: 'America/Bogota' },
         });
       }
       await summary('from=2026-10-01&to=2026-10-31').expect(200);

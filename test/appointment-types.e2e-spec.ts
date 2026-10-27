@@ -10,6 +10,7 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { setLocationZone } from './support/location-fixtures';
 
 // DX-121 en HTTP real: tipos de cita (CRUD solo ADMIN, borrado lógico), agendar
 // con tipo, la agenda por columnas (`providerIds[]`) y mover una cita de hora y
@@ -107,6 +108,11 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
     await resetDatabase(raw);
     clinic = await registerClinic(app, 'dx121-e2e');
     other = await registerClinic(app, 'dx121-e2e-otra');
+    // El horario de abajo se fija en UTC: la zona es dato de la sede.
+    const main = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId },
+    });
+    await setLocationZone(raw, clinic.tenantId, main.id, 'UTC');
     const d = await seedMember(raw, clinic, ClinicRole.DENTIST);
     dentist = {
       userId: d.userId,
@@ -120,7 +126,7 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
     // Sede sin restricción de horario: los casos de abajo no dependen del día
     // de la corrida (el de 422 fija su propio horario).
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-      .send({ timezone: 'UTC', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
     patientId = await createPatient(clinic, '121001');
     secondPatientId = await createPatient(clinic, '121002');
@@ -489,7 +495,6 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       const appt = await book({ start: at('10:00'), end: at('10:30') });
       await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
         .send({
-          timezone: 'UTC',
           ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
             weekday,
             startMinute: 9 * 60,
@@ -509,7 +514,7 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         );
       } finally {
         await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-          .send({ timezone: 'UTC', ranges: [] })
+          .send({ ranges: [] })
           .expect(200);
       }
     });

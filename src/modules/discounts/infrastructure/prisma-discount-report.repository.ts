@@ -7,8 +7,8 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
+import { loadPeriodLocationZones } from '../../../shared/locations/location-time-zone';
+import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import {
   civilDateIn,
   civilPeriodByZone,
@@ -64,13 +64,47 @@ interface RawTotal {
 }
 
 /**
+ * La primera de `locationIds` a la que el informe atribuye algún ítem (sede del
+ * descuento, de la presentación del plan o del precio), o null. Es un
+ * superconjunto a propósito: mira cada columna por separado y no la sede que
+ * el informe acaba eligiendo (`COALESCE`), así que puede pedir la zona de una
+ * sede que al final no se usa; nunca deja fuera una fila sin avisar.
+ */
+async function firstDiscountLocation(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  locationIds: string[],
+): Promise<string | null> {
+  const [found] = await tx.$queryRaw<{ locationId: string }[]>`
+    SELECT x."locationId" FROM (
+      SELECT i."discountLocationId" AS "locationId"
+        FROM "treatment_plan_items" i
+       WHERE i."tenantId" = ${tenantId}::uuid
+         AND i."discountLocationId" = ANY(${locationIds}::uuid[])
+      UNION ALL
+      SELECT i."pricingLocationId"
+        FROM "treatment_plan_items" i
+       WHERE i."tenantId" = ${tenantId}::uuid
+         AND i."pricingLocationId" = ANY(${locationIds}::uuid[])
+      UNION ALL
+      SELECT p."presentedLocationId"
+        FROM "treatment_plans" p
+       WHERE p."tenantId" = ${tenantId}::uuid
+         AND p."presentedLocationId" = ANY(${locationIds}::uuid[])
+    ) x
+    LIMIT 1`;
+  return found?.locationId ?? null;
+}
+
+/**
  * Informe de descuentos (DX-204). Una línea por ítem VIVO (sin `deletedAt`, de
  * un plan vivo y no anulado: ni rechazado ni cancelado) con descuento > 0 o con
  * el precio por debajo del de catálogo (SEC-041: la rebaja cuenta como
  * descuento y se firma igual), fechado por su descuento (`discountAt`; en
  * los anteriores a DX-204, el alta del ítem) y con la sede del descuento (o, si
  * no la tiene, la de presentación del plan). El periodo son días civiles de la
- * zona de CADA sede, como la caja (DX-097); sin sede, la zona por defecto.
+ * zona de CADA sede, como la caja (DX-097); sin sede, la de la sede
+ * principal (R6).
  * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
  * (mismo predicado).
  *
@@ -93,6 +127,7 @@ interface RawTotal {
  * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
  * aceptar una opción la hermana rechazada lo duplicaría.
  */
+
 @Injectable()
 export class PrismaDiscountReportRepository implements DiscountReportRepository {
   constructor(
@@ -127,22 +162,35 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     cte: Prisma.Sql;
     zoneOf: (locationId: string | null) => string;
   }> {
-    const zones = await loadLocationTimeZones(tx, tenantId);
-    const zoneOf = (locationId: string | null) =>
-      (locationId && zones.get(locationId)) || DEFAULT_BUSINESS_HOURS_TIMEZONE;
-    const branches = civilPeriodByZone(query.from, query.to, zones);
-    const fallback = civilRangeInZone(
-      query.from,
-      query.to,
-      DEFAULT_BUSINESS_HOURS_TIMEZONE,
+    const zones = await loadPeriodLocationZones(
+      tx,
+      tenantId,
+      query.locationId ? [query.locationId] : undefined,
+      (ids) => firstDiscountLocation(tx, tenantId, ids),
     );
-    const starts = [fallback.start, ...branches.map((b) => b.start)];
-    const ends = [fallback.end, ...branches.map((b) => b.end)];
-    const minStart = new Date(Math.min(...starts.map((d) => d.getTime())));
-    const maxEnd = new Date(Math.max(...ends.map((d) => d.getTime())));
+    // Sin sede (ítem nunca presentado ni descontado en una): el día de la
+    // sede principal (R6). Con una sede pedida esas filas no entran.
+    const referenceId =
+      query.locationId ??
+      (await resolveReferenceLocation(tx, tenantId, null)).id;
+    const zoneOf = (locationId: string | null) =>
+      zones.zoneOf(locationId ?? referenceId);
+    const branches = civilPeriodByZone(query.from, query.to, zones.configured);
+    const fallback = query.locationId
+      ? null
+      : civilRangeInZone(query.from, query.to, zoneOf(null));
+    const ranges = fallback ? [fallback, ...branches] : branches;
+    const minStart = new Date(
+      Math.min(...ranges.map((r) => r.start.getTime())),
+    );
+    const maxEnd = new Date(Math.max(...ranges.map((r) => r.end.getTime())));
     const inPeriod = Prisma.join(
       [
-        Prisma.sql`(d."locationId" IS NULL AND d."at" >= ${fallback.start} AND d."at" < ${fallback.end})`,
+        ...(fallback
+          ? [
+              Prisma.sql`(d."locationId" IS NULL AND d."at" >= ${fallback.start} AND d."at" < ${fallback.end})`,
+            ]
+          : []),
         ...branches.map(
           (b) =>
             Prisma.sql`(d."locationId" = ANY(${b.locationIds}::uuid[]) AND d."at" >= ${b.start} AND d."at" < ${b.end})`,

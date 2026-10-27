@@ -19,6 +19,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  locationBody,
+  REGIONAL_BOGOTA_FIXTURE,
+} from './support/location-fixtures';
 
 // DX-145 · Cartera por antigüedad. Siembra CONTROLADA por DIRECT_URL (owner,
 // sin RLS) para fijar fechas pasadas que la API no deja escribir (vencimientos,
@@ -216,7 +220,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       .post('/api/v1/locations')
       .set('X-Tenant-Host', clinicA.host)
       .set('Authorization', `Bearer ${clinicA.adminToken}`)
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     sedeNorte = (created.body as { id: string }).id;
 

@@ -7,6 +7,11 @@ import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 // SEC-001 / SEC-002: el refresh revalida la sesión contra el estado ACTUAL
 // (membresía, rol, usuario, superadmin), es de un solo uso (rotación real) y
@@ -99,13 +104,16 @@ describe('Session revalidation on refresh (e2e)', () => {
     await app.init();
     await cleanup();
 
-    const reg = await registerVerified(app, {
-      clinicName: 'Sesiones E2E',
-      subdomain: SUB,
-      email: OWNER,
-      password: PASSWORD,
-      fullName: 'Dra. Dueña',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Sesiones E2E',
+        subdomain: SUB,
+        email: OWNER,
+        password: PASSWORD,
+        fullName: 'Dra. Dueña',
+      }),
+    );
     tenantId = (reg.body as { tenantId: string }).tenantId;
     ownerAccess = (await login(OWNER)).accessToken;
   });
@@ -161,7 +169,7 @@ describe('Session revalidation on refresh (e2e)', () => {
       .post('/api/v1/locations')
       .set('X-Tenant-Host', hostFor(SUB))
       .set('Authorization', `Bearer ${ownerAccess}`)
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     const otherLocationId = (norte.body as { id: string }).id;
 

@@ -48,6 +48,11 @@ import {
   type WeeklyLocationInput,
   type WeeklyProviderRange,
 } from '../../domain/provider-availability';
+import {
+  locationTimeZoneRequired,
+  locationZonesOf,
+  requireLocationTimeZone,
+} from '../../../../shared/locations/location-time-zone';
 
 /** Reloj del horario (qué día es hoy en la sede); los tests lo fijan. */
 export const PROVIDER_SCHEDULE_CLOCK = Symbol('PROVIDER_SCHEDULE_CLOCK');
@@ -85,7 +90,11 @@ export interface WeeklyRangeView {
 export interface ProviderLocationScheduleView {
   locationId: string;
   locationName: string;
-  timeZone: string;
+  /**
+   * Zona de la sede; `null` si no se conoce (sede sin configurar en fase 1 o
+   * retirada). Nunca una zona de reserva (G1, R5).
+   */
+  timeZone: string | null;
   ranges: WeeklyRangeView[];
 }
 
@@ -228,6 +237,7 @@ function toView(
   byId: Map<string, Location>,
 ): ProviderScheduleView {
   const ids = [...new Set(snapshot.weekly.map((r) => r.locationId))];
+  const zones = locationZonesOf([...byId.values()]);
   return {
     providerId,
     configured: snapshot.configured,
@@ -236,7 +246,7 @@ function toView(
       return {
         locationId,
         locationName: location?.name ?? '',
-        timeZone: location?.timeZone ?? '',
+        timeZone: zones.configured.get(locationId) ?? null,
         ranges: snapshot.weekly
           .filter((r) => r.locationId === locationId)
           .map(({ weekday, startMinute, endMinute }) => ({
@@ -341,7 +351,7 @@ export class ReplaceProviderScheduleUseCase {
       overridesFrom,
       locations: kept.map((l) => ({
         locationId: l.locationId,
-        timezone: byId.get(l.locationId)!.timeZone,
+        timezone: requireLocationTimeZone(byId.get(l.locationId)!),
         ranges: l.ranges,
       })),
       validate: (current) => {
@@ -511,7 +521,7 @@ export class SetProviderOverrideUseCase {
     if (!location) throw new BadRequestException('Sede no encontrada');
     assertProviderAttendsAt(member, location);
     const date = requireCivilDate(input.date);
-    const today = civilDateIn(this.clock(), location.timeZone);
+    const today = civilDateIn(this.clock(), requireLocationTimeZone(location));
     if (date < today) {
       throw new BadRequestException(
         'La excepción no puede ser de un día que ya pasó en la sede',
@@ -688,16 +698,28 @@ export class GetScheduleRosterUseCase {
     );
     const dates = Array.from({ length: days }, (_, i) => addCivilDays(from, i));
     const locationId = input.locationId ?? null;
+    // G1: una sede sin zona (fila de una réplica antigua sin barrer) solo
+    // falla si la vista la usa: la pedida, o con tramos de algún profesional
+    // en el período. Si no, sale del cuadrante.
+    const zones = locationZonesOf(shown);
+    const withRanges = new Set(
+      [...snapshots.values()].flatMap((snapshot) => [
+        ...snapshot.weekly.map((r) => r.locationId),
+        ...snapshot.overrides.map((o) => o.locationId),
+      ]),
+    );
+    const used = zones.unconfigured.find(
+      (id) => id === locationId || withRanges.has(id),
+    );
+    if (used) throw locationTimeZoneRequired(used);
 
     return {
       from,
       to,
       locationId,
-      locations: shown.map((l) => ({
-        id: l.id,
-        name: l.name,
-        timeZone: l.timeZone,
-      })),
+      locations: shown
+        .filter((l) => zones.configured.has(l.id))
+        .map((l) => ({ id: l.id, name: l.name, timeZone: zones.zoneOf(l.id) })),
       providers: providers.map((p) => {
         const snapshot = snapshots.get(p.userId)!;
         return {

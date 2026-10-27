@@ -92,6 +92,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /auth/forgot-password': PUBLIC_TENANT,
   'POST /auth/reset-password/check': PUBLIC_TENANT,
   'POST /auth/reset-password': PUBLIC_TENANT,
+  // GLOBAL-G1 (spec §3.5, R18): monedas para el formulario anónimo de
+  // registro; la misma lista global de GET /currencies, con el límite de
+  // POST /auth/register.
+  'GET /public/currencies': PUBLIC,
 
   // --- Públicas por host de clínica ---------------------------------------
   // Invitaciones: dentalix-docs/docs/plans/2026-08-01-invitaciones-backend.md;

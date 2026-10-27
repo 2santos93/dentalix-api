@@ -3,6 +3,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLocationScheduleRepository } from '../src/modules/location-schedule/infrastructure/repositories/prisma-location-schedule.repository';
 import { HardDeleteForbiddenError } from '../src/shared/prisma/no-hard-delete';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // Conexión de administración (DIRECT_URL, sin RLS) sólo para sembrar y para
 // mirar la tabla POR DEBAJO del repositorio: es la única forma de comprobar que
@@ -15,7 +19,6 @@ const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaLocationScheduleRepository(prisma, tenantContext);
 
-const TZ = 'America/Bogota';
 const MORNING = { weekday: 1, startMinute: 9 * 60, endMinute: 13 * 60 };
 const AFTERNOON = { weekday: 1, startMinute: 15 * 60, endMinute: 19 * 60 };
 const SATURDAY = { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 };
@@ -32,7 +35,10 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
     });
     tenantId = tenant.id;
     const location = await raw.location.create({
-      data: { tenantId, name: 'Sede única' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId,
+        name: 'Sede única',
+      }),
       select: { id: true },
     });
     locationId = location.id;
@@ -53,10 +59,7 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
 
   it('guarda el horario, lo reemplaza, y el reemplazo NO borra los tramos viejos', async () => {
     await asClinic(() =>
-      repo.replaceForCurrentLocation({
-        timezone: TZ,
-        ranges: [MORNING, AFTERNOON],
-      }),
+      repo.replaceForCurrentLocation({ ranges: [MORNING, AFTERNOON] }),
     );
 
     const primeros = await raw.locationScheduleRange.findMany({
@@ -67,7 +70,7 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
 
     // Segundo guardado: la clínica cambia a "sólo sábados por la mañana".
     const despues = await asClinic(() =>
-      repo.replaceForCurrentLocation({ timezone: TZ, ranges: [SATURDAY] }),
+      repo.replaceForCurrentLocation({ ranges: [SATURDAY] }),
     );
 
     // Lo que ve la aplicación: sólo el horario NUEVO.

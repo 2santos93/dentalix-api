@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import {
+  firstLocationWithRows,
+  loadPeriodLocationZones,
+} from '../../../../shared/locations/location-time-zone';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { civilPeriodByZone } from '../../../../shared/time/civil-day';
@@ -58,8 +61,15 @@ export class PrismaExpenseSummaryRepository implements ExpenseSummaryRepository 
           where: { tenantId, ...(scope && { id: { in: scope } }) },
           select: { id: true, name: true },
         });
-        const zones = await loadLocationTimeZones(tx, tenantId, scope, true);
-        const income = await this.income(tx, tenantId, query, zones);
+        // Los ingresos se reparten por mes civil de su sede: una sede sin zona
+        // solo falla si tiene abonos.
+        const zones = await loadPeriodLocationZones(
+          tx,
+          tenantId,
+          scope,
+          firstLocationWithRows(tx.payment, tenantId),
+        );
+        const income = await this.income(tx, tenantId, query, zones.configured);
         const expenses = await this.expenses(tx, tenantId, query, scope);
         return {
           locationNames: new Map(locations.map((l) => [l.id, l.name])),
@@ -82,7 +92,7 @@ export class PrismaExpenseSummaryRepository implements ExpenseSummaryRepository 
     tx: Prisma.TransactionClient,
     tenantId: string,
     query: ExpenseSummaryQuery,
-    zones: Map<string, string>,
+    zones: ReadonlyMap<string, string>,
   ): Promise<SummaryIncomeRow[]> {
     const rows: SummaryIncomeRow[] = [];
     let branches: ReturnType<typeof civilPeriodByZone>;

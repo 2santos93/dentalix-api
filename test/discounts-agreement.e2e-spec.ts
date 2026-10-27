@@ -17,6 +17,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // SEC-047 en HTTP real: la rebaja de convenio queda en el informe de
 // descuentos (DX-204). Un ítem resuelto por convenio sale con su rebaja (precio
@@ -315,7 +319,12 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     const locations = await as(clinicA).get('/locations').expect(200);
     const main = (locations.body as { id: string }[])[0].id;
     const north = (
-      await as(clinicA).post('/locations', { name: 'Sede Norte' }).expect(201)
+      await as(clinicA)
+        .post(
+          '/locations',
+          locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+        )
+        .expect(201)
     ).body as { id: string };
     const all = await report(clinicA);
     expect(all.items.find((i) => i.itemId === suraItem)?.locationId).toBe(main);

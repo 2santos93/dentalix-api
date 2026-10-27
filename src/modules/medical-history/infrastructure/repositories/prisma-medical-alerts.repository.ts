@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import type { SafetyFlags } from '../../domain/entities/medical-history.entity';
 import { lockPatientAnamnesis } from './anamnesis-lock';
 import type {
@@ -32,6 +34,23 @@ export class PrismaMedicalAlertsRepository implements MedicalAlertsRepository {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
     return tenantId;
+  }
+
+  locationTimeZones(
+    locationIds: readonly string[],
+  ): Promise<(locationId: string) => string> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant((tx) =>
+      resolveLocationTimeZones(tx, tenantId, locationIds),
+    );
+  }
+
+  async referenceTimeZone(locationId: string | null): Promise<string> {
+    const tenantId = this.tenantId();
+    const reference = await this.prisma.runWithTenant((tx) =>
+      resolveReferenceLocation(tx, tenantId, locationId),
+    );
+    return reference.timeZone;
   }
 
   async reviewStates(

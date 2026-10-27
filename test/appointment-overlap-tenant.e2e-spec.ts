@@ -8,6 +8,11 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-036 / DB-003: las EXCLUDE anti-solape de citas se evalúan SALTANDO la RLS.
 // Antes no incluían `tenantId`, así que un profesional que trabaja en dos
@@ -57,13 +62,16 @@ async function registerClinic(
   subdomain: string,
 ): Promise<Clinic> {
   const email = `owner@${subdomain}.com`;
-  const res = await registerVerified(app, {
-    clinicName: `Clinica ${subdomain}`,
-    subdomain,
-    email,
-    password: PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const res = await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: `Clinica ${subdomain}`,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const body = res.body as { tenantId: string; userId: string };
   const token = await login(app, subdomain, email);
   // La sede principal nace con horario por defecto; sin franjas, los casos no
@@ -72,7 +80,7 @@ async function registerClinic(
     .put('/api/v1/locations/schedule')
     .set('X-Tenant-Host', hostFor(subdomain))
     .set('Authorization', `Bearer ${token}`)
-    .send({ timezone: 'America/Bogota', ranges: [] })
+    .send({ ranges: [] })
     .expect(200);
   return { tenantId: body.tenantId, ownerId: body.userId, subdomain, token };
 }
@@ -214,7 +222,12 @@ describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {
       .post('/api/v1/locations')
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.token}`)
-      .send({ name: 'Sede Norte', address: 'Cra 15' })
+      .send(
+        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+          name: 'Sede Norte',
+          address: 'Cra 15',
+        }),
+      )
       .expect(201);
     const sedeNorte = (created.body as { id: string }).id;
     await request(app.getHttpServer())
@@ -222,7 +235,7 @@ describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.token}`)
       .set('X-Location-Id', sedeNorte)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ ranges: [] })
       .expect(200);
 
     // La cita de 10:00 está en la sede principal; reservar a la misma

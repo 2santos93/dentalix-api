@@ -34,6 +34,10 @@ import {
 import { OptOutByMessageUseCase } from '../src/modules/reminders/application/use-cases/reminder-opt-out.use-cases';
 import { CapturingMailer } from './support/capture-mailer';
 import { waitFor } from './support/wait-for';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-026, capa de BD con la app REAL (AppModule) y DOS workers (dos apps, dos
 // pools), como dos réplicas: el barrido programado de DX-085 encola, el
@@ -66,11 +70,11 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: `Clínica ${subdomain}`, subdomain },
   });
   const location = await owner.location.create({
-    data: {
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
       address: 'Calle 1 # 2-3',
-    },
+    }),
   });
   const provider = await owner.user.create({
     data: {

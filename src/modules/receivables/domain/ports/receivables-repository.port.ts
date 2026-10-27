@@ -27,9 +27,10 @@ export interface ReceivablesRepository {
 
   /**
    * Zona de cada sede de la clínica (incluidas las retiradas), para decidir el
-   * «hoy» de cada deuda.
+   * «hoy» de cada deuda; sin sede, la de la principal (R6). Una sede sin zona
+   * solo falla (409) si se busca su zona, es decir, si tiene deudas.
    */
-  locationTimeZones(): Promise<Map<string, string>>;
+  locationTimeZones(): Promise<(locationId: string | null) => string>;
 
   /**
    * Lo financiero de cada DEUDOR vivo de la clínica (de la sede pedida):

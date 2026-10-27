@@ -4,6 +4,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import type { AuditEventDraft } from '../src/modules/audit/domain/audit-event';
+import {
+  REGIONAL_TOKYO_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-009, capa de BD: append-only (triggers), RLS forzada y el repositorio
 // (resolución del paciente bajo RLS y paginación por cursor) contra Postgres.
@@ -31,6 +35,7 @@ async function purge(): Promise<void> {
   await owner.treatmentPlan.deleteMany({ where: { tenantId: { in: ids } } });
   await owner.clinicMembership.deleteMany({ where: { tenantId: { in: ids } } });
   await owner.patient.deleteMany({ where: { tenantId: { in: ids } } });
+  await owner.location.deleteMany({ where: { tenantId: { in: ids } } });
   await owner.tenant.deleteMany({ where: { id: { in: ids } } });
   await owner.user.deleteMany({ where: { email: { in: EMAILS } } });
 }
@@ -74,6 +79,13 @@ describe('DX-009 · audit_events en la BD (int)', () => {
     );
     tenantA = a.id;
     tenantB = b.id;
+    // Sede principal de A: da la zona de los eventos sin sede (R6).
+    await owner.location.create({
+      data: locationData(REGIONAL_TOKYO_FIXTURE, {
+        tenantId: tenantA,
+        name: 'Principal',
+      }),
+    });
     userA = (
       await owner.user.create({
         data: { email: EMAILS[0], passwordHash: 'x', fullName: 'Ana Admin' },
@@ -317,7 +329,8 @@ describe('DX-009 · audit_events en la BD (int)', () => {
       expect(first[0]).toMatchObject({
         actor: { id: userA, fullName: 'Ana Admin', role: 'ADMIN' },
         patient: { id: patientA, fullName: 'Paula Pérez' },
-        timeZone: 'America/Bogota',
+        // Evento sin sede: la zona de la sede principal, nunca una por defecto.
+        timeZone: 'Asia/Tokyo',
       });
       // B, con los mismos filtros, no ve nada.
       expect(await repo.list(tenantB, filter, null, 10)).toEqual([]);

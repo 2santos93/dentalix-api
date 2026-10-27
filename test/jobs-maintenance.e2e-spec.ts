@@ -98,6 +98,12 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
           cron: '* * * * *',
           job: 'payment-allocations.sweep',
         },
+        // GLOBAL-G1 fase 1: sedes que una réplica antigua dejó sin configurar.
+        {
+          name: 'locations.regional-backfill.every-5-min',
+          cron: '*/5 * * * *',
+          job: 'locations.regional-backfill',
+        },
       ]),
     );
   });

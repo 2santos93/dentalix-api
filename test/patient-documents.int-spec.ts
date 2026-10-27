@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-151, capa DB de patient_documents: RLS FORCE, FK compuestas, CHECKs
 // (tamaño, sha256, dientes FDI), hash único entre los vigentes,
@@ -34,7 +38,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },

@@ -1,4 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-216: la serie de recibos de la sede ("receiptPrefix", DX-136) la elige
 // un trigger BEFORE INSERT mirando las series ya usadas en la clínica. Sin
@@ -58,7 +62,7 @@ function createLocation(
 ) {
   const run = (client: Prisma.TransactionClient) =>
     client.location.create({
-      data: { tenantId, name },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name }),
       select: { id: true, receiptPrefix: true },
     });
   return tx ? run(tx) : asApp(tenantId, run);
@@ -235,7 +239,11 @@ describe('DX-216 · serie de recibos de la sede ante altas concurrentes (int)', 
     await expect(
       asApp(tenantA, (tx) =>
         tx.location.create({
-          data: { tenantId: tenantA, name: 'Sede Copia', receiptPrefix: 'SUR' },
+          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+            tenantId: tenantA,
+            name: 'Sede Copia',
+            receiptPrefix: 'SUR',
+          }),
         }),
       ),
     ).rejects.toThrow(/Unique constraint failed/);

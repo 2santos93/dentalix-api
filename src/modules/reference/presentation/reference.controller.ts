@@ -19,6 +19,7 @@ import { Currency } from '../domain/entities/currency.entity';
 import { Country } from '../domain/entities/country.entity';
 import { City } from '../domain/entities/city.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 
 // Reference data (currencies/countries/cities) is global, NOT tenant domain
 // data — same rationale as ExchangeController: this controller applies ONLY
@@ -69,5 +70,27 @@ export class ReferenceController {
   @ApiOkResponse({ type: [Icd10CodeDto] })
   icd10(@Query() query: SearchIcd10QueryDto): Promise<Icd10Code[]> {
     return this.searchIcd10.execute(query.q);
+  }
+}
+
+/**
+ * G1 (spec §3.5, R18): la lista de monedas SIN sesión, para el formulario
+ * anónimo de registro (la primera sede elige su moneda). Es la misma lista
+ * global de `GET /currencies` (sin datos de ninguna clínica ni persona), con
+ * el mismo límite por IP que `POST /auth/register`.
+ */
+@ApiTags('public')
+@Controller('public')
+export class PublicReferenceController {
+  constructor(private readonly listCurrencies: ListCurrenciesUseCase) {}
+
+  @Get('currencies')
+  @RateLimit('auth')
+  @ApiOperation({
+    summary: 'Monedas admitidas, sin sesión (formulario de registro)',
+  })
+  @ApiOkResponse({ type: [CurrencyDto] })
+  currencies(): Promise<Currency[]> {
+    return this.listCurrencies.execute();
   }
 }

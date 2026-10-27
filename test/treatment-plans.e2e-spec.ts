@@ -15,6 +15,13 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+  legacyLocationInsert,
+  locationData,
+  registerBody as clinicRegisterBody,
+} from './support/location-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup — usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -80,13 +87,16 @@ async function registerAndLogin(
   accessToken: string;
   subdomain: string;
 }> {
-  const register = await registerVerified(app, {
-    clinicName: opts.clinicName,
-    subdomain: opts.subdomain,
-    email: opts.email,
-    password: SEEDED_PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: opts.clinicName,
+      subdomain: opts.subdomain,
+      email: opts.email,
+      password: SEEDED_PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())
@@ -412,5 +422,67 @@ describe('Treatment plans (e2e)', () => {
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .expect(200);
+  });
+  it('takes the plan currency from the location, never USD (GLOBAL-G1 R14)', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica TP Moneda',
+      subdomain: 'clinica-tp-moneda',
+      email: 'owner@clinica-tp-moneda.com',
+    });
+    const patient = await createPatient(
+      app,
+      clinic.accessToken,
+      clinic.subdomain,
+      '9101',
+    );
+    const createPlan = (locationId?: string, body: object = {}) => {
+      const req = request(app.getHttpServer())
+        .post(`/api/v1/patients/${patient.id}/treatment-plans`)
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+      if (locationId) req.set('X-Location-Id', locationId);
+      return req.send(body);
+    };
+
+    // Una sola sede (COP): sin sede activa se usa la moneda común.
+    const single = await createPlan().expect(201);
+    expect((single.body as { currency: string }).currency).toBe('COP');
+
+    const tokyo = (
+      await raw.location.create({
+        data: locationData(REGIONAL_TOKYO_FIXTURE, {
+          tenantId: clinic.tenantId,
+          name: 'Tokio',
+        }),
+      })
+    ).id;
+    const unconfigured = await legacyLocationInsert(
+      raw,
+      clinic.tenantId,
+      'Sin configurar',
+    );
+
+    // Sede activa JPY: JPY. Una moneda explícita sigue mandando.
+    const inTokyo = await createPlan(tokyo).expect(201);
+    expect((inTokyo.body as { currency: string }).currency).toBe('JPY');
+    const explicit = await createPlan(tokyo, { currency: 'usd' }).expect(201);
+    expect((explicit.body as { currency: string }).currency).toBe('USD');
+
+    // Sede sin moneda: 409, no se adivina.
+    const noCurrency = await createPlan(unconfigured).expect(409);
+    expect(noCurrency.body).toMatchObject({
+      code: 'LOCATION_CURRENCY_REQUIRED',
+      locationId: unconfigured,
+    });
+    // Sin sede activa y con una sede sin configurar, tampoco se adivina.
+    await createPlan().expect(409);
+
+    // Sin sede sin configurar y con monedas distintas: 400.
+    await raw.location.update({
+      where: { id: unconfigured },
+      data: { deletedAt: new Date() },
+    });
+    const mixed = await createPlan().expect(400);
+    expect(mixed.body).toMatchObject({ code: 'PLAN_CURRENCY_REQUIRED' });
   });
 });

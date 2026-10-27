@@ -1,6 +1,9 @@
-import { ClinicCountry, type Prisma } from '@prisma/client';
-import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import type { Prisma } from '@prisma/client';
+import {
+  locationTimeZoneRequired,
+  requireLocationTimeZone,
+} from '../../../../shared/locations/location-time-zone';
+import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import type {
   NoticeLocation,
   NoticeResponsible,
@@ -58,28 +61,30 @@ export async function loadNoticeResponsibles(
 
 /**
  * La sede que da país y «hoy» a la regla: `locationId` (la de la cita o el
- * abono), si no la sede activa de la petición y, en la vista consolidada, la
- * principal (la viva más antigua). Sin sedes: Colombia.
+ * abono, aunque se haya retirado después) o, sin ella, la sede principal
+ * (R6). Clínica sin sedes activas: 409 `LOCATION_REQUIRED`; sede sin zona:
+ * 409 `LOCATION_TIMEZONE_REQUIRED`. Nunca un país ni una zona por defecto.
  */
 export async function loadNoticeLocation(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationId: string | null,
 ): Promise<NoticeLocation> {
-  const location = await tx.location.findFirst({
-    where: locationId ? { id: locationId } : { deletedAt: null },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    select: { id: true, country: true },
-  });
-  if (!location) {
-    return {
-      country: ClinicCountry.CO,
-      timeZone: DEFAULT_BUSINESS_HOURS_TIMEZONE,
-    };
+  if (!locationId) {
+    const { country, timeZone } = await resolveReferenceLocation(
+      tx,
+      tenantId,
+      null,
+    );
+    return { country, timeZone };
   }
-  const zones = await loadLocationTimeZones(tx, tenantId, [location.id]);
+  const location = await tx.location.findFirst({
+    where: { id: locationId, tenantId },
+    select: { id: true, country: true, timeZone: true },
+  });
+  if (!location) throw locationTimeZoneRequired(locationId);
   return {
     country: location.country,
-    timeZone: zones.get(location.id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
+    timeZone: requireLocationTimeZone(location),
   };
 }

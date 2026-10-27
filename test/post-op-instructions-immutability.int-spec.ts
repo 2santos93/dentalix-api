@@ -1,4 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-222, capa DB de las indicaciones postoperatorias: plantillas, vínculos a
 // procedimientos/tipos de cita y entregas INALTERABLES (solo se marca la
@@ -109,7 +113,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: `Sede ${subdomain}` },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: `Sede ${subdomain}`,
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: subdomain },

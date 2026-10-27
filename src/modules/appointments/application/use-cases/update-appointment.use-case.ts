@@ -77,6 +77,7 @@ import {
   planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 
 /**
  * Lo que el cliente puede cambiar. `revokeConfirmations` y los indicadores de
@@ -814,9 +815,10 @@ export class UpdateAppointmentUseCase {
   ): Promise<boolean> {
     const location = await this.locations.findById(appointment.locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
+    const timeZone = requireLocationTimeZone(location);
     return (
-      civilDateIn(appointment.start, location.timeZone) ===
-      civilDateIn(instant, location.timeZone)
+      civilDateIn(appointment.start, timeZone) ===
+      civilDateIn(instant, timeZone)
     );
   }
 

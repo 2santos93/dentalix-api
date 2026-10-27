@@ -4,6 +4,10 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { PrismaPlanQuoteRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import type { NewPlanAcceptance } from '../src/modules/treatment-plans/domain/ports/plan-quote-repository.port';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-012 (revisión): orden de bloqueos plan → ítem. La aceptación bloquea el
 // plan (FOR UPDATE) y luego los ítems; editar o retirar un ítem tiene que
@@ -43,7 +47,10 @@ async function seed(): Promise<Seeded> {
     },
   });
   await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede principal',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: 'Orden' },

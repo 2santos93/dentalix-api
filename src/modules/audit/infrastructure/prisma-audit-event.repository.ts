@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
+import {
+  loadTenantZones,
+  resolveReferenceLocation,
+} from '../../../shared/locations/reference-location';
 import type { AuditEventRepository } from '../domain/ports/audit-event-repository.port';
 import {
   MAX_AUDIT_USER_AGENT,
@@ -194,9 +197,6 @@ export class PrismaAuditEventRepository implements AuditEventRepository {
       const patientIds = [
         ...new Set(rows.flatMap((r) => (r.patientId ? [r.patientId] : []))),
       ];
-      const locationIds = [
-        ...new Set(rows.flatMap((r) => (r.locationId ? [r.locationId] : []))),
-      ];
       const members = await tx.clinicMembership.findMany({
         where: { userId: { in: actorIds } },
         select: { userId: true, user: { select: { fullName: true } } },
@@ -205,8 +205,9 @@ export class PrismaAuditEventRepository implements AuditEventRepository {
         where: { id: { in: patientIds } },
         select: { id: true, firstName: true, lastName: true },
       });
-      const zoneOf = await resolveLocationTimeZones(tx, tenantId, locationIds);
-      const clinicZone = await this.defaultZone(tx, tenantId);
+      // Cada evento en la zona de su sede; sin sede (login, ajustes de la
+      // clínica), en la de la principal (R6).
+      const zoneOf = await loadTenantZones(tx, tenantId);
       const names = new Map(members.map((m) => [m.userId, m.user.fullName]));
       // El superadmin que entra a la clínica (LoginUseCase) no es miembro; su
       // nombre sí se enseña: es personal de Dentalix, no de otra clínica.
@@ -229,7 +230,7 @@ export class PrismaAuditEventRepository implements AuditEventRepository {
         resourceType: r.resourceType,
         resourceId: r.resourceId,
         locationId: r.locationId,
-        timeZone: r.locationId ? zoneOf(r.locationId) : clinicZone,
+        timeZone: zoneOf(r.locationId),
         actor: r.actorUserId
           ? {
               id: r.actorUserId,
@@ -249,26 +250,14 @@ export class PrismaAuditEventRepository implements AuditEventRepository {
   }
 
   clinicTimeZone(tenantId: string, locationId?: string): Promise<string> {
+    // Una sede pedida, aunque esté retirada (sus eventos siguen en el
+    // registro); sin ella, la principal (R6).
     return this.prisma.runWithTenant(tenantId, async (tx) =>
       locationId
         ? (await resolveLocationTimeZones(tx, tenantId, [locationId]))(
             locationId,
           )
-        : this.defaultZone(tx, tenantId),
+        : (await resolveReferenceLocation(tx, tenantId, null)).timeZone,
     );
-  }
-
-  /** Zona de la sede principal (la primera activa), o la de por defecto. */
-  private async defaultZone(
-    tx: Prisma.TransactionClient,
-    tenantId: string,
-  ): Promise<string> {
-    const main = await tx.location.findFirst({
-      where: { deletedAt: null, isActive: true },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true },
-    });
-    if (!main) return DEFAULT_BUSINESS_HOURS_TIMEZONE;
-    return (await resolveLocationTimeZones(tx, tenantId, [main.id]))(main.id);
   }
 }

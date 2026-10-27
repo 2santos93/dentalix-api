@@ -1,4 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-226 (DB-037): la hora que pone el servidor de BD en columnas `timestamp`
 // sin zona es UTC, sea cual sea el TimeZone de la sesión. Con CURRENT_TIMESTAMP
@@ -130,7 +134,11 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       data: { name: SUBDOMAIN, subdomain: SUBDOMAIN },
     });
     const location = await raw.location.create({
-      data: { tenantId: tenant.id, name: 'Sede Centro', country: 'CO' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: tenant.id,
+        name: 'Sede Centro',
+        country: 'CO',
+      }),
     });
     const patient = await raw.patient.create({
       data: { tenantId: tenant.id, firstName: 'Ana', lastName: 'Zona' },

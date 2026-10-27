@@ -10,6 +10,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-247 en HTTP real: la agenda y el panel «En clínica» traen SOLO las
 // banderas médicas del paciente (alerta, premedicación, anamnesis al día /
@@ -174,7 +178,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     ).expect(200);
     mainId = (locations.body as { id: string }[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as { id: string }).id;
     for (const locationId of [mainId, northId]) {
@@ -182,7 +186,6 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
         locationId,
       })
         .send({
-          timezone: 'America/Bogota',
           ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
             weekday,
             startMinute: 0,

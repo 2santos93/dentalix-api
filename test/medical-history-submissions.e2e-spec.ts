@@ -27,6 +27,10 @@ import {
 } from '../src/modules/medical-history-submissions/domain/answers-to-version';
 import { allNoAnswers } from '../src/modules/medical-history-submissions/domain/__fixtures__/anamnesis-answers';
 import type { AnamnesisAnswers } from '../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-099 en HTTP real: el ciclo completo de la anamnesis por enlace —
 // recepción crea el enlace, el paciente lo abre sin sesión (la clínica sale
@@ -191,9 +195,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
     assistantToken = await loginAs(app, clinicA.host, assistant.email);
 
     // Sin horario: la cita se puede agendar a cualquier hora.
-    await as(clinicA)
-      .put('/locations/schedule', { timezone: 'America/Bogota', ranges: [] })
-      .expect(200);
+    await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     locationId = (
       await raw.location.findFirstOrThrow({
         where: { tenantId: clinicA.tenantId },
@@ -753,7 +755,10 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         declarationAccepted: true,
       }).expect(200);
       const north = await raw.location.create({
-        data: { tenantId: clinicA.tenantId, name: 'Sede Norte DX-099' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: clinicA.tenantId,
+          name: 'Sede Norte DX-099',
+        }),
       });
       // seedMember usa un correo por rol: el segundo odontólogo va aparte,
       // con el mismo hash de contraseña que el primero.

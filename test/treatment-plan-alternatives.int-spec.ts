@@ -13,6 +13,10 @@ import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-040 sobre Postgres: aceptar una opción rechaza a sus hermanas en la MISMA
 // transacción (también la aceptación firmada de DX-012 y con dos aceptaciones
@@ -59,14 +63,17 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     },
   });
   const main = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede principal',
+    }),
   });
   const north = await raw.location.create({
-    data: {
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede norte',
       createdAt: new Date(Date.now() + 1000),
-    },
+    }),
   });
   const catalog = await raw.dentalCatalogItem.create({
     data: {

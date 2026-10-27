@@ -16,6 +16,10 @@ import {
   FEE_ITEM_LOCKED_MESSAGE,
   FEE_PLAN_LOCKED_MESSAGE,
 } from '../src/modules/cancellation-fees/domain/cancellation-fee';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // SEC-050: el cargo por inasistencia o cancelación tardía (DX-291) ya no se
 // rebaja ni se anula desde el plan. Matriz rol × acción sobre el ítem del
@@ -435,8 +439,14 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
       await setPolicy(true);
       try {
         const norte = (
-          (await admin().post('/locations', { name: 'Sede norte' }).expect(201))
-            .body as { id: string }
+          (
+            await admin()
+              .post(
+                '/locations',
+                locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede norte' }),
+              )
+              .expect(201)
+          ).body as { id: string }
         ).id;
         // Una recepcionista solo de la sede norte: la cita es de la principal.
         const m = await seedMember(

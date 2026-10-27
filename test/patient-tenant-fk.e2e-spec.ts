@@ -8,6 +8,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // SEC-004: los endpoints que reciben `:patientId` en la ruta tienen que
 // resolver el paciente en la clínica en contexto ANTES de insertar. Antes
@@ -36,13 +40,16 @@ async function registerAndLogin(
   subdomain: string,
 ): Promise<Clinic> {
   const email = `owner@${subdomain}.com`;
-  await registerVerified(app, {
-    clinicName: subdomain,
-    subdomain,
-    email,
-    password: PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: subdomain,
+      subdomain,
+      email,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(subdomain))

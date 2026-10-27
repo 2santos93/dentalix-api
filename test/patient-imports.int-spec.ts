@@ -9,6 +9,10 @@ import {
   PrismaPatientImportRepository,
 } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-107, capa DB de la importación de pacientes: RLS FORCE de los lotes y sus
 // filas, FK compuestas por tenant (paciente → lote, fila → lote/paciente),
@@ -64,7 +68,10 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const user = await raw.user.create({
     data: {

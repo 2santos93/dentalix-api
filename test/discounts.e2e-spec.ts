@@ -17,6 +17,11 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  legacyLocationInsert,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-204 en HTTP real: tope de descuento por rol, motivo obligatorio por
 // encima del umbral, «Descuento %» en bloque con redondeo por moneda, planes
@@ -184,7 +189,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     const locations = await as(clinicA).get('/locations').expect(200);
     mainLocationA = (locations.body as { id: string }[])[0].id;
     const north = await as(clinicA)
-      .post('/locations', { name: 'Sede Norte' })
+      .post(
+        '/locations',
+        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+      )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
   });
@@ -602,6 +610,60 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         percent: 5,
         discountByName: 'Miembro DENTIST',
         locationId: northLocationA,
+      });
+    });
+
+    describe('sede sin zona (réplica antigua)', () => {
+      let legacy: string;
+      let baseline: Report;
+      const consolidated = async () =>
+        (
+          await as(clinicA)
+            .get(`/reports/discounts?${period()}&pageSize=200`)
+            .expect(200)
+        ).body as Report;
+
+      beforeAll(async () => {
+        baseline = await consolidated();
+        legacy = await legacyLocationInsert(
+          raw,
+          clinicA.tenantId,
+          'Réplica antigua',
+        );
+      });
+
+      afterAll(async () => {
+        await raw.location.delete({ where: { id: legacy } });
+      });
+
+      it('tenant-wide view ignores an unconfigured location without movements', async () => {
+        // Mismas filas y totales que sin esa sede.
+        expect(await consolidated()).toEqual(baseline);
+      });
+
+      it('tenant-wide view with movements at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {
+        const before = await raw.treatmentPlanItem.findUniqueOrThrow({
+          where: { id: northItem.id },
+          select: { discountLocationId: true },
+        });
+        await raw.treatmentPlanItem.update({
+          where: { id: northItem.id },
+          data: { discountLocationId: legacy },
+        });
+        try {
+          const res = await as(clinicA)
+            .get(`/reports/discounts?${period()}&pageSize=200`)
+            .expect(409);
+          expect(res.body).toMatchObject({
+            code: 'LOCATION_TIMEZONE_REQUIRED',
+            locationId: legacy,
+          });
+        } finally {
+          await raw.treatmentPlanItem.update({
+            where: { id: northItem.id },
+            data: { discountLocationId: before.discountLocationId },
+          });
+        }
       });
     });
 

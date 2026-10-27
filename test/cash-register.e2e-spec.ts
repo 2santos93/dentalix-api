@@ -15,6 +15,11 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 // `raw` es la conexión de ADMINISTRACIÓN (DIRECT_URL, owner `dentalix`) solo
 // para sembrar y limpiar: con RLS, el rol de la app sin tenant en contexto ve
@@ -64,11 +69,14 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
-  const register = await registerVerified(app, {
-    ...opts,
-    password: PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      ...opts,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const accessToken = await loginAs(app, opts.subdomain, opts.email);
   return {
     tenantId: (register.body as { tenantId: string }).tenantId,
@@ -178,7 +186,7 @@ describe('Caja — GET /payments (e2e)', () => {
     const norte = await authA(
       request(app.getHttpServer())
         .post('/api/v1/locations')
-        .send({ name: 'Sede Norte' }),
+        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' })),
     ).expect(201);
     sedeNorte = (norte.body as { id: string }).id;
 
@@ -203,12 +211,20 @@ describe('Caja — GET /payments (e2e)', () => {
 
     planAna = (
       await raw.treatmentPlan.create({
-        data: { tenantId: clinicA.tenantId, patientId: patientAna },
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId: patientAna,
+          currency: 'USD',
+        },
       })
     ).id;
     const planBeto = (
       await raw.treatmentPlan.create({
-        data: { tenantId: clinicA.tenantId, patientId: patientBeto },
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId: patientBeto,
+          currency: 'USD',
+        },
       })
     ).id;
 
@@ -329,7 +345,11 @@ describe('Caja — GET /payments (e2e)', () => {
       },
     });
     const planB = await raw.treatmentPlan.create({
-      data: { tenantId: clinicB.tenantId, patientId: patientB.id },
+      data: {
+        tenantId: clinicB.tenantId,
+        patientId: patientB.id,
+        currency: 'USD',
+      },
     });
     await seedPayment('clinicB', {
       tenantId: clinicB.tenantId,
@@ -568,11 +588,19 @@ describe('Caja — GET /payments (e2e)', () => {
     let sedeMadrid: string;
 
     beforeAll(async () => {
-      // Sede en España: nace con el horario en la zona de su país.
+      // Sede en España: su zona (G1) es la que se elige al darla de alta.
       const madrid = await authA(
         request(app.getHttpServer())
           .post('/api/v1/locations')
-          .send({ name: 'Sede Madrid', country: 'ES' }),
+          .send(
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede Madrid',
+              country: 'ES',
+              currency: 'EUR',
+              timeZone: 'Europe/Madrid',
+              locale: 'es-ES',
+            }),
+          ),
       ).expect(201);
       sedeMadrid = (madrid.body as { id: string }).id;
 
