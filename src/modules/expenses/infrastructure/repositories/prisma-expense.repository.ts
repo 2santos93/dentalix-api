@@ -4,9 +4,9 @@ import { prismaRuleCode } from '../../../../shared/prisma/prisma-exception.filte
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
-  loadLocationTimeZones,
+  firstLocationWithRows,
+  loadPeriodLocationZones,
   resolveLocationTimeZones,
-  requireConfiguredLocationTimeZone,
 } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type {
@@ -140,12 +140,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       } else {
         locationId = await this.tenantContext.writeLocationId(tx);
       }
-      const zoneOf = await resolveLocationTimeZones(
-        tx,
-        tenantId,
-        [locationId],
-        true,
-      );
+      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
       return { locationId, today: civilDateIn(now, zoneOf(locationId)) };
     });
   }
@@ -153,12 +148,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   locationToday(locationId: string, now: Date): Promise<string> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const zoneOf = await resolveLocationTimeZones(
-        tx,
-        tenantId,
-        [locationId],
-        true,
-      );
+      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
       return civilDateIn(now, zoneOf(locationId));
     });
   }
@@ -218,14 +208,16 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       };
     }
     return this.prisma.runWithTenant(async (tx) => {
-      const zones = await loadLocationTimeZones(
+      const zones = await loadPeriodLocationZones(
         tx,
         tenantId,
         filters.locationId ? [filters.locationId] : scope,
-        true,
+        firstLocationWithRows(tx.expense, tenantId),
       );
-      const ids = [...zones.keys()];
-      const days = ids.map((id) => civilDateIn(now, zones.get(id)!));
+      const ids = [...zones.configured.keys()];
+      const days = [...zones.configured.values()].map((zone) =>
+        civilDateIn(now, zone),
+      );
       const args = { tenantId, filters, scope, todays: { ids, days } };
       // En orden: una transacción interactiva usa una sola conexión.
       const rows = await tx.$queryRaw<ExpenseListRow[]>(pageQuery(args));
@@ -236,10 +228,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         mapExpense(
           { ...row, amountCents: Number(row.amountCents) },
           Number(row.paidCents),
-          civilDateIn(
-            now,
-            requireConfiguredLocationTimeZone(zones.get(row.locationId)),
-          ),
+          civilDateIn(now, zones.zoneOf(row.locationId)),
         ),
       );
       return {
@@ -270,12 +259,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       include: { payments: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } },
     });
     if (!row) return null;
-    const zoneOf = await resolveLocationTimeZones(
-      tx,
-      this.requireTenantId(),
-      [row.locationId],
-      true,
-    );
+    const zoneOf = await resolveLocationTimeZones(tx, this.requireTenantId(), [
+      row.locationId,
+    ]);
     return mapDetail(row, civilDateIn(now, zoneOf(row.locationId)));
   }
 
@@ -564,12 +550,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       const invoiceDate = patch.invoiceDate ?? dayOf(current.invoiceDate);
       if (patch.locationId !== undefined || patch.invoiceDate !== undefined) {
         const locationId = patch.locationId ?? current.locationId;
-        const zoneOf = await resolveLocationTimeZones(
-          tx,
-          tenantId,
-          [locationId],
-          true,
-        );
+        const zoneOf = await resolveLocationTimeZones(tx, tenantId, [
+          locationId,
+        ]);
         validateInvoiceDate(invoiceDate, civilDateIn(now, zoneOf(locationId)));
       }
       const dueDate =

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
+  type ClinicCountry,
   type ContactChannel,
   type PatientImportBatch,
   type PatientImportDuplicateMode,
@@ -10,6 +11,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireLocationTimeZone,
+  resolveLocationTimeZones,
+} from '../../../shared/locations/location-time-zone';
 import { lockPatientDocs } from '../../patients/infrastructure/patient-doc-lock';
 import type { ExistingPatientDoc } from '../domain/dedupe';
 import {
@@ -135,6 +140,13 @@ export class BatchStateError extends Error {
   constructor(readonly status: PatientImportStatus) {
     super(`batch in ${status}`);
   }
+}
+
+/** La sede de un lote nuevo: su país y su zona. */
+export interface BatchLocation {
+  id: string;
+  country: ClinicCountry;
+  timeZone: string;
 }
 
 /** La sede del lote no existe o está inactiva. */
@@ -296,16 +308,24 @@ export class PrismaPatientImportRepository {
     return id;
   }
 
-  /** Sede del lote (la de escritura del request), activa, y su país. */
-  async batchLocation(): Promise<{ id: string; country: string }> {
+  /**
+   * Sede del lote (la de escritura del request), activa, con su país (reglas
+   * del documento) y su zona («hoy» de la validación). Sin zona válida, 409
+   * `LOCATION_TIMEZONE_REQUIRED`.
+   */
+  async batchLocation(): Promise<BatchLocation> {
     return this.prisma.runWithTenant(async (tx) => {
       const id = await this.tenantContext.writeLocationId(tx);
       const location = await tx.location.findFirst({
         where: { id, deletedAt: null, isActive: true },
-        select: { id: true, country: true },
+        select: { id: true, country: true, timeZone: true },
       });
       if (!location) throw new BatchLocationError();
-      return location;
+      return {
+        id: location.id,
+        country: location.country,
+        timeZone: requireLocationTimeZone(location),
+      };
     });
   }
 
@@ -918,15 +938,13 @@ export class PrismaPatientImportRepository {
     return rows.map((r) => r.code);
   }
 
-  /** País de la sede del lote (su zona decide el «hoy» de los saldos sin fecha). */
-  async locationCountry(locationId: string): Promise<string> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const location = await tx.location.findFirstOrThrow({
-        where: { id: locationId },
-        select: { country: true },
-      });
-      return location.country;
-    });
+  /** Zona de la sede del lote: decide el «hoy» de los saldos sin fecha. */
+  async locationTimeZone(locationId: string): Promise<string> {
+    const tenantId = this.tenantId();
+    const zoneOf = await this.prisma.runWithTenant((tx) =>
+      resolveLocationTimeZones(tx, tenantId, [locationId]),
+    );
+    return zoneOf(locationId);
   }
 
   async listBatches(

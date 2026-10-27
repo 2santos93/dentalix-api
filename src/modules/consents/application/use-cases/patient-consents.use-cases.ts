@@ -34,7 +34,6 @@ import {
   assertPatientInClinic,
   PATIENT_NOT_FOUND_MESSAGE,
 } from '../../../patients/application/assert-patient-in-clinic';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 
 export type ConsentClock = () => Date;
 export const CONSENT_CLOCK = Symbol('CONSENT_CLOCK');
@@ -138,7 +137,7 @@ async function prepare(
     documento: documentOf(context.patient) ?? NO_DOCUMENT,
     profesional: context.professionalName,
     clinica: context.clinicName,
-    fecha: formatConsentDate(now, DEFAULT_BUSINESS_HOURS_TIMEZONE),
+    fecha: formatConsentDate(now, context.timeZone),
     tratamiento: treatmentOf(context.plan),
   });
   return { template, context, title: template.title, body };

@@ -10,17 +10,10 @@ import {
   type AnamnesisReviewState,
   type MedicalAlertsRepository,
 } from '../domain/ports/medical-alerts-repository.port';
-import {
-  LOCATION_REPOSITORY,
-  type LocationRepository,
-} from '../../locations/domain/ports/location-repository.port';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { civilDateIn } from '../../../shared/time/civil-day';
 
 export const MEDICAL_ALERTS_CLOCK = Symbol('MEDICAL_ALERTS_CLOCK');
-
-/** Zona de reserva si la clínica no tiene ninguna sede viva (no debería pasar). */
-const FALLBACK_TIME_ZONE = 'America/Bogota';
 
 /** Lo que hace falta de una cita para evaluar su alerta el día que ocurre. */
 export interface AppointmentForAlerts {
@@ -46,8 +39,6 @@ export class PatientMedicalAlertFlags {
   constructor(
     @Inject(MEDICAL_ALERTS_REPOSITORY)
     private readonly repo: MedicalAlertsRepository,
-    @Inject(LOCATION_REPOSITORY)
-    private readonly locations: LocationRepository,
     private readonly tenantContext: TenantContextService,
     @Inject(MEDICAL_ALERTS_CLOCK) private readonly now: () => Date,
   ) {}
@@ -110,12 +101,14 @@ export class PatientMedicalAlertFlags {
   ): Promise<Map<string, MedicalAlertFlags>> {
     const out = new Map<string, MedicalAlertFlags>();
     if (appointments.length === 0) return out;
-    const [{ states, months }, zones] = await Promise.all([
+    const [{ states, months }, zoneOf] = await Promise.all([
       this.load([...new Set(appointments.map((a) => a.patientId))]),
-      this.zonesByLocation(),
+      this.repo.locationTimeZones([
+        ...new Set(appointments.map((a) => a.locationId)),
+      ]),
     ]);
     for (const a of appointments) {
-      const timeZone = zones.byId.get(a.locationId) ?? zones.fallback;
+      const timeZone = zoneOf(a.locationId);
       out.set(
         a.id,
         this.flagsOf(states.get(a.patientId), months, {
@@ -129,24 +122,12 @@ export class PatientMedicalAlertFlags {
 
   /**
    * Hoy en la sede del request o, en la vista consolidada, en la principal
-   * (la primera creada), con el reloj del servidor.
+   * (R6), con el reloj del servidor.
    */
   async todayInSede(): Promise<CivilDayInZone> {
-    const zones = await this.zonesByLocation();
-    const locationId = this.tenantContext.getLocationId();
-    const timeZone =
-      (locationId ? zones.byId.get(locationId) : undefined) ?? zones.fallback;
+    const timeZone = await this.repo.referenceTimeZone(
+      this.tenantContext.getLocationId() ?? null,
+    );
     return { date: civilDateIn(this.now(), timeZone), timeZone };
-  }
-
-  private async zonesByLocation(): Promise<{
-    byId: Map<string, string>;
-    fallback: string;
-  }> {
-    const list = await this.locations.list();
-    return {
-      byId: new Map(list.map((l) => [l.id, l.timeZone])),
-      fallback: list[0]?.timeZone ?? FALLBACK_TIME_ZONE,
-    };
   }
 }

@@ -10,17 +10,23 @@ import { PrismaExpenseSummaryRepository } from './prisma-expense-summary.reposit
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const LOCATION = '22222222-2222-4222-8222-222222222222';
 
-function build(timezone: string | null) {
+function build(timeZone: string | null, { withPayments = true } = {}) {
   const tx = {
     location: {
       findMany: jest.fn(() =>
         Promise.resolve([{ id: LOCATION, name: 'Sede' }]),
       ),
     },
+    // ¿Tiene abonos alguna sede sin zona? (solo se pregunta si la hay).
+    payment: {
+      findFirst: jest.fn(() =>
+        Promise.resolve(withPayments ? { locationId: LOCATION } : null),
+      ),
+    },
     // La primera consulta son las zonas; las demás (ingresos y gastos), vacías.
     $queryRaw: jest
       .fn()
-      .mockResolvedValueOnce([{ id: LOCATION, country: 'CO', timezone }])
+      .mockResolvedValueOnce([{ id: LOCATION, timeZone }])
       .mockResolvedValue([]),
   };
   const prisma = {
@@ -37,17 +43,31 @@ function build(timezone: string | null) {
 
 describe('resumen de gastos: zonas horarias (DX-274)', () => {
   it.each([null, 'Invalid/Zone'])(
-    'sin zona configurada (%s) devuelve un conflicto recuperable sin agrupar ingresos',
-    async (timezone) => {
-      const { tx, summarize } = build(timezone);
+    'una sede sin zona (%s) y con abonos devuelve un conflicto recuperable sin agrupar ingresos',
+    async (timeZone) => {
+      const { tx, summarize } = build(timeZone);
       await expect(summarize('2026-10-01', '2026-10-31')).rejects.toMatchObject(
         {
-          response: { code: 'LOCATION_TIMEZONE_REQUIRED', statusCode: 409 },
+          response: {
+            code: 'LOCATION_TIMEZONE_REQUIRED',
+            statusCode: 409,
+            locationId: LOCATION,
+          },
         },
       );
       expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('tenant-wide view ignores an unconfigured location without movements', async () => {
+    const { tx, summarize } = build(null, { withPayments: false });
+    await expect(summarize('2026-10-01', '2026-10-31')).resolves.toMatchObject({
+      income: [],
+      expenses: [],
+    });
+    // Zonas + gastos: ninguna zona configurada, ninguna consulta de ingresos.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+  });
 
   it('un día que no existe en la zona de una sede es 400 con el mensaje, no un 500', async () => {
     // Pacific/Apia saltó del 29 al 31 de diciembre de 2011.

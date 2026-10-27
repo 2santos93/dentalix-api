@@ -9,6 +9,8 @@ import { GetPaymentsTotalsUseCase } from '../src/modules/payments/application/us
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+  legacyLocationInsert,
   locationData,
 } from './support/location-fixtures';
 
@@ -329,6 +331,109 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     await owner.$executeRawUnsafe('ANALYZE "payments"');
     const text = plan.map((r) => r['QUERY PLAN']).join('\n');
     expect(text).toContain('payments_tenantId_locationId_paidAt_active_idx');
+  });
+
+  /** Abono directo (owner) en una sede de A; se borra con `dropPayments`. */
+  const payAt = async (locationId: string, paidAt: string) =>
+    (
+      await owner.payment.create({
+        data: {
+          tenantId: tenantA,
+          locationId,
+          treatmentPlanId: planA,
+          patientId: patientA,
+          amount: 1,
+          currency: 'COP',
+          paidAt: new Date(paidAt),
+        },
+      })
+    ).id;
+  const dropPayments = async (paymentIds: string[]) => {
+    await owner.paymentAllocation.deleteMany({
+      where: { paymentId: { in: paymentIds } },
+    });
+    await owner.payment.deleteMany({ where: { id: { in: paymentIds } } });
+  };
+
+  it('cash day cut at Tokyo midnight', async () => {
+    const tokyo = (
+      await owner.location.create({
+        data: locationData(REGIONAL_TOKYO_FIXTURE, {
+          tenantId: tenantA,
+          name: 'Tokio',
+        }),
+      })
+    ).id;
+    // 20/10 23:59 y 21/10 00:00 en Tokio (UTC+9, sin horario de verano).
+    const before = await payAt(tokyo, '2026-10-20T14:59:00.000Z');
+    const after = await payAt(tokyo, '2026-10-20T15:00:00.000Z');
+    try {
+      expect(await cashIds(tokyo, '2026-10-20')).toEqual([before]);
+      expect(await cashIds(tokyo, '2026-10-21')).toEqual([after]);
+      // Consolidada: también en su zona, junto a las de Bogotá y Madrid.
+      expect(await cashIds(undefined, '2026-10-21')).toEqual([after]);
+    } finally {
+      await dropPayments([before, after]);
+      await owner.location.delete({ where: { id: tokyo } });
+    }
+  });
+
+  describe('sede sin zona (réplica antigua) en la vista de toda la clínica', () => {
+    let legacy: string;
+
+    beforeAll(async () => {
+      legacy = await legacyLocationInsert(owner, tenantA, 'Réplica antigua');
+    });
+
+    afterAll(async () => {
+      await owner.location.delete({ where: { id: legacy } });
+    });
+
+    it('tenant-wide view ignores an unconfigured location without movements', async () => {
+      // Caja y dashboard consolidados siguen funcionando.
+      expect(await cashIds(undefined, '2026-10-16')).toEqual(
+        idsOf('bogEvening', 'madEarly'),
+      );
+      const month = await inA(undefined, () =>
+        totals.execute({
+          from: '2026-10-01',
+          to: '2026-10-31',
+          currency: 'COP',
+        }),
+      );
+      expect(month.count).toBeGreaterThan(0);
+      // Pedir esa sede sí necesita su zona.
+      await expect(cashIds(legacy, '2026-10-16')).rejects.toMatchObject({
+        response: { code: 'LOCATION_TIMEZONE_REQUIRED', locationId: legacy },
+      });
+    });
+
+    it('tenant-wide view with movements at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {
+      const paid = await payAt(legacy, '2026-10-16T17:00:00.000Z');
+      try {
+        const conflict = {
+          response: { code: 'LOCATION_TIMEZONE_REQUIRED', locationId: legacy },
+        };
+        await expect(cashIds(undefined, '2026-10-16')).rejects.toMatchObject(
+          conflict,
+        );
+        await expect(
+          inA(undefined, () =>
+            totals.execute({
+              from: '2026-10-01',
+              to: '2026-10-31',
+              currency: 'COP',
+            }),
+          ),
+        ).rejects.toMatchObject(conflict);
+        // La caja de otra sede no la necesita.
+        expect(await cashIds(bogota, '2026-10-16')).toEqual(
+          idsOf('bogEvening'),
+        );
+      } finally {
+        await dropPayments([paid]);
+      }
+    });
   });
 
   describe('migración 20261017113000_payments_civil_day_noon', () => {

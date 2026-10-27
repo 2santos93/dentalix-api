@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { computePatientAging } from '../../receivables/application/compute-patient-aging';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
 import {
   COLLECTIONS_REPOSITORY,
   type CollectionsRepository,
@@ -39,13 +38,11 @@ export class PatientBalanceFlags {
     if (ids.length === 0) return out;
     const ledgers = await this.repo.ledgersOf(ids);
     if (ledgers.length === 0) return out;
-    const zones = await this.repo.locationTimeZones();
+    const zoneOf = await this.repo.locationTimeZones();
     const now = this.now();
     const withAmounts = role !== null && OVERDUE_AMOUNT_ROLES.includes(role);
     for (const ledger of ledgers) {
-      const timeZone =
-        (ledger.locationId && zones.get(ledger.locationId)) ||
-        DEFAULT_BUSINESS_HOURS_TIMEZONE;
+      const timeZone = zoneOf(ledger.locationId);
       out.set(
         ledger.patientId,
         overdueView(

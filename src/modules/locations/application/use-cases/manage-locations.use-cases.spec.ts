@@ -404,7 +404,10 @@ describe('teléfono de la sede (DX-222)', () => {
       try {
         await p;
       } catch (err) {
-        return (err as ConflictException).getResponse()['code'] as string;
+        const body = (err as ConflictException).getResponse() as {
+          code: string;
+        };
+        return body.code;
       }
       return 'NO_ERROR';
     };

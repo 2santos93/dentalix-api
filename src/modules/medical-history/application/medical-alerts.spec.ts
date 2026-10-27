@@ -10,7 +10,6 @@ import { deriveSafetyFlags } from '../domain/safety-flags';
 import { NO_ANAMNESIS_FLAGS } from '../domain/medical-alert-flags';
 import { InMemoryMedicalAlertsRepository } from './__fixtures__/in-memory-medical-alerts';
 import { PatientMedicalAlertFlags } from './patient-medical-alert-flags';
-import type { LocationRepository } from '../../locations/domain/ports/location-repository.port';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
   ConfirmAnamnesisNoChangesUseCase,
@@ -23,32 +22,12 @@ import {
 const NOW = new Date('2026-10-20T15:00:00.000Z');
 const TODAY = { date: '2026-10-20', timeZone: 'America/Bogota' };
 
-/** Dos sedes: la principal en Bogotá y otra en Madrid. */
-function fakeLocations(): LocationRepository & { calls: number } {
-  const fake = {
-    calls: 0,
-    list() {
-      fake.calls++;
-      return Promise.resolve([
-        { id: 'bog', timeZone: 'America/Bogota' },
-        { id: 'mad', timeZone: 'Europe/Madrid' },
-      ]);
-    },
-  };
-  return fake as unknown as LocationRepository & { calls: number };
-}
-
+/** El repositorio en memoria trae dos sedes: la principal en Bogotá y otra en Madrid. */
 function flagsService(
   repo: InMemoryMedicalAlertsRepository,
-  locations = fakeLocations(),
   tenantContext = new TenantContextService(),
 ) {
-  return new PatientMedicalAlertFlags(
-    repo,
-    locations,
-    tenantContext,
-    () => NOW,
-  );
+  return new PatientMedicalAlertFlags(repo, tenantContext, () => NOW);
 }
 const premedication = deriveSafetyFlags({
   conditions: [
@@ -101,8 +80,6 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
   });
 
   it('cada cita se evalúa el día civil de su inicio en la zona de su sede, sin N+1', async () => {
-    const locations = fakeLocations();
-    flags = flagsService(repo, locations);
     // Revisada el 25/10/2025: caduca el 25/10/2026 en Bogotá.
     repo.seedSnapshot('p-1', {
       createdAt: new Date('2025-10-25T15:00:00.000Z'),
@@ -148,12 +125,12 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
     expect(map.get('nuevo')).toEqual(NO_ANAMNESIS_FLAGS);
     expect(callsOf('reviewStates')).toBe(1);
     expect(callsOf('getValidityMonths')).toBe(1);
-    expect(locations.calls).toBe(1);
+    expect(callsOf('locationTimeZones')).toBe(1);
   });
 
   it('hoy en la sede del request o, sin sede, en la principal', async () => {
     const tenantContext = new TenantContextService();
-    flags = flagsService(repo, fakeLocations(), tenantContext);
+    flags = flagsService(repo, tenantContext);
     // 15:00 UTC del 20/10: ya es 20/10 en Bogotá y en Madrid.
     await expect(flags.todayInSede()).resolves.toEqual({
       date: '2026-10-20',

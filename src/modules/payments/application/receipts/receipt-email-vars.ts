@@ -2,7 +2,6 @@ import type { DocType, PaymentMethod } from '@prisma/client';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import type { PaymentReceiptEmailVars } from '../../../notifications/email/domain/email-message';
 import { civilDateIn } from '../../../../shared/time/civil-day';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
 import { formatMoney as money } from '../../../../shared/money/format-money';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
@@ -53,7 +52,7 @@ function targetLabel(
  */
 export function receiptEmailVars(
   receipt: PaymentReceiptView,
-  timeZone: string = DEFAULT_BUSINESS_HOURS_TIMEZONE,
+  timeZone: string,
 ): PaymentReceiptEmailVars {
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;

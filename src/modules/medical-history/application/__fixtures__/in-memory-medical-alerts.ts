@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_ANAMNESIS_VALIDITY_MONTHS } from '../../domain/anamnesis-validity';
+import {
+  locationTimeZoneRequired,
+  locationZonesOf,
+} from '../../../../shared/locations/location-time-zone';
+import { locationRequired } from '../../../../shared/locations/reference-location';
 import type { AnamnesisSnapshot } from '../../domain/medical-alert-flags';
 import type {
   AnamnesisConfirmation,
@@ -16,6 +21,11 @@ export class InMemoryMedicalAlertsRepository implements MedicalAlertsRepository 
   readonly confirmations: AnamnesisConfirmation[] = [];
   names = new Map<string, string>();
   now = () => new Date();
+  /** Zona de cada sede; la primera es la principal. */
+  zones = new Map<string, string>([
+    ['bog', 'America/Bogota'],
+    ['mad', 'Europe/Madrid'],
+  ]);
 
   seedSnapshot(patientId: string, snapshot: Partial<AnamnesisSnapshot>) {
     const full: AnamnesisSnapshot = {
@@ -53,6 +63,27 @@ export class InMemoryMedicalAlertsRepository implements MedicalAlertsRepository 
       });
     }
     return Promise.resolve(out);
+  }
+
+  locationTimeZones(
+    locationIds: readonly string[],
+  ): Promise<(locationId: string) => string> {
+    this.calls.push('locationTimeZones');
+    const zones = locationZonesOf(
+      locationIds.map((id) => ({ id, timeZone: this.zones.get(id) ?? null })),
+    );
+    return Promise.resolve((id) => zones.zoneOf(id));
+  }
+
+  referenceTimeZone(locationId: string | null): Promise<string> {
+    this.calls.push('referenceTimeZone');
+    const [principal] = this.zones.keys();
+    const id = locationId ?? principal;
+    if (!id) return Promise.reject(locationRequired());
+    const zone = this.zones.get(id);
+    return zone
+      ? Promise.resolve(zone)
+      : Promise.reject(locationTimeZoneRequired(id));
   }
 
   getValidityMonths(): Promise<number> {

@@ -1,8 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import type { ClinicCountry } from '@prisma/client';
 import { JobRegistry } from '../../jobs/application/job-registry';
 import { civilDateIn } from '../../../shared/time/civil-day';
-import { timeZoneForCountry } from '../../../shared/locations/location-time-zone';
 import type { JobContext } from '../../jobs/domain/job';
 import {
   BatchNotRunningError,
@@ -126,10 +124,9 @@ export class PatientImportJobs implements OnModuleInit {
       // DX-262: los saldos, cuando ya existen todos los pacientes del lote.
       // Sin fecha en el archivo, el «hoy» de la sede del lote (aproximado).
       if (batch.balancePreparedRows > batch.balanceProcessedRows) {
-        const country = await this.repo.locationCountry(batch.locationId);
         const today = civilDateIn(
           new Date(),
-          timeZoneForCountry(country as ClinicCountry),
+          await this.repo.locationTimeZone(batch.locationId),
         );
         for (;;) {
           if (ctx.signal.aborted) throw new ImportAbortedError();

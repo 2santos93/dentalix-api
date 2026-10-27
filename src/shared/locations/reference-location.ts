@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ClinicCountry, Prisma } from '@prisma/client';
 import {
+  loadLocationZones,
   locationTimeZoneRequired,
   requireLocationTimeZone,
 } from './location-time-zone';
@@ -24,6 +25,7 @@ export function locationRequired(): ConflictException {
  */
 export interface ReferenceLocation {
   id: string;
+  country: ClinicCountry;
   timeZone: string;
   currency: string | null;
   locale: string | null;
@@ -40,6 +42,14 @@ export interface ReferenceLocation {
  *
  * Corre dentro de `runWithTenant`; `tenantId` va explícito además de RLS.
  */
+/** La sede principal (R6): la activa más antigua del tenant. */
+function principalLocationQuery(tenantId: string) {
+  return {
+    where: { tenantId, deletedAt: null, isActive: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  } satisfies Prisma.LocationFindFirstArgs;
+}
+
 export async function resolveReferenceLocation(
   tx: Prisma.TransactionClient,
   tenantId: string,
@@ -47,6 +57,7 @@ export async function resolveReferenceLocation(
 ): Promise<ReferenceLocation> {
   const select = {
     id: true,
+    country: true,
     timeZone: true,
     currency: true,
     locale: true,
@@ -57,8 +68,7 @@ export async function resolveReferenceLocation(
         select,
       })
     : await tx.location.findFirst({
-        where: { tenantId, deletedAt: null, isActive: true },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        ...principalLocationQuery(tenantId),
         select,
       });
   if (!location) {
@@ -67,8 +77,33 @@ export async function resolveReferenceLocation(
   }
   return {
     id: location.id,
+    country: location.country,
     timeZone: requireLocationTimeZone(location),
     currency: location.currency,
     locale: location.locale,
+  };
+}
+
+/**
+ * Zona de cada fila de una vista de toda la clínica cuya sede puede faltar
+ * (p. ej. una deuda sin sede): la de su sede o, sin sede, la de la principal
+ * (R6). Todo en la transacción del llamador y en dos consultas fijas. Los
+ * errores saltan al buscar, no al cargar: una sede sin zona solo es 409 si
+ * una fila es suya, y la clínica sin sedes activas solo es 409
+ * `LOCATION_REQUIRED` si alguna fila no tiene sede.
+ */
+export async function loadTenantZones(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<(locationId: string | null) => string> {
+  const zones = await loadLocationZones(tx, tenantId);
+  const principal = await tx.location.findFirst({
+    ...principalLocationQuery(tenantId),
+    select: { id: true },
+  });
+  return (locationId) => {
+    if (locationId) return zones.zoneOf(locationId);
+    if (!principal) throw locationRequired();
+    return zones.zoneOf(principal.id);
   };
 }

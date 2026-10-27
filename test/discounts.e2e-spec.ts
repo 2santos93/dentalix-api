@@ -19,6 +19,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
 
@@ -609,6 +610,53 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         percent: 5,
         discountByName: 'Miembro DENTIST',
         locationId: northLocationA,
+      });
+    });
+
+    describe('sede sin zona (réplica antigua)', () => {
+      let legacy: string;
+
+      beforeAll(async () => {
+        legacy = await legacyLocationInsert(
+          raw,
+          clinicA.tenantId,
+          'Réplica antigua',
+        );
+      });
+
+      afterAll(async () => {
+        await raw.location.delete({ where: { id: legacy } });
+      });
+
+      it('tenant-wide view ignores an unconfigured location without movements', async () => {
+        await as(clinicA)
+          .get(`/reports/discounts?${period()}&pageSize=200`)
+          .expect(200);
+      });
+
+      it('tenant-wide view with movements at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {
+        const before = await raw.treatmentPlanItem.findUniqueOrThrow({
+          where: { id: northItem.id },
+          select: { discountLocationId: true },
+        });
+        await raw.treatmentPlanItem.update({
+          where: { id: northItem.id },
+          data: { discountLocationId: legacy },
+        });
+        try {
+          const res = await as(clinicA)
+            .get(`/reports/discounts?${period()}&pageSize=200`)
+            .expect(409);
+          expect(res.body).toMatchObject({
+            code: 'LOCATION_TIMEZONE_REQUIRED',
+            locationId: legacy,
+          });
+        } finally {
+          await raw.treatmentPlanItem.update({
+            where: { id: northItem.id },
+            data: { discountLocationId: before.discountLocationId },
+          });
+        }
       });
     });
 

@@ -3,7 +3,9 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  loadLocationTimeZones,
+  firstLocationWithRows,
+  loadLocationZones,
+  loadPeriodLocationZones,
   resolveLocationTimeZones,
 } from '../src/shared/locations/location-time-zone';
 import { resolveReferenceLocation } from '../src/shared/locations/reference-location';
@@ -131,23 +133,56 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
 
   it('reads Location.timeZone (Asia/Tokyo, Pacific/Auckland)', async () => {
     const zones = await inTenant(tenantId, (tx) =>
-      loadLocationTimeZones(tx, tenantId, [ids.tokyo, ids.auckland]),
+      loadLocationZones(tx, tenantId, [ids.tokyo, ids.auckland]),
     );
-    expect(zones.get(ids.tokyo)).toBe('Asia/Tokyo');
-    expect(zones.get(ids.auckland)).toBe('Pacific/Auckland');
+    expect(zones.zoneOf(ids.tokyo)).toBe('Asia/Tokyo');
+    expect(zones.zoneOf(ids.auckland)).toBe('Pacific/Auckland');
   });
 
   it('corrupt zone raises LOCATION_TIMEZONE_REQUIRED', async () => {
     expect(
       await conflictOf(
         inTenant(tenantId, (tx) =>
-          loadLocationTimeZones(tx, tenantId, [ids.tokyo, ids.corrupt]),
+          resolveLocationTimeZones(tx, tenantId, [ids.tokyo, ids.corrupt]),
         ),
       ),
     ).toMatchObject({
       code: 'LOCATION_TIMEZONE_REQUIRED',
       locationId: ids.corrupt,
     });
+  });
+
+  it('tenant-wide load leaves unconfigured locations out until they have rows', async () => {
+    const period = () =>
+      inTenant(tenantId, (tx) =>
+        loadPeriodLocationZones(
+          tx,
+          tenantId,
+          undefined,
+          firstLocationWithRows(tx.locationSchedule, tenantId),
+        ),
+      );
+    // La fila de la réplica antigua (NULL) y la corrupta, sin filas: se ignoran.
+    const zones = await period();
+    expect([...zones.unconfigured].sort()).toEqual(
+      [ids.corrupt, ids.legacy].sort(),
+    );
+    expect(zones.zoneOf(ids.tokyo)).toBe('Asia/Tokyo');
+    expect(() => zones.zoneOf(ids.legacy)).toThrow(ConflictException);
+    // Con una fila en la tabla de la vista, la sede sin zona es 409.
+    await raw.locationSchedule.create({
+      data: { tenantId, locationId: ids.legacy, timezone: 'America/Bogota' },
+    });
+    try {
+      expect(await conflictOf(period())).toMatchObject({
+        code: 'LOCATION_TIMEZONE_REQUIRED',
+        locationId: ids.legacy,
+      });
+    } finally {
+      await raw.locationSchedule.deleteMany({
+        where: { locationId: ids.legacy },
+      });
+    }
   });
 
   it('NULL zone is 409 LOCATION_TIMEZONE_REQUIRED, never Bogotá', async () => {
@@ -188,6 +223,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       ),
     ).resolves.toEqual({
       id: ids.tokyo,
+      country: 'CO',
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',
@@ -197,6 +233,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       inTenant(tenantId, (tx) => resolveReferenceLocation(tx, tenantId, null)),
     ).resolves.toEqual({
       id: ids.auckland,
+      country: 'CO',
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',

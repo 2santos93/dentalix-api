@@ -4,6 +4,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPerioExamRepository } from '../src/modules/periodontal/infrastructure/repositories/prisma-perio-exam.repository';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -234,6 +235,18 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
 
   it('el repositorio toma la zona horaria de la sede activa', async () => {
     // G1: la zona es de la sede (`Location.timeZone`), no de su horario.
+    const repo = new PrismaPerioExamRepository(prisma, tenantContext);
+    // Sin sedes activas no hay zona de referencia: 409, nunca Bogotá.
+    await expect(
+      tenantContext.run(b.tenantId, undefined, () => repo.clinicTimeZone()),
+    ).rejects.toMatchObject({ response: { code: 'LOCATION_REQUIRED' } });
+    await raw.location.create({
+      data: locationData(REGIONAL_TOKYO_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede principal',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    });
     const location = await raw.location.create({
       data: locationData(REGIONAL_BOGOTA_FIXTURE, {
         tenantId: a.tenantId,
@@ -242,14 +255,13 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
         timeZone: 'Europe/Madrid',
       }),
     });
-    const repo = new PrismaPerioExamRepository(prisma, tenantContext);
     await expect(
       tenantContext.run(a.tenantId, location.id, () => repo.clinicTimeZone()),
     ).resolves.toBe('Europe/Madrid');
-    // Sin sede activa: la zona por defecto.
+    // Sin sede activa: la de la sede principal (la activa más antigua, R6).
     await expect(
       tenantContext.run(a.tenantId, undefined, () => repo.clinicTimeZone()),
-    ).resolves.toBe('America/Bogota');
+    ).resolves.toBe('Asia/Tokyo');
   });
 
   it('un DRAFT sí admite medidas y se puede finalizar', async () => {

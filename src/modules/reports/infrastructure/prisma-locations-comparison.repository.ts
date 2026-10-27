@@ -3,8 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { AllowedLocations } from '../../../shared/tenancy/location-access';
-import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
+import { loadPeriodLocationZones } from '../../../shared/locations/location-time-zone';
 import {
   civilPeriodByZone,
   type ZonedPeriodBranch,
@@ -159,6 +158,37 @@ function emptyAggregates(): PeriodAggregates & {
  *    excepciones del período, sus bloqueos que no admiten citas (DX-122) y
  *    los cierres de toda la sede.
  */
+/**
+ * La primera de `locationIds` con algo que el informe compara (citas, abonos,
+ * ítems realizados u horarios de profesionales), o null.
+ */
+async function firstComparedLocation(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  locationIds: string[],
+): Promise<string | null> {
+  const [found] = await tx.$queryRaw<{ locationId: string }[]>`
+    SELECT x."locationId" FROM (
+      SELECT a."locationId" FROM "appointments" a
+       WHERE a."tenantId" = ${tenantId}::uuid
+         AND a."locationId" = ANY(${locationIds}::uuid[])
+      UNION ALL
+      SELECT pay."locationId" FROM "payments" pay
+       WHERE pay."tenantId" = ${tenantId}::uuid
+         AND pay."locationId" = ANY(${locationIds}::uuid[])
+      UNION ALL
+      SELECT i."performedLocationId" FROM "treatment_plan_items" i
+       WHERE i."tenantId" = ${tenantId}::uuid
+         AND i."performedLocationId" = ANY(${locationIds}::uuid[])
+      UNION ALL
+      SELECT s."locationId" FROM "provider_schedules" s
+       WHERE s."tenantId" = ${tenantId}::uuid
+         AND s."locationId" = ANY(${locationIds}::uuid[])
+    ) x
+    LIMIT 1`;
+  return found?.locationId ?? null;
+}
+
 @Injectable()
 export class PrismaLocationsComparisonRepository implements LocationsComparisonRepository {
   constructor(
@@ -186,15 +216,16 @@ export class PrismaLocationsComparisonRepository implements LocationsComparisonR
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: { id: true, name: true, isActive: true },
       });
-      const zones = await loadLocationTimeZones(
+      const zones = await loadPeriodLocationZones(
         tx,
         tenantId,
         rows.map((r) => r.id),
+        (ids) => firstComparedLocation(tx, tenantId, ids),
       );
-      return rows.map((r) => ({
-        ...r,
-        timeZone: zones.get(r.id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
-      }));
+      // Una sede sin zona y sin actividad no entra en la comparación (G1).
+      return rows
+        .filter((r) => zones.configured.has(r.id))
+        .map((r) => ({ ...r, timeZone: zones.zoneOf(r.id) }));
     });
   }
 

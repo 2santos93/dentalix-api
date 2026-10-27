@@ -4,6 +4,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../src/modules/audit/infrastructure/audit-retention-config';
+import {
+  REGIONAL_TOKYO_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-102, capa de BD: audit_events particionada por mes (occurredAt), RLS
 // FORZADA en el padre y en cada partición, partición DEFAULT de seguridad,
@@ -50,6 +54,7 @@ async function cleanup(): Promise<void> {
   const ids = tenants.map((t) => t.id);
   // Superusuario local (DIRECT_URL): el único que el trigger deja borrar filas.
   await owner.auditEvent.deleteMany({ where: { tenantId: { in: ids } } });
+  await owner.location.deleteMany({ where: { tenantId: { in: ids } } });
   await owner.tenant.deleteMany({ where: { id: { in: ids } } });
 }
 
@@ -91,6 +96,15 @@ describe('DX-102 · audit_events particionada (int)', () => {
     );
     tenantA = a.id;
     tenantB = b.id;
+    // Sede principal de cada clínica: da la zona de los eventos sin sede (R6).
+    for (const tenantId of [tenantA, tenantB]) {
+      await owner.location.create({
+        data: locationData(REGIONAL_TOKYO_FIXTURE, {
+          tenantId,
+          name: 'Principal',
+        }),
+      });
+    }
   });
 
   afterAll(async () => {

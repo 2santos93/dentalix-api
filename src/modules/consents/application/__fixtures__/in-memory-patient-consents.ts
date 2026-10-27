@@ -17,6 +17,8 @@ import {
  */
 export class InMemoryPatientConsentRepository implements PatientConsentRepository {
   readonly rows: PatientConsent[] = [];
+  /** Zona de la sede de la firma (la activa o la principal). */
+  timeZone = 'Europe/Madrid';
   private nextId = 1;
 
   constructor(
@@ -56,6 +58,7 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
       patient,
       clinicName: 'Clínica Demo',
       professionalName: this.users[params.professionalUserId] ?? 'Sin nombre',
+      timeZone: this.timeZone,
       plan,
     });
   }
