@@ -44,6 +44,29 @@ function offending(
   );
 }
 
+/**
+ * `fichero:línea` de cada coincidencia de `pattern` (con `g`) sobre el fichero
+ * entero, no línea a línea: una llamada partida en varias líneas por Prettier
+ * (`new Intl.NumberFormat(\n  'es',`) también cuenta. `accept` recibe la
+ * coincidencia y la línea donde empieza.
+ */
+function offendingMatches(
+  files: string[],
+  pattern: RegExp,
+  accept: (match: RegExpExecArray, line: string) => boolean,
+): string[] {
+  return files.flatMap((file) => {
+    const text = readFileSync(file, 'utf8');
+    const lines = text.split('\n');
+    return [...text.matchAll(pattern)].flatMap((match) => {
+      const lineIndex = text.slice(0, match.index).split('\n').length - 1;
+      return accept(match, lines[lineIndex])
+        ? [`${relative(SRC, file)}:${lineIndex + 1}`]
+        : [];
+    });
+  });
+}
+
 /** Código de producción: sin `*.spec.ts` ni `__fixtures__/`. */
 const isProduction = (file: string): boolean =>
   !file.endsWith('.spec.ts') && !file.split(sep).includes('__fixtures__');
@@ -86,10 +109,18 @@ const NEUTRAL_FORMATTERS = [
   'modules/treatment-plans/application/use-cases/plan-quote.use-cases.ts',
 ].map((path) => join(SRC, ...path.split('/')));
 const NEUTRAL_LOCALES = ['en-US', 'en-CA'];
-/** Un locale regional literal pasado a `Intl.*(` o `toLocale*String(`. */
-const REGIONAL_LOCALE_CALL =
-  /(?:Intl\.[A-Za-z]+\(|toLocale[A-Za-z]*String\()\s*'([a-z]{2}-[A-Z]{2})'/;
-const HOUR_CYCLE_LITERAL = /hourCycle:\s*'h\d{2}'/;
+/**
+ * Un locale literal pasado a `Intl.*(` o `toLocale*String(`, también en un array y
+ * aunque la llamada ocupe varias líneas: con región (`'es-CO'`), región
+ * numérica (`'es-419'`), escritura (`'zh-Hant-TW'`) o solo el idioma (`'es'`,
+ * la forma del `formatMoney` retirado). Solo en el contexto de la llamada, para
+ * no confundir un texto cualquiera en español con un locale.
+ * `toLocaleLowerCase('es')` (claves de comparación) no formatea: no entra.
+ */
+const LOCALE_CALL =
+  /(?:Intl\.[A-Za-z]+\(|\.toLocale[A-Za-z]*String\()\s*\[?\s*'([a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)'/g;
+/** Un reloj fijo: `hourCycle: 'h23'`, o `hour12:` (que manda sobre `hourCycle`, §5.1). */
+const HOUR_CYCLE_LITERAL = /hourCycle:\s*'h\d{2}'|\bhour12\s*:/;
 /** Donde se arma el texto del recordatorio y el helper: sin país. */
 const COUNTRY_FREE = [
   join(SRC, 'modules', 'reminders', 'domain', 'starts-at-label.ts'),
@@ -106,26 +137,58 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
     expect(NEUTRAL_FORMATTERS.filter((file) => !known.has(file))).toEqual([]);
   });
 
-  it('architecture: regional locale literals only in the neutral allowlist', () => {
+  it('architecture: locale literals only in the neutral allowlist', () => {
     const neutral = (file: string) => NEUTRAL_FORMATTERS.includes(file);
-    const regionalLocale = (allowed: string[]) => (line: string) => {
-      const match = REGIONAL_LOCALE_CALL.exec(line);
-      return (
-        match !== null &&
-        !line.includes('example:') &&
-        !allowed.includes(match[1])
-      );
-    };
+    const localeLiteral =
+      (allowed: string[]) => (match: RegExpExecArray, line: string) =>
+        !line.includes('example:') && !allowed.includes(match[1]);
     expect([
-      ...offending(
+      ...offendingMatches(
         production.filter((file) => !neutral(file)),
-        regionalLocale([]),
+        LOCALE_CALL,
+        localeLiteral([]),
       ),
-      ...offending(production.filter(neutral), regionalLocale(NEUTRAL_LOCALES)),
+      ...offendingMatches(
+        production.filter(neutral),
+        LOCALE_CALL,
+        localeLiteral(NEUTRAL_LOCALES),
+      ),
     ]).toEqual([]);
   });
 
-  it('architecture: no hourCycle literal outside the helper and the allowlist', () => {
+  it('the locale pattern catches every literal shape and skips plain Spanish text', () => {
+    const caught = (code: string) =>
+      [...code.matchAll(LOCALE_CALL)].map((match) => match[1]);
+    expect(
+      caught(
+        [
+          "new Intl.NumberFormat('es', { style: 'currency' })",
+          "new Intl.DateTimeFormat(['es-CO'])",
+          "Intl.NumberFormat('es-419')",
+          "new Intl.DateTimeFormat('zh-Hant-TW', {})",
+          "amount.toLocaleString('es')",
+          "day.toLocaleDateString(\n  'de-DE',\n)",
+          "new Intl.NumberFormat(\n  'fr',\n  { minimumFractionDigits: 2 },\n)",
+        ].join('\n'),
+      ),
+    ).toEqual(['es', 'es-CO', 'es-419', 'zh-Hant-TW', 'es', 'de-DE', 'fr']);
+    expect(
+      caught(
+        [
+          "throw new BadRequestException('es obligatorio')",
+          "const label = 'de la sede';",
+          "message: 'en la sede no hay caja abierta'",
+          "a.name.localeCompare(b.name, 'es')",
+          "label.toLocaleLowerCase('es')",
+        ].join('\n'),
+      ),
+    ).toEqual([]);
+    expect(HOUR_CYCLE_LITERAL.test('{ hour12: true }')).toBe(true);
+    expect(HOUR_CYCLE_LITERAL.test("{ hourCycle: 'h12' }")).toBe(true);
+    expect(HOUR_CYCLE_LITERAL.test('{ hourCycle: fmt.hourCycle }')).toBe(false);
+  });
+
+  it('architecture: no hourCycle literal nor hour12 outside the helper and the allowlist', () => {
     expect(
       offending(
         production.filter((file) => !NEUTRAL_FORMATTERS.includes(file)),

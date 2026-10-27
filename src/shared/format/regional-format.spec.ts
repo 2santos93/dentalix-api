@@ -10,6 +10,13 @@ interface GoldenCase {
   expected: unknown;
 }
 
+/**
+ * Vectores de oro capturados con Node 22.16 / ICU 77.1. CLDR cambia espacios
+ * y símbolos entre versiones de ICU: si cambia la versión de Node (o de ICU),
+ * regenerarlos con ella y copiar el JSON byte a byte a la web (la CI compara
+ * las dos copias). Un fallo aquí con otra ICU no es, por sí, un fallo del
+ * helper.
+ */
 const CASES: GoldenCase[] = JSON.parse(
   readFileSync(join(__dirname, 'regional-format.cases.json'), 'utf8'),
 ) as GoldenCase[];
@@ -349,5 +356,19 @@ describe('regionalFormat', () => {
     const fmt = regionalFormat({ locale: 'fr-FR', hourCycle: 'h12' });
     expect(fmt.locale).toBe('fr-FR');
     expect(fmt.hourCycle).toBe('h12');
+  });
+
+  it('number with min above 2 raises max to min', () => {
+    // max por defecto = max(2, min): con min 3 y max 2 `Intl` lanzaría.
+    const fmt = regionalFormat({ locale: 'en-US', hourCycle: 'h23' });
+    expect(fmt.number(5, { min: 3 })).toBe('5.000');
+    expect(fmt.number(1.23456, { min: 3 })).toBe('1.235');
+  });
+
+  it('canonicalises the locale: en-us and en-US share one cached format', () => {
+    const lower = regionalFormat({ locale: 'en-us', hourCycle: 'h12' });
+    const canonical = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
+    expect(lower).toBe(canonical);
+    expect(lower.locale).toBe('en-US');
   });
 });
