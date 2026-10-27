@@ -1062,7 +1062,10 @@ Contenido del ticket:
 ## Cambiar la zona de una sede (G1, DX-313, DX-314)
 
 `PATCH /locations/:id` (ADMIN, auditado) edita `currency`, `timeZone` y
-`locale` de la sede; `null` en cualquiera es 400.
+`locale` de la sede; `null` en cualquiera es 400. Una sede con algún campo
+regional sin configurar (NULL, réplica antigua sin barrer) se completa con los
+tres (`currency`, `timeZone` y `locale`) en un mismo PATCH: un relleno parcial
+es 400 con el primer campo que falta.
 
 - **Orden de comprobaciones** al cambiar moneda o zona (valor distinto del
   actual), con la fila de la sede bloqueada (`SELECT … FOR UPDATE`) para que no
