@@ -319,6 +319,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       expect(location.currency).toBe('COP');
       expect(location.timeZone).toBe('America/Bogota');
       expect(location.locale).toBe('es-CO');
+      // G1-B: reloj explícito, el que la demo ya pintaba.
+      expect(location.hourCycle).toBe('h23');
       expect(location.country).toBe('CO');
       // El backfill D5 deja esto en NULL: la demo lo fija ella misma.
       expect(location.regionalSettingsReviewedAt).toBeInstanceOf(Date);
@@ -328,6 +330,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const [swept] = await raw.$queryRaw<{ n: number }[]>`
       SELECT dx_g1_backfill_location_regional(${tenantId}::uuid)::int AS n`;
     expect(swept.n).toBe(0);
+    const [sweptClock] = await raw.$queryRaw<{ n: number }[]>`
+      SELECT dx_g1b_backfill_location_hour_cycle(${tenantId}::uuid)::int AS n`;
+    expect(sweptClock.n).toBe(0);
     const schedules = await raw.locationSchedule.findMany({
       where: { tenantId },
     });

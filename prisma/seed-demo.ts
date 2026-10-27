@@ -182,6 +182,7 @@ import {
   DEMO_PROFESSIONAL_LICENSES,
   demoPerioMeasures,
   DEMO_CURRENCY,
+  DEMO_HOUR_CYCLE,
   DEMO_COMPARISON_HISTORY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
@@ -873,6 +874,14 @@ class DemoSeeder {
     await this.inTenant(tenantId, norte.id, () =>
       this.use(ReplaceLocationScheduleUseCase).execute({
         ranges: NORTE_SCHEDULE,
+      }),
+    );
+    // G1-B (DX-350): reloj explícito de las dos sedes, el que la demo ya
+    // pintaba; la demo no depende del barrido (spec G1-B §4.5).
+    await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.location.updateMany({
+        where: { id: { in: [principal.id, norte.id] } },
+        data: { hourCycle: DEMO_HOUR_CYCLE },
       }),
     );
     // DX-026: la principal manda recordatorios por email 48 h y 2 h antes; la

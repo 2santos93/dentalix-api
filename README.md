@@ -986,14 +986,18 @@ siguen admitiendo NULL hasta la fase 2.
    npm run g1:backfill-locations
    ```
 
-   y la comprobación (las dos cifras tienen que ser 0):
+   y la comprobación (las tres cifras tienen que ser 0):
 
    ```bash
    npm run g1:backfill-locations -- --check
    ```
 
-   Imprime `locations_sin_configurar=N` y `pendientes_legados_vigentes=N` y
-   sale con código 1 si alguna no es 0. Corre con el rol de la app
+   Imprime `locations_sin_configurar=N` (moneda, zona, formato o, desde G1-B,
+   reloj NULL), `pendientes_legados_vigentes=N` y
+   `pendientes_sin_reloj_vigentes=N` (G1-B, DX-350: registros vigentes de una
+   web anterior a G1-B; la fase 2 solo pone NOT NULL a
+   `pending_registrations."locationHourCycle"` cuando es 0) y sale con código
+   1 si alguna no es 0. Corre con el rol de la app
    (`DATABASE_URL`), clínica por clínica bajo su RLS (también las retiradas),
    igual que escribe el barrido: no necesita las credenciales del owner, no
    hace DDL ni toma más bloqueo que el de un `SELECT`, así que se puede correr

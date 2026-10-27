@@ -35,6 +35,11 @@ export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 export const DEMO_PASSWORD = 'DemoDentalix2026!';
 /** Moneda de la clínica: planes y abonos van en COP (Colombia). */
 export const DEMO_CURRENCY = 'COP';
+/**
+ * G1-B (DX-350): reloj de las sedes demo, explícito (nunca un default): 24 h,
+ * el que la demo pinta hoy en pantalla (spec G1-B §4.5).
+ */
+export const DEMO_HOUR_CYCLE = 'h23';
 
 interface DemoUser {
   email: string;
