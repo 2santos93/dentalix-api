@@ -35,7 +35,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { tenantId, firstName: 'Otra', lastName: subdomain },
   });
   const plan = await raw.treatmentPlan.create({
-    data: { tenantId, patientId: patient.id },
+    data: { tenantId, patientId: patient.id, currency: 'USD' },
   });
   const template = await raw.consentTemplate.create({
     data: { tenantId, title: 'Exodoncia', body: 'Texto {{paciente}}' },

@@ -133,6 +133,7 @@ describe('Listados por padre completos, sin topes silenciosos (DX-043, int)', ()
       data: Array.from({ length: n }, (_, i) => ({
         tenantId,
         patientId,
+        currency: 'USD',
         createdAt: minutes(i),
       })),
     });

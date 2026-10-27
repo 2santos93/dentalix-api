@@ -203,8 +203,24 @@ model Location {
   name                         String
   address                      String?
   // País de la sede (DX-013): la receta se emite con las reglas del país donde
-  // se atiende. Por defecto CO, que es lo que eran todas las sedes hasta hoy.
+  // se atiende. GLOBAL-G1 fase 1: el default CO se CONSERVA solo porque el
+  // INSERT de una réplica antigua no envía país; el código nuevo siempre lo
+  // escribe explícito (R1). La fase 2 lo quita (decisión 1 del dueño).
   country                      ClinicCountry @default(CO)
+  // GLOBAL-G1 (DX-313): moneda ISO 4217 de la sede (FK a currencies). NULL solo
+  // en una fila de una réplica antigua aún sin barrer: «sede sin configurar»,
+  // nunca se sustituye por la moneda de su país (R19).
+  currency                     String?       @db.Char(3)
+  // GLOBAL-G1 (DX-314): zona IANA de la sede, fuente única de su día civil y de
+  // su horario. NULL: ver `currency`.
+  timeZone                     String?
+  // GLOBAL-G1 (DX-315): locale BCP 47 canónico (solo formatos; la UI sigue en
+  // español). NULL: ver `currency`.
+  locale                       String?
+  // GLOBAL-G1 (D5): NULL = valores asignados por la migración o el barrido
+  // (dx_g1_backfill_location_regional) y aún sin confirmar por un ADMIN. Se
+  // rellena al crear la sede o al confirmarla.
+  regionalSettingsReviewedAt   DateTime?     @db.Timestamptz(3)
   // Serie de los recibos de caja de la sede (DX-136), p. ej. "NOR". Si no
   // viene al crearla, el trigger `locations_default_receipt_prefix` la deriva
   // del nombre (3 letras, con número si ya la usa otra sede de la clínica).
@@ -279,6 +295,8 @@ model Location {
   // DX-279: versiones de la política de cancelación de la sede.
   cancellationPolicyVersions CancellationPolicyVersion[]
   cancellationFees           CancellationFee[]
+  // GLOBAL-G1: moneda de la sede (locations_currency_fkey; admite NULL en fase 1).
+  currencyRef                Currency?                   @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1489,7 +1507,8 @@ model TreatmentPlan {
   status             TreatmentPlanStatus @default(DRAFT)
   // Moneda del plan: monto a pagar/saldo se calculan en esta moneda; un abono
   // en otra moneda se convierte por su fecha (ver Payment/ConvertAmountUseCase).
-  currency           String              @default("USD")
+  // GLOBAL-G1 (DX-313): sin default; quien crea el plan la escribe siempre.
+  currency           String
   notes              String?
   createdById        String?             @db.Uuid
   createdAt          DateTime            @default(now())
@@ -1817,6 +1836,8 @@ model Currency {
   cancellationFees           CancellationFee[]
   // DX-051: bases de los abonos en la moneda del plan.
   paymentPlanAmounts         PaymentPlanAmount[]
+  // GLOBAL-G1 (DX-313): sedes con esa moneda.
+  locations                  Location[]
 
   @@map("currencies")
 }
@@ -2888,6 +2909,13 @@ model PendingRegistration {
   tokenHash    String   @unique
   expiresAt    DateTime
   createdAt    DateTime @default(now())
+  // GLOBAL-G1: país, moneda, zona y locale de la primera sede. NULL en los
+  // pendientes creados por una réplica o una web antiguas (forma legada; la
+  // fase 2 los hace obligatorios).
+  locationCountry  ClinicCountry?
+  locationCurrency String?        @db.Char(3)
+  locationTimeZone String?
+  locationLocale   String?
 
   @@index([expiresAt])
   @@map("pending_registrations")

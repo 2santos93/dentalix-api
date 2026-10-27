@@ -203,12 +203,20 @@ describe('Caja — GET /payments (e2e)', () => {
 
     planAna = (
       await raw.treatmentPlan.create({
-        data: { tenantId: clinicA.tenantId, patientId: patientAna },
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId: patientAna,
+          currency: 'USD',
+        },
       })
     ).id;
     const planBeto = (
       await raw.treatmentPlan.create({
-        data: { tenantId: clinicA.tenantId, patientId: patientBeto },
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId: patientBeto,
+          currency: 'USD',
+        },
       })
     ).id;
 
@@ -329,7 +337,11 @@ describe('Caja — GET /payments (e2e)', () => {
       },
     });
     const planB = await raw.treatmentPlan.create({
-      data: { tenantId: clinicB.tenantId, patientId: patientB.id },
+      data: {
+        tenantId: clinicB.tenantId,
+        patientId: patientB.id,
+        currency: 'USD',
+      },
     });
     await seedPayment('clinicB', {
       tenantId: clinicB.tenantId,

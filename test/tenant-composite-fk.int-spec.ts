@@ -41,7 +41,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { tenantId, name: 'Sede' },
   });
   const plan = await raw.treatmentPlan.create({
-    data: { tenantId, patientId: patient.id },
+    data: { tenantId, patientId: patient.id, currency: 'USD' },
   });
   const paymentPlan = await raw.paymentPlan.create({
     data: {
@@ -120,7 +120,11 @@ describe('FK compuestas por tenant: rechazan referencias cruzadas (SEC-004, int)
       await expect(
         asA((tx) =>
           tx.treatmentPlan.create({
-            data: { tenantId: a.tenantId, patientId: b.patientId },
+            data: {
+              tenantId: a.tenantId,
+              patientId: b.patientId,
+              currency: 'USD',
+            },
           }),
         ),
       ).rejects.toMatchObject(FK_VIOLATION);

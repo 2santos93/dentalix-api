@@ -134,7 +134,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       ).body as { id: string }
     ).id;
     const plan = await raw.treatmentPlan.create({
-      data: { tenantId: clinic.tenantId, patientId: patient },
+      data: { tenantId: clinic.tenantId, patientId: patient, currency: 'USD' },
     });
     const income = (
       locationId: string,
