@@ -11,15 +11,17 @@ describe.each([
   ['configureApp', createE2eApp],
   ['fixtures', createFixtureApp],
 ] as const)('HTTP listener (%s)', (_name, createApp) => {
-  let app: INestApplication<App>;
+  // Lo que siga abierto si un test falla antes de cerrar; si cerró, no queda nada.
+  let open: INestApplication<App> | undefined;
   let server: Server;
 
   afterEach(async () => {
-    await app?.close();
+    await open?.close();
+    open = undefined;
   });
 
   it('reserves its IPv4 port before Supertest and releases it on Nest close', async () => {
-    app = await createApp();
+    const app = (open = await createApp());
     server = app.getHttpServer() as Server;
     expect(server.listening).toBe(true);
     const address = server.address() as AddressInfo;
@@ -45,11 +47,12 @@ describe.each([
         await new Promise<void>((resolve) => competitor.close(() => resolve()));
       }
     }
+    open = undefined;
     await app.close();
     expect(server.listening).toBe(false);
   });
   it('reuses the listener through the bounded HTTP agent helper', async () => {
-    app = await createApp();
+    const app = (open = await createApp());
     server = app.getHttpServer() as Server;
     const address = server.address();
     const http = await listenOnEphemeralPort(app);
@@ -57,6 +60,7 @@ describe.each([
       await http.get('/api/v1/health').expect(200);
       expect(server.address()).toEqual(address);
     } finally {
+      open = undefined;
       await http.close();
     }
     expect(server.listening).toBe(false);

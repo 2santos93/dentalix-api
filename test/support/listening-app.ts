@@ -14,8 +14,10 @@ export interface ListeningApp {
  * DX-252 (TST-029): `request(app.getHttpServer())` con el servidor sin
  * escuchar hace que supertest abra (y cierre) un servidor efímero POR
  * PETICIÓN; con varias en paralelo y la máquina cargada eso acaba en
- * `read ECONNRESET`. Aquí la app escucha UNA vez en un puerto efímero
- * (`listen(0)`, solo 127.0.0.1) y todas las peticiones pasan por un agente
+ * `read ECONNRESET`. DX-348: las fábricas de e2e ya dejan la app escuchando
+ * UNA vez en un puerto efímero de 127.0.0.1, así que aquí se reutiliza ese
+ * listener (solo se abre si la app llega sin escuchar, con el mismo
+ * `listen(0, '127.0.0.1')`) y todas las peticiones pasan por un agente
  * HTTP sin keep-alive (sin carreras con el `keepAliveTimeout` del servidor)
  * con `maxSockets` acotado: las de más esperan turno en el agente en vez de
  * abrir conexiones sin límite. El ECONNRESET venía del servidor por
