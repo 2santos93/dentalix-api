@@ -1,13 +1,36 @@
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { MAX_IMPORT_ROWS, TOO_MANY_ROWS_MESSAGE } from './import-fields';
 
 /**
+ * Texto de un error del fichero. Los que llevan cifras son funciones: se
+ * pintan con el formato de la sede del lote (G1-B).
+ */
+export type ImportFileMessage = string | ((fmt: RegionalFormat) => string);
+
+/**
  * Error del fichero entero (formato, codificación, tamaño, filas): 400 en
- * español, sin lote. Los errores de UNA fila no lo son: van al informe.
+ * español, sin lote. Los errores de UNA fila no lo son: van al informe. El
+ * texto para la persona sale de `render`; con cifras, `message` es solo una
+ * etiqueta para los registros.
  */
 export class ImportFileError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  readonly text: ImportFileMessage;
+
+  constructor(text: ImportFileMessage, options?: { cause?: unknown }) {
+    super(
+      typeof text === 'string' ? text : 'Tope del archivo de importación',
+      options,
+    );
+    this.text = text;
     this.name = 'ImportFileError';
+  }
+
+  /**
+   * El texto en el formato de la sede del lote. `fmt` se pide solo si el
+   * texto lleva cifras: una sede sin formato es 409 solo entonces (I4).
+   */
+  render(fmt: () => RegionalFormat): string {
+    return typeof this.text === 'string' ? this.text : this.text(fmt());
   }
 }
 
@@ -51,7 +74,8 @@ export const MAX_CELL_CHARS = 5_000;
 export const NO_HEADER_MESSAGE =
   'El archivo no tiene cabecera: la primera fila con datos debe tener los nombres de las columnas.';
 const TOO_MANY_COLUMNS_MESSAGE = `El archivo tiene más de ${MAX_COLUMNS} columnas: revisa que sea la hoja de pacientes.`;
-const TOO_MANY_PHYSICAL_MESSAGE = `El archivo tiene más de ${MAX_PHYSICAL_ROWS.toLocaleString('es-CO')} filas (contando las vacías). Quita las filas en blanco o divídelo.`;
+const TOO_MANY_PHYSICAL_MESSAGE = (fmt: RegionalFormat) =>
+  `El archivo tiene más de ${fmt.number(MAX_PHYSICAL_ROWS)} filas (contando las vacías). Quita las filas en blanco o divídelo.`;
 const DUPLICATE_HEADER_MESSAGE = (h: string) =>
   `La columna «${h}» aparece dos veces en la cabecera: cambia el nombre de una de ellas.`;
 

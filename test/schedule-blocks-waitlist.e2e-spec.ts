@@ -18,6 +18,11 @@ import {
 } from './support/e2e-fixtures';
 import { DAY_MONTH, dayMonthNumbers } from './support/sede-day-month';
 import { blockConflictMessage } from '../src/modules/schedule-blocks/domain/schedule-block-rules';
+import { regionalFormat } from '../src/shared/format/regional-format';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+} from './support/location-fixtures';
 
 // DX-122 en HTTP real: bloqueos de agenda (roles, vacaciones que impiden crear
 // y mover, almuerzo que deja agendar con aviso, confirmación sobre citas
@@ -714,6 +719,107 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
         .expect(200);
     });
   });
+
+  describe('formato y reloj de la sede (G1-B, DX-350)', () => {
+    const NEXT_TUE = addDays(TUE, 7);
+    const NEXT_WED = addDays(TUE, 8);
+    const NEXT_THU = addDays(TUE, 9);
+    /** Ajustes de la sede durante `run`; después, los de siempre. */
+    async function withLocationSettings(
+      data: { locale: string; hourCycle: string | null },
+      run: () => Promise<void>,
+    ) {
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+        select: { locale: true, hourCycle: true },
+      });
+      await raw.location.update({ where: { id: locationId }, data });
+      try {
+        await run();
+      } finally {
+        await raw.location.update({ where: { id: locationId }, data: before });
+      }
+    }
+
+    it('block conflict message follows the location format', async () => {
+      const created = await block(reception.token, {
+        providerId: dentist2.userId,
+        start: local(NEXT_TUE, '15:00'),
+        end: local(NEXT_TUE, '17:00'),
+        kind: 'MEETING',
+      }).expect(201);
+      try {
+        await withLocationSettings(
+          { locale: REGIONAL_NEW_YORK_FIXTURE.locale, hourCycle: 'h12' },
+          async () => {
+            const fmt = regionalFormat(REGIONAL_NEW_YORK_FIXTURE);
+            const day = fmt.dayMonth(
+              new Date(local(NEXT_TUE, '15:00')),
+              'America/Bogota',
+            );
+            const rejected = await book(
+              dentist2.userId,
+              NEXT_TUE,
+              '16:00',
+              2,
+            ).expect(409);
+            expect((rejected.body as { message: string }).message).toBe(
+              `La agenda del profesional está bloqueada (Reunión) del ${day} 3:00 p. m. al ${day} 5:00 p. m. Elige otro horario.`,
+            );
+            // Orden mes/día del locale, no el de la sede de siempre.
+            expect(day).toBe(
+              `${NEXT_TUE.slice(5, 7)}/${NEXT_TUE.slice(8, 10)}`,
+            );
+          },
+        );
+        // Con 24 h, lo que mostraba (fixture h23).
+        const again = await book(dentist2.userId, NEXT_TUE, '16:00', 2).expect(
+          409,
+        );
+        expect((again.body as { message: string }).message).toMatch(
+          / 15:00 al .* 17:00\. Elige otro horario\.$/,
+        );
+      } finally {
+        await as(
+          api().delete(`/api/v1/schedule-blocks/${(created.body as Body).id}`),
+          reception.token,
+        ).expect(204);
+      }
+    });
+
+    it('block at a location without hourCycle is 409 LOCATION_LOCALE_REQUIRED', async () => {
+      const created = await block(reception.token, {
+        providerId: dentist2.userId,
+        start: local(NEXT_WED, '09:00'),
+        end: local(NEXT_WED, '12:00'),
+        kind: 'MEETING',
+      }).expect(201);
+      try {
+        await withLocationSettings(
+          { locale: REGIONAL_NEW_YORK_FIXTURE.locale, hourCycle: null },
+          async () => {
+            const rejected = await book(
+              dentist2.userId,
+              NEXT_WED,
+              '10:00',
+              2,
+            ).expect(409);
+            expect(rejected.body).toMatchObject({
+              code: 'LOCATION_LOCALE_REQUIRED',
+              locationId,
+            });
+            // Sin bloqueo no se pinta nada: se agenda (I4).
+            await book(dentist2.userId, NEXT_THU, '10:00', 2).expect(201);
+          },
+        );
+      } finally {
+        await as(
+          api().delete(`/api/v1/schedule-blocks/${(created.body as Body).id}`),
+          reception.token,
+        ).expect(204);
+      }
+    });
+  });
 });
 
 // DX-252: el mismo análisis con el formateador real de la API en meses y días
@@ -737,6 +843,7 @@ describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252)',
         updatedAt: new Date(0),
       },
       'America/Bogota',
+      regionalFormat(REGIONAL_BOGOTA_FIXTURE),
     );
 
   it.each([

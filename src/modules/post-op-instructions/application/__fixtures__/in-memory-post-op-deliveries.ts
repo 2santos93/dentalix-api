@@ -12,7 +12,7 @@ import type { PostOpEmailSender, PostOpEmailSendInput } from '../postop-email';
 export const APPOINTMENT_ID = 'appt-1';
 export const PATIENT_ID = 'pat-1';
 
-/** Cita de un adulto con email y móvil, en una sede de Bogotá con teléfono. */
+/** Cita de un adulto con email y móvil, en una sede con teléfono y ajustes explícitos. */
 export function appointmentContext(
   overrides: {
     appointment?: Partial<PostOpAppointmentContext['appointment']>;
@@ -28,7 +28,7 @@ export function appointmentContext(
       patientId: PATIENT_ID,
       locationId: 'loc-1',
       appointmentTypeId: 'type-cx',
-      // 20/10/2026 a las 21:30 en Bogotá (ya 21/10 en UTC).
+      // 20/10/2026 a las 21:30 en la zona de la sede (ya 21/10 en UTC).
       start: new Date('2026-10-21T02:30:00.000Z'),
       providerName: 'Dra. Laura Gómez',
       ...overrides.appointment,
@@ -51,6 +51,8 @@ export function appointmentContext(
       phone: '601 555 0101',
       country: 'CO',
       timeZone: 'America/Bogota',
+      locale: 'es-CO',
+      hourCycle: 'h23',
       ...overrides.location,
     },
     clinicName: overrides.clinicName ?? 'Sonrisas del Norte',

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import type { ClinicRole } from '@prisma/client';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { formatMoney } from '../../../shared/money/format-money';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
   CANCELLATION_FEE_MESSAGES,
@@ -191,10 +191,17 @@ export class ChargeCancellationFeeUseCase {
     // chargeBlockReason ya exige versión comunicada con importe y moneda.
     const communicated = ctx.communicated!;
     const currency = communicated.currency!;
+    // El tope en el formato de la sede de la cita, pedido solo si se pinta
+    // (G1-B, I4).
     const resolved = resolveChargeAmount(
       amount,
       communicated.suggestedFee!,
-      (value) => formatMoney(value, currency),
+      (value) =>
+        requireLocationFormat({
+          id: ctx.appointment.locationId,
+          locale: ctx.locationLocale,
+          hourCycle: ctx.locationHourCycle,
+        }).money(value, currency),
     );
     if (!resolved.ok) throw new BadRequestException(resolved.message);
 

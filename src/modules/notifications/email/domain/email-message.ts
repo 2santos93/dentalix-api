@@ -21,7 +21,7 @@ export const EMAIL_TEMPLATES = [
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
-/** Idiomas con plantilla. Hoy solo español (el producto es es-CO). */
+/** Idioma de la plantilla (la app está en español). Los formatos son los de la sede (G1-B). */
 export type EmailLocale = 'es';
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */

@@ -19,6 +19,12 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
   readonly rows: PatientConsent[] = [];
   /** Zona de la sede de la firma (la activa o la principal). */
   timeZone = 'Europe/Madrid';
+  /** Esa sede con su formato y su reloj (G1-B), explícitos. */
+  location: ConsentSigningContext['location'] = {
+    id: 'loc-1',
+    locale: 'es-ES',
+    hourCycle: 'h23',
+  };
   private nextId = 1;
 
   constructor(
@@ -59,6 +65,7 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
       clinicName: 'Clínica Demo',
       professionalName: this.users[params.professionalUserId] ?? 'Sin nombre',
       timeZone: this.timeZone,
+      location: this.location,
       plan,
     });
   }

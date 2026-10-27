@@ -190,9 +190,20 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
         orderBy: { start: 'asc' },
       });
       const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
+      // G1-B: formato y reloj en crudo, solo si hay algo que pintar; los pide
+      // quien pinta (I4).
+      const regional =
+        rows.length === 0
+          ? null
+          : await tx.location.findFirst({
+              where: { id: locationId, tenantId },
+              select: { locale: true, hourCycle: true },
+            });
       return {
         locationId,
         timeZone: zoneOf(locationId),
+        locale: regional?.locale ?? null,
+        hourCycle: regional?.hourCycle ?? null,
         blocks: rows.map(mapToEntity),
       };
     });

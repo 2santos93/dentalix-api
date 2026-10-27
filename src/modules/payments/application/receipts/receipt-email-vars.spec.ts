@@ -1,8 +1,9 @@
 import { receiptEmailVars } from './receipt-email-vars';
 import { buildReceiptSnapshot } from '../../domain/receipt-snapshot';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
+import { regionalFormat } from '../../../../shared/format/regional-format';
 
-const snapshot = buildReceiptSnapshot({
+const SNAPSHOT_INPUT = {
   clinic: { name: 'Clínica Demo', legalName: null, taxId: null, address: null },
   location: { id: 'loc-1', name: 'Sede Norte', address: 'Cra 15 # 93-60' },
   patient: {
@@ -32,7 +33,8 @@ const snapshot = buildReceiptSnapshot({
     balance: 450000,
   },
   cashier: { id: 'u-1', fullName: 'Recepción Demo' },
-});
+} satisfies Parameters<typeof buildReceiptSnapshot>[0];
+const snapshot = buildReceiptSnapshot(SNAPSHOT_INPUT);
 
 const view = (
   overrides: Partial<PaymentReceiptView> = {},
@@ -50,17 +52,20 @@ const view = (
   ...overrides,
 });
 
-/** Zona de la sede del recibo en estos casos. */
+/** Zona y formato de la sede del recibo en estos casos (ajustes explícitos). */
 const SEDE_ZONE = 'America/Bogota';
+const SEDE_FMT = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
 
 describe('receiptEmailVars (DX-136)', () => {
   it('arma el email desde la foto del recibo, con el documento enmascarado', () => {
     const { amountLabel, balanceLabel, ...vars } = receiptEmailVars(
       view(),
       SEDE_ZONE,
+      SEDE_FMT,
     );
-    expect(amountLabel).toMatch(/^150\.000,00\sCOP$/);
-    expect(balanceLabel).toMatch(/^450\.000,00\sCOP$/);
+    expect(amountLabel).toBe(SEDE_FMT.money(150000, 'COP'));
+    expect(amountLabel).toMatch(/^\$\s150\.000,00$/);
+    expect(balanceLabel).toMatch(/^\$\s450\.000,00$/);
     expect(vars).toEqual({
       patientName: 'Carolina Duque',
       reference: 'NOR-000123',
@@ -80,7 +85,7 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(JSON.stringify(vars)).not.toContain('1012345678');
   });
 
-  it('anulado: fecha (día de Bogotá) y motivo', () => {
+  it('anulado: fecha (día civil de la sede) y motivo', () => {
     const vars = receiptEmailVars(
       view({
         voided: true,
@@ -88,6 +93,7 @@ describe('receiptEmailVars (DX-136)', () => {
         voidReason: 'Cobro duplicado',
       }),
       SEDE_ZONE,
+      SEDE_FMT,
     );
     expect(vars.voided).toEqual({
       dateLabel: '17/10/2026',
@@ -102,9 +108,10 @@ describe('receiptEmailVars (DX-136)', () => {
         voidedAt: new Date('2026-10-18T02:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
-      'Europe/Madrid',
+      'Europe/Berlin',
+      SEDE_FMT,
     );
-    // 02:00 UTC del 18 es el 17 en Bogotá, pero ya el 18 en Madrid.
+    // 02:00 UTC del 18 es el 17 en UTC-5, pero ya el 18 en Berlín.
     expect(vars.voided?.dateLabel).toBe('18/10/2026');
   });
 
@@ -125,6 +132,7 @@ describe('receiptEmailVars (DX-136)', () => {
         },
       }),
       SEDE_ZONE,
+      SEDE_FMT,
     );
     expect(vars.fiscalLine).toBe('Clínica Demo S.A.S. · NIT/NIF 900123456-7');
     expect(vars.methodLabel).toBe('Sin especificar');
@@ -146,10 +154,50 @@ describe('receiptEmailVars (DX-136)', () => {
         },
       }),
       SEDE_ZONE,
+      SEDE_FMT,
     );
     expect(vars.planLabel).toBe(
       'Saldo migrado · Ortodoncia (programa anterior) · corte 15/03/2026',
     );
     expect(vars.toOpeningBalance).toBe(true);
+  });
+
+  it('receipt email for a JPY location shows no decimals', () => {
+    const jpy = buildReceiptSnapshot({
+      ...SNAPSHOT_INPUT,
+      payment: { ...SNAPSHOT_INPUT.payment, amount: 12000, currency: 'JPY' },
+      planBalance: {
+        currency: 'JPY',
+        billable: 50000,
+        paid: 12000,
+        balance: 38000,
+      },
+    });
+    const vars = receiptEmailVars(
+      view({ snapshot: jpy }),
+      'Asia/Tokyo',
+      regionalFormat({ locale: 'ja-JP', hourCycle: 'h23' }),
+    );
+    expect(vars.amountLabel).toBe('￥12,000');
+    expect(vars.balanceLabel).toBe('￥38,000');
+  });
+
+  it('receipt email dates follow the location locale (en-US 10/27/2026)', () => {
+    const vars = receiptEmailVars(
+      view({
+        snapshot: {
+          ...snapshot,
+          payment: { ...snapshot.payment, paidOn: '2026-10-27' },
+        },
+        voided: true,
+        voidedAt: new Date('2026-10-28T15:00:00.000Z'),
+        voidReason: 'Cobro duplicado',
+      }),
+      'America/New_York',
+      regionalFormat({ locale: 'en-US', hourCycle: 'h12' }),
+    );
+    expect(vars.paidOnLabel).toBe('10/27/2026');
+    expect(vars.planLabel).toBe('Plan del 09/01/2026 · Opción A: implante');
+    expect(vars.voided?.dateLabel).toBe('10/28/2026');
   });
 });

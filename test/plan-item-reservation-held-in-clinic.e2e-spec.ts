@@ -16,6 +16,7 @@ import {
   loginAs,
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
+import { regionalFormat } from '../src/shared/format/regional-format';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -46,6 +47,8 @@ interface ReservedElsewhere {
   locationId: string | null;
   locationName: string | null;
   timeZone: string | null;
+  locale: string | null;
+  hourCycle: string | null;
 }
 
 interface InClinicPanel {
@@ -258,6 +261,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
         locationId,
         locationName,
         timeZone: ZONE,
+        locale: REGIONAL_BOGOTA_FIXTURE.locale,
+        hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
       };
       expect(await arrive(today.id)).toEqual([expected]);
       expect(await panelNotice(today.id)).toEqual([expected]);
@@ -268,6 +273,7 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
           start: holder.start,
           timeZone: ZONE,
           locationName,
+          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
         }),
       );
       expect(await activeLinks(itemId)).toEqual([{ appointmentId: holder.id }]);
@@ -311,6 +317,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId,
       locationName,
       timeZone: ZONE,
+      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
     };
     expect(await arrive(today.id)).toEqual([expected]);
     expect(await panelNotice(today.id)).toEqual([expected]);
@@ -355,6 +363,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId: null,
       locationName: null,
       timeZone: null,
+      locale: null,
+      hourCycle: null,
     };
     const arrived = await call(
       'patch',
@@ -402,6 +412,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId: north.id,
       locationName: 'Sede Norte DX293',
       timeZone: ZONE,
+      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
     });
   });
 });

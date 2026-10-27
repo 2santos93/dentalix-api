@@ -8,18 +8,21 @@ import {
 } from '../../locations/domain/regional-settings';
 import type { ClinicLocationSettings } from '../domain/ports/auth-repository.port';
 
-/** Los cuatro campos de la primera sede tal como llegan en el registro. */
+/** Los campos de la primera sede tal como llegan en el registro. */
 export interface RegistrationLocationInput {
   locationCountry?: ClinicCountry | null;
   locationCurrency?: string | null;
   locationTimeZone?: string | null;
   locationLocale?: string | null;
+  /** G1-B (DX-350). */
+  locationHourCycle?: string | null;
 }
 
 const FIELD = {
   currency: 'locationCurrency',
   timeZone: 'locationTimeZone',
   locale: 'locationLocale',
+  hourCycle: 'locationHourCycle',
 } as const;
 
 const absent = (value: unknown): boolean =>
@@ -27,9 +30,11 @@ const absent = (value: unknown): boolean =>
 
 /**
  * G1 (spec §3.5): la primera sede del registro, con las reglas y los mensajes
- * del alta de sede (§3.1). Fase 1: sin ninguno de los cuatro es la forma
+ * del alta de sede (§3.1). Fase 1: sin ninguno de los cinco es la forma
  * LEGADA de una web antigua y devuelve `null`; con algunos, 400 con el mensaje
- * y el campo del primero que falta o no vale (país, moneda, zona, formato).
+ * y el campo del primero que falta o no vale (país, moneda, zona, formato,
+ * reloj). G1-B fase 1 (spec §4.3): los cuatro de G1 sin reloj (web de G1) se
+ * aceptan con `hourCycle: null`; un reloj solo es 400 con el país.
  */
 export async function registrationLocation(
   input: RegistrationLocationInput,
@@ -39,7 +44,8 @@ export async function registrationLocation(
     absent(input.locationCountry) &&
     absent(input.locationCurrency) &&
     absent(input.locationTimeZone) &&
-    absent(input.locationLocale)
+    absent(input.locationLocale) &&
+    absent(input.locationHourCycle)
   ) {
     return null;
   }
@@ -51,6 +57,7 @@ export async function registrationLocation(
       currency: input.locationCurrency,
       timeZone: input.locationTimeZone,
       locale: input.locationLocale,
+      hourCycle: input.locationHourCycle,
     },
     currencies,
   );

@@ -14,6 +14,7 @@ import {
   RenderedEmail,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
+import { endSentence } from '../../../../../shared/format/end-sentence';
 
 const PRODUCT_NAME = 'Dentalix';
 
@@ -127,7 +128,10 @@ export function cancellationPolicyText(
   if (text) parts.push(text);
   if (policy.feeLabel)
     parts.push(
-      `La inasistencia o la cancelación con menos aviso puede tener un cargo de ${policy.feeLabel}.`,
+      // Algunos símbolos de moneda ya acaban en punto («ج.م.»).
+      endSentence(
+        `La inasistencia o la cancelación con menos aviso puede tener un cargo de ${policy.feeLabel}`,
+      ),
     );
   return parts.join(' ');
 }

@@ -4,6 +4,7 @@ import type { ReminderSendContext } from '../domain/ports/reminder-repository.po
 import { FakeReminderRepository } from './__fixtures__/fake-reminder.repository';
 import { SendAppointmentReminder } from './send-appointment-reminder';
 import type { ReminderClock } from './reminder-clock';
+import { regionalFormat } from '../../../shared/format/regional-format';
 
 const HOUR = 3_600_000;
 const NOW = new Date('2026-10-20T12:00:00.000Z');
@@ -22,6 +23,8 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     },
     locationCountry: 'CO',
     locationTimeZone: 'America/Bogota',
+    // Ajustes explícitos de la sede: el reloj sale de aquí, nunca del país.
+    locationFormat: regionalFormat({ locale: 'es-CO', hourCycle: 'h12' }),
     patientId: PATIENT,
     contact: {
       contactChannel: 'EMAIL',
@@ -203,6 +206,39 @@ describe('SendAppointmentReminder (DX-026)', () => {
     email: null,
     emergencyContactName: null,
   };
+
+  it('DX-350: hora y cargo con el formato y el reloj de la sede de la cita', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        locationTimeZone: 'Asia/Tokyo',
+        locationFormat: regionalFormat({ locale: 'ja-JP', hourCycle: 'h23' }),
+        cancellationPolicy: {
+          id: 'pol-v1',
+          version: 1,
+          noticeHours: 24,
+          patientText: 'Avísanos con tiempo.',
+          suggestedFee: 3000,
+          currency: 'JPY',
+        },
+      }),
+    );
+    await handler.handle(payload);
+
+    const call = email.enqueue.mock.calls[0] as [
+      {
+        vars: {
+          startsAtLabel: string;
+          cancellationPolicy: { feeLabel: string | null };
+        };
+      },
+    ];
+    // 14:00 UTC del 20 = 23:00 del 20 en Tokio, en 24 h y en español.
+    expect(call[0].vars.startsAtLabel).toBe(
+      'martes 20 de octubre de 2026 a las 23:00',
+    );
+    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('￥3,000');
+  });
 
   it('un menor sin email con responsable que recibe avisos: sale al email del responsable y queda «enviado al responsable» (DX-203)', async () => {
     repo.contexts.set(

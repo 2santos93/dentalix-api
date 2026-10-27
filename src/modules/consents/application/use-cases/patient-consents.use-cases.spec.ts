@@ -108,6 +108,45 @@ describe('PreviewPatientConsentUseCase', () => {
     expect(result.body).toContain('Fecha: 17 de octubre de 2026.');
   });
 
+  it('consent date is Spanish words for any locale', async () => {
+    const { preview, template, consents } = setup();
+    consents.location = { id: 'loc-1', locale: 'ja-JP', hourCycle: 'h12' };
+    const result = await preview.execute(
+      'p1',
+      { templateId: template.id },
+      'dentist-1',
+    );
+    expect(result.body).toContain('Fecha: 16 de octubre de 2026.');
+  });
+
+  it('una sede sin reloj: 409 LOCATION_LOCALE_REQUIRED al pintar la fecha', async () => {
+    const { preview, template, consents } = setup();
+    consents.location = { id: 'loc-1', locale: 'es-ES', hourCycle: null };
+    const error = await preview
+      .execute('p1', { templateId: template.id }, 'dentist-1')
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_LOCALE_REQUIRED',
+      locationId: 'loc-1',
+    });
+  });
+
+  it('una sede sin reloj firma una plantilla sin {{fecha}} sin pedir el formato', async () => {
+    const { preview, templates, consents } = setup();
+    consents.location = { id: 'loc-1', locale: null, hourCycle: null };
+    const nodate = templates.seed({
+      title: 'Sin fecha',
+      body: 'Yo, {{paciente}}, autorizo.',
+    });
+    const result = await preview.execute(
+      'p1',
+      { templateId: nodate.id },
+      'dentist-1',
+    );
+    expect(result.body).toBe('Yo, Ana Pérez, autorizo.');
+  });
+
   it('sin plan, {{tratamiento}} dice que no se especificó', async () => {
     const { preview, template } = setup();
     const result = await preview.execute(

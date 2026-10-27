@@ -21,8 +21,13 @@ import {
   type ConsentSigningContext,
   type PatientConsentRepository,
 } from '../../domain/ports/patient-consent-repository.port';
-import { formatConsentDate, renderConsent } from '../../domain/render-consent';
+import {
+  formatConsentDate,
+  renderConsent,
+  usesVariable,
+} from '../../domain/render-consent';
 import { computeConsentHash } from '../../domain/consent-hash';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   parseSignaturePng,
   SignatureImageError,
@@ -137,7 +142,14 @@ async function prepare(
     documento: documentOf(context.patient) ?? NO_DOCUMENT,
     profesional: context.professionalName,
     clinica: context.clinicName,
-    fecha: formatConsentDate(now, context.timeZone),
+    // El formato de la sede (409 si le falta) solo si la plantilla lo pinta.
+    fecha: usesVariable(template.body, 'fecha')
+      ? formatConsentDate(
+          now,
+          context.timeZone,
+          requireLocationFormat(context.location),
+        )
+      : '',
     tratamiento: treatmentOf(context.plan),
   });
   return { template, context, title: template.title, body };

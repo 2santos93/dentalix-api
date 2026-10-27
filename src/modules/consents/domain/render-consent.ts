@@ -1,3 +1,5 @@
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+
 /**
  * Variables que admite el texto de una plantilla de consentimiento (DX-006).
  * Se escriben `{{nombre}}`; dentro de las llaves se toleran espacios y
@@ -35,6 +37,18 @@ export function renderConsent(body: string, values: ConsentVariables): string {
   });
 }
 
+/**
+ * El texto usa la variable `name` (en cualquier forma: `{{ Fecha }}`). Quien
+ * renderiza la calcula solo si aparece: una plantilla sin `{{fecha}}` no exige
+ * el formato de la sede (G1-B, pre-flight I4).
+ */
+export function usesVariable(body: string, name: ConsentVariable): boolean {
+  for (const [, raw] of body.matchAll(VARIABLE_PATTERN)) {
+    if (raw.toLowerCase() === name) return true;
+  }
+  return false;
+}
+
 /** Variables del texto que no existen (en minúscula, sin repetir, en orden). */
 export function findUnknownVariables(body: string): string[] {
   const unknown = new Set<string>();
@@ -45,12 +59,14 @@ export function findUnknownVariables(body: string): string[] {
   return [...unknown];
 }
 
-/** «16 de octubre de 2026», en la zona horaria de la clínica. */
-export function formatConsentDate(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('es-CO', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone,
-  }).format(date);
+/**
+ * «16 de octubre de 2026», en la zona horaria de la sede, sin día de la
+ * semana. Las palabras son siempre en español, sea cual sea el locale.
+ */
+export function formatConsentDate(
+  date: Date,
+  timeZone: string,
+  fmt: RegionalFormat,
+): string {
+  return fmt.longDate(date, timeZone, { weekday: false });
 }

@@ -13,6 +13,8 @@ import {
   ReceivedPayment,
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
+import type { RegionalFormat } from '../../../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../../../shared/locations/location-regional';
 
 // `Payment` (the API-facing entity) deliberately has no `deletedAt` field —
 // same convention as Sale/TreatmentPlan. The fake still has to honour
@@ -142,8 +144,31 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   /** Test helper: saldos migrados que conoce el fake (DX-262). */
   readonly openingBalances = new Map<
     string,
-    { id: string; patientId: string; currency: string; amount: number }
+    {
+      id: string;
+      patientId: string;
+      currency: string;
+      amount: number;
+      /** Sede del saldo (la del lote); por defecto `loc-1`. */
+      locationId?: string;
+    }
   >();
+
+  /** Formato y reloj de cada sede (G1-B); `null` = sin configurar. */
+  readonly locations = new Map<
+    string,
+    { locale: string | null; hourCycle: string | null }
+  >([['loc-1', { locale: 'es-CO', hourCycle: 'h23' }]]);
+
+  locationFormat(locationId: string): Promise<RegionalFormat> {
+    return Promise.resolve().then(() =>
+      requireLocationFormat({
+        id: locationId,
+        locale: this.locations.get(locationId)?.locale ?? null,
+        hourCycle: this.locations.get(locationId)?.hourCycle ?? null,
+      }),
+    );
+  }
 
   findOpeningBalance(id: string): Promise<OpeningBalanceTarget | null> {
     const balance = this.openingBalances.get(id);
@@ -156,7 +181,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
           p.currency === balance.currency,
       )
       .reduce((sum, p) => sum + Math.round(p.amount * 100), 0);
-    return Promise.resolve({ ...balance, paid: paid / 100 });
+    return Promise.resolve({
+      ...balance,
+      locationId: balance.locationId ?? 'loc-1',
+      paid: paid / 100,
+    });
   }
 
   listByOpeningBalance(openingBalanceId: string): Promise<Payment[]> {

@@ -68,6 +68,9 @@ export interface CancellationFeeContext {
   receptionCanCharge: boolean;
   locationCountry: ClinicCountry;
   locationTimeZone: string;
+  /** Formato y reloj de la sede de la cita, en crudo: los pide quien pinta (G1-B, I4). */
+  locationLocale: string | null;
+  locationHourCycle: string | null;
   /** Coberturas vivas del paciente con el tipo de su pagador. */
   coverages: FeeCoverage[];
   fee: CancellationFeeRecord | null;

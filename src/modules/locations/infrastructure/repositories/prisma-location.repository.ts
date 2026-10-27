@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -13,6 +13,8 @@ import {
 
 @Injectable()
 export class PrismaLocationRepository implements LocationRepository {
+  private readonly logger = new Logger('Locations');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
@@ -38,6 +40,7 @@ export class PrismaLocationRepository implements LocationRepository {
           currency: input.currency,
           timeZone: input.timeZone,
           locale: input.locale,
+          hourCycle: input.hourCycle,
           // R11: quien crea la sede eligió sus valores; no queda «por revisar».
           regionalSettingsReviewedAt: new Date(),
           phone: input.phone,
@@ -48,13 +51,23 @@ export class PrismaLocationRepository implements LocationRepository {
       // según por dónde se crearon. Su columna legada de zona es la de la sede
       // (R20).
       await seedDefaultBusinessHours(tx, tenantId, location.id, input.timeZone);
-      return location;
+      if (input.hourCycle !== null) return location;
+      // G1-B fase 1 (spec §4.1): alta de la web de G1, sin reloj. La función
+      // es lo único que rellena un NULL (R5), en esta misma transacción; no
+      // toca la revisión. Desaparece en fase 2.
+      await tx.$queryRaw`SELECT public.dx_g1b_backfill_location_hour_cycle(${tenantId}::uuid)`;
+      this.logger.log({
+        event: 'location.create_hour_cycle_backfilled',
+        tenantId,
+        locationId: location.id,
+      });
+      return tx.location.findUniqueOrThrow({ where: { id: location.id } });
     });
   }
 
   // G1: moneda, zona y locale son columnas de la sede y se devuelven tal
   // cual; un NULL (fila de una réplica antigua sin barrer) sale como null,
-  // nunca como el valor de su país (R19).
+  // nunca como el valor de su país (R19). G1-B: igual el reloj.
   async list(): Promise<Location[]> {
     return this.prisma.runWithTenant((tx) =>
       tx.location.findMany({
@@ -138,6 +151,7 @@ export class PrismaLocationRepository implements LocationRepository {
           currency: write.currency,
           timeZone: write.timeZone,
           locale: write.locale,
+          hourCycle: write.hourCycle,
           ...(write.reviewed ? { regionalSettingsReviewedAt: new Date() } : {}),
         },
       });

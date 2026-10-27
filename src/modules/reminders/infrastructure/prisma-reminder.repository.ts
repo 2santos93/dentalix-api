@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { loadNoticeResponsibles } from '../../patients/infrastructure/notices/notice-context';
 import {
   REMINDER_CATCH_UP_MS,
@@ -212,7 +213,15 @@ export class PrismaReminderRepository implements ReminderRepository {
               emergencyContactName: true,
             },
           },
-          location: { select: { id: true, country: true, timeZone: true } },
+          location: {
+            select: {
+              id: true,
+              country: true,
+              timeZone: true,
+              locale: true,
+              hourCycle: true,
+            },
+          },
         },
       });
       if (!appointment) return null;
@@ -245,6 +254,9 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
         locationCountry: appointment.location.country,
         locationTimeZone: requireLocationTimeZone(appointment.location),
+        // Después de la zona (su 409 gana): sin formato o sin reloj, el 409
+        // de formato y el envío no sale, igual que con una zona NULL.
+        locationFormat: requireLocationFormat(appointment.location),
         patientId: appointment.patient.id,
         contact: toContact(appointment.patient),
         recipient: {

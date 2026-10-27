@@ -10,6 +10,7 @@ import {
 import type { ClinicLocationSettings } from '../src/modules/auth/domain/ports/auth-repository.port';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
 
@@ -29,12 +30,22 @@ const BOGOTA_LOCATION: ClinicLocationSettings = {
   currency: REGIONAL_BOGOTA_FIXTURE.currency,
   timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
   locale: REGIONAL_BOGOTA_FIXTURE.locale,
+  hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
 };
 const TOKYO_LOCATION: ClinicLocationSettings = {
   country: REGIONAL_TOKYO_FIXTURE.country,
   currency: REGIONAL_TOKYO_FIXTURE.currency,
   timeZone: REGIONAL_TOKYO_FIXTURE.timeZone,
   locale: REGIONAL_TOKYO_FIXTURE.locale,
+  hourCycle: REGIONAL_TOKYO_FIXTURE.hourCycle,
+};
+// G1-B: un pendiente con reloj de 12 h y uno de la web de G1 (sin reloj).
+const NEW_YORK_LOCATION: ClinicLocationSettings = {
+  country: REGIONAL_NEW_YORK_FIXTURE.country,
+  currency: REGIONAL_NEW_YORK_FIXTURE.currency,
+  timeZone: REGIONAL_NEW_YORK_FIXTURE.timeZone,
+  locale: REGIONAL_NEW_YORK_FIXTURE.locale,
+  hourCycle: REGIONAL_NEW_YORK_FIXTURE.hourCycle,
 };
 const EXPIRED_EMAIL = 'caducado.int@dx029.test';
 
@@ -118,6 +129,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
       locationCurrency: 'JPY',
       locationTimeZone: 'Asia/Tokyo',
       locationLocale: 'ja-JP',
+      locationHourCycle: 'h23',
     });
 
     // Forma legada (web antigua): el reemplazo deja la sede en NULL.
@@ -134,7 +146,34 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
       locationCurrency: null,
       locationTimeZone: null,
       locationLocale: null,
+      locationHourCycle: null,
     });
+  });
+
+  it('G1-B: the clock is written on create and overwritten on replace, also to NULL for the G1 web shape', async () => {
+    const first = generateRegistrationToken();
+    const second = generateRegistrationToken();
+    expect(await save(first, 'reg-int-1', undefined, NEW_YORK_LOCATION)).toBe(
+      true,
+    );
+    expect(
+      (
+        await raw.pendingRegistration.findUniqueOrThrow({
+          where: { email: EMAIL },
+        })
+      ).locationHourCycle,
+    ).toBe('h12');
+    const g1Shape = { ...TOKYO_LOCATION, hourCycle: null };
+    expect(await save(second, 'reg-int-2', undefined, g1Shape)).toBe(true);
+    expect(
+      await raw.pendingRegistration.findUniqueOrThrow({
+        where: { email: EMAIL },
+      }),
+    ).toMatchObject({ locationLocale: 'ja-JP', locationHourCycle: null });
+    // Los cuatro sin reloj NO son legado (pre-flight I3).
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(second)),
+    ).toMatchObject({ location: g1Shape });
   });
 
   it('DX-144: dentro del enfriamiento NO reemplaza el pendiente vigente: el primer enlace sigue valiendo', async () => {

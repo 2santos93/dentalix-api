@@ -148,6 +148,16 @@ export interface BatchLocation {
   country: ClinicCountry;
   timeZone: string;
   currency: string | null;
+  /** Formato y reloj en crudo: los pide quien pinta un mensaje (G1-B, I4). */
+  locale: string | null;
+  hourCycle: string | null;
+}
+
+/** Formato y reloj de una sede, en crudo (G1-B): para `requireLocationFormat`. */
+export interface LocationFormatSettings {
+  id: string;
+  locale: string | null;
+  hourCycle: string | null;
 }
 
 /** La sede del lote no existe o está inactiva. */
@@ -311,7 +321,8 @@ export class PrismaPatientImportRepository {
 
   /**
    * Sede del lote (la de escritura del request), activa, con su país (reglas
-   * del documento) y su zona («hoy» de la validación). Sin zona válida, 409
+   * del documento), su zona («hoy» de la validación) y su formato y reloj en
+   * crudo (mensajes con cifras, G1-B). Sin zona válida, 409
    * `LOCATION_TIMEZONE_REQUIRED`.
    */
   async batchLocation(): Promise<BatchLocation> {
@@ -324,7 +335,14 @@ export class PrismaPatientImportRepository {
           deletedAt: null,
           isActive: true,
         },
-        select: { id: true, country: true, timeZone: true, currency: true },
+        select: {
+          id: true,
+          country: true,
+          timeZone: true,
+          currency: true,
+          locale: true,
+          hourCycle: true,
+        },
       });
       if (!location) throw new BatchLocationError();
       return {
@@ -332,8 +350,27 @@ export class PrismaPatientImportRepository {
         country: location.country,
         timeZone: requireLocationTimeZone(location),
         currency: location.currency,
+        locale: location.locale,
+        hourCycle: location.hourCycle,
       };
     });
+  }
+
+  /** Formato y reloj en crudo de la sede de un lote ya creado (G1-B). */
+  async locationFormatSettings(
+    locationId: string,
+  ): Promise<LocationFormatSettings> {
+    const location = await this.prisma.runWithTenant((tx) =>
+      tx.location.findFirst({
+        where: { id: locationId, tenantId: this.tenantId() },
+        select: { locale: true, hourCycle: true },
+      }),
+    );
+    return {
+      id: locationId,
+      locale: location?.locale ?? null,
+      hourCycle: location?.hourCycle ?? null,
+    };
   }
 
   /** Pacientes vivos de la clínica cuyo documento tiene alguna de esas claves. */

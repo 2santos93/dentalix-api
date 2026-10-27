@@ -26,6 +26,8 @@ import {
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { PlanItemReservedElsewhere } from '../../domain/entities/appointment.entity';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import type { HourCycle } from '../../../../shared/format/regional-format';
 
 export const IN_CLINIC_NO_LOCATION_MESSAGE =
   'Elige una sede para ver quién está en la clínica.';
@@ -70,6 +72,9 @@ export interface InClinicView<Item extends InClinicItem = InClinicItem> {
   date: string;
   locationId: string;
   timeZone: string;
+  /** G1-B: formato y reloj de la sede, con los que la web pinta las horas. */
+  locale: string;
+  hourCycle: HourCycle;
   /** Reloj del servidor con el que se calcularon los minutos. */
   now: Date;
   /** MINE: solo los pacientes del odontólogo («Te esperan»); LOCATION: la sede. */
@@ -157,7 +162,9 @@ export class ListInClinicUseCase {
     }
     const location = await this.locations.findById(input.locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
+    // La zona primero; después el formato: el panel pinta horas (G1-B §10).
     const timeZone = requireLocationTimeZone(location);
+    const fmt = requireLocationFormat(location);
     const date = day ?? civilDateIn(now, timeZone);
     const range = civilDayRange(date, timeZone);
     const mine = input.role === ClinicRole.DENTIST;
@@ -182,6 +189,8 @@ export class ListInClinicUseCase {
       date,
       locationId: location.id,
       timeZone,
+      locale: fmt.locale,
+      hourCycle: fmt.hourCycle,
       now,
       scope: mine ? 'MINE' : 'LOCATION',
       waiting: group(AppointmentStatus.ARRIVED),

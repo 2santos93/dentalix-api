@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Logger,
@@ -143,7 +144,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
       tokenHash: null,
       tokenExpiresAt: null,
     });
-    // Fecha civil de la cita en Bogotá (en UTC ya es el 21).
+    // Fecha civil de la cita en la zona de la sede (en UTC ya es el 21).
     expect(row.renderedText).toBe(
       'Hola Carolina Duque. Te atendió Dra. Laura Gómez en Sonrisas del Norte el 20/10/2026. Dudas: 601 555 0101. Muerde la gasa.',
     );
@@ -174,6 +175,73 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
       LINK,
     );
     expect(deliveries.rows[0].renderedText).toContain('Dudas: . Muerde');
+  });
+
+  it('post-op fecha follows the location locale', async () => {
+    const { deliver, exo, deliveries } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        location: {
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        },
+      }),
+    );
+    await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'PRINT' },
+      CTX,
+      LINK,
+    );
+    // 02:30 UTC del 21 = 22:30 del 20 en Nueva York: mes primero en en-US.
+    expect(deliveries.rows[0].renderedText).toContain('el 10/20/2026.');
+  });
+
+  it('una sede sin reloj: 409 LOCATION_LOCALE_REQUIRED sin registrar nada', async () => {
+    const { deliver, exo, deliveries } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({ location: { hourCycle: null } }),
+    );
+    const error = await deliver
+      .execute(
+        APPOINTMENT_ID,
+        { templateId: exo.id, channel: 'PRINT' },
+        CTX,
+        LINK,
+      )
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_LOCALE_REQUIRED',
+      locationId: 'loc-1',
+    });
+    expect(deliveries.rows).toHaveLength(0);
+  });
+
+  it('una sede sin reloj entrega una plantilla sin {{fecha}} sin pedir el formato', async () => {
+    const { deliver, templates, deliveries } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({ location: { locale: null, hourCycle: null } }),
+    );
+    const nodate = templates.seed({
+      code: 'POI-SINFECHA',
+      title: 'Sin fecha',
+      body: 'Hola {{paciente}}. Muerde la gasa.',
+    });
+    await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: nodate.id, channel: 'PRINT' },
+      CTX,
+      LINK,
+    );
+    expect(deliveries.rows).toHaveLength(1);
+    expect(deliveries.rows[0].renderedText).toBe(
+      'Hola Carolina Duque. Muerde la gasa.',
+    );
   });
 
   it('EMAIL a un adulto: token con caducidad a 30 días, solo su hash en la fila, y email sin el título ni el texto', async () => {

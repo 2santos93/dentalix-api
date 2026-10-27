@@ -1,4 +1,6 @@
+import { ConflictException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
+import { regionalFormat } from '../../../shared/format/regional-format';
 import {
   PLAN_ITEMS_CANCELLED_MESSAGE,
   PLAN_ITEMS_CLOSED_MESSAGE,
@@ -51,21 +53,70 @@ describe('DX-271 reserva de ítems del plan', () => {
     );
   });
 
+  // Sedes de prueba con ajustes explícitos: lo que mostraban (24 h, día/mes).
+  const h23 = { id: 'loc-1', locale: 'es-CO', hourCycle: 'h23' };
+  const at = (
+    start: Date,
+    timeZone: string,
+    location: {
+      id: string;
+      locale: string | null;
+      hourCycle: string | null;
+    } = h23,
+  ) => ({
+    start,
+    timeZone,
+    location,
+  });
+
   it('dice en qué cita está el ítem, con la fecha y la hora de la sede', () => {
     // 14:00 UTC = 9:00 en Bogotá y 15:00 en Madrid (CET desde el 25/10).
-    expect(reservedElsewhereMessage(future, 'America/Bogota')).toBe(
+    expect(reservedElsewhereMessage(at(future, 'America/Bogota'))).toBe(
       'Este tratamiento ya está reservado en otra cita, la del 30/10/2026 a las 09:00. Quítalo de esa cita o cancélala antes.',
     );
-    expect(reservedElsewhereMessage(future, 'Europe/Madrid')).toContain(
+    expect(reservedElsewhereMessage(at(future, 'Europe/Madrid'))).toContain(
       'la del 30/10/2026 a las 15:00',
     );
     // Sin cita conocida (se canceló a la vez), el mensaje general.
-    expect(reservedElsewhereMessage(null, 'America/Bogota')).toBe(
+    expect(reservedElsewhereMessage(null)).toBe(
       'Este tratamiento ya está reservado en otra cita. Quítalo de esa cita o cancélala antes.',
     );
-    expect(reservedElsewhereMessage(future, 'America/Bogota')).not.toMatch(
+    expect(reservedElsewhereMessage(at(future, 'America/Bogota'))).not.toMatch(
       /agendarlo/,
     );
+  });
+
+  it('reservedElsewhere at a ja-JP h23 location uses 2026/10/30 a las 09:00', () => {
+    const tokyo = { id: 'loc-tokyo', locale: 'ja-JP', hourCycle: 'h23' };
+    // 00:00 UTC = 09:00 en Tokio.
+    const start = new Date('2026-10-30T00:00:00Z');
+    expect(reservedElsewhereMessage(at(start, 'Asia/Tokyo', tokyo))).toBe(
+      'Este tratamiento ya está reservado en otra cita, la del 2026/10/30 a las 09:00. Quítalo de esa cita o cancélala antes.',
+    );
+    const newYork = { id: 'loc-ny', locale: 'en-US', hourCycle: 'h12' };
+    expect(
+      reservedElsewhereMessage(at(future, 'America/New_York', newYork)),
+    ).toBe(
+      'Este tratamiento ya está reservado en otra cita, la del 10/30/2026 a las 10:00 a. m. Quítalo de esa cita o cancélala antes.',
+    );
+  });
+
+  it('reserved elsewhere message for an allowed unconfigured location is 409 only when formatting', () => {
+    const unconfigured = { id: 'loc-x', locale: 'en-US', hourCycle: null };
+    // Sin cita que pintar no hace falta el formato: nunca 409.
+    expect(reservedElsewhereMessage(null)).toMatch(/^Este tratamiento/);
+    // El 409 lo lanza el constructor del mensaje al pintar la fecha.
+    let thrown: unknown;
+    try {
+      reservedElsewhereMessage(at(future, 'America/Bogota', unconfigured));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ConflictException);
+    expect((thrown as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_LOCALE_REQUIRED',
+      locationId: 'loc-x',
+    });
   });
 
   it('una cita futura cancelada o no-show no «ya pasó»: lo dice su estado (M6)', () => {
@@ -182,10 +233,22 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
         start: new Date('2026-10-23T14:05:00.000Z'),
         timeZone: TZ,
         locationName: 'Sede Norte',
+        fmt: regionalFormat({ locale: 'es-CO', hourCycle: 'h23' }),
       }),
     ).toBe(
       'Este tratamiento ya lo tiene otra cita con el paciente en la clínica, la de hoy a las 09:05 (Sede Norte). No se puede traer mientras esa cita siga en curso.',
     );
+  });
+
+  it('heldInClinic at an h12 location uses 12 h', () => {
+    expect(
+      heldInClinicMessage({
+        start: new Date('2026-10-23T19:05:00.000Z'),
+        timeZone: 'America/New_York',
+        locationName: 'Sede Norte',
+        fmt: regionalFormat({ locale: 'en-US', hourCycle: 'h12' }),
+      }),
+    ).toContain('la de hoy a las 3:05 p. m. (Sede Norte)');
   });
 
   it('sin datos de la titular (sede no permitida, DX-089): el mensaje general', () => {
@@ -206,6 +269,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
     start: new Date(start),
     locationId: 'loc-norte',
     locationName: 'Sede Norte',
+    locationLocale: 'en-US',
+    locationHourCycle: 'h12' as const,
   });
 
   it.each([
@@ -228,6 +293,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
         locationId: 'loc-norte',
         locationName: 'Sede Norte',
         timeZone: TZ,
+        locale: 'en-US',
+        hourCycle: 'h12',
       });
     },
   );
@@ -269,6 +336,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
       locationId: 'loc-norte',
       locationName: 'Sede Norte',
       timeZone: TZ,
+      locale: 'en-US',
+      hourCycle: 'h12',
     });
   });
 
@@ -280,6 +349,28 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
         { timeZone: 'Europe/Madrid', locationAllowed: true, now },
       )?.heldInClinic,
     ).toBe(false);
+  });
+
+  it('sede permitida sin formato ni reloj: locale y hourCycle null en crudo, el resto igual (I4)', () => {
+    expect(
+      reservationHolderView(
+        {
+          ...holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
+          locationLocale: null,
+          locationHourCycle: null,
+        },
+        { timeZone: TZ, locationAllowed: true, now },
+      ),
+    ).toEqual({
+      heldInClinic: false,
+      appointmentId: 'b1',
+      start: new Date('2026-10-30T14:00:00.000Z'),
+      locationId: 'loc-norte',
+      locationName: 'Sede Norte',
+      timeZone: TZ,
+      locale: null,
+      hourCycle: null,
+    });
   });
 
   it('sede no permitida y titular de hoy en la clínica: heldInClinic sin cita, hora ni sede (DX-089)', () => {
@@ -295,6 +386,8 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
       locationId: null,
       locationName: null,
       timeZone: null,
+      locale: null,
+      hourCycle: null,
     });
   });
 

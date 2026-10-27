@@ -135,6 +135,7 @@ const TOKYO_LOCATION = {
   locationCurrency: 'JPY',
   locationTimeZone: 'Asia/Tokyo',
   locationLocale: 'ja-JP',
+  locationHourCycle: 'h23',
 };
 
 const INPUT = {
@@ -511,6 +512,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
+        hourCycle: 'h23',
       });
 
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
@@ -522,9 +524,62 @@ describe('RegisterClinicUseCase (DX-029)', () => {
             currency: 'JPY',
             timeZone: 'Asia/Tokyo',
             locale: 'ja-JP',
+            hourCycle: 'h23',
           },
         }),
       );
+    });
+
+    it('G1-B: con los cinco guarda el reloj elegido (12 h)', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      await uc.execute({
+        ...INPUT,
+        locationCurrency: 'JPY',
+        locationLocale: 'en-US',
+        locationTimeZone: 'America/New_York',
+        locationHourCycle: 'h12',
+      });
+      expect(pending.rows[0].location).toEqual({
+        country: 'CO',
+        currency: 'JPY',
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+    });
+
+    it('G1-B fase 1: los cuatro sin reloj (web de G1) no son legado: hourCycle null', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      await uc.execute({ ...INPUT, locationHourCycle: undefined });
+      expect(pending.rows[0].location).toEqual({
+        country: 'CO',
+        currency: 'JPY',
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+        hourCycle: null,
+      });
+    });
+
+    it('G1-B: locationHourCycle solo es 400 con el primer campo que falta', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      const error = await uc
+        .execute({ ...LEGACY_INPUT, locationHourCycle: 'h12' })
+        .catch((e: unknown) => e);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        message: 'Elige el país de la sede.',
+        field: 'locationCountry',
+      });
+      const invalid = await uc
+        .execute({ ...INPUT, locationHourCycle: 'h24' })
+        .catch((e: unknown) => e);
+      expect((invalid as BadRequestException).getResponse()).toMatchObject({
+        message: 'El reloj «h24» no es válido: elige 12 h o 24 h.',
+        field: 'locationHourCycle',
+      });
+      expect(pending.rows).toHaveLength(0);
     });
 
     it('forma legada (sin los cuatro): se acepta y verify crea la clínica sin sede configurada', async () => {

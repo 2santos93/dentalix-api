@@ -20,6 +20,7 @@ import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repos
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { maskEmail } from '../../../../shared/privacy/mask-email';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
   PostOpDelivery,
@@ -43,7 +44,10 @@ import {
   postOpLinkExpiry,
 } from '../../domain/postop-token';
 import { postOpWhatsAppMessage } from '../../domain/postop-whatsapp-message';
-import { renderInstructions } from '../../domain/render-instructions';
+import {
+  renderInstructions,
+  usesVariable,
+} from '../../domain/render-instructions';
 import { suggestTemplates } from '../../domain/template-rules';
 import { POSTOP_CLOCK, type PostOpClock } from '../post-op-clock';
 import { POSTOP_EMAIL_SENDER, type PostOpEmailSender } from '../postop-email';
@@ -158,12 +162,6 @@ function templateSummary(t: PostOpTemplateView): PostOpTemplateSummary {
 /** El móvil con solo los 4 últimos dígitos a la vista. */
 function maskPhone(e164: string): string {
   return `${'*'.repeat(Math.max(0, e164.length - 4))}${e164.slice(-4)}`;
-}
-
-/** `YYYY-MM-DD` → `dd/MM/yyyy`. */
-function civilDateLabel(day: string): string {
-  const [y, m, d] = day.split('-');
-  return `${d}/${m}/${y}`;
 }
 
 /**
@@ -371,7 +369,14 @@ export class DeliverPostOpInstructionsUseCase {
       profesional: appointment.providerName,
       clinica: ctx.clinicName,
       telefono_sede: location.phone ?? '',
-      fecha: civilDateLabel(civilDateIn(appointment.start, location.timeZone)),
+      // Día civil de la cita en la sede, con su formato (409 si le falta),
+      // solo si la plantilla lo pinta.
+      fecha: usesVariable(template.body, 'fecha')
+        ? requireLocationFormat(location).date(
+            appointment.start,
+            location.timeZone,
+          )
+        : '',
     });
     const deliveredByName =
       (await this.deliveries.userName(request.actor.userId)) ?? 'Equipo';

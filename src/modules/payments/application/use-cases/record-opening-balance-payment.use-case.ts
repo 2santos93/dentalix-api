@@ -16,6 +16,7 @@ import {
 } from '../../domain/idempotency';
 import {
   OPENING_BALANCE_NOT_FOUND_MESSAGE,
+  OPENING_BALANCE_PAID_MESSAGE,
   openingBalanceCurrencyMessage,
   openingBalanceOverpaidMessage,
 } from '../../domain/opening-balance-payment';
@@ -99,7 +100,13 @@ export class RecordOpeningBalancePaymentUseCase {
       Math.round(balance.amount * 100) - Math.round(balance.paid * 100);
     if (Math.round(input.amount * 100) > pendingCents) {
       throw new BadRequestException(
-        openingBalanceOverpaidMessage(pendingCents / 100, currency),
+        pendingCents <= 0
+          ? OPENING_BALANCE_PAID_MESSAGE
+          : openingBalanceOverpaidMessage(
+              pendingCents / 100,
+              currency,
+              await this.repo.locationFormat(balance.locationId),
+            ),
       );
     }
 

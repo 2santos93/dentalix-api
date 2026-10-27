@@ -29,6 +29,23 @@ import {
 } from './xlsx-reader';
 import { buildXlsx, zip } from './__fixtures__/xlsx-builder';
 import { TOO_MANY_ROWS_MESSAGE } from './import-fields';
+import {
+  regionalFormat,
+  type RegionalFormat,
+} from '../../../shared/format/regional-format';
+
+/** El texto de un `ImportFileError` en la sede `fmt` (G1-B). */
+function rendered(run: () => unknown, fmt: RegionalFormat): string {
+  try {
+    run();
+  } catch (error) {
+    expect(error).toBeInstanceOf(ImportFileError);
+    return (error as ImportFileError).render(() => fmt);
+  }
+  throw new Error('no lanzó');
+}
+const ES_CO = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const EN_US = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 
 const csvBytes = (text: string, encoding: BufferEncoding = 'utf8') =>
   Buffer.from(text, encoding);
@@ -193,7 +210,10 @@ describe('TableBuilder / toTable', () => {
       ['a', 'b'],
       ...Array.from({ length: 10_001 }, (_, i) => [`x${i}`, 'y']),
     ];
-    expect(() => toTable(rows(many))).toThrow(TOO_MANY_ROWS_MESSAGE);
+    expect(rendered(() => toTable(rows(many)), ES_CO)).toBe(
+      TOO_MANY_ROWS_MESSAGE(ES_CO),
+    );
+    expect(TOO_MANY_ROWS_MESSAGE(ES_CO)).toContain('más de 10.000 filas');
     const exact = [
       ['a', 'b'],
       ...Array.from({ length: 10_000 }, (_, i) => [`x${i}`, 'y']),
@@ -203,9 +223,34 @@ describe('TableBuilder / toTable', () => {
       { length: MAX_PHYSICAL_ROWS + 1 },
       () => [] as string[],
     );
-    expect(() => toTable(rows(blanks))).toThrow(
-      /filas \(contando las vacías\)/,
+    expect(rendered(() => toTable(rows(blanks)), ES_CO)).toMatch(
+      /más de 50\.000 filas \(contando las vacías\)/,
     );
+  });
+
+  it('import row limit message at an en-US location reads 10,000', () => {
+    const many = [
+      ['a', 'b'],
+      ...Array.from({ length: 10_001 }, (_, i) => [`x${i}`, 'y']),
+    ];
+    expect(rendered(() => toTable(rows(many)), EN_US)).toBe(
+      'El archivo tiene más de 10,000 filas de pacientes. Divídelo en varios archivos.',
+    );
+    const blanks = Array.from(
+      { length: MAX_PHYSICAL_ROWS + 1 },
+      () => [] as string[],
+    );
+    expect(rendered(() => toTable(rows(blanks)), EN_US)).toMatch(
+      /^El archivo tiene más de 50,000 filas \(contando las vacías\)/,
+    );
+    // Un error sin cifras no pide el formato (G1-B, I4).
+    const plain = rendered(() => toTable(rows([['a', 'A']])), EN_US);
+    expect(plain).toMatch(/aparece dos veces/);
+    expect(
+      new ImportFileError('sin cifras').render(() => {
+        throw new Error('no debe pedirse');
+      }),
+    ).toBe('sin cifras');
   });
 });
 
@@ -437,7 +482,9 @@ describe('readImportFile', () => {
         one.repeat(Math.floor((20 * 1024 * 1024) / one.length)) +
         '</sheetData>',
     );
-    await expect(readImportFile(book, 'x.xlsx')).rejects.toThrow(
+    const err = await readImportFile(book, 'x.xlsx').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ImportFileError);
+    expect((err as ImportFileError).render(() => ES_CO)).toMatch(
       /filas \(contando las vacías\)|no tiene cabecera/,
     );
   });

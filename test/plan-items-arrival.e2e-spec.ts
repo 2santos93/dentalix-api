@@ -16,9 +16,15 @@ import {
   loginAs,
 } from './support/e2e-fixtures';
 import {
+  REGIONAL_BERLIN_FIXTURE,
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+  g1LocationInsert,
   locationData,
 } from './support/location-fixtures';
+import { civilDateIn } from '../src/shared/time/civil-day';
+import { regionalFormat } from '../src/shared/format/regional-format';
 
 /**
  * DX-271 (auditoría BE-038 y BE-039):
@@ -460,5 +466,360 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     expect(message).not.toContain(wall(holderStart).slice(0, 10));
     expect(message).not.toContain('Norte');
     expect(await links(target.id)).toEqual([]);
+  });
+  // G1-B (DX-350, spec §4.4, pre-flight I4): el aviso «reservado en otra
+  // cita» lleva el formato y el reloj de la sede de la titular EN CRUDO: null
+  // si la sede no está permitida y también si no tiene el dato; la API no
+  // formatea con ellos y la lectura no falla.
+  interface ReservedItem {
+    planItemId: string;
+    locationId: string | null;
+    timeZone: string | null;
+    locale: string | null;
+    hourCycle: string | null;
+  }
+  interface PanelItem {
+    appointmentId: string;
+    planItemsReservedElsewhere: ReservedItem[];
+  }
+
+  // Cada test con su paciente y su profesional: las citas de hoy de los tests
+  // anteriores no se solapan con las suyas (EXCLUDE por paciente y por
+  // profesional). `acceptedItems` y `rawLink` usan `patientId`.
+  let providerId: string;
+  let providers = 0;
+  const freshPatientAndProvider = async () => {
+    patientId = (
+      await raw.patient.create({
+        data: { tenantId: a.tenantId, firstName: 'Rita', lastName: 'Reserva' },
+      })
+    ).id;
+    providerId = (
+      await seedMember(
+        raw,
+        { ...a, subdomain: `${a.subdomain}-${++providers}` },
+        ClinicRole.DENTIST,
+      )
+    ).userId;
+  };
+
+  /**
+   * Cita de hoy en la sede principal que empezó hace un rato, con estos
+   * tratamientos SIN reserva (el trigger no reserva en una cita vencida), y
+   * después el paciente en la sala de espera: como «Llegó» tarde (DX-271).
+   */
+  const arrivedLateWith = async (itemIds: string[]) => {
+    const lateBy = Math.max(
+      1,
+      Math.min(20, minutesIntoBogotaDay(new Date()) - 1),
+    );
+    const start = new Date(Date.now() - lateBy * MIN);
+    const late = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId,
+        patientId,
+        providerId,
+        start,
+        end: new Date(start.getTime() + 30 * MIN),
+        status: 'SCHEDULED',
+      },
+    });
+    for (const itemId of itemIds) await rawLink(late.id, itemId);
+    await raw.appointment.update({
+      where: { id: late.id },
+      data: {
+        status: 'ARRIVED',
+        preArrivalStatus: 'SCHEDULED',
+        arrivedAt: new Date(),
+      },
+    });
+    return late;
+  };
+  /** Cita titular en `holderLocationId`, con el vínculo activo. */
+  const holderAt = async (
+    holderLocationId: string,
+    itemId: string,
+    start: Date,
+    status: AppointmentStatus,
+  ) => {
+    const holder = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: holderLocationId,
+        patientId,
+        providerId,
+        start,
+        end: new Date(start.getTime() + 30 * MIN),
+        status,
+        ...(status === 'IN_CHAIR' ? { arrivedAt: start, seatedAt: start } : {}),
+      },
+    });
+    await rawLink(holder.id, itemId);
+    return holder;
+  };
+  /** Avisos de la cita en el panel «En clínica» de la sede principal. */
+  const reservedOf = async (appointmentId: string, token = a.adminToken) => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/appointments/in-clinic')
+      .set('X-Tenant-Host', a.host)
+      .set('Authorization', 'Bearer ' + token)
+      .set('X-Location-Id', locationId)
+      .expect(200);
+    const body = res.body as Record<string, PanelItem[]>;
+    const item = [
+      ...body.waiting,
+      ...body.inChair,
+      ...body.readyForCheckout,
+    ].find((i) => i.appointmentId === appointmentId);
+    return item?.planItemsReservedElsewhere ?? [];
+  };
+
+  it('reservedElsewhere includes locale and hourCycle, null when the location is not allowed', async () => {
+    await freshPatientAndProvider();
+    const {
+      planId,
+      ids: [toAllowed, toHidden],
+    } = await acceptedItems(2);
+    await accept(planId);
+    const east = await raw.location.create({
+      data: locationData(REGIONAL_NEW_YORK_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Este DX350',
+      }),
+    });
+    const west = await raw.location.create({
+      data: locationData(REGIONAL_BERLIN_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Oeste DX350',
+      }),
+    });
+    await holderAt(
+      east.id,
+      toAllowed,
+      new Date(Date.now() + 30 * DAY),
+      'SCHEDULED',
+    );
+    // La titular de la sede oculta es de hoy (en SU zona) con el paciente en
+    // la clínica: es la única de una sede no permitida que se enseña
+    // (DX-293). Una hora antes o después de la cita de hoy, sin solaparse.
+    const now = new Date();
+    const westToday = civilDateIn(now, REGIONAL_BERLIN_FIXTURE.timeZone);
+    const hourAfter = new Date(now.getTime() + 60 * MIN);
+    await holderAt(
+      west.id,
+      toHidden,
+      civilDateIn(hourAfter, REGIONAL_BERLIN_FIXTURE.timeZone) === westToday
+        ? hourAfter
+        : new Date(now.getTime() - 60 * MIN),
+      'IN_CHAIR',
+    );
+    const today = await arrivedLateWith([toAllowed, toHidden]);
+
+    expect(await reservedOf(today.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          planItemId: toAllowed,
+          locationId: east.id,
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        }),
+        expect.objectContaining({
+          planItemId: toHidden,
+          locationId: west.id,
+          timeZone: 'Europe/Berlin',
+          locale: 'de-DE',
+          hourCycle: 'h23',
+        }),
+      ]),
+    );
+
+    await call('put', `/staff/${receptionUserId}/locations`, {
+      locationIds: [locationId, east.id],
+    }).expect(200);
+    const restricted = await loginAs(app, a.host, receptionEmail);
+    const seen = await reservedOf(today.id, restricted);
+    expect(seen.find((r) => r.planItemId === toAllowed)).toMatchObject({
+      locale: 'en-US',
+      hourCycle: 'h12',
+    });
+    expect(seen.find((r) => r.planItemId === toHidden)).toMatchObject({
+      locationId: null,
+      timeZone: null,
+      locale: null,
+      hourCycle: null,
+    });
+  });
+
+  it('reservedElsewhere returns raw nulls for an allowed unconfigured location, the appointment read does not fail', async () => {
+    await freshPatientAndProvider();
+    const {
+      planId,
+      ids: [itemId],
+    } = await acceptedItems(1);
+    await accept(planId);
+    // Sede de una réplica de G1 sin reloj y, además, sin formato.
+    const g1 = await g1LocationInsert(
+      raw,
+      a.tenantId,
+      'Réplica G1 DX350',
+      REGIONAL_BERLIN_FIXTURE,
+    );
+    await raw.$executeRawUnsafe(
+      `UPDATE "locations" SET "locale" = NULL WHERE "id" = $1::uuid`,
+      g1,
+    );
+    await holderAt(g1, itemId, new Date(Date.now() + 30 * DAY), 'SCHEDULED');
+    const today = await arrivedLateWith([itemId]);
+
+    expect(await reservedOf(today.id)).toEqual([
+      expect.objectContaining({
+        planItemId: itemId,
+        locationId: g1,
+        timeZone: 'Europe/Berlin',
+        locale: null,
+        hourCycle: null,
+      }),
+    ]);
+  });
+
+  it('reserved elsewhere message follows the location format', async () => {
+    await freshPatientAndProvider();
+    const {
+      planId,
+      ids: [inTokyo, inNewYork],
+    } = await acceptedItems(2);
+    await accept(planId);
+    const tokyo = await raw.location.create({
+      data: locationData(REGIONAL_TOKYO_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Tokio DX350',
+      }),
+    });
+    const newYork = await raw.location.create({
+      data: locationData(REGIONAL_NEW_YORK_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Nueva York DX350',
+      }),
+    });
+    const tokyoStart = new Date(Date.now() + 40 * DAY);
+    const newYorkStart = new Date(Date.now() + 41 * DAY);
+    await holderAt(tokyo.id, inTokyo, tokyoStart, 'SCHEDULED');
+    await holderAt(newYork.id, inNewYork, newYorkStart, 'SCHEDULED');
+    const target = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId,
+        patientId,
+        providerId,
+        start: new Date(Date.now() + 42 * DAY),
+        end: new Date(Date.now() + 42 * DAY + 30 * MIN),
+        status: 'SCHEDULED',
+      },
+    });
+
+    const tokyoFmt = regionalFormat(REGIONAL_TOKYO_FIXTURE);
+    const zone = REGIONAL_TOKYO_FIXTURE.timeZone;
+    const atTokyo = await call('patch', `/appointments/${target.id}`, {
+      planItemIds: [inTokyo],
+    }).expect(409);
+    expect((atTokyo.body as { message: string }).message).toBe(
+      `Este tratamiento ya está reservado en otra cita, la del ${tokyoFmt.date(tokyoStart, zone)} a las ${tokyoFmt.time(tokyoStart, zone)}. Quítalo de esa cita o cancélala antes.`,
+    );
+    // ja-JP: año/mes/día; h23: 24 h.
+    expect(tokyoFmt.date(tokyoStart, zone)).toMatch(/^\d{4}\/\d{2}\/\d{2}$/);
+    expect(tokyoFmt.time(tokyoStart, zone)).toMatch(/^\d{2}:\d{2}$/);
+
+    const atNewYork = await call('patch', `/appointments/${target.id}`, {
+      planItemIds: [inNewYork],
+    }).expect(409);
+    const nyFmt = regionalFormat(REGIONAL_NEW_YORK_FIXTURE);
+    const nyZone = REGIONAL_NEW_YORK_FIXTURE.timeZone;
+    expect((atNewYork.body as { message: string }).message).toBe(
+      `Este tratamiento ya está reservado en otra cita, la del ${nyFmt.date(newYorkStart, nyZone)} a las ${nyFmt.time(newYorkStart, nyZone)} Quítalo de esa cita o cancélala antes.`,
+    );
+    // en-US h12: la hora acaba en «a. m.»/«p. m.» y no se dobla el punto.
+    expect(nyFmt.time(newYorkStart, nyZone)).toMatch(
+      /^\d{1,2}:\d{2} [ap]\. m\.$/,
+    );
+    expect(await links(target.id)).toEqual([]);
+  });
+
+  // Revisión de la Task 5 (m4): «Llegó» en la sede sin reloj y con la
+  // titular en otra sede sin reloj (permitida: ADMIN las ve todas). Una sede
+  // sin formato no bloquea la lectura; solo el 409 que pinta una fecha (I4).
+  it('arrival at a location without hourCycle reads; only the formatted message is 409', async () => {
+    await freshPatientAndProvider();
+    const {
+      planId,
+      ids: [itemId],
+    } = await acceptedItems(1);
+    await accept(planId);
+    const g1 = await g1LocationInsert(
+      raw,
+      a.tenantId,
+      'Réplica G1 llegada DX350',
+      REGIONAL_BERLIN_FIXTURE,
+    );
+    await holderAt(g1, itemId, new Date(Date.now() + 50 * DAY), 'SCHEDULED');
+    const lateBy = Math.max(
+      1,
+      Math.min(20, minutesIntoBogotaDay(new Date()) - 1),
+    );
+    const lateStart = new Date(Date.now() - lateBy * MIN);
+    const late = await raw.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId,
+        patientId,
+        providerId,
+        start: lateStart,
+        end: new Date(lateStart.getTime() + 30 * MIN),
+        status: 'SCHEDULED',
+      },
+    });
+    await rawLink(late.id, itemId);
+    const principal = await raw.location.findUniqueOrThrow({
+      where: { id: locationId },
+      select: { hourCycle: true },
+    });
+    await raw.location.update({
+      where: { id: locationId },
+      data: { hourCycle: null },
+    });
+    try {
+      const arrived = await call('patch', `/appointments/${late.id}`, {
+        status: 'ARRIVED',
+      }).expect(200);
+      expect(arrived.body).toMatchObject({
+        status: 'ARRIVED',
+        planItemsReservedElsewhere: [
+          expect.objectContaining({
+            planItemId: itemId,
+            locationId: g1,
+            timeZone: REGIONAL_BERLIN_FIXTURE.timeZone,
+            locale: REGIONAL_BERLIN_FIXTURE.locale,
+            hourCycle: null,
+          }),
+        ],
+      });
+      // Pintar la fecha de la titular sí necesita su formato: 409.
+      const explicit = await call('patch', `/appointments/${late.id}`, {
+        planItemIds: [itemId],
+      }).expect(409);
+      expect(explicit.body).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: g1,
+      });
+      expect(await links(late.id)).toEqual([
+        { planItemId: itemId, active: false, deletedAt: null },
+      ]);
+    } finally {
+      await raw.location.update({
+        where: { id: locationId },
+        data: { hourCycle: principal.hourCycle },
+      });
+    }
   });
 });

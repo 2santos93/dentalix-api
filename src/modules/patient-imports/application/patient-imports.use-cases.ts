@@ -44,10 +44,12 @@ import {
   yieldToEventLoop,
 } from '../domain/tabular-file';
 import { locationCurrencyRequired } from '../../../shared/locations/reference-location';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   BatchLocationError,
   BatchStateError,
   type BatchLocation,
+  type LocationFormatSettings,
   PrismaPatientImportRepository,
   UndoBlockedError,
   importJobKey,
@@ -259,13 +261,22 @@ function requireFile(file: UploadedFile | undefined): UploadedFile {
   return file;
 }
 
-async function readFile(file: UploadedFile) {
+/**
+ * 400 con el texto de un `ImportFileError` en el formato de la sede del lote
+ * (G1-B); el formato se pide solo si el texto lleva cifras (I4).
+ */
+function fileErrorOf(err: unknown, location: LocationFormatSettings): unknown {
+  if (!(err instanceof ImportFileError)) return err;
+  return new BadRequestException(
+    err.render(() => requireLocationFormat(location)),
+  );
+}
+
+async function readFile(file: UploadedFile, location: LocationFormatSettings) {
   try {
     return await readImportFile(file.buffer, file.originalname);
   } catch (err) {
-    if (err instanceof ImportFileError)
-      throw new BadRequestException(err.message);
-    throw err;
+    throw fileErrorOf(err, location);
   }
 }
 
@@ -304,10 +315,25 @@ export class PatientImportsService {
     return templateCsv();
   }
 
+  /**
+   * Sede del lote (la de escritura del request); no disponible, 400. Se lee
+   * ANTES que el fichero: sus errores se dicen en el formato de la sede.
+   */
+  private async batchLocation(): Promise<BatchLocation> {
+    try {
+      return await this.repo.batchLocation();
+    } catch (err) {
+      if (err instanceof BatchLocationError) {
+        throw new BadRequestException(LOCATION_MESSAGE);
+      }
+      throw err;
+    }
+  }
+
   /** Cabeceras, mapeo sugerido y unas filas, sin escribir nada. */
   async inspect(file: UploadedFile | undefined): Promise<InspectResult> {
     const f = requireFile(file);
-    const parsed = await readFile(f);
+    const parsed = await readFile(f, await this.batchLocation());
     return {
       fileName: safeFileName(f.originalname),
       fileFormat: parsed.format,
@@ -332,7 +358,8 @@ export class PatientImportsService {
     actorId: string,
   ): Promise<BatchDetail> {
     const f = requireFile(file);
-    const parsed = await readFile(f);
+    const location = await this.batchLocation();
+    const parsed = await readFile(f, location);
     const input: MappingInput = {
       columns: mapping.columns ?? suggestMapping(parsed.table.headers),
       defaultDocType: mapping.defaultDocType,
@@ -341,18 +368,7 @@ export class PatientImportsService {
     try {
       resolved = resolveMapping(parsed.table.headers, input);
     } catch (err) {
-      if (err instanceof ImportFileError)
-        throw new BadRequestException(err.message);
-      throw err;
-    }
-    let location: BatchLocation;
-    try {
-      location = await this.repo.batchLocation();
-    } catch (err) {
-      if (err instanceof BatchLocationError) {
-        throw new BadRequestException(LOCATION_MESSAGE);
-      }
-      throw err;
+      throw fileErrorOf(err, location);
     }
     const ctx = {
       countryCode: location.country,
@@ -541,15 +557,7 @@ export class PatientImportsService {
 
   /** La fila de ejemplo lleva la moneda de la sede en contexto (nunca otra). */
   async balanceTemplate(): Promise<string> {
-    let location: BatchLocation;
-    try {
-      location = await this.repo.batchLocation();
-    } catch (err) {
-      if (err instanceof BatchLocationError) {
-        throw new BadRequestException(LOCATION_MESSAGE);
-      }
-      throw err;
-    }
+    const location = await this.batchLocation();
     if (!location.currency) throw locationCurrencyRequired(location.id);
     return balanceTemplateCsv(location.currency);
   }
@@ -575,14 +583,14 @@ export class PatientImportsService {
     const current = await this.repo.findBatch(id);
     if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
     this.assertBalancesEditable(current);
-    const parsed = await readFile(f);
+    // La sede del lote, antes que el fichero: sus mensajes van en su formato.
+    const location = await this.repo.locationFormatSettings(current.locationId);
+    const parsed = await readFile(f, location);
     let cols;
     try {
       cols = resolveBalanceColumns(parsed.table.headers);
     } catch (err) {
-      if (err instanceof ImportFileError)
-        throw new BadRequestException(err.message);
-      throw err;
+      throw fileErrorOf(err, location);
     }
     const timeZone = await this.repo.locationTimeZone(current.locationId);
     const ctx = {
@@ -618,6 +626,7 @@ export class PatientImportsService {
       candidates,
       docs,
       cols.docNumber,
+      () => requireLocationFormat(location),
       existing,
       addToExisting,
     );

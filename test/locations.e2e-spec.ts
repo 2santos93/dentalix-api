@@ -9,8 +9,11 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
+  REGIONAL_BERLIN_FIXTURE,
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
+  g1LocationInsert,
   legacyLocationInsert,
   locationBody,
   registerBody,
@@ -132,8 +135,34 @@ describe('Locations / multi-sede (e2e)', () => {
       }
     ).properties;
     expect(
-      ['currency', 'timeZone', 'locale'].map((f) => update[f].type),
-    ).toEqual(['string', 'string', 'string']);
+      ['currency', 'timeZone', 'locale', 'hourCycle'].map(
+        (f) => update[f].type,
+      ),
+    ).toEqual(['string', 'string', 'string', 'string']);
+    // G1-B: el reloj es un enum también en la respuesta, anulable en fase 1.
+    const dto = (
+      schemas.LocationDto as {
+        properties: Record<string, Record<string, unknown>>;
+      }
+    ).properties.hourCycle;
+    expect(dto).toMatchObject({
+      type: 'string',
+      nullable: true,
+      enum: ['h12', 'h23', null],
+    });
+    for (const [schema, field] of [
+      ['CreateLocationDto', 'hourCycle'],
+      ['UpdateLocationDto', 'hourCycle'],
+      ['RegisterDto', 'locationHourCycle'],
+    ] as const) {
+      expect(
+        (
+          schemas[schema] as {
+            properties: Record<string, Record<string, unknown>>;
+          }
+        ).properties[field],
+      ).toMatchObject({ type: 'string', enum: ['h12', 'h23'] });
+    }
   });
 
   it(
@@ -489,8 +518,121 @@ describe('Locations / multi-sede (e2e)', () => {
         currency: null,
         timeZone: null,
         locale: null,
+        hourCycle: null,
         regionalSettingsReviewedAt: null,
       });
+    });
+
+    it('POST /locations with h12 stores it reviewed', async () => {
+      const res = await post(
+        locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Nueva York' }),
+      ).expect(201);
+      const body = res.body as {
+        id: string;
+        hourCycle: string;
+        regionalSettingsReviewedAt: string | null;
+      };
+      expect(body).toMatchObject({ locale: 'en-US', hourCycle: 'h12' });
+      expect(body.regionalSettingsReviewedAt).not.toBeNull();
+      const row = await raw.location.findUniqueOrThrow({
+        where: { id: body.id },
+      });
+      expect(row.hourCycle).toBe('h12');
+      expect(row.regionalSettingsReviewedAt).not.toBeNull();
+    });
+
+    it('POST /locations from the G1 web without hourCycle is 201 with the backfilled clock', async () => {
+      // La web de G1 envía moneda, zona y formato pero no el reloj (fase 1,
+      // spec §4.1): la API como dentalix_app llama a la función de backfill en
+      // la misma transacción (pre-flight I1, por el endpoint real).
+      // Una hermana sin reloj (réplica de G1 sin barrer): la función es de
+      // todo el tenant, así que también la rellena, sin marcarla revisada.
+      const sibling = await g1LocationInsert(
+        raw,
+        tenantId,
+        'Hermana G1 sin reloj',
+        REGIONAL_TOKYO_FIXTURE,
+      );
+      const body: Record<string, unknown> = {
+        ...locationBody(REGIONAL_BERLIN_FIXTURE, { name: 'Web G1' }),
+      };
+      delete body.hourCycle;
+      const res = await post(body).expect(201);
+      const created = res.body as {
+        id: string;
+        hourCycle: string | null;
+        regionalSettingsReviewedAt: string | null;
+      };
+      expect(created).toMatchObject({
+        currency: 'EUR',
+        timeZone: 'Europe/Berlin',
+        locale: 'de-DE',
+        hourCycle: 'h23',
+      });
+      expect(created.regionalSettingsReviewedAt).not.toBeNull();
+      const row = await raw.location.findUniqueOrThrow({
+        where: { id: created.id },
+      });
+      expect(row.hourCycle).toBe('h23');
+      const siblingRow = await raw.location.findUniqueOrThrow({
+        where: { id: sibling },
+      });
+      expect(siblingRow.hourCycle).toBe('h23');
+      expect(siblingRow.regionalSettingsReviewedAt).toBeNull();
+    });
+
+    it('hourCycle h24 is 400', async () => {
+      for (const [hourCycle, message] of [
+        ['h24', 'El reloj «h24» no es válido: elige 12 h o 24 h.'],
+        ['', 'Elige el reloj de la sede: 12 h o 24 h.'],
+      ]) {
+        const res = await post(
+          locationBody(REGIONAL_NEW_YORK_FIXTURE, {
+            name: 'Reloj malo',
+            hourCycle,
+          }),
+        ).expect(400);
+        expect(res.body).toMatchObject({ message, field: 'hourCycle' });
+      }
+      // El reloj se valida después del formato (moneda, zona, formato, reloj).
+      const order = await post(
+        locationBody(REGIONAL_NEW_YORK_FIXTURE, {
+          name: 'Reloj malo',
+          locale: 'not a locale',
+          hourCycle: 'h24',
+        }),
+      ).expect(400);
+      expect(order.body).toMatchObject({ field: 'locale' });
+      expect(
+        await raw.location.count({ where: { tenantId, name: 'Reloj malo' } }),
+      ).toBe(0);
+    });
+
+    it('GET /locations returns hourCycle', async () => {
+      const tokyo = await post(
+        locationBody(REGIONAL_TOKYO_FIXTURE, { name: 'Lista 24 h' }),
+      ).expect(201);
+      const newYork = await post(
+        locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Lista 12 h' }),
+      ).expect(201);
+      // Una sede de una réplica de G1 aún sin barrer: reloj null, nunca otro.
+      const g1Id = await g1LocationInsert(
+        raw,
+        tenantId,
+        'Réplica G1',
+        REGIONAL_BERLIN_FIXTURE,
+      );
+      const res = await auth(
+        request(app.getHttpServer()).get('/api/v1/locations'),
+      ).expect(200);
+      const byId = new Map(
+        (res.body as Array<{ id: string; hourCycle: string | null }>).map(
+          (l) => [l.id, l.hourCycle],
+        ),
+      );
+      expect(byId.get((tokyo.body as { id: string }).id)).toBe('h23');
+      expect(byId.get((newYork.body as { id: string }).id)).toBe('h12');
+      expect(byId.get(g1Id)).toBeNull();
     });
 
     it('DENTIST no puede crear sedes (403)', async () => {

@@ -14,11 +14,13 @@ export interface RegisterPayload {
   password: string;
   fullName: string;
   // G1: la primera sede se registra con sus cuatro valores; cada llamada
-  // nombra su fixture con `registerBody(...)`.
+  // nombra su fixture con `registerBody(...)`. G1-B: y su reloj (opcional
+  // solo en fase 1, la forma de la web de G1).
   locationCountry: string;
   locationCurrency: string;
   locationTimeZone: string;
   locationLocale: string;
+  locationHourCycle?: string;
 }
 
 export interface RegisterVerifiedBody {

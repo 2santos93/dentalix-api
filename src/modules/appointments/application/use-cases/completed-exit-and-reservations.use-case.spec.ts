@@ -117,6 +117,8 @@ const reserved = (appointmentId: string): PlanItemReservedElsewhere => ({
   locationId: 'loc1',
   locationName: 'Sede Principal',
   timeZone: TZ,
+  locale: 'es-CO',
+  hourCycle: 'h23',
 });
 
 describe('UpdateAppointmentUseCase · salida de COMPLETED (DX-273)', () => {

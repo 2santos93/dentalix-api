@@ -257,6 +257,21 @@ const FIXTURE_G1 = [
      (gen_random_uuid(),'${T_A}','${L_POLANCO}','America/Mexico_City',now())`,
 ];
 
+/** G1-B fase 1 (DX-350): reloj de la sede (backfill h23). */
+const G1B = '20261027140000_g1b_location_hour_cycle';
+
+/**
+ * Esquema de 20261027140000 (G1-B): una sede revisada (la revisión no se
+ * toca) y una creada por una réplica de G1 sin barrer, con moneda, zona y
+ * formato. Las demás vienen del backfill D5 de G1, sin revisar.
+ */
+const FIXTURE_G1B = [
+  `UPDATE "locations" SET "regionalSettingsReviewedAt" = '2026-10-20 10:00:00+00'
+    WHERE "id" = '${L_POLANCO}'`,
+  `INSERT INTO "locations" ("id","tenantId","name","currency","timeZone","locale","updatedAt") VALUES
+     (gen_random_uuid(),'${T_B}','Sede Berlín','EUR','Europe/Berlin','de-DE',now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -317,8 +332,11 @@ const STEPS: Step[] = [
   // REPS al nº de registro sanitario) y las siguientes hasta GLOBAL-G1.
   { until: G1, fixture: FIXTURE_DX319 },
   // g1_location_regional_settings (FORCE fuera de locations y de
-  // location_schedules durante el backfill D5) y las siguientes.
-  { until: '99999999999999', fixture: FIXTURE_G1 },
+  // location_schedules durante el backfill D5) y las siguientes hasta G1-B.
+  { until: G1B, fixture: FIXTURE_G1 },
+  // g1b_location_hour_cycle (FORCE fuera de locations durante el backfill del
+  // reloj) y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_G1B },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -810,6 +828,38 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE oid IN ('public.locations'::regclass, 'public.location_schedules'::regclass)`,
       ),
     ).toBe('location_schedules=true,locations=true');
+  }, 180_000);
+
+  it('owner-nosu hour cycle backfill fills every location and restores FORCE', async () => {
+    await run(STEPS[19]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(
+                  "name" || ':' || coalesce("hourCycle", '-') || ':' ||
+                  coalesce(to_char("regionalSettingsReviewedAt" AT TIME ZONE 'UTC',
+                                   'YYYY-MM-DD HH24:MI'), '-'),
+                  ',' ORDER BY "tenantId", "name" COLLATE "C") AS v
+           FROM "locations"`,
+      ),
+    ).toBe(
+      [
+        'Sede Norte:h23:-',
+        'Sede Nórte:h23:-',
+        'Sede Polanco:h23:2026-10-20 10:00',
+        'Sede principal:h23:-',
+        'Sede Berlín:h23:-',
+        'Sede Cerrada:h23:-',
+        'Sede Madrid:h23:-',
+        'Sede Norte:h23:-',
+        'Sede principal:h23:-',
+      ].join(','),
+    );
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.locations'::regclass`,
+      ),
+    ).toBe(true);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {
