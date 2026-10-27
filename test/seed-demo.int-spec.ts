@@ -131,6 +131,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    await app.listen(0, '127.0.0.1');
   }, 60000);
 
   afterAll(async () => {
