@@ -303,7 +303,8 @@ export class LocationDto {
   locale!: string | null;
   @ApiProperty({
     type: String,
-    enum: [...HOUR_CYCLES],
+    // OpenAPI 3.0: con `enum`, `nullable` solo admite null si está en la lista.
+    enum: [...HOUR_CYCLES, null] as unknown as string[],
     nullable: true,
     example: 'h23',
     description: `${HOUR_CYCLE_DOC} null = sede sin reloj (fase 1, réplica anterior aún sin barrer).`,

@@ -22,11 +22,13 @@ import {
   COUNTRY_MISSING,
   REGIONAL_CHANGE_MESSAGES,
   REGIONAL_FIELDS,
+  REGIONAL_MESSAGES,
   REGIONAL_NULL_MESSAGE,
   type RegionalError,
   type RegionalField,
   isHourCycle,
   isRegionalError,
+  isStoredTimeZone,
   regionalBadRequest,
   validateCurrency,
   validateHourCycle,
@@ -162,14 +164,18 @@ export class UpdateLocationUseCase {
 
   /**
    * Valida los campos regionales presentes (spec §3.2). `null` es 400; un
-   * campo ausente no se toca.
+   * campo ausente no se toca. La zona ya guardada (`storedTimeZone`) no se
+   * vuelve a validar contra la lista (ver `validateTimeZone`).
    */
-  private async validateProvided(patch: {
-    currency?: string | null;
-    timeZone?: string | null;
-    locale?: string | null;
-    hourCycle?: string | null;
-  }): Promise<Partial<Record<RegionalField, string>>> {
+  private async validateProvided(
+    patch: {
+      currency?: string | null;
+      timeZone?: string | null;
+      locale?: string | null;
+      hourCycle?: string | null;
+    },
+    storedTimeZone: string | null,
+  ): Promise<Partial<Record<RegionalField, string>>> {
     const out: Partial<Record<RegionalField, string>> = {};
     const checks: [
       RegionalField,
@@ -181,7 +187,11 @@ export class UpdateLocationUseCase {
         patch.currency,
         () => validateCurrency(patch.currency, this.currencies),
       ],
-      ['timeZone', patch.timeZone, () => validateTimeZone(patch.timeZone)],
+      [
+        'timeZone',
+        patch.timeZone,
+        () => validateTimeZone(patch.timeZone, storedTimeZone),
+      ],
       ['locale', patch.locale, () => validateLocale(patch.locale)],
       ['hourCycle', patch.hourCycle, () => validateHourCycle(patch.hourCycle)],
     ];
@@ -230,7 +240,7 @@ export class UpdateLocationUseCase {
       throw new ConflictException('Cannot deactivate the last active location');
     }
 
-    const regional = await this.validateProvided(patch);
+    const regional = await this.validateProvided(patch, current.timeZone);
     const touchesRegional =
       Object.keys(regional).length > 0 ||
       patch.currency !== undefined ||
@@ -269,14 +279,27 @@ export class UpdateLocationUseCase {
       base,
       async (ctx): Promise<RegionalWrite> => {
         const cur = ctx.current;
-        before = regionalSide(cur);
+        // Una zona aceptada por ser la guardada (fuera de la lista IANA) y que
+        // otra petición cambió entre la lectura y el bloqueo ya no lo es.
+        if (
+          regional.timeZone !== undefined &&
+          canonicalTimeZoneName(regional.timeZone) === null &&
+          !isStoredTimeZone(regional.timeZone, cur.timeZone)
+        ) {
+          throw regionalBadRequest(
+            'timeZone',
+            REGIONAL_MESSAGES.timeZoneUnknown(regional.timeZone),
+          );
+        }
         // Rellenar un NULL (réplica antigua sin barrer) no es un «cambio», ni
         // una zona igual a la guardada salvo mayúsculas (spec §7, M5): se
-        // compara con la guardada canónica.
+        // compara con la guardada canónica, y así se audita (un PATCH mixto
+        // no muestra la reescritura de mayúsculas como cambio de zona).
         const stored = (field: RegionalField): string | null =>
           field === 'timeZone'
             ? (canonicalTimeZoneName(cur.timeZone) ?? cur.timeZone)
             : cur[field];
+        before = { ...regionalSide(cur), timeZone: stored('timeZone') };
         const differs = (field: RegionalField): boolean =>
           regional[field] !== undefined && regional[field] !== stored(field);
         const moved = (field: RegionalField): boolean =>

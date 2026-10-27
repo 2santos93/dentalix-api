@@ -411,7 +411,7 @@ describe('Auth (e2e)', () => {
       expect(await legacyScheduleZone(location.id)).toBe('Asia/Tokyo');
     });
 
-    it('legacy registration verify also fills the clock', async () => {
+    it('legacy registration verify leaves currency, zone, format and clock filled, unreviewed', async () => {
       const legacy = base('g1b-legado');
       await api()
         .post('/api/v1/auth/register')
@@ -424,7 +424,8 @@ describe('Auth (e2e)', () => {
       const location = await mainLocation(
         (res.body as { tenantId: string }).tenantId,
       );
-      // Primero la función de G1 (moneda, zona, formato) y luego la de G1-B.
+      // La función de G1 rellena moneda, zona y formato (sus valores los fija
+      // «legacy pending verify creates the clinic…»); la de G1-B, el reloj.
       expect(location.currency).not.toBeNull();
       expect(location.timeZone).not.toBeNull();
       expect(location.locale).not.toBeNull();

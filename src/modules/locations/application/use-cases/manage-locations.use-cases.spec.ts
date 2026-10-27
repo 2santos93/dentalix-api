@@ -700,6 +700,87 @@ describe('teléfono de la sede (DX-222)', () => {
       expect(out.regionalSettings).toBeNull();
     });
 
+    it('mixed PATCH audits the case-only zone rewrite as no zone change', async () => {
+      // Task 5 m2: la zona guardada en minúsculas sale canónica en `before`.
+      const uc = updateUseCase(
+        regionalRepo({ current: { timeZone: 'asia/kolkata' } }),
+      );
+      const out = await uc.execute('loc-1', {
+        timeZone: 'Asia/Kolkata',
+        locale: 'en-IN',
+      });
+      expect(out.regionalSettings).toMatchObject({
+        before: { timeZone: 'Asia/Kolkata', locale: 'es-CO' },
+        after: { timeZone: 'Asia/Kolkata', locale: 'en-IN' },
+        reviewed: true,
+      });
+    });
+
+    it('a stored zone outside the IANA list is resent unchanged and other fields save', async () => {
+      // G1 aceptaba toda zona que `Intl` acepta; la web la reenvía al guardar.
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({
+          current: { timeZone: '+05:00' },
+          history: true,
+          written,
+        }),
+      );
+      const out = await uc.execute('loc-1', {
+        timeZone: '+05:00',
+        locale: 'en-IN',
+      });
+      expect(written).toEqual([
+        expect.objectContaining({
+          timeZone: undefined,
+          locale: 'en-IN',
+          reviewed: true,
+        }),
+      ]);
+      expect(out.regionalSettings).toMatchObject({
+        before: { timeZone: '+05:00' },
+        after: { timeZone: '+05:00', locale: 'en-IN' },
+      });
+    });
+
+    it('a new zone outside the IANA list is still 400', async () => {
+      const uc = updateUseCase(regionalRepo({}));
+      await expect(
+        uc.execute('loc-1', { timeZone: '+05:00' }),
+      ).rejects.toMatchObject({
+        response: {
+          field: 'timeZone',
+          message: 'La zona horaria «+05:00» no existe.',
+        },
+      });
+    });
+
+    it('a stored zone changed by another request before the lock is 400', async () => {
+      const read = makeLocation({ timeZone: '+05:00' });
+      const locked = makeLocation({ timeZone: 'Asia/Tokyo' });
+      const uc = updateUseCase(
+        makeRepo({
+          findById: () => Promise.resolve(read),
+          updateRegional: async (_id, _patch, decide) => {
+            await decide({
+              current: locked,
+              hasOpenCashSession: () => Promise.resolve(false),
+              hasRegionalHistory: () => Promise.resolve(false),
+            });
+            return locked;
+          },
+        }),
+      );
+      await expect(
+        uc.execute('loc-1', { timeZone: '+05:00' }),
+      ).rejects.toMatchObject({
+        response: {
+          field: 'timeZone',
+          message: 'La zona horaria «+05:00» no existe.',
+        },
+      });
+    });
+
     it('rellenar un reloj NULL no pide confirmación y queda revisada', async () => {
       const written: object[] = [];
       const uc = updateUseCase(

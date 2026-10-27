@@ -184,20 +184,39 @@ export async function validateCurrency(
   return currency;
 }
 
+/**
+ * La zona, canónica, si está en la lista IANA. `stored` es la zona ya guardada
+ * de la sede (PATCH): G1 aceptaba toda la que `Intl` acepta (`+05:00`) y la
+ * web la reenvía en cada guardado, así que la misma zona (sin distinguir
+ * mayúsculas) se devuelve tal cual está guardada en vez de rechazarla, para
+ * no bloquear el resto de la sede. Una zona nueva o cambiada sí pasa por la
+ * lista.
+ */
 export function validateTimeZone(
   raw: string | null | undefined,
+  stored?: string | null,
 ): string | RegionalError {
   if (blank(raw)) {
     return { field: 'timeZone', message: REGIONAL_MESSAGES.timeZoneMissing };
   }
   const timeZone = canonicalTimeZoneName(raw);
-  if (!timeZone) {
-    return {
-      field: 'timeZone',
-      message: REGIONAL_MESSAGES.timeZoneUnknown(raw.trim()),
-    };
-  }
-  return timeZone;
+  if (timeZone) return timeZone;
+  if (isStoredTimeZone(raw, stored)) return stored;
+  return {
+    field: 'timeZone',
+    message: REGIONAL_MESSAGES.timeZoneUnknown(raw.trim()),
+  };
+}
+
+/** `raw` es la zona `stored` de la sede, sin distinguir mayúsculas. */
+export function isStoredTimeZone(
+  raw: string,
+  stored: string | null | undefined,
+): stored is string {
+  return (
+    typeof stored === 'string' &&
+    raw.trim().toLowerCase() === stored.toLowerCase()
+  );
 }
 
 export function validateLocale(

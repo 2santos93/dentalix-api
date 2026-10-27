@@ -148,7 +148,7 @@ describe('Locations / multi-sede (e2e)', () => {
     expect(dto).toMatchObject({
       type: 'string',
       nullable: true,
-      enum: ['h12', 'h23'],
+      enum: ['h12', 'h23', null],
     });
     for (const [schema, field] of [
       ['CreateLocationDto', 'hourCycle'],
@@ -545,6 +545,14 @@ describe('Locations / multi-sede (e2e)', () => {
       // La web de G1 envía moneda, zona y formato pero no el reloj (fase 1,
       // spec §4.1): la API como dentalix_app llama a la función de backfill en
       // la misma transacción (pre-flight I1, por el endpoint real).
+      // Una hermana sin reloj (réplica de G1 sin barrer): la función es de
+      // todo el tenant, así que también la rellena, sin marcarla revisada.
+      const sibling = await g1LocationInsert(
+        raw,
+        tenantId,
+        'Hermana G1 sin reloj',
+        REGIONAL_TOKYO_FIXTURE,
+      );
       const body: Record<string, unknown> = {
         ...locationBody(REGIONAL_BERLIN_FIXTURE, { name: 'Web G1' }),
       };
@@ -566,6 +574,11 @@ describe('Locations / multi-sede (e2e)', () => {
         where: { id: created.id },
       });
       expect(row.hourCycle).toBe('h23');
+      const siblingRow = await raw.location.findUniqueOrThrow({
+        where: { id: sibling },
+      });
+      expect(siblingRow.hourCycle).toBe('h23');
+      expect(siblingRow.regionalSettingsReviewedAt).toBeNull();
     });
 
     it('hourCycle h24 is 400', async () => {
