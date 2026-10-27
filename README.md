@@ -966,6 +966,130 @@ cuenta en su día.
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
 
+## Despliegue GLOBAL-G1 (fase 1)
+
+Moneda, zona y formato pasan a ser de cada sede (`locations.currency`,
+`"timeZone"`, `locale`; el país se pide siempre). El despliegue es **sin
+parada**, en dos fases (expand/contract): esta es la fase 1; las columnas
+siguen admitiendo NULL hasta la fase 2.
+
+**Runbook (en este orden):**
+
+1. `prisma migrate deploy` **con las réplicas antiguas sirviendo**. La
+   migración solo añade columnas NULL, rellena las sedes existentes y añade
+   restricciones que admiten NULL, así que el código anterior sigue
+   funcionando. Las filas rellenadas quedan «por revisar» (aviso D5 al ADMIN).
+2. Despliegue *rolling* de la API nueva. Después, la web nueva.
+3. Cuando ya no quede ninguna réplica antigua:
+
+   ```bash
+   npm run g1:backfill-locations
+   ```
+
+   y la comprobación (las dos cifras tienen que ser 0):
+
+   ```bash
+   npm run g1:backfill-locations -- --check
+   ```
+
+   Imprime `locations_sin_configurar=N` y `pendientes_legados_vigentes=N` y
+   sale con código 1 si alguna no es 0. Corre con el rol de la app
+   (`DATABASE_URL`), clínica por clínica bajo su RLS (también las retiradas),
+   igual que escribe el barrido: no necesita las credenciales del owner, no
+   hace DDL ni toma más bloqueo que el de un `SELECT`, así que se puede correr
+   con tráfico. **No la sustituyas por un `SELECT count(*)` suelto como
+   owner**: `locations` tiene FORCE RLS y el owner (sin superusuario ni
+   BYPASSRLS) lee 0 filas sin clínica fijada, es decir, un falso 0. Si no da
+   0: `npm run g1:backfill-locations` y repetir.
+
+   Mientras tanto, el job `locations.regional-backfill` (programa
+   `locations.regional-backfill.every-5-min`, cada 5 minutos; registra
+   `locations.regional_backfilled` por clínica) barre las sedes que una
+   réplica antigua haya creado sin esos valores. Es idempotente. Una sede en NULL se trata como «sin configurar» (error
+   recuperable), nunca con un valor por país.
+
+**Compatibilidad durante la convivencia:**
+
+| Quién | Contra | Qué pasa |
+|---|---|---|
+| API antigua | BD de fase 1 | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido; lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20) |
+| Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; registro sin campos de sede se acepta en la forma legada; `LocationDto` solo gana campos |
+| Web nueva | API antigua | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP |
+| Enlace de registro de una réplica antigua | API nueva | `verify` lo acepta |
+| Web antigua | API antigua (`PUT /locations/schedule` con otra zona) | La zona se guarda solo en `location_schedules.timezone`, que el código nuevo no lee: se pierde. El ADMIN la corrige en Ajustes → Sedes |
+| Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua | La sede nace con país CO y moneda, zona y formato NULL; el barrido la rellena según D5 y no los elegidos. Queda «por revisar»: el aviso D5 se lo muestra al ADMIN, que la corrige |
+
+La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
+el proveedor de tasas puede no tener alguna y esos abonos cuentan en
+`unconvertedPaymentsCount`. La demo (`npm run seed:demo`) crea sus sedes con
+`COP`, `America/Bogota`, `es-CO` y `CO` explícitos y ya revisadas.
+
+### Fase 2 (ticket aparte)
+
+«G1 · Fase 2: cerrar las columnas regionales de la sede» (bajo DX-311; ticket
+por crear). Va en un release **posterior**, cuando no quede ninguna réplica
+anterior a la fase 1. Precondición: `npm run g1:backfill-locations -- --check`
+(ver arriba) da 0 en las dos cifras; si no, correr
+`npm run g1:backfill-locations` y repetir. Cuenta, en todas las clínicas
+(también las retiradas):
+
+```sql
+SELECT count(*) FROM locations
+ WHERE currency IS NULL OR "timeZone" IS NULL OR locale IS NULL;
+SELECT count(*) FROM pending_registrations
+ WHERE "locationCurrency" IS NULL AND "expiresAt" > now();
+```
+
+Contenido del ticket:
+
+- Migración (mismo bracket RLS que la de la fase 1): dentro del bracket NO
+  FORCE, llamar antes a `SELECT dx_g1_backfill_location_regional();` (sin
+  tenant: todas las clínicas) para que una fila que quede no la tumbe; luego
+  `SET NOT NULL` en
+  `locations.currency/"timeZone"/locale`; `ALTER COLUMN country DROP DEFAULT`;
+  `ALTER TABLE location_schedules DROP COLUMN timezone`; borrar los pendientes
+  legados caducados y poner NOT NULL en los cuatro `location*` de
+  `pending_registrations`; `DROP FUNCTION dx_g1_backfill_location_regional`.
+- Código: borrar el job `locations.regional-backfill`, el script
+  `g1:backfill-locations` y la rama legada de `verify`; `RegisterDto` con los
+  cuatro campos obligatorios; `PUT /locations/schedule` con `timezone` siempre
+  400; quitar la doble escritura (R20); `LocationDto` sin `| null` (regenerar
+  los tipos de la web); la web mantiene `SedeConfigError` solo para zona
+  inválida.
+- Tests: los de fase 1 (réplica antigua, NULL, barrido) pasan a comprobar el
+  NOT NULL y la ausencia de defaults.
+
+## Cambiar la zona de una sede (G1, DX-313, DX-314)
+
+`PATCH /locations/:id` (ADMIN, auditado) edita `currency`, `timeZone` y
+`locale` de la sede; `null` en cualquiera es 400. Una sede con algún campo
+regional sin configurar (NULL, réplica antigua sin barrer) se completa con los
+tres (`currency`, `timeZone` y `locale`) en un mismo PATCH: un relleno parcial
+es 400 con el primer campo que falta.
+
+- **Orden de comprobaciones** al cambiar moneda o zona (valor distinto del
+  actual), con la fila de la sede bloqueada (`SELECT … FOR UPDATE`) para que no
+  se abra una caja entre la comprobación y la escritura:
+  1. Con una caja `OPEN` en la sede: 409 `LOCATION_REGIONAL_CASH_OPEN`, aunque
+     venga `confirmRegionalChange: true`.
+  2. Con historial (citas, abonos, gastos y salidas de caja, inventario, cajas,
+     listas de precios o versiones de política) y sin `confirmRegionalChange:
+     true`: 409 `LOCATION_REGIONAL_CHANGE_UNCONFIRMED`.
+- **No se convierte nada**: los importes guardados conservan su moneda. Cambiar
+  la zona no reescribe ningún instante.
+- **Efectos de cambiar la zona** (se documentan, no se corrigen): un abono
+  guardado como mediodía civil (DX-097) puede cambiar de día si el desfase
+  supera 12 h; los tramos de horario de la sede y de los profesionales se leen
+  en la nueva zona; «hoy» de gastos, promesas, alertas e informes pasa a la
+  nueva zona; las citas y los recordatorios conservan su instante.
+- Rellenar un campo NULL (sede de una réplica anterior a G1 sin barrer) y
+  cambiar el `locale` no piden confirmación ni comprueban la caja.
+- Cualquier cambio de los tres campos, o `confirmRegionalSettings: true`, pone
+  `regionalSettingsReviewedAt = now()`.
+- Cambiar la zona actualiza en la misma transacción
+  `location_schedules.timezone` (columna legada de la fase 1, R20).
+- Auditoría: `metadata.regionalSettings = { before, after, reviewed }`.
+
 ## Cartera por antigüedad (DX-145, DX-155)
 
 `GET /api/v1/receivables/aging` (ADMIN y RECEPTION; 403 en español al resto):

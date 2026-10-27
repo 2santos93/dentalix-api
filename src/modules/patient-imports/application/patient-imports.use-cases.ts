@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type {
-  ClinicCountry,
   DocType,
   PatientImportDuplicateMode,
   PatientImportFileFormat,
@@ -15,7 +14,6 @@ import type {
 } from '@prisma/client';
 import { JobQueue } from '../../jobs/application/job-queue.service';
 import { civilDateIn } from '../../../shared/time/civil-day';
-import { timeZoneForCountry } from '../../../shared/locations/location-time-zone';
 import {
   resolveMapping,
   suggestMapping,
@@ -45,9 +43,11 @@ import {
   YIELD_EVERY,
   yieldToEventLoop,
 } from '../domain/tabular-file';
+import { locationCurrencyRequired } from '../../../shared/locations/reference-location';
 import {
   BatchLocationError,
   BatchStateError,
+  type BatchLocation,
   PrismaPatientImportRepository,
   UndoBlockedError,
   importJobKey,
@@ -345,7 +345,7 @@ export class PatientImportsService {
         throw new BadRequestException(err.message);
       throw err;
     }
-    let location: { id: string; country: string };
+    let location: BatchLocation;
     try {
       location = await this.repo.batchLocation();
     } catch (err) {
@@ -356,10 +356,7 @@ export class PatientImportsService {
     }
     const ctx = {
       countryCode: location.country,
-      today: civilDateIn(
-        new Date(),
-        timeZoneForCountry(location.country as ClinicCountry),
-      ),
+      today: civilDateIn(new Date(), location.timeZone),
     };
 
     const issues: RowIssue[] = [];
@@ -542,8 +539,19 @@ export class PatientImportsService {
   // Hoja de saldos «Saldo migrado» (DX-262)
   // -------------------------------------------------------------------------
 
-  balanceTemplate(): string {
-    return balanceTemplateCsv();
+  /** La fila de ejemplo lleva la moneda de la sede en contexto (nunca otra). */
+  async balanceTemplate(): Promise<string> {
+    let location: BatchLocation;
+    try {
+      location = await this.repo.batchLocation();
+    } catch (err) {
+      if (err instanceof BatchLocationError) {
+        throw new BadRequestException(LOCATION_MESSAGE);
+      }
+      throw err;
+    }
+    if (!location.currency) throw locationCurrencyRequired(location.id);
+    return balanceTemplateCsv(location.currency);
   }
 
   /**
@@ -576,8 +584,7 @@ export class PatientImportsService {
         throw new BadRequestException(err.message);
       throw err;
     }
-    const country = await this.repo.locationCountry(current.locationId);
-    const timeZone = timeZoneForCountry(country as ClinicCountry);
+    const timeZone = await this.repo.locationTimeZone(current.locationId);
     const ctx = {
       today: civilDateIn(new Date(), timeZone),
       currencies: new Set(await this.repo.currencyCodes()),

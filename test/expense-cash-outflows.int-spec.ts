@@ -21,6 +21,10 @@ import {
   transactionId,
   waitForTransactionWaiters,
 } from './support/postgres-concurrency';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-274 · Una salida de caja menor que se cruza con el cierre de su caja:
 // o entra en esa caja ANTES del cierre (y el arqueo guardado la resta) o es un
@@ -156,7 +160,12 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
     ).id;
     locationId = (
       await raw.location.create({
-        data: { tenantId, name: 'Sede', country: 'CO' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Sede',
+          country: 'CO',
+          timeZone: 'Asia/Tokyo',
+        }),
       })
     ).id;
     await raw.locationSchedule.create({

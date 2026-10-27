@@ -26,9 +26,11 @@ $$;
 INSERT INTO tenants (id, name, subdomain, "updatedAt") VALUES
   ('00000000-0000-4000-a000-0000000000d1', 'Bench reportes', 'bench-reportes', now());
 
-INSERT INTO locations (id, "tenantId", name, "createdAt", "updatedAt")
+-- G1: dato de bench (REGIONAL_BOGOTA_FIXTURE), no un default del producto.
+INSERT INTO locations (id, "tenantId", name, country, currency, "timeZone", locale, "createdAt", "updatedAt")
 SELECT ('00000000-0000-4000-b000-0000000000d' || s)::uuid,
        '00000000-0000-4000-a000-0000000000d1', 'Sede ' || s,
+       'CO', 'COP', 'America/Bogota', 'es-CO',
        timestamp '2024-01-01' + s * interval '1 minute', now()
   FROM generate_series(1, 5) AS s;
 

@@ -12,6 +12,10 @@ import { UpdateAppointmentUseCase } from '../src/modules/appointments/applicatio
 import type { LocationScheduleRepository } from '../src/modules/location-schedule/domain/ports/location-schedule-repository.port';
 import type { StaffRepository } from '../src/modules/staff/domain/ports/staff-repository.port';
 import type { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-121, capa DB: tipos de cita (RLS FORCE, FK compuesta, CHECK) y las dos
 // garantías de la agenda en columnas: la carrera de dos movimientos al mismo
@@ -43,7 +47,10 @@ async function seedClinic(subdomain: string, patients = 3): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const patientIds: string[] = [];
   for (let i = 0; i < patients; i++) {

@@ -9,10 +9,8 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import {
-  loadLocationTimeZones,
-  resolveLocationTimeZones,
-} from '../../../shared/locations/location-time-zone';
+import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import { loadTenantZones } from '../../../shared/locations/reference-location';
 import type {
   DebtorCollections,
   DebtorDetails,
@@ -234,11 +232,9 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
     });
   }
 
-  locationTimeZones(): Promise<Map<string, string>> {
+  locationTimeZones(): Promise<(locationId: string | null) => string> {
     const tenantId = this.tenantId();
-    return this.prisma.runWithTenant((tx) =>
-      loadLocationTimeZones(tx, tenantId),
-    );
+    return this.prisma.runWithTenant((tx) => loadTenantZones(tx, tenantId));
   }
 
   /**

@@ -5,6 +5,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
 import { assertNotUnderRetention } from '../src/modules/patients/application/retention-guard';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-039, capa DB de la retención legal de la HC: backfill de la migración,
 // triggers que mantienen `last_attention_at` (nunca retrocede), RLS FORZADA y
@@ -115,7 +119,12 @@ describe('retención legal de la HC (DX-039, int)', () => {
       })
     ).id;
     locationA = (
-      await raw.location.create({ data: { tenantId: tenantA, name: 'Sede' } })
+      await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: tenantA,
+          name: 'Sede',
+        }),
+      })
     ).id;
   });
 

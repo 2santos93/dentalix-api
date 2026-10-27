@@ -15,6 +15,10 @@ import {
   civilDateIn,
   zonedStartOfDay,
 } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-027 · Caja por turno: abrir con fondo → cobrar → anular → cerrar con
 // arqueo (esperado vs contado, motivo si no cuadra) → cierre inmutable →
@@ -148,7 +152,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       })
     ).id;
     const norte = await api(clinicA, 'post', '/locations')
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     sedeNorte = (norte.body as { id: string }).id;
 

@@ -1,5 +1,9 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-279, capa DB: política de cancelación por sede (versiones INALTERABLES),
 // columnas de cancelación/inasistencia de la cita con su CHECK de coherencia,
@@ -71,7 +75,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: `Sede ${subdomain}` },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: `Sede ${subdomain}`,
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: subdomain },

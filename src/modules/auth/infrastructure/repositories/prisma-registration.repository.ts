@@ -5,6 +5,7 @@ import type {
   PendingRegistrationRecord,
   RegistrationRepository,
 } from '../../domain/ports/registration-repository.port';
+import type { ClinicLocationSettings } from '../../domain/ports/auth-repository.port';
 
 const SELECT = {
   id: true,
@@ -14,7 +15,40 @@ const SELECT = {
   fullName: true,
   passwordHash: true,
   expiresAt: true,
+  locationCountry: true,
+  locationCurrency: true,
+  locationTimeZone: true,
+  locationLocale: true,
 } as const;
+
+type PendingRow = Prisma.PendingRegistrationGetPayload<{
+  select: typeof SELECT;
+}>;
+
+/** G1: un pendiente legado (sin los cuatro campos) no trae sede. */
+function locationOf(row: PendingRow): ClinicLocationSettings | null {
+  const {
+    locationCountry: country,
+    locationCurrency: currency,
+    locationTimeZone: timeZone,
+    locationLocale: locale,
+  } = row;
+  if (!country || !currency || !timeZone || !locale) return null;
+  return { country, currency, timeZone, locale };
+}
+
+function toRecord(row: PendingRow): PendingRegistrationRecord {
+  return {
+    id: row.id,
+    email: row.email,
+    clinicName: row.clinicName,
+    subdomain: row.subdomain,
+    fullName: row.fullName,
+    passwordHash: row.passwordHash,
+    expiresAt: row.expiresAt,
+    location: locationOf(row),
+  };
+}
 
 /**
  * `pending_registrations` es tabla global (aún no hay clínica): sin
@@ -41,6 +75,12 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
       tokenHash: input.tokenHash,
       expiresAt: input.expiresAt,
       createdAt: now,
+      // G1: también en la rama que reemplaza (updateMany): registrarse de
+      // nuevo sobrescribe la sede, y la forma legada la deja en NULL.
+      locationCountry: input.location?.country ?? null,
+      locationCurrency: input.location?.currency ?? null,
+      locationTimeZone: input.location?.timeZone ?? null,
+      locationLocale: input.location?.locale ?? null,
     };
     const saved = await this.replaceOrCreate(input.email, data, {
       replaceCreatedBefore: input.replaceCreatedBefore,
@@ -90,13 +130,14 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
     }
   }
 
-  findPendingByTokenHash(
+  async findPendingByTokenHash(
     tokenHash: string,
   ): Promise<PendingRegistrationRecord | null> {
-    return this.prisma.pendingRegistration.findUnique({
+    const row = await this.prisma.pendingRegistration.findUnique({
       where: { tokenHash },
       select: SELECT,
     });
+    return row ? toRecord(row) : null;
   }
 
   async consumePending(id: string): Promise<boolean> {

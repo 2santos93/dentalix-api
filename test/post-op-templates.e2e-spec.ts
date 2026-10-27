@@ -17,6 +17,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-222 en HTTP real: plantillas de indicaciones postoperatorias (solo ADMIN
 // escribe, los cuatro roles leen), versión al cambiar el texto, vínculos a
@@ -458,7 +462,12 @@ describe('Plantillas de indicaciones postoperatorias (e2e, DX-222)', () => {
 
     it('POST /locations acepta el teléfono al crear la sede', async () => {
       const res = await as(api().post('/api/v1/locations'), clinic.adminToken)
-        .send({ name: 'Sede Sur', phone: '601 222 3333' })
+        .send(
+          locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            name: 'Sede Sur',
+            phone: '601 222 3333',
+          }),
+        )
         .expect(201);
       expect((res.body as { phone: string }).phone).toBe('601 222 3333');
     });

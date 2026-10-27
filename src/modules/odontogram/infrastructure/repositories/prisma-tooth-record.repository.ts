@@ -8,8 +8,7 @@ import {
   CreateToothRecordVoidRepoInput,
   ToothRecordRepository,
 } from '../../domain/ports/tooth-record-repository.port';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
-import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import { ToothRecord } from '../../domain/entities/tooth-record.entity';
 
 type PrismaToothRecord = Prisma.ToothRecordGetPayload<Record<string, never>>;
@@ -176,15 +175,14 @@ export class PrismaToothRecordRepository implements ToothRecordRepository {
     return new Map(rows.map((r) => [r.userId, r.user.fullName]));
   }
 
-  /** Sede activa (cabecera validada por el guard) → su zona; sin sede, la por defecto. */
+  /** Sede activa (cabecera validada por el guard) → su zona; sin sede, la de la principal (R6). */
   async clinicTimeZone(): Promise<string> {
-    const locationId = this.tenantContext.getLocationId();
-    if (!locationId) return DEFAULT_BUSINESS_HOURS_TIMEZONE;
+    const locationId = this.tenantContext.getLocationId() ?? null;
     const tenantId = this.requireTenantId();
-    const zoneOf = await this.prisma.runWithTenant((tx) =>
-      resolveLocationTimeZones(tx, tenantId, [locationId]),
+    const reference = await this.prisma.runWithTenant((tx) =>
+      resolveReferenceLocation(tx, tenantId, locationId),
     );
-    return zoneOf(locationId);
+    return reference.timeZone;
   }
 
   // DX-207: bajo RLS y además con el tenant explícito (defensa en

@@ -15,6 +15,10 @@ import {
   seedMember,
   loginAs,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 /**
  * DX-271 (auditoría BE-038 y BE-039):
@@ -413,7 +417,10 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     } = await acceptedItems(1);
     await accept(planId);
     const north = await raw.location.create({
-      data: { tenantId: a.tenantId, name: 'Sede Norte DX271' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Norte DX271',
+      }),
     });
     const holderStart = new Date(Date.now() + 60 * DAY);
     const holder = await raw.appointment.create({

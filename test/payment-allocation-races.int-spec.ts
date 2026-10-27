@@ -30,6 +30,10 @@ import {
   transactionId,
   waitForTransactionWaiters,
 } from './support/postgres-concurrency';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-051 Task 3, contra Postgres con conexiones reales (rol dentalix_app vía
 // runWithTenant, RLS FORCE): el reparto automático (R5, R6, R9), el alta con
@@ -103,7 +107,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const user = await raw.user.create({
     data: {

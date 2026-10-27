@@ -1,13 +1,11 @@
-import {
-  DEFAULT_BUSINESS_HOURS,
-  DEFAULT_BUSINESS_HOURS_TIMEZONE,
-} from './default-business-hours';
+import { DEFAULT_BUSINESS_HOURS } from './default-business-hours';
 import { fitsBusinessHours } from '../../modules/location-schedule/application/business-hours';
 
 // El horario por defecto se valida CONTRA el validador real, no contra una copia
 // de la expectativa: así estos tests fallan si alguno de los dos se desalinea.
+// La zona es dato de test (una sede de Bogotá): el horario no trae zona propia.
 const hours = {
-  timezone: DEFAULT_BUSINESS_HOURS_TIMEZONE,
+  timezone: 'America/Bogota',
   ranges: DEFAULT_BUSINESS_HOURS,
 };
 

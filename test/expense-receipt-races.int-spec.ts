@@ -21,6 +21,10 @@ import {
   waitForTransactionWaiters,
 } from './support/postgres-concurrency';
 import { INVOICE_DATE_FUTURE_MESSAGE } from '../src/modules/expenses/domain/expense-rules';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // Barreras explícitas + transacciones reales y S3: el objeto de A ya está
 // copiado y su referencia aún sin COMMIT cuando falla y limpia B.
@@ -69,7 +73,12 @@ describeWithMinio(
       ).id;
       locationId = (
         await raw.location.create({
-          data: { tenantId, name: 'Tokyo', country: 'CO' },
+          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+            tenantId,
+            name: 'Tokyo',
+            country: 'CO',
+            timeZone: 'Asia/Tokyo',
+          }),
         })
       ).id;
       await raw.locationSchedule.create({
@@ -242,7 +251,12 @@ describeWithMinio(
       beforeAll(async () => {
         previousDayLocation = (
           await raw.location.create({
-            data: { tenantId, name: 'Pacific', country: 'CO' },
+            data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+              tenantId,
+              name: 'Pacific',
+              country: 'CO',
+              timeZone: 'America/Los_Angeles',
+            }),
           })
         ).id;
         await raw.locationSchedule.create({

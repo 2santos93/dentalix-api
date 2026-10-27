@@ -8,6 +8,10 @@ import {
   ownerUrlFor,
   requireOwnerNosuEnv,
 } from './owner-nosu-env';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from '../support/location-fixtures';
 
 const ROOT = join(__dirname, '../..');
 const MIGRATION = '20261022110000_dx232_clinical_entry_location';
@@ -79,7 +83,10 @@ describe('DX-232: migración con owner sin superusuario', () => {
         },
       });
       const location = await raw.location.create({
-        data: { tenantId: tenant.id, name: 'Sede B' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: tenant.id,
+          name: 'Sede B',
+        }),
       });
       const appointment = await raw.appointment.create({
         data: {

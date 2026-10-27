@@ -8,6 +8,11 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+  setLocationZone,
+} from './support/location-fixtures';
 
 // DX-057 — la caja (GET /payments) y el estado de cuenta exponen, por abono,
 // `createdById` y `canVoid` para QUIEN CONSULTA, con la misma regla que aplica
@@ -79,13 +84,16 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dra. Admin',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dra. Admin',
+      }),
+    );
     const body = reg.body as { tenantId: string; userId: string };
     return {
       tenantId: body.tenantId,
@@ -261,7 +269,7 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
     expect((await statement(clinicA)).get(ownToday)?.canVoid).toBe(false);
   });
 
-  it('el "hoy" de canVoid es el del horario de la SEDE, igual que la anulación', async () => {
+  it('el "hoy" de canVoid es el de la zona de la SEDE, igual que la anulación', async () => {
     const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const day = (d: Date, tz: string) =>
       new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
@@ -274,33 +282,20 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
     const sameDayZone = zones.find(
       (z) => day(createdAt, z) === day(new Date(), z),
     )!;
-    const original = await raw.locationSchedule.findFirst({
-      where: { tenantId: clinicA.tenantId },
-      select: { id: true, timezone: true, deletedAt: true },
-    });
-
     const paymentId = await pay(reception, 44);
     const row = await raw.payment.update({
       where: { id: paymentId },
       data: { createdAt },
       select: { locationId: true },
     });
-    async function setZone(timezone: string): Promise<void> {
-      await raw.locationSchedule.upsert({
-        where: {
-          tenantId_locationId: {
-            tenantId: clinicA.tenantId,
-            locationId: row.locationId,
-          },
-        },
-        create: {
-          tenantId: clinicA.tenantId,
-          locationId: row.locationId,
-          timezone,
-        },
-        update: { timezone, deletedAt: null },
-      });
-    }
+    // G1: la zona es de la sede (`Location.timeZone`, R4); `setLocationZone`
+    // mantiene igual la columna legada del horario (R20).
+    const original = await raw.location.findUniqueOrThrow({
+      where: { id: row.locationId },
+      select: { timeZone: true },
+    });
+    const setZone = (zone: string) =>
+      setLocationZone(raw, clinicA.tenantId, row.locationId, zone);
 
     await setZone(otherDayZone);
     expect((await cash(reception)).get(paymentId)?.canVoid).toBe(false);
@@ -312,16 +307,7 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
     expect((await statement(reception)).get(paymentId)?.canVoid).toBe(true);
     await as(reception).void(paymentId, { reason: REASON }).expect(200);
 
-    if (original) {
-      await raw.locationSchedule.update({
-        where: { id: original.id },
-        data: { timezone: original.timezone, deletedAt: original.deletedAt },
-      });
-    } else {
-      await raw.locationSchedule.deleteMany({
-        where: { tenantId: clinicA.tenantId },
-      });
-    }
+    await setZone(original.timeZone!);
   });
 
   it('aísla por clínica: el ADMIN de otra clínica no ve los abonos ni el estado de cuenta', async () => {

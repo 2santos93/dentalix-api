@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-089, capa DB: sedes a las que se restringe un miembro de la clínica
 // (membership_locations). Las escrituras van como el rol de la app
@@ -48,9 +52,11 @@ async function seedClinic(name: string): Promise<Seeded> {
     data: { tenantId, userId: user.id, role: 'RECEPTION' },
   });
   const location = await raw.location.create({
-    data: { tenantId, name: 'Norte' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Norte' }),
   });
-  const other = await raw.location.create({ data: { tenantId, name: 'Sur' } });
+  const other = await raw.location.create({
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sur' }),
+  });
   return {
     tenantId,
     userId: user.id,

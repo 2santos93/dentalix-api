@@ -27,10 +27,11 @@ INSERT INTO last_names SELECT ordinality - 1, v FROM unnest(ARRAY[
 INSERT INTO tenants (id, name, subdomain, "updatedAt") VALUES
   ('00000000-0000-4000-a000-00000000000a', 'Bench A', 'bench-a', now()),
   ('00000000-0000-4000-a000-00000000000b', 'Bench B', 'bench-b', now());
-INSERT INTO locations (id, "tenantId", name, "updatedAt") VALUES
-  ('00000000-0000-4000-b000-0000000000a1', '00000000-0000-4000-a000-00000000000a', 'Sede A1', now()),
-  ('00000000-0000-4000-b000-0000000000a2', '00000000-0000-4000-a000-00000000000a', 'Sede A2', now()),
-  ('00000000-0000-4000-b000-0000000000b1', '00000000-0000-4000-a000-00000000000b', 'Sede B1', now());
+-- G1: dato de bench (REGIONAL_BOGOTA_FIXTURE), no un default del producto.
+INSERT INTO locations (id, "tenantId", name, country, currency, "timeZone", locale, "updatedAt") VALUES
+  ('00000000-0000-4000-b000-0000000000a1', '00000000-0000-4000-a000-00000000000a', 'Sede A1', 'CO', 'COP', 'America/Bogota', 'es-CO', now()),
+  ('00000000-0000-4000-b000-0000000000a2', '00000000-0000-4000-a000-00000000000a', 'Sede A2', 'CO', 'COP', 'America/Bogota', 'es-CO', now()),
+  ('00000000-0000-4000-b000-0000000000b1', '00000000-0000-4000-a000-00000000000b', 'Sede B1', 'CO', 'COP', 'America/Bogota', 'es-CO', now());
 
 -- Pacientes. createdAt repartido en ~3 años; id derivado de (tenant, n) para
 -- que dos corridas den el mismo dataset.

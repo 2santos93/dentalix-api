@@ -101,8 +101,14 @@ export class ProviderLocationScheduleDto {
   @ApiProperty({ example: 'Sede Norte' })
   locationName!: string;
 
-  @ApiProperty({ example: 'America/Bogota' })
-  timeZone!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Europe/Madrid',
+    description:
+      'Zona IANA de la sede; null si la sede aún no tiene zona configurada (fase 1) o ya no existe.',
+  })
+  timeZone!: string | null;
 
   @ApiProperty({ type: [WeeklyRangeDto] })
   ranges!: WeeklyRangeDto[];

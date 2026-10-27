@@ -15,6 +15,10 @@ import {
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -85,13 +89,16 @@ describe('Domains (e2e)', () => {
   }
 
   async function signUp(sub: string, fullName: string): Promise<string> {
-    await registerVerified(app, {
-      clinicName: `Clinica ${sub}`,
-      subdomain: sub,
-      email: `owner@${sub}.com`,
-      password: 'S3cret!!',
-      fullName,
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${sub}`,
+        subdomain: sub,
+        email: `owner@${sub}.com`,
+        password: 'S3cret!!',
+        fullName,
+      }),
+    );
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor(sub))

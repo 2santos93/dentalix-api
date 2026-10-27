@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -33,13 +37,16 @@ describe('patient location (e2e)', () => {
 
     await resetDatabase(raw);
 
-    await registerVerified(app, {
-      clinicName: 'Loc',
-      subdomain: sub,
-      email: 'o@loc.com',
-      password: PASSWORD,
-      fullName: 'Dr',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Loc',
+        subdomain: sub,
+        email: 'o@loc.com',
+        password: PASSWORD,
+        fullName: 'Dr',
+      }),
+    );
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor(sub))

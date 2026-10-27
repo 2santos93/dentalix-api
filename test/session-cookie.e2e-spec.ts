@@ -15,6 +15,10 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { CapturingMailer } from './support/capture-mailer';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-062: el refresh de la web viaja en una cookie HttpOnly del host de la
 // clínica (la web llama a la API por su mismo origen). Compatibilidad con el
@@ -95,13 +99,16 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
   const http = () => request(app.getHttpServer());
 
   async function register(sub: string, email: string): Promise<void> {
-    await registerVerified(app, {
-      clinicName: `Clínica ${sub}`,
-      subdomain: sub,
-      email,
-      password: PASSWORD,
-      fullName: 'Dueña Cookie',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clínica ${sub}`,
+        subdomain: sub,
+        email,
+        password: PASSWORD,
+        fullName: 'Dueña Cookie',
+      }),
+    );
   }
 
   /** Login en modo cookie desde la web de `sub`; devuelve la respuesta. */

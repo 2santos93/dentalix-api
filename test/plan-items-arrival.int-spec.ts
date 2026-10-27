@@ -8,6 +8,10 @@ import {
   reservedElsewhereMessage,
 } from '../src/modules/appointments/domain/plan-item-reservation';
 import { resolveLocationTimeZones } from '../src/shared/locations/location-time-zone';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 /**
  * DX-271 (BE-038, BE-039): la sincronización de reservas al cambiar el estado
@@ -118,7 +122,12 @@ describe('DX-271 triggers de reserva de ítems', () => {
       })
     ).id;
     locationId = (
-      await owner.location.create({ data: { tenantId, name: 'Principal' } })
+      await owner.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Principal',
+        }),
+      })
     ).id;
     patientId = (
       await owner.patient.create({

@@ -18,6 +18,10 @@ import type { StaffRepository } from '../src/modules/staff/domain/ports/staff-re
 import type { PatientRepository } from '../src/modules/patients/domain/ports/patient-repository.port';
 import type { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 /** DX-279: cancelar desde la agenda exige origen y motivo. */
 const FOR_PATIENT = {
@@ -58,7 +62,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const patientIds: string[] = [];
   for (let i = 0; i < 3; i++) {

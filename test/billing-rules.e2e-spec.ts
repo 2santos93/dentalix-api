@@ -13,6 +13,10 @@ import { AppModule } from '../src/app.module';
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-109 · reglas de cobro por HTTP: un solo «aceptar», nada cobrable en
 // planes cerrados, saldo coherente con el estado de cuenta, idempotencia con
@@ -96,13 +100,16 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dra. Owner',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dra. Owner',
+      }),
+    );
     const login = await request(server())
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', hostFor(subdomain))

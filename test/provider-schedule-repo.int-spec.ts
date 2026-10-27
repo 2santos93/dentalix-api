@@ -9,6 +9,10 @@ import {
   weeklyScheduleError,
   type ProviderScheduleSnapshot,
 } from '../src/modules/provider-schedule/domain/provider-availability';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-233: el repositorio del horario contra Postgres (rol de la app, RLS):
 // reemplazo en blando, excepciones que se reemplazan, y el candado por
@@ -39,10 +43,16 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
     });
     tenantId = t.id;
     otherTenantId = o.id;
-    locationA = (await raw.location.create({ data: { tenantId, name: 'A' } }))
-      .id;
-    locationB = (await raw.location.create({ data: { tenantId, name: 'B' } }))
-      .id;
+    locationA = (
+      await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'A' }),
+      })
+    ).id;
+    locationB = (
+      await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'B' }),
+      })
+    ).id;
   });
 
   afterAll(async () => {

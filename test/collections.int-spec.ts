@@ -6,6 +6,10 @@ import { SettlePaymentPromises } from '../src/modules/collections/application/se
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-150, capa DB: notas de cobranza y compromisos de pago (RLS FORCE, FK
 // compuestas, append-only por trigger, un compromiso abierto por paciente) y
@@ -38,7 +42,11 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede', country: 'CO' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede',
+      country: 'CO',
+    }),
   });
   const patients: string[] = [];
   const planOf = new Map<string, string>();

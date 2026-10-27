@@ -6,6 +6,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-204, capa DB: las columnas del descuento (motivo, nota, autor, hora y
 // sede) quedan congeladas por los triggers ampliados en un plan firmado
@@ -53,10 +57,16 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     ),
   );
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede principal',
+    }),
   });
   const otherLocation = await raw.location.create({
-    data: { tenantId, name: 'Sede norte' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede norte',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: subdomain },

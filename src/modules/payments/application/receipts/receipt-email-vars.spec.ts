@@ -50,9 +50,15 @@ const view = (
   ...overrides,
 });
 
+/** Zona de la sede del recibo en estos casos. */
+const SEDE_ZONE = 'America/Bogota';
+
 describe('receiptEmailVars (DX-136)', () => {
   it('arma el email desde la foto del recibo, con el documento enmascarado', () => {
-    const { amountLabel, balanceLabel, ...vars } = receiptEmailVars(view());
+    const { amountLabel, balanceLabel, ...vars } = receiptEmailVars(
+      view(),
+      SEDE_ZONE,
+    );
     expect(amountLabel).toMatch(/^150\.000,00\sCOP$/);
     expect(balanceLabel).toMatch(/^450\.000,00\sCOP$/);
     expect(vars).toEqual({
@@ -81,6 +87,7 @@ describe('receiptEmailVars (DX-136)', () => {
         voidedAt: new Date('2026-10-18T02:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
+      SEDE_ZONE,
     );
     expect(vars.voided).toEqual({
       dateLabel: '17/10/2026',
@@ -117,6 +124,7 @@ describe('receiptEmailVars (DX-136)', () => {
           plan: { ...snapshot.plan!, optionLabel: null },
         },
       }),
+      SEDE_ZONE,
     );
     expect(vars.fiscalLine).toBe('Clínica Demo S.A.S. · NIT/NIF 900123456-7');
     expect(vars.methodLabel).toBe('Sin especificar');
@@ -137,6 +145,7 @@ describe('receiptEmailVars (DX-136)', () => {
           },
         },
       }),
+      SEDE_ZONE,
     );
     expect(vars.planLabel).toBe(
       'Saldo migrado · Ortodoncia (programa anterior) · corte 15/03/2026',

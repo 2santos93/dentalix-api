@@ -10,6 +10,10 @@ import {
   FILE_STORAGE,
   type FileStoragePort,
 } from '../src/shared/storage/file-storage.port';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -57,13 +61,16 @@ describe('Me (e2e)', () => {
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
     await raw.tenant.deleteMany({ where: { subdomain: sub } });
 
-    await registerVerified(app, {
-      clinicName: 'Perfil E2E',
-      subdomain: sub,
-      email: 'perfil@e2e.com',
-      password: 'OldPass1!',
-      fullName: 'Nombre Viejo',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Perfil E2E',
+        subdomain: sub,
+        email: 'perfil@e2e.com',
+        password: 'OldPass1!',
+        fullName: 'Nombre Viejo',
+      }),
+    );
   });
 
   afterAll(async () => {

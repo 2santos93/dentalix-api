@@ -9,6 +9,10 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
 // un contexto de tenant los triggers de inmutabilidad dejan borrar.
@@ -99,13 +103,16 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dr. Owner',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dr. Owner',
+      }),
+    );
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),

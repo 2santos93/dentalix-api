@@ -3,10 +3,11 @@ import { Prisma, type CashSessionStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
-  loadLocationTimeZones,
+  firstLocationWithRows,
+  loadPeriodLocationZones,
   resolveLocationTimeZones,
+  type LocationZones,
 } from '../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
 import { civilDateIn, civilPeriodByZone } from '../../../shared/time/civil-day';
 import { formatReceiptNumber } from '../../payments/domain/receipt-number';
 import {
@@ -377,10 +378,11 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(
       async (tx) => {
-        const zones = await loadLocationTimeZones(
+        const zones = await loadPeriodLocationZones(
           tx,
           tenantId,
           params.locationIds,
+          firstLocationWithRows(tx.cashSession, tenantId),
         );
         const where: Prisma.CashSessionWhereInput = {
           tenantId,
@@ -407,11 +409,9 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           tx,
           rows.flatMap((r) => [r.openedById, r.closedById ?? r.openedById]),
         );
-        const zoneOf = (id: string) =>
-          zones.get(id) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE;
         return {
           items: rows.map((row) =>
-            this.toSummary(row, names, zoneOf(row.locationId)),
+            this.toSummary(row, names, zones.zoneOf(row.locationId)),
           ),
           total,
         };
@@ -423,12 +423,12 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
   /** Días civiles de apertura, cortados en la zona de cada sede (DX-097). */
   private periodWhere(
     params: ListCashSessionsParams,
-    zones: Map<string, string>,
+    zones: LocationZones,
   ): Prisma.CashSessionWhereInput {
     if (!params.from && !params.to) return {};
     const from = params.from ?? params.to!;
     const to = params.to ?? params.from!;
-    const branches = civilPeriodByZone(from, to, zones);
+    const branches = civilPeriodByZone(from, to, zones.configured);
     if (branches.length === 0) return { id: { in: [] } };
     return {
       OR: branches.map((b) => ({

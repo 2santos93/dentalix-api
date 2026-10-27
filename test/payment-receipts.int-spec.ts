@@ -3,6 +3,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import type { CreatePaymentRepoInput } from '../src/modules/payments/domain/ports/payment-repository.port';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-136: recibo de caja numerado por sede, contra Postgres real. Los
 // abonos se registran con el repositorio de la API (rol dentalix_app, RLS);
@@ -45,7 +49,11 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede principal', address: 'Calle 1' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede principal',
+      address: 'Calle 1',
+    }),
   });
   const patient = await raw.patient.create({
     data: {
@@ -168,7 +176,10 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
     b = await seedClinic(SUBDOMAINS[1]);
     northId = (
       await raw.location.create({
-        data: { tenantId: a.tenantId, name: 'Sede Norte' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: a.tenantId,
+          name: 'Sede Norte',
+        }),
       })
     ).id;
   });
@@ -186,7 +197,10 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
     it('se deriva del nombre (sin tildes ni palabras genéricas) y se desambigua dentro de la clínica', async () => {
       const second = await asApp(a.tenantId, (tx) =>
         tx.location.create({
-          data: { tenantId: a.tenantId, name: 'Sede Nórte' },
+          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+            tenantId: a.tenantId,
+            name: 'Sede Nórte',
+          }),
           select: { receiptPrefix: true },
         }),
       );

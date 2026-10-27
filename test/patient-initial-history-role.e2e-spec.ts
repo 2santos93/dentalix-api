@@ -8,6 +8,10 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // SEC-005 — POST /patients con `medicalHistory` crea la anamnesis v1, que es
 // historia clínica (CLINICAL_ROLES). Recepción crea pacientes, pero sin ese
@@ -102,13 +106,16 @@ describe('Alta de paciente con anamnesis inicial según rol — POST /patients (
     await cleanup();
 
     const email = `owner@${SUBDOMAIN}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: 'Clinica Alta',
-      subdomain: SUBDOMAIN,
-      email,
-      password: PASSWORD,
-      fullName: 'Dra. Admin',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clinica Alta',
+        subdomain: SUBDOMAIN,
+        email,
+        password: PASSWORD,
+        fullName: 'Dra. Admin',
+      }),
+    );
     tenantId = (reg.body as { tenantId: string }).tenantId;
     tokens[ClinicRole.ADMIN] = await login(email);
     tokens[ClinicRole.RECEPTION] = await member(ClinicRole.RECEPTION);

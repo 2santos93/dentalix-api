@@ -12,8 +12,6 @@ import { Prisma } from '@prisma/client';
  * YA existen — sembrarles un horario las pasaría de "sin restricción" a
  * "restringidas" de golpe, rechazando citas que hoy son válidas.
  */
-export const DEFAULT_BUSINESS_HOURS_TIMEZONE = 'America/Bogota';
-
 const MORNING = { startMinute: 9 * 60, endMinute: 13 * 60 };
 const AFTERNOON = { startMinute: 15 * 60, endMinute: 19 * 60 };
 
@@ -33,8 +31,9 @@ export const DEFAULT_BUSINESS_HOURS: {
  * Siembra el horario por defecto de una sede recién creada, DENTRO de la
  * transacción que la creó (así una sede no puede quedar a medio configurar).
  *
- * `timezone`: la del país de la sede (`timeZoneForCountry`, DX-097); sin
- * ella, la zona por defecto.
+ * `timeZone`: la de la sede (`Location.timeZone`), obligatoria. Solo alimenta
+ * la columna LEGADA `location_schedules.timezone`, que leen las réplicas
+ * anteriores a G1; el código nuevo nunca la lee (fase 1, R20).
  *
  * Idempotente por el unique `(tenantId, locationId)`: si la sede ya tuviera
  * horario, no se toca.
@@ -43,7 +42,7 @@ export async function seedDefaultBusinessHours(
   tx: Prisma.TransactionClient,
   tenantId: string,
   locationId: string,
-  timezone: string = DEFAULT_BUSINESS_HOURS_TIMEZONE,
+  timeZone: string,
 ): Promise<void> {
   const existing = await tx.locationSchedule.findFirst({
     where: { tenantId, locationId, deletedAt: null },
@@ -52,7 +51,7 @@ export async function seedDefaultBusinessHours(
   if (existing) return;
 
   const schedule = await tx.locationSchedule.create({
-    data: { tenantId, locationId, timezone },
+    data: { tenantId, locationId, timezone: timeZone },
     select: { id: true },
   });
   await tx.locationScheduleRange.createMany({

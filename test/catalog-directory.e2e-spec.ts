@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // `raw` es la conexión de ADMINISTRACIÓN (DIRECT_URL, superuser) para
 // sembrar y limpiar: con RLS aplicado, una conexión sin contexto de tenant no
@@ -65,13 +69,16 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
     await app.listen(0, '127.0.0.1');
     await cleanup();
 
-    await registerVerified(app, {
-      clinicName: 'Clínica Catálogo',
-      subdomain: SUBDOMAIN,
-      email: 'admin@catalogo.test',
-      password: PASSWORD,
-      fullName: 'Dr. Owner',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clínica Catálogo',
+        subdomain: SUBDOMAIN,
+        email: 'admin@catalogo.test',
+        password: PASSWORD,
+        fullName: 'Dr. Owner',
+      }),
+    );
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('X-Tenant-Host', host)

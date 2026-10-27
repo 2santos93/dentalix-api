@@ -23,6 +23,11 @@ import {
   computeQuoteHash,
   parseQuoteContent,
 } from '../src/modules/treatment-plans/domain/plan-quote';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
@@ -146,13 +151,16 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dr. Owner',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dr. Owner',
+      }),
+    );
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),
@@ -283,7 +291,13 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
     });
 
     const north = await as(clinicA)
-      .post('/locations', { name: 'Sede Norte', address: 'Cra 7 # 100-20' })
+      .post(
+        '/locations',
+        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+          name: 'Sede Norte',
+          address: 'Cra 7 # 100-20',
+        }),
+      )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
     const catalogB = await createCatalog(clinicB, 'PRES-COR-B');

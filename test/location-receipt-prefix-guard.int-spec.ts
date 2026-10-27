@@ -1,4 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-226 (DB-038): la serie de recibos de una sede ("receiptPrefix", DX-136)
 // es parte de la numeración legal del recibo de caja. Antes solo se protegía
@@ -58,7 +62,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const main = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede principal',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
@@ -129,7 +136,11 @@ function setPrefix(clinic: Clinic, locationId: string, prefix: string | null) {
 function newLocation(clinic: Clinic, name: string, prefix?: string) {
   return asApp(clinic.tenantId, (tx) =>
     tx.location.create({
-      data: { tenantId: clinic.tenantId, name, receiptPrefix: prefix },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: clinic.tenantId,
+        name,
+        receiptPrefix: prefix,
+      }),
       select: { id: true, receiptPrefix: true },
     }),
   );

@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-233, capa BD: horario de los profesionales por sede y excepciones.
 // Se inserta POR LA MISMA RUTA que la app (runWithTenant, rol dentalix_app,
@@ -23,10 +27,16 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const a = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede A' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede A',
+    }),
   });
   const b = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede B' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede B',
+    }),
   });
   return { tenantId: tenant.id, locationA: a.id, locationB: b.id };
 }

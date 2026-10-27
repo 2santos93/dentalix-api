@@ -10,6 +10,10 @@ import { FORGOT_PASSWORD_MESSAGE } from '../src/modules/auth/presentation/passwo
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // SEC-033 / DX-143 (e2e): los enlaces con un token que da control de la
 // cuenta GLOBAL (restablecer la contraseña, invitación que puede reclamar una
@@ -87,13 +91,16 @@ describe('Enlaces con token hacia el host de plataforma (e2e, SEC-033)', () => {
       },
     });
     dispatcher = app.get(EmailDispatcher);
-    const register = await registerVerified(app, {
-      clinicName: 'Clínica Dominio Propio',
-      subdomain: SUB,
-      email: ADMIN_EMAIL,
-      password: PASSWORD,
-      fullName: 'Dra. Propia',
-    });
+    const register = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clínica Dominio Propio',
+        subdomain: SUB,
+        email: ADMIN_EMAIL,
+        password: PASSWORD,
+        fullName: 'Dra. Propia',
+      }),
+    );
     const tenantId = (register.body as { tenantId: string }).tenantId;
     // Dominio personalizado VERIFIED (solo TXT: su A/CNAME lo controla la
     // clínica, SEC-009).

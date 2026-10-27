@@ -309,6 +309,33 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
   }, 120000);
 
+  it('every demo location is reviewed and complete (G1)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const locations = await raw.location.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    expect(locations).toHaveLength(2);
+    for (const location of locations) {
+      expect(location.currency).toBe('COP');
+      expect(location.timeZone).toBe('America/Bogota');
+      expect(location.locale).toBe('es-CO');
+      expect(location.country).toBe('CO');
+      // El backfill D5 deja esto en NULL: la demo lo fija ella misma.
+      expect(location.regionalSettingsReviewedAt).toBeInstanceOf(Date);
+    }
+    // La demo no depende del barrido por país: no queda ninguna fila que el
+    // backfill tuviera que rellenar.
+    const [swept] = await raw.$queryRaw<{ n: number }[]>`
+      SELECT dx_g1_backfill_location_regional(${tenantId}::uuid)::int AS n`;
+    expect(swept.n).toBe(0);
+    const schedules = await raw.locationSchedule.findMany({
+      where: { tenantId },
+    });
+    for (const schedule of schedules) {
+      expect(schedule.timezone).toBe('America/Bogota');
+    }
+  });
+
   it('deja tipos de cita con color y citas demo con tipo (DX-121)', async () => {
     const tenantId = await liveDemoTenantId();
     const types = await raw.appointmentType.findMany({ where: { tenantId } });

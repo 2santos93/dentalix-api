@@ -10,6 +10,10 @@ import {
   hashAnamnesisToken,
 } from '../src/modules/medical-history-submissions/domain/anamnesis-token';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-099 contra Postgres: la tabla medical_history_submissions con RLS FORCE
 // (un token de la clínica A no existe con el tenant B), FK compuestas por
@@ -43,7 +47,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await owner.location.create({
-    data: { tenantId: tenant.id, name: `Sede ${subdomain}` },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: `Sede ${subdomain}`,
+    }),
   });
   const user = await owner.user.create({
     data: {

@@ -14,6 +14,10 @@ import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/u
 import { DeactivateStaffUseCase } from '../src/modules/staff/application/use-cases/deactivate-staff.use-case';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-042: carreras que la base y los repositorios cierran ahora en UNA
 // transacción (DB-012 último ADMIN, DB-013 espejo DONE → odontograma, DB-014
@@ -41,7 +45,12 @@ async function seed(): Promise<Seeded> {
     data: { name: SUBDOMAIN, subdomain: SUBDOMAIN },
   });
   const tenantId = tenant.id;
-  await raw.location.create({ data: { tenantId, name: 'Sede principal' } });
+  await raw.location.create({
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede principal',
+    }),
+  });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Carreras' },
   });

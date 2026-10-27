@@ -6,6 +6,10 @@ import { CatalogKind, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaExceptionFilter } from '../src/shared/prisma/prisma-exception.filter';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-042 (DB-010, DB-011, DB-013, DB-016): reglas de dominio en la BASE, no solo
 // en los casos de uso. Cada CHECK se prueba por SQL directo con el rol owner
@@ -56,7 +60,9 @@ async function seed(): Promise<Seeded> {
   // trigger las ordena con un candado por clínica (DX-216).
   const [locationA, locationB] = await Promise.all(
     ['Sede A', 'Sede B'].map((name) =>
-      raw.location.create({ data: { tenantId, name } }),
+      raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name }),
+      }),
     ),
   );
   const patient = await raw.patient.create({

@@ -54,7 +54,12 @@ describe('DX-256 integridad real y concurrencia', () => {
       })
     ).id;
     locationId = (
-      await owner.location.create({ data: { tenantId, name: 'Principal' } })
+      await owner.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Principal',
+        }),
+      })
     ).id;
     patientId = (
       await owner.patient.create({
@@ -352,6 +357,10 @@ import {
   replaceAppointmentPlanItems,
 } from '../src/modules/appointments/infrastructure/appointment-plan-items';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 const appointmentRepo = new PrismaAppointmentRepository(prisma, context);
 describe('DX-256 carreras de edición de vínculos', () => {
   let tenantId: string,
@@ -368,7 +377,12 @@ describe('DX-256 carreras de edición de vínculos', () => {
     });
     tenantId = tenant.id;
     const locationId = (
-      await owner.location.create({ data: { tenantId, name: 'Principal' } })
+      await owner.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Principal',
+        }),
+      })
     ).id;
     patientId = (
       await owner.patient.create({

@@ -8,6 +8,11 @@ import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
 // un contexto de tenant los triggers de inmutabilidad dejan borrar.
@@ -157,13 +162,16 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dr. Owner',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dr. Owner',
+      }),
+    );
     return {
       tenantId: (reg.body as { tenantId: string }).tenantId,
       accessToken: await login(subdomain, email),
@@ -686,11 +694,17 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
 
     beforeAll(async () => {
       const res = await as(clinicA)
-        .post('/locations', {
-          name: 'Sede Madrid',
-          address: 'Calle Mayor 1, Madrid',
-          country: 'ES',
-        })
+        .post(
+          '/locations',
+          locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            name: 'Sede Madrid',
+            address: 'Calle Mayor 1, Madrid',
+            country: 'ES',
+            currency: 'EUR',
+            timeZone: 'Europe/Madrid',
+            locale: 'es-ES',
+          }),
+        )
         .expect(201);
       madrid = (res.body as { id: string; country: string }).id;
       expect((res.body as { country: string }).country).toBe('ES');

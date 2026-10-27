@@ -7,6 +7,12 @@ import { TreatmentPlan } from '../../domain/entities/treatment-plan.entity';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
+import { PLAN_CURRENCY_SOURCE } from '../../domain/ports/plan-currency-source.port';
+import type { PlanCurrencySource } from '../../domain/ports/plan-currency-source.port';
+import {
+  locationCurrencyRequired,
+  locationRequired,
+} from '../../../../shared/locations/reference-location';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and a
@@ -30,13 +36,18 @@ export class CreateTreatmentPlanUseCase {
     // se podía escribir contra un paciente de otra clínica.
     @Inject(PATIENT_REPOSITORY)
     private readonly patients: PatientRepository,
+    // R14: la moneda de un plan sin `currency` sale de la sede, nunca de USD.
+    @Inject(PLAN_CURRENCY_SOURCE)
+    private readonly planCurrency: PlanCurrencySource,
   ) {}
 
   async execute(input: CreateTreatmentPlanInput): Promise<TreatmentPlan> {
-    // Default "USD" (the schema default) when omitted — validated against
-    // the seeded `currencies` table either way, so a client can't force an
-    // unknown code by omission or by an explicit-but-wrong value.
-    const currency = (input.currency ?? 'USD').toUpperCase();
+    // Sin `currency`: la de la sede activa o la común de la clínica (R14). Se
+    // valida contra la tabla `currencies` en ambos casos, así que un cliente no
+    // puede forzar un código desconocido ni por omisión ni con un valor erróneo.
+    const currency = (
+      input.currency ?? (await this.defaultCurrency())
+    ).toUpperCase();
     if (!(await this.whitelist.has(currency))) {
       throw new BadRequestException(`Unknown currency: ${currency}`);
     }
@@ -48,6 +59,25 @@ export class CreateTreatmentPlanUseCase {
       currency,
       notes: input.notes,
       createdById: input.createdById,
+    });
+  }
+
+  private async defaultCurrency(): Promise<string> {
+    const ctx = await this.planCurrency.context();
+    if (ctx.kind === 'location') {
+      if (!ctx.currency) throw locationCurrencyRequired(ctx.locationId);
+      return ctx.currency;
+    }
+    // Un solo valor posible y ninguna sede sin configurar: nunca se adivina.
+    if (ctx.unconfigured) throw locationCurrencyRequired();
+    if (ctx.currencies.length === 1) return ctx.currencies[0];
+    if (ctx.currencies.length === 0) throw locationRequired();
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'PLAN_CURRENCY_REQUIRED',
+      message:
+        'Elige una sede o indica la moneda del plan: tus sedes usan monedas distintas.',
     });
   }
 }

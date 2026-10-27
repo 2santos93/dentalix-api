@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup/seed en
 // beforeAll — usa DIRECT_URL (rol owner `dentalix`, superuser), mismo patrón
@@ -43,13 +47,16 @@ describe('Public tenant branding (e2e)', () => {
     await app.listen(0, '127.0.0.1');
     await resetDatabase(raw);
 
-    const register = await registerVerified(app, {
-      clinicName: 'Sonrisa Branding',
-      subdomain: 'sonrisa-branding',
-      email: 'owner@sonrisa-branding.com',
-      password: 'S3cret!!',
-      fullName: 'Dr. Owner',
-    });
+    const register = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Sonrisa Branding',
+        subdomain: 'sonrisa-branding',
+        email: 'owner@sonrisa-branding.com',
+        password: 'S3cret!!',
+        fullName: 'Dr. Owner',
+      }),
+    );
     tenantId = (register.body as RegisterResponseBody).tenantId;
 
     await raw.tenant.update({

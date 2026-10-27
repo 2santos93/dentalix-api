@@ -63,6 +63,7 @@ import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 
 /** Reloj de las ofertas (el día de hoy en la zona de la sede); los tests lo fijan. */
 export const OPENING_CLOCK = Symbol('OPENING_CLOCK');
@@ -225,7 +226,7 @@ export class ListOpeningCandidatesUseCase {
     if (input.providerId)
       await requireProvider(this.staff, input.providerId, location.id);
 
-    const timeZone = location.timeZone;
+    const timeZone = requireLocationTimeZone(location);
     const slot: CandidateSlot = {
       locationId: location.id,
       providerId: input.providerId ?? null,
@@ -475,7 +476,7 @@ export class CreateWaitlistOfferUseCase {
         appointmentId: input.appointmentId ?? null,
         channel: input.channel,
         outcome,
-        offerDay: offerDayFor(now, location.timeZone),
+        offerDay: offerDayFor(now, requireLocationTimeZone(location)),
         createdById: ctx.actor.userId,
       },
       cap,

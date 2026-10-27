@@ -1,4 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // SEC-032, search_path fijo en las funciones de trigger y SECURITY DEFINER.
 // Con el search_path por defecto, pg_temp se busca ANTES que pg_catalog y que
@@ -89,7 +93,7 @@ async function seed(): Promise<Seeded> {
     data: { email: EMAIL, passwordHash: 'x', fullName: 'Dra. Prueba' },
   });
   const { id: locationId } = await raw.location.create({
-    data: { tenantId, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const { id: patientId } = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Search-path' },

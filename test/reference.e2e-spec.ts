@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -15,13 +19,16 @@ const PASSWORD = 'Sup3rSecret!';
 
 async function registerAndLogin(app: INestApplication<App>) {
   const sub = 'refclinic';
-  await registerVerified(app, {
-    clinicName: 'Ref Clinic',
-    subdomain: sub,
-    email: 'owner@ref.com',
-    password: PASSWORD,
-    fullName: 'Dr. Ref',
-  });
+  await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: 'Ref Clinic',
+      subdomain: sub,
+      email: 'owner@ref.com',
+      password: PASSWORD,
+      fullName: 'Dr. Ref',
+    }),
+  );
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(sub))

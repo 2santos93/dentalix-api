@@ -17,6 +17,8 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
   readonly patients = new Map<string, FakePatient>();
   readonly parties: (ResponsiblePartyView & { deleted: boolean })[] = [];
   country: 'CO' | 'ES' = 'CO';
+  /** Dato de test de la sede; el fake no deduce la zona del país. */
+  timeZone = 'America/Bogota';
   private seq = 0;
 
   addPatient(
@@ -78,7 +80,7 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
         }),
       noticeLocation: {
         country: this.country,
-        timeZone: this.country === 'ES' ? 'Europe/Madrid' : 'America/Bogota',
+        timeZone: this.timeZone,
       },
     });
   }

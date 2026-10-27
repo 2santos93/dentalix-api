@@ -8,6 +8,10 @@ import { promiseLockKey } from '../src/modules/collections/infrastructure/paymen
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-215 (BE-032), capa DB: un compromiso CUMPLIDO cuyo abono se anula vuelve
 // a ABIERTO o pasa a INCUMPLIDO, en la MISMA transacción que la anulación,
@@ -217,7 +221,11 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
     ).id;
     locationId = (
       await raw.location.create({
-        data: { tenantId, name: 'Sede', country: 'CO' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Sede',
+          country: 'CO',
+        }),
       })
     ).id;
     userId = (

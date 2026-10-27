@@ -4,9 +4,17 @@ export const LOCATION_SCHEDULE_REPOSITORY = Symbol(
   'LOCATION_SCHEDULE_REPOSITORY',
 );
 
+/**
+ * G1 fase 1 (R15): una web antigua todavía envía `timezone` en el `PUT`. Se
+ * acepta solo si es la zona de la sede; nunca se guarda desde el cuerpo.
+ */
+export const SCHEDULE_TIME_ZONE_MOVED =
+  'La zona horaria ya no se guarda en el horario: es un dato de la sede (Ajustes → Sedes).';
+
 export interface ReplaceScheduleInput {
-  timezone: string;
   ranges: ScheduleRange[];
+  /** `timezone` del cuerpo de una web antigua (R15), sin guardar. */
+  legacyTimeZone?: string;
 }
 
 export interface LocationScheduleRepository {
@@ -14,6 +22,9 @@ export interface LocationScheduleRepository {
    * El horario de la sede indicada, o `null` si esa sede no tiene horario
    * configurado — que el dominio interpreta como "sin restricción" (ver
    * `fitsBusinessHours`). Tenant-scoped (RLS / `runWithTenant`).
+   *
+   * `timezone` es SIEMPRE `Location.timeZone` (G1, R4); sin una zona válida,
+   * 409 `LOCATION_TIMEZONE_REQUIRED`.
    */
   findByLocation(locationId: string): Promise<BusinessHours | null>;
 
@@ -32,7 +43,9 @@ export interface LocationScheduleRepository {
   /**
    * Reemplaza TODA la semana de la sede en contexto (semántica atómica simple
    * para una grilla: el cliente manda el horario completo, no parches por día).
-   * Crea la fila de configuración si no existía.
+   * Crea la fila de configuración si no existía, con la columna legada
+   * `timezone` igual a la zona de la sede (R20). Con `legacyTimeZone` distinto
+   * de esa zona (o sede sin zona), 400 `SCHEDULE_TIME_ZONE_MOVED` (R15).
    */
   replaceForCurrentLocation(
     input: ReplaceScheduleInput,

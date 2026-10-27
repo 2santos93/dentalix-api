@@ -12,6 +12,10 @@ import {
 } from '../src/modules/notifications/email/infrastructure/mail-config';
 import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-144 (SEC-034): `POST /auth/register` ya no es un relé de emails. Con los
 // topes reales de plataforma (1 cada 10 min y 3 en 24 h al mismo
@@ -51,13 +55,15 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
       .post('/api/v1/auth/register')
       .set('X-Tenant-Host', 'localhost')
       .set('X-Forwarded-For', `198.51.100.${i + 1}`)
-      .send({
-        clinicName: 'Clínica Sonda',
-        subdomain: overrides.subdomain ?? `${SUB_PREFIX}-${i}`,
-        email,
-        password: overrides.password ?? `Clave-${i}-Dx144!`,
-        fullName: 'Quien Sea',
-      });
+      .send(
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'Clínica Sonda',
+          subdomain: overrides.subdomain ?? `${SUB_PREFIX}-${i}`,
+          email,
+          password: overrides.password ?? `Clave-${i}-Dx144!`,
+          fullName: 'Quien Sea',
+        }),
+      );
 
   /** Simula que pasó el tiempo para ese destinatario (emails y pendiente). */
   async function age(email: string, ms: number): Promise<void> {
@@ -229,13 +235,15 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
     await http()
       .post('/api/v1/auth/register')
       .set('X-Tenant-Host', 'localhost')
-      .send({
-        clinicName: 'Clínica Sonda',
-        subdomain: `${SUB_PREFIX}-saludo`,
-        email,
-        password: 'Clave-Saludo-Dx144!',
-        fullName: 'Tu banco bloqueó tu cuenta llama ya',
-      })
+      .send(
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'Clínica Sonda',
+          subdomain: `${SUB_PREFIX}-saludo`,
+          email,
+          password: 'Clave-Saludo-Dx144!',
+          fullName: 'Tu banco bloqueó tu cuenta llama ya',
+        }),
+      )
       .expect(202);
     await mailer.waitFor(email, VERIFY_LINK);
     const [message] = sentTo(email);
@@ -248,13 +256,15 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
     const res = await http()
       .post('/api/v1/auth/register')
       .set('X-Tenant-Host', 'localhost')
-      .send({
-        clinicName: 'C'.repeat(121),
-        subdomain: `${SUB_PREFIX}-largo`,
-        email: `largo-${RUN}${DOMAIN}`,
-        password: 'Clave-Larga-Dx144!',
-        fullName: 'N'.repeat(121),
-      })
+      .send(
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'C'.repeat(121),
+          subdomain: `${SUB_PREFIX}-largo`,
+          email: `largo-${RUN}${DOMAIN}`,
+          password: 'Clave-Larga-Dx144!',
+          fullName: 'N'.repeat(121),
+        }),
+      )
       .expect(400);
     expect(JSON.stringify(res.body)).toContain(
       'El nombre de la clínica admite como mucho 120 caracteres',

@@ -11,6 +11,10 @@ import { describeWithMinio, ensureBucket } from '../support/minio';
 import { createS3Client } from '../../src/shared/storage/s3-file-storage';
 import { hostFor } from '../support/tenant-host';
 import { registerVerified } from '../support/register-verified';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from '../support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -69,13 +73,16 @@ describeWithMinio('Avatar con S3 y dos réplicas (e2e)', (cfg) => {
     expect(replicaA.get(FILE_STORAGE)).toBeInstanceOf(S3FileStorage);
     expect(replicaA.get(FILE_STORAGE)).not.toBe(replicaB.get(FILE_STORAGE));
     await cleanup();
-    const reg = await registerVerified(replicaA, {
-      clinicName: 'Avatar S3',
-      subdomain: sub,
-      email,
-      password,
-      fullName: 'Ana S3',
-    });
+    const reg = await registerVerified(
+      replicaA,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Avatar S3',
+        subdomain: sub,
+        email,
+        password,
+        fullName: 'Ana S3',
+      }),
+    );
     userId = reg.body.userId;
   });
 

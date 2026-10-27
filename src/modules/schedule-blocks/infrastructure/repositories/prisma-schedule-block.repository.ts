@@ -2,8 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { loadLocationTimeZones } from '../../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../shared/locations/default-business-hours';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
 import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import type {
@@ -190,10 +189,10 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
         },
         orderBy: { start: 'asc' },
       });
-      const zones = await loadLocationTimeZones(tx, tenantId, [locationId]);
+      const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
       return {
         locationId,
-        timeZone: zones.get(locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
+        timeZone: zoneOf(locationId),
         blocks: rows.map(mapToEntity),
       };
     });

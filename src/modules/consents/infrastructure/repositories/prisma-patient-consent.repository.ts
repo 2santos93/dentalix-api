@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import {
   PatientConsent,
   PatientConsentDocument,
@@ -102,7 +103,7 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         });
         if (!patient) return null;
 
-        const [tenant, user] = await Promise.all([
+        const [tenant, user, location] = await Promise.all([
           tx.tenant.findFirst({
             where: { id: tenantId, deletedAt: null },
             select: { name: true },
@@ -111,6 +112,11 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
             where: { id: params.professionalUserId },
             select: { fullName: true },
           }),
+          resolveReferenceLocation(
+            tx,
+            tenantId,
+            this.tenantContext.getLocationId() ?? null,
+          ),
         ]);
 
         let plan: ConsentSigningContext['plan'];
@@ -152,6 +158,7 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
           patient,
           clinicName: tenant?.name ?? '',
           professionalName: user?.fullName ?? UNKNOWN_PROFESSIONAL,
+          timeZone: location.timeZone,
           plan,
         };
       },

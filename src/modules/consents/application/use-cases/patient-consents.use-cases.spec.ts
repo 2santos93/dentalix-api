@@ -94,6 +94,20 @@ describe('PreviewPatientConsentUseCase', () => {
     });
   });
 
+  it('consent date uses the location zone', async () => {
+    // 17:30 UTC del 16 ya es el 17 en Tokio: la fecha es la de la sede.
+    const { preview, template, consents } = setup();
+    consents.timeZone = 'Asia/Tokyo';
+
+    const result = await preview.execute(
+      'p1',
+      { templateId: template.id },
+      'dentist-1',
+    );
+
+    expect(result.body).toContain('Fecha: 17 de octubre de 2026.');
+  });
+
   it('sin plan, {{tratamiento}} dice que no se especificó', async () => {
     const { preview, template } = setup();
     const result = await preview.execute(

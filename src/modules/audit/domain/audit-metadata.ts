@@ -104,6 +104,24 @@ export interface AuditMetadata {
    * nada del paciente.
    */
   allocation?: AuditAllocation;
+  /**
+   * G1 (R13): moneda, zona y formato de una sede antes y después de una
+   * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
+   * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
+   */
+  regionalSettings?: AuditRegionalSettingsChange;
+}
+
+export interface AuditRegionalSettingsSide {
+  currency: string | null;
+  timeZone: string | null;
+  locale: string | null;
+}
+
+export interface AuditRegionalSettingsChange {
+  before: AuditRegionalSettingsSide;
+  after: AuditRegionalSettingsSide;
+  reviewed: boolean;
 }
 
 /** Una línea de la imputación de un abono (DX-051). */
@@ -586,6 +604,45 @@ function healthRegistration(
   return before && after ? { before, after } : null;
 }
 
+const TIME_ZONE_ID = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
+const LOCALE_TAG = /^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
+
+function nullableCode(value: unknown, pattern: RegExp, max: number) {
+  if (value === null) return null;
+  if (typeof value === 'string' && value.length <= max && pattern.test(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function regionalSettingsSide(
+  value: unknown,
+): AuditRegionalSettingsSide | null {
+  if (!isRecord(value)) return null;
+  const { currency, timeZone, locale, ...rest } = value;
+  const c = nullableCode(currency, CURRENCY_CODE, 3);
+  const z = nullableCode(timeZone, TIME_ZONE_ID, 64);
+  const l = nullableCode(locale, LOCALE_TAG, 35);
+  if (
+    Object.keys(rest).length > 0 ||
+    c === undefined ||
+    z === undefined ||
+    l === undefined
+  ) {
+    return null;
+  }
+  return { currency: c, timeZone: z, locale: l };
+}
+
+/** Los dos lados y la marca de revisión, o nada (G1). */
+function regionalSettings(value: unknown): AuditRegionalSettingsChange | null {
+  if (!isRecord(value)) return null;
+  const before = regionalSettingsSide(value.before);
+  const after = regionalSettingsSide(value.after);
+  if (!before || !after || typeof value.reviewed !== 'boolean') return null;
+  return { before, after, reviewed: value.reviewed };
+}
+
 /** La cancelación entera con su forma, o nada (DX-279). */
 function cancellation(value: unknown): AuditCancellation | null {
   if (!isRecord(value)) return null;
@@ -751,5 +808,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (registration) out.healthRegistration = registration;
   const reallocated = allocation(input.allocation);
   if (reallocated) out.allocation = reallocated;
+  const regional = regionalSettings(input.regionalSettings);
+  if (regional) out.regionalSettings = regional;
   return out;
 }

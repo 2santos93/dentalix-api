@@ -1,16 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
-import { Location as PrismaLocation, Prisma } from '@prisma/client';
-import {
-  loadLocationTimeZones,
-  timeZoneForCountry,
-} from '../../../../shared/locations/location-time-zone';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CreateLocationRepoInput,
   Location,
   LocationRepository,
+  RegionalWrite,
+  RegionalWriteContext,
   UpdateLocationRepoInput,
 } from '../../domain/ports/location-repository.port';
 
@@ -29,31 +26,6 @@ export class PrismaLocationRepository implements LocationRepository {
     return tenantId;
   }
 
-  /** Añade a cada sede su zona (DX-097), leída en UNA consulta. */
-  private async withTimeZones(
-    tx: Prisma.TransactionClient,
-    rows: PrismaLocation[],
-  ): Promise<Location[]> {
-    const zones = await loadLocationTimeZones(
-      tx,
-      this.requireTenantId(),
-      rows.map((row) => row.id),
-    );
-    return rows.map((row) => ({
-      ...row,
-      timeZone: zones.get(row.id) ?? timeZoneForCountry(row.country),
-    }));
-  }
-
-  private async withTimeZone(
-    tx: Prisma.TransactionClient,
-    row: PrismaLocation | null,
-  ): Promise<Location | null> {
-    if (!row) return null;
-    const [located] = await this.withTimeZones(tx, [row]);
-    return located;
-  }
-
   async create(input: CreateLocationRepoInput): Promise<Location> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -63,43 +35,38 @@ export class PrismaLocationRepository implements LocationRepository {
           name: input.name,
           address: input.address,
           country: input.country,
+          currency: input.currency,
+          timeZone: input.timeZone,
+          locale: input.locale,
+          // R11: quien crea la sede eligió sus valores; no queda «por revisar».
+          regionalSettingsReviewedAt: new Date(),
           phone: input.phone,
         },
       });
       // Una sede nueva nace con horario por defecto, igual que la que se crea al
       // registrar la clínica — si no, unas sedes tendrían horario y otras no
-      // según por dónde se crearon.
-      // La zona del horario es la del país de la sede (DX-097): una sede en
-      // España corta su día de caja a medianoche de Madrid, no de Bogotá.
-      await seedDefaultBusinessHours(
-        tx,
-        tenantId,
-        location.id,
-        timeZoneForCountry(location.country),
-      );
-      const [created] = await this.withTimeZones(tx, [location]);
-      return created;
+      // según por dónde se crearon. Su columna legada de zona es la de la sede
+      // (R20).
+      await seedDefaultBusinessHours(tx, tenantId, location.id, input.timeZone);
+      return location;
     });
   }
 
+  // G1: moneda, zona y locale son columnas de la sede y se devuelven tal
+  // cual; un NULL (fila de una réplica antigua sin barrer) sale como null,
+  // nunca como el valor de su país (R19).
   async list(): Promise<Location[]> {
-    return this.prisma.runWithTenant(async (tx) =>
-      this.withTimeZones(
-        tx,
-        await tx.location.findMany({
-          where: { deletedAt: null },
-          orderBy: { createdAt: 'asc' },
-        }),
-      ),
+    return this.prisma.runWithTenant((tx) =>
+      tx.location.findMany({
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      }),
     );
   }
 
   async findById(id: string): Promise<Location | null> {
-    return this.prisma.runWithTenant(async (tx) =>
-      this.withTimeZone(
-        tx,
-        await tx.location.findFirst({ where: { id, deletedAt: null } }),
-      ),
+    return this.prisma.runWithTenant((tx) =>
+      tx.location.findFirst({ where: { id, deletedAt: null } }),
     );
   }
 
@@ -113,10 +80,75 @@ export class PrismaLocationRepository implements LocationRepository {
         data: patch,
       });
       if (result.count === 0) return null;
-      return this.withTimeZone(
-        tx,
-        await tx.location.findFirst({ where: { id, deletedAt: null } }),
-      );
+      return tx.location.findFirst({ where: { id, deletedAt: null } });
+    });
+  }
+
+  async updateRegional(
+    id: string,
+    patch: UpdateLocationRepoInput,
+    decide: (ctx: RegionalWriteContext) => Promise<RegionalWrite>,
+  ): Promise<Location | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Abrir una caja inserta una fila con FK a la sede (KEY SHARE), que choca
+      // con este FOR UPDATE: o la caja entra antes y la vemos, o espera.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "locations"
+        WHERE "id" = ${id}::uuid AND "tenantId" = ${tenantId}::uuid
+          AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (locked.length === 0) return null;
+      const current = await tx.location.findFirst({
+        where: { id, deletedAt: null },
+      });
+      if (!current) return null;
+
+      const where = { tenantId, locationId: id };
+      const write = await decide({
+        current,
+        hasOpenCashSession: async () =>
+          (await tx.cashSession.findFirst({
+            where: { ...where, status: 'OPEN' },
+            select: { id: true },
+          })) !== null,
+        hasRegionalHistory: async () => {
+          const probes = await Promise.all([
+            tx.appointment.findFirst({ where, select: { id: true } }),
+            tx.payment.findFirst({ where, select: { id: true } }),
+            tx.expense.findFirst({ where, select: { id: true } }),
+            tx.expensePayment.findFirst({ where, select: { id: true } }),
+            tx.cashSessionAdjustment.findFirst({ where, select: { id: true } }),
+            tx.inventoryItem.findFirst({ where, select: { id: true } }),
+            tx.cashSession.findFirst({ where, select: { id: true } }),
+            tx.priceList.findFirst({ where, select: { id: true } }),
+            tx.cancellationPolicyVersion.findFirst({
+              where,
+              select: { id: true },
+            }),
+          ]);
+          return probes.some((row) => row !== null);
+        },
+      });
+
+      const updated = await tx.location.update({
+        where: { id },
+        data: {
+          ...patch,
+          currency: write.currency,
+          timeZone: write.timeZone,
+          locale: write.locale,
+          ...(write.reviewed ? { regionalSettingsReviewedAt: new Date() } : {}),
+        },
+      });
+      if (write.timeZone !== undefined && write.timeZone !== current.timeZone) {
+        // R20: la columna legada del horario sigue la zona de la sede.
+        await tx.locationSchedule.updateMany({
+          where: { tenantId, locationId: id },
+          data: { timezone: write.timeZone },
+        });
+      }
+      return updated;
     });
   }
 

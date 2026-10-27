@@ -30,6 +30,8 @@ import { TREATMENT_PLAN_REPOSITORY } from './domain/ports/treatment-plan-reposit
 import { PrismaTreatmentPlanRepository } from './infrastructure/repositories/prisma-treatment-plan.repository';
 import { CURRENCY_WHITELIST } from './domain/ports/currency-whitelist.port';
 import { PrismaCurrencyWhitelist } from './infrastructure/adapters/prisma-currency-whitelist.adapter';
+import { PLAN_CURRENCY_SOURCE } from './domain/ports/plan-currency-source.port';
+import { PrismaPlanCurrencySource } from './infrastructure/adapters/prisma-plan-currency-source.adapter';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
@@ -120,6 +122,7 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
       provide: CURRENCY_WHITELIST,
       useClass: PrismaCurrencyWhitelist,
     },
+    { provide: PLAN_CURRENCY_SOURCE, useClass: PrismaPlanCurrencySource },
   ],
   // Exported (additive) so PaymentsModule can inject GetTreatmentPlanUseCase
   // by class -- RecordPaymentUseCase/GetPlanBalanceUseCase need to read a

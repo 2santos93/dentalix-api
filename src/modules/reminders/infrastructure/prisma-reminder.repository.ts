@@ -6,8 +6,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { loadLocationTimeZones } from '../../../shared/locations/location-time-zone';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../shared/locations/default-business-hours';
+import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { loadNoticeResponsibles } from '../../patients/infrastructure/notices/notice-context';
 import {
   REMINDER_CATCH_UP_MS,
@@ -198,7 +197,7 @@ export class PrismaReminderRepository implements ReminderRepository {
       // RLS: una cita de otra clínica (un id manipulado en el payload) no
       // aparece. Se leen también las retiradas para registrar el motivo.
       const appointment = await tx.appointment.findFirst({
-        where: { id: appointmentId },
+        where: { id: appointmentId, tenantId },
         select: {
           id: true,
           start: true,
@@ -213,16 +212,15 @@ export class PrismaReminderRepository implements ReminderRepository {
               emergencyContactName: true,
             },
           },
-          location: { select: { country: true } },
+          location: { select: { id: true, country: true, timeZone: true } },
         },
       });
       if (!appointment) return null;
-      const [settings, zones, responsibles, policy] = await Promise.all([
+      const [settings, responsibles, policy] = await Promise.all([
         tx.locationReminderSettings.findFirst({
           where: { locationId: appointment.locationId },
           select: { enabled: true, leadHours: true },
         }),
-        loadLocationTimeZones(tx, tenantId, [appointment.locationId]),
         loadNoticeResponsibles(tx, appointment.patient.id),
         // DX-291: la política vigente de la sede, para el email.
         tx.cancellationPolicyVersion.findFirst({
@@ -246,8 +244,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           deleted: appointment.deletedAt !== null,
         },
         locationCountry: appointment.location.country,
-        locationTimeZone:
-          zones.get(appointment.locationId) ?? DEFAULT_BUSINESS_HOURS_TIMEZONE,
+        locationTimeZone: requireLocationTimeZone(appointment.location),
         patientId: appointment.patient.id,
         contact: toContact(appointment.patient),
         recipient: {
