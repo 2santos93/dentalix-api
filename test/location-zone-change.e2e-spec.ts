@@ -517,32 +517,45 @@ describe('Locations / cambio regional (e2e)', () => {
     expect(row.timeZone).toBe('Asia/Kolkata');
   });
 
+  /** Zona guardada antes de canonicalizar (G1): tal cual llegó, sin revisar. */
+  const storeRawZone = async (id: string, zone: string) => {
+    await raw.$executeRawUnsafe(
+      `UPDATE "locations" SET "timeZone" = $2, "regionalSettingsReviewedAt" = NULL WHERE "id" = $1::uuid`,
+      id,
+      zone,
+    );
+    await raw.$executeRawUnsafe(
+      `UPDATE "location_schedules" SET "timezone" = $2 WHERE "locationId" = $1::uuid`,
+      id,
+      zone,
+    );
+  };
+
   it('PATCH timeZone differing only in case is not a change even with an open cash session', async () => {
+    // Con historial y caja abierta un cambio de zona sería 409: este no lo es.
     const id = await newLocation();
     await addExpense(id);
     await openCash(id);
-    const res = await patch(id, { timeZone: 'AMERICA/BOGOTA' }).expect(200);
-    expect((res.body as LocationBody).timeZone).toBe('America/Bogota');
+    await storeRawZone(id, 'asia/tokyo');
+    const res = await patch(id, { timeZone: 'ASIA/TOKYO' }).expect(200);
+    expect((res.body as LocationBody).timeZone).toBe('Asia/Tokyo');
+    const row = await raw.location.findUniqueOrThrow({ where: { id } });
+    expect(row.timeZone).toBe('Asia/Tokyo');
+    expect(row.regionalSettingsReviewedAt).toBeNull();
   });
 
   it('case-only zone rewrite is not reviewed nor audited as a regional change', async () => {
-    // M5: una zona guardada antes de canonicalizar (en minúsculas), con
-    // historial y caja abierta.
+    // M5: sin caja ni historial, un cambio de zona real marcaría la sede
+    // revisada y se auditaría con antes/después; este solo la canonicaliza.
     const id = await newLocation();
-    await addExpense(id);
-    await openCash(id);
-    await raw.$executeRawUnsafe(
-      `UPDATE "locations" SET "timeZone" = 'asia/kolkata', "regionalSettingsReviewedAt" = NULL WHERE "id" = $1::uuid`,
-      id,
-    );
-    await raw.$executeRawUnsafe(
-      `UPDATE "location_schedules" SET "timezone" = 'asia/kolkata' WHERE "locationId" = $1::uuid`,
-      id,
-    );
+    await storeRawZone(id, 'asia/kolkata');
     const res = await patch(id, { timeZone: 'Asia/Kolkata' }).expect(200);
     const body = res.body as LocationBody;
     expect(body.timeZone).toBe('Asia/Kolkata');
     expect(body.regionalSettingsReviewedAt).toBeNull();
+    const row = await raw.location.findUniqueOrThrow({ where: { id } });
+    expect(row.timeZone).toBe('Asia/Kolkata');
+    expect(row.regionalSettingsReviewedAt).toBeNull();
     // Se guarda canónica, con la doble escritura de R20.
     const schedule = await raw.locationSchedule.findFirstOrThrow({
       where: { locationId: id },
@@ -551,9 +564,8 @@ describe('Locations / cambio regional (e2e)', () => {
     const events = await raw.auditEvent.findMany({
       where: { resourceType: 'LOCATION', resourceId: id, action: 'UPDATE' },
     });
-    for (const event of events) {
-      expect(event.metadata ?? {}).not.toHaveProperty('regionalSettings');
-    }
+    expect(events).toHaveLength(1);
+    expect(events[0].metadata ?? {}).not.toHaveProperty('regionalSettings');
   });
 
   // G1-B (pre-flight I4): una sede sin reloj solo falla donde se formatea;

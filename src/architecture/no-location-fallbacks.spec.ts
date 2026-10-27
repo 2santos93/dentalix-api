@@ -11,6 +11,7 @@ import { join, relative, sep } from 'node:path';
  */
 const SRC = join(__dirname, '..');
 const BOGOTA = `'America/${'Bogota'}'`;
+const IANA_ZONE_NAMES_FILE = join(SRC, 'shared', 'time', 'iana-zone-names.ts');
 const RETIRED = new RegExp(
   [
     'timeZoneFor' + 'Country',
@@ -48,7 +49,10 @@ describe('sin zona por defecto ni derivada del país (G1, R5)', () => {
   it('(a) production code has no America/Bogota outside OpenAPI examples', () => {
     const production = files.filter(
       (file) =>
-        !file.endsWith('.spec.ts') && !file.split(sep).includes('__fixtures__'),
+        !file.endsWith('.spec.ts') &&
+        !file.split(sep).includes('__fixtures__') &&
+        // Lista generada de todas las zonas IANA: referencia, no un fallback.
+        file !== IANA_ZONE_NAMES_FILE,
     );
     expect(
       offending(

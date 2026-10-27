@@ -3,6 +3,8 @@ import { IsOptional, Matches } from 'class-validator';
 import { IN_CLINIC_STATUSES } from '../../domain/patient-flow';
 import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
 import { PlanItemReservedElsewhereDto } from './appointment.dto';
+import { HOUR_CYCLES } from '../../../../shared/locations/location-regional';
+import type { HourCycle } from '../../../../shared/format/regional-format';
 
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -109,10 +111,10 @@ export class InClinicViewDto {
   locale!: string;
 
   @ApiProperty({
-    enum: ['h12', 'h23'],
+    enum: [...HOUR_CYCLES],
     description: 'G1-B: reloj de la sede (12 h o 24 h).',
   })
-  hourCycle!: 'h12' | 'h23';
+  hourCycle!: HourCycle;
 
   @ApiProperty({
     format: 'date-time',

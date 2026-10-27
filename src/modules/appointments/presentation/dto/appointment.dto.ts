@@ -12,6 +12,8 @@ import {
   APPOINTMENT_WARNING_CODES,
   type AppointmentWarningCode,
 } from '../../domain/entities/appointment.entity';
+import { HOUR_CYCLES } from '../../../../shared/locations/location-regional';
+import type { HourCycle } from '../../../../shared/format/regional-format';
 
 // Response shape for Appointment endpoints — documents the Appointment
 // entity contract for Swagger (same convention as BrandingDto /
@@ -281,13 +283,13 @@ export class PlanItemReservedElsewhereDto {
   locale!: string | null;
 
   @ApiProperty({
-    enum: ['h12', 'h23'],
+    enum: [...HOUR_CYCLES],
     nullable: true,
     description:
       'G1-B: reloj de esa sede (12 h o 24 h), en crudo. null si la sede no está permitida y también si no lo tiene.',
     example: 'h12',
   })
-  hourCycle!: 'h12' | 'h23' | null;
+  hourCycle!: HourCycle | null;
 }
 
 /** DX-273: el mínimo de una visita del plan antes y después de la salida. */

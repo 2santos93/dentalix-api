@@ -1,6 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import { canonicalTimeZoneName } from '../../../shared/time/canonical-time-zone';
+import type { HourCycle } from '../../../shared/format/regional-format';
+import {
+  HOUR_CYCLES,
+  isHourCycle,
+} from '../../../shared/locations/location-regional';
 
 /**
  * G1 (DX-313/314/315): moneda, zona horaria y formato regional de la sede;
@@ -21,14 +26,10 @@ export const REGIONAL_FIELDS: readonly RegionalField[] = [
   'locale',
 ];
 
-/** G1-B: reloj de la sede, 12 h o 24 h. Sin valor por defecto. */
-export type HourCycle = 'h12' | 'h23';
-
-export const HOUR_CYCLES: readonly HourCycle[] = ['h12', 'h23'];
-
-export function isHourCycle(value: unknown): value is HourCycle {
-  return HOUR_CYCLES.some((cycle) => cycle === value);
-}
+// G1-B: el reloj de la sede (12 h o 24 h) y su comprobación tienen una sola
+// fuente, compartida con los cargadores de sede.
+export { HOUR_CYCLES, isHourCycle };
+export type { HourCycle };
 
 export interface RegionalInput {
   currency?: string | null;

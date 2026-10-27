@@ -27,9 +27,12 @@ export function locationLocaleRequired(locationId: string): ConflictException {
   });
 }
 
-/** El reloj leído de la columna (texto en fase 1) es uno de los válidos. */
-export function isHourCycle(value: string | null): value is HourCycle {
-  return value === 'h12' || value === 'h23';
+/** G1-B: reloj de la sede, 12 h o 24 h. Sin valor por defecto. */
+export const HOUR_CYCLES: readonly HourCycle[] = ['h12', 'h23'];
+
+/** El valor (p. ej. la columna, texto en fase 1) es uno de los relojes válidos. */
+export function isHourCycle(value: unknown): value is HourCycle {
+  return HOUR_CYCLES.some((cycle) => cycle === value);
 }
 
 /**
