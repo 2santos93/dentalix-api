@@ -6,6 +6,8 @@ import {
   CreateLocationRepoInput,
   Location,
   LocationRepository,
+  RegionalWrite,
+  RegionalWriteContext,
   UpdateLocationRepoInput,
 } from '../../domain/ports/location-repository.port';
 
@@ -79,6 +81,74 @@ export class PrismaLocationRepository implements LocationRepository {
       });
       if (result.count === 0) return null;
       return tx.location.findFirst({ where: { id, deletedAt: null } });
+    });
+  }
+
+  async updateRegional(
+    id: string,
+    patch: UpdateLocationRepoInput,
+    decide: (ctx: RegionalWriteContext) => Promise<RegionalWrite>,
+  ): Promise<Location | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Abrir una caja inserta una fila con FK a la sede (KEY SHARE), que choca
+      // con este FOR UPDATE: o la caja entra antes y la vemos, o espera.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "locations"
+        WHERE "id" = ${id}::uuid AND "tenantId" = ${tenantId}::uuid
+          AND "deletedAt" IS NULL
+        FOR UPDATE`;
+      if (locked.length === 0) return null;
+      const current = await tx.location.findFirst({
+        where: { id, deletedAt: null },
+      });
+      if (!current) return null;
+
+      const where = { tenantId, locationId: id };
+      const write = await decide({
+        current,
+        hasOpenCashSession: async () =>
+          (await tx.cashSession.findFirst({
+            where: { ...where, status: 'OPEN' },
+            select: { id: true },
+          })) !== null,
+        hasRegionalHistory: async () => {
+          const probes = await Promise.all([
+            tx.appointment.findFirst({ where, select: { id: true } }),
+            tx.payment.findFirst({ where, select: { id: true } }),
+            tx.expense.findFirst({ where, select: { id: true } }),
+            tx.expensePayment.findFirst({ where, select: { id: true } }),
+            tx.cashSessionAdjustment.findFirst({ where, select: { id: true } }),
+            tx.inventoryItem.findFirst({ where, select: { id: true } }),
+            tx.cashSession.findFirst({ where, select: { id: true } }),
+            tx.priceList.findFirst({ where, select: { id: true } }),
+            tx.cancellationPolicyVersion.findFirst({
+              where,
+              select: { id: true },
+            }),
+          ]);
+          return probes.some((row) => row !== null);
+        },
+      });
+
+      const updated = await tx.location.update({
+        where: { id },
+        data: {
+          ...patch,
+          currency: write.currency,
+          timeZone: write.timeZone,
+          locale: write.locale,
+          ...(write.reviewed ? { regionalSettingsReviewedAt: new Date() } : {}),
+        },
+      });
+      if (write.timeZone !== undefined && write.timeZone !== current.timeZone) {
+        // R20: la columna legada del horario sigue la zona de la sede.
+        await tx.locationSchedule.updateMany({
+          where: { tenantId, locationId: id },
+          data: { timezone: write.timeZone },
+        });
+      }
+      return updated;
     });
   }
 

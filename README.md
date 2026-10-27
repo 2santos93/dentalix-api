@@ -966,6 +966,34 @@ cuenta en su día.
   día civil del pago en la zona de su sede (es lo que hay que mostrar).
 - `GET /dashboard`: `to` sigue siendo EXCLUSIVO (`[from, to)`).
 
+## Cambiar la zona de una sede (G1, DX-313, DX-314)
+
+`PATCH /locations/:id` (ADMIN, auditado) edita `currency`, `timeZone` y
+`locale` de la sede; `null` en cualquiera es 400.
+
+- **Orden de comprobaciones** al cambiar moneda o zona (valor distinto del
+  actual), con la fila de la sede bloqueada (`SELECT … FOR UPDATE`) para que no
+  se abra una caja entre la comprobación y la escritura:
+  1. Con una caja `OPEN` en la sede: 409 `LOCATION_REGIONAL_CASH_OPEN`, aunque
+     venga `confirmRegionalChange: true`.
+  2. Con historial (citas, abonos, gastos y salidas de caja, inventario, cajas,
+     listas de precios o versiones de política) y sin `confirmRegionalChange:
+     true`: 409 `LOCATION_REGIONAL_CHANGE_UNCONFIRMED`.
+- **No se convierte nada**: los importes guardados conservan su moneda. Cambiar
+  la zona no reescribe ningún instante.
+- **Efectos de cambiar la zona** (se documentan, no se corrigen): un abono
+  guardado como mediodía civil (DX-097) puede cambiar de día si el desfase
+  supera 12 h; los tramos de horario de la sede y de los profesionales se leen
+  en la nueva zona; «hoy» de gastos, promesas, alertas e informes pasa a la
+  nueva zona; las citas y los recordatorios conservan su instante.
+- Rellenar un campo NULL (sede de una réplica anterior a G1 sin barrer) y
+  cambiar el `locale` no piden confirmación ni comprueban la caja.
+- Cualquier cambio de los tres campos, o `confirmRegionalSettings: true`, pone
+  `regionalSettingsReviewedAt = now()`.
+- Cambiar la zona actualiza en la misma transacción
+  `location_schedules.timezone` (columna legada de la fase 1, R20).
+- Auditoría: `metadata.regionalSettings = { before, after, reviewed }`.
+
 ## Cartera por antigüedad (DX-145, DX-155)
 
 `GET /api/v1/receivables/aging` (ADMIN y RECEPTION; 403 en español al resto):

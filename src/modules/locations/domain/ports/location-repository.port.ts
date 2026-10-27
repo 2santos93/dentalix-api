@@ -54,6 +54,26 @@ export interface UpdateLocationRepoInput {
   isActive?: boolean;
 }
 
+/**
+ * Lo que ve la decisión regional dentro de la transacción que ya tiene la fila
+ * de la sede bloqueada (`FOR UPDATE`): la sede tal como está, si hay una caja
+ * ABIERTA y si tiene historial (citas, abonos, gastos y salidas de caja,
+ * inventario, cajas, listas de precios o versiones de política).
+ */
+export interface RegionalWriteContext {
+  current: Location;
+  hasOpenCashSession(): Promise<boolean>;
+  hasRegionalHistory(): Promise<boolean>;
+}
+
+/** Valores regionales ya validados a escribir, y si la sede queda revisada. */
+export interface RegionalWrite {
+  currency?: string;
+  timeZone?: string;
+  locale?: string;
+  reviewed: boolean;
+}
+
 export const LOCATION_REPOSITORY = Symbol('LOCATION_REPOSITORY');
 
 export interface LocationRepository {
@@ -62,6 +82,18 @@ export interface LocationRepository {
   list(): Promise<Location[]>;
   findById(id: string): Promise<Location | null>;
   update(id: string, patch: UpdateLocationRepoInput): Promise<Location | null>;
+  /**
+   * Edición con campos regionales (G1, spec §3.2): en UNA transacción bloquea
+   * la sede (`SELECT … FOR UPDATE`, para que no se abra una caja entre la
+   * comprobación y la escritura), llama a `decide` (que puede lanzar 409) y
+   * escribe `patch` + lo regional. Si cambia la zona, actualiza en la misma
+   * transacción `location_schedules.timezone` (R20). null = la sede no existe.
+   */
+  updateRegional(
+    id: string,
+    patch: UpdateLocationRepoInput,
+    decide: (ctx: RegionalWriteContext) => Promise<RegionalWrite>,
+  ): Promise<Location | null>;
   /** Cuántas sedes ACTIVAS quedan — para no dejar la clínica sin ninguna. */
   countActive(): Promise<number>;
   /** ¿Hay operaciones (citas/pagos/inventario) atadas a esta sede? */

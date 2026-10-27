@@ -23,6 +23,7 @@ import {
 import {
   COUNTRY_MISSING,
   REGIONAL_MESSAGES,
+  REGIONAL_NULL_MESSAGE,
 } from '../../domain/regional-settings';
 
 export const LOCATION_PHONE_MAX = 40;
@@ -167,6 +168,43 @@ export class UpdateLocationDto {
   @IsString({ message: 'El teléfono debe ser un texto.' })
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string | null;
+
+  @ApiPropertyOptional({ example: 'COP', description: CURRENCY_DOC })
+  // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  currency?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'America/Bogota',
+    description: TIME_ZONE_DOC,
+  })
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  timeZone?: string | null;
+
+  @ApiPropertyOptional({ example: 'es-CO', description: LOCALE_DOC })
+  @IsOptional()
+  @IsString({ message: REGIONAL_NULL_MESSAGE })
+  locale?: string | null;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'G1: marca la sede como revisada (moneda, zona y formato confirmados) aunque no cambie nada.',
+  })
+  @IsOptional()
+  @Equals(true, { message: 'confirmRegionalSettings solo admite true.' })
+  confirmRegionalSettings?: true;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'G1: confirma un cambio de moneda o zona en una sede con historial (los importes guardados no se convierten). No salta el bloqueo por caja abierta.',
+  })
+  @IsOptional()
+  @Equals(true, { message: 'confirmRegionalChange solo admite true.' })
+  confirmRegionalChange?: true;
 
   @ApiPropertyOptional({
     description:

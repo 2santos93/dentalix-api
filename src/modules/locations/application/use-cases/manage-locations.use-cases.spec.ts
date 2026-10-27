@@ -46,6 +46,7 @@ function makeRepo(over: Partial<LocationRepository> = {}): LocationRepository {
     update: (_id, patch) => Promise.resolve(makeLocation({ ...patch })),
     countActive: () => Promise.resolve(2),
     hasOperations: () => Promise.resolve(false),
+    updateRegional: () => Promise.resolve(null),
     ...over,
   };
 }
@@ -62,6 +63,41 @@ const TOKYO = {
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
 };
+
+function updateUseCase(repo: LocationRepository): UpdateLocationUseCase {
+  return new UpdateLocationUseCase(repo, CURRENCIES);
+}
+
+/**
+ * `updateRegional` en memoria: llama a `decide` con la sede actual y los
+ * sondeos pedidos, y devuelve la sede con lo decidido aplicado.
+ */
+function regionalRepo(opts: {
+  current?: Partial<Location>;
+  openCash?: boolean;
+  history?: boolean;
+  written?: object[];
+}): LocationRepository {
+  const current = makeLocation(opts.current);
+  return makeRepo({
+    findById: () => Promise.resolve(current),
+    updateRegional: async (_id, patch, decide) => {
+      const write = await decide({
+        current,
+        hasOpenCashSession: () => Promise.resolve(opts.openCash ?? false),
+        hasRegionalHistory: () => Promise.resolve(opts.history ?? false),
+      });
+      opts.written?.push(write);
+      return makeLocation({
+        ...current,
+        ...patch,
+        ...(write.currency ? { currency: write.currency } : {}),
+        ...(write.timeZone ? { timeZone: write.timeZone } : {}),
+        ...(write.locale ? { locale: write.locale } : {}),
+      });
+    },
+  });
+}
 
 function createUseCase(repo: LocationRepository): CreateLocationUseCase {
   return new CreateLocationUseCase(repo, CURRENCIES);
@@ -143,7 +179,7 @@ describe('CreateLocationUseCase', () => {
 
 describe('UpdateLocationUseCase', () => {
   it('404 si la sede no existe', async () => {
-    const uc = new UpdateLocationUseCase(
+    const uc = updateUseCase(
       makeRepo({ findById: () => Promise.resolve(null) }),
     );
     await expect(uc.execute('nope', { name: 'X' })).rejects.toBeInstanceOf(
@@ -154,7 +190,7 @@ describe('UpdateLocationUseCase', () => {
   it('NO deja desactivar la última sede activa', async () => {
     // Citas, pagos e inventario exigen sede: sin ninguna activa la clínica no
     // podría operar. Mismo criterio que el "último administrador".
-    const uc = new UpdateLocationUseCase(
+    const uc = updateUseCase(
       makeRepo({ countActive: () => Promise.resolve(1) }),
     );
 
@@ -164,7 +200,7 @@ describe('UpdateLocationUseCase', () => {
   });
 
   it('sí deja desactivar una sede cuando quedan otras activas', async () => {
-    const uc = new UpdateLocationUseCase(
+    const uc = updateUseCase(
       makeRepo({ countActive: () => Promise.resolve(2) }),
     );
 
@@ -176,7 +212,7 @@ describe('UpdateLocationUseCase', () => {
   it('no aplica la protección cuando la sede YA estaba inactiva', async () => {
     // Renombrar una sede ya inactiva no debe chocar con la regla de la última
     // activa: no está quitando ninguna.
-    const uc = new UpdateLocationUseCase(
+    const uc = updateUseCase(
       makeRepo({
         findById: () => Promise.resolve(makeLocation({ isActive: false })),
         countActive: () => Promise.resolve(1),
@@ -211,7 +247,7 @@ describe('país de la sede (DX-013)', () => {
     const update = jest.fn((_id: string, patch: { country?: 'CO' | 'ES' }) =>
       Promise.resolve(makeLocation({ ...patch })),
     );
-    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    const uc = updateUseCase(makeRepo({ update }));
     const { location: updated } = await uc.execute('loc-1', { country: 'ES' });
     expect(update).toHaveBeenCalledWith(
       'loc-1',
@@ -229,7 +265,7 @@ describe('UpdateLocationUseCase · nº de registro sanitario (DX-319)', () => {
 
   it('guarda el texto recortado, sin validar formato ni país', async () => {
     const update = updateSpy();
-    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    const uc = updateUseCase(makeRepo({ update }));
     const { location } = await uc.execute('loc-1', {
       healthRegistrationNumber: '  CS-28/1234 ',
       showHealthRegistrationNumber: true,
@@ -247,7 +283,7 @@ describe('UpdateLocationUseCase · nº de registro sanitario (DX-319)', () => {
 
   it('vacío o null lo quitan; sin el campo no se toca', async () => {
     const update = updateSpy();
-    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    const uc = updateUseCase(makeRepo({ update }));
     await uc.execute('loc-1', { healthRegistrationNumber: '   ' });
     await uc.execute('loc-1', { healthRegistrationNumber: null });
     await uc.execute('loc-1', { name: 'Otra' });
@@ -263,7 +299,7 @@ describe('UpdateLocationUseCase · nº de registro sanitario (DX-319)', () => {
 
   it('devuelve el antes y el después para la auditoría solo si cambia', async () => {
     const before = makeLocation({ healthRegistrationNumber: '110010123401' });
-    const uc = new UpdateLocationUseCase(
+    const uc = updateUseCase(
       makeRepo({
         findById: () => Promise.resolve(before),
         // Como Prisma: un campo undefined no se toca.
@@ -345,7 +381,7 @@ describe('teléfono de la sede (DX-222)', () => {
     const update = jest.fn((_id: string, patch: object) =>
       Promise.resolve(makeLocation(patch)),
     );
-    const uc = new UpdateLocationUseCase(makeRepo({ update }));
+    const uc = updateUseCase(makeRepo({ update }));
 
     const { location: saved } = await uc.execute('loc-1', {
       phone: ' +57 601 555 0101 ',
@@ -361,5 +397,161 @@ describe('teléfono de la sede (DX-222)', () => {
       expect.objectContaining({ phone: null }),
       expect.objectContaining({ phone: undefined }),
     ]);
+  });
+
+  describe('campos regionales (G1)', () => {
+    const conflictCode = async (p: Promise<unknown>): Promise<string> => {
+      try {
+        await p;
+      } catch (err) {
+        return (err as ConflictException).getResponse()['code'] as string;
+      }
+      return 'NO_ERROR';
+    };
+
+    it('caja abierta gana a la confirmación en moneda y en zona', async () => {
+      const uc = updateUseCase(regionalRepo({ openCash: true, history: true }));
+      await expect(
+        conflictCode(
+          uc.execute('loc-1', { currency: 'EUR', confirmRegionalChange: true }),
+        ),
+      ).resolves.toBe('LOCATION_REGIONAL_CASH_OPEN');
+      await expect(
+        conflictCode(
+          uc.execute('loc-1', {
+            timeZone: 'Asia/Tokyo',
+            confirmRegionalChange: true,
+          }),
+        ),
+      ).resolves.toBe('LOCATION_REGIONAL_CASH_OPEN');
+    });
+
+    it('con historial y sin confirmar pide confirmación, con el mensaje de cada campo', async () => {
+      const uc = updateUseCase(regionalRepo({ history: true }));
+      await expect(
+        uc.execute('loc-1', { currency: 'EUR' }),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'LOCATION_REGIONAL_CHANGE_UNCONFIRMED',
+          message: expect.stringContaining('movimientos en COP') as string,
+        },
+      });
+      await expect(
+        uc.execute('loc-1', { timeZone: 'Asia/Tokyo' }),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'LOCATION_REGIONAL_CHANGE_UNCONFIRMED',
+          message: expect.stringContaining(
+            'Las citas conservan su hora',
+          ) as string,
+        },
+      });
+    });
+
+    it('confirmado cambia la moneda, marca revisada y devuelve antes y después', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(regionalRepo({ history: true, written }));
+      const out = await uc.execute('loc-1', {
+        currency: 'jpy',
+        confirmRegionalChange: true,
+      });
+      expect(written).toEqual([
+        expect.objectContaining({ currency: 'JPY', reviewed: true }),
+      ]);
+      expect(out.regionalSettings).toEqual({
+        before: {
+          currency: 'COP',
+          timeZone: 'America/Bogota',
+          locale: 'es-CO',
+        },
+        after: {
+          currency: 'JPY',
+          timeZone: 'America/Bogota',
+          locale: 'es-CO',
+        },
+        reviewed: true,
+      });
+    });
+
+    it('sin historial cambia sin confirmar; el locale nunca la pide', async () => {
+      const probe = jest.fn(() => Promise.resolve(true));
+      const repo = makeRepo({
+        updateRegional: async (_i, _p, decide) => {
+          await decide({
+            current: makeLocation(),
+            hasOpenCashSession: () => Promise.resolve(false),
+            hasRegionalHistory: probe,
+          });
+          return makeLocation();
+        },
+      });
+      const uc = updateUseCase(repo);
+      await uc.execute('loc-1', { locale: 'ja-JP' });
+      expect(probe).not.toHaveBeenCalled();
+    });
+
+    it('rellenar un NULL no es un cambio: ni caja ni confirmación, y queda revisada', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({
+          current: { currency: null, timeZone: null, locale: null },
+          openCash: true,
+          history: true,
+          written,
+        }),
+      );
+      await uc.execute('loc-1', {
+        currency: 'COP',
+        timeZone: 'America/Bogota',
+        locale: 'es-CO',
+      });
+      expect(written).toEqual([
+        {
+          currency: 'COP',
+          timeZone: 'America/Bogota',
+          locale: 'es-CO',
+          reviewed: true,
+        },
+      ]);
+    });
+
+    it('confirmRegionalSettings sin cambios marca revisada y no escribe valores', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(regionalRepo({ written }));
+      await uc.execute('loc-1', { confirmRegionalSettings: true });
+      expect(written).toEqual([
+        {
+          currency: undefined,
+          timeZone: undefined,
+          locale: undefined,
+          reviewed: true,
+        },
+      ]);
+    });
+
+    it('null en un campo regional es 400 con su campo', async () => {
+      const uc = updateUseCase(regionalRepo({}));
+      await expect(
+        uc.execute('loc-1', { currency: null }),
+      ).rejects.toMatchObject({
+        response: {
+          field: 'currency',
+          message:
+            'La sede tiene que tener moneda, zona horaria y formato regional.',
+        },
+      });
+    });
+
+    it('una moneda o zona inválida es 400 con el mensaje de la spec', async () => {
+      const uc = updateUseCase(regionalRepo({}));
+      await expect(
+        uc.execute('loc-1', { currency: 'XXX' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute('loc-1', { timeZone: 'Nope/Zone' }),
+      ).rejects.toMatchObject({
+        response: { message: 'La zona horaria «Nope/Zone» no existe.' },
+      });
+    });
   });
 });

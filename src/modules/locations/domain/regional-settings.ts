@@ -39,6 +39,19 @@ export const REGIONAL_MESSAGES = {
     `El formato regional «${locale}» no es válido.`,
 } as const;
 
+/** `null` en currency, timeZone o locale al editar (spec §3.2). */
+export const REGIONAL_NULL_MESSAGE =
+  'La sede tiene que tener moneda, zona horaria y formato regional.';
+
+export const REGIONAL_CHANGE_MESSAGES = {
+  cashOpen:
+    'Cierra la caja abierta de la sede antes de cambiar su moneda o su zona horaria.',
+  currency: (old: string) =>
+    `La sede ya tiene movimientos en ${old}. Cambiar la moneda no convierte esos importes ni los de las listas de precios: confirma el cambio para continuar.`,
+  timeZone:
+    'Cambiar la zona horaria cambia el día en que caen los movimientos ya registrados en caja e informes. Las citas conservan su hora, pero el horario de la sede y de los profesionales se leerá en la nueva zona. Confirma el cambio para continuar.',
+} as const;
+
 /** País de la sede: obligatorio en el alta y el registro (decisión 1). */
 export const COUNTRY_MISSING = 'Elige el país de la sede.';
 
@@ -93,6 +106,55 @@ export function normalizeLocale(raw: string): string | null {
 const blank = (value: string | null | undefined): value is null | undefined =>
   value === null || value === undefined || value.trim() === '';
 
+export async function validateCurrency(
+  raw: string | null | undefined,
+  currencies: CurrencyWhitelist,
+): Promise<string | RegionalError> {
+  if (blank(raw)) {
+    return { field: 'currency', message: REGIONAL_MESSAGES.currencyMissing };
+  }
+  const currency = raw.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency) || !(await currencies.has(currency))) {
+    return {
+      field: 'currency',
+      message: REGIONAL_MESSAGES.currencyUnknown(currency),
+    };
+  }
+  return currency;
+}
+
+export function validateTimeZone(
+  raw: string | null | undefined,
+): string | RegionalError {
+  if (blank(raw)) {
+    return { field: 'timeZone', message: REGIONAL_MESSAGES.timeZoneMissing };
+  }
+  const timeZone = raw.trim();
+  if (!isValidTimeZone(timeZone)) {
+    return {
+      field: 'timeZone',
+      message: REGIONAL_MESSAGES.timeZoneUnknown(timeZone),
+    };
+  }
+  return timeZone;
+}
+
+export function validateLocale(
+  raw: string | null | undefined,
+): string | RegionalError {
+  if (blank(raw)) {
+    return { field: 'locale', message: REGIONAL_MESSAGES.localeMissing };
+  }
+  const locale = normalizeLocale(raw);
+  if (!locale) {
+    return {
+      field: 'locale',
+      message: REGIONAL_MESSAGES.localeInvalid(raw.trim()),
+    };
+  }
+  return locale;
+}
+
 /**
  * Valida los tres campos en el orden moneda, zona, formato y devuelve los
  * valores canónicos (moneda en mayúsculas, locale canonicalizado) o el primer
@@ -103,38 +165,11 @@ export async function validateRegionalSettings(
   input: RegionalInput,
   currencies: CurrencyWhitelist,
 ): Promise<RegionalSettings | RegionalError> {
-  if (blank(input.currency)) {
-    return { field: 'currency', message: REGIONAL_MESSAGES.currencyMissing };
-  }
-  const currency = input.currency.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency) || !(await currencies.has(currency))) {
-    return {
-      field: 'currency',
-      message: REGIONAL_MESSAGES.currencyUnknown(currency),
-    };
-  }
-
-  if (blank(input.timeZone)) {
-    return { field: 'timeZone', message: REGIONAL_MESSAGES.timeZoneMissing };
-  }
-  const timeZone = input.timeZone.trim();
-  if (!isValidTimeZone(timeZone)) {
-    return {
-      field: 'timeZone',
-      message: REGIONAL_MESSAGES.timeZoneUnknown(timeZone),
-    };
-  }
-
-  if (blank(input.locale)) {
-    return { field: 'locale', message: REGIONAL_MESSAGES.localeMissing };
-  }
-  const locale = normalizeLocale(input.locale);
-  if (!locale) {
-    return {
-      field: 'locale',
-      message: REGIONAL_MESSAGES.localeInvalid(input.locale.trim()),
-    };
-  }
-
+  const currency = await validateCurrency(input.currency, currencies);
+  if (typeof currency !== 'string') return currency;
+  const timeZone = validateTimeZone(input.timeZone);
+  if (typeof timeZone !== 'string') return timeZone;
+  const locale = validateLocale(input.locale);
+  if (typeof locale !== 'string') return locale;
   return { currency, timeZone, locale };
 }

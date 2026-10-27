@@ -675,3 +675,46 @@ describe('sanitizeAuditMetadata — reasignación de un abono (DX-051)', () => {
     }
   });
 });
+
+describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () => {
+  const side = (currency: string | null) => ({
+    currency,
+    timeZone: currency ? 'America/Bogota' : null,
+    locale: currency ? 'es-CO' : null,
+  });
+
+  it('conserva antes y después (con null en una sede sin configurar) y la revisión', () => {
+    const regionalSettings = {
+      before: side(null),
+      after: side('COP'),
+      reviewed: true,
+    };
+    expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
+      regionalSettings,
+    });
+  });
+
+  it('descarta el cambio entero si un valor o un lado no tiene la forma admitida', () => {
+    for (const regionalSettings of [
+      { before: side('COP'), after: side('COP') },
+      {
+        before: side('COP'),
+        after: { ...side('COP'), currency: 'cop' },
+        reviewed: true,
+      },
+      {
+        before: side('COP'),
+        after: { ...side('COP'), timeZone: 'a b' },
+        reviewed: true,
+      },
+      {
+        before: side('COP'),
+        after: { ...side('COP'), extra: 1 },
+        reviewed: true,
+      },
+      { before: side('COP'), reviewed: false },
+    ]) {
+      expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({});
+    }
+  });
+});

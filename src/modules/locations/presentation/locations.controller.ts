@@ -82,11 +82,14 @@ export class LocationsController {
     @Body() dto: UpdateLocationDto,
     @Req() req: AuditedRequest,
   ): Promise<Location> {
-    const { location, healthRegistration } = await this.updateLocation.execute(
-      id,
-      dto,
-    );
-    if (healthRegistration) req.auditMetadata = { healthRegistration };
+    const { location, healthRegistration, regionalSettings } =
+      await this.updateLocation.execute(id, dto);
+    if (healthRegistration || regionalSettings) {
+      req.auditMetadata = {
+        ...(healthRegistration ? { healthRegistration } : {}),
+        ...(regionalSettings ? { regionalSettings } : {}),
+      };
+    }
     return location;
   }
 }
