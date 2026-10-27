@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -94,6 +95,45 @@ describe('Locations / multi-sede (e2e)', () => {
     await cleanup();
     await app.close();
     await raw.$disconnect();
+  });
+
+  it('G1 DTOs type every regional field in OpenAPI (never an empty object)', () => {
+    // Sin `type: String`, un `string | null` sale como `type: object` y la web
+    // genera `Record<string, never>` para ese campo.
+    const swagger = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const schemas = swagger.components?.schemas ?? {};
+    const untyped: string[] = [];
+    for (const dto of [
+      'LocationDto',
+      'CreateLocationDto',
+      'UpdateLocationDto',
+      'RegisterDto',
+      'CurrencyDto',
+      'CreateTreatmentPlanDto',
+      'ReplaceLocationScheduleDto',
+      'ProviderLocationScheduleDto',
+    ]) {
+      const schema = schemas[dto] as
+        { properties?: Record<string, Record<string, unknown>> } | undefined;
+      expect(schema?.properties).toBeDefined();
+      for (const [name, property] of Object.entries(schema!.properties!)) {
+        if (property.type === 'object' && !property.properties) {
+          untyped.push(`${dto}.${name}`);
+        }
+      }
+    }
+    expect(untyped).toEqual([]);
+    const update = (
+      schemas.UpdateLocationDto as {
+        properties: Record<string, { type?: string }>;
+      }
+    ).properties;
+    expect(
+      ['currency', 'timeZone', 'locale'].map((f) => update[f].type),
+    ).toEqual(['string', 'string', 'string']);
   });
 
   it(

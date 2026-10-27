@@ -169,13 +169,20 @@ export class UpdateLocationDto {
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string | null;
 
-  @ApiPropertyOptional({ example: 'COP', description: CURRENCY_DOC })
+  // `type: String`: sin él, el tipo `string | null` sale como objeto en
+  // OpenAPI. `null` no es válido (400), así que el contrato es `string`.
+  @ApiPropertyOptional({
+    type: String,
+    example: 'COP',
+    description: CURRENCY_DOC,
+  })
   // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
   @IsOptional()
   @IsString({ message: REGIONAL_NULL_MESSAGE })
   currency?: string | null;
 
   @ApiPropertyOptional({
+    type: String,
     example: 'America/Bogota',
     description: TIME_ZONE_DOC,
   })
@@ -183,7 +190,11 @@ export class UpdateLocationDto {
   @IsString({ message: REGIONAL_NULL_MESSAGE })
   timeZone?: string | null;
 
-  @ApiPropertyOptional({ example: 'es-CO', description: LOCALE_DOC })
+  @ApiPropertyOptional({
+    type: String,
+    example: 'es-CO',
+    description: LOCALE_DOC,
+  })
   @IsOptional()
   @IsString({ message: REGIONAL_NULL_MESSAGE })
   locale?: string | null;
