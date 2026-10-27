@@ -555,7 +555,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       .send({ ...body, amount: 150000.01 })
       .expect(400);
     expect((over.body as { message: string }).message).toMatch(
-      /^El abono supera lo pendiente del saldo migrado: quedan 150\.000,00\sCOP\.$/,
+      /^El abono supera lo pendiente del saldo migrado: quedan \$\s150\.000,00\.$/,
     );
     await as(
       api().post(`/api/v1/opening-balances/${ob.id}/payments`),
@@ -731,7 +731,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         row: 2,
         kind: 'ERROR',
         message: expect.stringMatching(
-          /^Este paciente ya tiene un saldo migrado vivo de 80\.000,00\sCOP \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+          /^Este paciente ya tiene un saldo migrado vivo de \$\s80\.000,00 \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
         ) as string,
       }),
     ]);

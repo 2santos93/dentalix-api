@@ -1,6 +1,10 @@
 import { ClinicRole, ScheduleBlockKind } from '@prisma/client';
 import type { ScheduleBlock } from './entities/schedule-block.entity';
 import type { ScheduleBlockScope } from './ports/schedule-block-repository.port';
+import type {
+  RegionalFormat,
+  WallParts,
+} from '../../../shared/format/regional-format';
 
 /** Un bloqueo dura como mucho un año (una baja larga cabe; un error de año, no). */
 export const MAX_BLOCK_DAYS = 366;
@@ -88,77 +92,66 @@ export function overlapsBlock(
   return block.start < end && block.end > start;
 }
 
-const formatters = new Map<string, Intl.DateTimeFormat>();
-
-function wallParts(instant: Date, timeZone: string): Record<string, string> {
-  let formatter = formatters.get(timeZone);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat('es-CO', {
-      timeZone,
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    });
-    formatters.set(timeZone, formatter);
-  }
-  return Object.fromEntries(
-    formatter.formatToParts(instant).map((p) => [p.type, p.value]),
-  );
+/** ¿Dos horas de pared caen en el mismo día civil de la sede? */
+function sameDay(a: WallParts, b: WallParts): boolean {
+  return a.year === b.year && a.month === b.month && a.day === b.day;
 }
 
-function dayAndTime(
-  instant: Date,
-  timeZone: string,
-): { day: string; time: string } {
-  const p = wallParts(instant, timeZone);
-  return { day: `${p.day}/${p.month}`, time: `${p.hour}:${p.minute}` };
-}
+const atMidnight = (wall: WallParts): boolean =>
+  wall.hour === 0 && wall.minute === 0;
 
 /**
  * «del 20/10 08:00 al 24/10 19:00», el mismo día «13:00–14:00» y, si son días
  * completos (de medianoche a medianoche en la sede), «del 21/10 al 22/10» o
  * «el 21/10»: el último día que eligió quien bloqueó, no «al 23/10 00:00».
+ * Día y hora en el formato y el reloj de la sede (G1-B); qué es día completo
+ * o el mismo día se decide con `wallParts`, nunca comparando texto (R13).
  */
 function describeRange(
   block: ScheduleBlock,
   timeZone: string,
+  fmt: RegionalFormat,
   sameDayShort: boolean,
 ): string {
-  const from = dayAndTime(block.start, timeZone);
-  const to = dayAndTime(block.end, timeZone);
-  if (from.time === '00:00' && to.time === '00:00') {
-    const lastDay = dayAndTime(
-      new Date(block.end.getTime() - 60_000),
-      timeZone,
-    ).day;
-    return lastDay === from.day
-      ? `el ${from.day}`
-      : `del ${from.day} al ${lastDay}`;
+  const from = fmt.wallParts(block.start, timeZone);
+  const to = fmt.wallParts(block.end, timeZone);
+  const day = (instant: Date) => fmt.dayMonth(instant, timeZone);
+  const time = (instant: Date) => fmt.time(instant, timeZone);
+  if (atMidnight(from) && atMidnight(to)) {
+    const lastInstant = new Date(block.end.getTime() - 60_000);
+    return sameDay(fmt.wallParts(lastInstant, timeZone), from)
+      ? `el ${day(block.start)}`
+      : `del ${day(block.start)} al ${day(lastInstant)}`;
   }
-  if (sameDayShort && from.day === to.day) return `${from.time}–${to.time}`;
-  return `del ${from.day} ${from.time} al ${to.day} ${to.time}`;
+  if (sameDayShort && sameDay(from, to))
+    return `${time(block.start)}–${time(block.end)}`;
+  return `del ${day(block.start)} ${time(block.start)} al ${day(block.end)} ${time(block.end)}`;
 }
+
+/** Cierra la frase sin doblar el punto de «p. m.» (12 h). */
+const endSentence = (text: string): string =>
+  text.endsWith('.') ? text : `${text}.`;
 
 /** 409 al agendar o mover encima de un bloqueo que no lo permite. */
 export function blockConflictMessage(
   block: ScheduleBlock,
   timeZone: string,
+  fmt: RegionalFormat,
 ): string {
   const who =
     block.providerId === null
       ? 'La sede tiene la agenda bloqueada'
       : 'La agenda del profesional está bloqueada';
   const kind = SCHEDULE_BLOCK_KIND_LABELS[block.kind];
-  return `${who} (${kind}) ${describeRange(block, timeZone, false)}. Elige otro horario.`;
+  return `${endSentence(`${who} (${kind}) ${describeRange(block, timeZone, fmt, false)}`)} Elige otro horario.`;
 }
 
 /** Aviso (no error) al agendar dentro de un bloqueo con `allowsBooking`. */
 export function blockWarningMessage(
   block: ScheduleBlock,
   timeZone: string,
+  fmt: RegionalFormat,
 ): string {
   const kind = SCHEDULE_BLOCK_KIND_LABELS[block.kind];
-  return `La cita cae en un bloqueo que permite agendar: ${kind} (${describeRange(block, timeZone, true)}).`;
+  return `La cita cae en un bloqueo que permite agendar: ${kind} (${describeRange(block, timeZone, fmt, true)}).`;
 }

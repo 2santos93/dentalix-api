@@ -19,6 +19,7 @@ import {
 import {
   OPENING_BALANCE_NOT_FOUND_MESSAGE,
   openingBalanceCurrencyMessage,
+  OPENING_BALANCE_PAID_MESSAGE,
   openingBalanceOverpaidMessage,
 } from '../../domain/opening-balance-payment';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -33,6 +34,8 @@ import {
   civilPeriodByZone,
 } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   CashRegisterPage,
   CashRegisterRow,
@@ -558,7 +561,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const thisCents = Math.round(input.amount * 100);
     if (thisCents > pendingCents) {
       throw new BadRequestException(
-        openingBalanceOverpaidMessage(pendingCents / 100, balance.currency),
+        pendingCents <= 0
+          ? OPENING_BALANCE_PAID_MESSAGE
+          : openingBalanceOverpaidMessage(
+              pendingCents / 100,
+              balance.currency,
+              await this.writeLocationFormatIn(tx),
+            ),
       );
     }
     return {
@@ -567,6 +576,26 @@ export class PrismaPaymentRepository implements PaymentRepository {
       paid: (paidCents + thisCents) / 100,
       balance: (pendingCents - thisCents) / 100,
     };
+  }
+
+  writeLocationFormat(): Promise<RegionalFormat> {
+    return this.prisma.runWithTenant((tx) => this.writeLocationFormatIn(tx));
+  }
+
+  /** G1-B: formato de la sede que usará `insert`, solo para pintar (I4). */
+  private async writeLocationFormatIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<RegionalFormat> {
+    const id = await this.tenantContext.writeLocationId(tx);
+    const location = await tx.location.findFirst({
+      where: { id, tenantId: this.requireTenantId() },
+      select: { locale: true, hourCycle: true },
+    });
+    return requireLocationFormat({
+      id,
+      locale: location?.locale ?? null,
+      hourCycle: location?.hourCycle ?? null,
+    });
   }
 
   async resolvePaidOn(paidAt: Date | { civilDate: string }): Promise<string> {

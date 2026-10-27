@@ -2,7 +2,11 @@ import { AppointmentStatus } from '@prisma/client';
 import { isInClinic } from './patient-flow';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import type { PlanItemReservedElsewhere } from './entities/appointment.entity';
-import type { HourCycle } from '../../../shared/format/regional-format';
+import type {
+  HourCycle,
+  RegionalFormat,
+} from '../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 
 /**
  * DX-271 (BE-039): los ítems del plan de una cita cerrada o pasada no se
@@ -115,19 +119,20 @@ export function reservationHolderView(
 }
 
 /**
- * El 409 de una titular en la clínica: con su hora (en la zona de su sede)
- * y su sede si el usuario la tiene permitida; sin ella (`null`), el general.
+ * El 409 de una titular en la clínica: con su hora (en la zona y el formato
+ * de su sede) y su sede si el usuario la tiene permitida; sin ella (`null`),
+ * el general. Quien llama pide `fmt` solo al lanzar este 409 (G1-B, I4).
  */
 export function heldInClinicMessage(
-  holder: { start: Date; timeZone: string; locationName: string } | null,
+  holder: {
+    start: Date;
+    timeZone: string;
+    locationName: string;
+    fmt: RegionalFormat;
+  } | null,
 ): string {
   if (!holder) return PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE;
-  const time = new Intl.DateTimeFormat('es-CO', {
-    timeZone: holder.timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).format(holder.start);
+  const time = holder.fmt.time(holder.start, holder.timeZone);
   return `Este tratamiento ya lo tiene otra cita con el paciente en la clínica, la de hoy a las ${time} (${holder.locationName}). No se puede traer mientras esa cita siga en curso.`;
 }
 /** DX-273: el tratamiento no está (vivo) en la cita destino. */
@@ -187,28 +192,24 @@ export function planItemsEditable(
 
 /**
  * DX-271 (BE-038): el 409 de reserva dice en qué cita está el ítem, con la
- * fecha y la hora en la zona de la sede de ESA cita: «… en otra cita, la del
- * 30/10/2026 a las 09:00. …». Sin la cita (se liberó a la vez), el general.
+ * fecha y la hora en la zona y el formato de la sede de ESA cita: «… en otra
+ * cita, la del 30/10/2026 a las 09:00. …». Sin la cita (se liberó a la vez),
+ * el general. El formato se pide aquí, al pintar (G1-B, I4): una sede sin
+ * formato o sin reloj es 409 `LOCATION_LOCALE_REQUIRED` solo entonces.
  */
 export function reservedElsewhereMessage(
-  start: Date | null,
-  timeZone: string,
+  holder: {
+    start: Date;
+    timeZone: string;
+    location: { id: string; locale: string | null; hourCycle: string | null };
+  } | null,
 ): string {
   const advice = 'Quítalo de esa cita o cancélala antes.';
-  if (!start)
+  if (!holder)
     return `Este tratamiento ya está reservado en otra cita. ${advice}`;
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat('es-CO', {
-      timeZone,
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    })
-      .formatToParts(start)
-      .map((part) => [part.type, part.value]),
-  ) as Record<string, string>;
-  return `Este tratamiento ya está reservado en otra cita, la del ${p.day}/${p.month}/${p.year} a las ${p.hour}:${p.minute}. ${advice}`;
+  const fmt = requireLocationFormat(holder.location);
+  const { start, timeZone } = holder;
+  const where = `Este tratamiento ya está reservado en otra cita, la del ${fmt.date(start, timeZone)} a las ${fmt.time(start, timeZone)}`;
+  // En 12 h la hora ya acaba en punto («p. m.»): no se dobla.
+  return `${where.endsWith('.') ? where : `${where}.`} ${advice}`;
 }

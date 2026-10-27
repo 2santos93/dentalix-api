@@ -327,6 +327,8 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       country: 'CO',
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
+      locale: 'ja-JP',
+      hourCycle: 'h23',
     });
     await expect(
       inTenant(undefined, () => repo.locationTimeZone(bogota)),

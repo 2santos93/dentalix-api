@@ -16,6 +16,7 @@ import {
   loginAs,
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
+import { regionalFormat } from '../src/shared/format/regional-format';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -272,6 +273,7 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
           start: holder.start,
           timeZone: ZONE,
           locationName,
+          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
         }),
       );
       expect(await activeLinks(itemId)).toEqual([{ appointmentId: holder.id }]);

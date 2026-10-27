@@ -13,6 +13,8 @@ import {
   ReceivedPayment,
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
+import type { RegionalFormat } from '../../../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../../../shared/locations/location-regional';
 
 // `Payment` (the API-facing entity) deliberately has no `deletedAt` field —
 // same convention as Sale/TreatmentPlan. The fake still has to honour
@@ -37,6 +39,10 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
  */
 export class InMemoryPaymentRepository implements PaymentRepository {
   private readonly payments: StoredPayment[] = [];
+
+  /** Formato y reloj de la sede de escritura (G1-B); `null` = sin configurar. */
+  locale: string | null = 'es-CO';
+  hourCycle: string | null = 'h23';
 
   /** Test helper: lo último que recibió `create` (DX-136: el saldo del recibo). */
   lastCreateInput: CreatePaymentRepoInput | null = null;
@@ -108,6 +114,16 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       paidAt instanceof Date
         ? civilDateIn(paidAt, this.timeZone)
         : paidAt.civilDate,
+    );
+  }
+
+  writeLocationFormat(): Promise<RegionalFormat> {
+    return Promise.resolve().then(() =>
+      requireLocationFormat({
+        id: 'loc-1',
+        locale: this.locale,
+        hourCycle: this.hourCycle,
+      }),
     );
   }
 

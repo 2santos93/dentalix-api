@@ -4,6 +4,7 @@ import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
 import type { ReceiptPlanBalance } from '../receipt-snapshot';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
 // guarded request context (never the client), same convention as
@@ -178,6 +179,13 @@ export interface PaymentRepository {
    * de la tasa con que el recibo convierte el abono a la moneda del plan.
    */
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string>;
+
+  /**
+   * G1-B: el formato de la sede donde se va a registrar el abono (la misma
+   * que `resolvePaidOn`), para pintar un importe en un mensaje. Sin formato o
+   * sin reloj, 409 `LOCATION_LOCALE_REQUIRED`: se pide solo al pintar (I4).
+   */
+  writeLocationFormat(): Promise<RegionalFormat>;
 
   /**
    * The payment, or `null` if it is absent, soft-deleted (voided), or

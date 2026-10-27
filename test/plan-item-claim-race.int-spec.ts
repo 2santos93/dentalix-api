@@ -4,6 +4,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
+import { regionalFormat } from '../src/shared/format/regional-format';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BOGOTA_FIXTURE,
@@ -274,7 +275,12 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
       where: { id: first },
     });
     expect((late as ConflictException).message).toBe(
-      heldInClinicMessage({ start, timeZone: ZONE, locationName: 'Principal' }),
+      heldInClinicMessage({
+        start,
+        timeZone: ZONE,
+        locationName: 'Principal',
+        fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+      }),
     );
     expect(await activeHolders(itemId)).toEqual([first]);
     expect((await moveEvents(itemId)).map((e) => e.resourceId).sort()).toEqual(
@@ -361,6 +367,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
           start,
           timeZone: ZONE,
           locationName: 'Principal',
+          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
         }),
       );
     }

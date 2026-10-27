@@ -112,7 +112,15 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
             status: true,
             lateCancellation: true,
             policyVersionId: true,
-            location: { select: { id: true, country: true, timeZone: true } },
+            location: {
+              select: {
+                id: true,
+                country: true,
+                timeZone: true,
+                locale: true,
+                hourCycle: true,
+              },
+            },
             policyVersion: {
               select: {
                 id: true,
@@ -167,6 +175,8 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
           receptionCanCharge: current?.receptionCanCharge ?? false,
           locationCountry: appointment.location.country,
           locationTimeZone: requireLocationTimeZone(appointment.location),
+          locationLocale: appointment.location.locale,
+          locationHourCycle: appointment.location.hourCycle,
           coverages: coverages.map((c) => ({
             payerType: c.payer.type,
             validFrom: civil(c.validFrom),

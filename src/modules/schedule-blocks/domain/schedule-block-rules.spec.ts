@@ -9,8 +9,13 @@ import {
   scheduleBlockScopeError,
 } from './schedule-block-rules';
 import type { ScheduleBlock } from './entities/schedule-block.entity';
+import { regionalFormat } from '../../../shared/format/regional-format';
 
 const z = (iso: string) => new Date(iso);
+/** La sede de las pruebas de siempre: 24 h, día/mes (lo que mostraba). */
+const H23 = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const EN_US_H12 = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
+const JA_JP_H23 = regionalFormat({ locale: 'ja-JP', hourCycle: 'h23' });
 
 function block(overrides: Partial<ScheduleBlock> = {}): ScheduleBlock {
   return {
@@ -88,7 +93,7 @@ describe('reglas de bloqueos (DX-122)', () => {
   });
 
   it('el 409 dice el motivo y el rango en la hora de la sede', () => {
-    expect(blockConflictMessage(block(), 'America/Bogota')).toBe(
+    expect(blockConflictMessage(block(), 'America/Bogota', H23)).toBe(
       'La agenda del profesional está bloqueada (Vacaciones) del 20/10 08:00 al 24/10 19:00. Elige otro horario.',
     );
     expect(
@@ -99,6 +104,7 @@ describe('reglas de bloqueos (DX-122)', () => {
           kind: ScheduleBlockKind.MEETING,
         }),
         'America/Bogota',
+        H23,
       ),
     ).toBe(
       'La sede tiene la agenda bloqueada (Reunión) del 20/10 08:00 al 24/10 19:00. Elige otro horario.',
@@ -112,7 +118,7 @@ describe('reglas de bloqueos (DX-122)', () => {
       start: z('2026-10-20T18:00:00.000Z'),
       end: z('2026-10-20T19:00:00.000Z'),
     });
-    expect(blockWarningMessage(lunch, 'America/Bogota')).toBe(
+    expect(blockWarningMessage(lunch, 'America/Bogota', H23)).toBe(
       'La cita cae en un bloqueo que permite agendar: Almuerzo (13:00–14:00).',
     );
   });
@@ -122,15 +128,65 @@ describe('reglas de bloqueos (DX-122)', () => {
       start: z('2026-10-21T05:00:00.000Z'), // 21/10 00:00 en Bogotá
       end: z('2026-10-23T05:00:00.000Z'), // 23/10 00:00 = fin del 22
     });
-    expect(blockConflictMessage(wholeDays, 'America/Bogota')).toBe(
+    expect(blockConflictMessage(wholeDays, 'America/Bogota', H23)).toBe(
       'La agenda del profesional está bloqueada (Vacaciones) del 21/10 al 22/10. Elige otro horario.',
     );
     const oneDay = block({
       start: z('2026-10-21T05:00:00.000Z'),
       end: z('2026-10-22T05:00:00.000Z'),
     });
-    expect(blockConflictMessage(oneDay, 'America/Bogota')).toBe(
+    expect(blockConflictMessage(oneDay, 'America/Bogota', H23)).toBe(
       'La agenda del profesional está bloqueada (Vacaciones) el 21/10. Elige otro horario.',
+    );
+  });
+
+  it('block conflict at an en-US h12 location reads del 10/20 8:00 a. m. al 10/24 7:00 p. m.', () => {
+    // Las mismas horas de pared en Nueva York (EDT, UTC-4).
+    const b = block({
+      start: z('2026-10-20T12:00:00.000Z'),
+      end: z('2026-10-24T23:00:00.000Z'),
+    });
+    // Piezas de los vectores dorados: dayMonth «10/27» y time «4:05 p. m.».
+    expect(EN_US_H12.dayMonth(b.start, 'America/New_York')).toBe('10/20');
+    expect(EN_US_H12.time(b.end, 'America/New_York')).toBe('7:00 p. m.');
+    expect(blockConflictMessage(b, 'America/New_York', EN_US_H12)).toBe(
+      'La agenda del profesional está bloqueada (Vacaciones) del 10/20 8:00 a. m. al 10/24 7:00 p. m. Elige otro horario.',
+    );
+    const lunch = block({
+      kind: ScheduleBlockKind.LUNCH,
+      allowsBooking: true,
+      start: z('2026-10-20T17:00:00.000Z'),
+      end: z('2026-10-20T18:00:00.000Z'),
+    });
+    expect(blockWarningMessage(lunch, 'America/New_York', EN_US_H12)).toBe(
+      'La cita cae en un bloqueo que permite agendar: Almuerzo (1:00 p. m.–2:00 p. m.).',
+    );
+  });
+
+  it('full-day block is detected at h12 en-US and h23 ja-JP locations', () => {
+    // 21/10 00:00 → 23/10 00:00 en Nueva York (EDT): días 21 y 22.
+    const ny = block({
+      start: z('2026-10-21T04:00:00.000Z'),
+      end: z('2026-10-23T04:00:00.000Z'),
+    });
+    expect(blockConflictMessage(ny, 'America/New_York', EN_US_H12)).toBe(
+      'La agenda del profesional está bloqueada (Vacaciones) del 10/21 al 10/22. Elige otro horario.',
+    );
+    // 21/10 00:00 → 22/10 00:00 en Tokio (UTC+9): un solo día.
+    const tokyo = block({
+      start: z('2026-10-20T15:00:00.000Z'),
+      end: z('2026-10-21T15:00:00.000Z'),
+    });
+    expect(blockConflictMessage(tokyo, 'Asia/Tokyo', JA_JP_H23)).toBe(
+      'La agenda del profesional está bloqueada (Vacaciones) el 10/21. Elige otro horario.',
+    );
+    // Medianoche en 12 h es «12:00 a. m.»: no se compara texto.
+    const notWhole = block({
+      start: z('2026-10-21T04:00:00.000Z'),
+      end: z('2026-10-21T16:00:00.000Z'),
+    });
+    expect(blockConflictMessage(notWhole, 'America/New_York', EN_US_H12)).toBe(
+      'La agenda del profesional está bloqueada (Vacaciones) del 10/21 12:00 a. m. al 10/21 12:00 p. m. Elige otro horario.',
     );
   });
 });

@@ -25,6 +25,9 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
   readonly appointments: AffectedAppointment[] = [];
   currentLocationId = 'loc1';
   timeZone = 'America/Bogota';
+  /** Formato y reloj de la sede (lo que mostraba: 24 h, día/mes). */
+  locale: string | null = 'es-CO';
+  hourCycle: string | null = 'h23';
   private nextId = 1;
 
   seed(partial: Partial<ScheduleBlock> = {}): ScheduleBlock {
@@ -144,6 +147,8 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
     return Promise.resolve({
       locationId,
       timeZone: this.timeZone,
+      locale: this.locale,
+      hourCycle: this.hourCycle,
       blocks: this.live()
         .filter((r) => blockAffects(r, query.providerId, locationId))
         .filter((r) => overlapsBlock(r, query.start, query.end))

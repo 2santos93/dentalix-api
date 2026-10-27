@@ -17,6 +17,7 @@ import {
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
+import { regionalFormat } from '../src/shared/format/regional-format';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -917,7 +918,12 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       };
       /** El 409 de la revisión M1: dice la hora y la sede de la titular. */
       const heldBy = (start: Date) =>
-        heldInClinicMessage({ start, timeZone: ZONE, locationName });
+        heldInClinicMessage({
+          start,
+          timeZone: ZONE,
+          locationName,
+          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+        });
       const claim = (appointmentId: string, itemId: string) =>
         call(
           'post',

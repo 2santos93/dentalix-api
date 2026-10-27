@@ -1214,6 +1214,44 @@ describe('CreateAppointmentUseCase', () => {
       ).resolves.toHaveLength(0);
     });
 
+    it('a location without hourCycle is 409 LOCATION_LOCALE_REQUIRED only when a block is shown', async () => {
+      const blocks = new InMemoryScheduleBlockRepository();
+      blocks.hourCycle = null;
+      const uc = new CreateAppointmentUseCase(
+        new InMemoryAppointmentRepository(),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(),
+        makeTypes(),
+        makeBlocks(blocks),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      // Sin bloqueos no se pinta nada: se agenda (G1-B, I4).
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1', start, end }),
+      ).resolves.toMatchObject({ warnings: [] });
+
+      blocks.seed({
+        providerId: 'prov1',
+        start: at('08:00'),
+        end: at('20:00'),
+      });
+      const err = await uc
+        .execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: at('11:00'),
+          end: at('11:30'),
+        })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: 'loc1',
+      });
+    });
+
     it('el bloqueo de otro profesional o de otra sede no estorba', async () => {
       const blocks = new InMemoryScheduleBlockRepository();
       blocks.seed({ providerId: 'otro', start: at('08:00'), end: at('20:00') });

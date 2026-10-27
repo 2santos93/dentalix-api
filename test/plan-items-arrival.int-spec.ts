@@ -320,7 +320,15 @@ describe('DX-271 triggers de reserva de ítems', () => {
           [held, staleItem],
           another,
         ),
-        want: reservedElsewhereMessage(holderStart, zoneOf(locationId)),
+        want: reservedElsewhereMessage({
+          start: holderStart,
+          timeZone: zoneOf(locationId),
+          location: {
+            id: locationId,
+            locale: REGIONAL_BOGOTA_FIXTURE.locale,
+            hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+          },
+        }),
       };
     });
     expect(message.got).toBe(message.want);
