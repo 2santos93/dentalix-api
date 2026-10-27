@@ -9,6 +9,10 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase, STAFF_CANCELLATION } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-005: enlace firmado de confirmación de cita, contra Postgres real (RLS +
 // FK compuestas). Cubre: generación con permisos por rol, solo hash en BD,
@@ -60,13 +64,16 @@ describe('Confirmación de cita por enlace (e2e)', () => {
   let slot = 0;
 
   async function registerClinic(subdomain: string): Promise<Clinic> {
-    const reg = await registerVerified(app, {
-      clinicName: `Clínica ${subdomain}`,
-      subdomain,
-      email: `owner@${subdomain}.com`,
-      password: PASSWORD,
-      fullName: 'Dra. Dueña',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clínica ${subdomain}`,
+        subdomain,
+        email: `owner@${subdomain}.com`,
+        password: PASSWORD,
+        fullName: 'Dra. Dueña',
+      }),
+    );
     const host = hostFor(subdomain);
     const accessToken = await loginAs(host, `owner@${subdomain}.com`);
     // Sede sin restricción de horario: los casos agendan a cualquier hora.

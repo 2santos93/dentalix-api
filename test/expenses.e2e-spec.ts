@@ -30,6 +30,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-274 (Task 2) en HTTP real: gastos de la sede con sus pagos, categorías,
 // proveedores y soporte. El aislamiento entre clínicas por id lo cubre
@@ -233,7 +237,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     const sedes = await call('get', '/locations').expect(200);
     loc1 = (sedes.body as { id: string }[])[0].id;
     const second = await call('post', '/locations')
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     loc2 = (second.body as { id: string }).id;
   });

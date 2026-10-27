@@ -10,6 +10,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-200 en HTTP real: flujo del paciente en la clínica. Recepción marca
 // «Llegó», el odontólogo «En sillón» y «Listo para cobrar», recepción la
@@ -164,7 +168,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     ).expect(200);
     mainId = (locations.body as { id: string }[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as { id: string }).id;
     const otherLocations = await as(

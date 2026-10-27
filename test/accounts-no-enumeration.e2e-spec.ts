@@ -9,6 +9,10 @@ import { registerVerified } from './support/register-verified';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { INVITATION_LIMITS } from '../src/modules/invitations/application/use-cases/create-invitation.use-case';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-029 (SEC-006/SEC-007): ningún endpoint público ni de ADMIN deja saber si
 // un email arbitrario tiene cuenta, el token de la invitación solo viaja por
@@ -77,13 +81,16 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
           .useValue({ tenantDaily: DAILY_LIMIT });
       },
     });
-    await registerVerified(app, {
-      clinicName: 'Clínica DX-029',
-      subdomain: SUB_A,
-      email: `owner-a${DOMAIN}`,
-      password: PASSWORD,
-      fullName: 'Dra. Dueña',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clínica DX-029',
+        subdomain: SUB_A,
+        email: `owner-a${DOMAIN}`,
+        password: PASSWORD,
+        fullName: 'Dra. Dueña',
+      }),
+    );
     const res = await login(SUB_A, `owner-a${DOMAIN}`, PASSWORD).expect(201);
     adminA = (res.body as { accessToken: string }).accessToken;
     mailer.clear();
@@ -96,13 +103,14 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
   });
 
   describe('POST /auth/register', () => {
-    const payload = (email: string, subdomain: string) => ({
-      clinicName: 'Clínica Sonda',
-      subdomain,
-      email,
-      password: 'Otra-Clave-2026!',
-      fullName: 'Quien Sea',
-    });
+    const payload = (email: string, subdomain: string) =>
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clínica Sonda',
+        subdomain,
+        email,
+        password: 'Otra-Clave-2026!',
+        fullName: 'Quien Sea',
+      });
 
     it('email existente y email nuevo reciben EXACTAMENTE la misma respuesta', async () => {
       const existing = await http()
@@ -266,13 +274,16 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       // clínica. Quien abre el enlace no puede cambiarle la contraseña: con
       // ella se llevaría esa otra clínica (SEC-033).
       const email = `multi${DOMAIN}`;
-      await registerVerified(app, {
-        clinicName: 'Clínica Otra',
-        subdomain: 'dx143-otra',
-        email,
-        password: 'Clave-De-Siempre-1!',
-        fullName: 'Dra. Multi',
-      });
+      await registerVerified(
+        app,
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'Clínica Otra',
+          subdomain: 'dx143-otra',
+          email,
+          password: 'Clave-De-Siempre-1!',
+          fullName: 'Dra. Multi',
+        }),
+      );
       await raw.user.update({
         where: { email },
         data: { emailVerifiedAt: null },
@@ -287,13 +298,16 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
 
       // La invita una clínica distinta (la de SUB_A ya agotó su cupo diario
       // de invitaciones en este spec).
-      await registerVerified(app, {
-        clinicName: 'Clínica Que Invita',
-        subdomain: 'dx143-invita',
-        email: `owner-invita${DOMAIN}`,
-        password: PASSWORD,
-        fullName: 'Dr. Invita',
-      });
+      await registerVerified(
+        app,
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'Clínica Que Invita',
+          subdomain: 'dx143-invita',
+          email: `owner-invita${DOMAIN}`,
+          password: PASSWORD,
+          fullName: 'Dr. Invita',
+        }),
+      );
       const inviter = (
         (
           await login('dx143-invita', `owner-invita${DOMAIN}`, PASSWORD).expect(
@@ -358,13 +372,16 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       // Su membresía ya no está activa: la cuenta no da acceso a ninguna
       // otra clínica, así que se puede reclamar (DX-143).
       const victim = `dra.victima${DOMAIN}`;
-      await registerVerified(app, {
-        clinicName: 'Clínica Atacante',
-        subdomain: 'dx029-squat',
-        email: victim,
-        password: 'Clave-Del-Atacante-1!',
-        fullName: 'Dra. Víctima',
-      });
+      await registerVerified(
+        app,
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'Clínica Atacante',
+          subdomain: 'dx029-squat',
+          email: victim,
+          password: 'Clave-Del-Atacante-1!',
+          fullName: 'Dra. Víctima',
+        }),
+      );
       await raw.user.update({
         where: { email: victim },
         data: { emailVerifiedAt: null },
@@ -423,13 +440,16 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
     });
 
     it(`límite diario por clínica: la invitación ${DAILY_LIMIT + 1} -> 429 en español`, async () => {
-      await registerVerified(app, {
-        clinicName: 'Clínica Límite',
-        subdomain: SUB_LIMIT,
-        email: `owner-limite${DOMAIN}`,
-        password: PASSWORD,
-        fullName: 'Dr. Límite',
-      });
+      await registerVerified(
+        app,
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName: 'Clínica Límite',
+          subdomain: SUB_LIMIT,
+          email: `owner-limite${DOMAIN}`,
+          password: PASSWORD,
+          fullName: 'Dr. Límite',
+        }),
+      );
       const res = await login(SUB_LIMIT, `owner-limite${DOMAIN}`, PASSWORD);
       const admin = (res.body as { accessToken: string }).accessToken;
       for (let i = 0; i < DAILY_LIMIT; i++) {

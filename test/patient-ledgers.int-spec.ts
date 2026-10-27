@@ -7,6 +7,10 @@ import {
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-155, capa DB de patient_ledgers: el resumen por paciente que lee la
 // cartera. Cada escritura va POR LA MISMA RUTA que la app (runWithTenant, rol
@@ -70,10 +74,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     },
   });
   const sede1 = await raw.location.create({
-    data: { tenantId, name: 'Sede 1' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede 1' }),
   });
   const sede2 = await raw.location.create({
-    data: { tenantId, name: 'Sede 2' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede 2' }),
   });
   const catalog = await raw.dentalCatalogItem.create({
     data: {

@@ -10,6 +10,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-105 en HTTP real: listas de precios por clínica y sede. Altas y edición
 // solo ADMIN, lectura ADMIN/DENTIST/ASSISTANT; 409 de nombre, sede y moneda
@@ -137,7 +141,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     const sedes = await admin(api().get('/api/v1/locations')).expect(200);
     sedeNorte = (sedes.body as IdBody[])[0].id;
     const sur = await admin(api().post('/api/v1/locations'))
-      .send({ name: 'Sede Sur' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Sur' }))
       .expect(201);
     sedeSur = (sur.body as IdBody).id;
 

@@ -6,6 +6,10 @@ import {
   ownerUrlFor,
   requireOwnerNosuEnv,
 } from './owner-nosu-env';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from '../support/location-fixtures';
 
 // DX-051: la liberación de imputaciones (triggers de treatment_plan_items y
 // treatment_plans) borra o reduce filas de payment_allocations, que tiene RLS
@@ -99,7 +103,10 @@ describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (own
       data: { id: T_A, name: 'Clínica imputación', subdomain: 'dx051-nosu' },
     });
     const location = await target.location.create({
-      data: { tenantId: T_A, name: 'Sede' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: T_A,
+        name: 'Sede',
+      }),
     });
     const patient = await target.patient.create({
       data: { tenantId: T_A, firstName: 'Pía', lastName: 'Arias' },

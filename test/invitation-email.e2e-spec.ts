@@ -14,6 +14,10 @@ import {
 } from '../src/modules/notifications/email/infrastructure/mail-config';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-088 (e2e): invitar encola el email con el enlace del host de la clínica
 // y responde sin esperar al proveedor; «Reenviar invitación» regenera el
@@ -126,13 +130,16 @@ describe('Email de invitación (e2e, DX-088)', () => {
     });
     dispatcher = app.get(EmailDispatcher);
 
-    const register = await registerVerified(app, {
-      clinicName: 'Clínica <b>Correo</b>',
-      subdomain: SUB,
-      email: ADMIN_EMAIL,
-      password: PASSWORD,
-      fullName: 'Dra. Correo',
-    });
+    const register = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Clínica <b>Correo</b>',
+        subdomain: SUB,
+        email: ADMIN_EMAIL,
+        password: PASSWORD,
+        fullName: 'Dra. Correo',
+      }),
+    );
     tenantId = (register.body as { tenantId: string }).tenantId;
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')

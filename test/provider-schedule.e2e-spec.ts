@@ -12,6 +12,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-233 en HTTP real: horario de cada profesional por sede (PUT/GET), sus
 // excepciones por fecha, el cuadrante, permisos, auditoría y aislamiento; y su
@@ -140,7 +144,12 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
     assistant = await member(ClinicRole.ASSISTANT);
     sedeA = await firstLocation(clinic);
     const created = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send({ name: 'Sede B', country: 'CO' })
+      .send(
+        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+          name: 'Sede B',
+          country: 'CO',
+        }),
+      )
       .expect(201);
     sedeB = (created.body as Body).id;
     otherLocationId = await firstLocation(other);

@@ -11,7 +11,6 @@ import {
   heldInClinicToday,
   PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE,
 } from '../../../domain/plan-item-reservation';
-import { DEFAULT_BUSINESS_HOURS_TIMEZONE } from '../../../../../shared/locations/default-business-hours';
 import {
   PATIENT_FLOW_MESSAGES,
   isInClinic,
@@ -32,6 +31,9 @@ import {
   ListUpcomingAppointmentsParams,
   UpdateAppointmentRepoInput,
 } from '../../../domain/ports/appointment-repository.port';
+
+/** Zona de la sede del fake: dato de test, no un valor por defecto del producto. */
+const FAKE_LOCATION_TIME_ZONE = 'America/Bogota';
 
 // `Appointment` (the API-facing entity) deliberately has no `deletedAt` field
 // — same convention as Patient/ToothRecord, see appointment.entity.ts. The
@@ -459,12 +461,12 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     const items = this.reservedElsewhere.get(appointmentId) ?? [];
     const moved = items.find((i) => i.planItemId === planItemId);
     // DX-288: como el repositorio real, no se trae desde una cita de hoy
-    // con el paciente en la clínica (zona por defecto: el fake no tiene
+    // con el paciente en la clínica (zona fija de test: el fake no tiene
     // sedes con zona).
     const holder = moved && this.rows.find((r) => r.id === moved.appointmentId);
     if (
       holder &&
-      heldInClinicToday(holder, DEFAULT_BUSINESS_HOURS_TIMEZONE, new Date())
+      heldInClinicToday(holder, FAKE_LOCATION_TIME_ZONE, new Date())
     )
       return Promise.reject(
         new ConflictException(PLAN_ITEM_CLAIM_HELD_IN_CLINIC_MESSAGE),

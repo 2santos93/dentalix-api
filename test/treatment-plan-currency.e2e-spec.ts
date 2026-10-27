@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para cleanup -- usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -49,13 +53,16 @@ describe('treatment plan currency whitelist (e2e)', () => {
 
     await cleanup();
 
-    await registerVerified(app, {
-      clinicName: 'Currency Clinic',
-      subdomain: sub,
-      email: 'owner@currency-clinic.com',
-      password: PASSWORD,
-      fullName: 'Dr. Owner',
-    });
+    await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Currency Clinic',
+        subdomain: sub,
+        email: 'owner@currency-clinic.com',
+        password: PASSWORD,
+        fullName: 'Dr. Owner',
+      }),
+    );
 
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')

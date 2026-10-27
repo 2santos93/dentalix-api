@@ -23,6 +23,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-151 · Documentos del paciente: subida con contenido comprobado, listado
 // con filtros, URL firmadas para ver o descargar, anulación y auditoría.
@@ -264,9 +268,15 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
     });
 
     it('con X-Location-Id la fila queda en esa sede', async () => {
-      const loc = await call(a, a.adminToken, 'post', '/locations', {
-        name: 'Sede Norte Docs',
-      }).expect(201);
+      const loc = await call(
+        a,
+        a.adminToken,
+        'post',
+        '/locations',
+        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+          name: 'Sede Norte Docs',
+        }),
+      ).expect(201);
       const locationId = (loc.body as { id: string }).id;
       const res = await uploadReq(
         a,

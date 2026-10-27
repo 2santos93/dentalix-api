@@ -9,6 +9,10 @@ import {
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import type { PreparedBalance } from '../src/modules/patient-imports/domain/opening-balance-sheet';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-262, capa DB del saldo migrado: RLS FORCE de opening_balances y de los
 // saldos preparados, FK compuestas por tenant (paciente, sede, lote), CHECK
@@ -80,7 +84,10 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const user = await raw.user.create({
     data: {
@@ -354,7 +361,10 @@ async function clinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const user = await raw.user.create({
     data: {

@@ -11,6 +11,10 @@ import { FORGOT_PASSWORD_MESSAGE } from '../src/modules/auth/presentation/passwo
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // DX-010 (e2e): «¿Olvidaste tu contraseña?» responde SIEMPRE 202 con el mismo
 // cuerpo y sin esperar a nada; el email lleva la marca y el host de la
@@ -110,13 +114,16 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
     });
     dispatcher = app.get(EmailDispatcher);
     const register = (sub: string, email: string, clinicName: string) =>
-      registerVerified(app, {
-        clinicName,
-        subdomain: sub,
-        email,
-        password: PASSWORD,
-        fullName: 'Ana Restablece',
-      });
+      registerVerified(
+        app,
+        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+          clinicName,
+          subdomain: sub,
+          email,
+          password: PASSWORD,
+          fullName: 'Ana Restablece',
+        }),
+      );
     const a = await register(SUB_A, USER_EMAIL, 'Clínica Sonrisa Norte');
     tenantA = (a.body as { tenantId: string }).tenantId;
     userId = (a.body as { userId: string }).userId;

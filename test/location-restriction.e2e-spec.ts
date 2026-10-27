@@ -16,6 +16,10 @@ import {
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/staff/domain/provider-location';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-089: el personal restringido a sedes solo ve y escribe en las suyas, y un
 // profesional restringido solo atiende en sus sedes (DX-121d).
@@ -160,7 +164,11 @@ describe('Personal restringido a sedes (DX-089)', () => {
     )[0].id;
     const newLocation = async (name: string) =>
       (
-        (await admin().post('/locations', { name }).expect(201)).body as {
+        (
+          await admin()
+            .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+            .expect(201)
+        ).body as {
           id: string;
         }
       ).id;

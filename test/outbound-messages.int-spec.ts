@@ -4,6 +4,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { OutboundMessages } from '../src/modules/notifications/outbound/application/outbound-messages.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-085, capa de BD: outbound_messages (RLS FORCE por clínica, FK compuesta a
 // la cita del MISMO tenant, solo destinatario enmascarado) y que el log del
@@ -28,7 +32,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: 'Pérez' },

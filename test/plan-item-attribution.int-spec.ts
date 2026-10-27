@@ -3,6 +3,10 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { resolvePerformer } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-050, capa DB: la atribución del ítem realizado (quién, dónde, cuándo).
 // FK COMPUESTA a la membresía (misma clínica Y mismo usuario) y a la sede,
@@ -51,7 +55,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     ),
   );
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede principal',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: subdomain },

@@ -10,6 +10,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-191 · Registro de implantes, tarjeta imprimible y búsqueda por lote.
 // Todo por la API; `raw` (DIRECT_URL) solo lee la auditoría y limpia.
@@ -591,10 +595,16 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
     it('la búsqueda por lote abarca toda la clínica aunque llegue una sede activa', async () => {
       const norte = (
         (
-          await call(a, a.adminToken, 'post', '/locations', {
-            name: 'Sede Norte',
-            address: 'Cra 15',
-          }).expect(201)
+          await call(
+            a,
+            a.adminToken,
+            'post',
+            '/locations',
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede Norte',
+              address: 'Cra 15',
+            }),
+          ).expect(201)
         ).body as { id: string }
       ).id;
       await call(a, dentist.token, 'post', `/patients/${patient1}/implants`, {

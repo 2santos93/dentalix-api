@@ -13,6 +13,10 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaReminderOptOutRepository } from '../src/modules/reminders/infrastructure/prisma-reminder-opt-out.repository';
 import { PrismaPatientCommunicationRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient-communication.repository';
 import { waitFor } from './support/wait-for';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 const NOW = new Date('2026-10-23T12:00:00Z');
 const DAY = 86400000;
@@ -78,7 +82,11 @@ beforeAll(async () => {
   ).id;
   for (const tenantId of [tenant, other])
     await owner.location.create({
-      data: { tenantId, name: 'Principal', address: 'Fixture' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId,
+        name: 'Principal',
+        address: 'Fixture',
+      }),
     });
   const data = {
     firstName: 'Fixture',

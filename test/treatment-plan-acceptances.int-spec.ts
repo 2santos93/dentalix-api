@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-012, capa DB de treatment_plan_acceptances y del congelado de ítems. Cada
 // caso escribe POR LA MISMA RUTA que la app (runWithTenant, rol dentalix_app,
@@ -43,7 +47,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     },
   });
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede principal',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: subdomain },

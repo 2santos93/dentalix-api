@@ -257,6 +257,7 @@ describe('responsables de pago y avisos (DX-203)', () => {
     repo.addPatient('teen', { birthDate: new Date('2010-01-01') });
     expect((await list.execute('teen')).minor).toBe(true);
     repo.country = 'ES';
+    repo.timeZone = 'Europe/Madrid';
     expect(await list.execute('teen')).toMatchObject({
       minor: false,
       majorityAge: 16,

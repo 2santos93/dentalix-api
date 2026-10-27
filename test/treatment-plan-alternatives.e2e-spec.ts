@@ -17,6 +17,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-040 en HTTP real: alternativas A/B, presentar, rechazar, la máquina de
 // estados (409), los permisos por rol y la lista de presupuestos por seguir
@@ -169,7 +173,10 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
     const locations = await as(clinicA).get('/locations').expect(200);
     mainLocationA = (locations.body as { id: string }[])[0].id;
     const north = await as(clinicA)
-      .post('/locations', { name: 'Sede Norte' })
+      .post(
+        '/locations',
+        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+      )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
   });

@@ -11,6 +11,10 @@ import {
   seedMember,
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-210 en HTTP real: «Ocupar este hueco». Cancelar una cita de 30 min →
 // candidatos del hueco (URGENT antes que NORMAL; ni el de 60 min, ni el de
@@ -219,7 +223,7 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
     ).expect(200);
     locationId = (locations.body as Body[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as Body).id;
 

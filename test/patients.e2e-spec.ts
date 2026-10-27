@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody as clinicRegisterBody,
+} from './support/location-fixtures';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -53,13 +57,16 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
-  const register = await registerVerified(app, {
-    clinicName: opts.clinicName,
-    subdomain: opts.subdomain,
-    email: opts.email,
-    password: 'S3cret!!',
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: opts.clinicName,
+      subdomain: opts.subdomain,
+      email: opts.email,
+      password: 'S3cret!!',
+      fullName: 'Dr. Owner',
+    }),
+  );
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())

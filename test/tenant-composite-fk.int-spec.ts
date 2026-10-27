@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { CatalogKind, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // SEC-004, capa DB: las FK de Postgres se chequean SALTANDO la RLS, así que una
 // FK simple `x -> padre(id)` solo garantiza "el padre existe en ALGÚN tenant".
@@ -38,7 +42,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { tenantId, firstName: 'Ana', lastName: subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const plan = await raw.treatmentPlan.create({
     data: { tenantId, patientId: patient.id, currency: 'USD' },

@@ -11,6 +11,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-027 · Caja por turno bajo concurrencia y con varias monedas y sedes:
 // dos aperturas o dos cierres a la vez (uno gana, el otro 409), abonos y
@@ -117,8 +121,11 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
       })
     ).id;
     sedeNorte = (
-      (await api('post', '/locations').send({ name: 'Norte' }).expect(201))
-        .body as { id: string }
+      (
+        await api('post', '/locations')
+          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Norte' }))
+          .expect(201)
+      ).body as { id: string }
     ).id;
     const patient = await raw.patient.create({
       data: {

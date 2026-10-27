@@ -17,6 +17,10 @@ import {
   LOCATION_NOT_ALLOWED_CODE,
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // SEC-045: las subrutas de una cita aplican la restricción por sedes de
 // DX-089 igual que `GET /appointments/:id`. Una recepción acotada a la Sede
@@ -191,7 +195,11 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     clinic = await registerClinic(app, 'sec045-sedes');
     const newLocation = async (name: string) =>
       (
-        (await admin().post('/locations', { name }).expect(201)).body as {
+        (
+          await admin()
+            .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+            .expect(201)
+        ).body as {
           id: string;
         }
       ).id;

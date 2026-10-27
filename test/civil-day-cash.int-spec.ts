@@ -7,6 +7,10 @@ import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/
 import { ListCashPaymentsUseCase } from '../src/modules/payments/application/use-cases/list-cash-payments.use-case';
 import { GetPaymentsTotalsUseCase } from '../src/modules/payments/application/use-cases/get-payments-totals.use-case';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-097, capa de BD: los períodos de caja y dashboard se cortan en la zona
 // IANA de CADA sede (de su horario en BD), contra Postgres y bajo RLS.
@@ -103,7 +107,11 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       timezone: string | null,
     ) => {
       const loc = await owner.location.create({
-        data: { tenantId, name, country },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name,
+          country,
+        }),
       });
       if (timezone) {
         await owner.locationSchedule.create({
@@ -363,12 +371,12 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       // la zona de su país (ES), sin abortar el despliegue.
       const retired = (
         await owner.location.create({
-          data: {
+          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
             tenantId: tenantA,
             name: 'Retirada',
             country: 'ES',
             deletedAt: new Date(),
-          },
+          }),
         })
       ).id;
       await owner.locationSchedule.create({

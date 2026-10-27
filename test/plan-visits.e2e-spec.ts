@@ -11,6 +11,10 @@ import {
   loginAs,
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -54,7 +58,10 @@ describe('DX-256 visitas y agenda', () => {
     });
     otherLocation = (
       await raw.location.create({
-        data: { tenantId: a.tenantId, name: 'Norte' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: a.tenantId,
+          name: 'Norte',
+        }),
       })
     ).id;
     const member = await seedMember(raw, a, ClinicRole.RECEPTION);

@@ -3,6 +3,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAgreementRepository } from '../src/modules/agreements/infrastructure/repositories/prisma-agreement.repository';
 import { PrismaPatientAgreementRepository } from '../src/modules/patient-agreements/infrastructure/repositories/prisma-patient-agreement.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-105, capa DB: listas de precios (price_lists, price_list_items), convenios
 // (agreements) y su asignación a pacientes (patient_agreements). RLS FORCE, FK
@@ -51,10 +55,16 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { tenantId, name: 'Sanitas', type: 'EPS_CO', country: 'CO' },
   });
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede principal' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede principal',
+    }),
   });
   const otherLocation = await raw.location.create({
-    data: { tenantId, name: 'Sede norte' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede norte',
+    }),
   });
   const catalog = await raw.dentalCatalogItem.create({
     data: {

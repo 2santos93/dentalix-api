@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-274, capa DB: gastos de la sede y salidas de caja menor. RLS FORCE en las
 // tres tablas, FK compuestas por clínica (el pago hereda sede y moneda del
@@ -42,10 +46,18 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede', country: 'CO' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede',
+      country: 'CO',
+    }),
   });
   const other = await raw.location.create({
-    data: { tenantId, name: 'Sede Norte', country: 'CO' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId,
+      name: 'Sede Norte',
+      country: 'CO',
+    }),
   });
   return { tenantId, locationId: location.id, otherLocationId: other.id };
 }

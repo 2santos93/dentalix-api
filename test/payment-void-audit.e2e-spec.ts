@@ -8,6 +8,10 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 // SEC-013 — DELETE /payments/:id exige motivo, guarda quién/cuándo/por qué y
 // limita a recepción a sus propios abonos del día. DIRECT_URL (superusuario,
@@ -76,13 +80,16 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
 
   async function register(subdomain: string): Promise<Session> {
     const email = `owner@${subdomain}.com`;
-    const reg = await registerVerified(app, {
-      clinicName: `Clinica ${subdomain}`,
-      subdomain,
-      email,
-      password: PASSWORD,
-      fullName: 'Dra. Admin',
-    });
+    const reg = await registerVerified(
+      app,
+      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: `Clinica ${subdomain}`,
+        subdomain,
+        email,
+        password: PASSWORD,
+        fullName: 'Dra. Admin',
+      }),
+    );
     const body = reg.body as { tenantId: string; userId: string };
     return {
       tenantId: body.tenantId,

@@ -6,6 +6,10 @@ import { SettlePaymentPromises } from '../src/modules/collections/application/se
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-226 (DB-037): la regla del compromiso (payment-promise-rule.ts) compara
 // el alta del abono con la del compromiso. Las dos horas las pone ahora el
@@ -136,7 +140,11 @@ describe('compromiso de pago con la hora de la BD como única fuente (DX-226, in
     ).id;
     locationId = (
       await raw.location.create({
-        data: { tenantId, name: 'Sede', country: 'CO' },
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId,
+          name: 'Sede',
+          country: 'CO',
+        }),
       })
     ).id;
     userId = (

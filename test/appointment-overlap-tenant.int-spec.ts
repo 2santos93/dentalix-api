@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-036 / DB-003, capa DB: las EXCLUDE constraints se evalúan SALTANDO la RLS.
 // Sin `"tenantId" WITH =`, una cita del tenant B chocaba con la del mismo
@@ -25,7 +29,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: { tenantId: tenant.id, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede',
+    }),
   });
   const patient = await raw.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },

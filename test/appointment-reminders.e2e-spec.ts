@@ -22,6 +22,10 @@ import {
   PLAN_REMINDERS_SCHEDULE,
   SEND_REMINDER_JOB,
 } from '../src/modules/reminders/application/plan-reminders';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-026 en HTTP real: Ajustes → Recordatorios por rol (solo ADMIN, 403 en
 // español), validación en español, sedes de otra clínica, y el estado de los
@@ -155,7 +159,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       .send({ timezone: 'America/Bogota', ranges: [] })
       .expect(200);
     await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send({ name: 'Sede Norte' })
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
   });
 

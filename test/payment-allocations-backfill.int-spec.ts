@@ -19,6 +19,10 @@ import {
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { seedDemo } from '../prisma/seed-demo';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-051 R17: el backfill sobre el seed demo. Escribe y BORRA EN DURO: solo
 // contra una base de test.
@@ -125,7 +129,7 @@ async function seedOtherClinic(): Promise<typeof other> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: { tenantId, name: 'Sede' },
+    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Heredada' },

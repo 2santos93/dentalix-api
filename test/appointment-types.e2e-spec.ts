@@ -10,6 +10,7 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { setLocationZone } from './support/location-fixtures';
 
 // DX-121 en HTTP real: tipos de cita (CRUD solo ADMIN, borrado lógico), agendar
 // con tipo, la agenda por columnas (`providerIds[]`) y mover una cita de hora y
@@ -107,6 +108,11 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
     await resetDatabase(raw);
     clinic = await registerClinic(app, 'dx121-e2e');
     other = await registerClinic(app, 'dx121-e2e-otra');
+    // El horario de abajo se fija en UTC: la zona es dato de la sede.
+    const main = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId },
+    });
+    await setLocationZone(raw, clinic.tenantId, main.id, 'UTC');
     const d = await seedMember(raw, clinic, ClinicRole.DENTIST);
     dentist = {
       userId: d.userId,

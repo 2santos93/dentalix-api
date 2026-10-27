@@ -15,6 +15,10 @@ import {
   STAFF_MEMBER_NOT_FOUND_MESSAGE,
   UNKNOWN_LOCATION_MESSAGE,
 } from '../src/modules/staff/application/use-cases/staff-locations.use-cases';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-089: sedes permitidas por miembro. GET/PUT /staff/:userId/locations
 // (solo ADMIN), el ADMIN siempre con todas, ascender a ADMIN las limpia y
@@ -75,7 +79,7 @@ describe('Sedes permitidas por miembro (DX-089)', () => {
 
   async function createLocation(name: string): Promise<string> {
     const res = await api(a, a.adminToken)
-      .post('/locations', { name })
+      .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
       .expect(201);
     return (res.body as { id: string }).id;
   }

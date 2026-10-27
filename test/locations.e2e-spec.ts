@@ -7,6 +7,11 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -33,11 +38,14 @@ async function registerAndLogin(
   app: INestApplication<App>,
   opts: { clinicName: string; subdomain: string; email: string },
 ) {
-  const register = await registerVerified(app, {
-    ...opts,
-    password: PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      ...opts,
+      password: PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const login = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
     .set('X-Tenant-Host', hostFor(opts.subdomain))
@@ -114,7 +122,12 @@ describe('Locations / multi-sede (e2e)', () => {
       const created = await auth(
         request(app.getHttpServer())
           .post('/api/v1/locations')
-          .send({ name: 'Sede Norte', address: 'Cra 15' }),
+          .send(
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede Norte',
+              address: 'Cra 15',
+            }),
+          ),
       ).expect(201);
       const sedeB = (created.body as LocationBody).id;
       expect(sedeB).not.toBe(sedeA);

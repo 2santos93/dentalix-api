@@ -2,6 +2,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPerioExamRepository } from '../src/modules/periodontal/infrastructure/repositories/prisma-perio-exam.repository';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-007, capa DB de perio_exams / perio_site_measures / perio_tooth_measures.
 // Cada caso escribe POR LA MISMA RUTA que la app (runWithTenant, rol
@@ -230,7 +234,10 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
 
   it('el repositorio toma la zona horaria de la sede activa', async () => {
     const location = await raw.location.create({
-      data: { tenantId: a.tenantId, name: 'Sede Madrid' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Madrid',
+      }),
     });
     await raw.locationSchedule.create({
       data: {

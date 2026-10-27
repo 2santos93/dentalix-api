@@ -15,6 +15,10 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody as clinicRegisterBody,
+} from './support/location-fixtures';
 
 // Same admin/superuser connection convention as payments.e2e-spec.ts /
 // dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts: DIRECT_URL bypasses RLS
@@ -100,13 +104,16 @@ async function registerAndLogin(
   accessToken: string;
   subdomain: string;
 }> {
-  const register = await registerVerified(app, {
-    clinicName: opts.clinicName,
-    subdomain: opts.subdomain,
-    email: opts.email,
-    password: SEEDED_PASSWORD,
-    fullName: 'Dr. Owner',
-  });
+  const register = await registerVerified(
+    app,
+    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: opts.clinicName,
+      subdomain: opts.subdomain,
+      email: opts.email,
+      password: SEEDED_PASSWORD,
+      fullName: 'Dr. Owner',
+    }),
+  );
   const registerBody = register.body as RegisterResponseBody;
 
   const login = await request(app.getHttpServer())

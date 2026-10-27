@@ -7,6 +7,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+} from './support/location-fixtures';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -18,13 +22,16 @@ interface LoginResponseBody {
 }
 
 async function register(app: INestApplication<App>, subdomain: string) {
-  await registerVerified(app, {
-    clinicName: subdomain,
-    subdomain,
-    email: `owner@${subdomain}.com`,
-    password: 'S3cret!!',
-    fullName: 'Dr. Owner',
-  });
+  await registerVerified(
+    app,
+    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicName: subdomain,
+      subdomain,
+      email: `owner@${subdomain}.com`,
+      password: 'S3cret!!',
+      fullName: 'Dr. Owner',
+    }),
+  );
 }
 
 async function login(app: INestApplication<App>, subdomain: string) {

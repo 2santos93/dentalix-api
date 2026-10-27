@@ -17,6 +17,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-105 en HTTP real: el precio de un ítem nuevo se resuelve en el servidor
 // (convenio vigente del paciente → lista activa de la sede del request →
@@ -192,7 +196,10 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
 
     const locations = await as().get('/locations').expect(200);
     mainLocation = (locations.body as { id: string }[])[0].id;
-    northLocation = await create('/locations', { name: 'Sede Norte' });
+    northLocation = await create(
+      '/locations',
+      locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+    );
 
     endo = await create('/catalog/items', {
       code: 'PR-ENDO',

@@ -22,6 +22,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-274 (Task 4) en HTTP real: resumen mensual ingresos − gastos y CSV. Los
 // abonos se siembran por `raw` para fijar sede, instante y moneda sin depender
@@ -115,7 +119,12 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     loc2 = (
       (
         await call('post', '/locations')
-          .send({ name: 'Sede Norte' })
+          .send(
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede Norte',
+              timeZone: 'Europe/Madrid',
+            }),
+          )
           .expect(201)
       ).body as { id: string }
     ).id;

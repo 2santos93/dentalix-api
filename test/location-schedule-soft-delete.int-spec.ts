@@ -3,6 +3,10 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLocationScheduleRepository } from '../src/modules/location-schedule/infrastructure/repositories/prisma-location-schedule.repository';
 import { HardDeleteForbiddenError } from '../src/shared/prisma/no-hard-delete';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // Conexión de administración (DIRECT_URL, sin RLS) sólo para sembrar y para
 // mirar la tabla POR DEBAJO del repositorio: es la única forma de comprobar que
@@ -32,7 +36,10 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
     });
     tenantId = tenant.id;
     const location = await raw.location.create({
-      data: { tenantId, name: 'Sede única' },
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId,
+        name: 'Sede única',
+      }),
       select: { id: true },
     });
     locationId = location.id;

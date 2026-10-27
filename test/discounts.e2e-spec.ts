@@ -17,6 +17,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-204 en HTTP real: tope de descuento por rol, motivo obligatorio por
 // encima del umbral, «Descuento %» en bloque con redondeo por moneda, planes
@@ -184,7 +188,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     const locations = await as(clinicA).get('/locations').expect(200);
     mainLocationA = (locations.body as { id: string }[])[0].id;
     const north = await as(clinicA)
-      .post('/locations', { name: 'Sede Norte' })
+      .post(
+        '/locations',
+        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+      )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
   });
