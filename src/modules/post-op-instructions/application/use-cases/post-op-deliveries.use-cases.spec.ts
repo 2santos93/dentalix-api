@@ -221,6 +221,29 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
     expect(deliveries.rows).toHaveLength(0);
   });
 
+  it('una sede sin reloj entrega una plantilla sin {{fecha}} sin pedir el formato', async () => {
+    const { deliver, templates, deliveries } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({ location: { locale: null, hourCycle: null } }),
+    );
+    const nodate = templates.seed({
+      code: 'POI-SINFECHA',
+      title: 'Sin fecha',
+      body: 'Hola {{paciente}}. Muerde la gasa.',
+    });
+    await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: nodate.id, channel: 'PRINT' },
+      CTX,
+      LINK,
+    );
+    expect(deliveries.rows).toHaveLength(1);
+    expect(deliveries.rows[0].renderedText).toBe(
+      'Hola Carolina Duque. Muerde la gasa.',
+    );
+  });
+
   it('EMAIL a un adulto: token con caducidad a 30 días, solo su hash en la fila, y email sin el título ni el texto', async () => {
     const { deliver, exo, deliveries, email, audits } = setup();
     const result = await deliver.execute(

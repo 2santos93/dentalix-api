@@ -37,6 +37,18 @@ export function renderInstructions(
   });
 }
 
+/**
+ * El texto usa la variable `name` (en cualquier forma: `{{ Fecha }}`). Quien
+ * renderiza la calcula solo si aparece: una plantilla sin `{{fecha}}` no exige
+ * el formato de la sede (G1-B, pre-flight I4).
+ */
+export function usesVariable(body: string, name: PostOpVariable): boolean {
+  for (const [, raw] of body.matchAll(VARIABLE_PATTERN)) {
+    if (raw.toLowerCase() === name) return true;
+  }
+  return false;
+}
+
 /** Variables del texto que no existen (en minúscula, sin repetir, en orden). */
 export function unknownVariables(body: string): string[] {
   const unknown = new Set<string>();

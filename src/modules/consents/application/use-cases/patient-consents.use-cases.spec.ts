@@ -132,6 +132,21 @@ describe('PreviewPatientConsentUseCase', () => {
     });
   });
 
+  it('una sede sin reloj firma una plantilla sin {{fecha}} sin pedir el formato', async () => {
+    const { preview, templates, consents } = setup();
+    consents.location = { id: 'loc-1', locale: null, hourCycle: null };
+    const nodate = templates.seed({
+      title: 'Sin fecha',
+      body: 'Yo, {{paciente}}, autorizo.',
+    });
+    const result = await preview.execute(
+      'p1',
+      { templateId: nodate.id },
+      'dentist-1',
+    );
+    expect(result.body).toBe('Yo, Ana Pérez, autorizo.');
+  });
+
   it('sin plan, {{tratamiento}} dice que no se especificó', async () => {
     const { preview, template } = setup();
     const result = await preview.execute(

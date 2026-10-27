@@ -44,7 +44,10 @@ import {
   postOpLinkExpiry,
 } from '../../domain/postop-token';
 import { postOpWhatsAppMessage } from '../../domain/postop-whatsapp-message';
-import { renderInstructions } from '../../domain/render-instructions';
+import {
+  renderInstructions,
+  usesVariable,
+} from '../../domain/render-instructions';
 import { suggestTemplates } from '../../domain/template-rules';
 import { POSTOP_CLOCK, type PostOpClock } from '../post-op-clock';
 import { POSTOP_EMAIL_SENDER, type PostOpEmailSender } from '../postop-email';
@@ -366,11 +369,14 @@ export class DeliverPostOpInstructionsUseCase {
       profesional: appointment.providerName,
       clinica: ctx.clinicName,
       telefono_sede: location.phone ?? '',
-      // Día civil de la cita en la sede, con su formato (409 si le falta).
-      fecha: requireLocationFormat(location).date(
-        appointment.start,
-        location.timeZone,
-      ),
+      // Día civil de la cita en la sede, con su formato (409 si le falta),
+      // solo si la plantilla lo pinta.
+      fecha: usesVariable(template.body, 'fecha')
+        ? requireLocationFormat(location).date(
+            appointment.start,
+            location.timeZone,
+          )
+        : '',
     });
     const deliveredByName =
       (await this.deliveries.userName(request.actor.userId)) ?? 'Equipo';
