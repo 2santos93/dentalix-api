@@ -139,26 +139,6 @@ function emptyAggregates(): PeriodAggregates & {
 }
 
 /**
- * Sumas de «Comparar sedes» (DX-014). Cada fuente es UNA consulta agregada por
- * período (GROUP BY sede), con el tenant explícito además de la RLS, dentro de
- * una transacción REPEATABLE READ para que todas vean la misma foto:
- *  - producción: ítems DONE con `completedAt` (DX-050) en el período, por la
- *    sede donde se realizaron (`performedLocationId`) y la moneda del plan;
- *    índice `treatment_plan_items_tenant_performed_location_idx`;
- *  - cobrado: abonos no anulados por `paidAt`, sede y moneda;
- *    `payments_tenantId_locationId_paidAt_active_idx`;
- *  - citas atendidas, no-show, cancelaciones tardías (DX-279), minutos de
- *    las atendidas por profesionales con horario en la sede y pacientes
- *    distintos (por sede y del conjunto con GROUPING SETS);
- *    `appointments_tenant_location_start_idx`;
- *  - pacientes nuevos: citas COMPLETED del período sin otra COMPLETED anterior
- *    del paciente en la clínica; `appointments_tenant_patient_completed_idx`;
- *  - capacidad (BE-042): horario semanal vivo de cada profesional del equipo
- *    que atiende en cada sede (DX-233, DX-089; `attendingSchedule`), sus
- *    excepciones del período, sus bloqueos que no admiten citas (DX-122) y
- *    los cierres de toda la sede.
- */
-/**
  * La primera de `locationIds` con algo que el informe compara (citas, abonos,
  * ítems realizados u horarios de profesionales), o null.
  */
@@ -188,6 +168,27 @@ async function firstComparedLocation(
     LIMIT 1`;
   return found?.locationId ?? null;
 }
+
+/**
+ * Sumas de «Comparar sedes» (DX-014). Cada fuente es UNA consulta agregada por
+ * período (GROUP BY sede), con el tenant explícito además de la RLS, dentro de
+ * una transacción REPEATABLE READ para que todas vean la misma foto:
+ *  - producción: ítems DONE con `completedAt` (DX-050) en el período, por la
+ *    sede donde se realizaron (`performedLocationId`) y la moneda del plan;
+ *    índice `treatment_plan_items_tenant_performed_location_idx`;
+ *  - cobrado: abonos no anulados por `paidAt`, sede y moneda;
+ *    `payments_tenantId_locationId_paidAt_active_idx`;
+ *  - citas atendidas, no-show, cancelaciones tardías (DX-279), minutos de
+ *    las atendidas por profesionales con horario en la sede y pacientes
+ *    distintos (por sede y del conjunto con GROUPING SETS);
+ *    `appointments_tenant_location_start_idx`;
+ *  - pacientes nuevos: citas COMPLETED del período sin otra COMPLETED anterior
+ *    del paciente en la clínica; `appointments_tenant_patient_completed_idx`;
+ *  - capacidad (BE-042): horario semanal vivo de cada profesional del equipo
+ *    que atiende en cada sede (DX-233, DX-089; `attendingSchedule`), sus
+ *    excepciones del período, sus bloqueos que no admiten citas (DX-122) y
+ *    los cierres de toda la sede.
+ */
 
 @Injectable()
 export class PrismaLocationsComparisonRepository implements LocationsComparisonRepository {

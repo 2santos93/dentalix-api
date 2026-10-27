@@ -317,7 +317,12 @@ export class PrismaPatientImportRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const id = await this.tenantContext.writeLocationId(tx);
       const location = await tx.location.findFirst({
-        where: { id, deletedAt: null, isActive: true },
+        where: {
+          id,
+          tenantId: this.tenantId(),
+          deletedAt: null,
+          isActive: true,
+        },
         select: { id: true, country: true, timeZone: true },
       });
       if (!location) throw new BatchLocationError();

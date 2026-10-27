@@ -615,8 +615,16 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
 
     describe('sede sin zona (réplica antigua)', () => {
       let legacy: string;
+      let baseline: Report;
+      const consolidated = async () =>
+        (
+          await as(clinicA)
+            .get(`/reports/discounts?${period()}&pageSize=200`)
+            .expect(200)
+        ).body as Report;
 
       beforeAll(async () => {
+        baseline = await consolidated();
         legacy = await legacyLocationInsert(
           raw,
           clinicA.tenantId,
@@ -629,9 +637,8 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
 
       it('tenant-wide view ignores an unconfigured location without movements', async () => {
-        await as(clinicA)
-          .get(`/reports/discounts?${period()}&pageSize=200`)
-          .expect(200);
+        // Mismas filas y totales que sin esa sede.
+        expect(await consolidated()).toEqual(baseline);
       });
 
       it('tenant-wide view with movements at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {

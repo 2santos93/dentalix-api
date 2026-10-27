@@ -13,6 +13,8 @@ import { InMemoryConsentTemplateRepository } from '../src/modules/consents/appli
 import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import { loadNoticeLocation } from '../src/modules/patients/infrastructure/notices/notice-context';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import { noticeRecipient } from '../src/modules/patients/domain/communication/notice-recipient';
+import { startsAtLabel } from '../src/modules/reminders/domain/starts-at-label';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
@@ -41,8 +43,11 @@ async function cleanup(): Promise<void> {
     select: { id: true },
   });
   const where = { tenantId: { in: tenants.map((t) => t.id) } };
+  await owner.treatmentPlanItem.deleteMany({ where });
+  await owner.treatmentPlan.deleteMany({ where });
   await owner.appointment.deleteMany({ where });
   await owner.patient.deleteMany({ where });
+  await owner.dentalCatalogItem.deleteMany({ where });
   await owner.clinicMembership.deleteMany({ where });
   await owner.user.deleteMany({
     where: { email: { endsWith: '@g1-zone-consumers.test' } },
@@ -113,7 +118,15 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
     });
     patientId = (
       await owner.patient.create({
-        data: { tenantId, firstName: 'Aiko', lastName: 'Sato' },
+        data: {
+          tenantId,
+          firstName: 'Aiko',
+          lastName: 'Sato',
+          email: 'aiko@g1-zone-consumers.test',
+          // Cumple 18 el 21/10/2026: ya en Tokio a las 15:30 UTC del 20/10, aún
+          // no en Bogotá.
+          birthDate: new Date('2008-10-21T00:00:00.000Z'),
+        },
       })
     ).id;
     providerId = (
@@ -155,8 +168,31 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       repo.loadSendContext(appointmentId),
     );
     expect(ctx?.locationTimeZone).toBe('Asia/Tokyo');
-    // El «hoy» del recordatorio (regla del menor) es el de Tokio.
-    expect(civilDateIn(NOW, ctx!.locationTimeZone)).toBe('2026-10-21');
+    const { recipient, contact, responsibles, locationCountry } = ctx!;
+    // Las dos decisiones de fecha del envío, con lo que da el repositorio:
+    // ¿es menor HOY en la sede? y la fecha de la cita del email.
+    const recipientOn = (timeZone: string) =>
+      noticeRecipient({
+        patient: { ...recipient, email: contact.email },
+        responsibles,
+        country: locationCountry,
+        today: civilDateIn(NOW, timeZone),
+        automatic: true,
+      });
+    expect(recipientOn(ctx!.locationTimeZone)).toMatchObject({
+      kind: 'PATIENT',
+      minor: false,
+    });
+    // Con la zona de Bogotá aún sería menor: el día de la sede decide.
+    expect(recipientOn('America/Bogota').minor).toBe(true);
+    // 01:00 UTC del 21/10 = 10:00 del 21 en Tokio (20:00 del 20 en Bogotá).
+    expect(
+      startsAtLabel(
+        ctx!.appointment.start,
+        ctx!.locationTimeZone,
+        locationCountry,
+      ),
+    ).toMatch(/^miércoles 21 de octubre de 2026 a las 10:00/);
   });
 
   it('medical alert day cut at Tokyo midnight', async () => {
@@ -190,18 +226,73 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
   });
 
   it('receivables day cut at Tokyo midnight', async () => {
+    const catalogItemId = (
+      await owner.dentalCatalogItem.create({
+        data: {
+          tenantId,
+          code: 'g1-zone-consumers',
+          kind: 'PROCEDURE',
+          labelEs: 'Resina',
+          color: '#123456',
+        },
+      })
+    ).id;
+    // Una deuda por paciente: su plan aceptado, presentado `presentedAt` en
+    // `locationId` (o sin sede), con un ítem aceptado sin pagar.
+    const debt = async (
+      lastName: string,
+      presentedAt: string,
+      locationId: string | null,
+    ) => {
+      const debtor = await owner.patient.create({
+        data: { tenantId, firstName: 'Deuda', lastName },
+      });
+      const plan = await owner.treatmentPlan.create({
+        data: {
+          tenantId,
+          patientId: debtor.id,
+          currency: 'JPY',
+          status: 'ACCEPTED',
+          createdAt: new Date(presentedAt),
+          presentedAt: new Date(presentedAt),
+          presentedLocationId: locationId,
+        },
+      });
+      await owner.treatmentPlanItem.create({
+        data: {
+          tenantId,
+          planId: plan.id,
+          toothNumber: '11',
+          catalogItemId,
+          price: 1000,
+          status: 'ACCEPTED',
+        },
+      });
+      return debtor.id;
+    };
+    // 20/09 23:30 en Tokio (09:30 en Bogotá): hoy (21/10 en Tokio) son 31
+    // días; con la zona de Bogotá serían 30.
+    const boundary = await debt('Tokio', '2026-09-20T14:30:00.000Z', tokyo);
+    // Sin sede: envejece en la zona de la principal (Tokio), igual que arriba.
+    const noLocation = await debt('Sin sede', '2026-09-20T14:30:00.000Z', null);
+
     const aging = new GetReceivablesAgingUseCase(
       new PrismaReceivablesRepository(prisma, tenantContext),
       () => NOW,
     );
+    const ageOf = (page: Awaited<ReturnType<typeof aging.execute>>) =>
+      new Map(page.items.map((i) => [i.patient.id, i.oldestAgeDays]));
     const scoped = await inTenant(undefined, () =>
       aging.execute({ locationId: tokyo }),
     );
     expect(scoped.asOf).toBe('2026-10-21');
+    expect(ageOf(scoped).get(boundary)).toBe(31);
     // Consolidada: el día de la principal. La sede sin zona y sin deudas no
     // tumba la cartera de la clínica.
     const consolidated = await inTenant(undefined, () => aging.execute({}));
     expect(consolidated.asOf).toBe('2026-10-21');
+    expect(ageOf(consolidated).get(boundary)).toBe(31);
+    expect(ageOf(consolidated).get(noLocation)).toBe(31);
   });
 
   it('consent date uses the location zone', async () => {

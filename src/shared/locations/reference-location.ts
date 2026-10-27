@@ -31,6 +31,14 @@ export interface ReferenceLocation {
   locale: string | null;
 }
 
+/** La sede principal (R6): la activa más antigua del tenant. */
+function principalLocationQuery(tenantId: string) {
+  return {
+    where: { tenantId, deletedAt: null, isActive: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  } satisfies Prisma.LocationFindFirstArgs;
+}
+
 /**
  * La sede con la que se interpreta una operación (G1, R6): la sede en contexto
  * si hay una; sin ella (vista «Todas las sedes»), la sede principal, que es la
@@ -42,14 +50,6 @@ export interface ReferenceLocation {
  *
  * Corre dentro de `runWithTenant`; `tenantId` va explícito además de RLS.
  */
-/** La sede principal (R6): la activa más antigua del tenant. */
-function principalLocationQuery(tenantId: string) {
-  return {
-    where: { tenantId, deletedAt: null, isActive: true },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-  } satisfies Prisma.LocationFindFirstArgs;
-}
-
 export async function resolveReferenceLocation(
   tx: Prisma.TransactionClient,
   tenantId: string,

@@ -64,38 +64,11 @@ interface RawTotal {
 }
 
 /**
- * Informe de descuentos (DX-204). Una línea por ítem VIVO (sin `deletedAt`, de
- * un plan vivo y no anulado: ni rechazado ni cancelado) con descuento > 0 o con
- * el precio por debajo del de catálogo (SEC-041: la rebaja cuenta como
- * descuento y se firma igual), fechado por su descuento (`discountAt`; en
- * los anteriores a DX-204, el alta del ítem) y con la sede del descuento (o, si
- * no la tiene, la de presentación del plan). El periodo son días civiles de la
- * zona de CADA sede, como la caja (DX-097); sin sede, la zona por defecto.
- * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
- * (mismo predicado).
- *
- * SEC-047: entran también los ítems resueltos por convenio con rebaja
- * (`basePrice` > `catalogPrice`), aunque no tengan descuento propio; esa rama
- * del OR la sirve `treatment_plan_items_tenant_agreement_reduction_at_idx`.
- * La rebaja de convenio va en su columna y en sus propios totales: los de
- * DX-204 (ítems, bruto, descuento y %) se agregan con `FILTER` solo sobre las
- * líneas que cuentan como descuento, exactamente las mismas que antes de
- * SEC-047, así que no cambian al entrar una línea solo de convenio. Quién
- * asignó el convenio es el autor de la asignación de ESE convenio al paciente
- * más reciente creada no después del ítem (la que resolvió el precio); quién
- * creó el ítem, `createdById` (NULL antes de SEC-047). Con `professionalId`,
- * una fila cuenta como descuento si esa persona lo dio (como en DX-204) y
- * como rebaja de convenio si creó el ítem, asignó el convenio o dio su
- * descuento. Una línea solo de convenio sin sede de descuento ni de
- * presentación toma la sede con la que se resolvió el precio.
- *
- * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
- * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
- * aceptar una opción la hermana rechazada lo duplicaría.
- */
-/**
  * La primera de `locationIds` a la que el informe atribuye algún ítem (sede del
- * descuento, de la presentación del plan o del precio), o null.
+ * descuento, de la presentación del plan o del precio), o null. Es un
+ * superconjunto a propósito: mira cada columna por separado y no la sede que
+ * el informe acaba eligiendo (`COALESCE`), así que puede pedir la zona de una
+ * sede que al final no se usa; nunca deja fuera una fila sin avisar.
  */
 async function firstDiscountLocation(
   tx: Prisma.TransactionClient,
@@ -122,6 +95,38 @@ async function firstDiscountLocation(
     LIMIT 1`;
   return found?.locationId ?? null;
 }
+
+/**
+ * Informe de descuentos (DX-204). Una línea por ítem VIVO (sin `deletedAt`, de
+ * un plan vivo y no anulado: ni rechazado ni cancelado) con descuento > 0 o con
+ * el precio por debajo del de catálogo (SEC-041: la rebaja cuenta como
+ * descuento y se firma igual), fechado por su descuento (`discountAt`; en
+ * los anteriores a DX-204, el alta del ítem) y con la sede del descuento (o, si
+ * no la tiene, la de presentación del plan). El periodo son días civiles de la
+ * zona de CADA sede, como la caja (DX-097); sin sede, la de la sede
+ * principal (R6).
+ * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
+ * (mismo predicado).
+ *
+ * SEC-047: entran también los ítems resueltos por convenio con rebaja
+ * (`basePrice` > `catalogPrice`), aunque no tengan descuento propio; esa rama
+ * del OR la sirve `treatment_plan_items_tenant_agreement_reduction_at_idx`.
+ * La rebaja de convenio va en su columna y en sus propios totales: los de
+ * DX-204 (ítems, bruto, descuento y %) se agregan con `FILTER` solo sobre las
+ * líneas que cuentan como descuento, exactamente las mismas que antes de
+ * SEC-047, así que no cambian al entrar una línea solo de convenio. Quién
+ * asignó el convenio es el autor de la asignación de ESE convenio al paciente
+ * más reciente creada no después del ítem (la que resolvió el precio); quién
+ * creó el ítem, `createdById` (NULL antes de SEC-047). Con `professionalId`,
+ * una fila cuenta como descuento si esa persona lo dio (como en DX-204) y
+ * como rebaja de convenio si creó el ítem, asignó el convenio o dio su
+ * descuento. Una línea solo de convenio sin sede de descuento ni de
+ * presentación toma la sede con la que se resolvió el precio.
+ *
+ * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
+ * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
+ * aceptar una opción la hermana rechazada lo duplicaría.
+ */
 
 @Injectable()
 export class PrismaDiscountReportRepository implements DiscountReportRepository {

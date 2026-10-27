@@ -13,6 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  legacyLocationInsert,
   locationData,
 } from './support/location-fixtures';
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -452,6 +453,54 @@ describe('DX-256 visitas y agenda', () => {
     ).expect(200);
     expect((foreign.body as { items: unknown[] }).items).toHaveLength(0);
     await call('get', '/treatment-plans/unscheduled?limit=51').expect(400);
+  });
+  describe('sede sin zona (réplica antigua) en la lista de toda la clínica', () => {
+    let legacy: string;
+    let baseline: string[];
+    const unscheduled = async () =>
+      (
+        (await call('get', '/treatment-plans/unscheduled').expect(200))
+          .body as { items: { planId: string }[] }
+      ).items.map((i) => i.planId);
+
+    beforeAll(async () => {
+      baseline = await unscheduled();
+      legacy = await legacyLocationInsert(raw, a.tenantId, 'Réplica antigua');
+    });
+
+    afterAll(async () => {
+      await raw.location.delete({ where: { id: legacy } });
+    });
+
+    it('unscheduled ignores an unconfigured location without movements', async () => {
+      expect(baseline.length).toBeGreaterThan(0);
+      expect(await unscheduled()).toEqual(baseline);
+    });
+
+    it('unscheduled with movements at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {
+      const plan = await raw.treatmentPlan.findFirstOrThrow({
+        where: { tenantId: a.tenantId, acceptedLocationId: { not: null } },
+        select: { id: true, acceptedLocationId: true },
+      });
+      await raw.treatmentPlan.update({
+        where: { id: plan.id },
+        data: { acceptedLocationId: legacy },
+      });
+      try {
+        const res = await call('get', '/treatment-plans/unscheduled').expect(
+          409,
+        );
+        expect(res.body).toMatchObject({
+          code: 'LOCATION_TIMEZONE_REQUIRED',
+          locationId: legacy,
+        });
+      } finally {
+        await raw.treatmentPlan.update({
+          where: { id: plan.id },
+          data: { acceptedLocationId: plan.acceptedLocationId },
+        });
+      }
+    });
   });
   it('cierra el plan y rechaza reorganizarlo', async () => {
     await call('patch', `/treatment-plans/${planId}`, {
